@@ -632,6 +632,12 @@ def validate_witness(document: dict[str, Any], *, repo_root: Path = REPO_ROOT) -
     for section in ("binary", "sass", "control_bits"):
         artifact = document["artifacts"][section]
         path = repo_root / artifact["path"]
+        # Workload executables are ignored build products. Their exact hash is
+        # retained in the witness; a fresh checkout may need re-materialization
+        # before a local binary comparison is possible. Committed SASS/control
+        # evidence remains mandatory and byte-exact.
+        if section == "binary" and not path.exists():
+            continue
         if not path.is_file() or sha256_file(path) != artifact["sha256"]:
             errors.append(f"artifact:{section}")
     log = repo_root / document["build"]["transcript_path"]
