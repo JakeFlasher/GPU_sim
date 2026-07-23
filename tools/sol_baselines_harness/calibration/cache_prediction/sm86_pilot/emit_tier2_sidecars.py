@@ -259,7 +259,7 @@ def _run_single_workload_tier2(
     )
     env["METRIC_EXTRACTOR_USER_MODULE_REGEX"] = ".*"
     env["METRIC_EXTRACTOR_MAX_LAUNCH_SLOTS"] = "32"
-    env["CUTLASS_DIR"] = str(_REPO_ROOT / "cutlass")
+    env["CUTLASS_DIR"] = str(_REPO_ROOT / "third_party" / "cutlass")
     kernel_name_base = lookup_pilot_kernel_name_base(slug, language)
     if kernel_name_base is not None:
         env["METRIC_EXTRACTOR_KERNEL_NAME_REGEX"] = kernel_name_base

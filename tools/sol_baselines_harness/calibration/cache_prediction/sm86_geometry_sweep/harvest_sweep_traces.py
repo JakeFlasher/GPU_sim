@@ -114,7 +114,7 @@ def _harvest_env() -> dict:
     env["METRIC_EXTRACTOR_TIER2_TRACE_BUDGET_BYTES"] = str(TIER2_BUDGET_BYTES)
     env["METRIC_EXTRACTOR_USER_MODULE_REGEX"] = ".*"
     env["METRIC_EXTRACTOR_MAX_LAUNCH_SLOTS"] = "1"
-    env["CUTLASS_DIR"] = str(_REPO_ROOT / "cutlass")
+    env["CUTLASS_DIR"] = str(_REPO_ROOT / "third_party" / "cutlass")
     return env
 
 

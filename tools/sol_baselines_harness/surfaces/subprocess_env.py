@@ -60,12 +60,10 @@ ALLOW_LIST = (
 #
 # * ``CUTLASS_DIR`` — the eval driver's CUTLASS build path
 #   (``sol-execbench/src/sol_execbench/driver/templates/build_ext.py``)
-#   reads it. The Docker image used to provision
-#   ``/usr/local/cutlass``; post-M4 the harness injects
-#   :func:`default_cutlass_dir` (``REPO_ROOT/cutlass``, the bundled
-#   v4.5.0 tree) when neither the operator env nor the overrides
-#   carry one, so a fresh ``uv sync`` host compiles CUTLASS
-#   baselines without manual operator setup. The cache hash
+#   reads it. The tracked
+#   ``REPO_ROOT/third_party/cutlass`` v4.6.1 tree is used when neither
+#   the operator env nor the overrides carry one, so a fresh checkout
+#   compiles against the pinned vendor source. The cache hash
 #   (:func:`baselines_harness.native_env.cutlass_tree_hash`) reads
 #   the same default so the hash matches what the subprocess
 #   actually built.
@@ -152,9 +150,8 @@ def build_subprocess_env(
     merged: Dict[str, str] = {**base, **plan_overrides, **surface_overrides}
     # Native CUTLASS_DIR default: when a build-toolchain call site
     # opted into BUILD_TOOLCHAIN_ALLOWED but no upstream layer
-    # supplied CUTLASS_DIR, fall back to the bundled tree so the
-    # eval driver's build_ext.py picks up REPO_ROOT/cutlass instead
-    # of the absent Docker-era /usr/local/cutlass. native_env's
+    # supplied CUTLASS_DIR, fall back to the tracked third_party/cutlass tree
+    # rather than an absent Docker-era path. native_env's
     # cutlass_tree_hash reads the same default, so the cache hash
     # and the subprocess build path agree by construction.
     if "CUTLASS_DIR" in allowed and "CUTLASS_DIR" not in merged:

@@ -46,7 +46,8 @@ control current operations.
 |---|---|
 | `sol-execbench/` | Official NVIDIA evaluation framework (native `uv sync` install; CLI `sol-execbench`); produces correctness + speedup vs PyTorch reference |
 | `SOLAR/` | NVlabs SOLAR — derives `T_SOL` hardware bounds via roofline + Orojenesis |
-| `cutlass/` | CUTLASS source tree (local v4.5.0; vendored `sol-execbench` package pins v4.4.1) |
+| `third_party/cutlass/` | Active unified-tree vendor path: official CUTLASS v4.6.1, scoped to `examples/`, `include/`, and `tools/`; see `third_party/cutlass.provenance.json` for the pinned commit/tree/digest. The upstream package's declared dependency remains separate; the build harness supplies `CUTLASS_DIR`. |
+| `cutlass/` | Historical pre-dissolve path retained only in this archived description; it is not a live checkout dependency. |
 | `baselines/` | The 235 *.cu template solutions, `baselines/{L1,L2,Quant,FIB}/<slug>/{cutlass,cuda_cpp}/` (see `baselines/README.md`) |
 | `scripts/baselines_harness/` | Wraps the native `sol-execbench` CLI as a host subprocess; entry point for the five counter-free analytic surfaces |
 | `scripts/baselines_scaffold/` | Emits `solution.json` + parent README boilerplate; lints forbidden surfaces |

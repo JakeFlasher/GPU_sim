@@ -67,7 +67,7 @@ _DEFAULT_OUTPUT = (
     / "sm120_pilot_reverification_v1.toml"
 )
 _DEFAULT_SOL_EXECBENCH_BIN = _REPO_ROOT / ".venv" / "bin" / "sol-execbench"
-_DEFAULT_CUTLASS_DIR = _REPO_ROOT / "cutlass"
+_DEFAULT_CUTLASS_DIR = _REPO_ROOT / "third_party" / "cutlass"
 
 REVERIFICATION_SCHEMA_VERSION: Final[str] = "1.0"
 REVERIFICATION_HOST_ARCH: Final[str] = "sm_120"

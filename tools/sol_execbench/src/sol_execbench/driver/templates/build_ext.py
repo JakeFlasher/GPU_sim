@@ -112,6 +112,27 @@ def _prepare_torch_extension_environment(*, host_cxx: str) -> None:
         raise RuntimeError("SOL certified C++ compiler changed before build")
     os.environ.pop("CC")
 
+
+def _validated_cutlass_dir() -> Path:
+    raw = os.environ.get("CUTLASS_DIR")
+    if not raw:
+        raise RuntimeError(
+            "CUTLASS_DIR is required; the build harness must provide the "
+            "hash-pinned CUTLASS tree"
+        )
+    cutlass_dir = Path(raw).expanduser().resolve()
+    required = (
+        cutlass_dir / "include" / "cutlass" / "version.h",
+        cutlass_dir / "tools" / "util" / "include",
+    )
+    if not cutlass_dir.is_dir() or any(not path.exists() for path in required):
+        raise RuntimeError(
+            "CUTLASS_DIR does not identify a usable pinned tree: "
+            f"{cutlass_dir}"
+        )
+    return cutlass_dir
+
+
 # set flags
 host_cxx = _validated_compiler_binding()
 cuda_cflags = _certified_cuda_cflags(
@@ -130,7 +151,7 @@ sources = [
 if not sources:
     raise RuntimeError("No CUDA/C++ source files found in working directory")
 
-cutlass_dir = os.environ.get("CUTLASS_DIR", "/usr/local/cutlass")
+cutlass_dir = _validated_cutlass_dir()
 extra_include_paths = [
     str(HERE),
     f"{cutlass_dir}/include",

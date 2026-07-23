@@ -59,34 +59,28 @@ from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
 REPO_ROOT = Path(__file__).resolve().parents[1].parent
-# Legacy Docker-era default. ``build_ext.py:44`` still reads this as
-# its own absolute fallback when ``CUTLASS_DIR`` is unset, but the
-# Docker image that used to provision ``/usr/local/cutlass`` is gone
-# post-M4. The native default below (``default_cutlass_dir``) is the
-# live fallback the harness injects into every build subprocess so
-# the build path stays consistent on a fresh ``uv sync`` host.
-CUTLASS_DIR_DEFAULT = "/usr/local/cutlass"
+# The active vendor tree is tracked in the repository.  The explicit
+# environment override remains available for an operator-managed external
+# tree, but no absent Docker-era path is used as an implicit build input.
+CUTLASS_DIR_DEFAULT = str(REPO_ROOT / "third_party" / "cutlass")
 SOL_EXECBENCH_PYPROJECT = REPO_ROOT / "sol-execbench" / "pyproject.toml"
 
 
 def default_cutlass_dir() -> Path:
     """Single source of truth for the harness's native CUTLASS default.
 
-    Returns the bundled CUTLASS tree at ``REPO_ROOT / "cutlass"``. The
-    repo ships this tree (v4.5.0) and the documented local-dev
-    workflow already points operators at it
-    (``CUTLASS_DIR=$PWD/cutlass``). Post-M4 the harness ALSO injects
-    this default into every build subprocess (see
+    Returns the tracked active CUTLASS tree at
+    ``REPO_ROOT / "third_party" / "cutlass"`` (v4.6.1). The harness
+    injects this default into every build subprocess (see
     :func:`baselines_harness.surfaces.subprocess_env.build_subprocess_env`)
-    so a fresh ``uv sync`` checkout works without manual operator
-    export. The cache hash (:func:`cutlass_tree_hash`) consults the
-    same default, keeping the hash and the build path in sync.
+    so a fresh checkout uses the same tree as the cache fingerprint without
+    a manual operator export.
 
     An operator that wants a different CUTLASS tree (system install,
     B200 container path) sets ``CUTLASS_DIR`` explicitly; the
     explicit value wins over this default.
     """
-    return REPO_ROOT / "cutlass"
+    return REPO_ROOT / "third_party" / "cutlass"
 
 
 def _effective_cutlass_dir() -> Path:
@@ -250,8 +244,8 @@ def cutlass_tree_hash() -> str:
     """Hash the CUTLASS tree the build path will use.
 
     The eval driver compiles against the tree at
-    ``os.environ.get("CUTLASS_DIR", "/usr/local/cutlass")``. The
-    cache identity must be causally complete over every byte that
+    ``os.environ["CUTLASS_DIR"]`` when supplied, otherwise the tracked
+    ``REPO_ROOT/third_party/cutlass`` default. The cache identity must be
     nvcc consumes — version.h alone is not enough, because a local
     patch or checkout update can change headers under
     ``include/cutlass/`` (or ``tools/util/include/``) without

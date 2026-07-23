@@ -31,7 +31,7 @@ same commit.
 
 | Library | Pin | Notes |
 |---|---|---|
-| CUTLASS | TBD (commit pinned when the first-wave kernel depending on it lands) | Used by `moe_grouped_gemm_bf16` / `moe_grouped_gemm_fp8` / `nvfp4_blockscale_gemm`. |
+| CUTLASS | v4.6.1 (`e05f953a5b3d38adc240df2ff928e0421c2abba3`; scoped tree `0d3dd31da2e1ccc8ab15047a2edd9ebf5d98218b`; digest `ad131382834231e4076b50c8fdf8f7783504fe83aac53982dab353be9908e113`) | Active tracked tree at `third_party/cutlass/`, with provenance in `third_party/cutlass.provenance.json`. Direct CUTLASS successor workloads use this tree; it does not rewrite or relabel frozen cuBLAS rows. |
 | CuTe DSL | bundled with CUTLASS pin | FlashAttention-4 / FlashMLA reference layouts. |
 | Triton | TBD | Used only for the `tier=control` rows if they adopt Triton-to-cubin paths. |
 | FlashInfer-SM120 | TBD | Required for the NVFP4 grouped-GEMM MoE row on sm_120a due to upstream CUTLASS grouped-GEMM issue #3096. |

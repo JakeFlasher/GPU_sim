@@ -273,7 +273,7 @@ def probe_device() -> Dict[str, Any]:
 
 
 def probe_cutlass() -> Dict[str, Any]:
-    version_h = REPO_ROOT / "cutlass" / "include" / "cutlass" / "version.h"
+    version_h = REPO_ROOT / "third_party" / "cutlass" / "include" / "cutlass" / "version.h"
     if not version_h.is_file():
         return {
             "status": "unavailable",

@@ -28,7 +28,7 @@ testable:
 |------|------|
 | `run.py` | Drive one baseline through the upstream CLI; emit one report row per workload. |
 | `native_dispatch.py` | Build and run the native `sol-execbench` invocation as a host subprocess. |
-| `native_env.py` | Compute the seven-component native host-env fingerprint (python / torch / nvcc / runtime CUDA / CUTLASS tree / cuDNN / sol-execbench package); raise `DegradedNativeEnvError` when any component reads `"unknown"`. |
+| `native_env.py` | Compute the ten-component native host-env fingerprint (Python / Torch / nvcc / runtime CUDA / CUTLASS tree / cuDNN / sol-execbench package / NVCC host compiler / C++ compiler / C compiler); raise `DegradedNativeEnvError` when any component reads `"unknown"`. |
 | `parse_trace.py` | Read JSONL `Trace` lines from the upstream evaluator via the live Pydantic schema (no schema duplication). |
 | `normalise_benchmark.py` | Stage a Pydantic-compatible copy of the downloaded benchmark directory (empty-string optional fields → `None`). |
 | `score.py` | SOL Score wrapper. When `SOLAR/configs/arch/5060.yaml` is present AND the slug has a builder in `solar_analysis.py:_REGISTRY`, the canonical `local_sol_score_5060` column is the median of `compute_score(t_k_5060, t_b_5060, t_sol_5060)` across the baseline's workloads, with `t_sol_5060` from SOLAR Stage 4. Falls back to `"unknown_t_sol"` when the YAML is absent OR the slug has no registered builder. |
@@ -57,9 +57,10 @@ Three things must exist before running the harness:
    uv sync --project sol-execbench
    ```
 
-   Installs the upstream package and its dependencies (CUTLASS v4.4.1
-   pinned via the upstream dep set). After install, `sol-execbench`
-   is on the host's PATH and is invoked directly by the harness.
+   The command installs the upstream package and CLI. Its declared CUTLASS
+   dependency remains independently versioned; the active harness build path
+   overrides header search with the hash-fingerprinted
+   `third_party/cutlass/` v4.6.1 tree via `CUTLASS_DIR`.
 
 3. **Host CUDA toolchain** (host-side, one-time):
 
@@ -262,7 +263,7 @@ The key tuple is:
 |---|---|
 | `solution_source_hash` | SHA-256 over the canonical-order solution content (name + definition + languages + entry_point + binding + dependencies + `compile_options.{cflags, cuda_cflags, ld_flags}` + per-source `(path, content)`). `compile_options` sub-keys are iterated in sorted order, but element order within each list is preserved verbatim because flag order can be semantically significant. Mirrors the upstream `Solution._compute_hash` plus the `compile_options` coverage (a build-flag-only edit must bust the cache). |
 | `sol_execbench_source_hash` | `git rev-parse HEAD:sol-execbench` from the repo root — the Git tree hash of the vendored `sol-execbench/` subdirectory at the current HEAD. Changes only when the evaluator source tree changes; a top-level commit that only touches `scripts/baselines_harness/` or `baselines/` leaves this hash invariant, so cached PASS traces remain replay-eligible across harness-only commits. Falls back to `"unknown"` outside a git tree (deliberately busts the cache). |
-| `native_env_hash` | SHA-256 over a canonical-order JSON of the seven host-environment components (`python_version`, `torch_version`, `nvcc_version`, `cuda_runtime_version`, `cutlass_tree_hash`, `cudnn_version`, `sol_execbench_package_version`). Strict identity: any component reading `"unknown"` raises `DegradedNativeEnvError` at derive time so a degraded fingerprint is never silently reused. The raw component dict is persisted in the cache record so debugging can inspect which component differed without re-probing. |
+| `native_env_hash` | SHA-256 over a canonical-order JSON of ten host-environment components (`python_version`, `torch_version`, `nvcc_version`, `cuda_runtime_version`, `cutlass_tree_hash`, `cudnn_version`, `sol_execbench_package_version`, `nvcc_ccbin`, `cxx_compiler`, `c_compiler`). Strict identity: any component reading `"unknown"` raises `DegradedNativeEnvError` at derive time so a degraded fingerprint is never silently reused. The raw component dict is persisted in the cache record so debugging can inspect which component differed without re-probing. |
 | `environment_libs` | Sorted tuple of `(name, version)` pairs from the upstream evaluation's `environment.libs` field (e.g. `("torch", "2.4.0")`). Extracted from the trace's recorded `environment_libs` field. |
 | `build_mode` | `"judge"` or `"profiling"`. Separates the canonical judge build (byte-identical to the landed `solution.json`) from the profiling build (staged solution with `-DSOLBENCH_PROFILING` always and `-DSOLBENCH_HAS_NVTX` conditional on host probes). |
 | `surface_set` | Sorted tuple of surface names that participated in the run. A partial-surface run (e.g. `("static",)`) never collides with a full-set run (`("cupti_activity", "nsys", "nvbit_metrics", "sanitizer", "static")`) because the bundle the report consumes differs. |

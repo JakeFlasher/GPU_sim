@@ -385,7 +385,7 @@ def live_tier2_harvest_fn(
     # Higher slot budget so multi-launch pilots emit every
     # qualifying kernel launch rather than just the first.
     env["METRIC_EXTRACTOR_MAX_LAUNCH_SLOTS"] = "32"
-    env["CUTLASS_DIR"] = str(_REPO_ROOT / "cutlass")
+    env["CUTLASS_DIR"] = str(_REPO_ROOT / "third_party" / "cutlass")
     # Per-cell kernel-name filter: with Tier-2 address
     # dump on, the per-slot Tier-2 buffer is ~503 MiB and the
     # default 512 MiB per-process budget admits only ONE accepted

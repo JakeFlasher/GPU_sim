@@ -43,8 +43,8 @@ def test_in_repo_cutlass_identity_is_stable_across_checkout_roots(
 ) -> None:
     first_checkout = tmp_path / "checkout-a"
     second_checkout = tmp_path / "checkout-b"
-    _write_cutlass_tree(first_checkout / "cutlass")
-    _write_cutlass_tree(second_checkout / "cutlass")
+    _write_cutlass_tree(first_checkout / "third_party" / "cutlass")
+    _write_cutlass_tree(second_checkout / "third_party" / "cutlass")
     monkeypatch.delenv("CUTLASS_DIR", raising=False)
 
     monkeypatch.setattr(native_env, "REPO_ROOT", first_checkout)
@@ -61,12 +61,12 @@ def test_in_repo_cutlass_worktree_header_mutation_changes_fingerprint(
     tmp_path: Path, monkeypatch,
 ) -> None:
     """The identity follows the header nvcc reads, not ``HEAD:<tree>``."""
-    cutlass = tmp_path / "cutlass"
+    cutlass = tmp_path / "third_party" / "cutlass"
     header = _write_cutlass_tree(cutlass)
     _git(tmp_path, "init", "-q")
     _git(tmp_path, "config", "user.email", "test@example.invalid")
     _git(tmp_path, "config", "user.name", "test")
-    _git(tmp_path, "add", "cutlass")
+    _git(tmp_path, "add", "third_party/cutlass")
     _git(tmp_path, "commit", "-qm", "baseline")
 
     monkeypatch.setattr(native_env, "REPO_ROOT", tmp_path)
@@ -81,7 +81,7 @@ def test_in_repo_cutlass_worktree_header_mutation_changes_fingerprint(
 
     assert after != native_env.UNKNOWN
     assert after != before
-    assert _git_status(tmp_path) == " M cutlass/include/cutlass/live_identity.h"
+    assert _git_status(tmp_path) == " M third_party/cutlass/include/cutlass/live_identity.h"
 
 
 def test_external_cutlass_identity_remains_absolute_path_sensitive(

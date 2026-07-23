@@ -59,7 +59,7 @@ cleanup target. Its six rebuildable binaries/objects are cleanup targets:
 | `tools/sol_execbench/`, SOL workload corpus | optional | Separate environment and explicit test invocation; not in default pytest collection |
 | `tools/solar/` | optional | Evaluation baseline, not simulator input |
 | FlashInfer-derived data/tests | optional | Heavy bundle; requires its own dependencies and environment |
-| `third_party/cutlass/` | retained active vendor | CUTLASS 4.4.2; do not merge with the workload's 3.8 subset without SASS equivalence proof |
+| `third_party/cutlass/` | retained active vendor | Official CUTLASS v4.6.1, scoped to `examples/`, `include/`, and `tools/`; provenance and digest are pinned in `third_party/cutlass.provenance.json`. Do not merge with the workload's byte-exact 3.8 subset or relabel frozen cuBLAS evidence |
 
 Unclear workload provenance resolves to retain-and-flag, never delete by
 inference.
