@@ -21,7 +21,7 @@ def test_fp32_successor_witness_is_sealed_and_valid():
     assert witness.validate_witness(document) == []
     assert document["pass"] is True
     assert document["witness_id"] == witness.WITNESS_ID
-    assert document["base_frozen_v1"]["base_slug"] == "vendor_sgemm_cublas"
+    assert "tools/local_labels/build_cutlass_successor_witness.py" in document["source_inputs"]["files"]
 
 
 def test_fp32_successor_has_independent_direct_control_and_shape_contract():

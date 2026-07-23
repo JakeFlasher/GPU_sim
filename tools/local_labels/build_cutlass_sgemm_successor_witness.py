@@ -38,6 +38,7 @@ SCHEMA_REL = Path(
     "workloads/simbench_bw/schemas/cutlass_sgemm_successor_build_witness.schema.json"
 )
 GUARD_REL = Path("tools/local_labels/verify_cutlass_successor_artifact.py")
+BASE_BUILDER_REL = Path("tools/local_labels/build_cutlass_successor_witness.py")
 BASE_MATRIX_REL = Path("data/local_labels/campaign/sm86_reference_capture_matrix.json")
 BASE_AUTHORITY_REL = Path("data/local_labels/campaign/capture_roster_authority_sm86.json")
 PROVENANCE_REL = Path("third_party/cutlass.provenance.json")
@@ -185,7 +186,7 @@ def _source_contract(commit: str) -> dict[str, Any]:
         repo_root=ROOT,
     )
     records = dict(guarded["files"])
-    for contract_rel in (BUILDER_REL, GUARD_REL, SCHEMA_REL):
+    for contract_rel in (BUILDER_REL, GUARD_REL, SCHEMA_REL, BASE_BUILDER_REL):
         records[contract_rel.as_posix()] = _sha256_file(ROOT / contract_rel)
     records = dict(sorted(records.items()))
     for path, digest in records.items():
