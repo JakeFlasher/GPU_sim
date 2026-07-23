@@ -246,6 +246,93 @@ def test_directory_preserves_final_when_final_authorization_fails(
     assert not (output_root / ".artifact.staging").exists()
 
 
+def test_directory_winner_fsync_order_and_reauthorization(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output_root = tmp_path / "published"
+    material = [immutable.ImmutableFile.from_bytes("nested/value", b"original")]
+    immutable.publish_directory(output_root, "artifact", material)
+    events: list[str] = []
+    original_fsync = immutable._fsync_or_fail
+
+    def record_fsync(descriptor: int, label: str) -> None:
+        events.append(label)
+        original_fsync(descriptor, label)
+
+    monkeypatch.setattr(immutable, "_fsync_or_fail", record_fsync)
+
+    def authorize(_root: Path, _descriptor: int) -> None:
+        events.append("authorize")
+
+    immutable.publish_directory(
+        output_root,
+        "artifact",
+        material,
+        before_commit=authorize,
+    )
+
+    assert events == [
+        "authorize",
+        "winner file nested/value",
+        "winner directory nested",
+        "winner tree root",
+        "winner publication root",
+        "authorize",
+    ]
+
+
+@pytest.mark.parametrize(
+    ("failure_index", "failure_label"),
+    [
+        (1, "winner file nested/value"),
+        (2, "winner directory nested"),
+        (3, "winner tree root"),
+        (4, "winner publication root"),
+    ],
+)
+def test_directory_winner_fsync_eio_preserves_final(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    failure_index: int,
+    failure_label: str,
+) -> None:
+    output_root = tmp_path / "published"
+    material = [immutable.ImmutableFile.from_bytes("nested/value", b"original")]
+    immutable.publish_directory(output_root, "artifact", material)
+    original_fsync = immutable.os.fsync
+    fsync_count = 0
+    callback_count = 0
+
+    def fail_at_selected_fsync(descriptor: int) -> None:
+        nonlocal fsync_count
+        fsync_count += 1
+        if fsync_count == failure_index:
+            raise OSError(errno.EIO, "injected winner fsync failure")
+        original_fsync(descriptor)
+
+    monkeypatch.setattr(immutable.os, "fsync", fail_at_selected_fsync)
+
+    def authorize(_root: Path, _descriptor: int) -> None:
+        nonlocal callback_count
+        callback_count += 1
+
+    with pytest.raises(
+        immutable.ImmutableArtifactError,
+        match=f"DURABILITY_UNPROVEN: {failure_label}",
+    ):
+        immutable.publish_directory(
+            output_root,
+            "artifact",
+            material,
+            before_commit=authorize,
+        )
+
+    assert fsync_count == failure_index
+    assert callback_count == 1
+    assert (output_root / "artifact" / "nested" / "value").read_bytes() == b"original"
+    assert not (output_root / ".artifact.staging").exists()
+
+
 def test_directory_reauthorizes_rename_race_winner(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
