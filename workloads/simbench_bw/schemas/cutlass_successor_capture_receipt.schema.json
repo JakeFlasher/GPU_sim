@@ -1,0 +1,168 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "cutlass_successor_capture_receipt.schema.json",
+  "title": "CUTLASS successor external capture receipt",
+  "description": "Closed wrapper for one external NCU or NVBit process receipt. The receipt carries the runner seven-field identity, the selected launch identity, process provenance, and hash-bound external artifacts; it contains no simulator configuration.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "artifact_kind", "receipt", "receipt_seal_sha256"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "artifact_kind": {"const": "cutlass_successor_capture_receipt"},
+    "receipt": {
+      "oneOf": [
+        {"$ref": "#/$defs/ncu_receipt"},
+        {"$ref": "#/$defs/nvbit_receipt"}
+      ]
+    },
+    "receipt_seal_sha256": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "relative_path": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "slug", "shape_point", "binary_sha256", "source_commit",
+        "kernel_signature_sha256", "arch", "ncu_metric_version"
+      ],
+      "properties": {
+        "slug": {"type": "string", "pattern": "^vendor_.*_cutlass$"},
+        "shape_point": {"const": "trace_00"},
+        "binary_sha256": {"$ref": "#/$defs/sha256"},
+        "source_commit": {"const": "237f17cd34728b31ea752062e7ea7843a3a2603a"},
+        "kernel_signature_sha256": {"$ref": "#/$defs/sha256"},
+        "arch": {"const": "sm_86"},
+        "ncu_metric_version": {"const": "ncu_2026.1.x"}
+      }
+    },
+    "dimensions": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {"type": "integer", "minimum": 1}
+    },
+    "launch_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "launch_index", "kernel_name", "kernel_signature_sha256",
+        "grid_dim", "block_dim", "launch_identity_sha256"
+      ],
+      "properties": {
+        "launch_index": {"const": 0},
+        "kernel_name": {"type": "string", "minLength": 1},
+        "kernel_signature_sha256": {"$ref": "#/$defs/sha256"},
+        "grid_dim": {"$ref": "#/$defs/dimensions"},
+        "block_dim": {"$ref": "#/$defs/dimensions"},
+        "launch_identity_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "process": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "host_identity_sha256", "boot_id_sha256", "pid",
+        "started_at_utc", "command_sha256", "process_identity_sha256"
+      ],
+      "properties": {
+        "host_identity_sha256": {"$ref": "#/$defs/sha256"},
+        "boot_id_sha256": {"$ref": "#/$defs/sha256"},
+        "pid": {"type": "integer", "minimum": 1},
+        "started_at_utc": {"type": "string", "format": "date-time"},
+        "command_sha256": {"$ref": "#/$defs/sha256"},
+        "process_identity_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "path", "sha256", "size_bytes"],
+      "properties": {
+        "role": {"type": "string", "minLength": 1},
+        "path": {"$ref": "#/$defs/relative_path"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "size_bytes": {"type": "integer", "minimum": 1}
+      }
+    },
+    "ncu_artifact": {
+      "allOf": [
+        {"$ref": "#/$defs/artifact"},
+        {
+          "type": "object",
+          "properties": {
+            "role": {
+              "enum": [
+                "ncu_report", "label_sidecar", "label_run_manifest",
+                "label_capture_manifest", "ncu_launch_observation"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "nvbit_artifact": {
+      "allOf": [
+        {"$ref": "#/$defs/artifact"},
+        {
+          "type": "object",
+          "properties": {
+            "role": {"enum": ["dynamic_trace", "trace_summary"]}
+          }
+        }
+      ]
+    },
+    "ncu_receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "capture_kind", "status", "matrix_key", "variant_id", "identity",
+        "launch_identity", "process", "artifacts"
+      ],
+      "properties": {
+        "capture_kind": {"const": "ncu"},
+        "status": {"const": "pass"},
+        "matrix_key": {"type": "string", "pattern": "^cutlass_successor:[a-z0-9_]+_cublas:[a-z0-9_]+_cutlass$"},
+        "variant_id": {"type": "string", "pattern": "^[a-z0-9_]+_v1$"},
+        "identity": {"$ref": "#/$defs/identity"},
+        "launch_identity": {"$ref": "#/$defs/launch_identity"},
+        "process": {"$ref": "#/$defs/process"},
+        "artifacts": {
+          "type": "array",
+          "minItems": 5,
+          "maxItems": 5,
+          "items": {"$ref": "#/$defs/ncu_artifact"}
+        }
+      }
+    },
+    "nvbit_receipt": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "capture_kind", "status", "matrix_key", "variant_id", "identity",
+        "launch_identity", "process", "artifacts"
+      ],
+      "properties": {
+        "capture_kind": {"const": "nvbit"},
+        "status": {"const": "pass"},
+        "matrix_key": {"type": "string", "pattern": "^cutlass_successor:[a-z0-9_]+_cublas:[a-z0-9_]+_cutlass$"},
+        "variant_id": {"type": "string", "pattern": "^[a-z0-9_]+_v1$"},
+        "identity": {"$ref": "#/$defs/identity"},
+        "launch_identity": {"$ref": "#/$defs/launch_identity"},
+        "process": {"$ref": "#/$defs/process"},
+        "artifacts": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {"$ref": "#/$defs/nvbit_artifact"}
+        }
+      }
+    }
+  }
+}
