@@ -18,11 +18,15 @@ ROOT = Path(__file__).resolve().parents[2]
 RECEIPT_SCHEMA = ROOT / admit.RECEIPT_SCHEMA_REL
 OVERLAY_SCHEMA = ROOT / admit.OVERLAY_SCHEMA_REL
 MATRIX = json.loads((ROOT / cohort.MATRIX_REL).read_text())
+ROSTER = json.loads((ROOT / cohort.ROSTER_REL).read_text())
+ROSTER_ROWS = {
+    (row["matrix_key"], row["variant_id"]): row for row in ROSTER["rows"]
+}
 
 
-_REPORT_CSV = """Kernel Name,Metric Name,Metric Value
-_Zsynthetic_kernel,gpc__cycles_elapsed.max,1
-_Zsynthetic_kernel,gpu__time_duration.sum,1
+_REPORT_CSV = """ID,Kernel Name,Metric Name,Metric Value
+0,_Zsynthetic_kernel,gpc__cycles_elapsed.max,1
+0,_Zsynthetic_kernel,gpu__time_duration.sum,1
 """
 
 
@@ -44,8 +48,8 @@ def _report_sidecar() -> dict:
 
 def _report_observation() -> dict:
     observation = {
-        "identity_columns": ["Kernel Name"],
-        "identity": {"Kernel Name": "_Zsynthetic_kernel"},
+        "identity_columns": ["ID", "Kernel Name"],
+        "identity": {"ID": "0", "Kernel Name": "_Zsynthetic_kernel"},
         "report_sha256": "unused",
     }
     return observation
@@ -88,8 +92,12 @@ def _seal(document: dict) -> dict:
 
 
 def _process(pid: int, command: list[str]) -> dict:
+    smi_stdout = "NVIDIA GeForce RTX 3090 Ti, 8.6, Enabled, 1350, 10501\n"
     process = {
-        "host_identity_sha256": "a" * 64,
+        "host_identity_sha256": admit.canonical_sha({
+            "gpu": "NVIDIA GeForce RTX 3090 Ti",
+            "smi": admit.sha256_bytes(smi_stdout.encode()),
+        }),
         "boot_id_sha256": "b" * 64,
         "pid": pid,
         "started_at_utc": f"2026-07-23T00:0{pid % 10}:00Z",
@@ -97,6 +105,51 @@ def _process(pid: int, command: list[str]) -> dict:
     }
     process["process_identity_sha256"] = admit.canonical_sha(process)
     return process
+
+
+def _environment_payload(
+    root: Path, row: dict, kind: str, preflight: dict, index: int
+) -> bytes:
+    live_outputs = {
+        "smi_stdout": "NVIDIA GeForce RTX 3090 Ti, 8.6, Enabled, 1350, 10501\n",
+        "competing_process_stdout": "",
+        "nvcc_stdout": "Cuda compilation tools, release 13.2, V13.2.0\n",
+        "ncu_stdout": "NVIDIA Nsight Compute CLI 2026.1.0\n",
+    }
+    live = {
+        "smi_command": ["nvidia-smi", "--query-gpu=name,compute_cap,persistence_mode,clocks.sm,clocks.mem", "--format=csv,noheader,nounits"],
+        "smi_stdout_sha256": admit.sha256_bytes(live_outputs["smi_stdout"].encode()),
+        "competing_process_command": ["nvidia-smi", "--query-compute-apps=pid,process_name", "--format=csv,noheader,nounits"],
+        "competing_process_stdout_sha256": admit.sha256_bytes(live_outputs["competing_process_stdout"].encode()),
+        "nvcc_command": ["/usr/local/cuda-13.2/bin/nvcc", "--version"],
+        "nvcc_stdout_sha256": admit.sha256_bytes(live_outputs["nvcc_stdout"].encode()),
+        "ncu_command": ["ncu", "--version"],
+        "ncu_stdout_sha256": admit.sha256_bytes(live_outputs["ncu_stdout"].encode()),
+        "cuda_release": {"major": 13, "minor": 2},
+        "nvbit_version": "1.8",
+        "ncu_version": "2026.1.0",
+        "gpu_name": "NVIDIA GeForce RTX 3090 Ti",
+        "persistence_mode": "Enabled",
+        "sm_clock_mhz": 1350,
+        "mem_clock_mhz": 10501,
+    }
+    selected = {key: "" for key in (
+        "PATH", "LD_LIBRARY_PATH", "CUDA_HOME", "CUDA_PATH", "NVBIT_PB_PREFIX",
+        "CUDA_INJECTION64_PATH", "TRACES_FOLDER", "USER_DEFINED_FOLDERS",
+    )}
+    if kind == "nvbit":
+        selected["CUDA_INJECTION64_PATH"] = str(ROOT / "tools/nvbit_tracer/tracer_tool/tracer_tool.so")
+        selected["TRACES_FOLDER"] = str(root / "nvbit" / f"{index:02d}" / row["successor_slug"])
+        selected["USER_DEFINED_FOLDERS"] = "1"
+    return json.dumps({
+        "schema_version": 1,
+        "artifact_kind": "cutlass_successor_capture_environment",
+        "source_commit": admit.PINNED_BUNDLE_COMMIT,
+        "preflight_pins_sha256": admit.canonical_sha(preflight),
+        "live_checks": live,
+        "live_outputs": live_outputs,
+        "environment": selected,
+    }, sort_keys=True).encode()
 
 
 def _receipt(root: Path, row: dict, kind: str, index: int) -> Path:
@@ -127,6 +180,9 @@ def _receipt(root: Path, row: dict, kind: str, index: int) -> Path:
         if kind == "ncu"
         else ["dynamic_trace", "stats", "threadblock", "trace_summary", "preflight", "environment"]
     )
+    preflight_document = admit._expected_preflight(
+        row, ROSTER_ROWS[(row["matrix_key"], row["variant_id"])]
+    )
     if kind == "nvbit":
         from tools.nvbit_tracer.test_trace_admission import _write_trace
         trace_root = root / "nvbit" / f"{index:02d}" / slug
@@ -149,9 +205,13 @@ def _receipt(root: Path, row: dict, kind: str, index: int) -> Path:
             )
         )
         payload = f"synthetic-{index}-{kind}-{role}".encode()
-        if kind == "nvbit" and role in {"dynamic_trace", "stats", "threadblock"}:
+        if role == "preflight":
+            payload = json.dumps(preflight_document, sort_keys=True).encode()
+        elif role == "environment":
+            payload = _environment_payload(root, row, kind, preflight_document, index)
+        elif kind == "nvbit" and role in {"dynamic_trace", "stats", "threadblock"}:
             payload = (root / relative).read_bytes()
-        if kind == "ncu" and role == "label_sidecar":
+        elif kind == "ncu" and role == "label_sidecar":
             payload = json.dumps({
                 "schema_version": 5,
                 "device": row["arch"],
@@ -195,7 +255,7 @@ def _receipt(root: Path, row: dict, kind: str, index: int) -> Path:
                 "schema_version": 1, "kind": "ncu_details_csv_launch_observation",
                 "kernel_name_base": "mangled", "requested_launch_skip": 0,
                 "requested_launch_count": 1, "report_sha256": hashlib.sha256(report_payload).hexdigest(),
-                "identity_columns": ["Kernel Name"], "identity": {"Kernel Name": "_Zsynthetic_kernel"},
+                "identity_columns": ["ID", "Kernel Name"], "identity": {"ID": "0", "Kernel Name": "_Zsynthetic_kernel"},
             }
             observation["observation_sha256"] = admit.canonical_sha(observation)
             payload = json.dumps(observation, sort_keys=True).encode()
@@ -279,6 +339,70 @@ def _all_pairs(root: Path) -> None:
 
 def _rewrite(path: Path, document: dict) -> None:
     path.write_text(json.dumps(_seal(document), indent=2, sort_keys=True) + "\n")
+
+
+def _mutate_json_artifact(root: Path, receipt_path: Path, role: str, mutate) -> None:
+    document = json.loads(receipt_path.read_text())
+    artifact = next(item for item in document["receipt"]["artifacts"] if item["role"] == role)
+    path = root / artifact["path"]
+    payload = json.loads(path.read_text())
+    mutate(payload)
+    encoded = (json.dumps(payload, sort_keys=True, indent=2) + "\n").encode()
+    path.write_bytes(encoded)
+    artifact["sha256"] = admit.sha256_bytes(encoded)
+    artifact["size_bytes"] = len(encoded)
+    if role == "preflight":
+        document["receipt"]["preflight_sha256"] = artifact["sha256"]
+    elif role == "environment":
+        document["receipt"]["environment_sha256"] = artifact["sha256"]
+    _rewrite(receipt_path, document)
+
+
+def test_preflight_content_tamper_is_rejected(tmp_path: Path):
+    target = _receipt(tmp_path, MATRIX["rows"][0], "ncu", 0)
+    _mutate_json_artifact(tmp_path, target, "preflight", lambda value: value.update({"unexpected": True}))
+    with pytest.raises(admit.AdmissionError, match="preflight content"):
+        admit.build_overlay(tmp_path, generated_at_utc="2026-07-23T01:00:00Z")
+
+
+def test_environment_preflight_binding_tamper_is_rejected(tmp_path: Path):
+    target = _receipt(tmp_path, MATRIX["rows"][0], "ncu", 0)
+    _mutate_json_artifact(tmp_path, target, "environment", lambda value: value.update({"preflight_pins_sha256": "0" * 64}))
+    with pytest.raises(admit.AdmissionError, match="environment pin binding"):
+        admit.build_overlay(tmp_path, generated_at_utc="2026-07-23T01:00:00Z")
+
+
+def test_environment_live_clock_tamper_is_rejected(tmp_path: Path):
+    target = _receipt(tmp_path, MATRIX["rows"][0], "ncu", 0)
+    _mutate_json_artifact(tmp_path, target, "environment", lambda value: value["live_checks"].update({"sm_clock_mhz": 1410}))
+    with pytest.raises(admit.AdmissionError, match="live-check pins"):
+        admit.build_overlay(tmp_path, generated_at_utc="2026-07-23T01:00:00Z")
+
+
+def test_environment_live_output_tamper_is_rejected(tmp_path: Path):
+    target = _receipt(tmp_path, MATRIX["rows"][0], "ncu", 0)
+    _mutate_json_artifact(tmp_path, target, "environment", lambda value: value["live_outputs"].update({"smi_stdout": "forged\n"}))
+    with pytest.raises(admit.AdmissionError, match="live output hash mismatch"):
+        admit.build_overlay(tmp_path, generated_at_utc="2026-07-23T01:00:00Z")
+
+
+def test_ncu_environment_rejects_nvbit_injection_controls(tmp_path: Path):
+    target = _receipt(tmp_path, MATRIX["rows"][0], "ncu", 0)
+    _mutate_json_artifact(tmp_path, target, "environment", lambda value: value["environment"].update({"CUDA_INJECTION64_PATH": "/tmp/tracer_tool.so"}))
+    with pytest.raises(admit.AdmissionError, match="NCU environment contains NVBit"):
+        admit.build_overlay(tmp_path, generated_at_utc="2026-07-23T01:00:00Z")
+
+
+def test_ncu_sidecar_duplicate_required_metric_is_rejected(tmp_path: Path, monkeypatch):
+    report = tmp_path / "run.ncu-rep"
+    report.write_bytes(b"report")
+    sidecar = _report_sidecar()
+    sidecar["unit_tagged_metrics"].append(copy.deepcopy(sidecar["unit_tagged_metrics"][0]))
+    monkeypatch.setattr(admit, "_import_ncu_report_csv", lambda path: (_REPORT_CSV, None))
+    observation = _report_observation()
+    observation["report_sha256"] = admit.sha256_bytes(report.read_bytes())
+    with pytest.raises(admit.AdmissionError, match="duplicate unit-tagged"):
+        admit._verify_ncu_report(report, observation["report_sha256"], sidecar, observation)
 
 
 def test_new_schemas_are_closed_draft_2020_12():

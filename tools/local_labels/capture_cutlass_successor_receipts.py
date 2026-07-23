@@ -380,12 +380,16 @@ def validate_live_capture_preflight() -> dict[str, Any]:
     nvbit = _nvbit_version()
     return {
         "smi_command": smi_command,
+        "smi_stdout": smi_stdout,
         "smi_stdout_sha256": sha256_bytes(smi_stdout.encode()),
         "competing_process_command": apps_command,
+        "competing_process_stdout": apps_stdout,
         "competing_process_stdout_sha256": sha256_bytes(apps_stdout.encode()),
         "nvcc_command": nvcc_command,
+        "nvcc_stdout": nvcc_stdout,
         "nvcc_stdout_sha256": sha256_bytes(nvcc_stdout.encode()),
         "ncu_command": ncu_command,
+        "ncu_stdout": ncu_stdout,
         "ncu_stdout_sha256": sha256_bytes(ncu_stdout.encode()),
         "cuda_release": cuda,
         "nvbit_version": nvbit,
@@ -429,12 +433,16 @@ def _environment_document(preflight: dict[str, Any], live: dict[str, Any], env: 
             "USER_DEFINED_FOLDERS",
         )
     }
+    output_keys = (
+        "smi_stdout", "competing_process_stdout", "nvcc_stdout", "ncu_stdout",
+    )
     return {
         "schema_version": 1,
         "artifact_kind": "cutlass_successor_capture_environment",
         "source_commit": PINNED_COMMIT,
         "preflight_pins_sha256": canonical_sha(preflight),
-        "live_checks": live,
+        "live_checks": {key: value for key, value in live.items() if key not in output_keys},
+        "live_outputs": {key: live[key] for key in output_keys},
         "environment": selected,
     }
 
@@ -533,7 +541,12 @@ def capture_phase(*, matrix_key: str, variant_id: str, phase: str, preflight_pat
     args = [str(value) for value in row["shape"]["actual_args"]]
     process_cwd = binary.parent
     if phase == "ncu":
-        command = [str(LABEL_DRIVER), "--device", ARCH, "--slug", row["successor_slug"], "--shape-point", "trace_00", "--repeat", "0", "--launch", "0", "--binary", str(binary), "--warmup", "0", "--out-dir", str(root), "--expected-cuda-release", "13.2", "--expected-ncu-version-prefix", NCU_VERSION, "--publication-metric-scope", "cycles_only_binding", "--clock-control", "none", "--unit-metric", "gpc__cycles_elapsed.max", "--unit-metric", "gpu__time_duration.sum", "--", *args]
+        for key in (
+            "NVBIT_PB_PREFIX", "CUDA_INJECTION64_PATH", "TRACES_FOLDER",
+            "USER_DEFINED_FOLDERS",
+        ):
+            env.pop(key, None)
+        command = [str(LABEL_DRIVER), "--device", ARCH, "--slug", row["successor_slug"], "--shape-point", "trace_00", "--repeat", "0", "--launch", "0", "--binary", str(binary), "--warmup", "0", "--out-dir", str(root), "--expected-cuda-release", "13.2", "--expected-ncu-version-prefix", NCU_VERSION, "--publication-metric-scope", "cycles_only_binding", "--clock-control", "none", "--cache-control", "all", "--unit-metric", "gpc__cycles_elapsed.max", "--unit-metric", "gpu__time_duration.sum", "--", *args]
         env["LD_SCRIPT_DIR"] = str(LABEL_DRIVER.parent)
         env["LD_SOURCE_COMMIT_OVERRIDE"] = PINNED_COMMIT
         phase_output_dir = root / ARCH / row["successor_slug"] / "trace_00"

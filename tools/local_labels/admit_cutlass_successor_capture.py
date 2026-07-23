@@ -12,6 +12,7 @@ import argparse
 import datetime as dt
 import hashlib
 import json
+import math
 import os
 import subprocess
 import sys
@@ -226,6 +227,16 @@ def _expected_rows(matrix: dict[str, Any]) -> dict[tuple[str, str], dict[str, An
     return rows
 
 
+def _expected_roster_rows(roster: dict[str, Any]) -> dict[tuple[str, str], dict[str, Any]]:
+    rows: dict[tuple[str, str], dict[str, Any]] = {}
+    for row in roster["rows"]:
+        key = (row["matrix_key"], row["variant_id"])
+        if key in rows:
+            raise AdmissionError(f"duplicate roster row identity: {key}")
+        rows[key] = row
+    return rows
+
+
 def _verify_process(process: dict[str, Any], label: str) -> None:
     expected = canonical_sha({k: v for k, v in process.items() if k != "process_identity_sha256"})
     if process["process_identity_sha256"] != expected:
@@ -273,12 +284,16 @@ def _verify_ncu_report(
         raise AdmissionError(
             f"NCU report metric extraction failed: {extraction.typed_reason}: {extraction.detail}"
         )
-    sidecar_metrics = {
-        item.get("ncu_metric"): item
-        for item in sidecar.get("unit_tagged_metrics", [])
-        if isinstance(item, dict)
-    }
+    sidecar_records = [
+        item for item in sidecar.get("unit_tagged_metrics", []) if isinstance(item, dict)
+    ]
+    metric_names = [item.get("ncu_metric") for item in sidecar_records]
+    if len(metric_names) != len(set(metric_names)):
+        raise AdmissionError("NCU sidecar has duplicate unit-tagged metrics")
+    sidecar_metrics = {item.get("ncu_metric"): item for item in sidecar_records}
     for metric, parsed in extraction.metrics.items():
+        if not isinstance(parsed.get("value"), (int, float)) or not math.isfinite(parsed["value"]):
+            raise AdmissionError(f"NCU report metric is non-finite: {metric}")
         declared = sidecar_metrics.get(metric)
         if not isinstance(declared, dict) or (
             declared.get("unit") != parsed["unit"]
@@ -286,6 +301,13 @@ def _verify_ncu_report(
         ):
             raise AdmissionError(f"NCU sidecar/report metric disagreement: {metric}")
     parsed_observation = parse_ncu_metrics.extract_launch_observation(csv_text)
+    if (
+        "ID" not in parsed_observation["identity_columns"]
+        or "Kernel Name" not in parsed_observation["identity_columns"]
+        or not parsed_observation["identity"].get("ID")
+        or not parsed_observation["identity"].get("Kernel Name")
+    ):
+        raise AdmissionError("NCU report launch identity is incomplete")
     if (
         observation.get("identity_columns") != parsed_observation["identity_columns"]
         or observation.get("identity") != parsed_observation["identity"]
@@ -333,6 +355,16 @@ def _verify_ncu_artifacts(
     }
     if any(sidecar.get(key) != value for key, value in expected_fields.items()):
         raise AdmissionError("NCU label sidecar identity does not match successor row")
+    protocol = sidecar.get("measurement_protocol")
+    if not isinstance(protocol, dict) or any(
+        protocol.get(key) != value
+        for key, value in {
+            "ncu_clock_control": "none",
+            "ncu_cache_control": "all",
+            "ncu_replay_mode": "kernel",
+        }.items()
+    ):
+        raise AdmissionError("NCU label sidecar controls are not pinned")
     metrics = {
         item.get("ncu_metric"): item
         for item in sidecar.get("unit_tagged_metrics", [])
@@ -458,10 +490,169 @@ def _verify_nvbit_artifacts(
         raise AdmissionError("NVBit trace summary counts do not match independent admission")
 
 
+def _expected_preflight(
+    row: dict[str, Any], roster_row: dict[str, Any]
+) -> dict[str, Any]:
+    static = row["static_launch_inventory"]
+    return {
+        "schema_version": 1,
+        "artifact_kind": "cutlass_successor_capture_preflight",
+        "matrix_key": row["matrix_key"],
+        "variant_id": row["variant_id"],
+        "arch": "sm_86",
+        "sku": "rtx_3090_ti",
+        "build_arch": "sm_86",
+        "source_commit": PINNED_BUNDLE_COMMIT,
+        "binary_path": static["binary_path"],
+        "binary_sha256": static["binary_sha256"],
+        "witness_path": roster_row["witness"]["path"],
+        "witness_sha256": roster_row["witness"]["sha256"],
+        "shape_path": row["shape"]["path"],
+        "shape_sha256": row["shape"]["sha256"],
+        "no_competing_processes": True,
+        "competing_processes": [],
+        "gpu_name": "NVIDIA GeForce RTX 3090 Ti",
+        "persistence_mode": "Enabled",
+        "sm_clock_mhz": 1350,
+        "mem_clock_mhz": 10501,
+        "cuda_release": {"major": 13, "minor": 2},
+        "nvbit_version": "1.8",
+        "ncu_version": "2026.1.0",
+    }
+
+
+def _verify_capture_documents(
+    root: Path,
+    receipt: dict[str, Any],
+    row: dict[str, Any],
+    roster_row: dict[str, Any],
+    artifact_by_role: dict[str, list[dict[str, Any]]],
+) -> None:
+    preflight = _load_json(
+        _safe_receipt_path(root, artifact_by_role["preflight"][0]["path"], "preflight"),
+        "preflight",
+    )
+    expected = _expected_preflight(row, roster_row)
+    if preflight != expected or canonical_sha(preflight) != canonical_sha(expected):
+        raise AdmissionError("successor preflight content does not match immutable pins")
+    for key in ("binary_path", "witness_path", "shape_path"):
+        path = ROOT / preflight[key]
+        _regular(path, f"successor preflight {key}")
+        if sha256_bytes(path.read_bytes()) != preflight[key.replace("_path", "_sha256")]:
+            raise AdmissionError(f"successor preflight {key} hash mismatch")
+
+    environment = _load_json(
+        _safe_receipt_path(root, artifact_by_role["environment"][0]["path"], "environment"),
+        "environment",
+    )
+    if set(environment) != {
+        "schema_version", "artifact_kind", "source_commit",
+        "preflight_pins_sha256", "live_checks", "live_outputs", "environment",
+    }:
+        raise AdmissionError("successor environment document keys are not closed")
+    if (
+        environment["schema_version"] != 1
+        or environment["artifact_kind"] != "cutlass_successor_capture_environment"
+        or environment["source_commit"] != PINNED_BUNDLE_COMMIT
+        or environment["preflight_pins_sha256"] != canonical_sha(preflight)
+    ):
+        raise AdmissionError("successor environment pin binding is invalid")
+    selected = environment["environment"]
+    selected_keys = {
+        "PATH", "LD_LIBRARY_PATH", "CUDA_HOME", "CUDA_PATH",
+        "NVBIT_PB_PREFIX", "CUDA_INJECTION64_PATH", "TRACES_FOLDER",
+        "USER_DEFINED_FOLDERS",
+    }
+    if not isinstance(selected, dict) or set(selected) != selected_keys or any(
+        not isinstance(value, str) for value in selected.values()
+    ):
+        raise AdmissionError("successor environment variables are not closed strings")
+    if receipt["capture_kind"] == "nvbit":
+        trace_root = _safe_receipt_path(
+            root, artifact_by_role["dynamic_trace"][0]["path"], "NVBit dynamic trace"
+        ).parent
+        if selected["USER_DEFINED_FOLDERS"] != "1" or Path(selected["TRACES_FOLDER"]) != trace_root:
+            raise AdmissionError("NVBit environment injection controls are invalid")
+        if selected["CUDA_INJECTION64_PATH"] != str(
+            ROOT / "tools/nvbit_tracer/tracer_tool/tracer_tool.so"
+        ):
+            raise AdmissionError("NVBit tracer injection path is not pinned")
+    elif any(
+        selected[key]
+        for key in (
+            "NVBIT_PB_PREFIX", "CUDA_INJECTION64_PATH", "TRACES_FOLDER",
+            "USER_DEFINED_FOLDERS",
+        )
+    ):
+        raise AdmissionError("NCU environment contains NVBit injection controls")
+
+    live = environment["live_checks"]
+    live_keys = {
+        "smi_command", "smi_stdout_sha256", "competing_process_command",
+        "competing_process_stdout_sha256", "nvcc_command", "nvcc_stdout_sha256",
+        "ncu_command", "ncu_stdout_sha256", "cuda_release", "nvbit_version",
+        "ncu_version", "gpu_name", "persistence_mode", "sm_clock_mhz",
+        "mem_clock_mhz",
+    }
+    if not isinstance(live, dict) or set(live) != live_keys:
+        raise AdmissionError("successor live-check document keys are not closed")
+    if (
+        live["smi_command"] != ["nvidia-smi", "--query-gpu=name,compute_cap,persistence_mode,clocks.sm,clocks.mem", "--format=csv,noheader,nounits"]
+        or live["competing_process_command"] != ["nvidia-smi", "--query-compute-apps=pid,process_name", "--format=csv,noheader,nounits"]
+        or live["nvcc_command"] != ["/usr/local/cuda-13.2/bin/nvcc", "--version"]
+        or live["ncu_command"] != ["ncu", "--version"]
+        or live["cuda_release"] != {"major": 13, "minor": 2}
+        or live["nvbit_version"] != "1.8"
+        or live["ncu_version"] != "2026.1.0"
+        or live["gpu_name"] != "NVIDIA GeForce RTX 3090 Ti"
+        or live["persistence_mode"] != "Enabled"
+        or live["sm_clock_mhz"] != 1350
+        or live["mem_clock_mhz"] != 10501
+    ):
+        raise AdmissionError("successor live-check pins are invalid")
+    outputs = environment["live_outputs"]
+    output_keys = {
+        "smi_stdout", "competing_process_stdout", "nvcc_stdout", "ncu_stdout",
+    }
+    if not isinstance(outputs, dict) or set(outputs) != output_keys or any(
+        not isinstance(value, str) for value in outputs.values()
+    ):
+        raise AdmissionError("successor live outputs are not closed strings")
+    output_hashes = {
+        "smi_stdout": "smi_stdout_sha256",
+        "competing_process_stdout": "competing_process_stdout_sha256",
+        "nvcc_stdout": "nvcc_stdout_sha256",
+        "ncu_stdout": "ncu_stdout_sha256",
+    }
+    for output_key, hash_key in output_hashes.items():
+        if sha256_bytes(outputs[output_key].encode()) != live[hash_key]:
+            raise AdmissionError(f"successor live output hash mismatch: {output_key}")
+    smi_lines = [line.strip() for line in outputs["smi_stdout"].splitlines() if line.strip()]
+    if smi_lines != ["NVIDIA GeForce RTX 3090 Ti, 8.6, Enabled, 1350, 10501"]:
+        raise AdmissionError("successor nvidia-smi output is not pinned")
+    competing = outputs["competing_process_stdout"].strip().lower()
+    if competing and "no running processes" not in competing:
+        raise AdmissionError("successor competing-process output is not empty")
+    if "release 13.2" not in outputs["nvcc_stdout"]:
+        raise AdmissionError("successor nvcc output does not prove CUDA 13.2")
+    if "2026.1.0" not in outputs["ncu_stdout"]:
+        raise AdmissionError("successor NCU output does not prove 2026.1.0")
+    expected_host = canonical_sha({"gpu": live["gpu_name"], "smi": live["smi_stdout_sha256"]})
+    if receipt["process"]["host_identity_sha256"] != expected_host:
+        raise AdmissionError("successor process host identity does not match live output")
+    for key in live_keys:
+        if key.endswith("sha256") and (
+            not isinstance(live[key], str) or len(live[key]) != 64
+            or any(char not in "0123456789abcdef" for char in live[key])
+        ):
+            raise AdmissionError(f"successor live-check hash is invalid: {key}")
+
+
 def _verify_receipt(
     root: Path,
     path: Path,
     expected_rows: dict[tuple[str, str], dict[str, Any]],
+    expected_roster_rows: dict[tuple[str, str], dict[str, Any]],
     used_artifacts: set[str],
 ) -> tuple[tuple[str, str], str, dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
     rel = path.relative_to(root).as_posix()
@@ -475,6 +666,9 @@ def _verify_receipt(
     if pair_key not in expected_rows:
         raise AdmissionError(f"receipt has unknown matrix_key+variant_id: {pair_key}")
     row = expected_rows[pair_key]
+    if pair_key not in expected_roster_rows:
+        raise AdmissionError(f"receipt has no immutable roster row: {pair_key}")
+    roster_row = expected_roster_rows[pair_key]
     identity = receipt["identity"]
     expected_binary = row["static_launch_inventory"]["binary_sha256"]
     expected_kernel = hashlib.sha256(
@@ -582,6 +776,7 @@ def _verify_receipt(
         raise AdmissionError(f"{rel} preflight reference does not match typed artifact")
     if receipt["environment_sha256"] != environment["sha256"]:
         raise AdmissionError(f"{rel} environment hash does not match typed artifact")
+    _verify_capture_documents(root, receipt, row, roster_row, artifact_by_role)
     if receipt["capture_kind"] == "ncu":
         _verify_ncu_artifacts(root, receipt, row, artifact_by_role)
     else:
@@ -624,15 +819,18 @@ def _bundle_overlay_meta(matrix: dict[str, Any]) -> dict[str, Any]:
 def build_overlay(receipt_root: Path, *, generated_at_utc: str) -> dict[str, Any]:
     root = _external_root(receipt_root)
     _check_dt(generated_at_utc, "generated_at_utc")
-    _, _, _, matrix = validate_immutable_bundle()
+    _, _, roster, matrix = validate_immutable_bundle()
     expected = _expected_rows(matrix)
+    expected_roster = _expected_roster_rows(roster)
     files = _inventory(root)
     receipt_files = [path for path in files if path.name.endswith(RECEIPT_SUFFIX)]
     extras = [path for path in files if not path.name.endswith(RECEIPT_SUFFIX)]
     used_artifacts: set[str] = set()
     receipts: dict[tuple[str, str], dict[str, tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]]] = {}
     for path in receipt_files:
-        pair_key, kind, identity, launch, process, ref = _verify_receipt(root, path, expected, used_artifacts)
+        pair_key, kind, identity, launch, process, ref = _verify_receipt(
+            root, path, expected, expected_roster, used_artifacts
+        )
         by_kind = receipts.setdefault(pair_key, {})
         if kind in by_kind:
             raise AdmissionError(f"duplicate {kind} receipt for {pair_key}")

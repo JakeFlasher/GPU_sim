@@ -152,7 +152,13 @@ def test_trace_byte_budget_stops_capture(tmp_path: Path):
 
 def test_environment_provenance_names_trace_folder_controls():
     document = capture._environment_document(
-        {"pin": "static"}, {"check": "live"},
+        {"pin": "static"}, {
+            "check": "live",
+            "smi_stdout": "smi",
+            "competing_process_stdout": "",
+            "nvcc_stdout": "nvcc",
+            "ncu_stdout": "ncu",
+        },
         {"TRACES_FOLDER": "/capture/traces", "USER_DEFINED_FOLDERS": "1"},
     )
     assert document["environment"]["TRACES_FOLDER"] == "/capture/traces"
