@@ -529,6 +529,7 @@ def capture_phase(*, matrix_key: str, variant_id: str, phase: str, preflight_pat
     if phase == "ncu":
         command = [str(LABEL_DRIVER), "--device", ARCH, "--slug", row["successor_slug"], "--shape-point", "trace_00", "--repeat", "0", "--launch", "0", "--binary", str(binary), "--warmup", "0", "--out-dir", str(root), "--expected-cuda-release", "13.2", "--expected-ncu-version-prefix", NCU_VERSION, "--publication-metric-scope", "cycles_only_binding", "--clock-control", "none", "--unit-metric", "gpc__cycles_elapsed.max", "--unit-metric", "gpu__time_duration.sum", "--", *args]
         env["LD_SCRIPT_DIR"] = str(LABEL_DRIVER.parent)
+        env["LD_SOURCE_COMMIT_OVERRIDE"] = PINNED_COMMIT
         phase_output_dir = root / ARCH / row["successor_slug"] / "trace_00"
     else:
         env = tracer_runtime_env(TRACER_SO, base_env=env)

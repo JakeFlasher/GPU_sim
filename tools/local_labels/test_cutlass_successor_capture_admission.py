@@ -84,6 +84,65 @@ def _receipt(root: Path, row: dict, kind: str, index: int) -> Path:
             )
         )
         payload = f"synthetic-{index}-{kind}-{role}".encode()
+        if kind == "ncu" and role == "label_sidecar":
+            payload = json.dumps({
+                "schema_version": 5,
+                "device": row["arch"],
+                "slug": slug,
+                "shape_point": row["shape"]["shape_point"],
+                "repeat_index": 0,
+                "launch_index": 0,
+                "binary_sha256": identity["binary_sha256"],
+                "profiler_family": "nsight_compute",
+                "profiler_version": "2026.1.0",
+                "cuda_version": "13.2",
+                "driver_version": "610.43.02",
+                "gpu_uuid_sha256": "c" * 64,
+                "replay_mode": "kernel",
+                "aggregation": "kernel",
+                "warmup_count": 0,
+                "cache_hit_rate_l2_sector": 0.5,
+                "confidence_interval_l2_sector": {
+                    "lower": 0.5, "upper": 0.5, "confidence_level": 0.95,
+                    "units": "sector_hit_rate_fraction", "aggregation": "kernel",
+                },
+                "measurement_protocol": {
+                    "ncu_clock_control": "none", "ncu_cache_control": "all",
+                    "ncu_replay_mode": "kernel",
+                },
+                "unit_tagged_metrics": [
+                    {"ncu_metric": "gpc__cycles_elapsed.max", "unit": "cycles", "value": 1},
+                    {"ncu_metric": "gpu__time_duration.sum", "unit": "ns", "value": 1},
+                ],
+            }, sort_keys=True).encode()
+        elif kind == "ncu" and role == "label_run_manifest":
+            payload = json.dumps({
+                "schema_version": 1, "source_commit": admit.PINNED_BUNDLE_COMMIT,
+                "binary_sha256": identity["binary_sha256"], "kernel_signature_sha256": identity["kernel_signature_sha256"], "arch": row["arch"],
+                "slug": slug, "shape_point": row["shape"]["shape_point"],
+                "repeat_index": 0, "launch_index": 0,
+            }, sort_keys=True).encode()
+        elif kind == "ncu" and role == "ncu_launch_observation":
+            report_payload = f"synthetic-{index}-{kind}-ncu_report".encode()
+            observation = {
+                "schema_version": 1, "kind": "ncu_details_csv_launch_observation",
+                "kernel_name_base": "mangled", "requested_launch_skip": 0,
+                "requested_launch_count": 1, "report_sha256": hashlib.sha256(report_payload).hexdigest(),
+                "identity_columns": ["Kernel Name"], "identity": {"Kernel Name": "_Zsynthetic_kernel"},
+            }
+            observation["observation_sha256"] = admit.canonical_sha(observation)
+            payload = json.dumps(observation, sort_keys=True).encode()
+        elif kind == "nvbit" and role == "trace_summary":
+            payload = json.dumps({
+                "schema_version": 1, "producer": "nvbit_tracer",
+                "artifact_kind": "cutlass_successor_nvbit_trace_summary",
+                "trace_contract_id": admit.TRACE_CONTRACT_ID,
+                "memory_payload_classes": admit.TRACE_MEMORY_PAYLOAD_CLASSES,
+                "binary_version": 86, "nvbit_version": "1.8",
+                "trace_contract_status": "pass", "expected_record_count": 1,
+                "admitted_record_count": 1, "threadblock_count": 1,
+                "dynamic_trace": "dynamic_trace.pb", "stats": "stats.csv",
+            }, sort_keys=True).encode()
         (root / relative).parent.mkdir(parents=True, exist_ok=True)
         (root / relative).write_bytes(payload)
         digest = hashlib.sha256(payload).hexdigest()

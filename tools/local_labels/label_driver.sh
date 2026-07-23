@@ -919,7 +919,10 @@ safe_git_head() {
 if [[ -z "${REPO_ROOT:-}" ]]; then
     REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 fi
-SOURCE_COMMIT="$(safe_git_head)"
+SOURCE_COMMIT="${LD_SOURCE_COMMIT_OVERRIDE:-$(safe_git_head)}"
+if [[ -n "${LD_SOURCE_COMMIT_OVERRIDE:-}" && ! "$SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
+    fail "LD_SOURCE_COMMIT_OVERRIDE must be a 40-character commit hash"
+fi
 
 # Emit the per-launch run manifest at the start of the NCU collection
 # block. The manifest carries the join-key fields the comparison

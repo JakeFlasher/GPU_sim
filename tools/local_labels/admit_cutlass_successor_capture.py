@@ -37,6 +37,11 @@ OVERLAY_SCHEMA_REL = Path(
 OVERLAY_ID = "cutlass_successor_capture_admission_sm86_v1"
 DEFAULT_METRIC_VERSION = "ncu_2026.1.x"
 RECEIPT_SUFFIX = ".capture_receipt.json"
+LOCAL_LABEL_SIDECAR_SCHEMA_REL = Path(
+    "workloads/simbench_bw/schemas/local_label_sidecar.schema.json"
+)
+TRACE_CONTRACT_ID = "sm86_addr_carry_v1"
+TRACE_MEMORY_PAYLOAD_CLASSES = [1, 2, 3, 6, 8]
 
 BUNDLE_FILES = (
     cohort.VALIDATION_REL,
@@ -241,6 +246,145 @@ def _verify_launch(launch: dict[str, Any], identity: dict[str, Any], row: dict[s
         raise AdmissionError(f"{label} launch geometry does not match successor matrix")
 
 
+def _verify_ncu_artifacts(
+    root: Path,
+    receipt: dict[str, Any],
+    row: dict[str, Any],
+    artifact_by_role: dict[str, list[dict[str, Any]]],
+) -> None:
+    """Re-derive NCU identity and target-only metric semantics from payloads."""
+    try:
+        from tools.local_labels import import_label
+
+        sidecar_path = _safe_receipt_path(
+            root, artifact_by_role["label_sidecar"][0]["path"], "label sidecar"
+        )
+        sidecar = _load_json(sidecar_path, "label sidecar")
+        result = import_label.validate(sidecar)
+        if not result.ok:
+            raise AdmissionError(
+                f"NCU label sidecar semantic validation failed: {result.typed_reason}"
+            )
+    except AdmissionError:
+        raise
+    except Exception as exc:
+        raise AdmissionError(f"NCU label sidecar semantic validation failed: {exc}") from exc
+
+    expected = receipt["identity"]
+    binary_path = ROOT / row["static_launch_inventory"]["binary_path"]
+    _regular(binary_path, "successor executable")
+    if sha256_bytes(binary_path.read_bytes()) != expected["binary_sha256"]:
+        raise AdmissionError("successor executable hash does not match matrix identity")
+    expected_fields = {
+        "device": expected["arch"],
+        "slug": expected["slug"],
+        "shape_point": expected["shape_point"],
+        "repeat_index": 0,
+        "launch_index": 0,
+        "binary_sha256": expected["binary_sha256"],
+    }
+    if any(sidecar.get(key) != value for key, value in expected_fields.items()):
+        raise AdmissionError("NCU label sidecar identity does not match successor row")
+    metrics = {
+        item.get("ncu_metric"): item
+        for item in sidecar.get("unit_tagged_metrics", [])
+        if isinstance(item, dict)
+    }
+    required_units = {
+        "gpc__cycles_elapsed.max": "cycles",
+        "gpu__time_duration.sum": "ns",
+    }
+    for metric, unit in required_units.items():
+        item = metrics.get(metric)
+        if not isinstance(item, dict) or item.get("unit") != unit:
+            raise AdmissionError(f"NCU sidecar metric/unit binding is invalid: {metric}")
+
+    run_path = _safe_receipt_path(
+        root, artifact_by_role["label_run_manifest"][0]["path"], "label run manifest"
+    )
+    run = _load_json(run_path, "label run manifest")
+    run_expected = {
+        "source_commit": PINNED_BUNDLE_COMMIT,
+        "binary_sha256": expected["binary_sha256"],
+        "arch": expected["arch"],
+        "slug": expected["slug"],
+        "shape_point": expected["shape_point"],
+        "repeat_index": 0,
+        "launch_index": 0,
+    }
+    if any(run.get(key) != value for key, value in run_expected.items()):
+        raise AdmissionError("NCU label run manifest identity does not match successor row")
+    if run.get("kernel_signature_sha256") != expected["kernel_signature_sha256"]:
+        raise AdmissionError("NCU label run manifest kernel signature does not match successor")
+    controls = run.get("ncu_controls")
+    if controls is not None and (
+        not isinstance(controls, dict)
+        or any(
+            controls.get(key) != value
+            for key, value in {
+                "ncu_clock_control": "none",
+                "ncu_cache_control": "all",
+                "ncu_replay_mode": "kernel",
+            }.items()
+        )
+    ):
+        raise AdmissionError("NCU label run manifest controls are not pinned")
+
+    report_artifact = artifact_by_role["ncu_report"][0]
+    observation_path = _safe_receipt_path(
+        root, artifact_by_role["ncu_launch_observation"][0]["path"],
+        "NCU launch observation",
+    )
+    observation = _load_json(observation_path, "NCU launch observation")
+    if (
+        observation.get("schema_version") != 1
+        or observation.get("kind") != "ncu_details_csv_launch_observation"
+        or observation.get("requested_launch_skip") != 0
+        or observation.get("requested_launch_count") != 1
+        or observation.get("report_sha256") != report_artifact["sha256"]
+    ):
+        raise AdmissionError("NCU launch observation selector/report binding is invalid")
+    identity = observation.get("identity")
+    if not isinstance(identity, dict) or not isinstance(identity.get("Kernel Name"), str) or not identity["Kernel Name"]:
+        raise AdmissionError("NCU launch observation has no kernel identity")
+    observation_seal = observation.get("observation_sha256")
+    if observation_seal != canonical_sha(
+        {key: value for key, value in observation.items() if key != "observation_sha256"}
+    ):
+        raise AdmissionError("NCU launch observation seal mismatch")
+
+
+def _verify_nvbit_artifacts(
+    root: Path,
+    receipt: dict[str, Any],
+    artifact_by_role: dict[str, list[dict[str, Any]]],
+) -> None:
+    """Re-derive the closed NVBit trace-summary contract from its JSON payload."""
+    summary_path = _safe_receipt_path(
+        root, artifact_by_role["trace_summary"][0]["path"], "NVBit trace summary"
+    )
+    summary = _load_json(summary_path, "NVBit trace summary")
+    dynamic = artifact_by_role["dynamic_trace"][0]
+    stats = artifact_by_role["stats"][0]
+    if (
+        summary.get("schema_version") != 1
+        or summary.get("artifact_kind") != "cutlass_successor_nvbit_trace_summary"
+        or summary.get("trace_contract_id") != TRACE_CONTRACT_ID
+        or summary.get("memory_payload_classes") != TRACE_MEMORY_PAYLOAD_CLASSES
+        or summary.get("trace_contract_status") != "pass"
+        or summary.get("dynamic_trace") != Path(dynamic["path"]).name
+        or summary.get("stats") != Path(stats["path"]).name
+    ):
+        raise AdmissionError("NVBit trace summary semantics do not match payload inventory")
+    for key in ("expected_record_count", "admitted_record_count", "threadblock_count"):
+        if type(summary.get(key)) is not int or summary[key] <= 0:
+            raise AdmissionError(f"NVBit trace summary has invalid {key}")
+    if summary["admitted_record_count"] != summary["expected_record_count"]:
+        raise AdmissionError("NVBit trace summary admits fewer records than expected")
+    if summary["threadblock_count"] != len(artifact_by_role["threadblock"]):
+        raise AdmissionError("NVBit trace summary threadblock count does not match inventory")
+
+
 def _verify_receipt(
     root: Path,
     path: Path,
@@ -353,6 +497,10 @@ def _verify_receipt(
         raise AdmissionError(f"{rel} preflight reference does not match typed artifact")
     if receipt["environment_sha256"] != environment["sha256"]:
         raise AdmissionError(f"{rel} environment hash does not match typed artifact")
+    if receipt["capture_kind"] == "ncu":
+        _verify_ncu_artifacts(root, receipt, row, artifact_by_role)
+    else:
+        _verify_nvbit_artifacts(root, receipt, artifact_by_role)
     return pair_key, receipt["capture_kind"], receipt["identity"], receipt["launch_identity"], receipt["process"], _receipt_ref(root, rel, seal)
 
 
