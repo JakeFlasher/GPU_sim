@@ -1,2 +1,4 @@
 # Preserve byte-exact upstream vendor sources without normalizing their whitespace.
 third_party/cutlass/** -whitespace
+# cuobjdump SASS is captured evidence; its formatting is part of the hash.
+data/annex/cutlass_successor_sm86_20260723/** -whitespace
