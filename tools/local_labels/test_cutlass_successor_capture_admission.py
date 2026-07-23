@@ -20,6 +20,65 @@ OVERLAY_SCHEMA = ROOT / admit.OVERLAY_SCHEMA_REL
 MATRIX = json.loads((ROOT / cohort.MATRIX_REL).read_text())
 
 
+_REPORT_CSV = """Kernel Name,Metric Name,Metric Value
+_Zsynthetic_kernel,gpc__cycles_elapsed.max,1
+_Zsynthetic_kernel,gpu__time_duration.sum,1
+"""
+
+
+@pytest.fixture(autouse=True)
+def _mock_ncu_report_import(monkeypatch):
+    monkeypatch.setattr(admit, "_import_ncu_report_csv", lambda path: (_REPORT_CSV, None))
+
+
+
+
+def _report_sidecar() -> dict:
+    return {
+        "unit_tagged_metrics": [
+            {"ncu_metric": "gpc__cycles_elapsed.max", "unit": "cycles", "value": 1.0},
+            {"ncu_metric": "gpu__time_duration.sum", "unit": "ns", "value": 1.0},
+        ]
+    }
+
+
+def _report_observation() -> dict:
+    observation = {
+        "identity_columns": ["Kernel Name"],
+        "identity": {"Kernel Name": "_Zsynthetic_kernel"},
+        "report_sha256": "unused",
+    }
+    return observation
+
+
+def test_ncu_report_import_failure_is_not_sidecar_only(tmp_path: Path, monkeypatch):
+    report = tmp_path / "run.ncu-rep"
+    report.write_bytes(b"report")
+    monkeypatch.setattr(
+        admit, "_import_ncu_report_csv", lambda path: (None, type("E", (), {"detail": "ncu unavailable"})())
+    )
+    with pytest.raises(admit.AdmissionError, match="import failed"):
+        admit._verify_ncu_report(report, admit.sha256_bytes(report.read_bytes()), _report_sidecar(), _report_observation())
+
+
+def test_ncu_report_metric_disagreement_is_rejected(tmp_path: Path, monkeypatch):
+    report = tmp_path / "run.ncu-rep"
+    report.write_bytes(b"report")
+    csv = "Kernel Name,Metric Name,Metric Value\n_Zsynthetic_kernel,gpc__cycles_elapsed.max,2\n_Zsynthetic_kernel,gpu__time_duration.sum,1\n"
+    monkeypatch.setattr(admit, "_import_ncu_report_csv", lambda path: (csv, None))
+    with pytest.raises(admit.AdmissionError, match="metric disagreement"):
+        admit._verify_ncu_report(report, admit.sha256_bytes(report.read_bytes()), _report_sidecar(), _report_observation())
+
+
+def test_ncu_report_multiple_launches_are_rejected(tmp_path: Path, monkeypatch):
+    report = tmp_path / "run.ncu-rep"
+    report.write_bytes(b"report")
+    csv = "ID,Kernel Name,Metric Name,Metric Value\n0,_Zsynthetic_kernel,gpc__cycles_elapsed.max,1\n1,_Zsynthetic_kernel,gpc__cycles_elapsed.max,1\n0,_Zsynthetic_kernel,gpu__time_duration.sum,1\n1,_Zsynthetic_kernel,gpu__time_duration.sum,1\n"
+    monkeypatch.setattr(admit, "_import_ncu_report_csv", lambda path: (csv, None))
+    with pytest.raises(admit.AdmissionError, match="metric extraction failed"):
+        admit._verify_ncu_report(report, admit.sha256_bytes(report.read_bytes()), _report_sidecar(), _report_observation())
+
+
 def _seal(document: dict) -> dict:
     document = copy.deepcopy(document)
     document["receipt_seal_sha256"] = admit.canonical_sha(

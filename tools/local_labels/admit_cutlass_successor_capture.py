@@ -246,6 +246,54 @@ def _verify_launch(launch: dict[str, Any], identity: dict[str, Any], row: dict[s
         raise AdmissionError(f"{label} launch geometry does not match successor matrix")
 
 
+def _import_ncu_report_csv(report_path: Path) -> tuple[str | None, Any]:
+    from tools.local_labels import parse_ncu_metrics
+
+    return parse_ncu_metrics._import_report_csv("ncu", report_path)
+
+
+def _verify_ncu_report(
+    report_path: Path,
+    report_sha256: str,
+    sidecar: dict[str, Any],
+    observation: dict[str, Any],
+) -> None:
+    from tools.local_labels import metric_registry, parse_ncu_metrics
+
+    csv_text, import_error = _import_ncu_report_csv(report_path)
+    if import_error is not None or csv_text is None:
+        detail = getattr(import_error, "detail", repr(import_error))
+        raise AdmissionError(f"NCU report import failed: {detail}")
+    extraction = parse_ncu_metrics.extract_unit_tagged_metrics(
+        csv_text,
+        metric_registry.load_registry(),
+        ["gpc__cycles_elapsed.max", "gpu__time_duration.sum"],
+    )
+    if not extraction.ok:
+        raise AdmissionError(
+            f"NCU report metric extraction failed: {extraction.typed_reason}: {extraction.detail}"
+        )
+    sidecar_metrics = {
+        item.get("ncu_metric"): item
+        for item in sidecar.get("unit_tagged_metrics", [])
+        if isinstance(item, dict)
+    }
+    for metric, parsed in extraction.metrics.items():
+        declared = sidecar_metrics.get(metric)
+        if not isinstance(declared, dict) or (
+            declared.get("unit") != parsed["unit"]
+            or declared.get("value") != parsed["value"]
+        ):
+            raise AdmissionError(f"NCU sidecar/report metric disagreement: {metric}")
+    parsed_observation = parse_ncu_metrics.extract_launch_observation(csv_text)
+    if (
+        observation.get("identity_columns") != parsed_observation["identity_columns"]
+        or observation.get("identity") != parsed_observation["identity"]
+        or observation.get("report_sha256") != report_sha256
+    ):
+        raise AdmissionError("NCU report launch identity disagrees with observation artifact")
+
+
 def _verify_ncu_artifacts(
     root: Path,
     receipt: dict[str, Any],
@@ -352,6 +400,12 @@ def _verify_ncu_artifacts(
         {key: value for key, value in observation.items() if key != "observation_sha256"}
     ):
         raise AdmissionError("NCU launch observation seal mismatch")
+    _verify_ncu_report(
+        _safe_receipt_path(root, report_artifact["path"], "NCU report"),
+        report_artifact["sha256"],
+        sidecar,
+        observation,
+    )
 
 
 def _verify_nvbit_artifacts(
