@@ -1,0 +1,27 @@
+schema_version = 1
+slug = "vendor_sgemm_strided_batched_cutlass"
+
+# Independent successor shape contract. batch_count is load-bearing and is
+# included in every actual launch and provenance record.
+[[timing_shapes]]
+name = "timing_00"
+axes = { m = 1024, n = 1024, k = 1024, batch_count = 4 }
+launch_config = { grid = [8, 8, 4], block = [256, 1, 1] }
+warm_up_iters = 5
+repeat_iters = 30
+
+[[trace_shapes]]
+name = "trace_00"
+axes = { m = 32, n = 32, k = 32, batch_count = 4 }
+launch_config = { grid = [2, 2, 4], block = [64, 1, 1] }
+predicted_bytes = 20971520
+estimator_source = "static"
+
+[[correctness_shapes]]
+name = "correctness_00"
+axes = { m = 8, n = 8, k = 8, batch_count = 2 }
+launch_config = { grid = [1, 1, 2], block = [32, 1, 1] }
+# The generic full_tensor kind describes the emitted dense batch-zero matrix;
+# output_scope=batch_zero_only keeps the bounded payload distinct from the
+# load-bearing full batched launch contract.
+digest_kind = "full_tensor"
