@@ -192,6 +192,32 @@ def _relative(path: Path) -> str:
         raise CohortError(f"path escapes repository: {path}") from exc
 
 
+def _artifact_path(raw: str) -> Path:
+    if not isinstance(raw, str) or not raw or Path(raw).is_absolute():
+        raise CohortError(f"invalid repository-relative artifact path: {raw!r}")
+    lexical = ROOT / raw
+    if lexical.is_symlink():
+        raise CohortError(f"artifact path is a symlink: {raw}")
+    resolved = lexical.resolve()
+    try:
+        resolved.relative_to(ROOT.resolve())
+    except ValueError as exc:
+        raise CohortError(f"artifact path escapes repository: {raw}") from exc
+    if not resolved.is_file():
+        raise CohortError(f"artifact is not a regular file: {raw}")
+    if resolved.stat().st_nlink != 1:
+        raise CohortError(f"artifact has unexpected hard links: {raw}")
+    return resolved
+
+
+def _verify_artifact_ref(reference: dict[str, Any], *, size_key: str = "bytes") -> None:
+    path = _artifact_path(reference.get("path"))
+    if _sha256_file(path) != reference.get("sha256"):
+        raise CohortError(f"artifact hash drifted: {reference.get('path')}")
+    if size_key in reference and path.stat().st_size != reference.get(size_key):
+        raise CohortError(f"artifact size drifted: {reference.get('path')}")
+
+
 def _load_json(path: Path) -> dict[str, Any]:
     try:
         value = json.loads(path.read_text())
@@ -941,33 +967,115 @@ def validate_bundle(
     validation: dict[str, Any], budgets: dict[str, Any],
     roster: dict[str, Any], matrix: dict[str, Any],
 ) -> None:
-    _validate_schema(ROOT / VALIDATION_SCHEMA_REL, validation)
-    _validate_schema(ROOT / BUDGETS_SCHEMA_REL, budgets)
-    _validate_schema(ROOT / ROSTER_SCHEMA_REL, roster)
-    _validate_schema(ROOT / MATRIX_SCHEMA_REL, matrix)
+    documents = (validation, budgets, roster, matrix)
+    schemas = (
+        VALIDATION_SCHEMA_REL,
+        BUDGETS_SCHEMA_REL,
+        ROSTER_SCHEMA_REL,
+        MATRIX_SCHEMA_REL,
+    )
+    for schema, document in zip(schemas, documents, strict=True):
+        _validate_schema(ROOT / schema, document)
     _check_seal(validation, "validation_seal_sha256")
     _check_seal(budgets, "budget_seal_sha256")
     _check_seal(roster, "roster_seal_sha256")
     _check_seal(matrix, "matrix_seal_sha256")
-    if roster["validation_ref"]["sha256"] != _sha256_bytes(
-        (json.dumps(validation, indent=2, sort_keys=True) + "\n").encode()
-    ):
+
+    producer_commit = validation["source_inputs"]["producer_commit"]
+    expected_sources = _source_inputs(producer_commit)
+    expected_frozen = _frozen_reference()
+    for document in documents:
+        if document["source_inputs"] != expected_sources:
+            raise CohortError("successor source-input set drifted")
+        if document["frozen_v1_reference"] != expected_frozen:
+            raise CohortError("frozen-v1 reference drifted")
+
+    validation_bytes = (json.dumps(validation, indent=2, sort_keys=True) + "\n").encode()
+    budget_bytes = (json.dumps(budgets, indent=2, sort_keys=True) + "\n").encode()
+    roster_bytes = (json.dumps(roster, indent=2, sort_keys=True) + "\n").encode()
+    if roster["validation_ref"]["sha256"] != _sha256_bytes(validation_bytes):
         raise CohortError("roster validation reference drifted")
-    if matrix["roster_ref"]["sha256"] != _sha256_bytes(
-        (json.dumps(roster, indent=2, sort_keys=True) + "\n").encode()
-    ):
+    if roster["trace_budget_ref"]["sha256"] != _sha256_bytes(budget_bytes):
+        raise CohortError("roster budget reference drifted")
+    if matrix["roster_ref"]["sha256"] != _sha256_bytes(roster_bytes):
         raise CohortError("matrix roster reference drifted")
-    if matrix["validation_ref"]["sha256"] != _sha256_bytes(
-        (json.dumps(validation, indent=2, sort_keys=True) + "\n").encode()
-    ):
+    if matrix["validation_ref"]["sha256"] != _sha256_bytes(validation_bytes):
         raise CohortError("matrix validation reference drifted")
-    if matrix["trace_budget_ref"]["sha256"] != _sha256_bytes(
-        (json.dumps(budgets, indent=2, sort_keys=True) + "\n").encode()
-    ):
+    if matrix["trace_budget_ref"]["sha256"] != _sha256_bytes(budget_bytes):
         raise CohortError("matrix budget reference drifted")
-    row_keys = [row["matrix_key"] for row in matrix["rows"]]
-    if row_keys != [row["matrix_key"] for row in roster["rows"]]:
-        raise CohortError("roster/matrix row order or identity drifted")
+
+    validation_rows = {row["matrix_key"]: row for row in validation["rows"]}
+    roster_rows = {row["matrix_key"]: row for row in roster["rows"]}
+    matrix_rows = {row["matrix_key"]: row for row in matrix["rows"]}
+    budget_rows = {row["matrix_key"]: row for row in budgets["rows"]}
+    expected_keys = [case.matrix_key for case in CASES]
+    for row_map in (validation_rows, roster_rows, matrix_rows, budget_rows):
+        if list(row_map) != expected_keys:
+            raise CohortError("successor row order or closed identity set drifted")
+
+    for case in CASES:
+        key = case.matrix_key
+        row = validation_rows[key]
+        witness = _load_witness(case)
+        witness_ref = row["witness"]
+        if _sha256_file(_artifact_path(witness_ref["path"])) != witness_ref["sha256"]:
+            raise CohortError(f"witness file hash drifted: {case.slug}")
+        if witness_ref["witness_seal_sha256"] != witness["witness_seal_sha256"]:
+            raise CohortError(f"witness seal drifted: {case.slug}")
+        if witness_ref["source_commit"] != witness["source_commit"]:
+            raise CohortError(f"witness producer commit drifted: {case.slug}")
+        if witness_ref["source_input_set_sha256"] != witness["source_inputs"]["input_set_sha256"]:
+            raise CohortError(f"witness source-input set drifted: {case.slug}")
+        if row["lineage"]["base_authority_cell_sha256"] != FROZEN_BASE_CELL_SHA256[case.base_slug]:
+            raise CohortError(f"successor base-cell lineage drifted: {case.slug}")
+
+        for prefix in ("binary", "sass", "control"):
+            artifact = row["static_launch_inventory"]
+            _verify_artifact_ref(
+                {"path": artifact[f"{prefix}_path"], "sha256": artifact[f"{prefix}_sha256"]},
+            )
+        correctness = row["correctness"]
+        _verify_artifact_ref(
+            {
+                "path": correctness["reference_path"],
+                "sha256": correctness["reference_sha256"],
+                "bytes": correctness["reference_bytes"],
+            }
+        )
+        if correctness["input_generator_sha256"] != _sha256_file(
+            ROOT / "tools/local_labels/cutlass_successor_reference.py"
+        ):
+            raise CohortError(f"correctness reference implementation drifted: {case.slug}")
+        for repeat_index, artifact in enumerate(row["repeatability"]["run_artifacts"]):
+            if artifact["repeat_index"] != repeat_index:
+                raise CohortError(f"repeat index drifted: {case.slug}")
+            _verify_artifact_ref(artifact)
+        _verify_artifact_ref(row["runtime_capability"]["environment_ref"])
+
+        roster_row = roster_rows[key]
+        if roster_row["row_seal_sha256"] != _canonical_sha(
+            {name: value for name, value in roster_row.items() if name != "row_seal_sha256"}
+        ):
+            raise CohortError(f"roster row seal drifted: {case.slug}")
+        matrix_row = matrix_rows[key]
+        if matrix_row["row_seal_sha256"] != _canonical_sha(
+            {name: value for name, value in matrix_row.items() if name != "row_seal_sha256"}
+        ):
+            raise CohortError(f"matrix row seal drifted: {case.slug}")
+        if matrix_row["authority_row_sha256"] != _canonical_sha(row):
+            raise CohortError(f"matrix authority-row binding drifted: {case.slug}")
+        if matrix_row["witness_sha256"] != witness_ref["sha256"]:
+            raise CohortError(f"matrix witness binding drifted: {case.slug}")
+        budget = budget_rows[key]
+        if matrix_row["trace_budget"]["max_trace_bytes"] != budget["max_trace_bytes"]:
+            raise CohortError(f"matrix trace budget drifted: {case.slug}")
+        if budget["predicted_bytes"] > budget["max_trace_bytes"]:
+            raise CohortError(f"declared trace budget is below prediction: {case.slug}")
+
+    if matrix["chunking"]["runnable_membership_sha256"] != _canonical_sha([]):
+        raise CohortError("empty runnable-membership seal drifted")
+    if matrix["chunks"] or matrix["chunking"]["chunks"] or matrix["chunking"]["runnable_order"]:
+        raise CohortError("capture-pending rows must not enter chunks")
 
 
 def build_cohort(*, source_commit: str) -> tuple[dict[str, Any], ...]:
@@ -1002,12 +1110,28 @@ def build_cohort(*, source_commit: str) -> tuple[dict[str, Any], ...]:
     return validation, budgets, roster, matrix
 
 
+def validate_existing_bundle() -> tuple[dict[str, Any], ...]:
+    documents = (
+        _load_json(ROOT / VALIDATION_REL),
+        _load_json(ROOT / BUDGETS_REL),
+        _load_json(ROOT / ROSTER_REL),
+        _load_json(ROOT / MATRIX_REL),
+    )
+    validate_bundle(*documents)
+    return documents
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--source-commit", required=True)
+    mode = parser.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--source-commit")
+    mode.add_argument("--check", action="store_true")
     args = parser.parse_args(argv)
     try:
-        build_cohort(source_commit=args.source_commit)
+        if args.check:
+            validate_existing_bundle()
+        else:
+            build_cohort(source_commit=args.source_commit)
     except (CohortError, OSError, ValueError, jsonschema.SchemaError) as exc:
         print(f"CUTLASS successor cohort failed: {exc}", file=sys.stderr)
         return 1
