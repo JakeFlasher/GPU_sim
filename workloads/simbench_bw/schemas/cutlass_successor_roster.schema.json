@@ -1,0 +1,267 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "cutlass_successor_roster.schema.json",
+  "title": "CUTLASS successor roster authority",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "cohort_id", "roster_id", "arch", "sku", "build_arch", "namespace", "generated_at_utc", "source_inputs", "frozen_v1_reference", "claim_policy", "validation_ref", "trace_budget_ref", "rows", "counts", "integrity", "roster_seal_sha256"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "cohort_id": {"const": "cutlass_successor_sm86_20260723_v1"},
+    "roster_id": {"const": "cutlass_successor_roster_sm86_20260723_v1"},
+    "arch": {"const": "sm_86"},
+    "sku": {"const": "rtx_3090_ti"},
+    "build_arch": {"const": "sm_86"},
+    "namespace": {"const": "cutlass_successor"},
+    "generated_at_utc": {"const": "2026-07-23T00:00:00Z"},
+    "source_inputs": {"$ref": "#/$defs/source_inputs"},
+    "frozen_v1_reference": {"$ref": "#/$defs/frozen_reference"},
+    "claim_policy": {"const": "additive_successor_evaluation_only"},
+    "validation_ref": {"$ref": "#/$defs/document_ref_validation"},
+    "trace_budget_ref": {"$ref": "#/$defs/document_ref_budget"},
+    "rows": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"$ref": "#/$defs/row"}},
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["total", "build_verified", "correctness_verified", "repeatability_verified", "capture_pending", "hardware_capture_runnable", "excluded"],
+      "properties": {
+        "total": {"const": 3},
+        "build_verified": {"const": 3},
+        "correctness_verified": {"const": 3},
+        "repeatability_verified": {"const": 3},
+        "capture_pending": {"const": 3},
+        "hardware_capture_runnable": {"const": 0},
+        "excluded": {"const": 0}
+      }
+    },
+    "integrity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["row_count", "unique_matrix_keys", "unique_successor_slugs", "base_lineage_exact", "canonical_v1_impact", "frozen_v1_unchanged"],
+      "properties": {
+        "row_count": {"const": 3},
+        "unique_matrix_keys": {"const": true},
+        "unique_successor_slugs": {"const": true},
+        "base_lineage_exact": {"const": true},
+        "canonical_v1_impact": {"const": "none_additive_supplement_only"},
+        "frozen_v1_unchanged": {"const": true}
+      }
+    },
+    "roster_seal_sha256": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "git_hash": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "source_inputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["producer_commit", "files", "input_set_sha256"],
+      "properties": {
+        "producer_commit": {"$ref": "#/$defs/git_hash"},
+        "files": {"type": "object", "minProperties": 9, "additionalProperties": {"$ref": "#/$defs/sha256"}},
+        "input_set_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "frozen_reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["matrix_path", "matrix_file_sha256", "matrix_source_commit", "matrix_seal_sha256", "authority_path", "authority_sha256", "metric_registry_path", "metric_registry_sha256", "metric_identity_sha256", "trace_budgets_path", "trace_budgets_sha256", "source_alias_path", "source_alias_sha256", "base_rows", "relation", "canonical_v1_impact"],
+      "properties": {
+        "matrix_path": {"const": "data/local_labels/campaign/sm86_reference_capture_matrix.json"},
+        "matrix_file_sha256": {"const": "af29d72e955cf42e281036190f2d55d72af0af92a632c78c8d159073a072fb0e"},
+        "matrix_source_commit": {"const": "124ce358733f97ba6e0af808d10ab69ffe4d5a78"},
+        "matrix_seal_sha256": {"const": "6376da9721c75bb9299e84a9d11bf607bc21f4cbaa30da25b672c86f6757a5e1"},
+        "authority_path": {"const": "data/local_labels/campaign/capture_roster_authority_sm86.json"},
+        "authority_sha256": {"const": "d02c817091b0a9f06c2106c0987c59a481910afcc3b78ab1de7a7d5bd5a6b4b4"},
+        "metric_registry_path": {"const": "tools/local_labels/metric_registry.json"},
+        "metric_registry_sha256": {"const": "be1f7893cf653800c69f6e39a4d22abfae4d67c10197e7d5f9bd46c6900c2423"},
+        "metric_identity_sha256": {"const": "13f1bdfd8155cb71db62cc30aea41bc7fc6af6447d1251d9ea4f0efd4a8396a6"},
+        "trace_budgets_path": {"const": "workloads/simbench_bw/trace_budgets.toml"},
+        "trace_budgets_sha256": {"const": "95fa9d83b41ee89d1824e9e708d404574859a00d3f68a0b12235b8d1be9f954c"},
+        "source_alias_path": {"const": "data/local_labels/campaign/frozen_v1_source_aliases.v1.json"},
+        "source_alias_sha256": {"const": "f74ac4e8750f970ab3bb5d7da54ec9db2df0f4ef0f5fb22b5f0f6f90898790ff"},
+        "base_rows": {"$ref": "#/$defs/base_rows"},
+        "relation": {"const": "evaluation_successor_no_relabel"},
+        "canonical_v1_impact": {"const": "none_additive_supplement_only"}
+      }
+    },
+    "document_ref_validation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "id"],
+      "properties": {
+        "path": {"const": "data/annex/cutlass_successor_sm86_20260723/cutlass_successor_validation_sm86_20260723.json"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "id": {"const": "cutlass_successor_validation_sm86_20260723_v1"}
+      }
+    },
+    "document_ref_budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "id"],
+      "properties": {
+        "path": {"const": "data/annex/cutlass_successor_sm86_20260723/cutlass_successor_trace_budgets_sm86_20260723.json"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "id": {"const": "cutlass_successor_trace_budgets_sm86_20260723_v1"}
+      }
+    },
+    "base_rows": {
+      "type": "object", "additionalProperties": false,
+      "required": ["vendor_gemm_cublas", "vendor_sgemm_cublas", "vendor_sgemm_strided_batched_cublas"],
+      "properties": {
+        "vendor_gemm_cublas": {"$ref": "#/$defs/base_row_gemm"},
+        "vendor_sgemm_cublas": {"$ref": "#/$defs/base_row_sgemm"},
+        "vendor_sgemm_strided_batched_cublas": {"$ref": "#/$defs/base_row_batched"}
+      }
+    },
+    "base_row_gemm": {"type": "object", "additionalProperties": false, "required": ["authority_cell_sha256", "disposition"], "properties": {"authority_cell_sha256": {"const": "1e84352627f783b1d28fb3684cab96a61fa10cbdbb9c0e0b8844b027c1dc6142"}, "disposition": {"const": "runnable"}}},
+    "base_row_sgemm": {"type": "object", "additionalProperties": false, "required": ["authority_cell_sha256", "disposition"], "properties": {"authority_cell_sha256": {"const": "328127e1ea186daea64cbc09527c954c5ab6bdb3453e8c38df0fd0122bcd294a"}, "disposition": {"const": "runnable"}}},
+    "base_row_batched": {"type": "object", "additionalProperties": false, "required": ["authority_cell_sha256", "disposition"], "properties": {"authority_cell_sha256": {"const": "f35f4dd55df1f34dd71aa39a0e0be2049a48ae8f5b29837d8488909c8aa15792"}, "disposition": {"const": "runnable"}}},
+    "lineage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["relation", "base_authority_cell_sha256", "base_disposition", "canonical_v1_impact"],
+      "properties": {
+        "relation": {"const": "evaluation_successor_no_relabel"},
+        "base_authority_cell_sha256": {"$ref": "#/$defs/sha256"},
+        "base_disposition": {"const": "runnable"},
+        "canonical_v1_impact": {"const": "none_additive_supplement_only"}
+      }
+    },
+    "witness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "witness_id", "witness_seal_sha256", "source_commit", "source_input_set_sha256", "artifact_id"],
+      "properties": {
+        "path": {"type": "string", "pattern": "^data/annex/cutlass.*\\.build_witness\\.json$"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "witness_id": {"type": "string", "minLength": 1},
+        "witness_seal_sha256": {"$ref": "#/$defs/sha256"},
+        "source_commit": {"$ref": "#/$defs/git_hash"},
+        "source_input_set_sha256": {"$ref": "#/$defs/sha256"},
+        "artifact_id": {"type": "string", "minLength": 1}      }
+    },
+    "axes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["m", "n", "k"],
+      "properties": {
+        "m": {"const": 32},
+        "n": {"const": 32},
+        "k": {"const": 32},
+        "batch_count": {"const": 4}
+      }
+    },
+    "launch_config": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["grid", "block"],
+      "properties": {
+        "grid": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"type": "integer", "minimum": 1}},
+        "block": {"type": "array", "minItems": 3, "maxItems": 3, "items": {"type": "integer", "minimum": 1}}
+      }
+    },
+    "trace_shape": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "axes", "launch_config", "predicted_bytes", "estimator_source"],
+      "properties": {
+        "name": {"const": "trace_00"},
+        "axes": {"$ref": "#/$defs/axes"},
+        "launch_config": {"$ref": "#/$defs/launch_config"},
+        "predicted_bytes": {"type": "integer", "minimum": 1},
+        "estimator_source": {"const": "static"}
+      }
+    },
+    "shape": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "trace_shape_sha256", "shape_point", "trace_shape", "actual_args", "shape_contract", "output_scope"],
+      "properties": {
+        "path": {"type": "string", "pattern": "^workloads/simbench_bw/shapes/vendor_.*_cutlass\\.toml$"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "trace_shape_sha256": {"$ref": "#/$defs/sha256"},
+        "shape_point": {"const": "trace_00"},
+        "trace_shape": {"$ref": "#/$defs/trace_shape"},
+        "actual_args": {"type": "array", "minItems": 10, "items": {"type": "string"}},
+        "shape_contract": {"type": "string", "pattern": "^trace_shape_is_actual_direct_executable_launch"},
+        "output_scope": {"enum": ["full_single_batch_tensor", "batch_zero_only"]}
+      }
+    },
+    "launch_inventory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "binary_path", "binary_sha256", "sass_path", "sass_sha256", "control_path", "control_sha256", "control_policy", "decoded_instructions", "unknown_encoding", "function_count", "sm86_cubin_present", "cubins"],
+      "properties": {
+        "status": {"const": "pass"},
+        "binary_path": {"type": "string", "minLength": 1},
+        "binary_sha256": {"$ref": "#/$defs/sha256"},
+        "sass_path": {"type": "string", "minLength": 1},
+        "sass_sha256": {"$ref": "#/$defs/sha256"},
+        "control_path": {"type": "string", "minLength": 1},
+        "control_sha256": {"$ref": "#/$defs/sha256"},
+        "control_policy": {"const": "direct_executable"},
+        "decoded_instructions": {"type": "integer", "minimum": 1},
+        "unknown_encoding": {"const": 0},
+        "function_count": {"type": "integer", "minimum": 1},
+        "sm86_cubin_present": {"const": true},
+        "cubins": {"type": "array", "minItems": 1, "items": {"type": "string", "pattern": "sm_86\\.cubin$"}}
+      }
+    },
+    "runtime_launch_inventory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "expected_process_runs", "observed_process_runs", "expected_kernel_launch_count", "observed_kernel_launch_count", "dynamic_launch_status", "nvbit_trace_status", "static_launch_contract", "typed_reason", "command", "command_sha256"],
+      "properties": {
+        "status": {"const": "declared_only"},
+        "expected_process_runs": {"const": 5},
+        "observed_process_runs": {"const": 5},
+        "expected_kernel_launch_count": {"const": 1},
+        "observed_kernel_launch_count": {"type": ["integer", "null"]},
+        "dynamic_launch_status": {"const": "not_run"},
+        "nvbit_trace_status": {"const": "not_run"},
+        "static_launch_contract": {"$ref": "#/$defs/launch_config"},
+        "typed_reason": {"const": "dynamic_launch_inventory_requires_nvbit_capture"},
+        "command": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+        "command_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "capture_admission": {
+      "additionalProperties": false,
+      "required": ["status", "typed_reason", "ncu_status", "nvbit_status", "primary_hardware_metric", "secondary_hardware_metric", "process_separation_policy"],
+      "properties": {
+        "status": {"const": "pending"},
+        "typed_reason": {"const": "hardware_capture_not_run_build_witness_only"},
+        "ncu_status": {"const": "not_run"},
+        "nvbit_status": {"const": "not_run"},
+        "primary_hardware_metric": {"const": "gpc__cycles_elapsed.max"},
+        "secondary_hardware_metric": {"const": "gpu__time_duration.sum"},
+        "process_separation_policy": {"const": "ncu_and_nvbit_must_run_in_separate_processes"}
+      }
+    },
+    "row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["matrix_key", "variant_id", "namespace", "successor_slug", "base_slug", "arch", "sku", "build_arch", "disposition", "admission_state", "lineage", "witness", "shape", "static_launch_inventory", "launch_inventory", "capture_admission", "row_seal_sha256"],
+      "properties": {
+        "matrix_key": {"type": "string", "pattern": "^cutlass_successor:[a-z0-9_]+_cublas:[a-z0-9_]+_cutlass$"},
+        "variant_id": {"type": "string", "pattern": "^[a-z0-9_]+_v1$"},
+        "namespace": {"const": "cutlass_successor"},
+        "successor_slug": {"type": "string", "pattern": "^vendor_.*_cutlass$"},
+        "base_slug": {"type": "string", "pattern": "^vendor_.*_cublas$"},
+        "arch": {"const": "sm_86"},
+        "sku": {"const": "rtx_3090_ti"},
+        "build_arch": {"const": "sm_86"},
+        "disposition": {"const": "build_verified_capture_pending"},
+        "admission_state": {"const": "build_witness_only"},
+        "lineage": {"$ref": "#/$defs/lineage"},
+        "witness": {"$ref": "#/$defs/witness"},
+        "shape": {"$ref": "#/$defs/shape"},
+        "static_launch_inventory": {"$ref": "#/$defs/launch_inventory"},
+        "launch_inventory": {"$ref": "#/$defs/runtime_launch_inventory"},
+        "capture_admission": {"$ref": "#/$defs/capture_admission"},
+        "row_seal_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    }
+  }
+}

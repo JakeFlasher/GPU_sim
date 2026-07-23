@@ -1,0 +1,107 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "cutlass_successor_trace_budgets.schema.json",
+  "title": "CUTLASS successor trace budgets",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "cohort_id", "budget_id", "arch", "sku", "build_arch", "namespace", "generated_at_utc", "source_inputs", "frozen_v1_reference", "budget_policy", "rows", "counts", "budget_seal_sha256"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "cohort_id": {"const": "cutlass_successor_sm86_20260723_v1"},
+    "budget_id": {"const": "cutlass_successor_trace_budgets_sm86_20260723_v1"},
+    "arch": {"const": "sm_86"},
+    "sku": {"const": "rtx_3090_ti"},
+    "build_arch": {"const": "sm_86"},
+    "namespace": {"const": "cutlass_successor"},
+    "generated_at_utc": {"const": "2026-07-23T00:00:00Z"},
+    "source_inputs": {"$ref": "#/$defs/source_inputs"},
+    "frozen_v1_reference": {"$ref": "#/$defs/frozen_reference"},
+    "budget_policy": {"const": "successor_static_shape_bound_v1"},
+    "rows": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {"$ref": "#/$defs/row"}
+    },
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["total", "declared", "measured"],
+      "properties": {
+        "total": {"const": 3},
+        "declared": {"const": 3},
+        "measured": {"const": 0}
+      }
+    },
+    "budget_seal_sha256": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "git_hash": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "source_inputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["producer_commit", "files", "input_set_sha256"],
+      "properties": {
+        "producer_commit": {"$ref": "#/$defs/git_hash"},
+        "files": {"type": "object", "minProperties": 9, "additionalProperties": {"$ref": "#/$defs/sha256"}},
+        "input_set_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "frozen_reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["matrix_path", "matrix_file_sha256", "matrix_source_commit", "matrix_seal_sha256", "authority_path", "authority_sha256", "metric_registry_path", "metric_registry_sha256", "metric_identity_sha256", "trace_budgets_path", "trace_budgets_sha256", "source_alias_path", "source_alias_sha256", "base_rows", "relation", "canonical_v1_impact"],
+      "properties": {
+        "matrix_path": {"const": "data/local_labels/campaign/sm86_reference_capture_matrix.json"},
+        "matrix_file_sha256": {"const": "af29d72e955cf42e281036190f2d55d72af0af92a632c78c8d159073a072fb0e"},
+        "matrix_source_commit": {"const": "124ce358733f97ba6e0af808d10ab69ffe4d5a78"},
+        "matrix_seal_sha256": {"const": "6376da9721c75bb9299e84a9d11bf607bc21f4cbaa30da25b672c86f6757a5e1"},
+        "authority_path": {"const": "data/local_labels/campaign/capture_roster_authority_sm86.json"},
+        "authority_sha256": {"const": "d02c817091b0a9f06c2106c0987c59a481910afcc3b78ab1de7a7d5bd5a6b4b4"},
+        "metric_registry_path": {"const": "tools/local_labels/metric_registry.json"},
+        "metric_registry_sha256": {"const": "be1f7893cf653800c69f6e39a4d22abfae4d67c10197e7d5f9bd46c6900c2423"},
+        "metric_identity_sha256": {"const": "13f1bdfd8155cb71db62cc30aea41bc7fc6af6447d1251d9ea4f0efd4a8396a6"},
+        "trace_budgets_path": {"const": "workloads/simbench_bw/trace_budgets.toml"},
+        "trace_budgets_sha256": {"const": "95fa9d83b41ee89d1824e9e708d404574859a00d3f68a0b12235b8d1be9f954c"},
+        "source_alias_path": {"const": "data/local_labels/campaign/frozen_v1_source_aliases.v1.json"},
+        "source_alias_sha256": {"const": "f74ac4e8750f970ab3bb5d7da54ec9db2df0f4ef0f5fb22b5f0f6f90898790ff"},
+        "base_rows": {"$ref": "#/$defs/base_rows"},
+        "relation": {"const": "evaluation_successor_no_relabel"},
+        "canonical_v1_impact": {"const": "none_additive_supplement_only"}
+      }
+    },
+    "base_rows": {
+      "type": "object", "additionalProperties": false,
+      "required": ["vendor_gemm_cublas", "vendor_sgemm_cublas", "vendor_sgemm_strided_batched_cublas"],
+      "properties": {
+        "vendor_gemm_cublas": {"$ref": "#/$defs/base_row_gemm"},
+        "vendor_sgemm_cublas": {"$ref": "#/$defs/base_row_sgemm"},
+        "vendor_sgemm_strided_batched_cublas": {"$ref": "#/$defs/base_row_batched"}
+      }
+    },
+    "base_row_gemm": {"type": "object", "additionalProperties": false, "required": ["authority_cell_sha256", "disposition"], "properties": {"authority_cell_sha256": {"const": "1e84352627f783b1d28fb3684cab96a61fa10cbdbb9c0e0b8844b027c1dc6142"}, "disposition": {"const": "runnable"}}},
+    "base_row_sgemm": {"type": "object", "additionalProperties": false, "required": ["authority_cell_sha256", "disposition"], "properties": {"authority_cell_sha256": {"const": "328127e1ea186daea64cbc09527c954c5ab6bdb3453e8c38df0fd0122bcd294a"}, "disposition": {"const": "runnable"}}},
+    "base_row_batched": {"type": "object", "additionalProperties": false, "required": ["authority_cell_sha256", "disposition"], "properties": {"authority_cell_sha256": {"const": "f35f4dd55df1f34dd71aa39a0e0be2049a48ae8f5b29837d8488909c8aa15792"}, "disposition": {"const": "runnable"}}},
+    "row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["matrix_key", "variant_id", "successor_slug", "shape_path", "shape_file_sha256", "trace_shape_sha256", "predicted_bytes", "max_trace_bytes", "max_wall_time_s", "sampling_policy", "status", "source", "batch_count"],
+      "properties": {
+        "matrix_key": {"type": "string", "pattern": "^cutlass_successor:"},
+        "variant_id": {"type": "string", "pattern": "^[a-z0-9_]+_v1$"},
+        "successor_slug": {"type": "string", "pattern": "^vendor_.*_cutlass$"},
+        "shape_path": {"type": "string", "pattern": "^workloads/simbench_bw/shapes/vendor_.*_cutlass\\.toml$"},
+        "shape_file_sha256": {"$ref": "#/$defs/sha256"},
+        "trace_shape_sha256": {"$ref": "#/$defs/sha256"},
+        "predicted_bytes": {"type": "integer", "minimum": 1},
+        "max_trace_bytes": {"type": "integer", "minimum": 67108864},
+        "max_wall_time_s": {"const": 3600},
+        "sampling_policy": {"const": "off"},
+        "status": {"const": "declared_capture_pending"},
+        "source": {"const": "successor_static_shape_bound_v1"},
+        "batch_count": {"type": "integer", "minimum": 1, "maximum": 4}
+      }
+    }
+  }
+}
