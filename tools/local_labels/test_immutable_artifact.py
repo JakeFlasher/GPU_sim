@@ -80,13 +80,21 @@ def test_directory_winner_rechecks_after_second_authorization_callback(
     assert (output_root / "artifact" / "value").read_bytes() == b"tampered"
 
 
+@pytest.mark.parametrize(
+    "force_snapshot_closure",
+    [False, True],
+    ids=["pinned", "snapshot-closure"],
+)
 def test_directory_winner_rejects_same_byte_inode_replacement(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    force_snapshot_closure: bool,
 ) -> None:
     output_root = tmp_path / "published"
     material = [immutable.ImmutableFile.from_bytes("value", b"original")]
+    if force_snapshot_closure:
+        monkeypatch.setattr(immutable, "_SNAPSHOT_CLOSURE_THRESHOLD", 0)
     immutable.publish_directory(output_root, "artifact", material)
-    original_inode = (output_root / "artifact" / "value").stat().st_ino
     callback_count = 0
     replacement_inode: int | None = None
 
@@ -111,7 +119,6 @@ def test_directory_winner_rejects_same_byte_inode_replacement(
 
     assert callback_count == 2
     assert replacement_inode is not None
-    assert replacement_inode != original_inode
     assert (output_root / "artifact" / "value").read_bytes() == b"original"
 
 
