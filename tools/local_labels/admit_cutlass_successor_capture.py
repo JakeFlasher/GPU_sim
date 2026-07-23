@@ -234,6 +234,8 @@ def _verify_launch(launch: dict[str, Any], identity: dict[str, Any], row: dict[s
         raise AdmissionError(f"{label} launch identity seal mismatch")
     if launch["kernel_signature_sha256"] != identity["kernel_signature_sha256"]:
         raise AdmissionError(f"{label} launch/kernel signature mismatch")
+    if launch["kernel_name"] != identity["slug"]:
+        raise AdmissionError(f"{label} kernel_name does not match successor identity")
     shape = row["shape"]["trace_shape"]
     if launch["grid_dim"] != shape["launch_config"]["grid"] or launch["block_dim"] != shape["launch_config"]["block"]:
         raise AdmissionError(f"{label} launch geometry does not match successor matrix")
@@ -274,15 +276,45 @@ def _verify_receipt(
         raise AdmissionError(f"receipt identity does not match matrix: {rel}")
     _verify_launch(receipt["launch_identity"], identity, row, rel)
     _verify_process(receipt["process"], rel)
-    expected_roles = (
-        {"ncu_report", "label_sidecar", "label_run_manifest", "label_capture_manifest", "ncu_launch_observation"}
+    if receipt["process"]["command_sha256"] != receipt["command_sha256"]:
+        raise AdmissionError(f"{rel} process command does not match receipt command")
+    _check_dt(receipt["captured_at_utc"], f"{rel} captured_at_utc")
+    if receipt["command_sha256"] != canonical_sha(receipt["command"]):
+        raise AdmissionError(f"{rel} command identity seal mismatch")
+    expected_semantics = (
+        {
+            "semantic_kind": "ncu_metric_validation",
+            "primary_metric": "gpc__cycles_elapsed.max",
+            "secondary_metric": "gpu__time_duration.sum",
+            "primary_metric_present": True,
+            "secondary_metric_present": True,
+            "target_only": True,
+            "simulator_config_present": False,
+        }
         if receipt["capture_kind"] == "ncu"
-        else {"dynamic_trace", "trace_summary"}
+        else {
+            "semantic_kind": "nvbit_trace_validation",
+            "trace_contract_status": "pass",
+            "dynamic_trace_role": "dynamic_trace",
+            "summary_role": "trace_summary",
+            "target_only": True,
+            "simulator_config_present": False,
+        }
     )
+    if receipt["semantic_validation"] != expected_semantics:
+        raise AdmissionError(f"{rel} semantic validation is not exact")
+    expected_roles = (
+        {"ncu_report", "label_sidecar", "label_run_manifest", "ncu_launch_observation", "preflight", "environment"}
+        if receipt["capture_kind"] == "ncu"
+        else {"dynamic_trace", "stats", "threadblock", "trace_summary", "trace_auxiliary", "preflight", "environment"}
+    )
+    mandatory_roles = expected_roles - {"threadblock", "trace_auxiliary"}
+    artifact_by_role: dict[str, list[dict[str, Any]]] = {}
     seen_roles: set[str] = set()
+
     for artifact in receipt["artifacts"]:
         role = artifact["role"]
-        if role in seen_roles:
+        if role in seen_roles and role != "threadblock":
             raise AdmissionError(f"duplicate artifact role in receipt: {rel}:{role}")
         seen_roles.add(role)
         if role not in expected_roles:
@@ -294,11 +326,33 @@ def _verify_receipt(
         if artifact_rel in used_artifacts:
             raise AdmissionError(f"duplicate artifact path: {artifact_rel}")
         used_artifacts.add(artifact_rel)
+        if receipt["capture_kind"] == "nvbit" and role in {"dynamic_trace", "stats", "threadblock", "trace_summary", "trace_auxiliary"} and not artifact["path"].startswith("nvbit/"):
+            raise AdmissionError(f"NVBit payload artifact is outside nvbit/: {artifact['path']}")
+        if role == "dynamic_trace" and Path(artifact["path"]).name != "dynamic_trace.pb":
+            raise AdmissionError(f"dynamic trace artifact has wrong producer path: {artifact['path']}")
+        if role == "stats" and Path(artifact["path"]).name != "stats.csv":
+            raise AdmissionError(f"stats artifact has wrong producer path: {artifact['path']}")
+        if role == "trace_summary" and Path(artifact["path"]).name != "trace_summary.json":
+            raise AdmissionError(f"trace summary artifact has wrong producer path: {artifact['path']}")
+        if role == "threadblock" and (
+            not artifact["path"].endswith(".pb")
+            or "/threadblocks/" not in f"/{artifact['path']}"
+        ):
+            raise AdmissionError(f"threadblock artifact is outside threadblocks/: {artifact['path']}")
+        artifact_by_role.setdefault(role, []).append(artifact)
         payload = artifact_path.read_bytes()
+        if not payload:
+            raise AdmissionError(f"zero-size artifact: {artifact_rel}")
         if sha256_bytes(payload) != artifact["sha256"] or len(payload) != artifact["size_bytes"]:
             raise AdmissionError(f"artifact hash or size drifted: {artifact_rel}")
-    if seen_roles != expected_roles:
+    if not mandatory_roles.issubset(seen_roles) or (receipt["capture_kind"] == "nvbit" and not artifact_by_role.get("threadblock")):
         raise AdmissionError(f"receipt artifact set incomplete: {rel}")
+    preflight = artifact_by_role["preflight"][0]
+    environment = artifact_by_role["environment"][0]
+    if receipt["preflight_path"] != preflight["path"] or receipt["preflight_sha256"] != preflight["sha256"]:
+        raise AdmissionError(f"{rel} preflight reference does not match typed artifact")
+    if receipt["environment_sha256"] != environment["sha256"]:
+        raise AdmissionError(f"{rel} environment hash does not match typed artifact")
     return pair_key, receipt["capture_kind"], receipt["identity"], receipt["launch_identity"], receipt["process"], _receipt_ref(root, rel, seal)
 
 

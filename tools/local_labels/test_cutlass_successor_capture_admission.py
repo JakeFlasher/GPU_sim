@@ -27,13 +27,13 @@ def _seal(document: dict) -> dict:
     return document
 
 
-def _process(pid: int, command_byte: str) -> dict:
+def _process(pid: int, command: list[str]) -> dict:
     process = {
         "host_identity_sha256": "a" * 64,
         "boot_id_sha256": "b" * 64,
         "pid": pid,
         "started_at_utc": f"2026-07-23T00:0{pid % 10}:00Z",
-        "command_sha256": ("d" if command_byte == "a" else "e") * 64,
+        "command_sha256": admit.canonical_sha(command),
     }
     process["process_identity_sha256"] = admit.canonical_sha(process)
     return process
@@ -54,25 +54,44 @@ def _receipt(root: Path, row: dict, kind: str, index: int) -> Path:
     }
     launch = {
         "launch_index": 0,
-        "kernel_name": f"{slug}_kernel",
+        "kernel_name": slug,
         "kernel_signature_sha256": identity["kernel_signature_sha256"],
         "grid_dim": row["shape"]["trace_shape"]["launch_config"]["grid"],
         "block_dim": row["shape"]["trace_shape"]["launch_config"]["block"],
     }
     launch["launch_identity_sha256"] = admit.canonical_sha(launch)
-    process = _process(100 + index * 2 + (kind == "nvbit"), "a" if kind == "ncu" else "f")
+    command = ["ncu" if kind == "ncu" else "nvbit", slug, "--shape-point", "trace_00"]
+    process = _process(100 + index * 2 + (kind == "nvbit"), command)
     roles = (
-        ["ncu_report", "label_sidecar", "label_run_manifest", "label_capture_manifest", "ncu_launch_observation"]
+        ["ncu_report", "label_sidecar", "label_run_manifest", "ncu_launch_observation", "preflight", "environment"]
         if kind == "ncu"
-        else ["dynamic_trace", "trace_summary"]
+        else ["dynamic_trace", "stats", "threadblock", "trace_summary", "preflight", "environment"]
     )
     artifacts = []
+    preflight_path = None
+    preflight_sha = None
+    environment_sha = None
     for role_index, role in enumerate(roles):
-        relative = f"artifacts/{index:02d}_{kind}_{role_index}.bin"
+        relative = (
+            f"artifacts/{index:02d}_{kind}_{role_index}.bin"
+            if kind == "ncu"
+            else (
+                f"nvbit/{index:02d}/vendor_gemm_cutlass/threadblocks/{index:02d}.pb"
+                if role == "threadblock"
+                else (
+                    f"nvbit/{index:02d}/vendor_gemm_cutlass/{'dynamic_trace.pb' if role == 'dynamic_trace' else 'stats.csv' if role == 'stats' else 'trace_summary.json' if role == 'trace_summary' else f'{role_index}_{role}.bin'}"
+                )
+            )
+        )
         payload = f"synthetic-{index}-{kind}-{role}".encode()
         (root / relative).parent.mkdir(parents=True, exist_ok=True)
         (root / relative).write_bytes(payload)
-        artifacts.append({"role": role, "path": relative, "sha256": hashlib.sha256(payload).hexdigest(), "size_bytes": len(payload)})
+        digest = hashlib.sha256(payload).hexdigest()
+        artifacts.append({"role": role, "path": relative, "sha256": digest, "size_bytes": len(payload)})
+        if role == "preflight":
+            preflight_path, preflight_sha = relative, digest
+        if role == "environment":
+            environment_sha = digest
     receipt = {
         "schema_version": 1,
         "artifact_kind": "cutlass_successor_capture_receipt",
@@ -84,6 +103,32 @@ def _receipt(root: Path, row: dict, kind: str, index: int) -> Path:
             "identity": identity,
             "launch_identity": launch,
             "process": process,
+            "captured_at_utc": "2026-07-23T01:00:00Z",
+            "preflight_path": preflight_path,
+            "preflight_sha256": preflight_sha,
+            "environment_sha256": environment_sha,
+            "command": command,
+            "command_sha256": admit.canonical_sha(command),
+            "semantic_validation": (
+                {
+                    "semantic_kind": "ncu_metric_validation",
+                    "primary_metric": "gpc__cycles_elapsed.max",
+                    "secondary_metric": "gpu__time_duration.sum",
+                    "primary_metric_present": True,
+                    "secondary_metric_present": True,
+                    "target_only": True,
+                    "simulator_config_present": False,
+                }
+                if kind == "ncu"
+                else {
+                    "semantic_kind": "nvbit_trace_validation",
+                    "trace_contract_status": "pass",
+                    "dynamic_trace_role": "dynamic_trace",
+                    "summary_role": "trace_summary",
+                    "target_only": True,
+                    "simulator_config_present": False,
+                }
+            ),
             "artifacts": artifacts,
         },
     }
@@ -184,6 +229,8 @@ def test_same_process_receipts_cannot_promote(tmp_path: Path):
     document = json.loads(nvbit.read_text())
     ncu = json.loads((tmp_path / f"00_ncu{admit.RECEIPT_SUFFIX}").read_text())
     document["receipt"]["process"] = ncu["receipt"]["process"]
+    document["receipt"]["command"] = ncu["receipt"]["command"]
+    document["receipt"]["command_sha256"] = ncu["receipt"]["command_sha256"]
     _rewrite(nvbit, document)
     with pytest.raises(admit.AdmissionError, match="separate processes"):
         admit.build_overlay(tmp_path, generated_at_utc="2026-07-23T01:00:00Z")
@@ -194,6 +241,44 @@ def test_extra_receipt_kind_is_rejected(tmp_path: Path):
     target = tmp_path / f"00_nvbit{admit.RECEIPT_SUFFIX}"
     document = json.loads(target.read_text())
     document["receipt"]["capture_kind"] = "ncu"
+    _rewrite(target, document)
+    with pytest.raises(admit.AdmissionError):
+        admit.build_overlay(tmp_path, generated_at_utc="2026-07-23T01:00:00Z")
+
+
+def test_process_command_hash_must_bind_receipt_command(tmp_path: Path):
+    _receipt(tmp_path, MATRIX["rows"][0], "ncu", 0)
+    target = tmp_path / f"00_ncu{admit.RECEIPT_SUFFIX}"
+    document = json.loads(target.read_text())
+    document["receipt"]["command"] = ["tampered"]
+    document["receipt"]["command_sha256"] = admit.canonical_sha(["tampered"])
+    _rewrite(target, document)
+    with pytest.raises(admit.AdmissionError, match="process command"):
+        admit.build_overlay(tmp_path, generated_at_utc="2026-07-23T01:00:00Z")
+
+
+def test_kernel_name_must_bind_successor_identity(tmp_path: Path):
+    _receipt(tmp_path, MATRIX["rows"][0], "ncu", 0)
+    target = tmp_path / f"00_ncu{admit.RECEIPT_SUFFIX}"
+    document = json.loads(target.read_text())
+    document["receipt"]["launch_identity"]["kernel_name"] = "wrong_successor"
+    launch = document["receipt"]["launch_identity"]
+    launch["launch_identity_sha256"] = admit.canonical_sha(
+        {key: value for key, value in launch.items() if key != "launch_identity_sha256"}
+    )
+    _rewrite(target, document)
+    with pytest.raises(admit.AdmissionError, match="kernel_name"):
+        admit.build_overlay(tmp_path, generated_at_utc="2026-07-23T01:00:00Z")
+
+
+def test_nvbit_receipt_requires_stats_and_threadblock_payloads(tmp_path: Path):
+    target = _receipt(tmp_path, MATRIX["rows"][0], "nvbit", 0)
+    document = json.loads(target.read_text())
+    document["receipt"]["artifacts"] = [
+        artifact
+        for artifact in document["receipt"]["artifacts"]
+        if artifact["role"] not in {"stats", "threadblock"}
+    ]
     _rewrite(target, document)
     with pytest.raises(admit.AdmissionError):
         admit.build_overlay(tmp_path, generated_at_utc="2026-07-23T01:00:00Z")
