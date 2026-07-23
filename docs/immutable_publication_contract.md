@@ -37,15 +37,18 @@ validation happens before a staging directory is created.
 
 Regular-file and tree publication perform ordered file, directory, and parent
 fsync operations. A failed fsync is `DURABILITY_UNPROVEN`; committed evidence
-is not rolled back. Winner acceptance repeats durability proof, closure
-verification, and caller authorization. Ordinary success also reauthorizes
-after the final expensive verification and before its cheap final closure.
+is not rolled back. Winner acceptance repeats durability proof, metadata/snapshot
+closure, and caller authorization. Ordinary success also reauthorizes after the
+final expensive verification and before its final metadata/inode closure. The
+post-authorization closure does not rehash content, but it may traverse the
+retained tree; it is bounded by descriptor depth rather than a constant-time
+guarantee.
 
-Large retained trees may use snapshot-closure verification with an iterative,
+Retained trees may use snapshot-closure verification with an iterative,
 O(depth) descriptor budget: each file is hashed once, metadata is retained in
-memory, the tree is reinventoried, and named entries are reopened
-no-follow for identity and snapshot closure. Metadata closure detects races;
-it does not prevent a same-UID writer from changing a writable parent.
+memory, the tree is reinventoried, and named entries are reopened no-follow for
+identity and snapshot closure. Metadata closure detects races; it does not
+prevent a same-UID writer from changing a writable parent.
 
 ## Threat boundary
 
