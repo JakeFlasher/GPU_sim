@@ -4,6 +4,7 @@ import copy
 import hashlib
 import json
 import shutil
+import sys
 from pathlib import Path
 
 import pytest
@@ -67,6 +68,11 @@ def _receipt(root: Path, row: dict, kind: str, index: int) -> Path:
         if kind == "ncu"
         else ["dynamic_trace", "stats", "threadblock", "trace_summary", "preflight", "environment"]
     )
+    if kind == "nvbit":
+        from tools.nvbit_tracer.test_trace_admission import _write_trace
+        trace_root = root / "nvbit" / f"{index:02d}" / slug
+        trace_root.parent.mkdir(parents=True, exist_ok=True)
+        _write_trace(trace_root)
     artifacts = []
     preflight_path = None
     preflight_sha = None
@@ -76,14 +82,16 @@ def _receipt(root: Path, row: dict, kind: str, index: int) -> Path:
             f"artifacts/{index:02d}_{kind}_{role_index}.bin"
             if kind == "ncu"
             else (
-                f"nvbit/{index:02d}/vendor_gemm_cutlass/threadblocks/{index:02d}.pb"
+                f"nvbit/{index:02d}/{slug}/threadblocks/device_0/stream_0/kernel_0/0.pb"
                 if role == "threadblock"
                 else (
-                    f"nvbit/{index:02d}/vendor_gemm_cutlass/{'dynamic_trace.pb' if role == 'dynamic_trace' else 'stats.csv' if role == 'stats' else 'trace_summary.json' if role == 'trace_summary' else f'{role_index}_{role}.bin'}"
+                    f"nvbit/{index:02d}/{slug}/{'dynamic_trace.pb' if role == 'dynamic_trace' else 'stats.csv' if role == 'stats' else 'trace_summary.json' if role == 'trace_summary' else f'{role_index}_{role}.bin'}"
                 )
             )
         )
         payload = f"synthetic-{index}-{kind}-{role}".encode()
+        if kind == "nvbit" and role in {"dynamic_trace", "stats", "threadblock"}:
+            payload = (root / relative).read_bytes()
         if kind == "ncu" and role == "label_sidecar":
             payload = json.dumps({
                 "schema_version": 5,

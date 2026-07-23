@@ -379,10 +379,29 @@ def _verify_nvbit_artifacts(
     for key in ("expected_record_count", "admitted_record_count", "threadblock_count"):
         if type(summary.get(key)) is not int or summary[key] <= 0:
             raise AdmissionError(f"NVBit trace summary has invalid {key}")
-    if summary["admitted_record_count"] != summary["expected_record_count"]:
-        raise AdmissionError("NVBit trace summary admits fewer records than expected")
-    if summary["threadblock_count"] != len(artifact_by_role["threadblock"]):
-        raise AdmissionError("NVBit trace summary threadblock count does not match inventory")
+    if summary["admitted_record_count"] > summary["expected_record_count"]:
+        raise AdmissionError("NVBit trace summary admits more records than expected")
+    try:
+        from tools.nvbit_tracer.import_trace_contract import validate_trace_dir
+        from tools.nvbit_tracer.trace_admission import require_trace_admission
+
+        trace_root = _safe_receipt_path(
+            root, dynamic["path"], "NVBit dynamic trace"
+        ).parent
+        admission_result = require_trace_admission(trace_root)
+        contract = validate_trace_dir(trace_root)
+        if not contract.ok:
+            raise AdmissionError(f"NVBit trace contract failed: {contract.typed_reason}")
+    except AdmissionError:
+        raise
+    except Exception as exc:
+        raise AdmissionError(f"NVBit trace semantic validation failed: {exc}") from exc
+    if (
+        summary["expected_record_count"] != admission_result.expected_record_count
+        or summary["admitted_record_count"] != admission_result.admitted_record_count
+        or summary["threadblock_count"] != admission_result.threadblock_count
+    ):
+        raise AdmissionError("NVBit trace summary counts do not match independent admission")
 
 
 def _verify_receipt(
