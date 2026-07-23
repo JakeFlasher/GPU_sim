@@ -1,0 +1,364 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "cutlass_successor_m6_determinism_schedule.schema.json",
+  "title": "CUTLASS successor M6 determinism schedule",
+  "description": "Closed additive schedule for exactly three receipt-admitted CUTLASS successor cells. This artifact does not modify or complete canonical M6.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "artifact_kind", "schedule_id", "generated_at_utc",
+    "seed", "shuffle_algorithm", "source_identity", "source_identity_sha256",
+    "admission", "execution_dispatch", "configs", "config_identity_sha256", "cells",
+    "cell_identity_sha256", "policy", "slots", "tier2_candidates",
+    "slots_sha256", "tier2_candidates_sha256", "counts", "claims",
+    "schedule_sha256"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "artifact_kind": {"const": "cutlass_successor_m6_determinism_schedule"},
+    "schedule_id": {"type": "string", "pattern": "^cutlass-successor-m6-[0-9a-f]{24}$"},
+    "generated_at_utc": {"type": "string", "format": "date-time"},
+    "seed": {"type": "integer", "minimum": 0, "maximum": 9007199254740991},
+    "shuffle_algorithm": {"const": "sha256_seeded_sweep_v1"},
+    "source_identity": {"$ref": "#/$defs/source_identity"},
+    "source_identity_sha256": {"$ref": "#/$defs/sha256"},
+    "admission": {"$ref": "#/$defs/admission"},
+    "execution_dispatch": {"$ref": "#/$defs/execution_dispatch"},
+    "configs": {
+      "type": "array", "minItems": 6, "maxItems": 6, "uniqueItems": true,
+      "items": {"$ref": "#/$defs/config"}
+    },
+    "config_identity_sha256": {"$ref": "#/$defs/sha256"},
+    "cells": {
+      "type": "array", "minItems": 3, "maxItems": 3, "uniqueItems": true,
+      "items": {"$ref": "#/$defs/cell"}
+    },
+    "cell_identity_sha256": {"$ref": "#/$defs/sha256"},
+    "policy": {"$ref": "#/$defs/policy"},
+    "slots": {
+      "type": "array", "minItems": 210, "maxItems": 210, "uniqueItems": true,
+      "items": {"allOf": [{"$ref": "#/$defs/slot"}, {"properties": {"tier": {"const": 1}}}]}
+    },
+    "tier2_candidates": {
+      "type": "array", "minItems": 30, "maxItems": 30, "uniqueItems": true,
+      "items": {"allOf": [{"$ref": "#/$defs/slot"}, {"properties": {"tier": {"const": 2}}}]}
+    },
+    "slots_sha256": {"$ref": "#/$defs/sha256"},
+    "tier2_candidates_sha256": {"$ref": "#/$defs/sha256"},
+    "counts": {"$ref": "#/$defs/counts"},
+    "claims": {"$ref": "#/$defs/claims"},
+    "schedule_sha256": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "relative_path": {
+      "type": "string", "minLength": 1,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"
+    },
+    "file_ref": {
+      "type": "object", "additionalProperties": false,
+      "required": ["path", "sha256", "size_bytes"],
+      "properties": {
+        "path": {"$ref": "#/$defs/relative_path"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "size_bytes": {"type": "integer", "minimum": 1}
+      }
+    },
+    "document_ref": {
+      "type": "object", "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {"$ref": "#/$defs/relative_path"},
+        "sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "base_bundle": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "source_commit", "validation", "trace_budgets", "roster",
+        "capture_matrix", "bundle_identity_sha256"
+      ],
+      "properties": {
+        "source_commit": {"const": "237f17cd34728b31ea752062e7ea7843a3a2603a"},
+        "validation": {"$ref": "#/$defs/document_ref"},
+        "trace_budgets": {"$ref": "#/$defs/document_ref"},
+        "roster": {"$ref": "#/$defs/document_ref"},
+        "capture_matrix": {"$ref": "#/$defs/document_ref"},
+        "bundle_identity_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "receipt_root": {
+      "type": "object", "additionalProperties": false,
+      "required": ["path", "inventory_sha256"],
+      "properties": {
+        "path": {"type": "string", "pattern": "^/"},
+        "inventory_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "admission_overlay_ref": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "overlay_id", "generated_at_utc", "overlay_seal_sha256",
+        "receipt_root", "runnable_membership_sha256"
+      ],
+      "properties": {
+        "overlay_id": {"const": "cutlass_successor_capture_admission_sm86_v1"},
+        "generated_at_utc": {"type": "string", "format": "date-time"},
+        "overlay_seal_sha256": {"$ref": "#/$defs/sha256"},
+        "receipt_root": {"$ref": "#/$defs/receipt_root"},
+        "runnable_membership_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "producer_files": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "schedule_builder", "schedule_schema", "admission_producer",
+        "admission_schema", "receipt_schema", "canonical_m6_helpers",
+        "cohort_validator", "capture_producer", "ncu_parser",
+        "metric_registry_module", "metric_registry", "label_validator",
+        "label_schema", "trace_contract_validator", "trace_admission",
+        "label_driver", "nvbit_tracer"
+      ],
+      "properties": {
+        "schedule_builder": {"$ref": "#/$defs/file_ref"},
+        "schedule_schema": {"$ref": "#/$defs/file_ref"},
+        "admission_producer": {"$ref": "#/$defs/file_ref"},
+        "admission_schema": {"$ref": "#/$defs/file_ref"},
+        "receipt_schema": {"$ref": "#/$defs/file_ref"},
+        "canonical_m6_helpers": {"$ref": "#/$defs/file_ref"},
+        "cohort_validator": {"$ref": "#/$defs/file_ref"},
+        "capture_producer": {"$ref": "#/$defs/file_ref"},
+        "ncu_parser": {"$ref": "#/$defs/file_ref"},
+        "metric_registry_module": {"$ref": "#/$defs/file_ref"},
+        "metric_registry": {"$ref": "#/$defs/file_ref"},
+        "label_validator": {"$ref": "#/$defs/file_ref"},
+        "label_schema": {"$ref": "#/$defs/file_ref"},
+        "trace_contract_validator": {"$ref": "#/$defs/file_ref"},
+        "trace_admission": {"$ref": "#/$defs/file_ref"},
+        "label_driver": {"$ref": "#/$defs/file_ref"},
+        "nvbit_tracer": {"$ref": "#/$defs/file_ref"}
+      }
+    },
+    "source_identity": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "pinned_bundle_commit", "producer_commit", "base_bundle",
+        "admission_overlay", "producer_files"
+      ],
+      "properties": {
+        "pinned_bundle_commit": {"const": "237f17cd34728b31ea752062e7ea7843a3a2603a"},
+        "producer_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "base_bundle": {"$ref": "#/$defs/base_bundle"},
+        "admission_overlay": {"$ref": "#/$defs/admission_overlay_ref"},
+        "producer_files": {"$ref": "#/$defs/producer_files"}
+      }
+    },
+    "admission_counts": {
+      "type": "object", "additionalProperties": false,
+      "required": ["total", "pending", "capture_ready", "chunks"],
+      "properties": {
+        "total": {"const": 3},
+        "pending": {"const": 0},
+        "capture_ready": {"const": 3},
+        "chunks": {"const": 1}
+      }
+    },
+    "admission": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "status", "typed_reason", "admission_m6_schedule_created",
+        "overlay_seal_sha256", "counts"
+      ],
+      "properties": {
+        "status": {"const": "capture_ready"},
+        "typed_reason": {"const": "all_successor_receipt_pairs_valid"},
+        "admission_m6_schedule_created": {"const": false},
+        "overlay_seal_sha256": {"$ref": "#/$defs/sha256"},
+        "counts": {"$ref": "#/$defs/admission_counts"}
+      }
+    },
+    "execution_dispatch": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "status", "typed_reason", "schedule_is_executable",
+        "tier1_dispatch_allowed", "tier2_activation_allowed",
+        "tier2_candidates_are_contract_only"
+      ],
+      "properties": {
+        "status": {"const": "required_unimplemented"},
+        "typed_reason": {"const": "successor_m6_collector_and_tier2_trigger_authority_required"},
+        "schedule_is_executable": {"const": false},
+        "tier1_dispatch_allowed": {"const": false},
+        "tier2_activation_allowed": {"const": false},
+        "tier2_candidates_are_contract_only": {"const": true}
+      }
+    },
+    "config": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "config_id", "clock_control", "cache_control", "replay_mode",
+        "target_processes", "filter_mode", "profile_from_start", "reference",
+        "tier1_repeats", "fresh_process_per_profile", "config_sha256"
+      ],
+      "properties": {
+        "config_id": {"type": "string", "pattern": "^cfg=clock_(none|base|boost)__cache_(all|none)$"},
+        "clock_control": {"enum": ["none", "base", "boost"]},
+        "cache_control": {"enum": ["all", "none"]},
+        "replay_mode": {"const": "kernel"},
+        "target_processes": {"const": "all"},
+        "filter_mode": {"const": "global"},
+        "profile_from_start": {"const": false},
+        "reference": {"type": "boolean"},
+        "tier1_repeats": {"enum": [10, 20]},
+        "fresh_process_per_profile": {"const": true},
+        "config_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "dimensions": {
+      "type": "array", "minItems": 3, "maxItems": 3,
+      "items": {"type": "integer", "minimum": 1}
+    },
+    "launch_identity": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "launch_index", "kernel_name", "kernel_signature_sha256", "grid_dim",
+        "block_dim", "launch_identity_sha256"
+      ],
+      "properties": {
+        "launch_index": {"const": 0},
+        "kernel_name": {"type": "string", "minLength": 1},
+        "kernel_signature_sha256": {"$ref": "#/$defs/sha256"},
+        "grid_dim": {"$ref": "#/$defs/dimensions"},
+        "block_dim": {"$ref": "#/$defs/dimensions"},
+        "launch_identity_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "receipt_ref": {
+      "type": "object", "additionalProperties": false,
+      "required": ["path", "sha256", "size_bytes", "receipt_seal_sha256"],
+      "properties": {
+        "path": {"$ref": "#/$defs/relative_path"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "size_bytes": {"type": "integer", "minimum": 1},
+        "receipt_seal_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "process_separation": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "host_identity_sha256", "boot_id_sha256", "ncu_process_identity_sha256",
+        "nvbit_process_identity_sha256", "separate"
+      ],
+      "properties": {
+        "host_identity_sha256": {"$ref": "#/$defs/sha256"},
+        "boot_id_sha256": {"$ref": "#/$defs/sha256"},
+        "ncu_process_identity_sha256": {"$ref": "#/$defs/sha256"},
+        "nvbit_process_identity_sha256": {"$ref": "#/$defs/sha256"},
+        "separate": {"const": true}
+      }
+    },
+    "trace_budget": {
+      "type": "object", "additionalProperties": false,
+      "required": ["max_trace_bytes", "max_wall_time_s", "sampling_policy"],
+      "properties": {
+        "max_trace_bytes": {"type": "integer", "minimum": 1},
+        "max_wall_time_s": {"type": "integer", "minimum": 1},
+        "sampling_policy": {"const": "off"}
+      }
+    },
+    "cell": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "cell_id", "matrix_key", "variant_id", "successor_slug", "base_slug",
+        "shape_point", "authority_row_sha256", "binary_sha256", "actual_args",
+        "launch_identity", "ncu_receipt", "nvbit_receipt", "process_separation",
+        "trace_budget", "cell_identity_sha256"
+      ],
+      "properties": {
+        "cell_id": {"type": "string", "pattern": "^cutlass_successor:[a-z0-9_]+_cublas:[a-z0-9_]+_cutlass$"},
+        "matrix_key": {"type": "string", "pattern": "^cutlass_successor:[a-z0-9_]+_cublas:[a-z0-9_]+_cutlass$"},
+        "variant_id": {"type": "string", "pattern": "^[a-z0-9_]+_v1$"},
+        "successor_slug": {"type": "string", "pattern": "^vendor_.*_cutlass$"},
+        "base_slug": {"type": "string", "pattern": "^vendor_.*_cublas$"},
+        "shape_point": {"const": "trace_00"},
+        "authority_row_sha256": {"$ref": "#/$defs/sha256"},
+        "binary_sha256": {"$ref": "#/$defs/sha256"},
+        "actual_args": {"type": "array", "minItems": 1, "items": {"type": ["string", "integer", "number"]}},
+        "launch_identity": {"$ref": "#/$defs/launch_identity"},
+        "ncu_receipt": {"$ref": "#/$defs/receipt_ref"},
+        "nvbit_receipt": {"$ref": "#/$defs/receipt_ref"},
+        "process_separation": {"$ref": "#/$defs/process_separation"},
+        "trace_budget": {"$ref": "#/$defs/trace_budget"},
+        "cell_identity_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "policy": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "reference_config_id", "reference_tier1_repeats", "other_tier1_repeats",
+        "tier2_additional_reference_repeats", "fresh_process_per_profile",
+        "adaptive_dispersion_stopping"
+      ],
+      "properties": {
+        "reference_config_id": {"const": "cfg=clock_none__cache_all"},
+        "reference_tier1_repeats": {"const": 20},
+        "other_tier1_repeats": {"const": 10},
+        "tier2_additional_reference_repeats": {"const": 10},
+        "fresh_process_per_profile": {"const": true},
+        "adaptive_dispersion_stopping": {"const": false}
+      }
+    },
+    "slot": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "ordinal", "slot_id", "tier", "sweep_index", "repeat_index", "cell_id",
+        "cell_identity_sha256", "config_id", "config_sha256", "process_isolation",
+        "slot_sha256"
+      ],
+      "properties": {
+        "ordinal": {"type": "integer", "minimum": 0, "maximum": 239},
+        "slot_id": {"type": "string", "pattern": "^m6-t[12]-[0-9a-f]{24}$"},
+        "tier": {"enum": [1, 2]},
+        "sweep_index": {"type": "integer", "minimum": 0, "maximum": 29},
+        "repeat_index": {"type": "integer", "minimum": 0, "maximum": 29},
+        "cell_id": {"type": "string", "pattern": "^cutlass_successor:"},
+        "cell_identity_sha256": {"$ref": "#/$defs/sha256"},
+        "config_id": {"type": "string", "pattern": "^cfg=clock_"},
+        "config_sha256": {"$ref": "#/$defs/sha256"},
+        "process_isolation": {"const": "fresh_process"},
+        "slot_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "counts": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "cells", "configs", "tier1_slots", "tier2_candidate_slots",
+        "maximum_slots", "tier1_fresh_processes", "maximum_fresh_processes"
+      ],
+      "properties": {
+        "cells": {"const": 3},
+        "configs": {"const": 6},
+        "tier1_slots": {"const": 210},
+        "tier2_candidate_slots": {"const": 30},
+        "maximum_slots": {"const": 240},
+        "tier1_fresh_processes": {"const": 210},
+        "maximum_fresh_processes": {"const": 240}
+      }
+    },
+    "claims": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "canonical_v1_impact", "canonical_m6_completed", "m6_done_created",
+        "m7_handoff_ready", "publication_claim", "hardware_values_are_targets_only"
+      ],
+      "properties": {
+        "canonical_v1_impact": {"const": "none_additive_supplement_only"},
+        "canonical_m6_completed": {"const": false},
+        "m6_done_created": {"const": false},
+        "m7_handoff_ready": {"const": false},
+        "publication_claim": {"const": false},
+        "hardware_values_are_targets_only": {"const": true}
+      }
+    }
+  }
+}
