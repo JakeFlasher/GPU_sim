@@ -442,8 +442,20 @@ def _verify_receipt(
     if receipt["process"]["command_sha256"] != receipt["command_sha256"]:
         raise AdmissionError(f"{rel} process command does not match receipt command")
     _check_dt(receipt["captured_at_utc"], f"{rel} captured_at_utc")
-    if receipt["command_sha256"] != canonical_sha(receipt["command"]):
-        raise AdmissionError(f"{rel} command identity seal mismatch")
+    expected_tool = ROOT / (
+        "tools/local_labels/label_driver.sh"
+        if receipt["capture_kind"] == "ncu"
+        else "tools/nvbit_tracer/tracer_tool/tracer_tool.so"
+    )
+    _regular(expected_tool, "successor capture phase tool")
+    expected_provenance = {
+        "capture_producer_sha256": sha256_bytes(
+            (ROOT / "tools/local_labels/capture_cutlass_successor_receipts.py").read_bytes()
+        ),
+        "phase_tool_sha256": sha256_bytes(expected_tool.read_bytes()),
+    }
+    if receipt["provenance"] != expected_provenance:
+        raise AdmissionError(f"{rel} capture tool provenance does not match current inputs")
     expected_semantics = (
         {
             "semantic_kind": "ncu_metric_validation",

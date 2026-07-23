@@ -170,6 +170,14 @@ def _receipt(root: Path, row: dict, kind: str, index: int) -> Path:
             "identity": identity,
             "launch_identity": launch,
             "process": process,
+            "provenance": {
+                "capture_producer_sha256": admit.sha256_bytes(
+                    (ROOT / "tools/local_labels/capture_cutlass_successor_receipts.py").read_bytes()
+                ),
+                "phase_tool_sha256": admit.sha256_bytes(
+                    (ROOT / ("tools/local_labels/label_driver.sh" if kind == "ncu" else "tools/nvbit_tracer/tracer_tool/tracer_tool.so")).read_bytes()
+                ),
+            },
             "captured_at_utc": "2026-07-23T01:00:00Z",
             "preflight_path": preflight_path,
             "preflight_sha256": preflight_sha,

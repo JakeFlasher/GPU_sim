@@ -493,6 +493,12 @@ def _receipt(
                 "block_dim": row["shape"]["trace_shape"]["launch_config"]["block"],
             },
             "process": process,
+            "provenance": {
+                "capture_producer_sha256": sha256_bytes(Path(__file__).read_bytes()),
+                "phase_tool_sha256": sha256_bytes(
+                    (LABEL_DRIVER if phase == "ncu" else TRACER_SO).read_bytes()
+                ),
+            },
             "captured_at_utc": captured_at,
             "preflight_path": preflight_relative,
             "preflight_sha256": sha256_bytes(preflight_payload),

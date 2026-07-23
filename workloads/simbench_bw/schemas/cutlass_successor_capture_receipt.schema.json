@@ -64,6 +64,15 @@
         "launch_identity_sha256": {"$ref": "#/$defs/sha256"}
       }
     },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["capture_producer_sha256", "phase_tool_sha256"],
+      "properties": {
+        "capture_producer_sha256": {"$ref": "#/$defs/sha256"},
+        "phase_tool_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
     "process": {
       "type": "object",
       "additionalProperties": false,
@@ -157,7 +166,7 @@
       "additionalProperties": false,
       "required": [
         "capture_kind", "status", "matrix_key", "variant_id", "identity",
-        "launch_identity", "process", "captured_at_utc", "preflight_path",
+        "launch_identity", "process", "provenance", "captured_at_utc", "preflight_path",
         "preflight_sha256", "environment_sha256", "command", "command_sha256",
         "semantic_validation", "artifacts"
       ],
@@ -169,6 +178,7 @@
         "identity": {"$ref": "#/$defs/identity"},
         "launch_identity": {"$ref": "#/$defs/launch_identity"},
         "process": {"$ref": "#/$defs/process"},
+        "provenance": {"$ref": "#/$defs/provenance"},
         "captured_at_utc": {"type": "string", "format": "date-time"},
         "preflight_path": {"$ref": "#/$defs/relative_path"},
         "preflight_sha256": {"$ref": "#/$defs/sha256"},
@@ -189,7 +199,7 @@
       "additionalProperties": false,
       "required": [
         "capture_kind", "status", "matrix_key", "variant_id", "identity",
-        "launch_identity", "process", "captured_at_utc", "preflight_path",
+        "launch_identity", "process", "provenance", "captured_at_utc", "preflight_path",
         "preflight_sha256", "environment_sha256", "command", "command_sha256",
         "semantic_validation", "artifacts"
       ],
@@ -201,6 +211,7 @@
         "identity": {"$ref": "#/$defs/identity"},
         "launch_identity": {"$ref": "#/$defs/launch_identity"},
         "process": {"$ref": "#/$defs/process"},
+        "provenance": {"$ref": "#/$defs/provenance"},
         "captured_at_utc": {"type": "string", "format": "date-time"},
         "preflight_path": {"$ref": "#/$defs/relative_path"},
         "preflight_sha256": {"$ref": "#/$defs/sha256"},
