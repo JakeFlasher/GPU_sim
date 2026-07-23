@@ -41,11 +41,11 @@
     "counts": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["total", "correctness_pass", "repeatability_pass", "runtime_pass", "capture_pending", "hardware_capture_runnable"],
+      "required": ["total", "scoped_correctness_pass", "output_repeatability_pass", "runtime_pass", "capture_pending", "hardware_capture_runnable"],
       "properties": {
         "total": {"const": 3},
-        "correctness_pass": {"const": 3},
-        "repeatability_pass": {"const": 3},
+        "scoped_correctness_pass": {"const": 3},
+        "output_repeatability_pass": {"const": 3},
         "runtime_pass": {"const": 3},
         "capture_pending": {"const": 3},
         "hardware_capture_runnable": {"const": 0}
@@ -205,13 +205,14 @@
     "runtime_launch_inventory": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["status", "expected_process_runs", "observed_process_runs", "expected_kernel_launch_count", "observed_kernel_launch_count", "dynamic_launch_status", "nvbit_trace_status", "static_launch_contract", "typed_reason", "command", "command_sha256"],
+      "required": ["status", "expected_process_runs", "observed_process_runs", "expected_candidate_launch_count", "observed_candidate_launch_count", "candidate_selection_status", "dynamic_launch_status", "nvbit_trace_status", "static_launch_contract", "typed_reason", "command", "command_sha256"],
       "properties": {
         "status": {"const": "declared_only"},
         "expected_process_runs": {"const": 5},
         "observed_process_runs": {"const": 5},
-        "expected_kernel_launch_count": {"const": 1},
-        "observed_kernel_launch_count": {"type": ["integer", "null"]},
+        "expected_candidate_launch_count": {"const": 1},
+        "observed_candidate_launch_count": {"type": ["integer", "null"]},
+        "candidate_selection_status": {"const": "not_run"},
         "dynamic_launch_status": {"const": "not_run"},
         "nvbit_trace_status": {"const": "not_run"},
         "static_launch_contract": {"$ref": "#/$defs/launch_config"},
@@ -232,10 +233,13 @@
     "correctness": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["status", "method", "reference_path", "reference_sha256", "reference_bytes", "input_generator", "input_generator_sha256", "dtype_contract", "layout_contract", "seed", "max_abs_error", "per_run_max_abs_error", "tolerance", "rtol", "atol", "max_ulp", "matched_ratio", "validated_batches", "unverified_batches", "output_scope"],
+      "required": ["status", "method", "executed_shape_point", "declared_correctness_shape_point", "declared_correctness_shape_status", "reference_path", "reference_sha256", "reference_bytes", "input_generator", "input_generator_sha256", "dtype_contract", "layout_contract", "seed", "max_abs_error", "per_run_max_abs_error", "tolerance", "rtol", "atol", "max_ulp", "matched_ratio", "validated_batches", "unverified_batches", "output_scope"],
       "properties": {
-        "status": {"enum": ["pass", "pass_scoped"]},
+        "status": {"const": "pass_scoped_trace_point"},
         "method": {"const": "independent_numpy_host_reference"},
+        "executed_shape_point": {"const": "trace_00"},
+        "declared_correctness_shape_point": {"const": "correctness_00"},
+        "declared_correctness_shape_status": {"const": "not_run"},
         "reference_path": {"type": "string", "pattern": "^data/annex/cutlass.*cohort_runtime/reference_batch_zero\\.json$"},
         "reference_sha256": {"$ref": "#/$defs/sha256"},
         "reference_bytes": {"type": "integer", "minimum": 1},
@@ -276,7 +280,7 @@
     "runtime": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["status", "arch", "sku", "binary_sha256", "returncodes", "stderr_empty", "hardware_label_capture", "warmup_count", "measured_reps", "timing_metric", "timing_unit", "timing_samples", "timing_median_ns", "timing_cv_percent", "environment_ref", "publication_timing_status"],
+      "required": ["status", "arch", "sku", "binary_sha256", "returncodes", "stderr_empty", "hardware_label_capture", "process_runs", "warmup_per_process", "measured_reps_per_process", "timing_metric", "timing_unit", "timing_samples", "timing_median_ns", "timing_cv_percent", "environment_ref", "publication_timing_status"],
       "properties": {
         "status": {"const": "pass_diagnostic"},
         "arch": {"const": "sm_86"},
@@ -285,8 +289,9 @@
         "returncodes": {"const": [0, 0, 0, 0, 0]},
         "stderr_empty": {"const": true},
         "hardware_label_capture": {"const": "not_run"},
-        "warmup_count": {"const": 0},
-        "measured_reps": {"const": 5},
+        "process_runs": {"const": 5},
+        "warmup_per_process": {"const": 0},
+        "measured_reps_per_process": {"const": 1},
         "timing_metric": {"const": "host_wall_time"},
         "timing_unit": {"const": "ns"},
         "timing_samples": {"type": "array", "minItems": 5, "maxItems": 5, "items": {"type": "integer", "minimum": 1}},

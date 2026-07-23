@@ -23,12 +23,12 @@
     "counts": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["total", "build_verified", "correctness_verified", "repeatability_verified", "capture_pending", "hardware_capture_runnable", "excluded"],
+      "required": ["total", "build_verified", "scoped_correctness_verified", "output_repeatability_verified", "capture_pending", "hardware_capture_runnable", "excluded"],
       "properties": {
         "total": {"const": 3},
         "build_verified": {"const": 3},
-        "correctness_verified": {"const": 3},
-        "repeatability_verified": {"const": 3},
+        "scoped_correctness_verified": {"const": 3},
+        "output_repeatability_verified": {"const": 3},
         "capture_pending": {"const": 3},
         "hardware_capture_runnable": {"const": 0},
         "excluded": {"const": 0}
@@ -211,13 +211,14 @@
     "runtime_launch_inventory": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["status", "expected_process_runs", "observed_process_runs", "expected_kernel_launch_count", "observed_kernel_launch_count", "dynamic_launch_status", "nvbit_trace_status", "static_launch_contract", "typed_reason", "command", "command_sha256"],
+      "required": ["status", "expected_process_runs", "observed_process_runs", "expected_candidate_launch_count", "observed_candidate_launch_count", "candidate_selection_status", "dynamic_launch_status", "nvbit_trace_status", "static_launch_contract", "typed_reason", "command", "command_sha256"],
       "properties": {
         "status": {"const": "declared_only"},
         "expected_process_runs": {"const": 5},
         "observed_process_runs": {"const": 5},
-        "expected_kernel_launch_count": {"const": 1},
-        "observed_kernel_launch_count": {"type": ["integer", "null"]},
+        "expected_candidate_launch_count": {"const": 1},
+        "observed_candidate_launch_count": {"type": ["integer", "null"]},
+        "candidate_selection_status": {"const": "not_run"},
         "dynamic_launch_status": {"const": "not_run"},
         "nvbit_trace_status": {"const": "not_run"},
         "static_launch_contract": {"$ref": "#/$defs/launch_config"},

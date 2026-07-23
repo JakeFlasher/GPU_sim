@@ -205,13 +205,14 @@
     "runtime_launch_inventory": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["status", "expected_process_runs", "observed_process_runs", "expected_kernel_launch_count", "observed_kernel_launch_count", "dynamic_launch_status", "nvbit_trace_status", "static_launch_contract", "typed_reason", "command", "command_sha256"],
+      "required": ["status", "expected_process_runs", "observed_process_runs", "expected_candidate_launch_count", "observed_candidate_launch_count", "candidate_selection_status", "dynamic_launch_status", "nvbit_trace_status", "static_launch_contract", "typed_reason", "command", "command_sha256"],
       "properties": {
         "status": {"const": "declared_only"},
         "expected_process_runs": {"const": 5},
         "observed_process_runs": {"const": 5},
-        "expected_kernel_launch_count": {"const": 1},
-        "observed_kernel_launch_count": {"type": ["integer", "null"]},
+        "expected_candidate_launch_count": {"const": 1},
+        "observed_candidate_launch_count": {"type": ["integer", "null"]},
+        "candidate_selection_status": {"const": "not_run"},
         "dynamic_launch_status": {"const": "not_run"},
         "nvbit_trace_status": {"const": "not_run"},
         "static_launch_contract": {"$ref": "#/$defs/launch_config"},
