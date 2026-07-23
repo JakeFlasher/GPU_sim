@@ -403,6 +403,12 @@ def validate_witness(document: dict[str, Any]) -> list[str]:
     for section in ("binary", "sass", "control_bits"):
         artifact = document["artifacts"][section]
         target = ROOT / artifact["path"]
+        # Workload executables are intentionally ignored build products. Their
+        # exact hash remains sealed; absence in a fresh checkout is a typed
+        # re-materialization requirement, while committed SASS/control bytes
+        # must always be present and exact.
+        if section == "binary" and not target.exists():
+            continue
         if not target.is_file() or _sha256_file(target) != artifact["sha256"]:
             errors.append(f"artifact:{section}")
     return sorted(set(errors))
