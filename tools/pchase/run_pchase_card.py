@@ -1,27 +1,11 @@
 #!/usr/bin/env python3
-"""P-chase static-card orchestrator (counter-free by construction).
+"""Historical p-chase v1 producer (retired from production use).
 
-Runs the clock64 dependent-chase probe suite on the live device and
-emits the committed per-arch static card. NO NCU, NO profiler, NO
-clock locking: cycles come from clock64() inside the kernels, and the
-only telemetry is read-only NVML queries (via nvidia-smi) recorded as
-covariates around every invocation.
-
-Honesty rules:
-
-- Every property carries either {value, unit, dispersion, n_repeats,
-  method, covariates} or a typed ``geometry_unresolved`` record with
-  the raw evidence curve — a property the probes cannot pin under
-  DVFS noise is typed, never guessed.
-- Latency-step detection uses an explicit confidence rule: the largest
-  relative jump in the median curve must be >= ``step_min_jump`` AND
-  >= ``step_dominance`` times the second-largest jump; anything
-  weaker is ``geometry_unresolved``.
-- NVML covariate acceptance follows the calibrated policy: HW
-  slowdown / HW thermal / HW power brake / SW power cap reject a
-  sample; SW thermal slowdown is the normal Ampere boost equilibrium
-  and is RECORDED (sw_thermal_active fraction), never rejected; idle
-  is rejected by an active-clock floor, not by the throttle mask.
+The v1 counter-free/clock64 producer is retained for archaeology and analysis
+helpers only. Its collection and publication entry points refuse before reading
+inputs, launching subprocesses, building binaries, or writing outputs. A future
+schema-v2 producer must provide independently reviewed, target-free provenance,
+locked-clock protocol metadata, and an external immutable publication root.
 """
 
 from __future__ import annotations
@@ -33,6 +17,11 @@ import statistics
 import subprocess
 import sys
 from pathlib import Path
+
+from tools.producer_retirement import (
+    report_legacy_producer_retirement,
+    refuse_legacy_producer,
+)
 
 HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parents[1]
@@ -77,37 +66,17 @@ def _sha256(path: Path) -> str:
 
 
 def build_binary(nvcc: str = "nvcc", arch: str = "sm_86") -> None:
-    BINARY.parent.mkdir(parents=True, exist_ok=True)
-    proc = subprocess.run(
-        [nvcc, "-O2", f"-arch={arch}", str(SOURCE), "-o", str(BINARY)],
-        capture_output=True, text=True, timeout=600,
+    refuse_legacy_producer(
+        "tools/pchase/run_pchase_card.py:build_binary",
+        successor_requirement="schema-v2 external immutable evidence",
     )
-    if proc.returncode != 0:
-        raise RuntimeError(f"nvcc failed: {proc.stderr[-400:]}")
 
 
 def nvml_sample() -> dict:
-    """One read-only telemetry sample (never mutates driver state)."""
-    proc = subprocess.run(
-        ["nvidia-smi",
-         "--query-gpu=clocks.sm,clocks.mem,temperature.gpu,power.draw,"
-         "clocks_event_reasons.active",
-         "--format=csv,noheader,nounits"],
-        capture_output=True, text=True, timeout=30,
+    refuse_legacy_producer(
+        "tools/pchase/run_pchase_card.py:nvml_sample",
+        successor_requirement="schema-v2 external immutable evidence",
     )
-    if proc.returncode != 0:
-        return {"unavailable": True}
-    parts = [s.strip() for s in proc.stdout.strip().split(",")]
-    try:
-        return {
-            "sm_clock_mhz": float(parts[0]),
-            "mem_clock_mhz": float(parts[1]),
-            "temperature_c": float(parts[2]),
-            "power_w": float(parts[3]),
-            "throttle_reasons": int(parts[4], 16),
-        }
-    except (ValueError, IndexError):
-        return {"unavailable": True}
 
 
 def covariate_verdict(sample: dict, cfg: dict) -> dict:
@@ -134,26 +103,10 @@ def covariate_verdict(sample: dict, cfg: dict) -> dict:
 
 
 def run_probe(args: list[str], cfg: dict) -> list[dict]:
-    """One binary invocation -> per-rep records, each annotated with a
-    post-run covariate sample (the GPU was active moments before)."""
-    proc = subprocess.run(
-        [str(BINARY), *args], capture_output=True, text=True,
-        timeout=600, cwd=str(REPO_ROOT),
+    refuse_legacy_producer(
+        "tools/pchase/run_pchase_card.py:run_probe",
+        successor_requirement="schema-v2 external immutable evidence",
     )
-    if proc.returncode != 0:
-        raise RuntimeError(
-            f"pchase {' '.join(args)} rc={proc.returncode}: "
-            f"{proc.stderr[-300:]}")
-    sample = nvml_sample()
-    verdict = covariate_verdict(sample, cfg)
-    records = []
-    for line in proc.stdout.splitlines():
-        if not line.startswith("{"):
-            continue
-        rec = json.loads(line)
-        rec["covariates"] = {**sample, **verdict}
-        records.append(rec)
-    return records
 
 
 def median_dispersion(values: list[float]) -> tuple[float, float]:
@@ -302,7 +255,10 @@ def capacity_property(points: list[tuple[int, list[dict]]],
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description=__doc__)
+    return report_legacy_producer_retirement(
+        "tools/pchase/run_pchase_card.py",
+        successor_requirement="schema-v2 external immutable evidence",
+    )
     parser.add_argument("--nvcc", default="nvcc")
     parser.add_argument("--arch", default="sm_86")
     parser.add_argument("--out", default=DEFAULT_CARD_OUT)
@@ -329,7 +285,7 @@ def main(argv: list[str] | None = None) -> int:
             f"single-thread permuted-ring chase, footprint "
             f"{spec['footprint']} B, {spec['iters']} dependent loads, "
             "in-kernel warmup pass, clock64 timing (loop overhead "
-            "included; cycles are boost-invariant)",
+            "included; cycles are not asserted boost-invariant)",
             records, {"footprint_bytes": spec["footprint"]})
         print(f"[pchase] {name}: "
               f"{properties[name].get('value')}", flush=True)
