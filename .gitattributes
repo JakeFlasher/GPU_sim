@@ -3,3 +3,4 @@ third_party/cutlass/** -whitespace
 # cuobjdump SASS is captured evidence; its formatting is part of the hash.
 data/annex/cutlass_successor_sm86_20260723/** -whitespace
 data/annex/cutlass_sgemm_successor_sm86_20260723/** -whitespace
+data/annex/cutlass_strided_batched_successor_sm86_20260723/** -whitespace
