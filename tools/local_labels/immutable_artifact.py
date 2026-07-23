@@ -1820,6 +1820,12 @@ def _accept_exact_concurrent_winner(
         snapshot = _durability_proof_at(
             root_descriptor, pinned_final.descriptor, material
         )
+        pinned_final.verify_path()
+        if _entry_mode(root_descriptor, stage_name) is not None:
+            raise ImmutableArtifactError(
+                "deterministic stage reappeared beside concurrent final winner"
+            )
+        pinned_final.verify_path()
         # The caller owns the pinned winner through authorization and final
         # closure; do not reopen the name after this transfer.
         transferred = True

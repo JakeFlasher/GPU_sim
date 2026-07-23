@@ -115,6 +115,47 @@ def test_directory_winner_rejects_same_byte_inode_replacement(
     assert (output_root / "artifact" / "value").read_bytes() == b"original"
 
 
+def test_directory_winner_rejects_stage_reappearing_before_authorization(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output_root = tmp_path / "published"
+    material = [immutable.ImmutableFile.from_bytes("value", b"original")]
+    immutable.publish_directory(output_root, "artifact", material)
+    original_proof = immutable._durability_proof_at
+    callback_count = 0
+
+    def reintroduce_stage(
+        root_descriptor: int,
+        tree_root_descriptor: int,
+        proof_material: tuple[immutable.ImmutableFile, ...],
+    ):
+        snapshot = original_proof(
+            root_descriptor, tree_root_descriptor, proof_material
+        )
+        os.mkdir(".artifact.staging", mode=0o755, dir_fd=root_descriptor)
+        return snapshot
+
+    monkeypatch.setattr(immutable, "_durability_proof_at", reintroduce_stage)
+
+    def authorize(_root: Path, _descriptor: int) -> None:
+        nonlocal callback_count
+        callback_count += 1
+
+    with pytest.raises(
+        immutable.ImmutableArtifactError,
+        match="stage reappeared beside concurrent final winner",
+    ):
+        immutable.publish_directory(
+            output_root,
+            "artifact",
+            material,
+            before_commit=authorize,
+        )
+
+    assert callback_count == 1
+    assert (output_root / ".artifact.staging").is_dir()
+
+
 def test_directory_rejects_same_byte_inode_replacement_after_commit(
     tmp_path: Path,
 ) -> None:
