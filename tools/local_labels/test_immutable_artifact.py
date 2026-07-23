@@ -220,6 +220,32 @@ def test_directory_final_authorization_follows_expensive_verification(
     assert events[-2:] == ["verify", "authorize"]
 
 
+def test_directory_preserves_final_when_final_authorization_fails(
+    tmp_path: Path,
+) -> None:
+    output_root = tmp_path / "published"
+    material = [immutable.ImmutableFile.from_bytes("value", b"original")]
+    callback_count = 0
+
+    def fail_on_final_authorization(_root: Path, _descriptor: int) -> None:
+        nonlocal callback_count
+        callback_count += 1
+        if callback_count == 3:
+            raise RuntimeError("late authorization failure")
+
+    with pytest.raises(RuntimeError, match="late authorization failure"):
+        immutable.publish_directory(
+            output_root,
+            "artifact",
+            material,
+            before_commit=fail_on_final_authorization,
+        )
+
+    assert callback_count == 3
+    assert (output_root / "artifact" / "value").read_bytes() == b"original"
+    assert not (output_root / ".artifact.staging").exists()
+
+
 def test_directory_reauthorizes_rename_race_winner(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
