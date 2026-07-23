@@ -173,6 +173,15 @@ def _write_or_match(path: Path, payload: bytes) -> None:
     path.write_bytes(payload)
 
 
+def _normalize_build_transcript(payload: bytes) -> bytes:
+    """Remove host-timing noise while retaining compiler diagnostics exactly."""
+    return re.sub(
+        rb"Compile time = [0-9]+(?:\\.[0-9]+)? ms",
+        b"Compile time = <normalized> ms",
+        payload,
+    )
+
+
 def live_cutlass_tree_hash(root: Path) -> str:
     """Match native_env.py's length-delimited build-input identity."""
     digest = hashlib.sha256()
@@ -482,7 +491,7 @@ def build_witness(
             )
         except (OSError, subprocess.TimeoutExpired) as exc:
             raise WitnessError(f"successor build failed to execute: {exc}") from exc
-        transcript = result.stdout
+        transcript = _normalize_build_transcript(result.stdout)
         _write_or_match(evidence_dir / BUILD_LOG_NAME, transcript)
         if result.returncode != 0:
             raise WitnessError(f"successor build failed rc={result.returncode}")
