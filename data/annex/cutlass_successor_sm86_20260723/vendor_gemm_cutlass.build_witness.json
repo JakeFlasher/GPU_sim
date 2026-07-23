@@ -5,7 +5,7 @@
     "binary": {
       "bytes": 356424,
       "path": "workloads/simbench_bw/l1/vendor_gemm_cutlass/vendor_gemm_cutlass_run",
-      "sha256": "e9c3ccb9eca3495f4200598a7a3acf4c116bbc5ea2cd90618d4859c8d95a9f47"
+      "sha256": "267fed46c8b307a1c88afa7f463abea08c199bd1338e03aca0c5bcee4e08fb4b"
     },
     "control_bits": {
       "bytes": 874747,
@@ -48,7 +48,7 @@
     "no_cublas": {
       "elf": {
         "binary_bytes": 356424,
-        "binary_sha256": "e9c3ccb9eca3495f4200598a7a3acf4c116bbc5ea2cd90618d4859c8d95a9f47",
+        "binary_sha256": "267fed46c8b307a1c88afa7f463abea08c199bd1338e03aca0c5bcee4e08fb4b",
         "forbidden_dependency_count": 0,
         "forbidden_dynamic_symbol_count": 0,
         "needed_libraries": [
@@ -116,7 +116,7 @@
     "returncode": 0,
     "transcript_bytes": 8743,
     "transcript_path": "data/annex/cutlass_successor_sm86_20260723/vendor_gemm_cutlass.build.log",
-    "transcript_sha256": "116bbe3506e98282f6fd4b0ecbf1d8122f0f05913def7cea173a5e6006a6382e"
+    "transcript_sha256": "72832fc0398c0f7608283629c3d8a89a7aafe1440ee2eb9785ffb3cfe9c745c3"
   },
   "control_contract": {
     "all_records_decoded": true,
@@ -139,7 +139,7 @@
       "patch": 1
     }
   },
-  "generated_at_utc": "2026-07-23T13:39:12Z",
+  "generated_at_utc": "2026-07-23T13:53:27Z",
   "integrity": {
     "all_checks_pass": true,
     "frozen_base_unchanged": true,
@@ -228,10 +228,10 @@
     "reported_slug": "vendor_gemm_cutlass",
     "returncode": 0
   },
-  "source_commit": "a3666d7505531277cb873643ba0f2d276d902188",
+  "source_commit": "a31511f3a53c63f282dede8d59fdce0587952059",
   "source_inputs": {
     "files": {
-      "tools/local_labels/build_cutlass_successor_witness.py": "410c297cf02d2b1f9505a0322a7b06fc689210a9216e4ef12e61ed70c8b57342",
+      "tools/local_labels/build_cutlass_successor_witness.py": "c82b8da4df42a9696f89390875152b68a9feba553966cbb73adf91a5dae719d6",
       "tools/local_labels/verify_cutlass_successor_artifact.py": "8a692fb2cdfba684802b3e944ebadb71aa82a8a8db2de544e226ae883565885d",
       "workloads/simbench_bw/common.mk": "e5dea6d25c243455de5a84dbd715abfeb94c342b37e7f194eb117e80c1a48f9e",
       "workloads/simbench_bw/l1/vendor_gemm_cutlass/Makefile": "a4e8b371bb9f6b42c8cb57d1540d7e8a79d69251ab71c8cc342d082d10fc4d36",
@@ -240,7 +240,7 @@
       "workloads/simbench_bw/schemas/cutlass_successor_build_witness.schema.json": "5d75745494d7f31499836593561196d3ad550f44e2fd94cfc1f3bc508f248e85",
       "workloads/simbench_bw/shapes/vendor_gemm_cutlass.toml": "4b05b54ca7a869ad00ebdf56bf06f5dcd4069c6d30f6e32797e46c2b6588c169"
     },
-    "input_set_sha256": "1535a6764e9e189c90ff8ccf81b37eeb05386c932a5c058830e31e6a45b36179",
+    "input_set_sha256": "808af27d11c8d7b20222d46761b755f029d0a88d022a686ab5e718544a2b5ccc",
     "policy": "source_and_makefile_no_cublas_references"
   },
   "toolchain": {
@@ -289,5 +289,5 @@
     }
   },
   "witness_id": "sm86_cutlass_successor_build_witness_v1",
-  "witness_seal_sha256": "a7f8eda4a2af27cd702595ff7b50f4151165cb40cfffad07dbc1a875fb66271e"
+  "witness_seal_sha256": "93bbc05fdf89d599fa40fd0e4154c648b8c8b1e857f57769918cebd0429627f9"
 }

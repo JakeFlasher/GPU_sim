@@ -1,0 +1,293 @@
+{
+  "arch": "sm_86",
+  "artifact_id": "cutlass_sgemm_successor_sm86_v1",
+  "artifacts": {
+    "binary": {
+      "bytes": 339256,
+      "path": "workloads/simbench_bw/l1/vendor_sgemm_cutlass/vendor_sgemm_cutlass_run",
+      "sha256": "5cda6c5c467bc591468ec33929db14ca4b4d15978d9902051b7d51b43b5cb42f"
+    },
+    "control_bits": {
+      "bytes": 824244,
+      "command": [
+        "/home/jakeshea/GPU_simulator_rebase_0723/.venv/bin/python",
+        "tools/sass_control/emit_control_bits_sidecar.py",
+        "--binary",
+        "workloads/simbench_bw/l1/vendor_sgemm_cutlass/vendor_sgemm_cutlass_run",
+        "--arch",
+        "sm_86",
+        "--out",
+        "data/annex/cutlass_sgemm_successor_sm86_20260723/vendor_sgemm_cutlass.control_bits.json",
+        "--toolkit-bindir",
+        "/usr/local/cuda-13.2/bin"
+      ],
+      "command_stderr_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "command_stdout_sha256": "e5cd826ecc4be2ba3f14a79e76d0582874d6c0fd213719909c0c8e28e4f23e56",
+      "decoded_instructions": 2328,
+      "function_count": 1,
+      "path": "data/annex/cutlass_sgemm_successor_sm86_20260723/vendor_sgemm_cutlass.control_bits.json",
+      "sha256": "de3d0b6a75ac56858abee6563760a79e8568aeb6238fa0bfec69e910e5bf2d74",
+      "toolkit_version": "V13.2",
+      "unknown_encoding": 0
+    },
+    "cubin_inventory": {
+      "command": [
+        "/usr/local/cuda-13.2/bin/cuobjdump",
+        "--list-elf",
+        "workloads/simbench_bw/l1/vendor_sgemm_cutlass/vendor_sgemm_cutlass_run"
+      ],
+      "cubins": [
+        "vendor_sgemm_cutlass-main.sm_86.cubin",
+        "vendor_sgemm_cutlass.sm_86.cubin",
+        "main.sm_86.cubin"
+      ],
+      "sm86_cubin_present": true,
+      "transcript_bytes": 133,
+      "transcript_sha256": "66821ce535108162ad6ee57ed6b387486ebae9ec438be91b702ab06e52765f17"
+    },
+    "no_cublas": {
+      "elf": {
+        "binary_bytes": 339256,
+        "binary_sha256": "5cda6c5c467bc591468ec33929db14ca4b4d15978d9902051b7d51b43b5cb42f",
+        "forbidden_dependency_count": 0,
+        "forbidden_dynamic_symbol_count": 0,
+        "needed_libraries": [
+          "libc.so.6",
+          "libcudart.so.13",
+          "libgcc_s.so.1",
+          "libm.so.6",
+          "libstdc++.so.6"
+        ],
+        "readelf_dynamic_bytes": 1681,
+        "readelf_dynamic_sha256": "d325add1946894d3baeba5f134eee690b57dbe29c1d82ff93025dec4959ab581",
+        "readelf_dynamic_symbols_bytes": 4229,
+        "readelf_dynamic_symbols_sha256": "6241bc75c28c4540283013cccaa1c9c8010277d4d4dbaac784126b9712b4c64a"
+      },
+      "pass": true,
+      "source": {
+        "files": {
+          "workloads/simbench_bw/common.mk": "e5dea6d25c243455de5a84dbd715abfeb94c342b37e7f194eb117e80c1a48f9e",
+          "workloads/simbench_bw/l1/vendor_sgemm_cutlass/Makefile": "d41f7b04963aba1939142bd7fc92eb59c87fb172f5242bdb6cbdb93f2dc63e28",
+          "workloads/simbench_bw/l1/vendor_sgemm_cutlass/main.cu": "e92e4421dce4336731b3db4035d652a03fd3bbaff5350961aeaafe8ecf4ffe65",
+          "workloads/simbench_bw/l1/vendor_sgemm_cutlass/vendor_sgemm_cutlass.cu": "5bdc2e9ec4e923fb9f59707b041b91a2ac17bdc382341e8ed8e55892539a33e9",
+          "workloads/simbench_bw/shapes/vendor_sgemm_cutlass.toml": "3cef3b1c3d2653f699d176c4e7743929addc0a0dd4f5f8b06dafaa810edf5da7"
+        },
+        "forbidden_library_policy": "reject_cublas_cublaslt_cublasxt_source_and_link_references",
+        "input_set_sha256": "006fcc399f03088a944641184e6c4a901f27d3dc65e742cddfb8c67cba1bf081"
+      }
+    },
+    "sass": {
+      "bytes": 528157,
+      "command": [
+        "/usr/local/cuda-13.2/bin/cuobjdump",
+        "--dump-sass",
+        "workloads/simbench_bw/l1/vendor_sgemm_cutlass/vendor_sgemm_cutlass_run"
+      ],
+      "path": "data/annex/cutlass_sgemm_successor_sm86_20260723/vendor_sgemm_cutlass.sass",
+      "sha256": "942fbf81984d9b80508a4a0a318baead9b890b7c3f12bb1e6f05bd8fe627395d"
+    }
+  },
+  "base_frozen_v1": {
+    "authority_path": "data/local_labels/campaign/capture_roster_authority_sm86.json",
+    "authority_sha256": "d02c817091b0a9f06c2106c0987c59a481910afcc3b78ab1de7a7d5bd5a6b4b4",
+    "base_authority_cell_sha256": "328127e1ea186daea64cbc09527c954c5ab6bdb3453e8c38df0fd0122bcd294a",
+    "base_disposition": "runnable",
+    "base_slug": "vendor_sgemm_cublas",
+    "claim_policy": "none_additive_supplement_only",
+    "matrix_file_sha256": "af29d72e955cf42e281036190f2d55d72af0af92a632c78c8d159073a072fb0e",
+    "matrix_path": "data/local_labels/campaign/sm86_reference_capture_matrix.json",
+    "matrix_seal_sha256": "6376da9721c75bb9299e84a9d11bf607bc21f4cbaa30da25b672c86f6757a5e1",
+    "matrix_source_commit": "124ce358733f97ba6e0af808d10ab69ffe4d5a78",
+    "relation": "evaluation_successor_no_relabel"
+  },
+  "build": {
+    "command": [
+      "make",
+      "-B",
+      "-C",
+      "workloads/simbench_bw/l1/vendor_sgemm_cutlass",
+      "run-bin",
+      "NVCC=/usr/local/cuda-13.2/bin/nvcc",
+      "NVCC_CCBIN=/usr/bin/g++-14",
+      "CUOBJDUMP=/usr/local/cuda-13.2/bin/cuobjdump",
+      "CUTLASS_DIR=/home/jakeshea/GPU_simulator_rebase_0723/third_party/cutlass"
+    ],
+    "executed": true,
+    "returncode": 0,
+    "transcript_bytes": 8711,
+    "transcript_path": "data/annex/cutlass_sgemm_successor_sm86_20260723/vendor_sgemm_cutlass.build.log",
+    "transcript_sha256": "02508f0ab93e98ff6038b2140d9430787ecd9b425650bf2eb7de4262742ec6b5"
+  },
+  "control_contract": {
+    "all_records_decoded": true,
+    "code_arch": "sm_86",
+    "execution_arch": "sm_86",
+    "function_count": 1,
+    "hardware_capture_status": "not_run_build_witness_only",
+    "policy": "direct_executable"
+  },
+  "cutlass_provenance": {
+    "path": "third_party/cutlass.provenance.json",
+    "scoped_digest": "ad131382834231e4076b50c8fdf8f7783504fe83aac53982dab353be9908e113",
+    "sha256": "a0a1f173cd899237ae2485eda4318029e6c67674eab2bd1685eee1fa92a2e6f8",
+    "upstream_commit": "e05f953a5b3d38adc240df2ff928e0421c2abba3",
+    "upstream_tag": "v4.6.1",
+    "upstream_tree": "0d3dd31da2e1ccc8ab15047a2edd9ebf5d98218b",
+    "version": {
+      "major": 4,
+      "minor": 6,
+      "patch": 1
+    }
+  },
+  "generated_at_utc": "2026-07-23T00:00:00Z",
+  "integrity": {
+    "all_checks_pass": true,
+    "frozen_base_unchanged": true,
+    "row_count": 1,
+    "source_commit_inputs_match": true,
+    "unique_slugs": true
+  },
+  "live_cutlass_inputs": {
+    "build_subdirectories": [
+      "include",
+      "tools/util/include"
+    ],
+    "root": "third_party/cutlass",
+    "tree_hash": "5c8afcd3e4e8ebc379cbeb73a58354a948eb4e222a57058f7fd5bffcf8b4f3a8"
+  },
+  "pass": true,
+  "schema_version": 1,
+  "shape_authority": {
+    "actual_args": [
+      "--m",
+      "32",
+      "--n",
+      "32",
+      "--k",
+      "32",
+      "--seed",
+      "42",
+      "--shape-point",
+      "trace_00"
+    ],
+    "path": "workloads/simbench_bw/shapes/vendor_sgemm_cutlass.toml",
+    "sha256": "3cef3b1c3d2653f699d176c4e7743929addc0a0dd4f5f8b06dafaa810edf5da7",
+    "shape_contract": "trace_shape_is_actual_direct_executable_launch",
+    "shape_role": "trace",
+    "slug": "vendor_sgemm_cutlass",
+    "trace_shape": {
+      "axes": {
+        "k": 32,
+        "m": 32,
+        "n": 32
+      },
+      "estimator_source": "static",
+      "launch_config": {
+        "block": [
+          64,
+          1,
+          1
+        ],
+        "grid": [
+          2,
+          2,
+          1
+        ]
+      },
+      "name": "trace_00",
+      "predicted_bytes": 5242880
+    },
+    "trace_shape_sha256": "ddd4342c2170c8f959f42d8e1ccf4d385e27d6b8e90c0c0c3bb4fa5774463dc5"
+  },
+  "sku": "rtx_3090_ti",
+  "smoke": {
+    "command": [
+      "./vendor_sgemm_cutlass_run",
+      "--m",
+      "32",
+      "--n",
+      "32",
+      "--k",
+      "32",
+      "--seed",
+      "42",
+      "--shape-point",
+      "trace_00"
+    ],
+    "contract_ok": true,
+    "output_bytes": 13098,
+    "output_sha256": "2f4685bc60e933a967a4b5d66fa81dcda166ae9bc55392d5640a98b933232d63",
+    "reported_shape_axes": {
+      "k": 32,
+      "m": 32,
+      "n": 32
+    },
+    "reported_shape_point": "trace_00",
+    "reported_shape_role": "trace",
+    "reported_shape_set": "successor_shapes",
+    "reported_slug": "vendor_sgemm_cutlass",
+    "returncode": 0
+  },
+  "source_commit": "b1df933f9ce5d765c713cbed3f12e58d7990d598",
+  "source_inputs": {
+    "files": {
+      "tools/local_labels/build_cutlass_sgemm_successor_witness.py": "8d7e6b0f6730f1abac55affc764bbcf94c9092cbc3b2fd7ded9f934f33b650f7",
+      "tools/local_labels/verify_cutlass_successor_artifact.py": "8a692fb2cdfba684802b3e944ebadb71aa82a8a8db2de544e226ae883565885d",
+      "workloads/simbench_bw/common.mk": "e5dea6d25c243455de5a84dbd715abfeb94c342b37e7f194eb117e80c1a48f9e",
+      "workloads/simbench_bw/l1/vendor_sgemm_cutlass/Makefile": "d41f7b04963aba1939142bd7fc92eb59c87fb172f5242bdb6cbdb93f2dc63e28",
+      "workloads/simbench_bw/l1/vendor_sgemm_cutlass/main.cu": "e92e4421dce4336731b3db4035d652a03fd3bbaff5350961aeaafe8ecf4ffe65",
+      "workloads/simbench_bw/l1/vendor_sgemm_cutlass/vendor_sgemm_cutlass.cu": "5bdc2e9ec4e923fb9f59707b041b91a2ac17bdc382341e8ed8e55892539a33e9",
+      "workloads/simbench_bw/schemas/cutlass_sgemm_successor_build_witness.schema.json": "297cbc149f6adaa2bf936ffa98f373daed71495cb47d9e632c2d4e54a5af5735",
+      "workloads/simbench_bw/shapes/vendor_sgemm_cutlass.toml": "3cef3b1c3d2653f699d176c4e7743929addc0a0dd4f5f8b06dafaa810edf5da7"
+    },
+    "input_set_sha256": "0c95c92514e1b7257e4f80d8522640863f319300149dc365dc106290c900fecb",
+    "policy": "source_and_makefile_no_cublas_references"
+  },
+  "toolchain": {
+    "cuobjdump": {
+      "path": "/usr/local/cuda-13.2/bin/cuobjdump",
+      "sha256": "903c5e1324669c1222b13ede0fc7226f48f7db355669f2912f0236031c56e1bf",
+      "version_returncode": 0,
+      "version_stderr": "",
+      "version_stdout": "cuobjdump: NVIDIA (R) fat binary listing tool\nCopyright (c) 2005-2026 NVIDIA Corporation\nBuilt on Mon_Mar_02_09:52:23_PM_PST_2026\nCuda compilation tools, release 13.2, V13.2.51\nBuild cuda_13.2.r13.2/compiler.37434383_0\n"
+    },
+    "cutlass_dir": "/home/jakeshea/GPU_simulator_rebase_0723/third_party/cutlass",
+    "host_cxx": {
+      "path": "/usr/bin/g++-14",
+      "sha256": "9002e36c8e8a152d2108fb7b687f4301d3f0de2b35ed0d6aa0a24293bbe36603",
+      "version_returncode": 0,
+      "version_stderr": "",
+      "version_stdout": "g++-14 (GCC) 14.3.1 20260214\nCopyright (C) 2024 Free Software Foundation, Inc.\nThis is free software; see the source for copying conditions.  There is NO\nwarranty; not even for MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.\n\n"
+    },
+    "make": {
+      "path": "/usr/bin/make",
+      "sha256": "6f36064c643168dbe57adddebc60c63702f7b5cdf23739705d23c87fe5e8dce3",
+      "version_returncode": 0,
+      "version_stderr": "",
+      "version_stdout": "GNU Make 4.4.1\nBuilt for x86_64-pc-linux-gnu\nCopyright (C) 1988-2023 Free Software Foundation, Inc.\nLicense GPLv3+: GNU GPL version 3 or later <https://gnu.org/licenses/gpl.html>\nThis is free software: you are free to change and redistribute it.\nThere is NO WARRANTY, to the extent permitted by law.\n"
+    },
+    "nvcc": {
+      "path": "/usr/local/cuda-13.2/bin/nvcc",
+      "sha256": "1b32c567e18698a94d78f18e571d7a213cfb461a7422505120e88748d5150136",
+      "version_returncode": 0,
+      "version_stderr": "",
+      "version_stdout": "nvcc: NVIDIA (R) Cuda compiler driver\nCopyright (c) 2005-2026 NVIDIA Corporation\nBuilt on Mon_Mar_02_09:52:23_PM_PST_2026\nCuda compilation tools, release 13.2, V13.2.51\nBuild cuda_13.2.r13.2/compiler.37434383_0\n"
+    },
+    "python": {
+      "path": "/home/jakeshea/.local/share/uv/python/cpython-3.12.12-linux-x86_64-gnu/bin/python3.12",
+      "sha256": "3008abbb48c1e2b0fa3072ae72334b9b352e1346ea3a20d34126a455f0c7bc66",
+      "version_returncode": 0,
+      "version_stderr": "",
+      "version_stdout": "Python 3.12.12\n"
+    },
+    "readelf": {
+      "path": "/usr/bin/readelf",
+      "sha256": "a94bb4654b8e8fab145b879c42fada9db89d71b15b4e2f7b4c65a5ca5f4d6c89",
+      "version_returncode": 0,
+      "version_stderr": "",
+      "version_stdout": "GNU readelf (GNU Binutils) 2.46.1\nCopyright (C) 2026 Free Software Foundation, Inc.\nThis program is free software; you may redistribute it under the terms of\nthe GNU General Public License version 3 or (at your option) any later version.\nThis program has absolutely no warranty.\n"
+    }
+  },
+  "witness_id": "sm86_sgemm_cutlass_successor_build_witness_v1",
+  "witness_seal_sha256": "092d0a8c29d2c278262e86bb90e2c6b1a02fa0bcd70ab717e258d3bfca62afcc"
+}
