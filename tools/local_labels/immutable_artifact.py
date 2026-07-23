@@ -236,7 +236,11 @@ def strict_json_loads(payload: bytes, *, label: str = "JSON") -> Any:
     return value
 
 
-def _snapshot_fields(metadata: os.stat_result) -> tuple[int, int, int, int, int, int, int]:
+_Snapshot = tuple[int, int, int, int, int, int, int]
+_TreeSnapshot = tuple[dict[str, _Snapshot], dict[str, _Snapshot]]
+
+
+def _snapshot_fields(metadata: os.stat_result) -> _Snapshot:
     return (
         metadata.st_dev,
         metadata.st_ino,
@@ -1372,13 +1376,10 @@ def _material_map(files: Iterable[ImmutableFile]) -> dict[str, ImmutableFile]:
 
 def _snapshot_tree_descriptor(
     root_descriptor: int,
-) -> tuple[
-    dict[str, tuple[int, int, int, int, int, int, int]],
-    dict[str, tuple[int, int, int, int, int, int, int]],
-]:
+) -> _TreeSnapshot:
     """Inventory one tree while retaining only an O(depth) descriptor stack."""
-    files: dict[str, tuple[int, int, int, int, int, int, int]] = {}
-    directories: dict[str, tuple[int, int, int, int, int, int, int]] = {}
+    files: dict[str, _Snapshot] = {}
+    directories: dict[str, _Snapshot] = {}
     pending: list[tuple[str, ...]] = [()]
     while pending:
         parts = pending.pop()
@@ -1417,7 +1418,7 @@ def _verify_snapshot_closure_at(
     expected: dict[str, ImmutableFile],
     *,
     require_readonly_directories: bool,
-) -> None:
+) -> _TreeSnapshot:
     """Verify large trees with one hash and bounded simultaneous descriptors."""
     try:
         soft_limit, _hard_limit = resource.getrlimit(resource.RLIMIT_NOFILE)
@@ -1442,7 +1443,7 @@ def _verify_snapshot_closure_at(
             raise ImmutableArtifactError(
                 f"finalized publication directory is writable: {relative_directory}"
             )
-    hashed: dict[str, tuple[int, int, int, int, int, int, int]] = {}
+    hashed: dict[str, _Snapshot] = {}
     for relative_path, file in expected.items():
         pinned = _open_relative_regular_at(root_descriptor, relative_path)
         try:
@@ -1497,6 +1498,7 @@ def _verify_snapshot_closure_at(
     root_after = _snapshot_fields(os.fstat(root_descriptor))
     if root_after != root_before:
         raise ImmutableArtifactError("publication root changed during verification")
+    return second_files, second_directories
 
 
 def _verify_published_files_at(
@@ -1504,7 +1506,7 @@ def _verify_published_files_at(
     files: Iterable[ImmutableFile],
     *,
     require_readonly_directories: bool = True,
-) -> None:
+) -> _TreeSnapshot:
     expected = _material_map(files)
     expected_directories = _expected_directories(expected)
     try:
@@ -1516,12 +1518,11 @@ def _verify_published_files_at(
     if soft_limit is not None and estimated_retained + 32 >= soft_limit:
         use_snapshot_closure = True
     if use_snapshot_closure:
-        _verify_snapshot_closure_at(
+        return _verify_snapshot_closure_at(
             root_descriptor,
             expected,
             require_readonly_directories=require_readonly_directories,
         )
-        return
     root_before = os.fstat(root_descriptor)
     if not stat.S_ISDIR(root_before.st_mode):
         raise ImmutableArtifactError("publication root descriptor is not a directory")
@@ -1544,15 +1545,11 @@ def _verify_published_files_at(
     if require_readonly_directories and root_before.st_mode & 0o222:
         raise ImmutableArtifactError("finalized publication root is writable")
     _, observed_directories = require_inventory()
-    pinned_directories: list[
-        tuple[str, int, tuple[int, int, int, int, int, int, int]]
-    ] = []
+    pinned_directories: list[tuple[str, int, _Snapshot]] = []
     # Retain one descriptor per file, but not one complete ancestor chain per
     # file. This keeps verification below ordinary RLIMIT_NOFILE values while
     # still pinning every hashed inode through closure.
-    pinned_files: list[
-        tuple[str, ImmutableFile, _PinnedRegular, tuple[int, int, int, int, int, int, int]]
-    ] = []
+    pinned_files: list[tuple[str, ImmutableFile, _PinnedRegular, _Snapshot]] = []
     try:
         for relative_directory in sorted(observed_directories):
             directory = _open_pinned_relative_directory(
@@ -1684,6 +1681,35 @@ def _verify_published_files_at(
         raise ImmutableArtifactError("finalized publication root became writable")
     if _snapshot_fields(root_after) != _snapshot_fields(root_before):
         raise ImmutableArtifactError("publication root changed during verification")
+    return (
+        {
+            relative_path: snapshot
+            for relative_path, _file, _pinned, snapshot in pinned_files
+        },
+        {
+            ".": _snapshot_fields(root_after),
+            **{
+                relative_directory: snapshot
+                for relative_directory, _descriptor, snapshot in pinned_directories
+            },
+        },
+    )
+
+
+def _verify_snapshot_against_at(
+    root_descriptor: int, baseline: _TreeSnapshot,
+) -> None:
+    """Close a verified tree after authorization without rehashing it."""
+    first = _snapshot_tree_descriptor(root_descriptor)
+    if first != baseline:
+        raise ImmutableArtifactError(
+            "immutable tree changed after authorization"
+        )
+    second = _snapshot_tree_descriptor(root_descriptor)
+    if second != first:
+        raise ImmutableArtifactError(
+            "immutable tree changed during authorization closure"
+        )
 
 
 def verify_published_files(
@@ -1734,10 +1760,14 @@ def _durability_proof_at(
     publication_root_descriptor: int,
     tree_root_descriptor: int,
     material: tuple[ImmutableFile, ...],
-) -> None:
+) -> _TreeSnapshot:
     """Prove a pre-existing winner was durably committed before acceptance."""
     expected = _material_map(material)
     expected_directories = _expected_directories(expected)
+    # Hash and close the exact tree before fsyncing the inodes that will be
+    # accepted.  The metadata baseline prevents a replacement between those
+    # operations from turning an unverified inode into a durable winner.
+    snapshot = _verify_published_files_at(tree_root_descriptor, material)
     for relative_path in sorted(expected):
         pinned = _open_relative_regular_at(
             tree_root_descriptor, relative_path,
@@ -1763,7 +1793,8 @@ def _durability_proof_at(
             directory.close()
     _fsync_or_fail(tree_root_descriptor, "winner tree root")
     _fsync_or_fail(publication_root_descriptor, "winner publication root")
-    _verify_published_files_at(tree_root_descriptor, material)
+    _verify_snapshot_against_at(tree_root_descriptor, snapshot)
+    return snapshot
 
 
 def _accept_exact_concurrent_winner(
@@ -1771,10 +1802,10 @@ def _accept_exact_concurrent_winner(
     stage_name: str,
     final_name: str,
     material: tuple[ImmutableFile, ...],
-) -> bool:
+) -> tuple[_TreeSnapshot, _PinnedDirectory] | None:
     final_mode = _entry_mode(root_descriptor, final_name)
     if final_mode is None:
-        return False
+        return None
     if _entry_mode(root_descriptor, stage_name) is not None:
         raise ImmutableArtifactError(
             "ambiguous final and deterministic staging directories coexist"
@@ -1784,17 +1815,18 @@ def _accept_exact_concurrent_winner(
     pinned_final = _open_pinned_relative_directory(
         root_descriptor, (final_name,)
     )
+    transferred = False
     try:
-        _durability_proof_at(root_descriptor, pinned_final.descriptor, material)
-        pinned_final.verify_path()
-        if _entry_mode(root_descriptor, stage_name) is not None:
-            raise ImmutableArtifactError(
-                "deterministic stage reappeared beside concurrent final winner"
-            )
-        pinned_final.verify_path()
-        return True
+        snapshot = _durability_proof_at(
+            root_descriptor, pinned_final.descriptor, material
+        )
+        # The caller owns the pinned winner through authorization and final
+        # closure; do not reopen the name after this transfer.
+        transferred = True
+        return snapshot, pinned_final
     finally:
-        pinned_final.close()
+        if not transferred:
+            pinned_final.close()
 
 
 def publish_directory(
@@ -1831,27 +1863,25 @@ def publish_directory(
         accepted = _accept_exact_concurrent_winner(
             pinned_root.descriptor, stage_name, final_name, material
         )
-        if accepted:
-            # A concurrent winner may have been created after the first
-            # authorization callback. Re-authorize immediately before every
-            # successful acceptance, including idempotent winner reuse.
+        if accepted is None:
+            return False
+        winner_snapshot, winner = accepted
+        try:
+            # Retain the winner descriptor across authorization so a same-byte
+            # replacement cannot be accepted as a freshly verified tree.
             authorize()
-            winner = _open_pinned_relative_directory(
-                pinned_root.descriptor, (final_name,)
-            )
-            try:
-                _verify_published_files_at(winner.descriptor, material)
-                if _entry_mode(pinned_root.descriptor, stage_name) is not None:
-                    raise ImmutableArtifactError(
-                        "deterministic stage reappeared after winner closure"
-                    )
-                _verify_named_directory(
-                    pinned_root.descriptor, final_name, winner.descriptor
+            _verify_snapshot_against_at(winner.descriptor, winner_snapshot)
+            if _entry_mode(pinned_root.descriptor, stage_name) is not None:
+                raise ImmutableArtifactError(
+                    "deterministic stage reappeared after winner closure"
                 )
-                pinned_root.verify_path()
-            finally:
-                winner.close()
-        return accepted
+            _verify_named_directory(
+                pinned_root.descriptor, final_name, winner.descriptor
+            )
+            pinned_root.verify_path()
+        finally:
+            winner.close()
+        return True
 
     try:
         # The deterministic stage inode is the per-final-name ownership lock;
@@ -1951,14 +1981,14 @@ def publish_directory(
                 directory.close()
         os.fchmod(pinned_stage.descriptor, 0o555)
         _fsync_or_fail(pinned_stage.descriptor, "staged tree root")
-        _verify_published_files_at(pinned_stage.descriptor, material)
+        staged_snapshot = _verify_published_files_at(pinned_stage.descriptor, material)
         pinned_stage.verify_path()
 
         authorize()
         # Authorization may inspect arbitrary external state and can widen the
         # commit window.  Reclose the exact staged tree after the callback and
-        # immediately before the namespace commit.
-        _verify_published_files_at(pinned_stage.descriptor, material)
+        # immediately before the namespace commit without rehashing it.
+        _verify_snapshot_against_at(pinned_stage.descriptor, staged_snapshot)
         pinned_stage.verify_path()
         if _entry_mode(root_descriptor, final_name) is not None:
             raise ImmutableArtifactError(
@@ -1990,21 +2020,21 @@ def publish_directory(
         # Rehash the committed inode tree.  A detected race is a typed failure;
         # the committed directory is deliberately preserved as possible unique
         # evidence rather than being rolled back or overwritten.
-        _verify_published_files_at(pinned_stage.descriptor, material)
-        _verify_named_directory(
-            root_descriptor, final_name, pinned_stage.descriptor
+        committed_snapshot = _verify_published_files_at(
+            pinned_stage.descriptor, material
         )
-        pinned_root.verify_path()
         authorize()
         if _entry_mode(root_descriptor, stage_name) is not None:
             raise ImmutableArtifactError(
                 "deterministic stage remained after immutable publication"
             )
         # The authorization callback is an external observation boundary.  It
-        # may inspect or mutate same-UID state, so close the committed tree
-        # again after the callback rather than relying on the pre-callback
-        # hash.  Preserve the committed inode as evidence if this check fails.
-        _verify_published_files_at(pinned_stage.descriptor, material)
+        # may inspect or mutate same-UID state, so close the committed inode
+        # tree against the pre-authorization snapshot without rehashing it.
+        # Preserve the committed directory as evidence if this check fails.
+        _verify_snapshot_against_at(
+            pinned_stage.descriptor, committed_snapshot
+        )
         if _entry_mode(root_descriptor, stage_name) is not None:
             raise ImmutableArtifactError(
                 "deterministic stage reappeared after publication closure"
