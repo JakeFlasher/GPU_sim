@@ -1,0 +1,25 @@
+schema_version = 1
+slug = "vendor_sgemm_cutlass"
+
+# Independent successor shape contract. The trace point is a bounded direct
+# executable launch; it does not inherit a vendor-library timing alias or
+# matrix capture override.
+[[timing_shapes]]
+name = "timing_00"
+axes = { m = 4096, n = 4096, k = 4096 }
+launch_config = { grid = [32, 32, 1], block = [128, 1, 1] }
+warm_up_iters = 5
+repeat_iters = 30
+
+[[trace_shapes]]
+name = "trace_00"
+axes = { m = 32, n = 32, k = 32 }
+launch_config = { grid = [2, 2, 1], block = [64, 1, 1] }
+predicted_bytes = 5242880
+estimator_source = "static"
+
+[[correctness_shapes]]
+name = "correctness_00"
+axes = { m = 8, n = 8, k = 8 }
+launch_config = { grid = [1, 1, 1], block = [32, 1, 1] }
+digest_kind = "full_tensor"
