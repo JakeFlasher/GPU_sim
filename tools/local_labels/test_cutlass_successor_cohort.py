@@ -69,6 +69,7 @@ def test_source_input_set_closes_successor_contract_files():
     expected = {
         cohort.GENERATOR_REL.as_posix(),
         cohort.GUARD_REL.as_posix(),
+        "tools/local_labels/cutlass_successor_reference.py",
         cohort.VALIDATION_SCHEMA_REL.as_posix(),
         cohort.BUDGETS_SCHEMA_REL.as_posix(),
         cohort.ROSTER_SCHEMA_REL.as_posix(),

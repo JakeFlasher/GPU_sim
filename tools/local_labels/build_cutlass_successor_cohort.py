@@ -13,7 +13,6 @@ import json
 import math
 import re
 import statistics
-import struct
 import subprocess
 import sys
 import time
@@ -33,6 +32,7 @@ from tools.local_labels import (  # noqa: E402
     build_cutlass_strided_batched_successor_witness as batched_witness,
     build_cutlass_successor_witness as bf16_witness,
 )
+from tools.local_labels.cutlass_successor_reference import reference_matrix  # noqa: E402
 
 
 COHORT_ID = "cutlass_successor_sm86_20260723_v1"
@@ -249,6 +249,7 @@ def _source_inputs(source_commit: str) -> dict[str, Any]:
     paths = [
         GENERATOR_REL,
         GUARD_REL,
+        Path("tools/local_labels/cutlass_successor_reference.py"),
         VALIDATION_SCHEMA_REL,
         BUDGETS_SCHEMA_REL,
         ROSTER_SCHEMA_REL,
@@ -368,43 +369,15 @@ def _load_witness(case: Case) -> dict[str, Any]:
     return document
 
 
-def _next_u32(state: int) -> int:
-    return (state * 1103515245 + 12345) & 0xFFFFFFFF
-
-
-def _sample_values(count: int, seed: int) -> np.ndarray:
-    state = (seed * 2654435761 + 1) & 0xFFFFFFFF
-    values = np.empty(count, dtype=np.float32)
-    for index in range(count):
-        state = _next_u32(state)
-        values[index] = np.float32(-0.5 + state / 4294967296.0)
-    return values
-
-
-def _round_bf16(value: float) -> float:
-    bits = struct.unpack("<I", struct.pack("<f", np.float32(value)))[0]
-    rounded = (bits + 0x7FFF + ((bits >> 16) & 1)) & 0xFFFFFFFF
-    return struct.unpack("<f", struct.pack("<I", rounded & 0xFFFF0000))[0]
-
-
 def _reference(case: Case, m: int, n: int, k: int, seed: int) -> np.ndarray:
-    a = _sample_values(m * k * case.batch_count, seed).reshape(
-        case.batch_count, m, k
+    return reference_matrix(
+        dtype_contract=case.dtype,
+        batch_count=case.batch_count,
+        m=m,
+        n=n,
+        k=k,
+        seed=seed,
     )
-    b_values = _sample_values(k * n * case.batch_count, seed + 1)
-    b = np.empty((case.batch_count, k, n), dtype=np.float32)
-    index = 0
-    for batch in range(case.batch_count):
-        for row in range(k):
-            for column in range(n):
-                value = float(b_values[index])
-                index += 1
-                if case.dtype.startswith("bf16"):
-                    value = _round_bf16(value)
-                b[batch, row, column] = np.float32(value)
-    if case.dtype.startswith("bf16"):
-        a = np.array([_round_bf16(float(value)) for value in a.flat], dtype=np.float32).reshape(a.shape)
-    return np.matmul(a, b)
 
 
 def _runtime_environment(case: Case, parent: Path) -> dict[str, Any]:
@@ -583,8 +556,8 @@ def _run_case(case: Case, witness: dict[str, Any]) -> dict[str, Any]:
             "reference_path": _relative(reference_path),
             "reference_sha256": _sha256_bytes(reference_bytes),
             "reference_bytes": len(reference_bytes),
-            "input_generator": "tools/local_labels/build_cutlass_successor_cohort.py:_sample_values",
-            "input_generator_sha256": _sha256_file(Path(__file__)),
+            "input_generator": "tools/local_labels/cutlass_successor_reference.py:reference_matrix",
+            "input_generator_sha256": _sha256_file(ROOT / "tools/local_labels/cutlass_successor_reference.py"),
             "dtype_contract": case.dtype,
             "layout_contract": "row_major_a_column_major_b_row_major_c_d",
             "seed": 42,
@@ -613,7 +586,7 @@ def _run_case(case: Case, witness: dict[str, Any]) -> dict[str, Any]:
             "dispersion_rule": "host_wall_time_population_cv_percent_diagnostic",
             "dispersion_cv_percent": wall_cv_pct,
             "dispersion_threshold_percent": 25.0,
-        },
+            "timing_dispersion_status": "within_threshold" if wall_cv_pct <= 25.0 else "above_threshold",        },
         "runtime_capability": {
             "status": "pass_diagnostic",
             "arch": ARCH,

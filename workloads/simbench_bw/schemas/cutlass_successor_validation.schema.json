@@ -259,7 +259,7 @@
     "repeatability": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["status", "runs", "repeat_indices", "stdout_sha256", "run_artifacts", "binary_sha256_consistent", "exact_bytes_equal", "dispersion_rule", "dispersion_cv_percent", "dispersion_threshold_percent"],
+      "required": ["status", "runs", "repeat_indices", "stdout_sha256", "run_artifacts", "binary_sha256_consistent", "exact_bytes_equal", "dispersion_rule", "dispersion_cv_percent", "dispersion_threshold_percent", "timing_dispersion_status"],
       "properties": {
         "status": {"const": "pass"},
         "runs": {"const": 5},
@@ -270,8 +270,8 @@
         "exact_bytes_equal": {"const": true},
         "dispersion_rule": {"const": "host_wall_time_population_cv_percent_diagnostic"},
         "dispersion_cv_percent": {"type": "number", "minimum": 0},
-        "dispersion_threshold_percent": {"const": 25.0}
-      }
+        "dispersion_threshold_percent": {"const": 25.0},
+        "timing_dispersion_status": {"enum": ["within_threshold", "above_threshold"]}      }
     },
     "runtime": {
       "type": "object",
