@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import copy
 import json
+import subprocess
 import sys
 from pathlib import Path
 
@@ -71,6 +72,144 @@ def test_canonical_matrix_uses_supported_frozen_validation_contract(
         registry_sha256=campaign.sha256_bytes(registry_payload),
         validation_mode="frozen_v1",
     ) == []
+
+
+def test_frozen_source_alias_resolves_exact_registry_and_sidecar_bytes() -> None:
+    cache = campaign.InputSnapshotCache()
+    aliases, alias_payload = campaign._load_frozen_source_alias(
+        repo_root=campaign.REPO_ROOT,
+        cache=cache,
+    )
+    assert campaign.sha256_bytes(alias_payload) == campaign.FROZEN_SOURCE_ALIAS_SHA256
+    expected = {
+        campaign.REGISTRY_PATH.relative_to(campaign.REPO_ROOT).as_posix(): (
+            campaign.REGISTRY_PATH
+        ),
+        campaign.SIDECAR_SCHEMA_PATH.relative_to(campaign.REPO_ROOT).as_posix(): (
+            campaign.SIDECAR_SCHEMA_PATH
+        ),
+    }
+    assert set(aliases) == set(expected)
+    for relative, path in expected.items():
+        payload = campaign._frozen_source_payload(
+            campaign.REPO_ROOT,
+            campaign.FROZEN_V1_SOURCE_COMMIT,
+            relative,
+            role=f"test frozen source {relative}",
+            cache=cache,
+        )
+        assert payload == path.read_bytes()
+        assert campaign.sha256_bytes(payload) == aliases[relative]["sha256"]
+        assert len(payload) == aliases[relative]["size_bytes"]
+
+
+def test_matrix_authority_sources_do_not_invoke_git(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def reject_subprocess(*_args, **_kwargs):  # noqa: ANN002,ANN003
+        raise AssertionError("historical Git lookup attempted")
+
+    monkeypatch.setattr(subprocess, "run", reject_subprocess)
+    matrix = json.loads(campaign.MATRIX_PATH.read_text(encoding="utf-8"))
+    sources = campaign._load_matrix_authority_sources(
+        matrix,
+        repo_root=campaign.REPO_ROOT,
+        cache=campaign.InputSnapshotCache(),
+    )
+    assert sources["frozen_metric_registry"]["sha256"] == (
+        matrix["input_pins"]["metric_registry"]["sha256"]
+    )
+    assert sources["frozen_sidecar_schema"]["sha256"] == (
+        "49b436d60535c4e213d3841d65b2e6f1d58b1c45d132b5ee20b06dc5ed09ae94"
+    )
+
+
+def test_frozen_source_alias_rejects_manifest_hash_drift(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(campaign, "FROZEN_SOURCE_ALIAS_SHA256", "0" * 64)
+    with pytest.raises(campaign.M6Error) as error:
+        campaign._load_frozen_source_alias(
+            repo_root=campaign.REPO_ROOT,
+            cache=campaign.InputSnapshotCache(),
+        )
+    assert error.value.code == "M6_SOURCE_IDENTITY_MISMATCH"
+
+
+def test_frozen_source_alias_rejects_unknown_version(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_loads = campaign.loads_strict
+
+    def load_version_drift(payload: bytes, *, role: str):
+        value = original_loads(payload, role=role)
+        if role == "frozen source alias table":
+            value = copy.deepcopy(value)
+            value["schema_version"] = 2
+        return value
+
+    monkeypatch.setattr(campaign, "loads_strict", load_version_drift)
+    with pytest.raises(campaign.M6Error) as error:
+        campaign._load_frozen_source_alias(
+            repo_root=campaign.REPO_ROOT,
+            cache=campaign.InputSnapshotCache(),
+        )
+    assert error.value.code == "M6_SOURCE_ALIAS_VERSION"
+
+
+def test_frozen_source_alias_rejects_payload_identity_drift(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_load = campaign._load_frozen_source_alias
+
+    def load_bad_identity(*, repo_root: Path, cache=None):
+        aliases, payload = original_load(repo_root=repo_root, cache=cache)
+        aliases = copy.deepcopy(aliases)
+        registry = campaign.REGISTRY_PATH.relative_to(campaign.REPO_ROOT).as_posix()
+        aliases[registry]["sha256"] = "0" * 64
+        return aliases, payload
+
+    monkeypatch.setattr(campaign, "_load_frozen_source_alias", load_bad_identity)
+    with pytest.raises(campaign.M6Error) as error:
+        campaign._frozen_source_payload(
+            campaign.REPO_ROOT,
+            campaign.FROZEN_V1_SOURCE_COMMIT,
+            campaign.REGISTRY_PATH.relative_to(campaign.REPO_ROOT).as_posix(),
+            role="drifted frozen registry",
+            cache=campaign.InputSnapshotCache(),
+        )
+    assert error.value.code == "M6_SOURCE_IDENTITY_MISMATCH"
+
+
+@pytest.mark.parametrize(
+    ("source_commit", "relative_path", "expected_code"),
+    [
+        (
+            "0" * 40,
+            "tools/local_labels/metric_registry.json",
+            "M6_SOURCE_ALIAS_COMMIT",
+        ),
+        (
+            campaign.FROZEN_V1_SOURCE_COMMIT,
+            "tools/local_labels/metric_registry.successor.json",
+            "M6_SOURCE_ALIAS_MISSING",
+        ),
+    ],
+)
+def test_frozen_source_alias_rejects_unadmitted_fallbacks(
+    source_commit: str,
+    relative_path: str,
+    expected_code: str,
+) -> None:
+    with pytest.raises(campaign.M6Error) as error:
+        campaign._frozen_source_payload(
+            campaign.REPO_ROOT,
+            source_commit,
+            relative_path,
+            role="unadmitted frozen source",
+            cache=campaign.InputSnapshotCache(),
+        )
+    assert error.value.code == expected_code
 
 
 def _schema(kind: str) -> dict:
@@ -630,7 +769,7 @@ def _artifact(path: Path, root: Path, kind: str) -> dict:
 
 
 def _m4_sidecar(matrix: dict, matrix_cell: dict, schedule_cell: dict) -> dict:
-    registry = json.loads(campaign._git_blob_bytes(
+    registry = json.loads(campaign._frozen_source_payload(
         campaign.REPO_ROOT,
         matrix["source_commit"],
         campaign.REGISTRY_PATH.relative_to(campaign.REPO_ROOT).as_posix(),
@@ -707,24 +846,6 @@ def _fake_m4_archive(
     monkeypatch: pytest.MonkeyPatch,
 ) -> tuple[dict, Path]:
     matrix = json.loads(campaign.MATRIX_PATH.read_text())
-    original_git_blob = campaign._git_blob_bytes
-
-    def fixture_git_blob(repo_root, source_commit, relative_path, *, role):
-        if (
-            relative_path == campaign.SIDECAR_SCHEMA_PATH.relative_to(
-                campaign.REPO_ROOT
-            ).as_posix()
-            and role in {
-                "source v5 sidecar schema",
-                "fixture source sidecar schema",
-            }
-        ):
-            return campaign.SIDECAR_SCHEMA_PATH.read_bytes()
-        return original_git_blob(
-            repo_root, source_commit, relative_path, role=role,
-        )
-
-    monkeypatch.setattr(campaign, "_git_blob_bytes", fixture_git_blob)
     matrix_cells = {
         (
             cell["identity"]["roster_source"],
@@ -817,7 +938,7 @@ def _fake_m4_archive(
                     observation_path, chunk_root, "ncu_launch_observation"
                 ),
             }
-            registry_payload = campaign._git_blob_bytes(
+            registry_payload = campaign._frozen_source_payload(
                 campaign.REPO_ROOT,
                 matrix["source_commit"],
                 campaign.REGISTRY_PATH.relative_to(
@@ -1106,7 +1227,7 @@ def test_complete_m4_receipt_is_rederived_from_verified_done_artifacts(
     assert len(receipt["cell_launch_identities"]) == 122
 
 
-def test_snapshot_source_binding_excludes_git_blob_authorities(
+def test_snapshot_source_binding_deduplicates_frozen_alias_payloads(
     schedule: dict,
 ) -> None:
     authorities = campaign._source_authority_rows(schedule)
@@ -1117,7 +1238,8 @@ def test_snapshot_source_binding_excludes_git_blob_authorities(
         )
         for key in ("frozen_metric_registry", "frozen_sidecar_schema")
     }
-    assert all((path, digest) not in frozen_pairs for path, digest, _size in authorities)
+    authority_pairs = [(path, digest) for path, digest, _size in authorities]
+    assert all(authority_pairs.count(pair) == 1 for pair in frozen_pairs)
     witness: list[dict] = []
     for relative, digest, size in authorities:
         path = campaign.REPO_ROOT / relative

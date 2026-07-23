@@ -136,6 +136,12 @@ tracked path, SHA-256 manifest membership, and a clean working-tree check.
 Historical absolute paths remain byte-exact in ledger rows and may resolve only
 through an authority-closed versioned alias table with mandatory hash equality.
 `evidence/path_aliases.v2.json` is active for its M1 scope.
+`data/local_labels/campaign/frozen_v1_source_aliases.v1.json` is the M6-local
+versioned authority for the unavailable
+`124ce358733f97ba6e0af808d10ab69ffe4d5a78` registry and sidecar objects; the
+`f74ac4e8750f970ab3bb5d7da54ec9db2df0f4ef0f5fb22b5f0f6f90898790ff`
+and requires exact canonical-file digest and size equality rather than falling
+back to ambient worktree bytes or Git object discovery.
 `evidence/path_aliases.v1.json` is retained but currently cites a missing ADR
 whose number is occupied by another decision, so its relocation chain is
 blocked pending an explicitly accepted versioned repair. POSIX mode `0444` is

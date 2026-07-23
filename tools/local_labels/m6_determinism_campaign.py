@@ -16,7 +16,6 @@ import math
 import os
 import stat
 import statistics
-import subprocess
 import sys
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
@@ -74,6 +73,14 @@ MATRIX_SCHEMA_PATH = (
 REGISTRY_PATH = REPO_ROOT / "tools/local_labels/metric_registry.json"
 PROBE_PATH = REPO_ROOT / "data/local_labels/ncu_metric_availability_probe_sm_86.json"
 SIDECAR_SCHEMA_PATH = REPO_ROOT / "workloads/simbench_bw/schemas/local_label_sidecar.schema.json"
+FROZEN_SOURCE_ALIAS_PATH = (
+    REPO_ROOT / "data/local_labels/campaign/frozen_v1_source_aliases.v1.json"
+)
+FROZEN_SOURCE_ALIAS_SHA256 = (
+    "f74ac4e8750f970ab3bb5d7da54ec9db2df0f4ef0f5fb22b5f0f6f90898790ff"
+)
+FROZEN_SOURCE_ALIAS_SCHEMA_VERSION = 1
+FROZEN_V1_SOURCE_COMMIT = "124ce358733f97ba6e0af808d10ab69ffe4d5a78"
 STATS_PATH = Path(__file__).resolve().with_name("m6_determinism_stats.py")
 IMMUTABLE_HELPER_PATH = Path(__file__).resolve().with_name("immutable_artifact.py")
 SCHEMA_DIR = REPO_ROOT / "workloads/simbench_bw/schemas"
@@ -650,45 +657,126 @@ def _resolve_repo_file(
     return payload
 
 
-def _git_blob_bytes(
-    repo_root: Path, source_commit: str, relative_path: str, *, role: str,
-) -> bytes:
-    if (
-        not isinstance(source_commit, str)
-        or len(source_commit) != 40
-        or any(character not in "0123456789abcdef" for character in source_commit)
-    ):
-        _fail("M6_GIT_BLOB_COMMIT", f"{role}: {source_commit!r}")
-    relative = _safe_relative(relative_path, role=role).as_posix()
-    environment = {
-        "HOME": "/nonexistent",
-        "PATH": os.environ.get("PATH", ""),
-        "LC_ALL": "C",
-        "LANG": "C",
-        "GIT_CONFIG_NOSYSTEM": "1",
-        "GIT_CONFIG_GLOBAL": "/dev/null",
-        "GIT_OPTIONAL_LOCKS": "0",
+def _load_frozen_source_alias(
+    *,
+    repo_root: Path,
+    cache: InputSnapshotCache | None = None,
+) -> tuple[dict[str, dict[str, Any]], bytes]:
+    """Load the admitted local alias table for frozen-v1 source payloads.
+
+    The historical Git object is unavailable in this checkout.  This table is
+    the only accepted relocation path: its own bytes are pinned, and every
+    entry independently pins the canonical regular file's bytes and size.
+    """
+    alias_relative = FROZEN_SOURCE_ALIAS_PATH.relative_to(REPO_ROOT)
+    alias_file = _canonical_repo_file(
+        repo_root / alias_relative,
+        FROZEN_SOURCE_ALIAS_PATH,
+        repo_root=repo_root,
+        role="frozen source alias table",
+    )
+    alias_payload = _read_regular_cached(
+        alias_file,
+        role="frozen source alias table",
+        cache=cache,
+        expected_sha256=FROZEN_SOURCE_ALIAS_SHA256,
+    )
+    value = loads_strict(alias_payload, role="frozen source alias table")
+    if not isinstance(value, dict):
+        _fail("M6_SOURCE_ALIAS_SHAPE", "alias table must be an object")
+    expected_top_level = {"$id", "alias_id", "entries", "schema_version"}
+    if set(value) != expected_top_level:
+        _fail("M6_SOURCE_ALIAS_SHAPE", "alias table keys differ")
+    if value.get("$id") != "simbench_bw/data/frozen_v1_source_aliases.v1.json":
+        _fail("M6_SOURCE_ALIAS_IDENTITY", "alias table $id differs")
+    if value.get("alias_id") != "sm86_reference_capture_matrix_v1_source_aliases":
+        _fail("M6_SOURCE_ALIAS_IDENTITY", "alias table id differs")
+    if value.get("schema_version") != FROZEN_SOURCE_ALIAS_SCHEMA_VERSION:
+        _fail("M6_SOURCE_ALIAS_VERSION", repr(value.get("schema_version")))
+    rows = value.get("entries")
+    if not isinstance(rows, list) or len(rows) != 2:
+        _fail("M6_SOURCE_ALIAS_SHAPE", "exactly two frozen source aliases are required")
+    expected_paths = {
+        REGISTRY_PATH.relative_to(REPO_ROOT).as_posix(),
+        SIDECAR_SCHEMA_PATH.relative_to(REPO_ROOT).as_posix(),
     }
-    try:
-        completed = subprocess.run(
-            [
-                "git", "-c", "core.hooksPath=/dev/null", "cat-file", "blob",
-                f"{source_commit}:{relative}",
-            ],
-            cwd=repo_root,
-            env=environment,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            check=False,
-            timeout=30,
-        )
-    except (OSError, subprocess.SubprocessError) as exc:
-        _fail("M6_GIT_BLOB_READ", f"{role}: {type(exc).__name__}: {exc}")
-    if completed.returncode != 0:
-        detail = completed.stderr.decode("utf-8", errors="replace").strip()
-        _fail("M6_GIT_BLOB_READ", f"{role}: {detail or completed.returncode}")
-    return completed.stdout
+    aliases: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        if not isinstance(row, dict):
+            _fail("M6_SOURCE_ALIAS_SHAPE", "alias entry must be an object")
+        expected_keys = {
+            "canonical_path",
+            "historical_path",
+            "match",
+            "requires_sha256_match",
+            "sha256",
+            "size_bytes",
+            "source_commit",
+        }
+        if set(row) != expected_keys:
+            _fail("M6_SOURCE_ALIAS_SHAPE", "alias entry keys differ")
+        historical = row.get("historical_path")
+        canonical = row.get("canonical_path")
+        if (
+            not isinstance(historical, str)
+            or not isinstance(canonical, str)
+            or historical != canonical
+            or historical not in expected_paths
+        ):
+            _fail("M6_SOURCE_ALIAS_PATH", repr((historical, canonical)))
+        if row.get("match") != "exact" or row.get("requires_sha256_match") is not True:
+            _fail("M6_SOURCE_ALIAS_POLICY", historical)
+        if row.get("source_commit") != FROZEN_V1_SOURCE_COMMIT:
+            _fail("M6_SOURCE_ALIAS_COMMIT", historical)
+        digest = row.get("sha256")
+        size = row.get("size_bytes")
+        if not _sha256_text(digest) or type(size) is not int or size <= 0:
+            _fail("M6_SOURCE_ALIAS_IDENTITY", historical)
+        if historical in aliases:
+            _fail("M6_SOURCE_ALIAS_DUPLICATE", historical)
+        aliases[historical] = dict(row)
+    if set(aliases) != expected_paths:
+        _fail("M6_SOURCE_ALIAS_COVERAGE", "registry and sidecar aliases are required")
+    return aliases, alias_payload
+
+
+def _frozen_source_payload(
+    repo_root: Path,
+    source_commit: str,
+    relative_path: str,
+    *,
+    role: str,
+    cache: InputSnapshotCache | None = None,
+) -> bytes:
+    """Resolve one frozen source only through the hash-bound alias table."""
+    if source_commit != FROZEN_V1_SOURCE_COMMIT:
+        _fail("M6_SOURCE_ALIAS_COMMIT", f"{role}: {source_commit!r}")
+    relative = _safe_relative(relative_path, role=role).as_posix()
+    aliases, _alias_payload = _load_frozen_source_alias(
+        repo_root=repo_root,
+        cache=cache,
+    )
+    entry = aliases.get(relative)
+    if entry is None:
+        _fail("M6_SOURCE_ALIAS_MISSING", f"{role}: {relative}")
+    canonical = entry["canonical_path"]
+    expected = REPO_ROOT / _safe_relative(canonical, role=f"{role} canonical path")
+    actual = _canonical_repo_file(
+        repo_root / Path(canonical),
+        expected,
+        repo_root=repo_root,
+        role=role,
+    )
+    payload = _read_regular_cached(
+        actual,
+        role=role,
+        cache=cache,
+        expected_sha256=entry["sha256"],
+        expected_size=entry["size_bytes"],
+    )
+    if sha256_bytes(payload) != entry["sha256"] or len(payload) != entry["size_bytes"]:
+        _fail("M6_SOURCE_ALIAS_IDENTITY", role)
+    return payload
 
 
 def _lexical_absolute(path: Path, *, role: str) -> Path:
@@ -975,7 +1063,7 @@ def _load_matrix_authority_sources(
     The matrix is a projection, not permission to omit the files that made the
     projection.  Every pinned local input is read once through the invocation
     cache.  The registry has an intentional frozen-source pin, so both the
-    current successor bytes and the exact historical Git blob are retained.
+    current authority and the exact alias-resolved frozen payload are retained.
     """
     def local_identity(relative: str, declared: str | None, role: str) -> dict[str, Any]:
         if not isinstance(relative, str) or not relative:
@@ -1019,8 +1107,8 @@ def _load_matrix_authority_sources(
     for name, pin in sorted(pins.items()):
         if not isinstance(pin, Mapping) or not isinstance(pin.get("path"), str):
             _fail("M6_MATRIX_INPUT_PINS", str(name))
-        # The metric registry is validated against its frozen Git blob below;
-        # its current worktree successor is already bound separately.
+        # The metric registry is validated against its frozen source alias
+        # below; its active authority is already bound separately.
         if name == "metric_registry":
             continue
         identity = local_identity(
@@ -1037,13 +1125,14 @@ def _load_matrix_authority_sources(
     if registry_path != expected_registry_path:
         _fail("M6_MATRIX_REGISTRY_PIN", "metric registry path differs")
     source_commit = matrix.get("source_commit")
-    if not isinstance(source_commit, str):
+    if source_commit != FROZEN_V1_SOURCE_COMMIT:
         _fail("M6_MATRIX_SOURCE_COMMIT", repr(source_commit))
-    frozen_payload = _git_blob_bytes(
+    frozen_payload = _frozen_source_payload(
         repo_root,
         source_commit,
         expected_registry_path,
         role="frozen matrix metric registry",
+        cache=cache,
     )
     frozen_digest = sha256_bytes(frozen_payload)
     if registry_pin.get("sha256") != frozen_digest:
@@ -1055,11 +1144,12 @@ def _load_matrix_authority_sources(
         "size_bytes": len(frozen_payload),
     }
     frozen_sidecar_relative = SIDECAR_SCHEMA_PATH.relative_to(REPO_ROOT).as_posix()
-    frozen_sidecar_payload = _git_blob_bytes(
+    frozen_sidecar_payload = _frozen_source_payload(
         repo_root,
         source_commit,
         frozen_sidecar_relative,
         role="frozen matrix sidecar schema",
+        cache=cache,
     )
     frozen_sidecar = {
         "path": frozen_sidecar_relative,
@@ -2253,11 +2343,19 @@ def _derive_m4_binding_receipt(
     schema_relative = SIDECAR_SCHEMA_PATH.relative_to(REPO_ROOT).as_posix()
     if registry_pin.get("path") != registry_relative:
         _fail("M6_M4_REGISTRY_AUTHORITY", "matrix registry path mismatch")
-    registry_payload = _git_blob_bytes(
-        repo_root, source_commit, registry_relative, role="source metric registry",
+    registry_payload = _frozen_source_payload(
+        repo_root,
+        source_commit,
+        registry_relative,
+        role="source metric registry",
+        cache=input_cache,
     )
-    sidecar_schema_payload = _git_blob_bytes(
-        repo_root, source_commit, schema_relative, role="source v5 sidecar schema",
+    sidecar_schema_payload = _frozen_source_payload(
+        repo_root,
+        source_commit,
+        schema_relative,
+        role="source v5 sidecar schema",
+        cache=input_cache,
     )
     registry = loads_strict(registry_payload, role="source metric registry")
     sidecar_schema = loads_strict(
@@ -2971,34 +3069,23 @@ def validate_schedule(
         except Exception as exc:
             _fail("M6_SIDECAR_SCHEMA_INVALID", f"{type(exc).__name__}: {exc}")
         registry_pin = (matrix.get("input_pins") or {}).get("metric_registry") or {}
-        registry_digest = sha256_bytes(registry_payload)
         expected_registry_path = REGISTRY_PATH.relative_to(REPO_ROOT).as_posix()
-        validation_registry = registry
-        validation_registry_payload = registry_payload
-        validation_registry_digest = registry_digest
         if registry_pin.get("path") != expected_registry_path:
             _fail("M6_MATRIX_REGISTRY_PIN", "matrix metric registry path differs")
-        if registry_pin.get("sha256") != registry_digest:
-            # The frozen v1 matrix deliberately pins the registry blob from its
-            # source commit, while the live canonical registry may have additive
-            # successor text.  Verify that exact historical blob rather than
-            # accepting an unexplained pin mismatch or rewriting the matrix.
-            try:
-                validation_registry_payload = _git_blob_bytes(
-                    repo_root,
-                    matrix["source_commit"],
-                    expected_registry_path,
-                    role="frozen matrix metric registry",
-                )
-                validation_registry = loads_strict(
-                    validation_registry_payload,
-                    role="frozen matrix metric registry",
-                )
-                validation_registry_digest = sha256_bytes(validation_registry_payload)
-            except M6Error:
-                raise
-            if registry_pin.get("sha256") != validation_registry_digest:
-                _fail("M6_MATRIX_REGISTRY_PIN", "frozen registry pin differs")
+        validation_registry_payload = _frozen_source_payload(
+            repo_root,
+            matrix.get("source_commit"),
+            expected_registry_path,
+            role="frozen matrix metric registry",
+            cache=input_cache,
+        )
+        validation_registry = loads_strict(
+            validation_registry_payload,
+            role="frozen matrix metric registry",
+        )
+        validation_registry_digest = sha256_bytes(validation_registry_payload)
+        if registry_pin.get("sha256") != validation_registry_digest:
+            _fail("M6_MATRIX_REGISTRY_PIN", "frozen registry pin differs")
         try:
             semantic_problems = matrix_builder.validate_matrix(
                 matrix,
@@ -5826,9 +5913,9 @@ def _source_authority_rows(
         "matrix_schema",
         "roster_authority",
         "matrix_input_pins",
-        # Frozen authorities are Git blobs, not filesystem reads, so they do
-        # not have invocation-snapshot witness rows. Their exact payloads are
-        # instead retained and checked as source:frozen_* inventory entries.
+        # Frozen identities reuse the exact canonical registry/schema bytes and
+        # are retained separately in the final inventory.  Their canonical
+        # files already have snapshot witness rows through the active entries.
         "metric_registry",
         "sidecar_schema",
         "availability_probe",
@@ -6234,6 +6321,25 @@ def _done_inventory(
     source = schedule.get("source_identity")
     if not isinstance(source, Mapping):
         _fail("M6_FINAL_INVENTORY_INCOMPLETE", "source identity is absent")
+    alias_relative = FROZEN_SOURCE_ALIAS_PATH.relative_to(REPO_ROOT).as_posix()
+    alias_file = _canonical_repo_file(
+        repo_root / alias_relative,
+        FROZEN_SOURCE_ALIAS_PATH,
+        repo_root=repo_root,
+        role="frozen source alias table inventory",
+    )
+    _aliases, alias_payload = _load_frozen_source_alias(
+        repo_root=repo_root,
+        cache=cache,
+    )
+    add(
+        "source:frozen_source_aliases",
+        alias_relative,
+        FROZEN_SOURCE_ALIAS_SHA256,
+        len(alias_payload),
+        actual_path=alias_file,
+        payload=alias_payload,
+    )
     structured_source_keys = {
         "canonical_matrix",
         "matrix_schema",
@@ -6264,11 +6370,12 @@ def _done_inventory(
                 commit = item.get("source_commit")
                 if not isinstance(commit, str):
                     _fail("M6_FINAL_INVENTORY_INCOMPLETE", f"frozen {key} commit")
-                frozen_payload = _git_blob_bytes(
+                frozen_payload = _frozen_source_payload(
                     repo_root,
                     commit,
                     path,
                     role=f"{key} inventory",
+                    cache=cache,
                 )
                 if sha256_bytes(frozen_payload) != item.get("sha256"):
                     _fail("M6_FINAL_INVENTORY_IDENTITY", key)
