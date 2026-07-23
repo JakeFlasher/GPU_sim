@@ -1,0 +1,226 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "simbench_bw/schemas/cutlass_successor_build_witness.schema.json",
+  "title": "sm_86 CUTLASS successor build witness",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "witness_id", "artifact_id", "arch", "sku",
+    "source_commit", "generated_at_utc", "base_frozen_v1", "source_inputs",
+    "shape_authority", "cutlass_provenance", "live_cutlass_inputs",
+    "toolchain", "build", "artifacts", "smoke", "control_contract",
+    "integrity", "pass", "witness_seal_sha256"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "witness_id": {"const": "sm86_cutlass_successor_build_witness_v1"},
+    "artifact_id": {"const": "cutlass_successor_sm86_v1"},
+    "arch": {"const": "sm_86"},
+    "sku": {"const": "rtx_3090_ti"},
+    "source_commit": {"$ref": "#/$defs/commit"},
+    "generated_at_utc": {"type": "string", "minLength": 1},
+    "base_frozen_v1": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "matrix_path", "matrix_file_sha256", "matrix_source_commit",
+        "matrix_seal_sha256", "authority_path", "authority_sha256",
+        "base_slug", "base_authority_cell_sha256", "base_disposition",
+        "relation", "claim_policy"
+      ],
+      "properties": {
+        "matrix_path": {"$ref": "#/$defs/path"},
+        "matrix_file_sha256": {"$ref": "#/$defs/sha256"},
+        "matrix_source_commit": {"$ref": "#/$defs/commit"},
+        "matrix_seal_sha256": {"$ref": "#/$defs/sha256"},
+        "authority_path": {"$ref": "#/$defs/path"},
+        "authority_sha256": {"$ref": "#/$defs/sha256"},
+        "base_slug": {"const": "vendor_gemm_cublas"},
+        "base_authority_cell_sha256": {"$ref": "#/$defs/sha256"},
+        "base_disposition": {"const": "runnable"},
+        "relation": {"const": "evaluation_successor_no_relabel"},
+        "claim_policy": {"const": "none_additive_supplement_only"}
+      }
+    },
+    "source_inputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["files", "input_set_sha256", "policy"],
+      "properties": {
+        "files": {
+          "type": "object",
+          "minProperties": 4,
+          "propertyNames": {"$ref": "#/$defs/path"},
+          "additionalProperties": {"$ref": "#/$defs/sha256"}
+        },
+        "input_set_sha256": {"$ref": "#/$defs/sha256"},
+        "policy": {"const": "source_and_makefile_no_cublas_references"}
+      }
+    },
+    "shape_authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path", "sha256", "slug", "trace_shape", "trace_shape_sha256",
+        "shape_role", "actual_args", "shape_contract"
+      ],
+      "properties": {
+        "path": {"$ref": "#/$defs/path"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "slug": {"const": "vendor_gemm_cutlass"},
+        "trace_shape": {"type": "object", "minProperties": 1},
+        "trace_shape_sha256": {"$ref": "#/$defs/sha256"},
+        "shape_role": {"const": "trace"},
+        "actual_args": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+        "shape_contract": {"const": "trace_shape_is_actual_direct_executable_launch"}
+      }
+    },
+    "cutlass_provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path", "sha256", "upstream_tag", "upstream_commit", "upstream_tree",
+        "scoped_digest", "version"
+      ],
+      "properties": {
+        "path": {"$ref": "#/$defs/path"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "upstream_tag": {"const": "v4.6.1"},
+        "upstream_commit": {"$ref": "#/$defs/commit"},
+        "upstream_tree": {"$ref": "#/$defs/sha1"},
+        "scoped_digest": {"$ref": "#/$defs/sha256"},
+        "version": {"const": {"major": 4, "minor": 6, "patch": 1}}
+      }
+    },
+    "live_cutlass_inputs": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["root", "build_subdirectories", "tree_hash"],
+      "properties": {
+        "root": {"const": "third_party/cutlass"},
+        "build_subdirectories": {
+          "const": ["include", "tools/util/include"]
+        },
+        "tree_hash": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "toolchain": {"type": "object", "minProperties": 4},
+    "build": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["executed", "command", "returncode", "transcript_path", "transcript_sha256", "transcript_bytes"],
+      "properties": {
+        "executed": {"const": true},
+        "command": {"type": "array", "minItems": 4, "items": {"type": "string"}},
+        "returncode": {"const": 0},
+        "transcript_path": {"$ref": "#/$defs/path"},
+        "transcript_sha256": {"$ref": "#/$defs/sha256"},
+        "transcript_bytes": {"type": "integer", "minimum": 1}
+      }
+    },
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["binary", "cubin_inventory", "sass", "control_bits", "no_cublas"],
+      "properties": {
+        "binary": {"$ref": "#/$defs/artifact"},
+        "cubin_inventory": {
+          "type": "object",
+          "required": ["command", "transcript_sha256", "cubins", "sm86_cubin_present"],
+          "properties": {
+            "command": {"type": "array", "minItems": 2, "items": {"type": "string"}},
+            "transcript_sha256": {"$ref": "#/$defs/sha256"},
+            "cubins": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+            "sm86_cubin_present": {"const": true}
+          }
+        },
+        "sass": {"$ref": "#/$defs/artifact"},
+        "control_bits": {
+          "type": "object",
+          "required": ["path", "sha256", "decoded_instructions", "unknown_encoding", "toolkit_version"],
+          "properties": {
+            "path": {"$ref": "#/$defs/path"},
+            "sha256": {"$ref": "#/$defs/sha256"},
+            "decoded_instructions": {"type": "integer", "minimum": 1},
+            "unknown_encoding": {"const": 0},
+            "toolkit_version": {"const": "V13.2"}
+          }
+        },
+        "no_cublas": {
+          "type": "object",
+          "required": ["source", "elf", "pass"],
+          "properties": {
+            "source": {"type": "object"},
+            "elf": {"type": "object"},
+            "pass": {"const": true}
+          }
+        }
+      }
+    },
+    "smoke": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["command", "returncode", "output_sha256", "output_bytes", "reported_slug", "reported_shape_set", "reported_shape_role", "reported_shape_point", "reported_shape_axes", "contract_ok"],
+      "properties": {
+        "command": {"type": "array", "minItems": 2, "items": {"type": "string"}},
+        "returncode": {"const": 0},
+        "output_sha256": {"$ref": "#/$defs/sha256"},
+        "output_bytes": {"type": "integer", "minimum": 1},
+        "reported_slug": {"const": "vendor_gemm_cutlass"},
+        "reported_shape_set": {"const": "successor_shapes"},
+        "reported_shape_role": {"const": "trace"},
+        "reported_shape_point": {"const": "trace_00"},
+        "reported_shape_axes": {"const": {"m": 32, "n": 32, "k": 32}},
+        "contract_ok": {"const": true}
+      }
+    },
+    "control_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["policy", "execution_arch", "code_arch", "function_count", "all_records_decoded", "hardware_capture_status"],
+      "properties": {
+        "policy": {"const": "direct_executable"},
+        "execution_arch": {"const": "sm_86"},
+        "code_arch": {"const": "sm_86"},
+        "function_count": {"type": "integer", "minimum": 1},
+        "all_records_decoded": {"const": true},
+        "hardware_capture_status": {"const": "not_run_build_witness_only"}
+      }
+    },
+    "integrity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["row_count", "unique_slugs", "source_commit_inputs_match", "frozen_base_unchanged", "all_checks_pass"],
+      "properties": {
+        "row_count": {"const": 1},
+        "unique_slugs": {"const": true},
+        "source_commit_inputs_match": {"const": true},
+        "frozen_base_unchanged": {"const": true},
+        "all_checks_pass": {"const": true}
+      }
+    },
+    "pass": {"const": true},
+    "witness_seal_sha256": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "sha1": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "path": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*\\\\)(?!.*//)(?!.*/$)(?!\\.\\.?(?:/|$))(?!.*(?:/\\.\\.?)(?:/|$))[^\\u0000-\\u001f\\u007f]+$"
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "bytes"],
+      "properties": {
+        "path": {"$ref": "#/$defs/path"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "bytes": {"type": "integer", "minimum": 1},
+        "command": {"type": "array", "items": {"type": "string"}}
+      }
+    }
+  }
+}
