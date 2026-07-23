@@ -1,0 +1,24 @@
+{
+  "$id": "simbench_bw/third_party/cutlass.provenance.json",
+  "digest": {
+    "algorithm": "sha256-cutlass-scoped-tree-v1",
+    "sha256": "ad131382834231e4076b50c8fdf8f7783504fe83aac53982dab353be9908e113"
+  },
+  "materialization_type": "scoped_regular_tracked_tree",
+  "repository_path": "third_party/cutlass",
+  "schema_version": 1,
+  "scope": [
+    "examples",
+    "include",
+    "tools"
+  ],
+  "upstream_commit": "e05f953a5b3d38adc240df2ff928e0421c2abba3",
+  "upstream_tag": "v4.6.1",
+  "upstream_tree": "0d3dd31da2e1ccc8ab15047a2edd9ebf5d98218b",
+  "upstream_url": "https://github.com/NVIDIA/cutlass.git",
+  "version": {
+    "major": 4,
+    "minor": 6,
+    "patch": 1
+  }
+}

@@ -1,0 +1,2 @@
+# Preserve byte-exact upstream vendor sources without normalizing their whitespace.
+third_party/cutlass/** -whitespace
