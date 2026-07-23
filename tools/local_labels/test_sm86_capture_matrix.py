@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
 import sys
 from pathlib import Path
@@ -29,6 +30,197 @@ _COMMITTED = (
 @pytest.fixture(scope="module")
 def matrix() -> dict:
     return bcm.build_matrix(_REPO, require_head_match=False)
+
+
+def _committed_matrix() -> dict:
+    return json.loads(_COMMITTED.read_text())
+
+
+def test_legacy_two_argument_validation_keeps_live_rederivation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    matrix = _committed_matrix()
+    calls: list[dict] = []
+
+    def fake_build_matrix(*args, **kwargs):
+        calls.append(kwargs)
+        return copy.deepcopy(matrix)
+
+    monkeypatch.setattr(bcm, "build_matrix", fake_build_matrix)
+    assert bcm.validate_matrix(matrix, _REPO) == []
+    assert calls == [{
+        "require_head_match": False,
+        "authority_path": _REPO / bcm.AUTHORITY_PATH,
+    }]
+
+
+def test_frozen_v1_validation_does_not_rederive_live_inputs(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    matrix = _committed_matrix()
+
+    def fail_live_rebuild(*args, **kwargs):
+        raise AssertionError("frozen validation called live build_matrix")
+
+    monkeypatch.setattr(bcm, "build_matrix", fail_live_rebuild)
+    assert bcm.validate_matrix(
+        matrix,
+        _REPO,
+        validation_mode="frozen_v1",
+    ) == []
+
+    registry_path = _REPO / bcm.METRIC_REGISTRY_PATH
+    registry_payload = registry_path.read_bytes()
+    registry_document = json.loads(registry_payload)
+    assert bcm.validate_matrix(
+        matrix,
+        _REPO,
+        registry_document=registry_document,
+        registry_payload=registry_payload,
+        registry_sha256=hashlib.sha256(registry_payload).hexdigest(),
+        validation_mode="frozen_v1",
+    ) == []
+
+
+@pytest.mark.parametrize(
+    "operands",
+    [
+        {"registry_document": {}},
+        {"registry_payload": b"{}"},
+        {"registry_sha256": "0" * 64},
+    ],
+)
+def test_frozen_v1_rejects_partial_registry_operands(operands: dict) -> None:
+    problems = bcm.validate_matrix(
+        _committed_matrix(),
+        _REPO,
+        validation_mode="frozen_v1",
+        **operands,
+    )
+    assert "registry_operands_incomplete" in problems
+
+
+def test_frozen_v1_rejects_unknown_validation_mode(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def fail_live_rebuild(*args, **kwargs):
+        raise AssertionError("unknown validation mode reached live builder")
+
+    monkeypatch.setattr(bcm, "build_matrix", fail_live_rebuild)
+    problems = bcm.validate_matrix(
+        _committed_matrix(),
+        _REPO,
+        validation_mode="ambient_successor",
+    )
+    assert problems == ["validation_mode_unknown"]
+
+
+def test_frozen_v1_rejects_registry_payload_hash_mismatch() -> None:
+    matrix = _committed_matrix()
+    registry_path = _REPO / bcm.METRIC_REGISTRY_PATH
+    payload = registry_path.read_bytes()
+    document = json.loads(payload)
+    problems = bcm.validate_matrix(
+        matrix,
+        _REPO,
+        validation_mode="frozen_v1",
+        registry_document=document,
+        registry_payload=payload,
+        registry_sha256="0" * 64,
+    )
+    assert "registry_payload_sha256" in problems
+
+
+def test_frozen_v1_rejects_registry_document_payload_mismatch() -> None:
+    matrix = _committed_matrix()
+    registry_path = _REPO / bcm.METRIC_REGISTRY_PATH
+    payload = registry_path.read_bytes()
+    document = json.loads(payload)
+    document["registry_version"] += 1
+    problems = bcm.validate_matrix(
+        matrix,
+        _REPO,
+        validation_mode="frozen_v1",
+        registry_document=document,
+        registry_payload=payload,
+        registry_sha256=hashlib.sha256(payload).hexdigest(),
+    )
+    assert "registry_document_payload_mismatch" in problems
+
+
+def test_frozen_v1_rejects_type_drifting_registry_document() -> None:
+    matrix = _committed_matrix()
+    registry_payload = (_REPO / bcm.METRIC_REGISTRY_PATH).read_bytes()
+    registry_document = json.loads(registry_payload)
+    registry_document["registry_version"] = float(registry_document["registry_version"])
+    problems = bcm.validate_matrix(
+        matrix,
+        _REPO,
+        validation_mode="frozen_v1",
+        registry_document=registry_document,
+        registry_payload=registry_payload,
+        registry_sha256=hashlib.sha256(registry_payload).hexdigest(),
+    )
+    assert "registry_document_payload_mismatch" in problems
+
+
+def test_frozen_v1_rejects_valid_registry_with_wrong_projection_or_pin() -> None:
+    registry_payload = (_REPO / bcm.METRIC_REGISTRY_PATH).read_bytes()
+    registry_document = json.loads(registry_payload)
+    digest = hashlib.sha256(registry_payload).hexdigest()
+
+    projection_mutation = _committed_matrix()
+    projection_mutation["metric_registry"]["metric_count"] += 1
+    problems = bcm.validate_matrix(
+        projection_mutation,
+        _REPO,
+        validation_mode="frozen_v1",
+        registry_document=registry_document,
+        registry_payload=registry_payload,
+        registry_sha256=digest,
+    )
+    assert "metric_registry_projection" in problems
+
+    pin_mutation = _committed_matrix()
+    pin_mutation["input_pins"]["metric_registry"]["path"] = "other-registry.json"
+    problems = bcm.validate_matrix(
+        pin_mutation,
+        _REPO,
+        validation_mode="frozen_v1",
+        registry_document=registry_document,
+        registry_payload=registry_payload,
+        registry_sha256=digest,
+    )
+    assert "registry_pin_path" in problems
+
+
+def test_frozen_v1_rejects_non_object_registry_pins_without_crashing() -> None:
+    matrix = _committed_matrix()
+    matrix["input_pins"] = []
+    registry_payload = (_REPO / bcm.METRIC_REGISTRY_PATH).read_bytes()
+    registry_document = json.loads(registry_payload)
+    problems = bcm.validate_matrix(
+        matrix,
+        _REPO,
+        validation_mode="frozen_v1",
+        registry_document=registry_document,
+        registry_payload=registry_payload,
+        registry_sha256=hashlib.sha256(registry_payload).hexdigest(),
+    )
+    assert "registry_pin_missing" in problems
+
+
+def test_frozen_v1_rejects_malformed_registry_payload_typed() -> None:
+    payload = b'{"registry_version": ' + (b"9" * 5000) + b"}"
+    problems = bcm.validate_matrix(
+        _committed_matrix(),
+        _REPO,
+        validation_mode="frozen_v1",
+        registry_document={},
+        registry_payload=payload,
+        registry_sha256=hashlib.sha256(payload).hexdigest(),
+    )
+    assert "registry_payload_json" in problems
 
 
 def _reseal(matrix: dict) -> None:

@@ -30,6 +30,7 @@ import argparse
 import copy
 import hashlib
 import json
+import math
 import os
 import subprocess
 import sys
@@ -63,6 +64,23 @@ PROTOCOL_PINS_PATH = Path("tools/local_labels/campaign_protocol_pins.json")
 RETENTION_BUDGET_PATH = Path("data/local_labels/campaign/trace_retention_budget.json")
 TRACE_BUDGETS_PATH = Path("workloads/simbench_bw/trace_budgets.toml")
 METRIC_REGISTRY_PATH = Path("tools/local_labels/metric_registry.json")
+FROZEN_V1_MATRIX_PATH = Path(
+    "data/local_labels/campaign/sm86_reference_capture_matrix.json"
+)
+FROZEN_V1_MATRIX_SHA256 = (
+    "af29d72e955cf42e281036190f2d55d72af0af92a632c78c8d159073a072fb0e"
+)
+FROZEN_V1_MATRIX_SEAL_SHA256 = (
+    "6376da9721c75bb9299e84a9d11bf607bc21f4cbaa30da25b672c86f6757a5e1"
+)
+FROZEN_V1_SOURCE_COMMIT = "124ce358733f97ba6e0af808d10ab69ffe4d5a78"
+FROZEN_V1_REGISTRY_SHA256 = (
+    "be1f7893cf653800c69f6e39a4d22abfae4d67c10197e7d5f9bd46c6900c2423"
+)
+FROZEN_V1_METRIC_IDENTITY_SHA256 = (
+    "13f1bdfd8155cb71db62cc30aea41bc7fc6af6447d1251d9ea4f0efd4a8396a6"
+)
+VALIDATION_MODES = frozenset({"live", "frozen_v1"})
 SOL_EXECBENCH_PATH = Path("tools/sol_execbench/.venv/bin/sol-execbench")
 SOL_BENCHMARK_ROOT = Path("tools/sol_execbench/data/benchmark")
 SOL_BASELINES_ROOT = Path("workloads/sol_execbench_baselines")
@@ -457,6 +475,42 @@ def canonical_sha256(value: Any) -> str:
         value, sort_keys=True, separators=(",", ":"), ensure_ascii=False,
     ).encode("utf-8")
     return hashlib.sha256(encoded).hexdigest()
+
+
+def _strict_json_fingerprint(value: Any) -> tuple:
+    """Return a type-sensitive fingerprint for already-decoded JSON values."""
+    if value is None:
+        return ("null",)
+    if type(value) is bool:
+        return ("bool", value)
+    if type(value) is int:
+        return ("int", value)
+    if type(value) is float:
+        if not math.isfinite(value):
+            raise ValueError("non-finite JSON number")
+        return ("float", value.hex())
+    if type(value) is str:
+        return ("string", value)
+    if isinstance(value, list):
+        return ("array", tuple(_strict_json_fingerprint(item) for item in value))
+    if isinstance(value, dict):
+        if not all(type(key) is str for key in value):
+            raise TypeError("JSON object keys must be strings")
+        return (
+            "object",
+            tuple(
+                (key, _strict_json_fingerprint(item))
+                for key, item in sorted(value.items())
+            ),
+        )
+    raise TypeError(f"unsupported JSON value type: {type(value).__name__}")
+
+
+def _strict_json_equal(left: Any, right: Any) -> bool:
+    try:
+        return _strict_json_fingerprint(left) == _strict_json_fingerprint(right)
+    except (TypeError, ValueError):
+        return False
 
 
 def _repo_rel(path: Path, repo_root: Path) -> str:
@@ -1644,30 +1698,151 @@ def build_matrix(repo_root: Path = REPO_ROOT, *,
     return matrix
 
 
-def validate_matrix(matrix: dict, repo_root: Path = REPO_ROOT) -> list[str]:
-    """Semantic/live-input validation; returns stable problem tokens."""
+def _validate_frozen_registry_contract(
+    matrix: dict,
+    *,
+    registry_document: dict | None,
+    registry_payload: bytes | None,
+    registry_sha256: str | None,
+) -> list[str]:
+    """Validate an explicitly supplied frozen registry projection.
+
+    The all-``None`` form is intentional: callers that only have the frozen
+    matrix must still be able to validate it without rebuilding against live
+    host inputs.  Callers that have the source registry must supply all three
+    operands so the projection is checked against the exact payload they
+    already pinned.
+    """
+    supplied = (registry_document, registry_payload, registry_sha256)
+    if all(operand is None for operand in supplied):
+        return []
+    if any(operand is None for operand in supplied):
+        return ["registry_operands_incomplete"]
+    if not isinstance(registry_document, dict):
+        return ["registry_document_invalid"]
+    if not isinstance(registry_payload, bytes):
+        return ["registry_payload_invalid"]
+    if (
+        not isinstance(registry_sha256, str)
+        or len(registry_sha256) != 64
+        or any(character not in "0123456789abcdef" for character in registry_sha256)
+    ):
+        return ["registry_sha256_invalid"]
+    observed_digest = hashlib.sha256(registry_payload).hexdigest()
+    if observed_digest != registry_sha256:
+        return ["registry_payload_sha256"]
+    try:
+        parsed = json.loads(registry_payload)
+    except (UnicodeDecodeError, ValueError, RecursionError):
+        return ["registry_payload_json"]
+    if not _strict_json_equal(parsed, registry_document):
+        return ["registry_document_payload_mismatch"]
+    input_pins = matrix.get("input_pins")
+    if not isinstance(input_pins, dict):
+        return ["registry_pin_missing"]
+    pin = input_pins.get("metric_registry")
+    if not isinstance(pin, dict):
+        return ["registry_pin_missing"]
+    if pin.get("path") != METRIC_REGISTRY_PATH.as_posix():
+        return ["registry_pin_path"]
+    if pin.get("sha256") != registry_sha256:
+        return ["registry_pin_sha256"]
+    try:
+        projection = _metric_contract(registry_document)
+    except Exception:  # noqa: BLE001 -- return a typed validation result
+        return ["registry_projection_invalid"]
+    if not _strict_json_equal(matrix.get("metric_registry"), projection):
+        return ["metric_registry_projection"]
+    return []
+
+
+def _validate_frozen_v1_authority(matrix: dict, repo_root: Path) -> list[str]:
+    """Validate the checked-in v1 matrix without ambient matrix generation."""
+    authority_path = repo_root / FROZEN_V1_MATRIX_PATH
+    if authority_path.is_symlink() or not authority_path.is_file():
+        return ["frozen_v1_authority_file"]
+    try:
+        if sha256_file(authority_path) != FROZEN_V1_MATRIX_SHA256:
+            return ["frozen_v1_authority_sha256"]
+        expected = _load_json(authority_path)
+    except Exception:  # noqa: BLE001 -- return a typed validation result
+        return ["frozen_v1_authority_json"]
+    if not _strict_json_equal(matrix, expected):
+        return ["matrix_content_stale_or_tampered"]
+    if matrix.get("matrix_seal_sha256") != FROZEN_V1_MATRIX_SEAL_SHA256:
+        return ["frozen_v1_matrix_seal"]
+    if matrix.get("source_commit") != FROZEN_V1_SOURCE_COMMIT:
+        return ["frozen_v1_source_commit"]
+    input_pins = matrix.get("input_pins")
+    if not isinstance(input_pins, dict):
+        return ["frozen_v1_registry_pin"]
+    registry_pin = input_pins.get("metric_registry")
+    if not isinstance(registry_pin, dict):
+        return ["frozen_v1_registry_pin"]
+    if registry_pin.get("path") != METRIC_REGISTRY_PATH.as_posix():
+        return ["frozen_v1_registry_path"]
+    if registry_pin.get("sha256") != FROZEN_V1_REGISTRY_SHA256:
+        return ["frozen_v1_registry_sha256"]
+    metric_registry = matrix.get("metric_registry")
+    if not isinstance(metric_registry, dict):
+        return ["frozen_v1_metric_identity"]
+    if metric_registry.get("metric_identity_sha256") != FROZEN_V1_METRIC_IDENTITY_SHA256:
+        return ["frozen_v1_metric_identity"]
+    return []
+
+
+def validate_matrix(
+    matrix: dict,
+    repo_root: Path = REPO_ROOT,
+    *,
+    validation_mode: str = "live",
+    registry_document: dict | None = None,
+    registry_payload: bytes | None = None,
+    registry_sha256: str | None = None,
+) -> list[str]:
+    """Validate matrix semantics using either live or explicit frozen inputs."""
     problems = []
     seal = matrix.get("matrix_seal_sha256")
     unsealed = {k: v for k, v in matrix.items() if k != "matrix_seal_sha256"}
     if seal != canonical_sha256(unsealed):
         problems.append("matrix_seal_sha256")
-    authority_ref = (matrix.get("authority") or {}).get("path")
-    authority_path = Path(authority_ref) if isinstance(authority_ref, str) else None
-    if authority_path is not None and not authority_path.is_absolute():
-        authority_path = Path(repo_root) / authority_path
-    try:
-        expected = build_matrix(
-            repo_root, require_head_match=False, authority_path=authority_path,
+    if not isinstance(validation_mode, str) or validation_mode not in VALIDATION_MODES:
+        return list(dict.fromkeys(problems + ["validation_mode_unknown"]))
+    registry_operands = (
+        registry_document,
+        registry_payload,
+        registry_sha256,
+    )
+    if validation_mode == "live":
+        if any(operand is not None for operand in registry_operands):
+            return list(dict.fromkeys(problems + ["registry_operands_live_mode"]))
+        authority_ref = (matrix.get("authority") or {}).get("path")
+        authority_path = Path(authority_ref) if isinstance(authority_ref, str) else None
+        if authority_path is not None and not authority_path.is_absolute():
+            authority_path = Path(repo_root) / authority_path
+        try:
+            expected = build_matrix(
+                repo_root, require_head_match=False, authority_path=authority_path,
+            )
+        except Exception as exc:  # noqa: BLE001 -- return a typed validation result
+            return problems + [f"rederive_failed:{type(exc).__name__}:{exc}"]
+        if matrix != expected:
+            problems.append("matrix_content_stale_or_tampered")
+    else:
+        problems.extend(_validate_frozen_v1_authority(matrix, repo_root))
+        problems.extend(
+            _validate_frozen_registry_contract(
+                matrix,
+                registry_document=registry_document,
+                registry_payload=registry_payload,
+                registry_sha256=registry_sha256,
+            )
         )
-    except Exception as exc:  # noqa: BLE001 -- return a typed validation result
-        return problems + [f"rederive_failed:{type(exc).__name__}:{exc}"]
-    if matrix != expected:
-        problems.append("matrix_content_stale_or_tampered")
 
     cells = matrix.get("cells")
     if not isinstance(cells, list) or not cells:
         problems.append("cells_nonempty")
-        return problems
+        return list(dict.fromkeys(problems))
     identities = [
         (c.get("identity", {}).get("roster_source"), c.get("identity", {}).get("slug"))
         for c in cells if isinstance(c, dict)
@@ -1685,7 +1860,7 @@ def validate_matrix(matrix: dict, repo_root: Path = REPO_ROOT) -> list[str]:
     chunks = matrix.get("chunks")
     if not isinstance(chunks, list) or not chunks:
         problems.append("chunks_nonempty")
-        return problems
+        return list(dict.fromkeys(problems))
     flattened = []
     chunk_ids = []
     for chunk in chunks:

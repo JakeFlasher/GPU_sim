@@ -30,6 +30,49 @@ def schedule() -> dict:
     return campaign.build_schedule(seed=0xC0FFEE, generated_at_utc=FIXED_TIME)
 
 
+def test_canonical_matrix_uses_supported_frozen_validation_contract(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls: list[dict] = []
+    original_validate = campaign.matrix_builder.validate_matrix
+
+    def record_validate(*args, **kwargs):
+        calls.append(dict(kwargs))
+        return original_validate(*args, **kwargs)
+
+    monkeypatch.setattr(
+        campaign.matrix_builder,
+        "validate_matrix",
+        record_validate,
+    )
+    cache = campaign.InputSnapshotCache()
+    matrix, matrix_payload, runnable = campaign._load_canonical_matrix(
+        campaign.MATRIX_PATH,
+        repo_root=campaign.REPO_ROOT,
+        require_semantic_rederivation=True,
+        cache=cache,
+    )
+    assert calls[0]["validation_mode"] == "frozen_v1"
+    assert campaign.sha256_bytes(matrix_payload) == (
+        campaign.matrix_builder.FROZEN_V1_MATRIX_SHA256
+    )
+    assert len(runnable) == campaign.EXPECTED_RUNNABLE
+    registry_path = campaign.REGISTRY_PATH
+    registry_document, registry_payload = campaign.load_json(
+        registry_path,
+        role="metric registry",
+        cache=cache,
+    )
+    assert campaign.matrix_builder.validate_matrix(
+        matrix,
+        repo_root=campaign.REPO_ROOT,
+        registry_document=registry_document,
+        registry_payload=registry_payload,
+        registry_sha256=campaign.sha256_bytes(registry_payload),
+        validation_mode="frozen_v1",
+    ) == []
+
+
 def _schema(kind: str) -> dict:
     return json.loads(campaign.SCHEMA_PATHS[kind].read_text())
 
