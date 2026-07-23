@@ -1,0 +1,39 @@
+# sim/ — the event-driven GPU simulator (Rust workspace)
+
+Phase-0 scaffold (2026-07-06). Design: `plans/micro2027_ncu_sim_execution_plan.md` §6,
+grounded in `references/papers/notes/draft_new_gpu_simulator.md` (NVArchSim-inspired)
+and the `.claude/skills/designing-gpu-simulator/` routing. Build order = design-note
+phases A→E (engine → memory → trace → modern features → accuracy tuning).
+
+| Crate | Role (target fidelity) |
+|---|---|
+| `sim-arch` | Typed deployment/build/SKU identities plus reviewed capability states. `sm_86` capabilities are admitted; `sm_120` is an explicit template with typed research gaps/unsupported control paths. |
+| `sim-engine` | Event queue (binary-heap → timing-wheel hybrid later), tagged-enum dispatch, current event tuple `{time, seq, target, kind}`, per-SM actor mini-loop batching. Throughput target ≥3–10 M events/s. |
+| `sim-sm` | Generic 4-sub-core issue/replay algorithms. Static control decoding is capability-gated: the checked-in Ampere sidecar path is active for `sm_86`; no unproven Blackwell decoder is implied. |
+| `sim-mem` | Generic sectored L1/L2 state machines and warp-pool interleave. Geometry, cache-op defaults, MSHR approximations, and latency ladders enter through typed architecture/card resolvers; an `sm_120` gap cannot inherit an `sm_86` hypothesis. |
+| `sim-trace` | NVBit protobuf trace ingestion through the committed Rust/prost bindings for the existing `traces_enhanced` wire format. Wire decoding remains architecture-neutral. |
+| `sim-emit` | NCU-metric emission layer — every metric implements its `tools/local_labels/metric_registry.json` v2 `ncu_observation_contract`, incl. sector-accounting semantics + cold-cache-per-kernel (`--cache-control all`) parity. |
+| `sim-calib` | Card loader and typed provenance boundary for per-architecture latencies/throughputs. Cards are simulator inputs; NCU labels remain targets and never enter this crate's feature/configuration path. |
+
+## Architecture scope
+
+The active development lane is Ampere `sm_86` on the RTX 3090 Ti. The
+Blackwell `sm_120` card and enum values are retained as a typed integration
+scaffold only: missing L1/cache-policy, scheduler, latency, DRAM operating
+point, and control-layout evidence produces a typed gap or unsupported error.
+No simulator constructor may substitute an `sm_86` value for one of those
+states. Adding a future architecture requires a new card-backed capability
+set and producer/consumer parity evidence rather than extending a string map.
+
+`ArchId` (deployment), `BuildArch` (fatbin/compiler token), and `Sku` (device
+card) are deliberately separate. This prevents build tokens such as
+`sm_120a` from being mistaken for a deploy target and prevents one SKU's
+architecture facts from being reused for another.
+
+Hard rules: targets-not-features (CLAUDE.md Rule 1; enforced by
+`eval/guards/test_targets_not_features_guard.py` which scans this tree);
+undocumented microarchitecture = tunable hypotheses behind fidelity knobs; no
+per-cycle global ticking hidden inside "event-driven" naming; no per-instruction
+events (SM mini-loop batches issue cycles).
+
+Build: `cargo build` from this directory (workspace).

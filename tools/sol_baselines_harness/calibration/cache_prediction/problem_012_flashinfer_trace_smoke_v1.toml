@@ -1,0 +1,48 @@
+# AC-3 end-to-end proof: problem_012 GQA paged decode through the native
+# sol-execbench evaluator with the corrected FLASHINFER_TRACE_DIR.
+#
+# Demonstrates the trace-data dependency is RESOLVED: the eval driver loaded
+# the real safetensors trace blobs from the repo-root data/flashinfer-trace
+# (the fix target) and every workload PASSED. Diagnostic timing was reduced
+# (warmup=1, iterations=3, benchmark_reference=false) so the 48-workload eval
+# fits the CLI --timeout; correctness is a separate trial unaffected by the
+# timing-iteration count. No clock-policy mutation (lock_clocks=false; the
+# --lock-clocks flag was not passed). No NCU.
+
+[meta]
+schema_version = 1
+host_arch = "sm_86"
+host_kind = "local_sm_8_6"
+device_name = "NVIDIA GeForce RTX 3090 Ti"
+captured_at_utc = "2026-05-28T20:01:37+00:00"
+plan = "sm86-solbench-coverage-predictor-calibration-20260529-023541"
+problem_definition = "012_gqa_paged_decode_h32_kv4_d128_ps1"
+benchmark_dir = "sol-execbench/data/benchmark/FlashInfer-Bench/012_gqa_paged_decode_h32_kv4_d128_ps1"
+solution = "baselines/L1/problem_012_gqa_paged_decode_h32_kv4_d128_ps1/cuda_cpp/solution.json"
+flashinfer_trace_dir = "data/flashinfer-trace"
+sol_execbench_timeout_s = 2400
+
+[config]
+warmup_runs = 1
+iterations = 3
+benchmark_reference = false
+lock_clocks = false
+
+[result]
+returncode = 0
+workloads_total = 48
+eval_traces = 48
+workloads_passed = 48
+all_passed = true
+any_runtime_error = false
+evaluation_status = "PASSED"
+trace_blob_path_prefix = "data/flashinfer-trace/blob/workloads/gqa_paged/gqa_paged_decode_h32_kv4_d128_ps1"
+dispatch_stdout_jsonl_sha256 = "ef6531fa24d7f5252fcca7e88f55bbf57f878170e9da44ad847c8379ab76b5fc"
+
+[provenance]
+runner = ".humanize/rlcr/2026-05-29_02-41-41/r1_harvest/run_problem_012_proof.py (native_dispatch.run direct-dispatch)"
+raw_jsonl = ".humanize/rlcr/2026-05-29_02-41-41/r1_harvest/problem_012_dispatch_stdout.jsonl (gitignored; references gitignored trace blobs)"
+clock_policy_mutation = false
+ncu_used = false
+nvbit_used = false
+note = "problem_012 baseline is under baselines/L1/ but its benchmark dir is FlashInfer-Bench/012; the proof drove native_dispatch directly to bypass run.py category-inference (AC-6 relocation finding)."

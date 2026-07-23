@@ -1,0 +1,65 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "simbench_bw/schemas/pre_registration_amendment.schema.json",
+  "title": "Pre-registration amendment record",
+  "description": "Closed-object schema for a single pre-registration amendment file under `workloads/simbench_bw/pre_registration_amendments/AMD_NNN.md` (or its JSON sidecar). The amendment registry exists so that any modification to a frozen pre-registration artifact is traceable to a rationale + reviewer signoff. The continuous-integration freeze guard validates every amendment record against this schema before allowing the modification to land. Without a matching amendment record, modifying a frozen file is a `pre_registration_freeze_violation` per the closure plan's freeze-discipline acceptance criterion. This schema is itself a frozen artifact: changes must go through the same amendment process it documents.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "amendment_id",
+    "rationale",
+    "reviewer_signoff_sha",
+    "frozen_files_affected",
+    "original_tag_ref",
+    "post_amendment_tag_ref",
+    "amendment_dated_iso8601"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Amendment record schema version. Bumped only when fields are added, removed, or change semantics."
+    },
+    "amendment_id": {
+      "type": "string",
+      "pattern": "^AMD_[0-9]{3}$",
+      "description": "Stable amendment identifier in the form AMD_NNN where NNN is a zero-padded sequence number. The numeric component is monotonically increasing in the registry directory; the freeze guard rejects duplicate ids and gaps that skip a sequence number."
+    },
+    "rationale": {
+      "type": "string",
+      "minLength": 50,
+      "description": "Human-readable rationale for the amendment. Must explain WHY the frozen artifact needs to change and WHY this change still serves the published claim scope. Must reference at least one cited source (paper, knowledge-base card, prior amendment) so a future reviewer can re-anchor the policy decision against external evidence."
+    },
+    "reviewer_signoff_sha": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40,64}$",
+      "description": "SHA-1 (40-char) or SHA-256 (64-char) commit hash of the reviewer's signoff commit. The freeze guard rejects amendments whose reviewer_signoff_sha is not reachable from the post_amendment_tag_ref."
+    },
+    "frozen_files_affected": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Repo-relative path to a frozen artifact this amendment modifies. Each entry must appear in `frozen_artifacts.toml` as a registered frozen path; the freeze guard rejects amendments naming non-frozen files."
+      },
+      "description": "Repo-relative paths to every frozen file this amendment touches. The freeze-diff guard cross-references this list against the actual diff between original_tag_ref and post_amendment_tag_ref; any frozen file diffed but not listed here is a `frozen_files_affected_unlisted` violation."
+    },
+    "original_tag_ref": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Annotated git tag the amendment is anchored against. Typically the published pre-registration freeze tag (`pillar4_pre_registration_v4` or a later amendment-superseded variant)."
+    },
+    "post_amendment_tag_ref": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Annotated git tag created by the amendment that supersedes original_tag_ref. The freeze guard verifies that post_amendment_tag_ref is a descendant commit of original_tag_ref and that the only diff between the two trees consists of the frozen_files_affected paths plus the amendment file itself."
+    },
+    "amendment_dated_iso8601": {
+      "type": "string",
+      "format": "date-time",
+      "description": "ISO 8601 timestamp when the amendment was authored. Normalized to UTC at canonical-serialization time per `canonical_serialization_spec.md`."
+    }
+  }
+}

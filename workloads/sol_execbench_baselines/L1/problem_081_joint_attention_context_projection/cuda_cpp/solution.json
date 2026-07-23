@@ -1,0 +1,44 @@
+{
+  "name": "problem_081_joint_attention_context_projection_cuda_cpp_scaffold",
+  "definition": "081_joint_attention_context_projection",
+  "author": "scaffold",
+  "spec": {
+    "languages": [
+      "cuda_cpp"
+    ],
+    "target_hardware": [
+      "LOCAL"
+    ],
+    "entry_point": "main.cpp::run",
+    "dependencies": [],
+    "destination_passing_style": true,
+    "binding": "torch",
+    "compile_options": {
+      "cflags": [],
+      "cuda_cflags": [
+        "-O3",
+        "--use_fast_math",
+        "-gencode",
+        "arch=compute_86,code=sm_86"
+      ],
+      "ld_flags": [
+        "-lcuda"
+      ]
+    }
+  },
+  "sources": [
+    {
+      "path": "main.cpp",
+      "content": "#include <torch/extension.h>\n#include <ATen/cuda/CUDAContext.h>\n#include <c10/cuda/CUDAGuard.h>\n#include <string>\n\n// Joint attention context projection (Stable Diffusion 3.5 joint attention).\n//\n// Reference (problem_081_joint_attention_context_projection):\n//\n//     batch_size      = image_attention_output.shape[0]\n//     image_seq_len   = image_attention_output.shape[1]\n//     context_seq_len = context_attention_output.shape[1]\n//\n//     # 1. concat along sequence dim -> [B, image_seq_len + context_seq_len, inner_dim]\n//     combined_attention = torch.cat([image_attention_output,\n//                                     context_attention_output], dim=1)\n//\n//     # 2. duplicate along feature dim -> [B, S, 2*inner_dim]\n//     combined_features  = torch.cat([combined_attention,\n//                                     combined_attention], dim=-1)\n//\n//     # 3. linear: x @ W^T + b   (W: [inner_dim, 2*inner_dim], b: [inner_dim])\n//     projected_output   = torch.matmul(combined_features, to_out_weight.t()) + to_out_bias\n//\n//     # 4. split back along sequence dim\n//     projected_image    = projected_output[:, :image_seq_len, :]\n//     projected_context  = projected_output[:, image_seq_len:, :]\n//     return projected_image, projected_context\n//\n// Per definition.json (insertion order):\n//   image_attention_output   : [batch_size, image_seq_len,   inner_dim]      fp32\n//   context_attention_output : [batch_size, context_seq_len, inner_dim]      fp32\n//   to_out_weight            : [inner_dim, proj_input_dim]  (proj_input_dim = inner_dim*2)  fp32\n//   to_out_bias              : [inner_dim]                                   fp32\n//   projected_image          : [batch_size, image_seq_len,   inner_dim]      fp32  (DPS)\n//   projected_context        : [batch_size, context_seq_len, inner_dim]      fp32  (DPS)\n//\n// Subtleties faithfully reproduced:\n//   * Feature duplication: combined_features = cat([combined, combined], dim=-1)\n//     doubles the feature width from inner_dim to proj_input_dim = 2*inner_dim,\n//     so it matches to_out_weight's column count. We reproduce the literal\n//     cat-of-two-copies rather than the algebraic shortcut\n//     (x @ W1^T + x @ W2^T), so the matmul reduction order / FP rounding is the\n//     same single GEMM the reference issues.\n//   * proj_input_dim is the DOUBLED inner_dim (= inner_dim * 2 per the axes\n//     \"expr\"), NOT a free axis. to_out_weight is [inner_dim, 2*inner_dim].\n//   * Linear is x @ W.t() + b (PyTorch F.linear convention written out via\n//     matmul). at::matmul + at::transpose route through the same cuBLAS GEMM\n//     the reference torch.matmul issues, so the result is bit-matched.\n//   * Sequence split: the first image_seq_len rows go to projected_image, the\n//     remaining context_seq_len rows go to projected_context. We .contiguous()\n//     each slice before copy_ so the DPS write into the (contiguous)\n//     pre-allocated outputs is well-defined.\n//\n// Implementation: pure ATen tensor ops -- NO custom CUDA kernels. Outputs are\n// written in place into the pre-allocated destinations (destination-passing\n// style).\n\nstatic void check_fp32_cuda(const torch::Tensor& t, const std::string& name) {\n    TORCH_CHECK(t.is_cuda(), name, \" must be a CUDA tensor\");\n    TORCH_CHECK(t.dtype() == torch::kFloat32, name, \" must be float32, got \", t.dtype());\n}\n\nvoid run(\n    const torch::Tensor& image_attention_output,\n    const torch::Tensor& context_attention_output,\n    const torch::Tensor& to_out_weight,\n    const torch::Tensor& to_out_bias,\n    torch::Tensor projected_image,\n    torch::Tensor projected_context\n) {\n    check_fp32_cuda(image_attention_output, \"image_attention_output\");\n    check_fp32_cuda(context_attention_output, \"context_attention_output\");\n    check_fp32_cuda(to_out_weight, \"to_out_weight\");\n    check_fp32_cuda(to_out_bias, \"to_out_bias\");\n    check_fp32_cuda(projected_image, \"projected_image\");\n    check_fp32_cuda(projected_context, \"projected_context\");\n    TORCH_CHECK(image_attention_output.dim() == 3,\n                \"image_attention_output must be 3D [B, image_seq_len, inner_dim], got \",\n                image_attention_output.dim(), \"D\");\n    TORCH_CHECK(context_attention_output.dim() == 3,\n                \"context_attention_output must be 3D [B, context_seq_len, inner_dim], got \",\n                context_attention_output.dim(), \"D\");\n    TORCH_CHECK(to_out_weight.dim() == 2,\n                \"to_out_weight must be 2D [inner_dim, proj_input_dim], got \",\n                to_out_weight.dim(), \"D\");\n    TORCH_CHECK(to_out_bias.dim() == 1,\n                \"to_out_bias must be 1D [inner_dim], got \", to_out_bias.dim(), \"D\");\n\n    const c10::cuda::CUDAGuard device_guard(image_attention_output.device());\n\n    const int64_t image_seq_len = image_attention_output.size(1);\n\n    // 1. Concatenate along the sequence dim (dim=1):\n    //    [B, image_seq_len + context_seq_len, inner_dim]\n    torch::Tensor combined_attention =\n        at::cat({image_attention_output, context_attention_output}, /*dim=*/1);\n\n    // 2. Duplicate along the feature dim (dim=-1):\n    //    [B, S, 2*inner_dim] == [B, S, proj_input_dim]\n    torch::Tensor combined_features =\n        at::cat({combined_attention, combined_attention}, /*dim=*/-1);\n\n    // 3. Linear projection: combined_features @ to_out_weight.t() + to_out_bias\n    //    [B, S, proj_input_dim] @ [proj_input_dim, inner_dim] -> [B, S, inner_dim]\n    torch::Tensor projected_output =\n        at::matmul(combined_features, to_out_weight.t()) + to_out_bias;\n\n    // 4. Split back along the sequence dim.\n    torch::Tensor img_slice =\n        projected_output.slice(/*dim=*/1, /*start=*/0, /*end=*/image_seq_len).contiguous();\n    torch::Tensor ctx_slice =\n        projected_output.slice(/*dim=*/1, /*start=*/image_seq_len).contiguous();\n\n    TORCH_CHECK(img_slice.sizes() == projected_image.sizes(),\n                \"computed projected_image shape \", img_slice.sizes(),\n                \" does not match pre-allocated output \", projected_image.sizes());\n    TORCH_CHECK(ctx_slice.sizes() == projected_context.sizes(),\n                \"computed projected_context shape \", ctx_slice.sizes(),\n                \" does not match pre-allocated output \", projected_context.sizes());\n\n    projected_image.copy_(img_slice);\n    projected_context.copy_(ctx_slice);\n}\n\nPYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {\n    m.def(\"run\", &run,\n          \"Joint attention context projection via ATen (cat + cat + matmul + \"\n          \"bias + split); fp32; destination-passing style.\");\n}\n"
+    },
+    {
+      "path": "kernel.cu",
+      "content": "// Stub translation unit: this ATen-delegated port has no custom __global__\n// kernels. A bare .cu is still needed so torch's cpp_extension builds a CUDA\n// extension (adding CUDA include paths); a .cpp-only extension fails with\n// \"cuda_runtime_api.h: No such file or directory\".\n#include <cuda_runtime.h>\n"
+    },
+    {
+      "path": "kernel.h",
+      "content": "#pragma once\n// Intentionally empty: ATen-delegated port, no custom kernel launcher.\n"
+    }
+  ],
+  "description": "Scaffolded baseline for problem_081_joint_attention_context_projection (language=cuda_cpp); hand-edit the copied exemplar to implement the target problem before harness-running. Destination-passing-style is set true; outputs appear after inputs in definition.json insertion order."
+}

@@ -1,0 +1,44 @@
+{
+  "name": "problem_016_rope_inverse_frequency_computation_cuda_cpp",
+  "definition": "016_rope_inverse_frequency_computation",
+  "author": "sol-baselines-codegen",
+  "description": "Compute RoPE inverse-frequency table from a scalar rope_theta. head_dim=128 pinned; half_head_dim=64 outputs in float32. Single CTA, 64 threads, one element per thread, destination-passing style.",
+  "spec": {
+    "languages": [
+      "cuda_cpp"
+    ],
+    "target_hardware": [
+      "LOCAL"
+    ],
+    "entry_point": "main.cpp::run",
+    "dependencies": [],
+    "destination_passing_style": true,
+    "binding": "torch",
+    "compile_options": {
+      "cflags": [],
+      "cuda_cflags": [
+        "-O3",
+        "--use_fast_math",
+        "-gencode",
+        "arch=compute_86,code=sm_86"
+      ],
+      "ld_flags": [
+        "-lcuda"
+      ]
+    }
+  },
+  "sources": [
+    {
+      "path": "main.cpp",
+      "content": "#include <torch/extension.h>\n#include <ATen/cuda/CUDAContext.h>\n#include \"kernel.h\"\n#include <string>\n\n// Destination-passing-style entry. The definition declares:\n//   rope_theta: scalar float32\n//   inv_freq  : [half_head_dim]  float32 (DPS, pre-allocated)\n//\n// head_dim is pinned at 128 per definition.json, so half_head_dim = 64.\n\nvoid run(double rope_theta, torch::Tensor inv_freq) {\n    TORCH_CHECK(inv_freq.is_cuda(), \"inv_freq must be a CUDA tensor\");\n    TORCH_CHECK(\n        inv_freq.dtype() == torch::kFloat32,\n        \"inv_freq must be float32, got \", inv_freq.dtype());\n    TORCH_CHECK(inv_freq.is_contiguous(), \"inv_freq must be contiguous\");\n    TORCH_CHECK(inv_freq.dim() == 1, \"inv_freq must be 1D\");\n    TORCH_CHECK(\n        inv_freq.size(0) == 64,\n        \"inv_freq must have 64 elements (head_dim=128/2), got \",\n        inv_freq.size(0));\n\n    cudaStream_t stream = at::cuda::getCurrentCUDAStream();\n    problem_016_rope_inverse_frequency_computation_launcher(\n        static_cast<float>(rope_theta),\n        inv_freq,\n        stream);\n}\n\nPYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {\n    m.def(\n        \"run\", &run,\n        \"RoPE inverse-frequency computation; scalar rope_theta -> \"\n        \"inv_freq[64] fp32; head_dim=128 pinned by problem definition; \"\n        \"destination-passing style.\");\n}\n"
+    },
+    {
+      "path": "kernel.cu",
+      "content": "#include \"kernel.h\"\n#include <cuda_runtime.h>\n\n// One CTA, half_head_dim threads. Each thread computes\n// `inv_freq[i] = 1.0f / powf(rope_theta, (2*i) / head_dim)`. The\n// problem definition pins head_dim = 128, half_head_dim = 64.\n\nnamespace {\n\nconstexpr int HEAD_DIM = 128;\nconstexpr int HALF_HEAD_DIM = 64;\n\n__global__ void __launch_bounds__(HALF_HEAD_DIM, 16)\nproblem_016_rope_inverse_frequency_computation_kernel(\n    float rope_theta,\n    float* __restrict__ inv_freq) {\n\n    const int i = threadIdx.x;\n    if (i >= HALF_HEAD_DIM) return;\n    // exponent = (2 * i) / head_dim\n    const float exponent =\n        static_cast<float>(2 * i) / static_cast<float>(HEAD_DIM);\n    // inv_freq = 1 / rope_theta^exponent\n    inv_freq[i] = 1.0f / powf(rope_theta, exponent);\n}\n\n}  // namespace\n\nvoid problem_016_rope_inverse_frequency_computation_launcher(\n    float rope_theta,\n    torch::Tensor& inv_freq,\n    cudaStream_t stream) {\n\n    dim3 grid(1);\n    dim3 block(HALF_HEAD_DIM);\n    problem_016_rope_inverse_frequency_computation_kernel<<<\n        grid, block, 0, stream>>>(\n        rope_theta,\n        inv_freq.data_ptr<float>());\n}\n"
+    },
+    {
+      "path": "kernel.h",
+      "content": "#pragma once\n\n#include <torch/extension.h>\n#include <cuda_runtime.h>\n\n// Host launcher for the RoPE inverse-frequency-computation kernel.\n// One-shot elementwise: `inv_freq[i] = 1 / rope_theta^(2*i / head_dim)`\n// for i in [0, half_head_dim). Output is pre-allocated by the eval\n// driver and written in-place (destination-passing style). head_dim is\n// pinned at 128 per the problem definition, so half_head_dim = 64.\nvoid problem_016_rope_inverse_frequency_computation_launcher(\n    float rope_theta,\n    torch::Tensor& inv_freq,\n    cudaStream_t stream);\n"
+    }
+  ]
+}

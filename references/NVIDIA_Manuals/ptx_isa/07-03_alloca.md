@@ -1,0 +1,18 @@
+---
+title: "7.3. Alloca"
+section: "7.3"
+source: "https://docs.nvidia.com/cuda/parallel-thread-execution/#alloca"
+---
+
+## [7.3. Alloca](https://docs.nvidia.com/cuda/parallel-thread-execution#alloca)[](https://docs.nvidia.com/cuda/parallel-thread-execution/#alloca "Permalink to this headline")
+
+PTX provides `alloca` instruction for allocating storage at runtime on the per-thread local memory
+stack. The allocated stack memory can be accessed with `ld.local` and `st.local` instructions
+using the pointer returned by `alloca`.
+
+In order to facilitate deallocation of memory allocated with `alloca`, PTX provides two additional
+instructions: `stacksave` which allows reading the value of stack pointer in a local variable, and
+`stackrestore` which can restore the stack pointer with the saved value.
+
+`alloca`, `stacksave`, and `stackrestore` instructions are described in
+[Stack Manipulation Instructions](https://docs.nvidia.com/cuda/parallel-thread-execution/#stack-manipulation-instructions).

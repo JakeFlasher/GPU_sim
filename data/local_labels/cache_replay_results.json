@@ -1,0 +1,1239 @@
+{
+  "algorithm_version": "cache_replay_v1",
+  "arch": "sm_120",
+  "arches": [
+    "sm_120"
+  ],
+  "l2_capacity_provenance": {
+    "capacity_bytes": 33554432,
+    "capacity_source": "static_device_card",
+    "compute_capability": "12.0",
+    "geometry_source": "constant",
+    "line_size_bytes": 128,
+    "num_l2_slices_source": "constant",
+    "resolver": "tools.hrd_profiler.cache_model_spec.resolve_cache_model_spec + run_suite static card",
+    "resolver_evidence": [],
+    "sector_size_bytes": 32
+  },
+  "results": [
+    {
+      "cache_parameters": {
+        "associativity": 8,
+        "capacity_bytes": 33554432,
+        "capacity_scale": 1.0,
+        "effective_capacity_bytes": 33554432,
+        "line_bytes": 128,
+        "num_sets_per_slice": 32768,
+        "num_slices": 1,
+        "prefetch": "off",
+        "replacement_policy": "LRU",
+        "sector_bytes": 32,
+        "sectors_per_line": 4,
+        "slice_hash_id": "line_mod",
+        "total_lines": 262144
+      },
+      "calibrated_hit_ratio": 0.97240093,
+      "ground_truth_hit_ratio": 0.97240093,
+      "hits": 2910340,
+      "join_key": {
+        "arch": "sm_120",
+        "cache_layer": "L2",
+        "family_bucket": "memory_stress",
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "carveout_sensitivity_probe"
+      },
+      "miss_breakdown": {
+        "capacity": 0,
+        "cold": 9725,
+        "conflict": 0,
+        "total": 9725
+      },
+      "predicted_hit_ratio": 0.99666959468368,
+      "total_accesses": 2920065,
+      "uncertainty_interval": {
+        "ci_high": 0.9967350265785139,
+        "ci_low": 0.9966028559662893,
+        "method": "wilson_95"
+      }
+    },
+    {
+      "cache_parameters": {
+        "associativity": 8,
+        "capacity_bytes": 33554432,
+        "capacity_scale": 1.0,
+        "effective_capacity_bytes": 33554432,
+        "line_bytes": 128,
+        "num_sets_per_slice": 32768,
+        "num_slices": 1,
+        "prefetch": "off",
+        "replacement_policy": "LRU",
+        "sector_bytes": 32,
+        "sectors_per_line": 4,
+        "slice_hash_id": "line_mod",
+        "total_lines": 262144
+      },
+      "calibrated_hit_ratio": 0.53285,
+      "ground_truth_hit_ratio": 0.7036199999999999,
+      "hits": 4096,
+      "join_key": {
+        "arch": "sm_120",
+        "cache_layer": "L2",
+        "family_bucket": "other",
+        "shape_point": "timing_shape",
+        "slug": "conv2d_implicit_gemm_bf16_sm80"
+      },
+      "miss_breakdown": {
+        "capacity": 0,
+        "cold": 4096,
+        "conflict": 0,
+        "total": 4096
+      },
+      "predicted_hit_ratio": 0.5,
+      "total_accesses": 8192,
+      "uncertainty_interval": {
+        "ci_high": 0.5108250347097731,
+        "ci_low": 0.48917496529022686,
+        "method": "wilson_95"
+      }
+    },
+    {
+      "cache_parameters": {
+        "associativity": 8,
+        "capacity_bytes": 33554432,
+        "capacity_scale": 1.0,
+        "effective_capacity_bytes": 33554432,
+        "line_bytes": 128,
+        "num_sets_per_slice": 32768,
+        "num_slices": 1,
+        "prefetch": "off",
+        "replacement_policy": "LRU",
+        "sector_bytes": 32,
+        "sectors_per_line": 4,
+        "slice_hash_id": "line_mod",
+        "total_lines": 262144
+      },
+      "calibrated_hit_ratio": 0.53285,
+      "ground_truth_hit_ratio": 0.61188,
+      "hits": 1942,
+      "join_key": {
+        "arch": "sm_120",
+        "cache_layer": "L2",
+        "family_bucket": "other",
+        "shape_point": "correctness_shape",
+        "slug": "cross_entropy_fwd_fp32_sm80"
+      },
+      "miss_breakdown": {
+        "capacity": 0,
+        "cold": 130,
+        "conflict": 0,
+        "total": 130
+      },
+      "predicted_hit_ratio": 0.9372586872586872,
+      "total_accesses": 2072,
+      "uncertainty_interval": {
+        "ci_high": 0.9469127740633716,
+        "ci_low": 0.9259861985750029,
+        "method": "wilson_95"
+      }
+    },
+    {
+      "cache_parameters": {
+        "associativity": 8,
+        "capacity_bytes": 33554432,
+        "capacity_scale": 1.0,
+        "effective_capacity_bytes": 33554432,
+        "line_bytes": 128,
+        "num_sets_per_slice": 32768,
+        "num_slices": 1,
+        "prefetch": "off",
+        "replacement_policy": "LRU",
+        "sector_bytes": 32,
+        "sectors_per_line": 4,
+        "slice_hash_id": "line_mod",
+        "total_lines": 262144
+      },
+      "calibrated_hit_ratio": 0.53285,
+      "ground_truth_hit_ratio": 0.028900000000000002,
+      "hits": 491696,
+      "join_key": {
+        "arch": "sm_120",
+        "cache_layer": "L2",
+        "family_bucket": "other",
+        "shape_point": "timing_shape",
+        "slug": "cross_entropy_fwd_fp32_sm80"
+      },
+      "miss_breakdown": {
+        "capacity": 0,
+        "cold": 32784,
+        "conflict": 0,
+        "total": 32784
+      },
+      "predicted_hit_ratio": 0.9374923733984136,
+      "total_accesses": 524480,
+      "uncertainty_interval": {
+        "ci_high": 0.9381443262727379,
+        "ci_low": 0.9368340116681119,
+        "method": "wilson_95"
+      }
+    },
+    {
+      "cache_parameters": {
+        "associativity": 8,
+        "capacity_bytes": 33554432,
+        "capacity_scale": 1.0,
+        "effective_capacity_bytes": 33554432,
+        "line_bytes": 128,
+        "num_sets_per_slice": 32768,
+        "num_slices": 1,
+        "prefetch": "off",
+        "replacement_policy": "LRU",
+        "sector_bytes": 32,
+        "sectors_per_line": 4,
+        "slice_hash_id": "line_mod",
+        "total_lines": 262144
+      },
+      "calibrated_hit_ratio": 0.53285,
+      "ground_truth_hit_ratio": 0.02786,
+      "hits": 491696,
+      "join_key": {
+        "arch": "sm_120",
+        "cache_layer": "L2",
+        "family_bucket": "other",
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "cross_entropy_fwd_fp32_sm80"
+      },
+      "miss_breakdown": {
+        "capacity": 0,
+        "cold": 32784,
+        "conflict": 0,
+        "total": 32784
+      },
+      "predicted_hit_ratio": 0.9374923733984136,
+      "total_accesses": 524480,
+      "uncertainty_interval": {
+        "ci_high": 0.9381443262727379,
+        "ci_low": 0.9368340116681119,
+        "method": "wilson_95"
+      }
+    },
+    {
+      "cache_parameters": {
+        "associativity": 8,
+        "capacity_bytes": 33554432,
+        "capacity_scale": 1.0,
+        "effective_capacity_bytes": 33554432,
+        "line_bytes": 128,
+        "num_sets_per_slice": 32768,
+        "num_slices": 1,
+        "prefetch": "off",
+        "replacement_policy": "LRU",
+        "sector_bytes": 32,
+        "sectors_per_line": 4,
+        "slice_hash_id": "line_mod",
+        "total_lines": 262144
+      },
+      "calibrated_hit_ratio": 0.53285,
+      "ground_truth_hit_ratio": 0.15818,
+      "hits": 1966080,
+      "join_key": {
+        "arch": "sm_120",
+        "cache_layer": "L2",
+        "family_bucket": "memory_stress",
+        "shape_point": "timing_shape",
+        "slug": "embedding_gather_int32_sm80"
+      },
+      "miss_breakdown": {
+        "capacity": 0,
+        "cold": 131072,
+        "conflict": 0,
+        "total": 131072
+      },
+      "predicted_hit_ratio": 0.9375,
+      "total_accesses": 2097152,
+      "uncertainty_interval": {
+        "ci_high": 0.9378268165138196,
+        "ci_low": 0.937171580648693,
+        "method": "wilson_95"
+      }
+    },
+    {
+      "cache_parameters": {
+        "associativity": 8,
+        "capacity_bytes": 33554432,
+        "capacity_scale": 1.0,
+        "effective_capacity_bytes": 33554432,
+        "line_bytes": 128,
+        "num_sets_per_slice": 32768,
+        "num_slices": 1,
+        "prefetch": "off",
+        "replacement_policy": "LRU",
+        "sector_bytes": 32,
+        "sectors_per_line": 4,
+        "slice_hash_id": "line_mod",
+        "total_lines": 262144
+      },
+      "calibrated_hit_ratio": 0.53285,
+      "ground_truth_hit_ratio": 0.17126000000000002,
+      "hits": 1966080,
+      "join_key": {
+        "arch": "sm_120",
+        "cache_layer": "L2",
+        "family_bucket": "memory_stress",
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "embedding_gather_int32_sm80"
+      },
+      "miss_breakdown": {
+        "capacity": 0,
+        "cold": 131072,
+        "conflict": 0,
+        "total": 131072
+      },
+      "predicted_hit_ratio": 0.9375,
+      "total_accesses": 2097152,
+      "uncertainty_interval": {
+        "ci_high": 0.9378268165138196,
+        "ci_low": 0.937171580648693,
+        "method": "wilson_95"
+      }
+    },
+    {
+      "cache_parameters": {
+        "associativity": 8,
+        "capacity_bytes": 33554432,
+        "capacity_scale": 1.0,
+        "effective_capacity_bytes": 33554432,
+        "line_bytes": 128,
+        "num_sets_per_slice": 32768,
+        "num_slices": 1,
+        "prefetch": "off",
+        "replacement_policy": "LRU",
+        "sector_bytes": 32,
+        "sectors_per_line": 4,
+        "slice_hash_id": "line_mod",
+        "total_lines": 262144
+      },
+      "calibrated_hit_ratio": 0.53285,
+      "ground_truth_hit_ratio": 0.9936799999999999,
+      "hits": 3840,
+      "join_key": {
+        "arch": "sm_120",
+        "cache_layer": "L2",
+        "family_bucket": "tensor_compute",
+        "shape_point": "timing_shape",
+        "slug": "flash_attn_fwd_bf16_sm80"
+      },
+      "miss_breakdown": {
+        "capacity": 0,
+        "cold": 256,
+        "conflict": 0,
+        "total": 256
+      },
+      "predicted_hit_ratio": 0.9375,
+      "total_accesses": 4096,
+      "uncertainty_interval": {
+        "ci_high": 0.944511047075315,
+        "ci_low": 0.9296690675905784,
+        "method": "wilson_95"
+      }
+    },
+    {
+      "cache_parameters": {
+        "associativity": 8,
+        "capacity_bytes": 33554432,
+        "capacity_scale": 1.0,
+        "effective_capacity_bytes": 33554432,
+        "line_bytes": 128,
+        "num_sets_per_slice": 32768,
+        "num_slices": 1,
+        "prefetch": "off",
+        "replacement_policy": "LRU",
+        "sector_bytes": 32,
+        "sectors_per_line": 4,
+        "slice_hash_id": "line_mod",
+        "total_lines": 262144
+      },
+      "calibrated_hit_ratio": 0.53285,
+      "ground_truth_hit_ratio": 0.9190600000000001,
+      "hits": 57344,
+      "join_key": {
+        "arch": "sm_120",
+        "cache_layer": "L2",
+        "family_bucket": "tensor_compute",
+        "shape_point": "timing_shape",
+        "slug": "gemm_hmma_bf16_sm80"
+      },
+      "miss_breakdown": {
+        "capacity": 0,
+        "cold": 8192,
+        "conflict": 0,
+        "total": 8192
+      },
+      "predicted_hit_ratio": 0.875,
+      "total_accesses": 65536,
+      "uncertainty_interval": {
+        "ci_high": 0.8775101073580135,
+        "ci_low": 0.8724459315958554,
+        "method": "wilson_95"
+      }
+    },
+    {
+      "cache_parameters": {
+        "associativity": 8,
+        "capacity_bytes": 33554432,
+        "capacity_scale": 1.0,
+        "effective_capacity_bytes": 33554432,
+        "line_bytes": 128,
+        "num_sets_per_slice": 32768,
+        "num_slices": 1,
+        "prefetch": "off",
+        "replacement_policy": "LRU",
+        "sector_bytes": 32,
+        "sectors_per_line": 4,
+        "slice_hash_id": "line_mod",
+        "total_lines": 262144
+      },
+      "calibrated_hit_ratio": 0.53285,
+      "ground_truth_hit_ratio": 0.9178799999999999,
+      "hits": 57344,
+      "join_key": {
+        "arch": "sm_120",
+        "cache_layer": "L2",
+        "family_bucket": "tensor_compute",
+        "shape_point": "trace_l2_accuracy_lg",
+        "slug": "gemm_hmma_bf16_sm80"
+      },
+      "miss_breakdown": {
+        "capacity": 0,
+        "cold": 8192,
+        "conflict": 0,
+        "total": 8192
+      },
+      "predicted_hit_ratio": 0.875,
+      "total_accesses": 65536,
+      "uncertainty_interval": {
+        "ci_high": 0.8775101073580135,
+        "ci_low": 0.8724459315958554,
+        "method": "wilson_95"
+      }
+    },
+    {
+      "cache_parameters": {
+        "associativity": 8,
+        "capacity_bytes": 33554432,
+        "capacity_scale": 1.0,
+        "effective_capacity_bytes": 33554432,
+        "line_bytes": 128,
+        "num_sets_per_slice": 32768,
+        "num_slices": 1,
+        "prefetch": "off",
+        "replacement_policy": "LRU",
+        "sector_bytes": 32,
+        "sectors_per_line": 4,
+        "slice_hash_id": "line_mod",
+        "total_lines": 262144
+      },
+      "calibrated_hit_ratio": 0.53285,
+      "ground_truth_hit_ratio": 0.9213800000000001,
+      "hits": 57344,
+      "join_key": {
+        "arch": "sm_120",
+        "cache_layer": "L2",
+        "family_bucket": "tensor_compute",
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "gemm_hmma_bf16_sm80"
+      },
+      "miss_breakdown": {
+        "capacity": 0,
+        "cold": 8192,
+        "conflict": 0,
+        "total": 8192
+      },
+      "predicted_hit_ratio": 0.875,
+      "total_accesses": 65536,
+      "uncertainty_interval": {
+        "ci_high": 0.8775101073580135,
+        "ci_low": 0.8724459315958554,
+        "method": "wilson_95"
+      }
+    },
+    {
+      "cache_parameters": {
+        "associativity": 8,
+        "capacity_bytes": 33554432,
+        "capacity_scale": 1.0,
+        "effective_capacity_bytes": 33554432,
+        "line_bytes": 128,
+        "num_sets_per_slice": 32768,
+        "num_slices": 1,
+        "prefetch": "off",
+        "replacement_policy": "LRU",
+        "sector_bytes": 32,
+        "sectors_per_line": 4,
+        "slice_hash_id": "line_mod",
+        "total_lines": 262144
+      },
+      "calibrated_hit_ratio": 0.53285,
+      "ground_truth_hit_ratio": 0.9983,
+      "hits": 57344,
+      "join_key": {
+        "arch": "sm_120",
+        "cache_layer": "L2",
+        "family_bucket": "tensor_compute",
+        "shape_point": "timing_shape",
+        "slug": "gemm_hmma_fp16_sm80"
+      },
+      "miss_breakdown": {
+        "capacity": 0,
+        "cold": 8192,
+        "conflict": 0,
+        "total": 8192
+      },
+      "predicted_hit_ratio": 0.875,
+      "total_accesses": 65536,
+      "uncertainty_interval": {
+        "ci_high": 0.8775101073580135,
+        "ci_low": 0.8724459315958554,
+        "method": "wilson_95"
+      }
+    },
+    {
+      "cache_parameters": {
+        "associativity": 8,
+        "capacity_bytes": 33554432,
+        "capacity_scale": 1.0,
+        "effective_capacity_bytes": 33554432,
+        "line_bytes": 128,
+        "num_sets_per_slice": 32768,
+        "num_slices": 1,
+        "prefetch": "off",
+        "replacement_policy": "LRU",
+        "sector_bytes": 32,
+        "sectors_per_line": 4,
+        "slice_hash_id": "line_mod",
+        "total_lines": 262144
+      },
+      "calibrated_hit_ratio": 0.53285,
+      "ground_truth_hit_ratio": 0.9204399999999999,
+      "hits": 57344,
+      "join_key": {
+        "arch": "sm_120",
+        "cache_layer": "L2",
+        "family_bucket": "tensor_compute",
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "gemm_hmma_fp16_sm80"
+      },
+      "miss_breakdown": {
+        "capacity": 0,
+        "cold": 8192,
+        "conflict": 0,
+        "total": 8192
+      },
+      "predicted_hit_ratio": 0.875,
+      "total_accesses": 65536,
+      "uncertainty_interval": {
+        "ci_high": 0.8775101073580135,
+        "ci_low": 0.8724459315958554,
+        "method": "wilson_95"
+      }
+    },
+    {
+      "cache_parameters": {
+        "associativity": 8,
+        "capacity_bytes": 33554432,
+        "capacity_scale": 1.0,
+        "effective_capacity_bytes": 33554432,
+        "line_bytes": 128,
+        "num_sets_per_slice": 32768,
+        "num_slices": 1,
+        "prefetch": "off",
+        "replacement_policy": "LRU",
+        "sector_bytes": 32,
+        "sectors_per_line": 4,
+        "slice_hash_id": "line_mod",
+        "total_lines": 262144
+      },
+      "calibrated_hit_ratio": 0.53285,
+      "ground_truth_hit_ratio": 0.99834,
+      "hits": 57344,
+      "join_key": {
+        "arch": "sm_120",
+        "cache_layer": "L2",
+        "family_bucket": "tensor_compute",
+        "shape_point": "timing_shape",
+        "slug": "gemm_imma_int8_sm80"
+      },
+      "miss_breakdown": {
+        "capacity": 0,
+        "cold": 8192,
+        "conflict": 0,
+        "total": 8192
+      },
+      "predicted_hit_ratio": 0.875,
+      "total_accesses": 65536,
+      "uncertainty_interval": {
+        "ci_high": 0.8775101073580135,
+        "ci_low": 0.8724459315958554,
+        "method": "wilson_95"
+      }
+    },
+    {
+      "cache_parameters": {
+        "associativity": 8,
+        "capacity_bytes": 33554432,
+        "capacity_scale": 1.0,
+        "effective_capacity_bytes": 33554432,
+        "line_bytes": 128,
+        "num_sets_per_slice": 32768,
+        "num_slices": 1,
+        "prefetch": "off",
+        "replacement_policy": "LRU",
+        "sector_bytes": 32,
+        "sectors_per_line": 4,
+        "slice_hash_id": "line_mod",
+        "total_lines": 262144
+      },
+      "calibrated_hit_ratio": 0.53285,
+      "ground_truth_hit_ratio": 0.9005,
+      "hits": 57344,
+      "join_key": {
+        "arch": "sm_120",
+        "cache_layer": "L2",
+        "family_bucket": "tensor_compute",
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "gemm_imma_int8_sm80"
+      },
+      "miss_breakdown": {
+        "capacity": 0,
+        "cold": 8192,
+        "conflict": 0,
+        "total": 8192
+      },
+      "predicted_hit_ratio": 0.875,
+      "total_accesses": 65536,
+      "uncertainty_interval": {
+        "ci_high": 0.8775101073580135,
+        "ci_low": 0.8724459315958554,
+        "method": "wilson_95"
+      }
+    },
+    {
+      "cache_parameters": {
+        "associativity": 8,
+        "capacity_bytes": 33554432,
+        "capacity_scale": 1.0,
+        "effective_capacity_bytes": 33554432,
+        "line_bytes": 128,
+        "num_sets_per_slice": 32768,
+        "num_slices": 1,
+        "prefetch": "off",
+        "replacement_policy": "LRU",
+        "sector_bytes": 32,
+        "sectors_per_line": 4,
+        "slice_hash_id": "line_mod",
+        "total_lines": 262144
+      },
+      "calibrated_hit_ratio": 0.53285,
+      "ground_truth_hit_ratio": 0.8537399999999999,
+      "hits": 14336,
+      "join_key": {
+        "arch": "sm_120",
+        "cache_layer": "L2",
+        "family_bucket": "tensor_compute",
+        "shape_point": "timing_shape",
+        "slug": "gemm_sparse_2to4_bf16_sm80"
+      },
+      "miss_breakdown": {
+        "capacity": 0,
+        "cold": 2048,
+        "conflict": 0,
+        "total": 2048
+      },
+      "predicted_hit_ratio": 0.875,
+      "total_accesses": 16384,
+      "uncertainty_interval": {
+        "ci_high": 0.8799763961416356,
+        "ci_low": 0.8698477905895812,
+        "method": "wilson_95"
+      }
+    },
+    {
+      "cache_parameters": {
+        "associativity": 8,
+        "capacity_bytes": 33554432,
+        "capacity_scale": 1.0,
+        "effective_capacity_bytes": 33554432,
+        "line_bytes": 128,
+        "num_sets_per_slice": 32768,
+        "num_slices": 1,
+        "prefetch": "off",
+        "replacement_policy": "LRU",
+        "sector_bytes": 32,
+        "sectors_per_line": 4,
+        "slice_hash_id": "line_mod",
+        "total_lines": 262144
+      },
+      "calibrated_hit_ratio": 0.8869405966666667,
+      "ground_truth_hit_ratio": 0.7706000000000001,
+      "hits": 2139104,
+      "join_key": {
+        "arch": "sm_120",
+        "cache_layer": "L2",
+        "family_bucket": "memory_stress",
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "l2_persisting_window_sweep"
+      },
+      "miss_breakdown": {
+        "capacity": 0,
+        "cold": 7169,
+        "conflict": 0,
+        "total": 7169
+      },
+      "predicted_hit_ratio": 0.9966597911822028,
+      "total_accesses": 2146273,
+      "uncertainty_interval": {
+        "ci_high": 0.9967360995451219,
+        "ci_low": 0.9965817048862448,
+        "method": "wilson_95"
+      }
+    },
+    {
+      "cache_parameters": {
+        "associativity": 8,
+        "capacity_bytes": 33554432,
+        "capacity_scale": 1.0,
+        "effective_capacity_bytes": 33554432,
+        "line_bytes": 128,
+        "num_sets_per_slice": 32768,
+        "num_slices": 1,
+        "prefetch": "off",
+        "replacement_policy": "LRU",
+        "sector_bytes": 32,
+        "sectors_per_line": 4,
+        "slice_hash_id": "line_mod",
+        "total_lines": 262144
+      },
+      "calibrated_hit_ratio": 0.8869405966666667,
+      "ground_truth_hit_ratio": 0.96592,
+      "hits": 4423584,
+      "join_key": {
+        "arch": "sm_120",
+        "cache_layer": "L2",
+        "family_bucket": "memory_stress",
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "l2_prefetch_hint_sweep"
+      },
+      "miss_breakdown": {
+        "capacity": 0,
+        "cold": 32769,
+        "conflict": 0,
+        "total": 32769
+      },
+      "predicted_hit_ratio": 0.9926466776756688,
+      "total_accesses": 4456353,
+      "uncertainty_interval": {
+        "ci_high": 0.9927255782424986,
+        "ci_low": 0.992566927737236,
+        "method": "wilson_95"
+      }
+    },
+    {
+      "cache_parameters": {
+        "associativity": 8,
+        "capacity_bytes": 33554432,
+        "capacity_scale": 1.0,
+        "effective_capacity_bytes": 33554432,
+        "line_bytes": 128,
+        "num_sets_per_slice": 32768,
+        "num_slices": 1,
+        "prefetch": "off",
+        "replacement_policy": "LRU",
+        "sector_bytes": 32,
+        "sectors_per_line": 4,
+        "slice_hash_id": "line_mod",
+        "total_lines": 262144
+      },
+      "calibrated_hit_ratio": 0.53285,
+      "ground_truth_hit_ratio": 0.44848,
+      "hits": 1277440,
+      "join_key": {
+        "arch": "sm_120",
+        "cache_layer": "L2",
+        "family_bucket": "activation_norm",
+        "shape_point": "timing_shape",
+        "slug": "layernorm_fwd_bf16_sm80"
+      },
+      "miss_breakdown": {
+        "capacity": 0,
+        "cold": 33280,
+        "conflict": 0,
+        "total": 33280
+      },
+      "predicted_hit_ratio": 0.974609375,
+      "total_accesses": 1310720,
+      "uncertainty_interval": {
+        "ci_high": 0.9748772975475152,
+        "ci_low": 0.9743386703876179,
+        "method": "wilson_95"
+      }
+    },
+    {
+      "cache_parameters": {
+        "associativity": 8,
+        "capacity_bytes": 33554432,
+        "capacity_scale": 1.0,
+        "effective_capacity_bytes": 33554432,
+        "line_bytes": 128,
+        "num_sets_per_slice": 32768,
+        "num_slices": 1,
+        "prefetch": "off",
+        "replacement_policy": "LRU",
+        "sector_bytes": 32,
+        "sectors_per_line": 4,
+        "slice_hash_id": "line_mod",
+        "total_lines": 262144
+      },
+      "calibrated_hit_ratio": 0.53285,
+      "ground_truth_hit_ratio": 0.43776000000000004,
+      "hits": 1277440,
+      "join_key": {
+        "arch": "sm_120",
+        "cache_layer": "L2",
+        "family_bucket": "activation_norm",
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "layernorm_fwd_bf16_sm80"
+      },
+      "miss_breakdown": {
+        "capacity": 0,
+        "cold": 33280,
+        "conflict": 0,
+        "total": 33280
+      },
+      "predicted_hit_ratio": 0.974609375,
+      "total_accesses": 1310720,
+      "uncertainty_interval": {
+        "ci_high": 0.9748772975475152,
+        "ci_low": 0.9743386703876179,
+        "method": "wilson_95"
+      }
+    },
+    {
+      "cache_parameters": {
+        "associativity": 8,
+        "capacity_bytes": 33554432,
+        "capacity_scale": 1.0,
+        "effective_capacity_bytes": 33554432,
+        "line_bytes": 128,
+        "num_sets_per_slice": 32768,
+        "num_slices": 1,
+        "prefetch": "off",
+        "replacement_policy": "LRU",
+        "sector_bytes": 32,
+        "sectors_per_line": 4,
+        "slice_hash_id": "line_mod",
+        "total_lines": 262144
+      },
+      "calibrated_hit_ratio": 0.53285,
+      "ground_truth_hit_ratio": 0.35481999999999997,
+      "hits": 1785600,
+      "join_key": {
+        "arch": "sm_120",
+        "cache_layer": "L2",
+        "family_bucket": "activation_norm",
+        "shape_point": "timing_shape",
+        "slug": "rmsnorm_bwd_bf16_sm80"
+      },
+      "miss_breakdown": {
+        "capacity": 0,
+        "cold": 49408,
+        "conflict": 0,
+        "total": 49408
+      },
+      "predicted_hit_ratio": 0.9730747767857143,
+      "total_accesses": 1835008,
+      "uncertainty_interval": {
+        "ci_high": 0.9733079898499558,
+        "ci_low": 0.9728395829559854,
+        "method": "wilson_95"
+      }
+    },
+    {
+      "cache_parameters": {
+        "associativity": 8,
+        "capacity_bytes": 33554432,
+        "capacity_scale": 1.0,
+        "effective_capacity_bytes": 33554432,
+        "line_bytes": 128,
+        "num_sets_per_slice": 32768,
+        "num_slices": 1,
+        "prefetch": "off",
+        "replacement_policy": "LRU",
+        "sector_bytes": 32,
+        "sectors_per_line": 4,
+        "slice_hash_id": "line_mod",
+        "total_lines": 262144
+      },
+      "calibrated_hit_ratio": 0.53285,
+      "ground_truth_hit_ratio": 0.374,
+      "hits": 1015552,
+      "join_key": {
+        "arch": "sm_120",
+        "cache_layer": "L2",
+        "family_bucket": "activation_norm",
+        "shape_point": "timing_shape",
+        "slug": "rmsnorm_fwd_bf16_sm80"
+      },
+      "miss_breakdown": {
+        "capacity": 0,
+        "cold": 33024,
+        "conflict": 0,
+        "total": 33024
+      },
+      "predicted_hit_ratio": 0.968505859375,
+      "total_accesses": 1048576,
+      "uncertainty_interval": {
+        "ci_high": 0.9688384357686366,
+        "ci_low": 0.968169850124774,
+        "method": "wilson_95"
+      }
+    },
+    {
+      "cache_parameters": {
+        "associativity": 8,
+        "capacity_bytes": 33554432,
+        "capacity_scale": 1.0,
+        "effective_capacity_bytes": 33554432,
+        "line_bytes": 128,
+        "num_sets_per_slice": 32768,
+        "num_slices": 1,
+        "prefetch": "off",
+        "replacement_policy": "LRU",
+        "sector_bytes": 32,
+        "sectors_per_line": 4,
+        "slice_hash_id": "line_mod",
+        "total_lines": 262144
+      },
+      "calibrated_hit_ratio": 0.53285,
+      "ground_truth_hit_ratio": 0.32298000000000004,
+      "hits": 1015552,
+      "join_key": {
+        "arch": "sm_120",
+        "cache_layer": "L2",
+        "family_bucket": "activation_norm",
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "rmsnorm_fwd_bf16_sm80"
+      },
+      "miss_breakdown": {
+        "capacity": 0,
+        "cold": 33024,
+        "conflict": 0,
+        "total": 33024
+      },
+      "predicted_hit_ratio": 0.968505859375,
+      "total_accesses": 1048576,
+      "uncertainty_interval": {
+        "ci_high": 0.9688384357686366,
+        "ci_low": 0.968169850124774,
+        "method": "wilson_95"
+      }
+    },
+    {
+      "cache_parameters": {
+        "associativity": 8,
+        "capacity_bytes": 33554432,
+        "capacity_scale": 1.0,
+        "effective_capacity_bytes": 33554432,
+        "line_bytes": 128,
+        "num_sets_per_slice": 32768,
+        "num_slices": 1,
+        "prefetch": "off",
+        "replacement_policy": "LRU",
+        "sector_bytes": 32,
+        "sectors_per_line": 4,
+        "slice_hash_id": "line_mod",
+        "total_lines": 262144
+      },
+      "calibrated_hit_ratio": 0.53285,
+      "ground_truth_hit_ratio": 0.19524,
+      "hits": 491520,
+      "join_key": {
+        "arch": "sm_120",
+        "cache_layer": "L2",
+        "family_bucket": "other",
+        "shape_point": "timing_shape",
+        "slug": "silu_fwd_bf16_sm80"
+      },
+      "miss_breakdown": {
+        "capacity": 0,
+        "cold": 32768,
+        "conflict": 0,
+        "total": 32768
+      },
+      "predicted_hit_ratio": 0.9375,
+      "total_accesses": 524288,
+      "uncertainty_interval": {
+        "ci_high": 0.9381520342885741,
+        "ci_low": 0.936841554396709,
+        "method": "wilson_95"
+      }
+    },
+    {
+      "cache_parameters": {
+        "associativity": 8,
+        "capacity_bytes": 33554432,
+        "capacity_scale": 1.0,
+        "effective_capacity_bytes": 33554432,
+        "line_bytes": 128,
+        "num_sets_per_slice": 32768,
+        "num_slices": 1,
+        "prefetch": "off",
+        "replacement_policy": "LRU",
+        "sector_bytes": 32,
+        "sectors_per_line": 4,
+        "slice_hash_id": "line_mod",
+        "total_lines": 262144
+      },
+      "calibrated_hit_ratio": 0.53285,
+      "ground_truth_hit_ratio": 0.18045999999999998,
+      "hits": 753664,
+      "join_key": {
+        "arch": "sm_120",
+        "cache_layer": "L2",
+        "family_bucket": "activation_norm",
+        "shape_point": "timing_shape",
+        "slug": "softmax_safe_bf16_sm80"
+      },
+      "miss_breakdown": {
+        "capacity": 0,
+        "cold": 32768,
+        "conflict": 0,
+        "total": 32768
+      },
+      "predicted_hit_ratio": 0.9583333333333334,
+      "total_accesses": 786432,
+      "uncertainty_interval": {
+        "ci_high": 0.9587727489754359,
+        "ci_low": 0.9578894399366826,
+        "method": "wilson_95"
+      }
+    },
+    {
+      "cache_parameters": {
+        "associativity": 8,
+        "capacity_bytes": 33554432,
+        "capacity_scale": 1.0,
+        "effective_capacity_bytes": 33554432,
+        "line_bytes": 128,
+        "num_sets_per_slice": 32768,
+        "num_slices": 1,
+        "prefetch": "off",
+        "replacement_policy": "LRU",
+        "sector_bytes": 32,
+        "sectors_per_line": 4,
+        "slice_hash_id": "line_mod",
+        "total_lines": 262144
+      },
+      "calibrated_hit_ratio": 0.53285,
+      "ground_truth_hit_ratio": 0.1784,
+      "hits": 753664,
+      "join_key": {
+        "arch": "sm_120",
+        "cache_layer": "L2",
+        "family_bucket": "activation_norm",
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "softmax_safe_bf16_sm80"
+      },
+      "miss_breakdown": {
+        "capacity": 0,
+        "cold": 32768,
+        "conflict": 0,
+        "total": 32768
+      },
+      "predicted_hit_ratio": 0.9583333333333334,
+      "total_accesses": 786432,
+      "uncertainty_interval": {
+        "ci_high": 0.9587727489754359,
+        "ci_low": 0.9578894399366826,
+        "method": "wilson_95"
+      }
+    },
+    {
+      "cache_parameters": {
+        "associativity": 8,
+        "capacity_bytes": 33554432,
+        "capacity_scale": 1.0,
+        "effective_capacity_bytes": 33554432,
+        "line_bytes": 128,
+        "num_sets_per_slice": 32768,
+        "num_slices": 1,
+        "prefetch": "off",
+        "replacement_policy": "LRU",
+        "sector_bytes": 32,
+        "sectors_per_line": 4,
+        "slice_hash_id": "line_mod",
+        "total_lines": 262144
+      },
+      "calibrated_hit_ratio": 0.53285,
+      "ground_truth_hit_ratio": 0.12634,
+      "hits": 737280,
+      "join_key": {
+        "arch": "sm_120",
+        "cache_layer": "L2",
+        "family_bucket": "other",
+        "shape_point": "timing_shape",
+        "slug": "swiglu_fwd_bf16_sm80"
+      },
+      "miss_breakdown": {
+        "capacity": 0,
+        "cold": 49152,
+        "conflict": 0,
+        "total": 49152
+      },
+      "predicted_hit_ratio": 0.9375,
+      "total_accesses": 786432,
+      "uncertainty_interval": {
+        "ci_high": 0.9380328625845565,
+        "ci_low": 0.9369628631951928,
+        "method": "wilson_95"
+      }
+    },
+    {
+      "cache_parameters": {
+        "associativity": 8,
+        "capacity_bytes": 33554432,
+        "capacity_scale": 1.0,
+        "effective_capacity_bytes": 33554432,
+        "line_bytes": 128,
+        "num_sets_per_slice": 32768,
+        "num_slices": 1,
+        "prefetch": "off",
+        "replacement_policy": "LRU",
+        "sector_bytes": 32,
+        "sectors_per_line": 4,
+        "slice_hash_id": "line_mod",
+        "total_lines": 262144
+      },
+      "calibrated_hit_ratio": 0.53285,
+      "ground_truth_hit_ratio": 0.13134,
+      "hits": 737280,
+      "join_key": {
+        "arch": "sm_120",
+        "cache_layer": "L2",
+        "family_bucket": "other",
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "swiglu_fwd_bf16_sm80"
+      },
+      "miss_breakdown": {
+        "capacity": 0,
+        "cold": 49152,
+        "conflict": 0,
+        "total": 49152
+      },
+      "predicted_hit_ratio": 0.9375,
+      "total_accesses": 786432,
+      "uncertainty_interval": {
+        "ci_high": 0.9380328625845565,
+        "ci_low": 0.9369628631951928,
+        "method": "wilson_95"
+      }
+    },
+    {
+      "cache_parameters": {
+        "associativity": 8,
+        "capacity_bytes": 33554432,
+        "capacity_scale": 1.0,
+        "effective_capacity_bytes": 33554432,
+        "line_bytes": 128,
+        "num_sets_per_slice": 32768,
+        "num_slices": 1,
+        "prefetch": "off",
+        "replacement_policy": "LRU",
+        "sector_bytes": 32,
+        "sectors_per_line": 4,
+        "slice_hash_id": "line_mod",
+        "total_lines": 262144
+      },
+      "calibrated_hit_ratio": 0.53285,
+      "ground_truth_hit_ratio": 0.97926,
+      "hits": 999329,
+      "join_key": {
+        "arch": "sm_120",
+        "cache_layer": "L2",
+        "family_bucket": "memory_stress",
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "warm_cold_pair_relaunch"
+      },
+      "miss_breakdown": {
+        "capacity": 0,
+        "cold": 49153,
+        "conflict": 0,
+        "total": 49153
+      },
+      "predicted_hit_ratio": 0.9531198437359917,
+      "total_accesses": 1048482,
+      "uncertainty_interval": {
+        "ci_high": 0.9535228029473752,
+        "ci_low": 0.9527135641074453,
+        "method": "wilson_95"
+      }
+    },
+    {
+      "cache_parameters": {
+        "associativity": 8,
+        "capacity_bytes": 33554432,
+        "capacity_scale": 1.0,
+        "effective_capacity_bytes": 33554432,
+        "line_bytes": 128,
+        "num_sets_per_slice": 32768,
+        "num_slices": 1,
+        "prefetch": "off",
+        "replacement_policy": "LRU",
+        "sector_bytes": 32,
+        "sectors_per_line": 4,
+        "slice_hash_id": "line_mod",
+        "total_lines": 262144
+      },
+      "calibrated_hit_ratio": 0.8869405966666667,
+      "ground_truth_hit_ratio": 0.9243017899999999,
+      "hits": 2648512,
+      "join_key": {
+        "arch": "sm_120",
+        "cache_layer": "L2",
+        "family_bucket": "memory_stress",
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "working_set_capacity_sweep"
+      },
+      "miss_breakdown": {
+        "capacity": 0,
+        "cold": 9729,
+        "conflict": 0,
+        "total": 9729
+      },
+      "predicted_hit_ratio": 0.996340060965127,
+      "total_accesses": 2658241,
+      "uncertainty_interval": {
+        "ci_high": 0.9964119409779981,
+        "ci_low": 0.9962667463665862,
+        "method": "wilson_95"
+      }
+    }
+  ],
+  "schema_version": 1,
+  "selected_config": {
+    "associativity": 8,
+    "capacity_bytes": 33554432,
+    "capacity_scale": 1.0,
+    "effective_capacity_bytes": 33554432,
+    "line_bytes": 128,
+    "num_sets_per_slice": 32768,
+    "num_slices": 1,
+    "prefetch": "off",
+    "replacement_policy": "LRU",
+    "sector_bytes": 32,
+    "sectors_per_line": 4,
+    "slice_hash_id": "line_mod",
+    "total_lines": 262144
+  },
+  "sku": "rtx_5060_laptop",
+  "source_commit": "ee7c5ab43e23ca4d9a8ecb7a730e8bd2b24ca13f",
+  "top_level_admission_scope": "target_arch=sm_120"
+}

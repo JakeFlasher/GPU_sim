@@ -1,0 +1,39 @@
+---
+title: "10.27. Special Registers: %envreg<32>"
+section: "10.27"
+source: "https://docs.nvidia.com/cuda/parallel-thread-execution/#special-registers-envreg-32"
+---
+
+## [10.27. Special Registers: %envreg<32>](https://docs.nvidia.com/cuda/parallel-thread-execution#special-registers-envreg-32)[](https://docs.nvidia.com/cuda/parallel-thread-execution/#special-registers-envreg-32 "Permalink to this headline")
+
+**`%envreg<32>`**
+
+Driver-defined read-only registers.
+
+**Syntax (predefined)**
+
+```text
+.sreg .b32 %envreg<32>;
+```
+
+**Description**
+
+A set of 32 pre-defined read-only registers used to capture execution environment of PTX program
+outside of PTX virtual machine. These registers are initialized by the driver prior to kernel launch
+and can contain cta-wide or grid-wide values.
+
+Precise semantics of these registers is defined in the driver documentation.
+
+**PTX ISA Notes**
+
+Introduced in PTX ISA version 2.1.
+
+**Target ISA Notes**
+
+Supported on all target architectures.
+
+**Examples**
+
+```text
+mov.b32      %r1,%envreg0;  // move envreg0 to %r1
+```

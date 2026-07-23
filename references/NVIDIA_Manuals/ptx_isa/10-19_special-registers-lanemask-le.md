@@ -1,0 +1,36 @@
+---
+title: "10.19. Special Registers: %lanemask_le"
+section: "10.19"
+source: "https://docs.nvidia.com/cuda/parallel-thread-execution/#special-registers-lanemask-le"
+---
+
+## [10.19. Special Registers: %lanemask_le](https://docs.nvidia.com/cuda/parallel-thread-execution#special-registers-lanemask-le)[](https://docs.nvidia.com/cuda/parallel-thread-execution/#special-registers-lanemask-le "Permalink to this headline")
+
+**`%lanemask_le`**
+
+32-bit mask with bits set in positions less than or equal to the thread’s lane number in the warp.
+
+**Syntax (predefined)**
+
+```text
+.sreg .u32 %lanemask_le;
+```
+
+**Description**
+
+A predefined, read-only special register initialized with a 32-bit mask with bits set in positions
+less than or equal to the thread’s lane number in the warp.
+
+**PTX ISA Notes**
+
+Introduced in PTX ISA version 2.0.
+
+**Target ISA Notes**
+
+`%lanemask_le` requires `sm_20` or higher.
+
+**Examples**
+
+```text
+mov.u32     %r, %lanemask_le
+```

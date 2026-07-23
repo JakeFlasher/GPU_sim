@@ -1,0 +1,53 @@
+{
+  "by_assoc": {
+    "16": {
+      "raw_l1_hit_rate": 0.6651204427083334,
+      "raw_l2_hit_rate": 0.0015795868772782503,
+      "scored": true,
+      "typed_reason": ""
+    },
+    "32": {
+      "raw_l1_hit_rate": 0.6651204427083334,
+      "raw_l2_hit_rate": 0.004495747266099636,
+      "scored": true,
+      "typed_reason": ""
+    },
+    "4": {
+      "raw_l1_hit_rate": 0.6651204427083334,
+      "raw_l2_hit_rate": 0.00018226002430133658,
+      "scored": true,
+      "typed_reason": ""
+    },
+    "64": {
+      "raw_l1_hit_rate": 0.6651204427083334,
+      "raw_l2_hit_rate": 0.004495747266099636,
+      "scored": true,
+      "typed_reason": ""
+    },
+    "8": {
+      "raw_l1_hit_rate": 0.6651204427083334,
+      "raw_l2_hit_rate": 0.0005467800729040097,
+      "scored": true,
+      "typed_reason": ""
+    }
+  },
+  "candidates": [
+    4,
+    8,
+    16,
+    32,
+    64
+  ],
+  "captured_at_utc": "2026-05-30T00:59:12+00:00",
+  "dense_reuse": {
+    "distinct_sectors": 131081,
+    "reuse_factor": 2.499828350409289,
+    "total_sector_accesses": 327680,
+    "truncated": false
+  },
+  "schema_version": 2,
+  "scored": true,
+  "slug": "problem_021_rmsnorm_h128",
+  "tier2_sidecar_sha256": "0266e35acc571b790c3b52a7c84176db183b56e807cf471918bff768ac718b2c",
+  "typed_reason": ""
+}

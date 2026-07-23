@@ -1,0 +1,14 @@
+{
+  "associativity_l2": 16,
+  "captured_at_utc": "2026-05-29T22:20:13+00:00",
+  "geometry_source": "sm86_pilot_static_device_card_v1",
+  "language": "cuda_cpp",
+  "num_l2_slices": 6,
+  "raw_l1_hit_rate": 0.6645304361979166,
+  "raw_l2_hit_rate": 0.004791072836436412,
+  "schema_version": 1,
+  "scored": true,
+  "slug": "problem_021_rmsnorm_h128",
+  "tier2_sidecar_sha256": "78539bebd2b5e3e951a2ca89b8411b0ede4b366905aa45c5753e8fdfd5251e6f",
+  "typed_reason": ""
+}

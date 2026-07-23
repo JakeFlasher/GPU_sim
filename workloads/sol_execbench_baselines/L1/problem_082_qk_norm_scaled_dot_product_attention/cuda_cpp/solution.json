@@ -1,0 +1,44 @@
+{
+  "name": "problem_082_qk_norm_scaled_dot_product_attention_cuda_cpp_scaffold",
+  "definition": "082_qk_norm_scaled_dot_product_attention",
+  "author": "scaffold",
+  "spec": {
+    "languages": [
+      "cuda_cpp"
+    ],
+    "target_hardware": [
+      "LOCAL"
+    ],
+    "entry_point": "main.cpp::run",
+    "dependencies": [],
+    "destination_passing_style": true,
+    "binding": "torch",
+    "compile_options": {
+      "cflags": [],
+      "cuda_cflags": [
+        "-O3",
+        "--use_fast_math",
+        "-gencode",
+        "arch=compute_86,code=sm_86"
+      ],
+      "ld_flags": [
+        "-lcuda"
+      ]
+    }
+  },
+  "sources": [
+    {
+      "path": "main.cpp",
+      "content": "#include <torch/extension.h>\n#include <ATen/cuda/CUDAContext.h>\n#include <c10/cuda/CUDAGuard.h>\n#include <cmath>\n#include <string>\n\n// Scaled dot-product attention with QK LayerNorm normalization (SD3.5 block).\n//\n// Reference (problem_082_qk_norm_scaled_dot_product_attention), op-for-op:\n//   num_heads = 24 ; head_dim = 64 ; scale = head_dim ** -0.5\n//\n//   qkv = (hidden_states @ qkv_weight.t()) + qkv_bias           # [B,S,3*dim]\n//   qkv = qkv.reshape(B,S,3,24,64).permute(2,0,3,1,4)           # [3,B,24,S,64]\n//   q, k, v = qkv[0], qkv[1], qkv[2]                            # each [B,24,S,64]\n//\n//   # LayerNorm over the last dim (head_dim=64), unbiased=False variance:\n//   q_mean = q.mean(-1, keepdim); q_var = q.var(-1, unbiased=False, keepdim)\n//   q = (q - q_mean) / sqrt(q_var + eps) * q_norm_weight + q_norm_bias\n//   k_mean = k.mean(-1, keepdim); k_var = k.var(-1, unbiased=False, keepdim)\n//   k = (k - k_mean) / sqrt(k_var + eps) * k_norm_weight + k_norm_bias\n//\n//   q = q * scale                                              # scale on Q, post-norm\n//   attn_scores = q @ k.transpose(-2,-1)                       # [B,24,S,S]\n//   attn_probs  = softmax(attn_scores, dim=-1)                 # fp32 (native dtype)\n//   attn_output = attn_probs @ v                               # [B,24,S,64]\n//   attn_output = attn_output.transpose(1,2).reshape(B,S,24*64)# [B,S,dim]\n//   output = (attn_output @ out_proj_weight.t()) + out_proj_bias\n//   return output\n//\n// Per definition.json (insertion order):\n//   hidden_states   : [batch_size, seq_len, dim=1536]            fp32\n//   qkv_weight      : [dim_times_3=4608, dim=1536]               fp32\n//   qkv_bias        : [dim_times_3=4608]                         fp32\n//   q_norm_weight   : [head_dim=64]                              fp32\n//   q_norm_bias     : [head_dim=64]                              fp32\n//   k_norm_weight   : [head_dim=64]                              fp32\n//   k_norm_bias     : [head_dim=64]                              fp32\n//   out_proj_weight : [dim=1536, dim=1536]                       fp32\n//   out_proj_bias   : [dim=1536]                                 fp32\n//   eps             : scalar                                     fp32\n//   output          : [batch_size, seq_len, dim=1536]            fp32 DPS\n//\n// Implementation: pure ATen / cuBLAS / cuDNN dispatch -- NO custom CUDA\n// kernels. The Q/K LayerNorm over the trailing head_dim axis is delegated to\n// at::layer_norm({head_dim}, weight, bias, eps), which computes exactly the\n// reference's (x-mean)/sqrt(var+eps)*w+b with biased (unbiased=False) variance\n// over the last axis -- matching q.var(unbiased=False). The scores are\n// materialized through an explicit matmul (not a fused SDPA) so the scale,\n// softmax dtype, and op order match the reference precisely; scale is applied\n// to Q AFTER the LayerNorm and BEFORE the QK^T matmul, exactly as written.\n// Softmax stays in the native fp32 dtype. Output is written in place (DPS).\n\nstatic void check_fp32_cuda(const torch::Tensor& t, const std::string& name) {\n    TORCH_CHECK(t.is_cuda(), name, \" must be a CUDA tensor\");\n    TORCH_CHECK(t.dtype() == torch::kFloat32, name, \" must be float32, got \", t.dtype());\n}\n\nvoid run(\n    const torch::Tensor& hidden_states,\n    const torch::Tensor& qkv_weight,\n    const torch::Tensor& qkv_bias,\n    const torch::Tensor& q_norm_weight,\n    const torch::Tensor& q_norm_bias,\n    const torch::Tensor& k_norm_weight,\n    const torch::Tensor& k_norm_bias,\n    const torch::Tensor& out_proj_weight,\n    const torch::Tensor& out_proj_bias,\n    double eps,\n    torch::Tensor output\n) {\n    check_fp32_cuda(hidden_states, \"hidden_states\");\n    check_fp32_cuda(qkv_weight, \"qkv_weight\");\n    check_fp32_cuda(qkv_bias, \"qkv_bias\");\n    check_fp32_cuda(q_norm_weight, \"q_norm_weight\");\n    check_fp32_cuda(q_norm_bias, \"q_norm_bias\");\n    check_fp32_cuda(k_norm_weight, \"k_norm_weight\");\n    check_fp32_cuda(k_norm_bias, \"k_norm_bias\");\n    check_fp32_cuda(out_proj_weight, \"out_proj_weight\");\n    check_fp32_cuda(out_proj_bias, \"out_proj_bias\");\n    check_fp32_cuda(output, \"output\");\n    TORCH_CHECK(hidden_states.dim() == 3,\n                \"hidden_states must be 3D [B, S, dim], got \", hidden_states.dim(), \"D\");\n\n    const c10::cuda::CUDAGuard device_guard(hidden_states.device());\n\n    constexpr int64_t kNumHeads = 24;\n    constexpr int64_t kHeadDim = 64;\n    const double scale = std::pow(static_cast<double>(kHeadDim), -0.5);  // head_dim ** -0.5\n\n    const int64_t batch_size = hidden_states.size(0);\n    const int64_t seq_len = hidden_states.size(1);\n    const int64_t dim = hidden_states.size(2);\n\n    // --- QKV projection + bias. ---\n    auto qkv = at::matmul(hidden_states, qkv_weight.t()) + qkv_bias;  // [B,S,3*dim]\n\n    // --- Reshape and split into q, k, v ([B,24,S,64] each). ---\n    qkv = qkv.reshape({batch_size, seq_len, 3, kNumHeads, kHeadDim});\n    qkv = qkv.permute({2, 0, 3, 1, 4});  // [3,B,24,S,64]\n    auto q = qkv[0];\n    auto k = qkv[1];\n    auto v = qkv[2];\n\n    // --- LayerNorm over head_dim (last axis) on Q and K, affine, biased var. ---\n    q = at::layer_norm(q, /*normalized_shape=*/{kHeadDim}, q_norm_weight, q_norm_bias, eps);\n    k = at::layer_norm(k, /*normalized_shape=*/{kHeadDim}, k_norm_weight, k_norm_bias, eps);\n\n    // --- Scale Q (post-norm, pre-matmul), exactly as the reference orders it. ---\n    q = q * scale;\n\n    // --- Attention scores (materialized), native-dtype softmax, attn @ V. ---\n    auto attn_scores = at::matmul(q, k.transpose(-2, -1));  // [B,24,S,S]\n    auto attn_probs = at::softmax(attn_scores, /*dim=*/-1);  // fp32 (native)\n    auto attn_output = at::matmul(attn_probs, v);            // [B,24,S,64]\n\n    // --- Merge heads, output projection + bias. ---\n    attn_output = attn_output.transpose(1, 2).reshape({batch_size, seq_len, kNumHeads * kHeadDim});\n    auto out = at::matmul(attn_output, out_proj_weight.t()) + out_proj_bias;  // [B,S,dim]\n\n    // --- Destination-passing-style write. ---\n    TORCH_CHECK(out.sizes() == output.sizes(),\n                \"output shape \", out.sizes(),\n                \" does not match pre-allocated \", output.sizes());\n    output.copy_(out);\n}\n\nPYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {\n    m.def(\"run\", &run,\n          \"QK-norm scaled dot-product attention (SD3.5). Pure ATen / cuBLAS / \"\n          \"cuDNN dispatch: QKV projection + bias, reshape/permute to heads, \"\n          \"at::layer_norm over head_dim (affine, biased variance) on Q and K, \"\n          \"scale Q by head_dim^-0.5 (post-norm, pre-matmul), materialized QK^T, \"\n          \"fp32 softmax, attn @ V, head merge, output projection + bias. fp32; \"\n          \"destination-passing style.\");\n}\n"
+    },
+    {
+      "path": "kernel.cu",
+      "content": "// Stub translation unit: this ATen-delegated port has no custom __global__\n// kernels. A bare .cu is still needed so torch's cpp_extension builds a CUDA\n// extension (adding CUDA include paths); a .cpp-only extension fails with\n// \"cuda_runtime_api.h: No such file or directory\".\n#include <cuda_runtime.h>\n"
+    },
+    {
+      "path": "kernel.h",
+      "content": "#pragma once\n// Intentionally empty: ATen-delegated port, no custom kernel launcher.\n"
+    }
+  ],
+  "description": "Scaffolded baseline for problem_082_qk_norm_scaled_dot_product_attention (language=cuda_cpp); hand-edit the copied exemplar to implement the target problem before harness-running. Destination-passing-style is set true; outputs appear after inputs in definition.json insertion order."
+}

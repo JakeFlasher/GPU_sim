@@ -1,0 +1,44 @@
+{
+  "name": "problem_026_video_patch_embedding_projection_cuda_cpp_scaffold",
+  "definition": "026_video_patch_embedding_projection",
+  "author": "scaffold",
+  "spec": {
+    "languages": [
+      "cuda_cpp"
+    ],
+    "target_hardware": [
+      "LOCAL"
+    ],
+    "entry_point": "main.cpp::run",
+    "dependencies": [],
+    "destination_passing_style": true,
+    "binding": "torch",
+    "compile_options": {
+      "cflags": [],
+      "cuda_cflags": [
+        "-O3",
+        "--use_fast_math",
+        "-gencode",
+        "arch=compute_86,code=sm_86"
+      ],
+      "ld_flags": [
+        "-lcuda"
+      ]
+    }
+  },
+  "sources": [
+    {
+      "path": "main.cpp",
+      "content": "#include <torch/extension.h>\n#include <ATen/cuda/CUDAContext.h>\n#include <c10/cuda/CUDAGuard.h>\n#include <string>\n#include <vector>\n\n// Video patch embedding projection (Wan2.2-T2V latent patchifier).\n//\n// Reference (problem_026_video_patch_embedding_projection): a Conv3D patch\n// projection over a video tensor, followed by additive spatial and temporal\n// positional embeddings and a final layer normalization over the hidden\n// dimension. Reproduced op-for-op below.\n//\n// Per definition.json (insertion order):\n//   inputs (all float16 except the scalar eps):\n//     video                   : [batch_size, num_frames, in_channels, height, width]\n//     patch_projection_weight : [hidden_size, in_channels, 1, patch_size, patch_size]\n//     patch_projection_bias   : [hidden_size]\n//     spatial_pos_embedding   : [1, num_spatial_patches, hidden_size]\n//     temporal_pos_embedding  : [1, num_frames, 1, hidden_size]\n//     norm_weight             : [hidden_size]\n//     norm_bias               : [hidden_size]\n//     eps                     : scalar (passed as double)\n//   output (float16, DPS pre-alloc, written in place):\n//     output                  : [batch_size, total_patches, hidden_size]\n//\n// The patch size is the spatial kernel extent of patch_projection_weight\n// (its 4th dimension), and the conv stride along the spatial axes equals\n// that patch size; the temporal kernel extent is 1 with temporal stride 1.\n// These follow the weight shape rather than arriving as separate inputs, so\n// they are derived here, matching the reference's patch_size read.\n//\n// Implementation: pure ATen / cuDNN dispatch -- NO custom CUDA kernels. The\n// at::conv3d call routes through the same cuDNN path F.conv3d uses, and\n// at::layer_norm carries the same fp16-in / internal-fp32-accumulate profile\n// the reference's manual mean / variance normalization gets from PyTorch.\n// Every tensor stays float16 throughout, exactly as the reference does; the\n// layer norm upcasts its statistics internally. Output is written in place\n// into the pre-allocated destination (destination-passing style).\n\nstatic void check_fp16_cuda(const torch::Tensor& t, const std::string& name) {\n    TORCH_CHECK(t.is_cuda(), name, \" must be a CUDA tensor\");\n    TORCH_CHECK(t.dtype() == torch::kFloat16, name, \" must be float16, got \", t.dtype());\n}\n\nvoid run(\n    const torch::Tensor& video,\n    const torch::Tensor& patch_projection_weight,\n    const torch::Tensor& patch_projection_bias,\n    const torch::Tensor& spatial_pos_embedding,\n    const torch::Tensor& temporal_pos_embedding,\n    const torch::Tensor& norm_weight,\n    const torch::Tensor& norm_bias,\n    double eps,\n    torch::Tensor output\n) {\n    check_fp16_cuda(video, \"video\");\n    check_fp16_cuda(patch_projection_weight, \"patch_projection_weight\");\n    check_fp16_cuda(patch_projection_bias, \"patch_projection_bias\");\n    check_fp16_cuda(spatial_pos_embedding, \"spatial_pos_embedding\");\n    check_fp16_cuda(temporal_pos_embedding, \"temporal_pos_embedding\");\n    check_fp16_cuda(norm_weight, \"norm_weight\");\n    check_fp16_cuda(norm_bias, \"norm_bias\");\n    check_fp16_cuda(output, \"output\");\n    TORCH_CHECK(video.dim() == 5, \"video must be 5D [B, F, C, H, W], got \", video.dim(), \"D\");\n    TORCH_CHECK(patch_projection_weight.dim() == 5,\n                \"patch_projection_weight must be 5D [hidden, C, 1, p, p], got \",\n                patch_projection_weight.dim(), \"D\");\n\n    const c10::cuda::CUDAGuard device_guard(video.device());\n\n    const int64_t hidden_size = patch_projection_weight.size(0);\n    const int64_t patch_size = patch_projection_weight.size(3);\n\n    // Rearrange the video to (B, C, F, H, W) so the channel axis leads, the\n    // layout Conv3D expects.\n    auto video_ncfhw = video.permute({0, 2, 1, 3, 4});\n\n    // Patch projection. Temporal kernel/stride is 1; spatial stride equals\n    // the patch size; no padding -- the same call F.conv3d issues.\n    auto patches = at::conv3d(\n        video_ncfhw,\n        patch_projection_weight,\n        patch_projection_bias,\n        /*stride=*/std::vector<int64_t>{1, patch_size, patch_size},\n        /*padding=*/std::vector<int64_t>{0, 0, 0});\n\n    // Move the frame axis ahead of the hidden axis: (B, F, hidden, H', W').\n    patches = patches.permute({0, 2, 1, 3, 4});\n\n    const int64_t batch_size = patches.size(0);\n    const int64_t frames = patches.size(1);\n    const int64_t num_h = patches.size(3);\n    const int64_t num_w = patches.size(4);\n    const int64_t num_spatial_patches = num_h * num_w;\n\n    // Flatten the two spatial axes then bring the hidden axis last, giving\n    // (B, F, num_spatial_patches, hidden).\n    patches = patches.reshape({batch_size, frames, hidden_size, num_spatial_patches});\n    patches = patches.permute({0, 1, 3, 2});\n\n    // Spatial positional embeddings broadcast across frames; the unsqueeze\n    // inserts the frame axis.\n    patches = patches + spatial_pos_embedding.unsqueeze(1);\n\n    // Temporal positional embeddings broadcast across spatial patches; the\n    // input already carries the right shape for the broadcast.\n    patches = patches + temporal_pos_embedding;\n\n    // Flatten frame and spatial axes into the token axis: (B, total, hidden).\n    patches = patches.reshape({batch_size, frames * num_spatial_patches, hidden_size});\n\n    // Layer normalization over the hidden dimension. at::layer_norm reproduces\n    // the reference's biased-variance normalization scaled by norm_weight and\n    // shifted by norm_bias, with statistics accumulated in fp32 internally.\n    auto result = at::layer_norm(\n        patches,\n        /*normalized_shape=*/std::vector<int64_t>{hidden_size},\n        norm_weight,\n        norm_bias,\n        eps);\n\n    TORCH_CHECK(result.sizes() == output.sizes(),\n                \"layer_norm output shape \", result.sizes(),\n                \" does not match pre-allocated output \", output.sizes());\n    output.copy_(result);\n}\n\nPYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {\n    m.def(\"run\", &run,\n          \"Video patch embedding projection via at::conv3d + positional \"\n          \"embedding adds + at::layer_norm (pure ATen / cuDNN dispatch); \"\n          \"fp16; destination-passing style.\");\n}\n"
+    },
+    {
+      "path": "kernel.cu",
+      "content": "// Stub translation unit: this ATen-delegated port has no custom device kernels.\n// A bare .cu is still needed so torch's cpp_extension builds a CUDA extension\n// (adding CUDA include paths); a .cpp-only extension fails to find\n// cuda_runtime_api.h.\n#include <cuda_runtime.h>\n"
+    },
+    {
+      "path": "kernel.h",
+      "content": "#pragma once\n// Intentionally empty: ATen-delegated port, no custom kernel launcher.\n"
+    }
+  ],
+  "description": "Scaffolded baseline for problem_026_video_patch_embedding_projection (language=cuda_cpp); hand-edit the copied exemplar to implement the target problem before harness-running. Destination-passing-style is set true; outputs appear after inputs in definition.json insertion order."
+}

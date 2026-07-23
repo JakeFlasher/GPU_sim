@@ -1,0 +1,324 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "cache_replay_falsification.schema.json",
+  "title": "Falsification arm + engineering-closure decoupling report for the cache-replay loop",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "source_commit",
+    "top_level_admission_scope",
+    "arches",
+    "terminal_on_sm120_host",
+    "cross_arch_precondition",
+    "research_success",
+    "closure_disjunct",
+    "missed_gates",
+    "gate_verdict",
+    "subsumption",
+    "hypothesis",
+    "failure_mode_decomposition",
+    "advisory_robustness",
+    "l1_diagnostic",
+    "throughput",
+    "sampled_fidelity"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "source_commit": {"type": "string"},
+    "top_level_admission_scope": {"const": "target_arch=sm_120"},
+    "arches": {
+      "type": "array",
+      "items": {"const": "sm_120"},
+      "minItems": 1
+    },
+    "terminal_on_sm120_host": {
+      "type": "boolean",
+      "const": true
+    },
+    "cross_arch_precondition": {"type": "boolean"},
+    "research_success": {"type": "boolean"},
+    "closure_disjunct": {"enum": ["engineering_closure", "research_success"]},
+    "missed_gates": {
+      "type": "array",
+      "items": {"type": "string"}
+    },
+    "gate_verdict": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "criteria",
+        "passed",
+        "per_bucket_p90",
+        "per_bucket_passed"
+      ],
+      "properties": {
+        "criteria": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "passed", "threshold", "value"],
+            "properties": {
+              "name": {"type": "string"},
+              "passed": {"type": "boolean"},
+              "threshold": {"type": "number"},
+              "value": {"type": "number"}
+            }
+          }
+        },
+        "passed": {"type": "boolean"},
+        "per_bucket_p90": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "bucket",
+              "evaluated",
+              "n",
+              "p90_absolute_error",
+              "passed",
+              "threshold"
+            ],
+            "properties": {
+              "bucket": {"type": "string"},
+              "evaluated": {"type": "boolean"},
+              "n": {"type": "integer", "minimum": 0},
+              "p90_absolute_error": {"type": "number", "minimum": 0.0},
+              "passed": {"type": "boolean"},
+              "threshold": {"type": "number"}
+            }
+          }
+        },
+        "per_bucket_passed": {"type": "boolean"}
+      }
+    },
+    "subsumption": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "passed",
+        "replay_vs_rdh_baseline_beat_fraction",
+        "replay_vs_v5_beat_fraction"
+      ],
+      "properties": {
+        "passed": {"type": "boolean"},
+        "replay_vs_rdh_baseline_beat_fraction": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0
+        },
+        "replay_vs_v5_beat_fraction": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0
+        }
+      }
+    },
+    "hypothesis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "statement",
+        "rdh_baseline_median_absolute_error",
+        "replay_mechanistic_median_absolute_error",
+        "replay_calibrated_median_absolute_error",
+        "reduction_vs_rdh_baseline_pct",
+        "set_associative_realism_contribution_pct",
+        "joint_contribution_pct",
+        "confirmed_threshold_pct",
+        "refuted_threshold_pct",
+        "verdict"
+      ],
+      "properties": {
+        "statement": {"type": "string"},
+        "rdh_baseline_median_absolute_error": {"type": "number", "minimum": 0.0},
+        "replay_mechanistic_median_absolute_error": {"type": "number", "minimum": 0.0},
+        "replay_calibrated_median_absolute_error": {"type": "number", "minimum": 0.0},
+        "reduction_vs_rdh_baseline_pct": {"type": "number"},
+        "set_associative_realism_contribution_pct": {"type": "number"},
+        "joint_contribution_pct": {"type": "number"},
+        "confirmed_threshold_pct": {"type": "number"},
+        "refuted_threshold_pct": {"type": "number"},
+        "verdict": {"enum": ["confirmed", "refuted", "indeterminate"]}
+      }
+    },
+    "failure_mode_decomposition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["trace_fidelity", "model_parameter", "residual_calibration"],
+      "properties": {
+        "trace_fidelity": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "dominant",
+            "mean_signed_over_prediction",
+            "cells_over_predicted_by_0p1",
+            "evidence"
+          ],
+          "properties": {
+            "dominant": {"type": "boolean"},
+            "mean_signed_over_prediction": {"type": "number"},
+            "cells_over_predicted_by_0p1": {"type": "integer", "minimum": 0},
+            "evidence": {"type": "string"}
+          }
+        },
+        "model_parameter": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "dominant",
+            "max_grid_prediction_spread",
+            "fully_associative_single_slice_median_absolute_error",
+            "most_set_associative_median_absolute_error",
+            "evidence"
+          ],
+          "properties": {
+            "dominant": {"type": "boolean"},
+            "max_grid_prediction_spread": {"type": "number", "minimum": 0.0},
+            "fully_associative_single_slice_median_absolute_error": {"type": "number", "minimum": 0.0},
+            "most_set_associative_median_absolute_error": {"type": "number", "minimum": 0.0},
+            "evidence": {"type": "string"}
+          }
+        },
+        "residual_calibration": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "dominant",
+            "mechanistic_median_absolute_error",
+            "calibrated_median_absolute_error",
+            "evidence"
+          ],
+          "properties": {
+            "dominant": {"type": "boolean"},
+            "mechanistic_median_absolute_error": {"type": "number", "minimum": 0.0},
+            "calibrated_median_absolute_error": {"type": "number", "minimum": 0.0},
+            "evidence": {"type": "string"}
+          }
+        }
+      }
+    },
+    "advisory_robustness": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "advisory",
+            "gates_closure",
+            "loocv",
+            "loso",
+            "bootstrap_ci",
+            "advisory_bands"
+          ],
+          "properties": {
+            "advisory": {"const": true},
+            "gates_closure": {"const": false},
+            "loocv": {"$ref": "#/$defs/cv_block"},
+            "loso": {"$ref": "#/$defs/cv_block"},
+            "bootstrap_ci": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "geomean",
+                "ci_low",
+                "ci_high",
+                "n_resamples",
+                "percentile",
+                "seed"
+              ],
+              "properties": {
+                "geomean": {"type": "number", "minimum": 0.0},
+                "ci_low": {"type": "number", "minimum": 0.0},
+                "ci_high": {"type": "number", "minimum": 0.0},
+                "n_resamples": {"type": "integer", "minimum": 1},
+                "percentile": {"type": "number", "exclusiveMinimum": 0.0, "maximum": 100.0},
+                "seed": {"type": "integer"}
+              }
+            },
+            "advisory_bands": {"type": "boolean"}
+          }
+        }
+      ]
+    },
+    "l1_diagnostic": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "load_bearing",
+            "diagnostic_median_absolute_error",
+            "note"
+          ],
+          "properties": {
+            "load_bearing": {"type": "boolean"},
+            "diagnostic_median_absolute_error": {"type": "number", "minimum": 0.0},
+            "note": {"type": "string"}
+          }
+        }
+      ]
+    },
+    "throughput": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "replay_sectors_per_sec",
+            "speedup_vs_fenwick",
+            "passed"
+          ],
+          "properties": {
+            "replay_sectors_per_sec": {"type": "number", "minimum": 0.0},
+            "speedup_vs_fenwick": {"type": "number", "minimum": 0.0},
+            "passed": {"type": "boolean"}
+          }
+        }
+      ]
+    },
+    "sampled_fidelity": {
+      "oneOf": [
+        {"type": "null"},
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "set_sample_modulus",
+            "n_within_abs_delta_bar",
+            "n_cells",
+            "max_abs_delta",
+            "max_sampled_record_fraction",
+            "passed"
+          ],
+          "properties": {
+            "set_sample_modulus": {"type": "integer", "minimum": 1},
+            "n_within_abs_delta_bar": {"type": "integer", "minimum": 0},
+            "n_cells": {"type": "integer", "minimum": 0},
+            "max_abs_delta": {"type": "number", "minimum": 0.0},
+            "max_sampled_record_fraction": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+            "passed": {"type": "boolean"}
+          }
+        }
+      ]
+    }
+  },
+  "$defs": {
+    "cv_block": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["n", "median_absolute_error", "geomean_relative_error"],
+      "properties": {
+        "n": {"type": "integer", "minimum": 0},
+        "median_absolute_error": {"type": "number", "minimum": 0.0},
+        "geomean_relative_error": {"type": "number", "minimum": 0.0}
+      }
+    }
+  }
+}

@@ -1,0 +1,377 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "t2_traffic_prediction",
+  "description": "T2 miss-stream traffic prediction composed from committed artifacts (T1 replay counts + warp-pool walker counters), scored against the live-captured T2 stream labels by closed-identity join under the closed scored/diagnostic/label_unavailable vocabulary with per-primitive gates, a declared denominator floor, directional achieved-vs-target rows, a non-vacuity floor, and the hit-rate pp-bucket report with traffic-gate promotion bars.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_kind",
+    "arch",
+    "generated_at_commit",
+    "config",
+    "config_digest",
+    "inputs",
+    "n_cells",
+    "status_counts",
+    "non_vacuity_floor",
+    "achieved_vs_target",
+    "cells",
+    "hit_rate_pp_report"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "artifact_kind": {
+      "const": "t2_traffic_prediction"
+    },
+    "arch": {
+      "const": "sm_86"
+    },
+    "generated_at_commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "config": {
+      "type": "object",
+      "required": [
+        "model",
+        "sectors_per_l2_request",
+        "rel_denominator_floor_sectors",
+        "directional_targets",
+        "hit_rate_pp_targets",
+        "non_vacuity_floor",
+        "label_fitted_parameters"
+      ],
+      "properties": {
+        "label_fitted_parameters": {
+          "type": "array",
+          "maxItems": 0
+        }
+      }
+    },
+    "config_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "inputs": {
+      "type": "object"
+    },
+    "n_cells": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "status_counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "scored": {
+          "type": "integer"
+        },
+        "diagnostic": {
+          "type": "integer"
+        },
+        "label_unavailable": {
+          "type": "integer"
+        }
+      }
+    },
+    "non_vacuity_floor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "min_scored_pairs",
+        "min_distinct_slugs",
+        "scored_pairs",
+        "distinct_scored_slugs",
+        "met"
+      ],
+      "properties": {
+        "min_scored_pairs": {
+          "type": "integer"
+        },
+        "min_distinct_slugs": {
+          "type": "integer"
+        },
+        "scored_pairs": {
+          "type": "integer"
+        },
+        "distinct_scored_slugs": {
+          "type": "integer"
+        },
+        "met": {
+          "type": "boolean"
+        }
+      }
+    },
+    "achieved_vs_target": {
+      "type": "array",
+      "minItems": 8,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "gate",
+          "target",
+          "achieved",
+          "met"
+        ],
+        "properties": {
+          "gate": {
+            "type": "string"
+          },
+          "target": {
+            "type": "number"
+          },
+          "achieved": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "met": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    "cells": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "slug",
+          "shape_point",
+          "binary_sha256",
+          "kernel_signature_sha256",
+          "primitives"
+        ],
+        "properties": {
+          "slug": {
+            "type": "string"
+          },
+          "shape_point": {
+            "type": "string"
+          },
+          "binary_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "kernel_signature_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "primitives": {
+            "type": "array",
+            "minItems": 3,
+            "maxItems": 3,
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "primitive",
+                "label_metric",
+                "status",
+                "status_reason",
+                "predicted",
+                "label",
+                "rel_error",
+                "gates"
+              ],
+              "properties": {
+                "primitive": {
+                  "enum": [
+                    "read_sectors",
+                    "write_sectors",
+                    "l2_requests"
+                  ]
+                },
+                "label_metric": {
+                  "type": "string"
+                },
+                "status": {
+                  "enum": [
+                    "scored",
+                    "diagnostic",
+                    "label_unavailable"
+                  ]
+                },
+                "status_reason": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "predicted": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "label": {
+                  "type": [
+                    "number",
+                    "null"
+                  ]
+                },
+                "rel_error": {
+                  "type": [
+                    "number",
+                    "null"
+                  ],
+                  "minimum": 0
+                },
+                "gates": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": [
+                      "boolean",
+                      "null"
+                    ]
+                  }
+                }
+              },
+              "allOf": [
+                {
+                  "if": {
+                    "properties": {
+                      "status": {
+                        "const": "scored"
+                      }
+                    }
+                  },
+                  "then": {
+                    "properties": {
+                      "predicted": {
+                        "type": "number"
+                      },
+                      "label": {
+                        "type": "number"
+                      },
+                      "rel_error": {
+                        "type": "number"
+                      }
+                    }
+                  }
+                },
+                {
+                  "if": {
+                    "properties": {
+                      "status": {
+                        "const": "label_unavailable"
+                      }
+                    }
+                  },
+                  "then": {
+                    "properties": {
+                      "label": {
+                        "const": null
+                      },
+                      "rel_error": {
+                        "const": null
+                      }
+                    }
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "hit_rate_pp_report": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "note",
+        "rows",
+        "n_promoted",
+        "n_barred",
+        "overall_promoted",
+        "buckets",
+        "achieved_vs_target"
+      ],
+      "properties": {
+        "source": {
+          "type": "string"
+        },
+        "note": {
+          "type": "string"
+        },
+        "rows": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "slug",
+              "shape_point",
+              "split",
+              "abs_error_pp",
+              "label_hit_rate",
+              "bucket",
+              "promoted",
+              "promotion_bar_reason"
+            ],
+            "properties": {
+              "slug": {
+                "type": "string"
+              },
+              "shape_point": {
+                "type": "string"
+              },
+              "split": {
+                "type": "string"
+              },
+              "abs_error_pp": {
+                "type": "number"
+              },
+              "label_hit_rate": {
+                "type": "number"
+              },
+              "bucket": {
+                "enum": [
+                  "low",
+                  "mid",
+                  "high"
+                ]
+              },
+              "promoted": {
+                "type": "boolean"
+              },
+              "promotion_bar_reason": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        },
+        "n_promoted": {
+          "type": "integer"
+        },
+        "n_barred": {
+          "type": "integer"
+        },
+        "overall_promoted": {
+          "type": "object"
+        },
+        "buckets": {
+          "type": "object"
+        },
+        "achieved_vs_target": {
+          "type": "array",
+          "minItems": 2
+        }
+      }
+    }
+  }
+}

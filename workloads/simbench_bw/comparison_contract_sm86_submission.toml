@@ -1,0 +1,72 @@
+# sm_86 submission-track overlay over comparison_contract.toml.
+#
+# This file is a NARROWING overlay: it pins the submission view (single
+# arch sm_86, single device RTX 3090 Ti, cache_layers narrowed to L2)
+# and adds publication-target gates (cohort_paper_target_unique_slugs,
+# cohort_paper_target_cells, aspirational_target_unique_slugs) that the
+# base contract does not carry. The base
+# workloads/simbench_bw/comparison_contract.toml is preserved unchanged
+# so the project's broader two-arch / cross-arch program description
+# remains the authoritative contract for non-submission flows.
+#
+# Consumers
+# ---------
+# - tools/local_labels/run_headline_cohort_predict_compare.py via the
+#   --contract-overlay flag; when the flag is set, the runner applies
+#   the overlay's scope.arch_set as an additional cohort gate and emits
+#   the typed diagnostic cell_arch_outside_overlay_scope (with non-zero
+#   exit) on any cohort cell whose arch is not in the overlay's
+#   arch_set.
+# - workloads/simbench_bw/comparison_contract_overlay.py provides a
+#   strict required-field validator.
+#
+# Required fields (validated)
+# ---------------------------
+# All keys below are REQUIRED. A missing key fails the
+# overlay-required-field validator and the runner refuses to honor the
+# overlay. See workloads/simbench_bw/tests/test_comparison_contract_sm86_submission_overlay.py.
+
+schema_version = 1
+overlay_kind = "submission_track"
+
+# ---------------------------------------------------------------------
+# Scope -- narrows the submission view to sm_86 / RTX 3090 Ti, L1 + L2.
+# ---------------------------------------------------------------------
+# The base contract scope.arch_set = ["sm_86", "sm_120"] and
+# scope.device_set = ["RTX 3090 Ti", "RTX 5060 Laptop GPU"] describe
+# the project's broader cross-arch program. The submission targets
+# sm_86 only on the RTX 3090 Ti host; cross-arch sm_120 verification
+# is an explicit follow-up.
+# cache_layers widened from ["L2"] to ["L1", "L2"]: L1/TEX hit rate is now a
+# load-bearing, comparison-runner-scored metric in lockstep with the driver's
+# L1TEX-bundle emission. Contract-side label is "L1" ("L1TEX" is the bundle-side
+# label the runner maps to "L1"). L1 coverage is honestly below the smoke floor
+# on the current cohort (the coverage gate reports meets_floor=false).
+
+[scope]
+arch_set = ["sm_86"]
+cache_layers = ["L1", "L2"]
+device_set = ["RTX 3090 Ti"]
+prior_art_handling = "head_to_head_for_RDH_and_trivial_only_contextual_otherwise"
+
+# ---------------------------------------------------------------------
+# Coverage gate -- two-tier separation between the contract sanity
+# floor and the submission-target gate.
+# ---------------------------------------------------------------------
+# - publication_grade_floor_per_arch (10) inherits from the base
+#   contract; serves as the sanity gate that stops the pipeline with
+#   the cohort_below_contract_floor typed diagnostic when unmet.
+# - cohort_paper_target_unique_slugs (30) is the submission's primary
+#   breadth unit; the holdout-evaluation report is not marked
+#   publication-grade below this floor.
+# - cohort_paper_target_cells (31) is the split-count floor under the
+#   unique-slug split semantics (calibration >= 15 + validation >= 8
+#   + holdout >= 8 = 31 cells minimum).
+# - aspirational_target_unique_slugs (40) is the upper-bound target
+#   from the plan's Path Boundaries section.
+
+[coverage_gate]
+publication_grade_floor_per_arch = 10
+cohort_paper_target_unique_slugs = 30
+cohort_paper_target_cells = 31
+aspirational_target_unique_slugs = 40

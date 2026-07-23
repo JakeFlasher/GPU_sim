@@ -1,0 +1,25 @@
+{
+  "arch": "sm_86",
+  "artifact_kind": "static_work",
+  "binary_sha256": "e2151e3732238acb4dcf030d1b0a191cc587a8b84e3d29224c25caff1d455592",
+  "byte_widths": {
+    "memory_global": 16.0,
+    "memory_local": 16.0,
+    "memory_shared": 8.0,
+    "memory_texture": 16.0
+  },
+  "claim_class": "static_sanity_check_only",
+  "estimate_convention": "order_of_magnitude_per_warp_instruction_sanity_check_only; FFMA=2 FLOP/instr; HMMA assumed 16x8x16 (2*16*8*16=4096 FLOP/instr); global op=16 B/instr; shared op=8 B/instr; NOT a calibrated per-shape FLOP/byte count",
+  "estimated_bytes": 280.0,
+  "estimated_flops": 18.0,
+  "flop_weights": {
+    "fp16_arith": 2.0,
+    "fp32_arith": 2.0,
+    "fp64_arith": 2.0,
+    "tensor_mma": 4096.0
+  },
+  "kernel_signature_sha256": "df59dde4085274edd4472d88caa68803e3e77e4fbf50855cf14be2f53bfc55fc",
+  "schema_version": 1,
+  "source_commit": "3a715f5a9fe773046a266dac46a6d58caf135484",
+  "unknown_mnemonics": []
+}

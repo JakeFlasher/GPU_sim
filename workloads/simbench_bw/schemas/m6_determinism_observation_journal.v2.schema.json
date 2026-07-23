@@ -1,0 +1,1122 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "simbench_bw/schemas/m6_determinism_observation_journal.v2.schema.json",
+  "title": "M6 raw observation journal",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_kind",
+    "journal_id",
+    "created_at_utc",
+    "schedule_sha256",
+    "source_identity_sha256",
+    "config_identity_sha256",
+    "metric_identity_sha256",
+    "m4_identity_sha256",
+    "trigger_state",
+    "trigger_decisions",
+    "events",
+    "causal_events",
+    "causal_prefix_closed",
+    "resume",
+    "cost",
+    "journal_sha256"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 2
+    },
+    "artifact_kind": {
+      "type": "string",
+      "const": "m6_raw_observation_journal"
+    },
+    "journal_id": {
+      "type": "string",
+      "pattern": "^m6-journal-[0-9a-f]{16}$"
+    },
+    "created_at_utc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "schedule_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "source_identity_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "config_identity_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "metric_identity_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "m4_identity_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "trigger_state": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "decided"
+      ]
+    },
+    "trigger_decisions": {
+      "type": "array",
+      "maxItems": 122,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/triggerDecision"
+      }
+    },
+    "events": {
+      "type": "array",
+      "maxItems": 9760,
+      "items": {
+        "$ref": "#/$defs/event"
+      },
+      "uniqueItems": true
+    },
+    "causal_events": {
+      "type": "array",
+      "maxItems": 40000,
+      "items": {
+        "$ref": "#/$defs/causalRecord"
+      },
+      "uniqueItems": true
+    },
+    "causal_prefix_closed": {
+      "type": "boolean"
+    },
+    "resume": {
+      "$ref": "#/$defs/resume"
+    },
+    "cost": {
+      "$ref": "#/$defs/costSummary"
+    },
+    "journal_sha256": {
+      "$ref": "#/$defs/sha256"
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"
+    },
+    "triggerDecision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cell_id",
+        "cell_identity_sha256",
+        "triggered",
+        "reason_codes",
+        "evidence_metric_keys",
+        "decision_sha256"
+      ],
+      "properties": {
+        "cell_id": {
+          "type": "string",
+          "minLength": 3
+        },
+        "cell_identity_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "triggered": {
+          "type": "boolean"
+        },
+        "reason_codes": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "boundary_proximity",
+              "discrete_multiple_values",
+              "modality_flag",
+              "out_of_range",
+              "single_point_outlier"
+            ]
+          }
+        },
+        "evidence_metric_keys": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "decision_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "artifactRef": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "relative_path",
+        "sha256",
+        "size_bytes"
+      ],
+      "properties": {
+        "relative_path": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "launchEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "label_run_manifest",
+        "ncu_report",
+        "ncu_launch_observation",
+        "label_capture_manifest",
+        "kernel_name",
+        "kernel_signature_sha256",
+        "kernel_signature_source",
+        "ncu_observation_sha256",
+        "capture_manifest_sha256"
+      ],
+      "properties": {
+        "label_run_manifest": {
+          "$ref": "#/$defs/artifactRef"
+        },
+        "ncu_report": {
+          "$ref": "#/$defs/artifactRef"
+        },
+        "ncu_launch_observation": {
+          "$ref": "#/$defs/artifactRef"
+        },
+        "label_capture_manifest": {
+          "$ref": "#/$defs/artifactRef"
+        },
+        "kernel_name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kernel_signature_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "kernel_signature_source": {
+          "type": "string",
+          "minLength": 1
+        },
+        "ncu_observation_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "capture_manifest_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "sidecar": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "relative_path",
+        "sha256",
+        "size_bytes",
+        "schema_version",
+        "device",
+        "slug",
+        "shape_point",
+        "repeat_index",
+        "launch_index",
+        "binary_sha256",
+        "launch_evidence",
+        "m4_launch_identity_sha256"
+      ],
+      "properties": {
+        "relative_path": {
+          "$ref": "#/$defs/relativePath"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "schema_version": {
+          "type": "integer",
+          "const": 5
+        },
+        "device": {
+          "type": "string",
+          "const": "sm_86"
+        },
+        "slug": {
+          "type": "string",
+          "minLength": 1
+        },
+        "shape_point": {
+          "type": "string",
+          "minLength": 1
+        },
+        "repeat_index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 29
+        },
+        "launch_index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "binary_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "launch_evidence": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/launchEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "m4_launch_identity_sha256": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "rawObservation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sidecar_sha256",
+        "launch_index",
+        "metric_key",
+        "metric_sha256",
+        "ncu_metric",
+        "unit",
+        "carrier",
+        "source_pointer",
+        "value",
+        "source_emitted_value",
+        "source_emitted_unit"
+      ],
+      "properties": {
+        "sidecar_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "launch_index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "metric_key": {
+          "type": "string",
+          "minLength": 1
+        },
+        "metric_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "ncu_metric": {
+          "type": "string",
+          "minLength": 1
+        },
+        "unit": {
+          "type": "string",
+          "enum": [
+            "pct",
+            "count",
+            "ns",
+            "cycles"
+          ]
+        },
+        "carrier": {
+          "type": "string",
+          "enum": [
+            "flat_field",
+            "unit_tagged_metric"
+          ]
+        },
+        "source_pointer": {
+          "type": "string",
+          "pattern": "^/"
+        },
+        "value": {
+          "type": "number"
+        },
+        "source_emitted_value": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "source_emitted_unit": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "percent",
+            null
+          ]
+        }
+      }
+    },
+    "covariates": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "observed_at_utc",
+        "sweep_index",
+        "sm_clock_mhz",
+        "mem_clock_mhz",
+        "temperature_c",
+        "ncu_replay_pass_count"
+      ],
+      "properties": {
+        "observed_at_utc": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "sweep_index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 29
+        },
+        "sm_clock_mhz": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "mem_clock_mhz": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "temperature_c": {
+          "type": "number"
+        },
+        "ncu_replay_pass_count": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "eventCost": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fresh_processes",
+        "ncu_replay_passes"
+      ],
+      "properties": {
+        "fresh_processes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "ncu_replay_passes": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "typedExclusion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reason",
+        "detail"
+      ],
+      "properties": {
+        "reason": {
+          "type": "string",
+          "enum": [
+            "profile_failed",
+            "sidecar_missing",
+            "identity_mismatch",
+            "metric_missing",
+            "source_unavailable",
+            "operator_stop"
+          ]
+        },
+        "detail": {
+          "type": "string",
+          "minLength": 1
+        },
+        "operator_authority_receipt": {
+          "$ref": "#/$defs/sha256"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "reason": {
+                "const": "operator_stop"
+              }
+            },
+            "required": [
+              "reason"
+            ]
+          },
+          "then": {
+            "required": [
+              "operator_authority_receipt"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "reason": {
+                "const": "operator_stop"
+              }
+            },
+            "required": [
+              "reason"
+            ]
+          },
+          "then": {
+            "properties": {
+              "operator_authority_receipt": {
+                "$ref": "#/$defs/sha256"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "causalRecord": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sequence",
+        "previous_record_sha256",
+        "record_sha256",
+        "record_kind",
+        "epoch",
+        "schedule_sha256"
+      ],
+      "properties": {
+        "sequence": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "previous_record_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "record_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "record_kind": {
+          "type": "string",
+          "enum": [
+            "epoch_open",
+            "attempt_started",
+            "attempt_terminal",
+            "tier1_closed",
+            "trigger_decision",
+            "tier2_activated",
+            "checkpoint",
+            "epoch_closed"
+          ]
+        },
+        "epoch": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "schedule_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "ordinal": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9759
+        },
+        "slot_id": {
+          "type": "string",
+          "minLength": 16
+        },
+        "attempt_id": {
+          "$ref": "#/$defs/sha256"
+        },
+        "event_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "observed",
+            "excluded_typed"
+          ]
+        },
+        "cell_id": {
+          "type": "string",
+          "minLength": 3
+        },
+        "triggered": {
+          "type": "boolean"
+        },
+        "reason_codes": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          }
+        },
+        "decision_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "evidence_metric_keys": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "activated_cell_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 3
+          }
+        },
+        "activated_ordinals": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 1220,
+          "uniqueItems": true,
+          "items": {
+            "type": "integer",
+            "minimum": 8540,
+            "maximum": 9759
+          }
+        },
+        "cost": {
+          "$ref": "#/$defs/eventCost"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "record_kind": {
+                "const": "epoch_open"
+              }
+            },
+            "required": [
+              "record_kind"
+            ]
+          },
+          "then": {}
+        },
+        {
+          "if": {
+            "properties": {
+              "record_kind": {
+                "const": "attempt_started"
+              }
+            },
+            "required": [
+              "record_kind"
+            ]
+          },
+          "then": {
+            "required": [
+              "ordinal",
+              "slot_id",
+              "attempt_id"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "record_kind": {
+                "const": "attempt_terminal"
+              }
+            },
+            "required": [
+              "record_kind"
+            ]
+          },
+          "then": {
+            "required": [
+              "ordinal",
+              "slot_id",
+              "attempt_id",
+              "event_sha256",
+              "outcome",
+              "cost"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "record_kind": {
+                "const": "tier1_closed"
+              }
+            },
+            "required": [
+              "record_kind"
+            ]
+          },
+          "then": {}
+        },
+        {
+          "if": {
+            "properties": {
+              "record_kind": {
+                "const": "trigger_decision"
+              }
+            },
+            "required": [
+              "record_kind"
+            ]
+          },
+          "then": {
+            "required": [
+              "cell_id",
+              "cell_identity_sha256",
+              "triggered",
+              "reason_codes",
+              "decision_sha256",
+              "evidence_metric_keys"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "record_kind": {
+                "const": "tier2_activated"
+              }
+            },
+            "required": [
+              "record_kind"
+            ]
+          },
+          "then": {
+            "required": [
+              "activated_cell_ids",
+              "activated_ordinals"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "record_kind": {
+                "const": "checkpoint"
+              }
+            },
+            "required": [
+              "record_kind"
+            ]
+          },
+          "then": {
+            "required": [
+              "cost"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "record_kind": {
+                "const": "epoch_closed"
+              }
+            },
+            "required": [
+              "record_kind"
+            ]
+          },
+          "then": {}
+        }
+      ]
+    },
+    "event": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sequence",
+        "previous_event_sha256",
+        "event_sha256",
+        "resume_epoch",
+        "ordinal",
+        "slot_id",
+        "slot_sha256",
+        "tier",
+        "cell_id",
+        "cell_identity_sha256",
+        "config_id",
+        "config_sha256",
+        "repeat_index",
+        "sweep_index",
+        "fresh_process",
+        "outcome",
+        "sidecars",
+        "raw_observations",
+        "covariates",
+        "cost",
+        "typed_exclusion"
+      ],
+      "properties": {
+        "sequence": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "previous_event_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "event_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "resume_epoch": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "ordinal": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9759
+        },
+        "slot_id": {
+          "type": "string",
+          "minLength": 16
+        },
+        "slot_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "tier": {
+          "type": "integer",
+          "enum": [
+            1,
+            2
+          ]
+        },
+        "cell_id": {
+          "type": "string",
+          "minLength": 3
+        },
+        "cell_identity_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "config_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "config_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "repeat_index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 29
+        },
+        "sweep_index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 29
+        },
+        "fresh_process": {
+          "type": "boolean"
+        },
+        "outcome": {
+          "type": "string",
+          "enum": [
+            "observed",
+            "excluded_typed"
+          ]
+        },
+        "sidecars": {
+          "type": "array",
+          "maxItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/sidecar"
+          }
+        },
+        "raw_observations": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/rawObservation"
+          }
+        },
+        "covariates": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/covariates"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "cost": {
+          "$ref": "#/$defs/eventCost"
+        },
+        "typed_exclusion": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/typedExclusion"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "const": "observed"
+              }
+            },
+            "required": [
+              "outcome"
+            ]
+          },
+          "then": {
+            "properties": {
+              "sidecars": {
+                "minItems": 1
+              },
+              "raw_observations": {
+                "minItems": 1
+              },
+              "covariates": {
+                "$ref": "#/$defs/covariates"
+              },
+              "typed_exclusion": {
+                "type": "null"
+              },
+              "fresh_process": {
+                "const": true
+              },
+              "cost": {
+                "properties": {
+                  "fresh_processes": {
+                    "const": 1
+                  }
+                }
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "sidecars": {
+                "maxItems": 0
+              },
+              "raw_observations": {
+                "maxItems": 0
+              },
+              "covariates": {
+                "type": "null"
+              },
+              "typed_exclusion": {
+                "$ref": "#/$defs/typedExclusion"
+              },
+              "fresh_process": {
+                "type": "boolean"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "const": "excluded_typed"
+              },
+              "typed_exclusion": {
+                "properties": {
+                  "reason": {
+                    "enum": [
+                      "source_unavailable",
+                      "operator_stop"
+                    ]
+                  }
+                },
+                "required": [
+                  "reason"
+                ]
+              }
+            },
+            "required": [
+              "outcome",
+              "typed_exclusion"
+            ]
+          },
+          "then": {
+            "properties": {
+              "fresh_process": {
+                "const": false
+              },
+              "cost": {
+                "properties": {
+                  "fresh_processes": {
+                    "const": 0
+                  },
+                  "ncu_replay_passes": {
+                    "const": 0
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "outcome": {
+                "const": "excluded_typed"
+              },
+              "typed_exclusion": {
+                "properties": {
+                  "reason": {
+                    "enum": [
+                      "profile_failed",
+                      "sidecar_missing",
+                      "identity_mismatch",
+                      "metric_missing"
+                    ]
+                  }
+                },
+                "required": [
+                  "reason"
+                ]
+              }
+            },
+            "required": [
+              "outcome",
+              "typed_exclusion"
+            ]
+          },
+          "then": {
+            "properties": {
+              "fresh_process": {
+                "const": true
+              },
+              "covariates": {
+                "type": "null"
+              },
+              "cost": {
+                "properties": {
+                  "fresh_processes": {
+                    "const": 1
+                  },
+                  "ncu_replay_passes": {
+                    "minimum": 1
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "resume": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "active_slots",
+        "terminal_slots",
+        "pending_slots",
+        "resume_epochs",
+        "max_profiles_in_one_epoch",
+        "terminal_slot_ids_sha256",
+        "pending_slot_ids_sha256",
+        "completed_slots_recomputed"
+      ],
+      "properties": {
+        "active_slots": {
+          "type": "integer",
+          "minimum": 8540,
+          "maximum": 9760
+        },
+        "terminal_slots": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9760
+        },
+        "pending_slots": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9760
+        },
+        "resume_epochs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "max_profiles_in_one_epoch": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9760
+        },
+        "terminal_slot_ids_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "pending_slot_ids_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "completed_slots_recomputed": {
+          "const": false
+        }
+      }
+    },
+    "costSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fresh_processes",
+        "ncu_replay_passes",
+        "observed_slots",
+        "excluded_typed_slots"
+      ],
+      "properties": {
+        "fresh_processes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9760
+        },
+        "ncu_replay_passes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "observed_slots": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9760
+        },
+        "excluded_typed_slots": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9760
+        }
+      }
+    }
+  }
+}

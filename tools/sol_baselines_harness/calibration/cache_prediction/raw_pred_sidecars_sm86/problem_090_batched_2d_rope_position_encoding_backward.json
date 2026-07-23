@@ -1,0 +1,14 @@
+{
+  "associativity_l2": 16,
+  "captured_at_utc": "2026-05-29T22:40:18+00:00",
+  "geometry_source": "sm86_pilot_static_device_card_v1",
+  "language": "cuda_cpp",
+  "num_l2_slices": 6,
+  "raw_l1_hit_rate": 0.0,
+  "raw_l2_hit_rate": 0.0,
+  "schema_version": 1,
+  "scored": true,
+  "slug": "problem_090_batched_2d_rope_position_encoding_backward",
+  "tier2_sidecar_sha256": "3dae8a5b817790b9cd5784347f440d8c71e98c7185041bcc8db97e498496470a",
+  "typed_reason": ""
+}

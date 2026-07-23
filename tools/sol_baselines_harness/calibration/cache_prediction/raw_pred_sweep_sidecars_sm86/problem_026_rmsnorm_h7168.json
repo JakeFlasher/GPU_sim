@@ -1,0 +1,53 @@
+{
+  "by_assoc": {
+    "16": {
+      "raw_l1_hit_rate": 0.32927013578869047,
+      "raw_l2_hit_rate": 0.03606992122162809,
+      "scored": true,
+      "typed_reason": ""
+    },
+    "32": {
+      "raw_l1_hit_rate": 0.32927013578869047,
+      "raw_l2_hit_rate": 0.4588211843621898,
+      "scored": true,
+      "typed_reason": ""
+    },
+    "4": {
+      "raw_l1_hit_rate": 0.32927013578869047,
+      "raw_l2_hit_rate": 0.0010746444573478814,
+      "scored": true,
+      "typed_reason": ""
+    },
+    "64": {
+      "raw_l1_hit_rate": 0.32927013578869047,
+      "raw_l2_hit_rate": 0.48500264327870557,
+      "scored": true,
+      "typed_reason": ""
+    },
+    "8": {
+      "raw_l1_hit_rate": 0.32927013578869047,
+      "raw_l2_hit_rate": 0.005026562784369123,
+      "scored": true,
+      "typed_reason": ""
+    }
+  },
+  "candidates": [
+    4,
+    8,
+    16,
+    32,
+    64
+  ],
+  "captured_at_utc": "2026-05-30T01:00:02+00:00",
+  "dense_reuse": {
+    "distinct_sectors": 459202,
+    "reuse_factor": 2.0549039420560016,
+    "total_sector_accesses": 943616,
+    "truncated": false
+  },
+  "schema_version": 2,
+  "scored": true,
+  "slug": "problem_026_rmsnorm_h7168",
+  "tier2_sidecar_sha256": "4faa67cc5c44f1a38eea9094d389cce9637d3f8a7bf16f08a72cf9c7a579fdaf",
+  "typed_reason": ""
+}

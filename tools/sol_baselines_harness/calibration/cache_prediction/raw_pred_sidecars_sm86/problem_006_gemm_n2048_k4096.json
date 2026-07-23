@@ -1,0 +1,14 @@
+{
+  "associativity_l2": 16,
+  "captured_at_utc": "2026-05-29T22:14:40+00:00",
+  "geometry_source": "sm86_pilot_static_device_card_v1",
+  "language": "cuda_cpp",
+  "num_l2_slices": 6,
+  "raw_l1_hit_rate": 0.0011193608668932562,
+  "raw_l2_hit_rate": 0.40758691046064505,
+  "schema_version": 1,
+  "scored": true,
+  "slug": "problem_006_gemm_n2048_k4096",
+  "tier2_sidecar_sha256": "16e09ce93f5b3f70a9d779959d3f913d17f0cc4995f50f34d6412a93a426a2ce",
+  "typed_reason": ""
+}

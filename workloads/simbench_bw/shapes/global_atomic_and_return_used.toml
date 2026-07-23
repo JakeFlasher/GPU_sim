@@ -1,0 +1,35 @@
+schema_version = 1
+slug = "global_atomic_and_return_used"
+
+# Global atomic-AND(ATOM) microbench: each thread issues atomicAnd into a scratch bin
+# array driven by a seeded sample stream (return used -> ATOMG.E.AND). The verified
+# output is the identity round-trip on the seeded buffer; reference is a seeded
+# tensor of the same axis-product envelope. Same geometry as the add-based
+# atomics pair.
+
+[[timing_shapes]]
+name = "timing_00"
+axes = { samples = 1048576, bins = 1024 }
+launch_config = { grid = [1, 1, 1], block = [32, 1, 1] }
+warm_up_iters = 5
+repeat_iters = 30
+
+[[trace_shapes]]
+name = "trace_00"
+axes = { samples = 1024, bins = 64 }
+launch_config = { grid = [1, 1, 1], block = [32, 1, 1] }
+predicted_bytes = 10485760
+estimator_source = "static"
+
+[[trace_shapes]]
+name = "trace_l2_accuracy_xl"
+axes = { samples = 1024, bins = 32 }
+launch_config = { grid = [1, 1, 1], block = [32, 1, 1] }
+predicted_bytes = 5242880
+estimator_source = "static"
+
+[[correctness_shapes]]
+name = "correctness_00"
+axes = { samples = 32, bins = 8 }
+launch_config = { grid = [1, 1, 1], block = [32, 1, 1] }
+digest_kind = "hash"

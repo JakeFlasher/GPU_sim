@@ -1,0 +1,151 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "cache_replay_l1_diagnostic.schema.json",
+  "title": "sm_120 cache-replay L1 sector-hit-ratio diagnostic surface",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "algorithm_version",
+    "source_commit",
+    "arch",
+    "cache_layer",
+    "load_bearing",
+    "diagnostic_median_absolute_error",
+    "load_bearing_provenance",
+    "cache_parameters",
+    "n_cells",
+    "rows"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "algorithm_version": {"type": "string"},
+    "source_commit": {"type": "string"},
+    "arch": {"const": "sm_120"},
+    "sku": {"type": "string"},
+    "cache_layer": {"const": "L1TEX"},
+    "load_bearing": {"type": "boolean"},
+    "diagnostic_median_absolute_error": {
+      "type": ["number", "null"],
+      "minimum": 0.0
+    },
+    "n_cells": {"type": "integer", "minimum": 0},
+    "load_bearing_provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "load_bearing_medabs_bar",
+        "meets_accuracy_bar",
+        "bypass_provenance_present",
+        "l1_capacity_bytes",
+        "associativity",
+        "replacement",
+        "num_slices",
+        "assumption_note"
+      ],
+      "properties": {
+        "load_bearing_medabs_bar": {"type": "number", "exclusiveMinimum": 0.0},
+        "meets_accuracy_bar": {"type": "boolean"},
+        "bypass_provenance_present": {"type": "boolean"},
+        "l1_capacity_bytes": {"type": "integer", "minimum": 1},
+        "associativity": {"type": "integer", "minimum": 1},
+        "replacement": {"enum": ["LRU", "SRRIP", "BIP"]},
+        "num_slices": {"type": "integer", "minimum": 1},
+        "assumption_note": {"type": "string"}
+      }
+    },
+    "cache_parameters": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "capacity_bytes",
+        "effective_capacity_bytes",
+        "capacity_scale",
+        "sector_bytes",
+        "line_bytes",
+        "sectors_per_line",
+        "num_slices",
+        "slice_hash_id",
+        "associativity",
+        "replacement_policy",
+        "prefetch",
+        "num_sets_per_slice",
+        "total_lines"
+      ],
+      "properties": {
+        "capacity_bytes": {"type": "integer", "minimum": 1},
+        "effective_capacity_bytes": {"type": "integer", "minimum": 1},
+        "capacity_scale": {"type": "number", "exclusiveMinimum": 0.0},
+        "sector_bytes": {"const": 32},
+        "line_bytes": {"const": 128},
+        "sectors_per_line": {"const": 4},
+        "num_slices": {"type": "integer", "minimum": 1},
+        "slice_hash_id": {"type": "string"},
+        "associativity": {"type": "integer", "minimum": 1},
+        "replacement_policy": {"enum": ["LRU", "SRRIP", "BIP"]},
+        "prefetch": {"enum": ["off", "next_line"]},
+        "num_sets_per_slice": {"type": "integer", "minimum": 1},
+        "total_lines": {"type": "integer", "minimum": 1}
+      }
+    },
+    "rows": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "join_key",
+          "l1_diagnostic_predicted_hit_ratio",
+          "l1_ground_truth_hit_ratio",
+          "absolute_error",
+          "miss_breakdown",
+          "uncertainty_interval"
+        ],
+        "properties": {
+          "join_key": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["slug", "shape_point", "arch", "family_bucket", "cache_layer"],
+            "properties": {
+              "slug": {"type": "string"},
+              "shape_point": {"type": "string"},
+              "arch": {"const": "sm_120"},
+              "family_bucket": {
+                "enum": ["tensor_compute", "activation_norm", "memory_stress", "other"]
+              },
+              "cache_layer": {"const": "L1TEX"}
+            }
+          },
+          "l1_diagnostic_predicted_hit_ratio": {
+            "type": "number", "minimum": 0.0, "maximum": 1.0
+          },
+          "l1_ground_truth_hit_ratio": {
+            "type": "number", "minimum": 0.0, "maximum": 1.0
+          },
+          "absolute_error": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+          "miss_breakdown": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["cold", "conflict", "capacity", "total"],
+            "properties": {
+              "cold": {"type": "integer", "minimum": 0},
+              "conflict": {"type": "integer", "minimum": 0},
+              "capacity": {"type": "integer", "minimum": 0},
+              "total": {"type": "integer", "minimum": 0}
+            }
+          },
+          "uncertainty_interval": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["method", "ci_low", "ci_high"],
+            "properties": {
+              "method": {"type": "string"},
+              "ci_low": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+              "ci_high": {"type": "number", "minimum": 0.0, "maximum": 1.0}
+            }
+          }
+        }
+      }
+    }
+  }
+}

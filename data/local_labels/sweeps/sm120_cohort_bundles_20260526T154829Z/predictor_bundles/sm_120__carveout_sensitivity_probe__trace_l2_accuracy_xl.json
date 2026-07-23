@@ -1,0 +1,62 @@
+{
+  "algorithm_version": "smith_eklund_lru_v1",
+  "bootstrap_resamples": 2000,
+  "bootstrap_seed": 0,
+  "cache_layer": "L2",
+  "cache_model_capacity_bytes": 33554432,
+  "cache_model_cross_launch_state_carryover": false,
+  "cache_model_cta_interleave_enabled": false,
+  "cache_model_hrd_second_layer_enabled": false,
+  "cache_model_num_l2_slices": 1,
+  "cache_model_num_l2_slices_source": "constant",
+  "canonical_pre_calibration_features": {
+    "footprint_ratio": 3.0562477111816406,
+    "global_share": 1.0,
+    "gridDim_density": 0.0,
+    "intra_lane_reuse": 0.011599452625656804,
+    "long_rd_tail_mass": 0.12078729169709065,
+    "raw_prediction": 0.99666959468368
+  },
+  "ci_confidence": 0.95,
+  "ci_half_width": 0.0,
+  "ci_high": 0.99666959468368,
+  "ci_low": 0.99666959468368,
+  "device": "NVIDIA GeForce RTX 5060 Laptop GPU",
+  "epsilon": 0.01,
+  "evidence": {
+    "cross_launch_state_carryover_applied_launch_count": 0,
+    "grid_dim_correction_alpha": 0.0,
+    "grid_dim_correction_penalty": 0.0,
+    "grid_dim_input": null,
+    "launch_count": 1,
+    "per_launch_hit_rates": [
+      0.99666959468368
+    ],
+    "populated_launch_count": 1,
+    "predicted_hit_rate_uncorrected": 0.99666959468368,
+    "total_observations": 3214945
+  },
+  "grid_dim_alpha_source": "sm120_uncalibrated",
+  "input_sidecar_digests": {
+    "dynamic_trace_pb": {
+      "path": "workloads/simbench_bw/results/carveout_sensitivity_probe/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/dynamic_trace.pb",
+      "sha256": "1e610b8b07d1144e0e35ac55d921596f48a6b8465b5acb96e728efa351f86657"
+    },
+    "sector_stream": {
+      "path": "workloads/simbench_bw/results/carveout_sensitivity_probe/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/sector_stream/sector_stream.jsonl",
+      "sha256": "4fe37c4ac1d785df1c810c6d05476ff1d60f762b7dfc9185befcb88a0f452e59"
+    }
+  },
+  "manifest_pairing_index": {
+    "arch": "sm_120",
+    "binary_sha256": "d41b20f5a9eb5990587c14a235389ffd9b04dcf1fbd2c77b064518e6ffc3c458",
+    "kernel_signature_sha256": "4585d912ad82ae86356fa7d64c2782fc6948e8acc97cc30947abfc4633840f6d",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "carveout_sensitivity_probe",
+    "source_commit": "b6372fddd6078896b831cbecc0cf1be8724c2ecb"
+  },
+  "predicted_hit_rate": 0.99666959468368,
+  "result_kind": "scalar",
+  "schema_version": 1,
+  "sector_size_bytes": 32
+}

@@ -1,0 +1,278 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "warp_pool_l1_per_admitted_cell",
+  "description": "Per-admitted-cell L1 predictions from the warp-pool walker (the NEW analytical head, zero label-fitted parameters, card-sourced geometry). Lands beside the existing predicted-L1 artifact; every cell is scalar or typed_unavailable with the closed identity tuple mirrored from the admitted row.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_kind",
+    "arch",
+    "generator",
+    "generated_at_commit",
+    "config",
+    "config_digest",
+    "cohort_size",
+    "n_scalar",
+    "n_typed",
+    "cells"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "artifact_kind": {
+      "const": "warp_pool_l1_per_admitted_cell"
+    },
+    "arch": {
+      "const": "sm_86"
+    },
+    "generator": {
+      "type": "string",
+      "minLength": 1
+    },
+    "generated_at_commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "config": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "model",
+        "scheduling_mode",
+        "sector_accounting",
+        "cta_to_sm_schedule_policy",
+        "sm_count",
+        "occupancy_warp_limit_per_sm",
+        "max_blocks_per_sm",
+        "warmup_launches",
+        "card_path",
+        "carveout_percent_by_cell",
+        "shared_memory_occupancy_reduction_modeled",
+        "label_fitted_parameters"
+      ],
+      "properties": {
+        "model": {
+          "const": "warp_pool_two_layer_finite_mshr"
+        },
+        "scheduling_mode": {
+          "const": "warp_pool"
+        },
+        "sector_accounting": {
+          "const": "two_layer"
+        },
+        "cta_to_sm_schedule_policy": {
+          "const": "round_robin_homogeneous"
+        },
+        "sm_count": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "occupancy_warp_limit_per_sm": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "max_blocks_per_sm": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "warmup_launches": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "card_path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "carveout_percent_by_cell": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 100
+          }
+        },
+        "shared_memory_occupancy_reduction_modeled": {
+          "type": "boolean"
+        },
+        "label_fitted_parameters": {
+          "type": "array",
+          "maxItems": 0,
+          "description": "MUST be empty: the head has zero parameters fit to labels; the re-score consumer rejects any entry here."
+        }
+      }
+    },
+    "config_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "cohort_size": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "n_scalar": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "n_typed": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "cells": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "slug",
+          "shape_point",
+          "arch",
+          "binary_sha256",
+          "source_commit",
+          "kernel_signature_sha256",
+          "ncu_metric_version",
+          "result_kind",
+          "cache_layer",
+          "predicted_hit_rate",
+          "typed_reason",
+          "evidence",
+          "input_digests"
+        ],
+        "properties": {
+          "slug": {
+            "type": "string",
+            "minLength": 1
+          },
+          "shape_point": {
+            "type": "string",
+            "minLength": 1
+          },
+          "arch": {
+            "const": "sm_86"
+          },
+          "binary_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "source_commit": {
+            "type": "string",
+            "minLength": 7
+          },
+          "kernel_signature_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "ncu_metric_version": {
+            "type": "string",
+            "minLength": 1
+          },
+          "variant_id": {
+            "type": "string",
+            "minLength": 1
+          },
+          "register_cap": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "result_kind": {
+            "enum": [
+              "scalar",
+              "typed_unavailable"
+            ]
+          },
+          "cache_layer": {
+            "const": "L1TEX"
+          },
+          "predicted_hit_rate": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "minimum": 0.0,
+            "maximum": 1.0
+          },
+          "typed_reason": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "enum": [
+              null,
+              "predictor_l1_sass_provenance_missing",
+              "predictor_l1_cta_to_sm_schedule_unknown",
+              "predictor_l1_no_modeled_l1_eligible_accesses"
+            ]
+          },
+          "evidence": {
+            "type": "object"
+          },
+          "input_digests": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "classifier_manifest_sha256",
+              "dynamic_trace_pb_sha256",
+              "threadblock_proto_set_sha256"
+            ],
+            "properties": {
+              "classifier_manifest_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "dynamic_trace_pb_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "threadblock_proto_set_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              }
+            }
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "result_kind": {
+                  "const": "scalar"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "predicted_hit_rate": {
+                  "type": "number"
+                },
+                "typed_reason": {
+                  "const": null
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "result_kind": {
+                  "const": "typed_unavailable"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "predicted_hit_rate": {
+                  "const": null
+                },
+                "typed_reason": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

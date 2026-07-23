@@ -1,0 +1,1169 @@
+{
+  "artifact_kind": "sol_definition_equivalence_v1_blocking_audit",
+  "certifying": false,
+  "comparator_module": {
+    "path": "tools/local_labels/sol_definition_equivalence.py",
+    "sha256": "1f7caa7b51dceae604a93bf0755b3772b249825c0895727b9f9e8a98b94c860c"
+  },
+  "created_at_utc": "2026-07-10T19:14:02Z",
+  "git_head": "9b8e0e403ec0fc2acc2fcf40dbe3feb31572475a",
+  "immutable": true,
+  "matrix": {
+    "file_sha256": "fd3a1868845ceac309e718da6519f4779824b7fd69eddf1bfa0e7e7847d4e297",
+    "matrix_seal_sha256": "544938301f40a46713dd056af9d349c4f59848179212ef4a7826f12d9418d447",
+    "path": "/home/jakeshea/sm86_reference_capture_r27/inputs/r28_9b8e0e40/sm86_reference_capture_matrix.json"
+  },
+  "packager_module": {
+    "path": "tools/sol_execbench/src/sol_execbench/driver/problem_packager.py",
+    "sha256": "f539ec0ef269676c6995980b7631972fd12c2fc4443016378ed30bb462c1b6c2"
+  },
+  "problem_070_control": {
+    "row_id": "sol_execbench::problem_070_mamba2_fused_intra_chunk_diagonal_computation",
+    "source_definition_sha256": "3e0aceb31c7639d533a7b9c0c9f3e75cc7e6f4fb9beb9e56d57ee73bdbf1c4fa",
+    "staged_definition_sha256": "e752675533d1d49220488a5df6a107648d9c2e6137820c4dc1d9d8cd0fc5f387",
+    "verdict": "equal"
+  },
+  "rows": [
+    {
+      "difference_pointers": [],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_001_fused_vision_multihead_attention_with_norms_backward"
+      },
+      "row_id": "sol_execbench::problem_001_fused_vision_multihead_attention_with_norms_backward",
+      "source_definition_sha256": "b83c33ef32bd03a8516100f2ef6cd5c3f7739bdfce327a6171ce909769d53f8f",
+      "source_path": "tools/sol_execbench/data/benchmark/L2/001_fused_vision_multihead_attention_with_norms_backward/definition.json",
+      "staged_definition_sha256": "3b4e78c19f0a38580bd4b2c5ab80982f1e8c7775f575894fdaa6386c93bd5065",
+      "verdict": "equal"
+    },
+    {
+      "difference_pointers": [],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_002_vae_conv3x3_groupnorm_silu_residual_fused"
+      },
+      "row_id": "sol_execbench::problem_002_vae_conv3x3_groupnorm_silu_residual_fused",
+      "source_definition_sha256": "a3bd2bd29b60231411231e751cdb1af17afc5afb9660e25f9fa40c564bc5bf82",
+      "source_path": "tools/sol_execbench/data/benchmark/L1/002_vae_conv3x3_groupnorm_silu_residual_fused/definition.json",
+      "staged_definition_sha256": "708490eb9e82d14439639aeaa22f5144f1fcf48b779b7282bc2a58f566b30f12",
+      "verdict": "equal"
+    },
+    {
+      "difference_pointers": [
+        "/axes/head_dim/description",
+        "/axes/hidden_size/description",
+        "/axes/kv_proj_size/description",
+        "/axes/num_attention_heads/description",
+        "/axes/num_key_value_heads/description",
+        "/axes/q_proj_size/description"
+      ],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_003_grouped_query_attention_with_rope_backward"
+      },
+      "row_id": "sol_execbench::problem_003_grouped_query_attention_with_rope_backward",
+      "source_definition_sha256": "028264125daf632c25597b84470432f0b34e7481ff9dc72d52a9fcce49191bfc",
+      "source_path": "tools/sol_execbench/data/benchmark/L2/003_grouped_query_attention_with_rope_backward/definition.json",
+      "staged_definition_sha256": "23fa8e954a7a6bf1a05b4520df62751c1b5b876fbbcb3a3b01d448353754495d",
+      "verdict": "divergent"
+    },
+    {
+      "difference_pointers": [],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_004_attention_output_projection_with_reshape_backward"
+      },
+      "row_id": "sol_execbench::problem_004_attention_output_projection_with_reshape_backward",
+      "source_definition_sha256": "112f0895da7c50cdff5bf0c2371dd3c322221b02e287827b3db44726997270be",
+      "source_path": "tools/sol_execbench/data/benchmark/L1/004_attention_output_projection_with_reshape_backward/definition.json",
+      "staged_definition_sha256": "359af8db5913f0306cbea87a18a009f285eeb1c9d4c52d9a0085c1dd99c4fba6",
+      "verdict": "equal"
+    },
+    {
+      "difference_pointers": [],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_007_hyena_fft_size_padding_rfft"
+      },
+      "row_id": "sol_execbench::problem_007_hyena_fft_size_padding_rfft",
+      "source_definition_sha256": "478728e862d1dfe9c678fd774bbcc139f170b21fa3d464441d498a202987bb1f",
+      "source_path": "tools/sol_execbench/data/benchmark/L1/007_hyena_fft_size_padding_rfft/definition.json",
+      "staged_definition_sha256": "78a850ad86e6682a7d165b1b5b2d4cfe42a0449d353022142ad38b3bae60c6c6",
+      "verdict": "equal"
+    },
+    {
+      "difference_pointers": [],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_009_expert_token_scatter_with_weighted_forward_backward"
+      },
+      "row_id": "sol_execbench::problem_009_expert_token_scatter_with_weighted_forward_backward",
+      "source_definition_sha256": "8f71f261c29e50f83bf99229217d4aaaf7b0b650a5dd4cdcb551e2c47b4544fc",
+      "source_path": "tools/sol_execbench/data/benchmark/L1/009_expert_token_scatter_with_weighted_forward_backward/definition.json",
+      "staged_definition_sha256": "49c19f79a0eff3b8cc80af158a3fbdda99d4d83f3cc651a011b05f1becea5dd8",
+      "verdict": "equal"
+    },
+    {
+      "difference_pointers": [],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_010_attention_value_projection_with_transpose"
+      },
+      "row_id": "sol_execbench::problem_010_attention_value_projection_with_transpose",
+      "source_definition_sha256": "a3d9bf985fed679767555613d315cb91df1fe9e7f29a4f399f49a4a7ea7e0aca",
+      "source_path": "tools/sol_execbench/data/benchmark/L1/010_attention_value_projection_with_transpose/definition.json",
+      "staged_definition_sha256": "2d31fbcf874fca95902f746f5b4211b8c68a8e77da58fbc9914289a3f41cb004",
+      "verdict": "equal"
+    },
+    {
+      "difference_pointers": [
+        "/axes/hidden_size/description",
+        "/axes/num_experts/description",
+        "/axes/top_k/description"
+      ],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_011_moe_sparse_routing_and_dispatch_backward"
+      },
+      "row_id": "sol_execbench::problem_011_moe_sparse_routing_and_dispatch_backward",
+      "source_definition_sha256": "d605ea7cddea0463e18945d4d673887b1c52f15c3856afafc93ce478bdcf563e",
+      "source_path": "tools/sol_execbench/data/benchmark/L2/011_moe_sparse_routing_and_dispatch_backward/definition.json",
+      "staged_definition_sha256": "c2e3d0f5c9104038c2e75762517440cd9bd080366d0ed800e938ae06f72aaeb5",
+      "verdict": "divergent"
+    },
+    {
+      "difference_pointers": [],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_014_audio_encoder_varlen_attention_with_chunking_backward"
+      },
+      "row_id": "sol_execbench::problem_014_audio_encoder_varlen_attention_with_chunking_backward",
+      "source_definition_sha256": "f7302152f7025ffdbcad4d066c0bb8200a67c1640b249f7bf05ed53dd7174200",
+      "source_path": "tools/sol_execbench/data/benchmark/L2/014_audio_encoder_varlen_attention_with_chunking_backward/definition.json",
+      "staged_definition_sha256": "bc38387305be5628917a8e42913df6cc0e3a24b31512fa0a23869e2945317edb",
+      "verdict": "equal"
+    },
+    {
+      "difference_pointers": [],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_014_rotary_embedding_with_attention_scaling_backward"
+      },
+      "row_id": "sol_execbench::problem_014_rotary_embedding_with_attention_scaling_backward",
+      "source_definition_sha256": "c86329f77229fc103505b4087f3c45d01a81223c1780124053676f42b9a0349b",
+      "source_path": "tools/sol_execbench/data/benchmark/L1/014_rotary_embedding_with_attention_scaling_backward/definition.json",
+      "staged_definition_sha256": "b9690d89557794f502723a34641eeb8f880de2330d02b0c993a9c419a63460e1",
+      "verdict": "equal"
+    },
+    {
+      "difference_pointers": [],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_015_audio_sinusoidal_position_embedding_with_conv_projection"
+      },
+      "row_id": "sol_execbench::problem_015_audio_sinusoidal_position_embedding_with_conv_projection",
+      "source_definition_sha256": "a321668dd71f276b898abc61407e0b22e71b09ce2c5682f7de7b67d7bbc62238",
+      "source_path": "tools/sol_execbench/data/benchmark/L2/015_audio_sinusoidal_position_embedding_with_conv_projection/definition.json",
+      "staged_definition_sha256": "f569920f7c18d1ffa18188bf52829847be9873e1cdd6614d38d96a0f3ac39b2f",
+      "verdict": "equal"
+    },
+    {
+      "difference_pointers": [],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_015_grouped_query_attention_with_rope_and_qk_norm"
+      },
+      "row_id": "sol_execbench::problem_015_grouped_query_attention_with_rope_and_qk_norm",
+      "source_definition_sha256": "8ddb2495ef6749f402de1473b8f73227e05baa543988c040ce6d618f2bb80271",
+      "source_path": "tools/sol_execbench/data/benchmark/L1/015_grouped_query_attention_with_rope_and_qk_norm/definition.json",
+      "staged_definition_sha256": "e42a0f73b1341411da331bfb78397e021c66fc4d257fe8bf78738a8527909d98",
+      "verdict": "equal"
+    },
+    {
+      "difference_pointers": [
+        "/axes/hidden_size/description",
+        "/axes/intermediate_size/description",
+        "/axes/num_tokens/description"
+      ],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_017_moe_expert_swiglu_with_down_projection_backward"
+      },
+      "row_id": "sol_execbench::problem_017_moe_expert_swiglu_with_down_projection_backward",
+      "source_definition_sha256": "05c1a2ce01ed9ff33457b0ea87831f5f4a8b9022842cf4b00319b80a49c0c01b",
+      "source_path": "tools/sol_execbench/data/benchmark/L1/017_moe_expert_swiglu_with_down_projection_backward/definition.json",
+      "staged_definition_sha256": "3d0ff26e60891bde58bb6383a4cd8f3e44f2065194eae6a1f6e17da3d5879588",
+      "verdict": "divergent"
+    },
+    {
+      "difference_pointers": [
+        "/axes/batch_size/description",
+        "/axes/half_head_dim/description",
+        "/axes/head_dim/description",
+        "/axes/hidden_size/description",
+        "/axes/intermediate_size/description",
+        "/axes/kv_hidden/description",
+        "/axes/num_attention_heads/description",
+        "/axes/num_key_value_heads/description",
+        "/axes/qkv_hidden/description",
+        "/axes/seq_len/description"
+      ],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_020_decoder_layer_pre_post_norm_residual"
+      },
+      "row_id": "sol_execbench::problem_020_decoder_layer_pre_post_norm_residual",
+      "source_definition_sha256": "2840bfc2267e3c93d81dd71c27f1d87fc6701b1232e301d2051c7c6489eff4ef",
+      "source_path": "tools/sol_execbench/data/benchmark/L2/020_decoder_layer_pre_post_norm_residual/definition.json",
+      "staged_definition_sha256": "2548e4e5990ed744d156ef3f507f29227d516e73bfffc6f2aa3ed91f431bf04b",
+      "verdict": "divergent"
+    },
+    {
+      "difference_pointers": [
+        "/axes/head_dim/description",
+        "/axes/hidden_size/description",
+        "/axes/num_grid_per_side/description",
+        "/axes/num_heads/description",
+        "/axes/num_position_embeddings/description",
+        "/axes/quarter_head_dim/description",
+        "/axes/spatial_merge_size/description"
+      ],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_023_multimodal_rope_position_computation_with_grid_based_indexing"
+      },
+      "row_id": "sol_execbench::problem_023_multimodal_rope_position_computation_with_grid_based_indexing",
+      "source_definition_sha256": "8ce06b4bab08aac192c166cc274325265702fbc95dca4e8024de760838f9181a",
+      "source_path": "tools/sol_execbench/data/benchmark/L1/023_multimodal_rope_position_computation_with_grid_based_indexing/definition.json",
+      "staged_definition_sha256": "4f1e6711158e9fe8f4c9da3d75ee680efa69b0238c2bbaa52223d3b2b7ac89a3",
+      "verdict": "divergent"
+    },
+    {
+      "difference_pointers": [],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_024_vision_rotary_position_embedding_generation_backward"
+      },
+      "row_id": "sol_execbench::problem_024_vision_rotary_position_embedding_generation_backward",
+      "source_definition_sha256": "e44c0eb0344e99c1f4c59a2e22188e53815538799d7c959b77997b1d3344ee51",
+      "source_path": "tools/sol_execbench/data/benchmark/L1/024_vision_rotary_position_embedding_generation_backward/definition.json",
+      "staged_definition_sha256": "fc47db6db4cfedf4d03723bc1b62eaa989631e3ee6d87a7fee5ae1123a3b2fe8",
+      "verdict": "equal"
+    },
+    {
+      "difference_pointers": [],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_027_grouped_query_attention_with_yarn_rope_and_qk_norm"
+      },
+      "row_id": "sol_execbench::problem_027_grouped_query_attention_with_yarn_rope_and_qk_norm",
+      "source_definition_sha256": "88ebcd460d7d50c967b8b52ff774cf893ac323d9ce44c7241df5d040712479ae",
+      "source_path": "tools/sol_execbench/data/benchmark/L2/027_grouped_query_attention_with_yarn_rope_and_qk_norm/definition.json",
+      "staged_definition_sha256": "02c57533256d4ce5196046c74ad37b37624e2342d91ce2ca45946325517d50be",
+      "verdict": "equal"
+    },
+    {
+      "difference_pointers": [],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_028_gqa_rotary_attention_core_backward"
+      },
+      "row_id": "sol_execbench::problem_028_gqa_rotary_attention_core_backward",
+      "source_definition_sha256": "93f4cec6f486c147365d778709ddd8a2599dc5611a30822f0728d7121ec9684f",
+      "source_path": "tools/sol_execbench/data/benchmark/L2/028_gqa_rotary_attention_core_backward/definition.json",
+      "staged_definition_sha256": "aefc36b99b1f86fd0067424245cc39fbcd9ccb7ea1305d60349eb4bf1406018a",
+      "verdict": "equal"
+    },
+    {
+      "difference_pointers": [],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_031_repeat_kv_attention_matmul"
+      },
+      "row_id": "sol_execbench::problem_031_repeat_kv_attention_matmul",
+      "source_definition_sha256": "e58541940c1275a2a6090b3dbb433dfdc8e0b7af839eef39e0018d4ba0ca7441",
+      "source_path": "tools/sol_execbench/data/benchmark/L1/031_repeat_kv_attention_matmul/definition.json",
+      "staged_definition_sha256": "f3784b43d4fb45446fff0834dd3606df5663f53825634ee68e3206dcd2dbc98d",
+      "verdict": "equal"
+    },
+    {
+      "difference_pointers": [],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_032_attention_weights_matmul_with_value_projection"
+      },
+      "row_id": "sol_execbench::problem_032_attention_weights_matmul_with_value_projection",
+      "source_definition_sha256": "8cefa384e16a940ac66658e002858bbc6c6f7df6e7b84516ccd910ba2e36b023",
+      "source_path": "tools/sol_execbench/data/benchmark/L1/032_attention_weights_matmul_with_value_projection/definition.json",
+      "staged_definition_sha256": "2f78488a00088549f0f32f9dcac2803701c30e8cb63a61d93ce37ede871ce0a7",
+      "verdict": "equal"
+    },
+    {
+      "difference_pointers": [
+        "/axes/base_channels/description",
+        "/axes/batch_size/description",
+        "/axes/height/description",
+        "/axes/height_div2/description",
+        "/axes/height_div4/description",
+        "/axes/input_channels/description",
+        "/axes/num_scales/description",
+        "/axes/scale1_channels/description",
+        "/axes/scale2_channels/description",
+        "/axes/scale3_channels/description",
+        "/axes/width/description",
+        "/axes/width_div2/description",
+        "/axes/width_div4/description"
+      ],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_033_multi_scale_feature_pyramid"
+      },
+      "row_id": "sol_execbench::problem_033_multi_scale_feature_pyramid",
+      "source_definition_sha256": "f9f718d9186584eb1136742d6f1d6f5c7459c337b655ba2b81ae717798934633",
+      "source_path": "tools/sol_execbench/data/benchmark/L2/033_multi_scale_feature_pyramid/definition.json",
+      "staged_definition_sha256": "07fce4097806c4f75034b40a10266d9cfd4eee532e1ca5a917cc42d35d54fb7c",
+      "verdict": "divergent"
+    },
+    {
+      "difference_pointers": [],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_036_convnextv2_layer_with_nhwc_persistence_backward"
+      },
+      "row_id": "sol_execbench::problem_036_convnextv2_layer_with_nhwc_persistence_backward",
+      "source_definition_sha256": "0587ec871fcea007209960cf84b2d4088a42432331d9722e8b569a3807423697",
+      "source_path": "tools/sol_execbench/data/benchmark/L2/036_convnextv2_layer_with_nhwc_persistence_backward/definition.json",
+      "staged_definition_sha256": "27cbf507985ebc648a9bcbe5db37f004cd2a0376f702c3b8fce6f133f1f8d387",
+      "verdict": "equal"
+    },
+    {
+      "difference_pointers": [
+        "/axes/batch_size/description",
+        "/axes/head_dim/description",
+        "/axes/hidden_size/description",
+        "/axes/kv_proj_out/description",
+        "/axes/num_attention_heads/description",
+        "/axes/num_key_value_heads/description",
+        "/axes/q_proj_out/description",
+        "/axes/seq_len/description"
+      ],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_037_qk_norm_rope_attention_core_backward"
+      },
+      "row_id": "sol_execbench::problem_037_qk_norm_rope_attention_core_backward",
+      "source_definition_sha256": "9d383bf86c46bc6709f2e13c3b7a151d91f57c30116959f3fe390af96e84498c",
+      "source_path": "tools/sol_execbench/data/benchmark/L2/037_qk_norm_rope_attention_core_backward/definition.json",
+      "staged_definition_sha256": "e1c947fcc5f995774d368a53a319ed2b6c0e5253c27c37ac99f79c9dc402c409",
+      "verdict": "divergent"
+    },
+    {
+      "difference_pointers": [
+        "/axes/chunk_size/description",
+        "/axes/context_size/description",
+        "/axes/head_dim/description",
+        "/axes/hidden_size/description",
+        "/axes/max_backward/description",
+        "/axes/max_forward/description",
+        "/axes/num_heads/description",
+        "/axes/num_timescales/description"
+      ],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_038_audio_relative_position_attention"
+      },
+      "row_id": "sol_execbench::problem_038_audio_relative_position_attention",
+      "source_definition_sha256": "f1bee6fa744ab67ce52079850f7adb0feed3d9ed5e75813050c4aeadab0d42fd",
+      "source_path": "tools/sol_execbench/data/benchmark/L2/038_audio_relative_position_attention/definition.json",
+      "staged_definition_sha256": "094588e936d0d4681f3ceb5cbcd2b79887b93b389c605b5b97eaddc55b6c767c",
+      "verdict": "divergent"
+    },
+    {
+      "difference_pointers": [],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_039_adaptive_instance_normalization_2d_backward"
+      },
+      "row_id": "sol_execbench::problem_039_adaptive_instance_normalization_2d_backward",
+      "source_definition_sha256": "91570ddbe37b487fa28991e912f036ff7c4d60a6d25c388e1bf29a6c4b1b9581",
+      "source_path": "tools/sol_execbench/data/benchmark/L1/039_adaptive_instance_normalization_2d_backward/definition.json",
+      "staged_definition_sha256": "80829ff8af792c455ac9532ddc5378daf2f84e98e457d2b0ae06727f3b4f0fec",
+      "verdict": "equal"
+    },
+    {
+      "difference_pointers": [
+        "/axes/batch_size/description",
+        "/axes/head_dim/description",
+        "/axes/hidden_size/description",
+        "/axes/kv_out_dim/description",
+        "/axes/num_attention_heads/description",
+        "/axes/num_key_value_groups/description",
+        "/axes/num_key_value_heads/description",
+        "/axes/qkv_out_dim/description",
+        "/axes/seq_len/description"
+      ],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_039_kv_shared_attention_with_rope"
+      },
+      "row_id": "sol_execbench::problem_039_kv_shared_attention_with_rope",
+      "source_definition_sha256": "0b604517f96d41ee003602d722ec609ff9f1ebc4b46a61a257e4dcc629546832",
+      "source_path": "tools/sol_execbench/data/benchmark/L2/039_kv_shared_attention_with_rope/definition.json",
+      "staged_definition_sha256": "a770993c756c64b506541f6072483c9506007ae41351e25661a720a2fc8c771b",
+      "verdict": "divergent"
+    },
+    {
+      "difference_pointers": [
+        "/axes/altup_num_inputs/description",
+        "/axes/altup_num_inputs_sq/description",
+        "/axes/batch_size/description",
+        "/axes/hidden_size/description",
+        "/axes/seq_len/description"
+      ],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_040_altup_predict_correction_cycle_backward"
+      },
+      "row_id": "sol_execbench::problem_040_altup_predict_correction_cycle_backward",
+      "source_definition_sha256": "c5dd1c6873a58566385c6b3c80edeff24302d8f8b054db61cb0684ffee658d0f",
+      "source_path": "tools/sol_execbench/data/benchmark/L2/040_altup_predict_correction_cycle_backward/definition.json",
+      "staged_definition_sha256": "bd2ff370fd16d6cdddedc2d603cd828c56532cc1982aa1068a4b4298bf9c603d",
+      "verdict": "divergent"
+    },
+    {
+      "difference_pointers": [
+        "/axes/batch_size/description",
+        "/axes/head_dim/description",
+        "/axes/hidden_size/description",
+        "/axes/kv_proj_dim/description",
+        "/axes/num_attention_heads/description",
+        "/axes/num_key_value_groups/description",
+        "/axes/num_key_value_heads/description",
+        "/axes/q_proj_dim/description",
+        "/axes/seq_len/description"
+      ],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_041_kv_shared_attention_with_dual_rope"
+      },
+      "row_id": "sol_execbench::problem_041_kv_shared_attention_with_dual_rope",
+      "source_definition_sha256": "0db778b576290241dd84f23e0d1a7681bf9c5d89a82a6cafd83efe73bd9744e5",
+      "source_path": "tools/sol_execbench/data/benchmark/L2/041_kv_shared_attention_with_dual_rope/definition.json",
+      "staged_definition_sha256": "a7f94b8660963127060d9dac8acbbe12a620fa97f697f9c63bc2e262d038a611",
+      "verdict": "divergent"
+    },
+    {
+      "difference_pointers": [],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_041_strided_conv2d_downsampling"
+      },
+      "row_id": "sol_execbench::problem_041_strided_conv2d_downsampling",
+      "source_definition_sha256": "8bfca99cefd239b8e51113ef6819aecef58e2eeaec0f4cf8e04cb78380ee4018",
+      "source_path": "tools/sol_execbench/data/benchmark/L1/041_strided_conv2d_downsampling/definition.json",
+      "staged_definition_sha256": "fc3ae522ed29257d7c6c0605cb8f28d7408f0206c7a13ee64552aa509626b66f",
+      "verdict": "equal"
+    },
+    {
+      "difference_pointers": [
+        "/axes/batch_size/description",
+        "/axes/hidden_size/description",
+        "/axes/intermediate_size/description",
+        "/axes/seq_len/description"
+      ],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_042_ffn_gelu_projection_fused_backward"
+      },
+      "row_id": "sol_execbench::problem_042_ffn_gelu_projection_fused_backward",
+      "source_definition_sha256": "21ff914d933f7cd61bb0958439aac028a19045bf9ce3e3d9e33f26a1d85c9068",
+      "source_path": "tools/sol_execbench/data/benchmark/L2/042_ffn_gelu_projection_fused_backward/definition.json",
+      "staged_definition_sha256": "e4e1a701ed59e7de1a88ca873c5a5422c23962e5afe303f4f443b730ab523357",
+      "verdict": "divergent"
+    },
+    {
+      "difference_pointers": [],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_042_moe_expert_load_balancing_and_token_capacity_backward"
+      },
+      "row_id": "sol_execbench::problem_042_moe_expert_load_balancing_and_token_capacity_backward",
+      "source_definition_sha256": "cf1b729b85572cc2af647cc0155c4e861385421f65c0f52e56a793bf7518104a",
+      "source_path": "tools/sol_execbench/data/benchmark/L1/042_moe_expert_load_balancing_and_token_capacity_backward/definition.json",
+      "staged_definition_sha256": "a42862730c14d3730a76ea1814ddbca397d6350e9a6caaa8d95fba562ea4ce23",
+      "verdict": "equal"
+    },
+    {
+      "difference_pointers": [
+        "/axes/batch_size/description",
+        "/axes/chunk_size/description",
+        "/axes/head_dim/description",
+        "/axes/hidden_out/description",
+        "/axes/n_groups/description",
+        "/axes/num_heads/description",
+        "/axes/seq_len/description",
+        "/axes/state_size/description"
+      ],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_043_mamba_chunk_scan_with_segsum"
+      },
+      "row_id": "sol_execbench::problem_043_mamba_chunk_scan_with_segsum",
+      "source_definition_sha256": "16ec3d3b6ca99c979a9f5aba154432742ba8165632077510f3019b34944571c5",
+      "source_path": "tools/sol_execbench/data/benchmark/L2/043_mamba_chunk_scan_with_segsum/definition.json",
+      "staged_definition_sha256": "5cd11f0e827181f23d96fe20a4439a2c91c59bcbf4bd57a7f17292b33e567236",
+      "verdict": "divergent"
+    },
+    {
+      "difference_pointers": [],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_043_mla_fused_qkv_rope_split"
+      },
+      "row_id": "sol_execbench::problem_043_mla_fused_qkv_rope_split",
+      "source_definition_sha256": "450a43533ef988c682895c1196b0ab4f2abe2150c86070bd0d13d8d167277bc1",
+      "source_path": "tools/sol_execbench/data/benchmark/L1/043_mla_fused_qkv_rope_split/definition.json",
+      "staged_definition_sha256": "9f933ef2ca19f56a3b25f448e2b7629cb8ecc7f41fe63aa7c249cd2b5c11bc6c",
+      "verdict": "equal"
+    },
+    {
+      "difference_pointers": [
+        "/axes/batch_size/description",
+        "/axes/chunk_size/description",
+        "/axes/d_state/description",
+        "/axes/head_dim/description",
+        "/axes/n_groups/description",
+        "/axes/num_chunks/description",
+        "/axes/num_heads/description"
+      ],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_044_mamba_discretization_and_segsum"
+      },
+      "row_id": "sol_execbench::problem_044_mamba_discretization_and_segsum",
+      "source_definition_sha256": "3d4f08e55c5097f4bfbed1a7b0cdc834caeb57a5f638e613f42732f003f153b8",
+      "source_path": "tools/sol_execbench/data/benchmark/L2/044_mamba_discretization_and_segsum/definition.json",
+      "staged_definition_sha256": "7471503a44dd87ed1a04206d3cc30d8418d6614dc42c8217062af58002804b2f",
+      "verdict": "divergent"
+    },
+    {
+      "difference_pointers": [],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_047_attention_with_qk_norm_and_rope"
+      },
+      "row_id": "sol_execbench::problem_047_attention_with_qk_norm_and_rope",
+      "source_definition_sha256": "93fdb54c3ee82463b73f55244dbea69a44a8bfd46fff5b8b645beed06b53402e",
+      "source_path": "tools/sol_execbench/data/benchmark/L1/047_attention_with_qk_norm_and_rope/definition.json",
+      "staged_definition_sha256": "34143384e082a49a02e27fe209a3a2cc8a5b825ec5c79029a40f6f17fe1377fa",
+      "verdict": "equal"
+    },
+    {
+      "difference_pointers": [],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_049_attention_qk_matmul_with_gqa_repeat_and_scaling"
+      },
+      "row_id": "sol_execbench::problem_049_attention_qk_matmul_with_gqa_repeat_and_scaling",
+      "source_definition_sha256": "7b9ddf52d5b16d5a3dd476f7ff3b2d08d4f089fdc1c93c87dac1c37e5227aea5",
+      "source_path": "tools/sol_execbench/data/benchmark/L1/049_attention_qk_matmul_with_gqa_repeat_and_scaling/definition.json",
+      "staged_definition_sha256": "58d59a64b89cb060dc416a607d55ed61d36ac07c03056be8beb79cb3d3980a14",
+      "verdict": "equal"
+    },
+    {
+      "difference_pointers": [],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_049_group_limited_topk_routing"
+      },
+      "row_id": "sol_execbench::problem_049_group_limited_topk_routing",
+      "source_definition_sha256": "38febc89bac8021794e7bd2ac695e6c7e2e84d88885d87822f4052a6124b5977",
+      "source_path": "tools/sol_execbench/data/benchmark/L2/049_group_limited_topk_routing/definition.json",
+      "staged_definition_sha256": "49728f8f8617eaf41fd2428ff1f416f7d62e8dc9524f1f4cf5fba9eddbdfe3e8",
+      "verdict": "equal"
+    },
+    {
+      "difference_pointers": [
+        "/axes/batch_size/description",
+        "/axes/head_dim/description",
+        "/axes/hidden_size/description",
+        "/axes/kv_proj_size/description",
+        "/axes/num_attention_heads/description",
+        "/axes/num_key_value_heads/description",
+        "/axes/q_proj_size/description",
+        "/axes/seq_len/description"
+      ],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_051_attention_qkv_with_qk_norm_single_kernel_backward"
+      },
+      "row_id": "sol_execbench::problem_051_attention_qkv_with_qk_norm_single_kernel_backward",
+      "source_definition_sha256": "8ecb6160680ae47b0fb51a493cd0491f0b78e82b0a4db80a8cffdc84b72b21ed",
+      "source_path": "tools/sol_execbench/data/benchmark/L1/051_attention_qkv_with_qk_norm_single_kernel_backward/definition.json",
+      "staged_definition_sha256": "7013b0cc6ea4fa773a6054a77b83e69b3827ba8cc9f05a6c8b5d155a20619b2c",
+      "verdict": "divergent"
+    },
+    {
+      "difference_pointers": [
+        "/axes/altup_num_inputs/description",
+        "/axes/batch_size/description",
+        "/axes/hidden_size/description",
+        "/axes/seq_len/description"
+      ],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_052_altup_hidden_state_collapse_with_magnitude_normalization"
+      },
+      "row_id": "sol_execbench::problem_052_altup_hidden_state_collapse_with_magnitude_normalization",
+      "source_definition_sha256": "11e3dc716eb99985551d3e660f7904268db9217f35c5e2ab71a840fa4af30b52",
+      "source_path": "tools/sol_execbench/data/benchmark/L1/052_altup_hidden_state_collapse_with_magnitude_normalization/definition.json",
+      "staged_definition_sha256": "d281f49915fd8e6aecfbd5ca3ea6dd4b520279b508df28185642b37e93e2f260",
+      "verdict": "divergent"
+    },
+    {
+      "difference_pointers": [
+        "/axes/batch_size/description",
+        "/axes/d_model/description",
+        "/axes/fft_size_expr/description",
+        "/axes/hyena_order/description",
+        "/axes/order_minus_1/description",
+        "/axes/seq_len/description"
+      ],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_052_seqlen"
+      },
+      "row_id": "sol_execbench::problem_052_seqlen",
+      "source_definition_sha256": "c7be5945f8aa878c165c5063125b0b7a45946490c4e1cc669bdf0b1bf3b7cd47",
+      "source_path": "tools/sol_execbench/data/benchmark/L2/052_seqlen-finetuned-reconstructed_hyena_gating_and_output_projection/definition.json",
+      "staged_definition_sha256": "6dde8a5cacf43e1f568463a3ce965897a0376a63e00a04364bbc7a7d1d28bb2c",
+      "verdict": "divergent"
+    },
+    {
+      "difference_pointers": [
+        "/axes/batch_size/description",
+        "/axes/head_dim/description",
+        "/axes/hidden_size/description",
+        "/axes/intermediate_size/description",
+        "/axes/kv_head_dim/description",
+        "/axes/num_heads/description",
+        "/axes/num_key_value_groups/description",
+        "/axes/num_key_value_heads/description",
+        "/axes/qkv_head_dim/description",
+        "/axes/seq_len/description"
+      ],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_053_text_decoder_layer_with_self_attention_and_mlp"
+      },
+      "row_id": "sol_execbench::problem_053_text_decoder_layer_with_self_attention_and_mlp",
+      "source_definition_sha256": "1506de7cd1a34ff698421f8aa6f6794d9e1db54659666b29d06dfa06112c86a9",
+      "source_path": "tools/sol_execbench/data/benchmark/L2/053_text_decoder_layer_with_self_attention_and_mlp/definition.json",
+      "staged_definition_sha256": "6ec2e311e9c2398b6bb3c27cb983866cbb3d11389697924ab2fe18bedc8a2ada",
+      "verdict": "divergent"
+    },
+    {
+      "difference_pointers": [],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_054_audio_attention_qkv_projection_with_normalization"
+      },
+      "row_id": "sol_execbench::problem_054_audio_attention_qkv_projection_with_normalization",
+      "source_definition_sha256": "ab3e65f7b202f4c645049fdc9e562df9209799b848dac29c6dfe89a2bdb5adcc",
+      "source_path": "tools/sol_execbench/data/benchmark/L1/054_audio_attention_qkv_projection_with_normalization/definition.json",
+      "staged_definition_sha256": "050d2bcc782c43e94feb814f026451d1028edb709ab257854eb58106190de861",
+      "verdict": "equal"
+    },
+    {
+      "difference_pointers": [],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_054_vision_encoder_layer_with_gated_residuals"
+      },
+      "row_id": "sol_execbench::problem_054_vision_encoder_layer_with_gated_residuals",
+      "source_definition_sha256": "492304c1dea8f4a5a17a87e6d1ee5fee2dec8cac871162ef61d067a600353e56",
+      "source_path": "tools/sol_execbench/data/benchmark/L2/054_vision_encoder_layer_with_gated_residuals/definition.json",
+      "staged_definition_sha256": "0b0e10a26edc74ed61bb0cd10c93bc1d7248b5e276291e734e24f4b2e0c0e45d",
+      "verdict": "equal"
+    },
+    {
+      "difference_pointers": [],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_055_attention_qkv_projection_with_gqa_reshape"
+      },
+      "row_id": "sol_execbench::problem_055_attention_qkv_projection_with_gqa_reshape",
+      "source_definition_sha256": "a425d711056a832c860e5d35545c01b37ecb5cb9af14c65255d30e2bed8af9cb",
+      "source_path": "tools/sol_execbench/data/benchmark/L1/055_attention_qkv_projection_with_gqa_reshape/definition.json",
+      "staged_definition_sha256": "473965d6ebe02ff75c30d97dea7dac4ac3d98f4daa431c9bb6107fe9b72af9d9",
+      "verdict": "equal"
+    },
+    {
+      "difference_pointers": [
+        "/axes/half_head_dim/description",
+        "/axes/num_heads_x_head_dim/description",
+        "/axes/num_kv_heads_x_head_dim/description"
+      ],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_056_language_model_decoder_prenorm_attention_ffn_residual_backward"
+      },
+      "row_id": "sol_execbench::problem_056_language_model_decoder_prenorm_attention_ffn_residual_backward",
+      "source_definition_sha256": "ce8bb714fe0a7339fa537dfb8c1ff74b4223debcfd8c167a0bf106aa378ecf8b",
+      "source_path": "tools/sol_execbench/data/benchmark/L2/056_language_model_decoder_prenorm_attention_ffn_residual_backward/definition.json",
+      "staged_definition_sha256": "2683fceebd514459d3a1eee4e4cd9f722f85197ab9f4420d90cc3626fd29144c",
+      "verdict": "divergent"
+    },
+    {
+      "difference_pointers": [],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_057_mtp_shifted_embedding_with_dual_rms_norm_fusion"
+      },
+      "row_id": "sol_execbench::problem_057_mtp_shifted_embedding_with_dual_rms_norm_fusion",
+      "source_definition_sha256": "abcdff70685c8c552a34e3ddd853507ae76096729f167eb6ca82710ef3ac7e12",
+      "source_path": "tools/sol_execbench/data/benchmark/L1/057_mtp_shifted_embedding_with_dual_rms_norm_fusion/definition.json",
+      "staged_definition_sha256": "fed420a320978928893cf77a84d0ee0d6a8d93a91391d1b889620630bb904ad0",
+      "verdict": "equal"
+    },
+    {
+      "difference_pointers": [],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_057_residual_coupling_flow_block"
+      },
+      "row_id": "sol_execbench::problem_057_residual_coupling_flow_block",
+      "source_definition_sha256": "76298ff6a145ffdc44677da02ab4cb48e8477376edf46a77e30386e574e783fd",
+      "source_path": "tools/sol_execbench/data/benchmark/L2/057_residual_coupling_flow_block/definition.json",
+      "staged_definition_sha256": "e70f82673ca5c3e8897843bad584e78e3c7312c95e979373dbe9815041632d25",
+      "verdict": "equal"
+    },
+    {
+      "difference_pointers": [],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_058_mamba2_selective_scan"
+      },
+      "row_id": "sol_execbench::problem_058_mamba2_selective_scan",
+      "source_definition_sha256": "731a5f8a4382bc9937fe7bed1218b706fbf8e355760dcf3ff8ab43681c9425f8",
+      "source_path": "tools/sol_execbench/data/benchmark/L2/058_mamba2_selective_scan/definition.json",
+      "staged_definition_sha256": "50c13f4fd221a59c5845a696f6da1ab644642994fb402fd5d28e3946113f2208",
+      "verdict": "equal"
+    },
+    {
+      "difference_pointers": [],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_058_moe_expert_token_radix_sort_with_prefix_sum"
+      },
+      "row_id": "sol_execbench::problem_058_moe_expert_token_radix_sort_with_prefix_sum",
+      "source_definition_sha256": "9e96a6f25c0a24e2318aa8be06c42071972e3244d561c70d3d6f5db89d93ffda",
+      "source_path": "tools/sol_execbench/data/benchmark/L1/058_moe_expert_token_radix_sort_with_prefix_sum/definition.json",
+      "staged_definition_sha256": "4120eb681e1619b0f64c485e83a2d95052e4dcca6e06e9fd7fb2b03f15c0fe93",
+      "verdict": "equal"
+    },
+    {
+      "difference_pointers": [],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_060_chunk_gated_delta_rule_linear_attention"
+      },
+      "row_id": "sol_execbench::problem_060_chunk_gated_delta_rule_linear_attention",
+      "source_definition_sha256": "a09b09c858e6c2e5c1d4e837d2479de95a2080042c1d5595c5b80da946004660",
+      "source_path": "tools/sol_execbench/data/benchmark/L2/060_chunk_gated_delta_rule_linear_attention/definition.json",
+      "staged_definition_sha256": "59ca70b7e4da0f4169cd8153d7c188037a21c3734443386bfb90b4f6e5447fe3",
+      "verdict": "equal"
+    },
+    {
+      "difference_pointers": [
+        "/axes/cross_attn_kv_dim/description",
+        "/axes/cross_attn_q_dim/description",
+        "/axes/cross_head_dim/description",
+        "/axes/cross_hidden_size/description",
+        "/axes/cross_num_attention_heads/description",
+        "/axes/cross_num_key_value_heads/description",
+        "/axes/head_dim/description",
+        "/axes/hidden_size/description",
+        "/axes/intermediate_size/description",
+        "/axes/num_attention_heads/description",
+        "/axes/num_key_value_heads/description",
+        "/axes/self_attn_kv_dim/description",
+        "/axes/self_attn_q_dim/description"
+      ],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_062_decoder_complete_layer"
+      },
+      "row_id": "sol_execbench::problem_062_decoder_complete_layer",
+      "source_definition_sha256": "76b3bc1cf993ab2a0308eabd4d7c064d785d6b82372a866530f2d868e6597df4",
+      "source_path": "tools/sol_execbench/data/benchmark/L2/062_decoder_complete_layer/definition.json",
+      "staged_definition_sha256": "528dad3c41f3c9dfc3022cf1adfbdc0058c0aef507d07ed6b1dab0efb05b0af4",
+      "verdict": "divergent"
+    },
+    {
+      "difference_pointers": [],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_062_kv_cache_update_with_rope_backward"
+      },
+      "row_id": "sol_execbench::problem_062_kv_cache_update_with_rope_backward",
+      "source_definition_sha256": "3381ec3c19f89089a4ce7cbc53f5c598dd15cd421aaeb847223306021c033986",
+      "source_path": "tools/sol_execbench/data/benchmark/L1/062_kv_cache_update_with_rope_backward/definition.json",
+      "staged_definition_sha256": "5be5dfd87c6c902dec5d06f5b5db6bb701e49198839af304b1e09ec71bb77140",
+      "verdict": "equal"
+    },
+    {
+      "difference_pointers": [],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_063_attention_output_reshape_and_projection"
+      },
+      "row_id": "sol_execbench::problem_063_attention_output_reshape_and_projection",
+      "source_definition_sha256": "115bba3ed9fb1116a69efdefc0f7fbd50c4b7e14af5bde78875494013341cb25",
+      "source_path": "tools/sol_execbench/data/benchmark/L1/063_attention_output_reshape_and_projection/definition.json",
+      "staged_definition_sha256": "b6d2373e08ab66ce4824b25f9e08271ddde6ce1125b1def51980447eb5140eda",
+      "verdict": "equal"
+    },
+    {
+      "difference_pointers": [],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_063_encoder_layer_dual_residual_norm_chain"
+      },
+      "row_id": "sol_execbench::problem_063_encoder_layer_dual_residual_norm_chain",
+      "source_definition_sha256": "f542e31e5ea566924c515a950ac816b7520588a74accbbd610d1cd99c81e80d3",
+      "source_path": "tools/sol_execbench/data/benchmark/L2/063_encoder_layer_dual_residual_norm_chain/definition.json",
+      "staged_definition_sha256": "66162ec3dd8933cd9359a76f37daf2fce62392bd1b961572111dab2f578a29bf",
+      "verdict": "equal"
+    },
+    {
+      "difference_pointers": [],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_064_latent_kv_expansion_with_split"
+      },
+      "row_id": "sol_execbench::problem_064_latent_kv_expansion_with_split",
+      "source_definition_sha256": "9aff78bcbce24d1144d39e605b1b3d82062ad571d5f2661b5eb1ea89e8ffce7d",
+      "source_path": "tools/sol_execbench/data/benchmark/L1/064_latent_kv_expansion_with_split/definition.json",
+      "staged_definition_sha256": "261498ad913b982a0690e9596dd02b6b31acca7a1a98a656d741951f8afefabc",
+      "verdict": "equal"
+    },
+    {
+      "difference_pointers": [
+        "/axes/batch_size/description",
+        "/axes/half_head_dim/description",
+        "/axes/head_dim/description",
+        "/axes/hidden_size/description",
+        "/axes/kv_out_dim/description",
+        "/axes/num_heads/description",
+        "/axes/num_kv_heads/description",
+        "/axes/q_out_dim/description",
+        "/axes/seq_len/description"
+      ],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_064_multi_head_qkv_projection_with_rope_backward"
+      },
+      "row_id": "sol_execbench::problem_064_multi_head_qkv_projection_with_rope_backward",
+      "source_definition_sha256": "4172bb647154927dd62d0f3be183f3a402fe12b0cfecf464ff92b9331dce5c8f",
+      "source_path": "tools/sol_execbench/data/benchmark/L2/064_multi_head_qkv_projection_with_rope_backward/definition.json",
+      "staged_definition_sha256": "ad1063a2908b8090a7cb5e4b89cfa7ba923fa0d83813c8f219c454372a73dac6",
+      "verdict": "divergent"
+    },
+    {
+      "difference_pointers": [],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_065_fused_statistics_projection_and_split"
+      },
+      "row_id": "sol_execbench::problem_065_fused_statistics_projection_and_split",
+      "source_definition_sha256": "a87f9be56a97506bfb1fd2dcce932a0acecaaadd59990c87b3c830395e6f2299",
+      "source_path": "tools/sol_execbench/data/benchmark/L1/065_fused_statistics_projection_and_split/definition.json",
+      "staged_definition_sha256": "e54ce48c78af95bf44b1bdb06ffca74b5282c32e236b4f4b2916decc06333ce1",
+      "verdict": "equal"
+    },
+    {
+      "difference_pointers": [
+        "/axes/batch_size/description",
+        "/axes/dim/description",
+        "/axes/hidden_dim/description",
+        "/axes/seq_len/description"
+      ],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_068_gelu_approximate_feedforward_backward"
+      },
+      "row_id": "sol_execbench::problem_068_gelu_approximate_feedforward_backward",
+      "source_definition_sha256": "d27f82fa29ae74e4af587467352948a88b4e8e9c631e70ad8292c875efc075c2",
+      "source_path": "tools/sol_execbench/data/benchmark/L2/068_gelu_approximate_feedforward_backward/definition.json",
+      "staged_definition_sha256": "2c412f63469216b63a89bc229acf320b78bbd37bc55b1e15eabfb08ee8a51a3c",
+      "verdict": "divergent"
+    },
+    {
+      "difference_pointers": [],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_070_mamba2_fused_intra_chunk_diagonal_computation"
+      },
+      "row_id": "sol_execbench::problem_070_mamba2_fused_intra_chunk_diagonal_computation",
+      "source_definition_sha256": "3e0aceb31c7639d533a7b9c0c9f3e75cc7e6f4fb9beb9e56d57ee73bdbf1c4fa",
+      "source_path": "tools/sol_execbench/data/benchmark/L1/070_mamba2_fused_intra_chunk_diagonal_computation/definition.json",
+      "staged_definition_sha256": "e752675533d1d49220488a5df6a107648d9c2e6137820c4dc1d9d8cd0fc5f387",
+      "verdict": "equal"
+    },
+    {
+      "difference_pointers": [],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_071_edit_consistency_loss_with_perceptual_weighting"
+      },
+      "row_id": "sol_execbench::problem_071_edit_consistency_loss_with_perceptual_weighting",
+      "source_definition_sha256": "5a9a02f6328a32450672e99b7c419564e5d69c36a732e31d6ebe9c66ecc3457d",
+      "source_path": "tools/sol_execbench/data/benchmark/L2/071_edit_consistency_loss_with_perceptual_weighting/definition.json",
+      "staged_definition_sha256": "26bf565f6827b23f15070d8958cb03372d4a5f94eedba7013f38813f636852fe",
+      "verdict": "equal"
+    },
+    {
+      "difference_pointers": [
+        "/axes/batch_size/description",
+        "/axes/cross_hidden_size/description",
+        "/axes/head_dim/description",
+        "/axes/hidden_size/description",
+        "/axes/kv_out_dim/description",
+        "/axes/num_heads/description",
+        "/axes/num_key_value_groups/description",
+        "/axes/num_key_value_heads/description",
+        "/axes/q_out_dim/description",
+        "/axes/seq_len_dec/description",
+        "/axes/seq_len_enc/description"
+      ],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_072_cross_attention_qkv_projection_with_gqa_repeat_backward"
+      },
+      "row_id": "sol_execbench::problem_072_cross_attention_qkv_projection_with_gqa_repeat_backward",
+      "source_definition_sha256": "396dd6caaab88dcecc56460830295024d961d93bd305dbfc9cab635bd1063df1",
+      "source_path": "tools/sol_execbench/data/benchmark/L1/072_cross_attention_qkv_projection_with_gqa_repeat_backward/definition.json",
+      "staged_definition_sha256": "6832d43c318c4cfa14b0f6519bcd83aed34a41c4b8596c9e4db57b96e28ac798",
+      "verdict": "divergent"
+    },
+    {
+      "difference_pointers": [
+        "/axes/batch_size/description",
+        "/axes/hidden_size/description",
+        "/axes/intermediate_size/description",
+        "/axes/seq_len/description"
+      ],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_073_feedforward_mlp_backward"
+      },
+      "row_id": "sol_execbench::problem_073_feedforward_mlp_backward",
+      "source_definition_sha256": "ce3b7602ec41c1136274c19775aeafc4ef38631cd23b27de4cf795ef6f43fcb0",
+      "source_path": "tools/sol_execbench/data/benchmark/L2/073_feedforward_mlp_backward/definition.json",
+      "staged_definition_sha256": "b1fab02b5385a2e0bb34ee222a6aa866d77422070fdf6bbc2aa26d866ddb06cb",
+      "verdict": "divergent"
+    },
+    {
+      "difference_pointers": [
+        "/axes/batch_size/description",
+        "/axes/hidden_size/description",
+        "/axes/intermediate_size/description",
+        "/axes/seq_len/description"
+      ],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_074_fused_gated_mlp_silu"
+      },
+      "row_id": "sol_execbench::problem_074_fused_gated_mlp_silu",
+      "source_definition_sha256": "7a94e10bafe1011d73e8ddcb9926bee8cee01f16ebf766fa9985f86b64c37d5b",
+      "source_path": "tools/sol_execbench/data/benchmark/L1/074_fused_gated_mlp_silu/definition.json",
+      "staged_definition_sha256": "becfbc4c71028c9fdb7fd875745fbd2329c4a474620445b8976b9e238b217fec",
+      "verdict": "divergent"
+    },
+    {
+      "difference_pointers": [],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_074_sam_hq_mask_decoder_iou_hypernetwork_fusion_backward"
+      },
+      "row_id": "sol_execbench::problem_074_sam_hq_mask_decoder_iou_hypernetwork_fusion_backward",
+      "source_definition_sha256": "6c23d344bebc1a0b4ff46a3c2484ed1ccaff13131c3dc70311478be473340749",
+      "source_path": "tools/sol_execbench/data/benchmark/L2/074_sam_hq_mask_decoder_iou_hypernetwork_fusion_backward/definition.json",
+      "staged_definition_sha256": "7edbe6f468edb7cd48a2e5d6cf8c1968e718539b1d04d65674de8b1ffc8f0ea4",
+      "verdict": "equal"
+    },
+    {
+      "difference_pointers": [
+        "/axes/batch_size/description",
+        "/axes/head_dim/description",
+        "/axes/hidden_size/description",
+        "/axes/kv_proj_size/description",
+        "/axes/num_heads/description",
+        "/axes/num_key_value_groups/description",
+        "/axes/num_key_value_heads/description",
+        "/axes/q_proj_size/description",
+        "/axes/seq_len/description"
+      ],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_075_grouped_query_self_attention_with_rope"
+      },
+      "row_id": "sol_execbench::problem_075_grouped_query_self_attention_with_rope",
+      "source_definition_sha256": "282c79125884476be726c6416e79cb7a5a294530776d4c487b7d8c036182a7d7",
+      "source_path": "tools/sol_execbench/data/benchmark/L1/075_grouped_query_self_attention_with_rope/definition.json",
+      "staged_definition_sha256": "85dccf93025a0992df48f6f10b3532acd9438ff0c59ea68ff804ab74ec821014",
+      "verdict": "divergent"
+    },
+    {
+      "difference_pointers": [
+        "/axes/batch_size/description",
+        "/axes/expanded_dim/description",
+        "/axes/hidden_dim/description",
+        "/axes/seq_len/description"
+      ],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_079_ImageNet_83"
+      },
+      "row_id": "sol_execbench::problem_079_ImageNet_83",
+      "source_definition_sha256": "ae4ee1fd4805576dab8d942ebb06551ce3867e58c209f0ce28c1f7c9054930eb",
+      "source_path": "tools/sol_execbench/data/benchmark/L1/079_ImageNet_83.6_ssm_output_projection_gate_multiply_backward/definition.json",
+      "staged_definition_sha256": "a3f9dbe392be060b9d677fe88a439827338c79cf01f0c0072e2e47f49f12095a",
+      "verdict": "divergent"
+    },
+    {
+      "difference_pointers": [],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_080_moe_complete_layer_with_shared_expert_backward"
+      },
+      "row_id": "sol_execbench::problem_080_moe_complete_layer_with_shared_expert_backward",
+      "source_definition_sha256": "2d7f379ac2748936e9fb7fbae89dda17d6d4e9c87411d4e60123fb6d06e4c9df",
+      "source_path": "tools/sol_execbench/data/benchmark/L2/080_moe_complete_layer_with_shared_expert_backward/definition.json",
+      "staged_definition_sha256": "33819abbbaf961a1f12e186024442702675e1dedfb7e6e771fb58305c8ad99f2",
+      "verdict": "equal"
+    },
+    {
+      "difference_pointers": [
+        "/axes/batch_size/description",
+        "/axes/context_seq_len/description",
+        "/axes/image_seq_len/description",
+        "/axes/inner_dim/description",
+        "/axes/proj_input_dim/description"
+      ],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_081_joint_attention_context_projection"
+      },
+      "row_id": "sol_execbench::problem_081_joint_attention_context_projection",
+      "source_definition_sha256": "f40ecfb2120c8aa1b0cdcc5d760e204850e2ca65163541746fb34fab713950eb",
+      "source_path": "tools/sol_execbench/data/benchmark/L1/081_joint_attention_context_projection/definition.json",
+      "staged_definition_sha256": "b0d0df680084f5b2b97849a69097acaac66b1f03b4e53eeb4880e044ce975440",
+      "verdict": "divergent"
+    },
+    {
+      "difference_pointers": [
+        "/axes/hidden_size/description",
+        "/axes/moe_intermediate_size/description",
+        "/axes/n_group/description",
+        "/axes/n_routed_experts/description",
+        "/axes/num_experts_per_tok/description",
+        "/axes/shared_intermediate/description",
+        "/axes/topk_group/description"
+      ],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_081_moe_sparse_expert_dispatch"
+      },
+      "row_id": "sol_execbench::problem_081_moe_sparse_expert_dispatch",
+      "source_definition_sha256": "e09b135d85ed0bf8c8e676d9479e10fb15b0cc7909ffb99eb9b562b9bbd639c4",
+      "source_path": "tools/sol_execbench/data/benchmark/L2/081_moe_sparse_expert_dispatch/definition.json",
+      "staged_definition_sha256": "1db2e35618485ab32215a9457b7f4d1689b9056f77bf62075cd15a6e15100e05",
+      "verdict": "divergent"
+    },
+    {
+      "difference_pointers": [
+        "/axes/hidden_size/description",
+        "/axes/moe_intermediate_size/description",
+        "/axes/n_group/description",
+        "/axes/n_routed_experts/description",
+        "/axes/num_experts_per_tok/description",
+        "/axes/shared_intermediate/description",
+        "/axes/topk_group/description"
+      ],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_082_moe_layer_complete_forward_with_residual"
+      },
+      "row_id": "sol_execbench::problem_082_moe_layer_complete_forward_with_residual",
+      "source_definition_sha256": "cec0ec517197be72230506832cd08216f91758ae7027d9adcd3fca276fe2cefd",
+      "source_path": "tools/sol_execbench/data/benchmark/L2/082_moe_layer_complete_forward_with_residual/definition.json",
+      "staged_definition_sha256": "6dee332172aa90f7557ceb63e66241dad3ab98a600a6855030d065c592a4a85c",
+      "verdict": "divergent"
+    },
+    {
+      "difference_pointers": [],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_082_qk_norm_scaled_dot_product_attention"
+      },
+      "row_id": "sol_execbench::problem_082_qk_norm_scaled_dot_product_attention",
+      "source_definition_sha256": "eb02b41e653ecc92f7d16b59211b36fe0520aaac7a8b787a800f2f13fb5ada25",
+      "source_path": "tools/sol_execbench/data/benchmark/L1/082_qk_norm_scaled_dot_product_attention/definition.json",
+      "staged_definition_sha256": "4335760f7ab7e570b6182ebd37b87612b8f633f3832517860ce4a3cb4ee0462a",
+      "verdict": "equal"
+    },
+    {
+      "difference_pointers": [],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_083_attention_score_value_matmul"
+      },
+      "row_id": "sol_execbench::problem_083_attention_score_value_matmul",
+      "source_definition_sha256": "69585372c4147e7faca51fb82c1a6c508bb3d858320eb6e09d9b5f924fcd614b",
+      "source_path": "tools/sol_execbench/data/benchmark/L1/083_attention_score_value_matmul/definition.json",
+      "staged_definition_sha256": "66de7aab01e85dca6fac955c0f180d9b5fc4156b968beeb740c55471e364cab8",
+      "verdict": "equal"
+    },
+    {
+      "difference_pointers": [],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_091_fused_gqa_qkv_rope_qk_norm_backward"
+      },
+      "row_id": "sol_execbench::problem_091_fused_gqa_qkv_rope_qk_norm_backward",
+      "source_definition_sha256": "1092780f07da270eddac1c82ad14c9aef9fc4a4f451ae2e4e767435286594202",
+      "source_path": "tools/sol_execbench/data/benchmark/L1/091_fused_gqa_qkv_rope_qk_norm_backward/definition.json",
+      "staged_definition_sha256": "9a0cf2659d52c1e09ecd793f7d210f8ae125227fa96515fc2f807e003a10a088",
+      "verdict": "equal"
+    },
+    {
+      "difference_pointers": [
+        "/axes/hidden_size/description",
+        "/axes/n_routed_experts/description",
+        "/axes/one/description",
+        "/axes/top_k/description"
+      ],
+      "identity": {
+        "roster_source": "sol_execbench",
+        "slug": "problem_093_grouped_topk_moe_routing_backward"
+      },
+      "row_id": "sol_execbench::problem_093_grouped_topk_moe_routing_backward",
+      "source_definition_sha256": "96091ff5bdc540287a7eb70821ea6c1763e8b144ce0798a1f2064192cb5d1baf",
+      "source_path": "tools/sol_execbench/data/benchmark/L1/093_grouped_topk_moe_routing_backward/definition.json",
+      "staged_definition_sha256": "5ce27ceaa37dc0954d49b0c8c4371019b2981bae14b23a161527891b3bb77cc8",
+      "verdict": "divergent"
+    }
+  ],
+  "rule_id": "SOL_DEF_EQUIV_V1",
+  "schema_version": 1,
+  "summary": {
+    "divergent": 31,
+    "equal": 43,
+    "rows": 74,
+    "total_difference_pointers": 212,
+    "unique_rows": 74
+  },
+  "verdict": "blocking_divergence_preserved"
+}

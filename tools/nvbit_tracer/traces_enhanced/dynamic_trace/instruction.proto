@@ -1,0 +1,223 @@
+syntax = "proto3";
+
+package dynamic_trace;
+
+import "address.proto";
+
+// AC4 enum: memory operation class for each emitted instruction.
+// MEMORY_OP_CLASS_UNSPECIFIED is the proto3 default zero value and
+// must NEVER be emitted by the tracer; readers treat it as a
+// contract violation. The nine original plan classes follow; the
+// tenth value MEMORY_OP_CLASS_TMEM was added for Blackwell
+// (sm_100) tensor-memory accesses via the `tcgen05.{ld,st}`
+// family (mnemonics `LDT` / `STT`). Per the CLAUDE.md wire-
+// extension policy this is an additive enum extension: producer
+// emits the new value, consumer accepts it; old readers that
+// only knew 0-9 either route the new value through their
+// catch-all path or REJECT (a closed-enum validator that
+// hard-codes the prior 10 cases as a frozenset is the only place
+// readers would break, and the consumer-side widening lands in
+// the same commit as this producer-side enum addition per
+// BL-20260507-multi-surface-lockstep-changes).
+enum MemoryOpClass {
+  MEMORY_OP_CLASS_UNSPECIFIED = 0;
+  MEMORY_OP_CLASS_GLOBAL = 1;
+  MEMORY_OP_CLASS_SHARED = 2;
+  MEMORY_OP_CLASS_LOCAL = 3;
+  MEMORY_OP_CLASS_TEXTURE = 4;
+  MEMORY_OP_CLASS_SURFACE = 5;
+  MEMORY_OP_CLASS_ATOMIC = 6;
+  MEMORY_OP_CLASS_TMA = 7;
+  MEMORY_OP_CLASS_ASYNC_COPY = 8;
+  MEMORY_OP_CLASS_CLUSTER_DSMEM = 9;
+  MEMORY_OP_CLASS_TMEM = 10;
+}
+
+// Write-policy classification dimension orthogonal to
+// MemoryOpClass. MemoryOpClass tags the memory space (global,
+// shared, local, etc.); MemoryOpAccessKind tags the direction
+// (load, store, atomic / read-modify-write, async-copy). Together
+// the two enums let consumers distinguish write-allocate paths
+// (global / local / texture loads + stores; atomic; texture
+// loads) from no-write-allocate paths (shared, async-copy
+// destination side). The classifier is the producer's job: the
+// SASS opcode head determines which kind the access falls into.
+// New optional field at tag 12; legacy traces leave it absent,
+// and consumers fall back to UNSPECIFIED so the additive widening
+// is wire-compatible with pre-tag-12 readers.
+enum MemoryOpAccessKind {
+  MEMORY_OP_ACCESS_KIND_UNSPECIFIED = 0;
+  MEMORY_OP_ACCESS_KIND_LOAD = 1;
+  MEMORY_OP_ACCESS_KIND_STORE = 2;
+  MEMORY_OP_ACCESS_KIND_ATOMIC = 3;
+  MEMORY_OP_ACCESS_KIND_ASYNC_COPY = 4;
+}
+
+message instruction {
+  // Existing fields (tags 1-5) are unchanged so older readers can
+  // still parse new traces and silently ignore the new tags >= 6.
+  uint32 pc = 1;
+  // Tag numbers preserved when `optional` is added so older
+  // readers can still parse new traces. The change here is
+  // observability: proto3 explicit-presence lets the validator
+  // distinguish "tracer did not emit this field" (HasField false)
+  // from "tracer emitted value 0" (HasField true with the proto3
+  // default value). Without explicit-presence, a regression that
+  // dropped the producer's `inst->set_active_mask(...)` /
+  // `inst->set_predicate_mask(...)` calls would be silently
+  // admitted because the proto3 default 0 is a valid lane-mask
+  // value (predicated-off all-lanes-inactive case). Setters on
+  // the producer side are wire-compatible; no producer-code
+  // change is required.
+  optional uint32 active_mask = 2;
+  optional uint32 predicate_mask = 3;
+  int32 function_unique_id = 4;
+  repeated address addresses = 5;
+
+  // AC4 per-record fields.
+
+  // Operation class. Marked `optional` so a non-memory instruction
+  // (ALU, branch, control flow) can leave the field absent on the
+  // wire. The downstream contract validator interprets:
+  //   - field absent: this is not a memory instruction; addresses
+  //     list is also expected to be empty.
+  //   - field present and != UNSPECIFIED: a memory instruction whose
+  //     op-class the tracer determined.
+  //   - field present and == UNSPECIFIED: contract violation; the
+  //     tracer encountered a memory instruction it could not
+  //     classify and should have emitted a typed
+  //     `unsupported_memory_path` exclusion sidecar instead.
+  optional MemoryOpClass memory_op_class = 6;
+
+  // Width of the per-lane access in bytes (e.g. 4 for an int32
+  // load, 16 for a 128-bit load). Mirrors the per-warp-instruction
+  // data width that already appears on `address.data_width`, but is
+  // promoted to instruction level so consumers do not have to walk
+  // the address list to discover the width when no addresses are
+  // emitted (e.g. predicated-off warps with all-lanes-inactive).
+  // Marked `optional` for proto3 explicit presence so consumers can
+  // distinguish "tracer did not emit data_width" from "data_width
+  // value 0" (which is a contract violation analogous to
+  // MEMORY_OP_CLASS_UNSPECIFIED — the loss-of-diagnostic Codex
+  // flagged in R8 v2 review).
+  optional int32 data_width = 7;
+
+  // Warp index inside the threadblock (0 <= warpid_tb < blockDim
+  // total / 32). This is the lane-grouping the SIMT scheduler uses
+  // and the one downstream coalescer needs. Marked `optional` so
+  // proto3 explicit presence distinguishes "warp 0" (valid) from
+  // "tracer did not emit this field" (absent on the wire). Required
+  // because SM/warp 0 is a perfectly valid ID and a plain int32
+  // scalar would collapse it to the proto3 zero default.
+  optional int32 warpid_tb = 8;
+
+  // Warp index on the SM, where exposed by NVBit. Marked `optional`
+  // so absence on the wire ("not exposed by the NVBit runtime
+  // present at trace time") is observationally distinct from value
+  // 0 (warp 0 on the SM). The AC4 plan permits this so traces
+  // from older NVBit releases stay admissible.
+  optional int32 warpid_sm = 9;
+
+  // SM id, where exposed by NVBit. Marked `optional` for the same
+  // reason: SM 0 is a valid id and must be distinguishable from
+  // "tracer did not emit this field". When the NVBit runtime does
+  // not expose the SM id, the field is simply omitted (has_sm_id()
+  // returns false on the C++ side; the field is absent on the
+  // wire); when it is exposed, the actual value is written
+  // including 0.
+  optional int32 sm_id = 10;
+
+  // Virtual program counter. Widens the existing `pc` field
+  // (uint32) to uint64 because PC ranges on post-Hopper
+  // architectures may exceed 32 bits when the code lives in a
+  // long-running kernel module mapped at a high virtual address.
+  // The legacy `pc` field stays so older readers continue to work;
+  // new emitters should populate both `pc` (low 32 bits) and `vpc`
+  // (full 64-bit virtual PC). Marked `optional` for proto3
+  // explicit-presence so the validator can distinguish "tracer
+  // did not emit vpc" (HasField false) from "vpc=0" (HasField
+  // true with a value that legitimately equals pc=0 for the
+  // first instruction in a kernel). Tag number unchanged.
+  optional uint64 vpc = 11;
+
+  // Access-kind dimension orthogonal to memory_op_class. The
+  // producer-side SASS classifier maps the opcode head to one of
+  // {load, store, atomic, async-copy}; downstream consumers use
+  // the kind to distinguish write-allocate paths (global stores
+  // fetch the line on miss, just like loads) from
+  // no-write-allocate paths (shared stores do not touch L2;
+  // async-copy destination side flows into shared without an L2
+  // write-allocate). Marked `optional` so legacy traces emitted
+  // before this field landed remain admissible (HasField false
+  // routes to UNSPECIFIED on the consumer side). Tag 12 is the
+  // next available after the existing tags 1-11. Producer-side
+  // C++ classifier lands in a future round; this tag reserves
+  // the wire slot and the consumer reads it when present.
+  optional MemoryOpAccessKind memory_op_access_kind = 12;
+
+  // Cache-operator dimension orthogonal to both memory_op_class
+  // (memory space) AND memory_op_access_kind (load/store/atomic/
+  // async-copy direction). The producer-side SASS classifier at
+  // tools/cache_predictor/l1_cache_op_classifier.py maps the
+  // opcode head (LDG.E.CA / LDG.E.STRONG.SM / LDGSTS / LDL /
+  // STL / ATOM / TEX / etc.) to one of the closed 12-token
+  // underscore-vocabulary InstructionCacheOp values. The
+  // downstream L1 predictor head's per-SM walker filters
+  // l1_eligible accesses by this field; it answers "how does the
+  // cache operator decide whether this access touches the modeled
+  // L1 line state".
+  //
+  // Per CLAUDE.md "Two-Device Local Development Model" and
+  // BL-20260505, the classifier records the actual SASS encoding
+  // (Ampere LDG.E.CA -> LDG_E_CA; Blackwell LDG.E.STRONG.SM ->
+  // LDG_E_STRONG_SM), NOT the semantic equivalent class. The
+  // two arches' cache-operator behavior is per-architecture
+  // distinct.
+  //
+  // Marked `optional` so legacy traces emitted before this field
+  // landed remain admissible (HasField false routes to
+  // INSTRUCTION_CACHE_OP_UNSPECIFIED on the consumer side); the
+  // L1 predictor head treats absent or unspecified values as
+  // `predictor_l1_sass_provenance_missing`. Tag 13 is the next
+  // available after the existing tags 1-12.
+  //
+  // Three-surface lockstep with the JSON classifier manifest
+  // schema (tools/cache_predictor/cache_op_map.schema.json) +
+  // the cache_predictor._TYPED_REASONS frozenset + the
+  // comparison_runner module-level constants is enforced by the
+  // structural lockstep test at
+  // workloads/simbench_bw/tests/test_predictor_l1_sass_provenance_missing_lockstep.py
+  // per BL-20260507-arch-token-multi-surface-lockstep.
+  optional InstructionCacheOp instruction_cache_op = 13;
+}
+
+// Closed 12-token cache-operator vocabulary. The
+// INSTRUCTION_CACHE_OP_UNSPECIFIED zero value is the proto3
+// default and is what an absent-on-the-wire instruction_cache_op
+// resolves to on the consumer side; the L1 predictor head treats
+// it as `predictor_l1_sass_provenance_missing` (the tracer did
+// not classify the cache operator for this instruction).
+//
+// Per CLAUDE.md wire-extension policy, this is an additive enum
+// extension: producer emits the new values, consumer accepts them;
+// old readers that only know the enum entries at producer-side
+// build time route unknown values through their catch-all path.
+// The 12 named values mirror the JSON schema's
+// `instruction_cache_op` enum at
+// tools/cache_predictor/cache_op_map.schema.json (closed-set
+// lockstep enforced by a structural cross-surface parity test).
+enum InstructionCacheOp {
+  INSTRUCTION_CACHE_OP_UNSPECIFIED = 0;
+  INSTRUCTION_CACHE_OP_LDG_E_CA = 1;
+  INSTRUCTION_CACHE_OP_LDG_E_CG = 2;
+  INSTRUCTION_CACHE_OP_LDG_E_CS = 3;
+  INSTRUCTION_CACHE_OP_LDG_E_EF = 4;
+  INSTRUCTION_CACHE_OP_LDG_E_STRONG_SM = 5;
+  INSTRUCTION_CACHE_OP_LDG_E_STRONG_GPU = 6;
+  INSTRUCTION_CACHE_OP_LDL = 7;
+  INSTRUCTION_CACHE_OP_STL = 8;
+  INSTRUCTION_CACHE_OP_LDGSTS = 9;
+  INSTRUCTION_CACHE_OP_ATOM = 10;
+  INSTRUCTION_CACHE_OP_TEX = 11;
+  INSTRUCTION_CACHE_OP_OTHER = 12;
+}

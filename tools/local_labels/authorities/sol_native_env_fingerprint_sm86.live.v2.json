@@ -1,0 +1,21 @@
+{
+  "arch": "sm_86",
+  "components": {
+    "c_compiler": "gcc-14",
+    "cuda_runtime_version": "13.0",
+    "cudnn_version": "9.20.0",
+    "cutlass_tree_hash": "634837e1255fd57153997e4b04d61af4f2b58dd0ab228edc4d1d124f5fbeafb7",
+    "cxx_compiler": "g++-14",
+    "nvcc_ccbin": "g++-14",
+    "nvcc_version": "13.2",
+    "python_version": "3.12.12",
+    "sol_execbench_package_version": "1.0.2",
+    "torch_version": "2.12.0+cu130"
+  },
+  "degraded": false,
+  "fingerprint_id": "sm86_sol_native_env_fingerprint_live_v2",
+  "missing_components": [],
+  "native_env_hash": "91e4f753cc8a4c3a7a53f3217d9a89fcd00a13b47678295dd8952934aad10363",
+  "schema_version": 2,
+  "sku": "rtx_3090_ti"
+}

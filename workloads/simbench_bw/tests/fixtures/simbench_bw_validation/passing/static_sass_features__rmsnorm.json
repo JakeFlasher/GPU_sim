@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "slug": "rmsnorm_fwd_bf16",
+  "binary_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+  "kernel_name": "_Z11rmsnorm_fwdPKfPfii",
+  "kernel_signature_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "claim_scope": "measured_local",
+  "claim_class": "static_sanity_check_only",
+  "mnemonic_histogram": {
+    "schema_version": 1,
+    "total_instruction_count": 256,
+    "families": {
+      "floating_point": {
+        "count": 64,
+        "exemplar_mnemonics": ["FFMA", "FMUL", "FADD"]
+      },
+      "integer": {
+        "count": 32,
+        "exemplar_mnemonics": ["IMAD", "IADD3"]
+      },
+      "load_store": {
+        "count": 96,
+        "exemplar_mnemonics": ["LDG.E.SYS", "STG.E.SYS"]
+      },
+      "tensor_core": {
+        "count": 0,
+        "exemplar_mnemonics": []
+      },
+      "control": {
+        "count": 32,
+        "exemplar_mnemonics": ["BRA", "EXIT"]
+      },
+      "atomics": {
+        "count": 0,
+        "exemplar_mnemonics": []
+      },
+      "shared_memory_ops": {
+        "count": 16,
+        "exemplar_mnemonics": ["LDS", "STS"]
+      },
+      "predication": {
+        "count": 8,
+        "exemplar_mnemonics": ["ISETP"]
+      },
+      "other": {
+        "count": 8,
+        "exemplar_mnemonics": ["NOP"]
+      }
+    }
+  },
+  "register_usage": {
+    "regs_per_thread": 32,
+    "stack_frame_bytes": 0,
+    "spill_loads_static": 0,
+    "spill_stores_static": 0
+  },
+  "tool_provenance": {
+    "extractor_name": "cuobjdump_dump_sass",
+    "extractor_version": "12.4.131",
+    "extracted_dated_iso8601": "2026-04-28T12:00:00Z"
+  }
+}

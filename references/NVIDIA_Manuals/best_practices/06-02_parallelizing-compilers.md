@@ -1,0 +1,13 @@
+---
+title: "6.2. Parallelizing Compilers"
+section: "6.2"
+source: "https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/#parallelizing-compilers"
+---
+
+## [6.2. Parallelizing Compilers](https://docs.nvidia.com/cuda/cuda-c-best-practices-guide#parallelizing-compilers)[](https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/#parallelizing-compilers "Permalink to this headline")
+
+Another common approach to parallelization of sequential codes is to make use of parallelizing compilers. Often this means the use of directives-based approaches, where the programmer uses a pragma or other similar notation to provide hints to the compiler about where parallelism can be found without needing to modify or adapt the underlying code itself. By exposing parallelism to the compiler, directives allow the compiler to do the detailed work of mapping the computation onto the parallel architecture.
+
+The OpenACC standard provides a set of compiler directives to specify loops and regions of code in standard C, C++ and Fortran that should be offloaded from a host CPU to an attached accelerator such as a CUDA GPU. The details of managing the accelerator device are handled implicitly by an OpenACC-enabled compiler and runtime.
+
+See <http://www.openacc.org/> for details.

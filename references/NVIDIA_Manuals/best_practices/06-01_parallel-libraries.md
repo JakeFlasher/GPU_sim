@@ -1,0 +1,13 @@
+---
+title: "6.1. Parallel Libraries"
+section: "6.1"
+source: "https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/#parallel-libraries"
+---
+
+## [6.1. Parallel Libraries](https://docs.nvidia.com/cuda/cuda-c-best-practices-guide#parallel-libraries)[](https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/#parallel-libraries "Permalink to this headline")
+
+The most straightforward approach to parallelizing an application is to leverage existing libraries that take advantage of parallel architectures on our behalf. The CUDA Toolkit includes a number of such libraries that have been fine-tuned for NVIDIA CUDA GPUs, such as `cuBLAS`, `cuFFT`, and so on.
+
+The key here is that libraries are most useful when they match well with the needs of the application. Applications already using other BLAS libraries can often quite easily switch to `cuBLAS`, for example, whereas applications that do little to no linear algebra will have little use for `cuBLAS`. The same goes for other CUDA Toolkit libraries: `cuFFT` has an interface similar to that of `FFTW`, etc.
+
+Also of note is the Thrust library, which is a parallel C++ template library similar to the C++ Standard Template Library. Thrust provides a rich collection of data parallel primitives such as scan, sort, and reduce, which can be composed together to implement complex algorithms with concise, readable source code. By describing your computation in terms of these high-level abstractions you provide Thrust with the freedom to select the most efficient implementation automatically. As a result, Thrust can be utilized in rapid prototyping of CUDA applications, where programmer productivity matters most, as well as in production, where robustness and absolute performance are crucial.

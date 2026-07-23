@@ -1,0 +1,394 @@
+*Thinking...*
+
+> I'm looking at a formal consultation request for a Rust GPU simulator project that includes 15 blockers, 19 questions, and 40 evidence items, and I need to produce a consolidated ruling that addresses each question with a disposition and supporting rationale.
+> 
+> My approach is to work through the questions systematically in numeric order, generate a blocker ledger with one row per item, and set the required completion fields while drawing on the evidence provided about the project's current state—modules M0–M3 complete, M4 in progress, M5 not started, and M6/M7 blocked.
+> 
+> Now I'm examining the specific technical defects and implementation gaps: the cycles emission metric has a ≤10% MAPE target with a >15% failure threshold, cycles are diagnostic-only in the kernel replay result, and seven secondary descriptors are implemented with one-way registry lockstep. The Rust reader performs fail-closed trace admission checks while the Python gate handles anchored snapshots and link rejection. I'm also noting two concrete memory defects—local memory incorrectly routed through shared memory and L2 missing sectors installed before DRAM fill response—plus unchecked arithmetic across surfaces in the trace reader. * 1_000_000` — mhz is validated as finite and positive but the cast to u64 followed by multiplication isn't checked; E1032 flags the cast after validation; E1019 identifies unchecked additions in `l1.hits + l1.misses + bypass_read_sectors` that could theoretically overflow u64.
+> - B1013 shows KernelReplayResult.max_cycles is set to final local issue time plus one (matching SmSimResult cycles which is the last issue time plus one), but this excludes the final response and coherence tails, and the output surface just omits exec_cycles_gpc_max rather than emitting an explicit RequiredUnimplemented marker.
+> - B1014 notes seven descriptors have one-way lockstep when they need bidirectional communication; MetricValue::Exact indicates exact simulator scope rather than silicon accuracy, so this distinction needs clarification.
+> - B1015 shows M4 is in progress, M5 hasn't started, and M6/M7 are blocked; production runner readiness depends on following the execution plan and tools/dev/hw_evidence_gate.sh, and a missing hardware-owner receipt counts as a typed block rather than a pass.
+> - The response format requires one consolidated ruling with every question answered exactly once in numeric order, each with a single disposition, plus rationale, complete contract or replacement, invariants and identities, evidence IDs, failure and pending states, implementation order, task-specific deliverables with positive and negative tests, an explicit mechanical acceptance predicate, one closed ledger row per blocker, and completion fields.
+> 
+> I'm seeing that Q109001 through Q109005 are five instances of the same request for the section-11 local blocker ledger, each scoped to different blocker and evidence subsets. Since the ledger covers all 15 blockers and each question has authority only over this prompt's local ledger, I need to answer each exactly once with either ACCEPT or AMEND, all pointing to the single consolidated section-11 ledger rather than emitting five separate full ledgers, which would create conflicts. The instructions specify exactly one ledger with 15 rows total, so each Q109xxx gets one answer with rationale referencing that shared ledger.
+> 
+> For the dispositions themselves, I'm interpreting ACCEPT as granting the blocker clause's requested contract as specified, AMEND as modifying or completing the proposal with corrections, REJECT as indicating the premise is wrong, and STOP for user-owned choices or unavailable external facts. Since the blockers describe defects and the questions ask for contracts, most should be AMEND—defining the contract that closes each blocker by amending current code behavior.
+> 
+> Now I need to think through what's actually implementable and defensible for each question. The instructions require a lot per question: rationale, complete contract or replacement, invariants, evidence IDs, failure states, implementation order, and task-specific deliverables with tests. I'll aim for compact but thorough treatments that respect the scope while staying reasonably concise.
+> 
+> Starting with Q1001, which concerns the LaunchEvidenceIdentity and sealed simulator-input manifest. The current code has identity checks scattered across different components, so I need to consolidate that into one sealed identity structure.
+> 
+> The LaunchEvidenceIdentity struct needs to capture the kernel's cell ID along with its mangled name and argument hash from the trace sampling sidecar, the trace contract ID and memory payload capability set, device and stream identifiers, kernel location data like grid/block/cluster dimensions, the SHA-256 digest of the dynamic trace protobuf file with per-threadblock payload digests in sorted order, the allocations registry digest, and the trace sampling sidecar SHA-256 where applicable.
+> 
+> I also need to include the enhanced execution info digest along with benchmark name and static program counter set hash, the control sidecar digest with architecture and binary identity information that gets validated against build schedules, the architecture card identity including the SKU and card file digest plus the pchase card digest, and a coverage type declaration that links back to the requirements.
+> 
+> The validation sequence starts by opening the root trace and verifying the contract ID and capabilities, then loads the allocations registry, sampling sidecar with seal and payload digest verification, execution info, control sidecar, and finally performs the build schedules join to match architecture and program counter sets before computing per-block identity.
+> 
+> After the coverage gate check, I'm constructing a seal manifest as canonical JSON of all the digests and hashing it, then admission either emits the sealed manifest or returns a typed error. The transitive hash edges connect the manifest to each artifact digest with cross-references between execution info benchmark names, sidecar file stems, architecture matching, and kernel function IDs, though there's currently a gap where the traced binary digest isn't joined for the control and execution sidecars since they only carry binary as a string.
+> 
+> I need to define new ManifestError variants for artifact digest mismatches, missing capabilities, missing identity fields, and the binary digest gap. For testing, I'll verify that a canary trace admits and produces a stable manifest hash, then confirm that mutating any artifact byte triggers a digest mismatch and that removing a capability surfaces the incomplete trace capabilities error.
+> 
+> Now I'm defining a CoverageType enum...
+> 
+> Defining coverage variants... Exact aggregation of mixed coverage types triggers a compile-time type error or runtime error at boundaries. For memory semantics state machines, I need to specify attribution dimensions like operation class, address space, access kind, cache operations, memory role, and L2 source provenance, along with behavioral classification—these mostly exist but require routing distinctions between local and shared spaces plus pending-fill generation on L2. The request/response/fill machines for L1 handle access hits, miss requests, merged pending states, and stalls. LDGSTS enters L2 as a read-class bypass with shared destination exemption, keeping that path intact while treating shared-write timing as approximate. Writebacks and coherence traffic remain unmodeled gaps that need to be flagged in results, with terminal causality determined by the maximum of issue times, response completions, and DRAM server completions for fetched data. Store visibility at L2-hit is still an approximation, and I'm checking how same-cycle fill-responses interact with new access ordering based on queue sequence.
+> 
+> For SM timing resources, I need to amend the architecture-owned definitions: per-SMSP functional unit issue ports and pipes, occupancy ceilings (currently testing 48 resident warps per SM), barrier counts (6 structural barriers), and barrier latencies (25 cycles for reads, 8 for writes). Dual-issue isn't modeled since SM 8.6 doesn't support it per SMSP.
+> 
+> Before M5, I can scaffold typed resource descriptors in the card schema with issue model parameters and synthetic test values, but actual timing facts for SM 8.6 only come after M5 microbench evidence—architecture-local facts only, never NCU-derived. Current knobs stay documented as hypotheses in output metadata, and SM 12.0 needs its own constructor rather than reusing the SM 8.6 version.
+> 
+> For unsupported behavior, unknown opcodes or encodings should trigger a typed UnsupportedEncoding exclusion rather than defaulting to timing estimates. Looking at the arithmetic inventory across subsystems: the sim-engine's sequence counter needs to switch from unchecked to checked addition with a SeqOverflow type, the sim-trace reader's grid total multiplication should use checked_mul like the kernel grid path does, while Sha256's wrapping operations stay exempt since they're algorithm-specified modular arithmetic. Adding overflow checks across remaining modules... KernelReplayResult needs to track the final modeled event timestamp by taking the maximum across all response completion times, issue end times, and DRAM service completions using checked arithmetic. The overflow policy for production code prohibits wrapping, saturating, and expect/debug_assert operations except in SHA-256 modular arithmetic and test-only code like FNV-1a hashing. I should add boundary tests covering u64::MAX-1 timestamps, overflow scenarios from delays, and counters at their limits.
+> 
+> For the sim-runner and sim-cli refactor, I'm splitting the replay logic into a library crate that accepts a sealed SimInputManifest containing paths, digests, architecture and prefetch cards, and a typed mode enum—no environment variables. The library performs admission checks per kernel, aggregates results using sums rather than averaged rates, and returns a typed RunResult with identity, coverage, per-kernel data, aggregate counters, and emissions including unimplemented cycles and unmodeled tails. The CLI binary then parses the manifest from versioned canonical JSON with typed outcome discriminants.
+> 
+> The output uses canonical JSON formatting with sorted keys and consistent float representation, exiting with 0 for success, 1 for admission or replay failures, and 2 when prerequisites are missing. The manifest schema explicitly rejects unknown fields and replaces environment variable mode selection with typed fields for memory configuration (flat, L1 constant, or L1 shared L2) and DRAM bandwidth (carded or unmodeled). I'm adding both crates to the workspace members list and setting up owner gates.
+> 
+> The hw_evidence_gate script extends to run sim-cli on M1 payloads in operator mode, while offline tests rely on synthetic traces. Integration tests validate golden canonical JSON output against synthetic traces, checking for manifest digest mismatches and ensuring the mode matrix stays consistent with existing expectations. For production readiness, I'm defining a ladder with R0 at offline libraries passing (201 tests, 3 ignored) and R1 requiring offline runner and CLI with manifest admission working across synthetic and canary fixtures.
+> 
+> R2 through R5 establish further rungs: wire-parity receipts offline, M5 inputs existing (currently typed pending), hardware-owner integration with the gate script passing 22 owner tests plus 3 nonvacuous Rust tests, and binding cycles staying RequiredUnimplemented until aggregation semantics are studied. Each rung is a typed predicate that blocks progress when absent, and hardware_done remains false until these conditions are met.
+> 
+> Now I'm mapping the cross-block dependency graph: B1001 depends on parity semantics and placement predicates from B1008 and B1009; B1002 and B1010 are bidirectional on coverage types; B1003 and B1011 need memory semantics and defect patches; B1004 requires strictness inputs from B1012 and is gated by M5 facts in B1015; B1005 spans all crates and precedes the runner in B1006, which itself depends on B1001, B1002, and B1005; B1007 is the top-level ladder depending on everything; B1013 and B1014 emission depend on B1006. The architecture targets sm_86 only initially, with sm_120 gated behind E1002.
+> 
+> The implementation order is: arithmetic foundation, memory patches, type algebra, coverage analysis, strictness validation, manifest generation, parity receipts, placement predicates, emission logic, runner aggregation, then remaining semantics and scaffolds, with gating states handled separately.
+> 
+> For Q1009, I'm amending the Rust/Python wire-admission parity contract: either Rust implements the full semantic validator matching the Python equivalent, including VPC presence and consistency checks, warpid_tb validation, function_unique_id strictness, and lane_mask inconsistency detection.
+> 
+> Adding validation rules... Allocation range overflow needs checked arithmetic instead of wrapping to catch the error properly. The control sidecar is missing the binary digest field in receipts, which is a typed gap that can't be worked around. For deterministic binding regeneration, I'm using pbgen and proto pins authenticated by regenerating and comparing the committed dynamic_trace.rs in CI, with FNV pins plus a generated-file hash pin for offline verification. Snapshot semantics in Python handles anchored no-follow opens.
+> 
+> For the Rust side, I'm rejecting symlink/hardlink mutations and detecting same-size changes through the receipt, while Rust only consumes receipt-bound bytes or reruns full checks on local directories with documented weaker filesystem guarantees—production admission still requires the Python receipt. Enum widths create typed skew when Rust encounters unknown values, so I'm recording the producer contract ID in receipts and running differential tests through both validators to assert identical typed reasons using a name-mapped table. The test strategy covers positive canaries that both validators admit, and negative cases where each error class has a matching Rust counterpart with the same typed reason, with explicit handling for UNSPECIFIED values.
+> 
+> Now I'm moving to placement and completeness predicates across the simulation layers—the reader validates block ranges and duplicate detection, the execution layer checks program counter set equality and architecture matching, and the replay layer verifies SM ID and warp ID consistency with new architecture-range bounds checking. Defining result types... I'm finishing up the serialization requirements—untagged JSON with the coverage type as a discriminant, and unavailable fields omitted based on their type. Then I need to add tests covering compile-time failures when sampled variants try to access max_cycles, golden serialization tests for each variant, and type errors when aggregating mismatched coverage types. After that, I'm moving into Q1012 to patch the local memory routing logic—specifically updating the classification to recognize AccessKind::Local as distinct from Shared, since local memory is L1-eligible and should traverse the cache hierarchy differently than global allocations. I'm introducing a PendingSectorFill structure to track in-flight L2 fills with generation tracking, so stale fills from evicted lines get dropped on arrival. The MemResponse handler needs to call complete_fill before waking the state machine, which exposes the current bug where a second access between miss and response incorrectly hits. For ATOM reads that carry replies, I'm keeping the fetch bytes and DRAM arm modeling, while RED accesses without replies stay unmodeled.
+> 
+> Now I'm setting up the test cases: validating that a second SM access before the response misses but hits after, checking that generation bumps on eviction properly drop late fills, handling eviction and refill races by sequence order, ensuring terminal events occur after the last response, and excluding local sectors from memory load metrics. I'm also refining the taxonomy representation as a single JSON wire format and applying the Carded repair to Q1013.
+> 
+> I'm defining the status field as a closed enum with precedence rules: "value" for actual payloads, "research_gap" for known unknowns, and new statuses like "range" for bounded intervals, "censored" for MSHR-bounded cases, "mixture" for carveout-dependent capacities, "unresolved_structure" for grid conflicts, and "surface" or "surface_gap" for swept curves. When multiple statuses could apply, the most specific one wins, with value taking priority over range, which beats censored, mixture, surface, unresolved_structure, and research_gap.
+> 
+> For the Carded deserializer, I need to check the status field first and reject if both status and unexpected payload keys appear together—anything beyond status, reason, or challenge should trigger an error. Unknown status strings should also be rejected explicitly. In PchaseCard RawProperty, I'm catching the collision where kind:"value" lacks a value field or kind:"typed" has an unexpected value present, which currently gets ignored but needs to become a hard error. The SimulatorArchInputs projection should enforce strict allowlisting to deny unknown fields. -field source pointers and lockstep tests that validate schema changes (E1037) with Python and Rust implementations asserting identical behavior across collision and unknown-status cases. For the max_cycles boundary work, I'm renaming it to diagnostic_last_issue_cycles and introducing terminal_modeled_event_time to capture the maximum of issue completion and all modeled response times, with the correction boundary excluding unmodeled tails.
+> 
+> I'm adding an explicit binding row to the descriptors table that maps exec_cycles_gpc_max to a new RequiredUnimplemented variant with a blocking reason, emitted on every run, while the type system prevents constructing Predicted values from that key. For bidirectional lockstep validation, I'm extending the registry to ensure every available target-role metric either appears in descriptors or in a typed exclusion list. The serialization tags the exact semantics with simulator scope, and production readiness requires hardware evidence from the runner—specifically the Q1007 ladder rungs and E1040 output confirming the hardware gate passed, otherwise it's marked as pending. The consolidated ledger for blockers B1001–B1015 uses only local IDs and literal artifact names, though there's a gap in evidence closure around the traced-binary digest since producer support isn't available.
+> 
+> Now I'm reconsidering whether offline_implementation_ready should actually be false—the field depends on whether unresolved evidence-closure items exist, and there are several: the aggregation-semantics study isn't embedded, the traced-binary digest producer is missing, M5 inputs are absent, and hardware receipts aren't available. The question is whether these unembedded dependencies block offline implementation or if the contracts I've defined are still implementable from what's embedded.
+> 
+> Since B1008's binary digest requires producer-side facts that aren't embedded and B1014's binding cycles depend on the unembedded aggregation study, I need to mark offline_implementation_ready as false and enumerate these specific defects.
+> 
+> Now I'm building out the ledger with one row per blocker, tracking its disposition, controlling constraints, and current state—whether it's an evidence-closure defect, a typed gap, pending external input, or prohibited. I'm assigning statuses to each: B1001 gets an amended contract that's mostly implementable offline except for a binary-digest edge case that's a typed gap; B1002 is amended and fully implementable offline; B1003 is amended and implementable offline but has some red/writeback tail research gaps still pending.
+> 
+> Continuing through the remaining blockers: B1004 has scaffolding ready offline but timing facts are pending external input; B1005 is fully offline implementable; B1006 depends on B1001, B1002, B1005, and B1010 being resolved first; B1007 is accepted but has R3+ pending external factors like hardware; B1008 has a parity implementation offline but the binary digest is an evidence-closure defect since producer semantics aren't embedded; B1009 is offline but co-residency exactness is a typed limitation because the wire lacks timestamps; B1010 is amended and offline; B1011 is being amended.
+> 
+> Moving forward with the next set: B1012 through B1015 are all amended and offline implementable, though B1013 has binding cycles that remain unimplemented and prohibited until the study artifact is available; B1014 is bidirectional lockstep implementable; B1015 is accepted as typed blocks with no live selection, pending external facts like M5 start and owner gate run. The acceptance criteria requires exactly 19 questions answered once each with a disposition of ACCEPT, AMEND, REJECT, or STOP.
+> 
+> Now I'm determining the output format — the user's explicit request for structured ledger rows with specific fields overrides the general prose guidance, so I'll use compact structured content with headings and labeled lines rather than full prose paragraphs.
+> 
+> I'm also verifying the technical details I'll cite, particularly around how the identity checking logic works in the codebase — tracing through the specific record requirements and memory space handling to confirm the evidence for each ruling. So the wrapping issue causes a wrong diagnostic — I should use checked_add to match Python's behavior and avoid the divergence where Rust rejects allocations spanning the 2^64 boundary that Python would accept. The L2SourceSplit field in KernelReplayResult is optional and the test handles it correctly. Moving on to E1010.
+> 
+> There are several production paths using `.expect()` that should be typed checks instead: `WarpState::clear_pending` expects a barrier pending-unit, and there's a debug assertion in E1011 that's being used as policy rather than a true check. The DRAM stats accumulation and sequence counter increments are unchecked, and `on_response` uses `.expect()` on a subtraction that could fail — all of these need to become proper typed error handling. I'm noting these violations to cite.
+> 
+> The float-to-integer cast issue is particularly problematic: `(mhz as u64) * 1_000_000` uses a saturating cast on an f64 value that could theoretically exceed u64::MAX, and the same saturating-cast pattern appears in the pchase card_int conversion after the fractional check. Rust's `as` operator silently saturates these conversions, which violates the policy requiring checked try-conversion instead. Several other accumulation operations like `records +=` and `issued +=` are also unchecked and need to be cited.
+> 
+> For the registry metrics scope, I'm defining the in-scope set as all 61 entries where the ncu_observation_contract counting_unit falls into {SMSP, SM, L1TEX, LTS, DRAM, GPC, GPU}, and I'll require the exclusion table to cover the complement of the 7 descriptors across all 61 metrics with reason enums—this ensures every metric either maps to a descriptor or has a typed exclusion row, satisfying the requirement to represent every in-scope registry metric or typed exclusion.
+> 
+> Now I'm checking specific metrics and their constraints: exec_cycles_gpc_max gets marked as RequiredUnimplemented, the Q1002 estimator provenance from the E1007 sidecar has the right structure with not_recoverable including cycles, and for Q1010 warpid_tb I need to verify the proto bounds (0 ≤ warpid_tb < blockDim total/32), ensure Python enforces presence, and add a roster predicate that the warps map keys and per-record warpid_tb values agree and stay in range.
+> 
+> For the kernel proto, the expected warp roster should be ceil(bx*by*bz/32) warps numbered 0 through n-1. Q1011 shows sampled traces currently return the same KernelReplayResult with max_cycles, but I'm making that type-level distinct. Q1003 needs new same-cycle adversarial tests since the engine orders by (time, seq) FIFO. I'll organize the implementation order globally in Q1008 with per-question brief ordering lines, and produce a numbered matrix showing blocker dependencies.
+> 
+> The completion fields show response_complete is true, but offline_implementation_ready stays false because the aggregation-semantics study and traced-binary digest producer are unembedded dependencies required for full closure of B1001/B1008/B1013. Hardware_done and authorized_for_handoff are both false. Now I'm writing out the final deliverable mapping.
+> 
+> I need to be careful with citations here — there are no web search results, so I'll reference evidence IDs textually instead. The user's explicit format requirements override the general preference for prose; I'll use markdown headers and compact bullets for enumerable fields while keeping the rationale readable, and structure the ledger as a table. I'm watching the total length to keep this concise.
+> 
+> Now I'm laying out the structure: starting with a consolidated ruling and mechanical acceptance predicate, then moving through the question blocks Q1001–Q1014 and Q109001–Q109005, followed by the Section 11 ledger as a 15-row table with columns for blocker, disposition basis, controlling constraints, state, and evidence. I'll finish with completion fields and a brief evidence-closure defect register. Each question gets tight treatment around 150–300 words, focusing on manifest fields, validation order, and the essential details. Q1014 needs amending too. For each question I'm going to need the rationale, contract, invariants, evidence IDs, failure and pending states, implementation order, and deliverables with both positive and negative tests — I'll pack these into compact labeled fields to stay within bounds while covering everything required. This is going to be a substantial response, but I'll keep it as economical as possible without sacrificing clarity.
+
+# FABLE5-CONSULTATION-V1 — Consolidated Ruling (topic-06, Rust production simulator)
+
+**Mechanical acceptance predicate (explicit).** This ruling is acceptable iff: (a) each of the 19 expected question IDs {Q1001–Q1014, Q109001–Q109005} appears exactly once, in numeric order, with exactly one disposition from {ACCEPT, AMEND, REJECT, STOP}; (b) the section-11 ledger contains exactly one row for each of the 15 expected blocker IDs {B1001–B1015}; (c) every cited B/Q/E identifier resolves to an ID embedded in this prompt; (d) every accepted/amended contract is implementable and testable from the embedded evidence alone, with unembedded dependencies recorded as typed evidence-closure defects or typed pending states; (e) completion fields are present with `hardware_done: false` and `authorized_for_handoff: false`. No sibling context, live capture, mutation, or handoff is used or granted.
+
+---
+
+## Q1001 — AMEND
+
+**Rationale.** Admission identity is currently distributed and partially bound: the reader binds trace bytes, sidecars, and allocation identity (E1007); the program join binds function/pc/arch (E1008); replay binds placement and coverage (E1009). No single sealed object transitively binds all of them, and no traced-binary digest edge exists anywhere in the embedded evidence.
+
+**Contract.** Define `LaunchEvidenceIdentity` (sealed, canonical-JSON, SHA-256-sealed like the sampling sidecar's `sidecar_sha256` discipline in E1007) with fields: `cell_id?`, `kernel {mangled_name, args_hash?}`, `launch {device_id, stream_id, kernel_id, function_unique_id}`, `geometry {grid_dim, block_dim, cluster_dim}` (E1024), `trace_contract_id` + `memory_payload_classes` capability set (E1023/E1029), `artifact_digests { dynamic_trace_pb, threadblock_payload_sha256 (sorted-path stream digest, reusing E1007's verify_sampling_payload construction), allocations_json?, trace_sampling_json_seal?, enhanced_execution_info_json, control_bits_sidecar }`, `arch {arch_id, sku, arch_card_sha256, pchase_card_sha256}` (E1015/E1016/E1017), `binary {name, digest: Value|TypedGap}` (E1008 carries only a name string — digest is a typed gap), `coverage: CoverageType` (Q1002). **Validation order:** decode root + contract/capability gate → allocations registry → sampling seal + payload digest → exec info → control sidecar → `build_schedules` join (arch equality, pc-set equality both directions, E1008) → per-block walk (block_id per-axis range, duplicates, allocation identity, E1007/E1009) → coverage gate → seal. **Transitive hash edges:** manifest→each digest; `benchmark_name`→sidecar stem (E1020); `sidecar.arch`≡`card.arch_id`; `function_unique_id`→exec-info→sidecar function. Any missing edge is a typed gap; any mismatch a typed error, never a skip.
+
+**Invariants.** One seal per launch; identical inputs ⇒ identical seal; a seal never admits without every edge either verified or typed-gapped.
+
+**Failures.** New `ManifestError {ArtifactDigestMismatch, CapabilityMissing, IdentityFieldMissing, EdgeUnverifiable, BinaryDigestGap}` plus all existing typed errors in E1007/E1008/E1022/E1009.
+
+**Order/deliverables/tests.** After Q1005/Q1013; before Q1006. Positive: canary fixture (E1031) admits with a stable seal. Negative: single-byte mutation of any artifact → `ArtifactDigestMismatch`; removed capability → parity with `trace_capabilities_incomplete` (E1027); sidecar arch `sm_120` vs exec 86 → typed (E1008 test retained).
+
+**Evidence:** E1007, E1008, E1009 (+E1023–E1027, E1031 for edges). **Pending:** traced-binary digest producer semantics — evidence-closure defect.
+
+---
+
+## Q1002 — AMEND
+
+**Rationale.** Coverage today is a boolean-ish gate (full vs sanctioned subset) with one result shape (E1007/E1009); the workspace has no runner to normalize types (E1006).
+
+**Contract.** `enum CoverageType`: `ExactFull` (blocks_seen == grid_total, no sanctioning sidecar); `LosslessStored` (full coverage + `lossless_compressed_full` provenance sidecar; identical exactness, distinct provenance — E1007); `EstimatedSampled { selected_block_ids, strata, pi/neyman provenance, estimator_mode == weighted_full_shape_estimate, targets, not_recoverable, convergence }` (all literal sidecar fields, E1007); `ReducedShape` — typed unavailable (current subset contract requires `reduced_shape_variant = null`, E1007); `Unavailable{reason}`. **Estimator provenance** is carried verbatim from the sealed sidecar and never recomputed. **Aggregation compatibility:** aggregation is legal only across identical `LaunchEvidenceIdentity` scopes and identical coverage variants; `ExactFull`/`LosslessStored` aggregate by checked sums; `EstimatedSampled` aggregates only within one estimator/target family and never into an exact scope. **Explicit prohibition:** a `sanctions_incomplete` trace can never yield exact cycles — the embedded sampled fixtures literally carry `"not_recoverable":["cycles"]` (E1007/E1009); the sampled variant has no cycles field at type level (Q1011).
+
+**Invariants.** coverage(variant) is decided at admission and immutable; sampled ⇒ timing NotRecoverable.
+
+**Failures.** `CoverageError {MixedVariantAggregation, EstimatorIncompatible, ReducedShapeUnavailable}`.
+
+**Tests.** Positive: sealed subset admits as `EstimatedSampled` with cycles-not-recoverable. Negative: aggregating ExactFull with Sampled → typed; constructing exact cycles from a sampled result is unrepresentable (compile-level, Q1011).
+
+**Evidence:** E1006, E1007, E1008, E1009.
+
+---
+
+## Q1003 — AMEND
+
+**Rationale.** Attribution dimensions exist (op_class/address_space/access_kind/cache-op token/MemRole/L2Source/L2OpClass — E1012/E1025/E1029), but local space is mis-routed and L2 fills are non-causal (B1011), and reply-less tails are not typed.
+
+**Contract.** (1) **Attribution:** retain the existing token→MemRole→AccessKind chain (E1012); add `AccessKind::Local` (Q1012) and per-result `unmodeled_tails: TailFlags{red_rmw, writeback, coherence, ldgsts_dst_shared_timing}`. (2) **State machines:** L1 keeps `EvAccess{Hit, MissRequest(FillKey), MergedPending, Stalled}` + `complete_fill` at response time (E1013). L2 gains in-flight sector state (Q1012): read-class miss ⇒ `PendingSectorFill{line, sector, generation}`; sector becomes valid only at `complete_fill` at the response event (E1011 handler); write-class (store/RED/ATOM) validates from write data immediately, with ATOM's reply still priced/fetched on the DRAM arm when absent (E1011). (3) **Reply-less RED:** remains write-class, mutation-only, no fetch — modeled occupancy, unmodeled RMW read tail, typed `red_rmw` flag; never conflated with the modeled ATOM fetch path (E1010/E1011). (4) **LDGSTS:** global source = read-class bypass into L2 (E1012); shared destination exempt from identity (E1007) with destination-timing typed as approximation. (5) **Writeback/coherence:** unmodeled, typed flags; excluded from the terminal modeled event until modeled. (6) **Terminal causality:** `terminal_modeled_event_time = checked max(last issue time+1, all MemResponse completion times, DRAM server completions for reply-carrying fetches)` (E1011).
+
+**Adversarial same-cycle tests (all deterministic via (time,seq), E1018):** fill-response and new same-sector access at one timestamp (seq order decides; no hit before the response is processed); merge folding vs follow-up fetch at batch boundary (extends E1010 tests); cross-SM store-then-load same sector same cycle (extends E1011 `store_allocates_for_a_later_load_across_sms`); eviction vs sector-fill at equal timestamps (E1013 tie rule + L2 generation rule).
+
+**Evidence:** E1010, E1011, E1012, E1013, E1014. **Pending:** RED/writeback/coherence constants — typed research gaps until admitted M5 evidence.
+
+---
+
+## Q1004 — AMEND
+
+**Rationale.** The issue model hardcodes structural constants (4 SMSPs, 6 dependence barriers) and hypothesis knobs (25/8-cycle barrier latencies, 48-warp residency) inside `IssueModelParams` (E1010); cards carry no occupancy/functional-unit blocks (E1016), and the pchase card types several geometries unresolved (E1017).
+
+**Contract.** **Architecture-owned resources** (card schema blocks, objOrGap per E1037 discipline): `smsp {count, issue_ports}`, `occupancy {max_resident_warps_per_sm, max_blocks}`, `dep_barriers {count}`, `barrier_latencies {read, non_memory_write}`, `dual_issue {supported: bool|gap}`. **Scaffolding permitted before M5 (offline):** schema extension, `Carded<T>` plumbing with typed gaps, `IssueModelParams::from_card` constructor that fail-closes on gaps, synthetic-value unit tests, typed `UnsupportedEncoding` exclusions for unknown opcode/control encodings. **Timing facts permitted only after admitted M5:** any new sm_86 numeric constant beyond the retained legacy pchase values (E1016/E1017 provenance scoping) requires admitted microbench evidence; NCU values are never inputs (E1002 Rule 1); sm_120 must not inherit sm_86 values (E1010's arch-tagged constructor stays; `L2_DEFAULTS_REVIEWED_ARCHES` pattern in E1014 generalizes). Current 25/8/48 knobs remain **documented hypotheses**, surfaced in output metadata, never silently upgraded.
+
+**Invariants.** No cross-arch constant substitution for a research_gap; no default where the card is gapped in strict mode (Q1013).
+
+**Tests.** Positive: card with full blocks constructs params equal to today's values. Negative: gapped occupancy block → typed `BlockResearchGap` at construction (E1015 pattern); sm_120 card via sm_86 constructor path → typed refusal.
+
+**Evidence:** E1009, E1010, E1015, E1016, E1017. **Pending:** M5 microbench facts — typed pending external.
+
+---
+
+## Q1005 — AMEND
+
+**Rationale/Inventory (by subsystem, literal sites).**
+- **sim-engine (E1018):** `next_seq += 1` unchecked → checked_add typed `SeqOverflow`; `schedule_in` already checked (keep as exemplar); `debug_assert!(event.time >= self.now)` is debug-only — add typed release check or prove unreachable via API.
+- **sim-trace (E1007):** `block_launch_index` i64 `gx*gy*gz` and index arithmetic → checked (the subset validator already models this with `checked_mul`); `AllocRange` `end = base.wrapping_add(size)` → widen to u128 or checked_add typed `AllocationRangeOverflow` (Python parity: arbitrary precision, Q1009); SHA-256 `wrapping_*` is **exempt** (specified modular algorithm; document exemption). FNV in E1030 is test-only — exempt.
+- **sim-sm issue (E1010):** `t+stall`, `t+latency`, `arrival_stamp += 1`, `issued += 1`, `self.t += 1` → checked typed `TimeOverflow/CounterOverflow`; `clear_pending`/`release_pending` `.expect(...)` → typed `BarrierAccountingUnderflow` (expect forbidden in production).
+- **sim-sm system (E1011):** `DramServer::serve` `u64::try_from(...).expect(...)` and u128 muls → typed `TimeOverflow`; `outstanding.checked_sub().expect(...)` → typed; `debug_assert!(ready >= bound)` (causality) → typed release check `ResponseUndercutsBound`; `dram_stats` adds checked.
+- **sim-sm replay (E1009):** `records_seen += 1`, fold sums → checked.
+- **sim-mem (E1013/E1014):** counter `+=`/`add` → checked; `fill_seq += 1`, `clock += 1` checked; BIP `min_recency(ways) - 1` i64 → checked_sub typed.
+- **calibration/pchase casts (E1015/E1032):** `(mhz as u64) * 1_000_000` — float→int `as` is a saturating cast (forbidden class) → validate `mhz ≤ 2^53` and use `u64::try_from` + `checked_mul`; `n as u64` in `card_int` same treatment.
+- **emit (E1019):** all numerator/denominator sums → checked_add typed `CounterInvariant`; `bypass_read_sectors` checked_sub is the retained exemplar.
+- **runner composition (E1020):** `records +=`, `issued +=` → checked.
+- **Terminal obligation:** every result carries `terminal_modeled_event_time` (Q1003) computed with checked max/adds; a run whose final queued modeled response timestamp exceeds it is a typed invariant failure.
+
+**Policy.** Production paths forbid `wrapping_*`, `saturating_*` (including `as` float→int and silent int narrowing), `expect/unwrap`, and debug-only assertions as overflow/causality policy. Exemptions: specified modular hash algorithms; `#[cfg(test)]` code.
+
+**Tests.** Boundary: `schedule_in(u64::MAX)` typed (exists); timestamps near `u64::MAX` through issue/fold; DRAM fixed-point at maximal bytes×Hz; counters at `u64::MAX` fold → typed; allocation `base=u64::MAX-4,size=8` in-range lane admits under u128 semantics (Python parity) and never wraps.
+
+**Evidence:** E1007, E1009, E1010, E1011, E1012, E1013, E1014, E1015, E1018, E1019, E1020, E1032.
+
+---
+
+## Q1006 — AMEND
+
+**Rationale.** The only end-to-end composition is an ignored env-driven test (E1020); the workspace has no runner/CLI member (E1006); emission exists but no canonical output (E1019, E1021).
+
+**Contract.** New crates `runner` (lib) and `cli` (bin) added to E1006 members. **Input:** one `SimInputManifest` (versioned canonical JSON, `deny_unknown_fields`): artifact paths + expected digests (Q1001), arch/pchase card digests, `mem_mode ∈ {flat, l1_const, l1_shared_l2}`, `dram_bw ∈ {carded, unmodeled}` — replacing `SIM_L1_DISABLE`/`SIM_L2_DISABLE`/`SIM_DRAM_BW_DISABLE` env selection (E1020); **no field can carry a label value** (schema has no such fields; guard test asserts rejection of unknown keys — the no-label-input path). **Behavior:** admission (Q1001) → per-kernel replay (E1009) → **checked aggregation** of summed numerators/denominators only (rates never averaged post-hoc — the E1020 contract) → emission via `emit_all` (E1019) including the explicit `RequiredUnimplemented` cycles row (Q1014). **Output:** canonical JSON `sim_result.v1` {schema_version, sealed identity, coverage variant, per-kernel + aggregate counters, typed emission outcomes, unmodeled_tails, hypothesis-knob provenance}; typed gaps serialize as tagged variants, never null-as-zero. Exit codes: 0 ok; 1 typed failure; 2 prerequisite missing (mirrors E1040 taxonomy).
+
+**Owner gates.** The runner never fabricates hardware readiness; `tools/dev/hw_evidence_gate.sh` (E1040) remains the sole owner gate and may later invoke the CLI — operator-run only.
+
+**Tests.** Positive: synthetic trace (E1007 writer pattern) → golden canonical JSON, byte-stable across runs. Negative: digest mismatch → typed; env vars present are ignored (asserted); unknown manifest key → typed; mixed-coverage aggregation → typed (Q1002).
+
+**Evidence:** E1005, E1006, E1019, E1020, E1021.
+
+---
+
+## Q1007 — ACCEPT
+
+**Ladder (typed, no rung fabricates evidence).**
+- **R0 — Offline libraries:** current state; 201 passed / 0 failed / 3 ignored (E1021). The three ignored owner tests are *ignored, not passes*.
+- **R1 — Offline runner/CLI:** Q1006 green on synthetic + canary fixtures.
+- **R2 — Wire-parity closure:** Q1009 differential green offline.
+- **R3 — Admitted M5 inputs:** campaign M5 has not started (E1002 §Current execution state); typed pending external — no offline result substitutes.
+- **R4 — Hardware-owner integration:** `hw_evidence_gate.sh` PASS with nonvacuous 22/22 owner tests and the 3 ignored Rust tests executed (E1040); absent receipt = typed `HardwareEvidencePending`, never a pass.
+- **R5 — Binding cycles:** remains `required_unimplemented` until the checked-in aggregation-semantics study is admitted (E1002, E1005); ADR 0002 bands (≤10%/≤15%/>15%) apply only then (E1004). ADR 0001 preservation constraints stand (E1003).
+
+**Invariant.** Rung predicates are monotone and independent; passing one satisfies no other. Production-readiness claims cite the highest satisfied rung only.
+
+**Tests.** Positive: R0 predicate machine-checks E1021 totals. Negative: absent gate log → R4 pending, runner refuses "live-ready" output.
+
+**Evidence:** E1002, E1003, E1004, E1005, E1019, E1021.
+
+---
+
+## Q1008 — ACCEPT
+
+**Dependency edges (local only).** B1005 → {all crates} (checked arithmetic precedes composition). B1011 → B1003 (semantics contract presumes the two patches). B1010 → B1002 (type algebra carries coverage). B1012 → B1004, B1001 (strict arch inputs feed params and manifest). B1001 ← B1008, B1009 (admission parity and placement predicates are manifest inputs). B1006 ← B1001, B1002, B1005, B1010. B1013/B1014 ← B1006 (emission surfaces ride the runner). B1007/B1015 gate everything and are states, not code. **Architecture order:** sm_86 only; sm_120 remains gated behind sm_86 M-SIM-1 + explicit operator approval (E1002); no cross-SKU value substitution (E1015/E1016/E1017 gap discipline).
+
+**Normative implementation matrix (order → deliverable → blocker):**
+1. Checked-arithmetic sweep + policy lint (B1005; E1007–E1020, E1032).
+2. Local-routing + L2 pending-fill patches with generations (B1011; E1009–E1014).
+3. Result/coverage type algebra (B1010; E1007/E1009).
+4. Coverage typing + estimator provenance (B1002; E1006/E1007).
+5. Taxonomy + Carded/strict projection repair (B1012; E1015/E1016/E1017/E1032/E1037/E1038).
+6. LaunchEvidenceIdentity + sealed manifest (B1001; E1007/E1008/E1009).
+7. Wire-parity/receipt + flat-mode closure (B1008; Q1009 set).
+8. Placement/completeness predicates (B1009; Q1010 set).
+9. Emission: terminal field, RequiredUnimplemented row, bidirectional lockstep (B1013/B1014; E1005/E1019/E1035/E1036).
+10. sim-runner/sim-cli (B1006; E1005/E1006/E1019/E1020/E1021).
+11. Memory/timing scaffolds and typed tails (B1003/B1004; E1010–E1017).
+Ladder states B1007/B1015 overlay all rungs (E1002/E1039/E1040).
+
+**Evidence:** all IDs listed against each row above (E1002–E1021).
+
+---
+
+## Q1009 — AMEND
+
+**Rationale.** Rust re-enforces replay-critical invariants but is not wire-contract equivalent: flat mode bypasses decode-time checks (E1009 `classify_flat` never enforces mask presence/data_width/access-kind-UNSPECIFIED); explicit `MEMORY_SPACE_UNSPECIFIED` is exempted by `record_requires_identity`'s `Some(_) => false` arm and unknown spaces are dropped by `.ok()` in `check_allocation_identity` (E1007); allocation end wraps (E1007); Python owns snapshot/link/mutation defenses (E1027/E1028) and semantic validation (E1033/E1034); binding hashes pin sources, not regeneration (E1030/E1041).
+
+**Contract.**
+1. **Parity mechanism:** either (a) Rust implements the full E1033 semantic set (vpc presence + low-32 consistency, warpid_tb presence, function_unique_id>0, both lane_mask_inconsistent directions, compressed_format_malformed incl. base_stride popcount-1 impossibility, lane_position_mismatch, allocation rules keyed on {GLOBAL, GENERIC} incl. legacy fallback) plus the E1027 root checks (contract id `sm86_addr_carry_v1`, capabilities {1,2,3,6,8}, launch-identity map-key equality, geometry positivity, stats.csv counter sanity); **or** (b) a canonical hash-sealed **AdmissionReceipt** emitted by the Python gate — {per-artifact SHA-256 set covering *every* payload byte, validator version, typed result, contract id, capability list} — which Rust verifies byte-for-byte before consuming. Comments or a prior unproven Python run are not a receipt.
+2. **UNSPECIFIED/unknown space:** explicit `MEMORY_SPACE_UNSPECIFIED` on the wire → typed contract violation (mirror op_class rule); unknown raw space in the identity gate → typed schema skew, never silent fallback.
+3. **Checked ranges:** allocation containment computed in u128 (`base as u128 + size as u128`) — restores Python arbitrary-precision parity and removes the wrap.
+4. **Flat-mode closure:** `classify_flat` routes through the same wire-contract decode (masks, data_width, access-kind UNSPECIFIED, unknown enums) minus sector expansion, so both modes reject identically with identical typed diagnoses.
+5. **Digest joins:** receipt/manifest carries traced-binary digest edge; producer support absent from embedded evidence ⇒ typed `BinaryDigestGap` (evidence-closure defect), never fabricated.
+6. **Deterministic regeneration:** keep E1030 pins + `no_unpinned_proto_files`; add a pin over the committed `dynamic_trace.rs` bytes and a dev-time `regen_pb`-then-diff check (E1041's sorted enumeration makes this deterministic), so binding regeneration is authenticated, not inferred from source pins alone.
+7. **Snapshot semantics:** anchored no-follow opens, symlink/hardlink rejection, inventory stability, same-size in-place mutation and replacement detection remain Python-owned (E1027, proven by E1028); Rust consumes receipt-bound bytes; production admission without the receipt is a typed failure.
+8. **Additive lockstep:** unknown enum values stay typed skew in Rust (E1007/E1029); receipt records the contract id so old/new traces never cross-compare (E1023).
+
+**Tests.** Differential corpus: every E1034 negative class gains a Rust twin with a name-mapped identical typed reason; canary (E1031) both-admit; explicit-UNSPECIFIED-space fixture both-reject; wrap fixture admits under u128 and never mis-rejects; receipt tamper (any byte) → typed; E1028's replacement/in-place/inventory/hardlink cases remain green.
+
+**Evidence:** E1007, E1008, E1009, E1012, E1022–E1031, E1033, E1034, E1041. **Defect:** traced-binary digest producer — evidence closure.
+
+---
+
+## Q1010 — AMEND
+
+**Predicates and owning layers.**
+- **sim-trace reader:** grid positivity; per-axis block_id range + duplicates (E1007); lane positional identity; allocation identity; **new:** `warpid_tb` presence (Python requires it, E1033; Rust does not) and `warpid_tb ∈ [0, ceil(blockDim.total/32))` from E1024 geometry; warps-map key ≡ records' warpid_tb consistency.
+- **sim-sm program:** function join, arch equality, pc-set equality both directions (E1008).
+- **sim-sm replay:** sm_id presence/intra-block consistency, warpid_sm presence/consistency (E1009); **new architecture-range checks:** `sm_id ∈ [0, card.sm_count)` (84 on sm_86, E1015/E1016) and `warpid_sm ∈ [0, occupancy ceiling)` with card provenance (typed gap if the card lacks the block — Q1004); **expected block roster:** full-coverage traces must cover launch indices `0..grid_total` exactly (exists as completeness gate) and per-block expected-warp roster `0..warps_per_block` present-or-typed; **segment closure:** sampled membership ≡ `selected_block_ids` (exists, E1009) plus per-SM slot-map cross-check — when the sealed sidecar carries `per_sm_slot_map` (E1007), traced `sm_id` membership per block must be consistent with the declared roster (new typed predicate).
+- **Co-residency:** the wire carries no per-record timestamps (E1025), so *exact temporal co-residency is not establishable from embedded evidence*; it is a **typed model property** (admission-order residency, E1010 `admit_blocks`), declared as `co_residency: Modeled` in the result — never claimed as traced. This is a permanent typed limitation, not a silent assumption.
+
+**Tests.** sm_id=84 on sm_86 → typed range error; warpid_tb missing → typed (Python parity); slot-map/sm_id contradiction → typed; block completion holes → existing `IncompleteTrace` retained.
+
+**Evidence:** E1007, E1008, E1009, E1010, E1022–E1027, E1029.
+
+---
+
+## Q1011 — AMEND
+
+**Rationale.** Sampled and full traces share one `KernelReplayResult` including `max_cycles` (E1009), while the sampled sidecar marks cycles not recoverable (E1007) — misleading by construction.
+
+**Contract.**
+```
+enum ReplayTiming {
+  Exact { last_issue_plus_one: u64, terminal_modeled_event: u64, unmodeled_tails: TailFlags },
+  NotRecoverable { reason: TimingUnrecoverable /* e.g. SampledSubset */ },
+}
+struct ReplayCore { identity, instructions_issued, records_seen, per_sm, l1, l2, l2_by_source, dram }
+enum ReplayResult {
+  ExactFull   { core: ReplayCore, timing: Exact },
+  LosslessFull{ core: ReplayCore, provenance, timing: Exact },
+  Sampled     { core_estimates: WeightedEstimates /* per sidecar targets */, strata, convergence,
+                timing: NotRecoverable },     // NO cycles fields exist on this variant
+  ReducedShape{ typed_unavailable },
+}
+```
+**Conversions:** `ExactFull ⊕ ExactFull → ExactFull` (checked sums; identity-compatible only); `LosslessFull` aggregates as ExactFull with provenance union; `Sampled` aggregates only with matching estimator/targets; **no conversion exists from Sampled to any Exact variant** (absence of constructor = the prohibition). **Serialization:** tagged canonical JSON, discriminant `coverage_type`; absent-by-type fields are structurally absent, never null-as-zero; `Exact` timing serializes both diagnostic and terminal fields with the `unmodeled_tails` set.
+
+**Tests.** API-absence test: `Sampled` exposes no cycles accessor (does not compile / not present); golden serialization per variant; mixed-variant aggregation → typed `MixedVariantAggregation`; sampled admission produces `NotRecoverable{SampledSubset}` on the E1009 fixture.
+
+**Evidence:** E1007, E1009, E1023–E1027, E1029.
+
+---
+
+## Q1012 — AMEND
+
+**Patch (a) — local memory routing.** In `classify_with_l1` and `classify_flat` (E1009), `MemorySpace::Local` and `MemoryOpClass::Local/Shared` are folded into `AccessKind::Shared`, sending local (spill/stack) traffic to the shared-latency path with sectors truncated. Amend: introduce `AccessKind::Local{off,len,role}`; LOCAL space/class records keep their decoded sectors; LDL/STL take their L1-eligible token roles (E1012 `Stl → EligibleLoad`), traverse L1→L2 read/write-class like global with allocation identity exempt (E1007 exemption retained); flat mode prices local at the flat global arm, not shared. **Metric attribution:** local sectors are excluded from the gmem op_ld/op_st surfaces (E1019) and tracked in new local counters (registry rows exist as targets, E1035; emission may typed-exclude rather than add descriptors now — Q1014).
+
+**Patch (b) — L2 pending sector fills.** In `L2Model::access` (E1014), a read-class missing sector currently sets `way.mask |= sbit` immediately (occupancy-only), enabling premature hits and wrong terminal pricing. Amend: add `pending: HashMap<(slice,set,tag,sector), Generation>`; read-class miss registers a pending fill keyed to the emitting request; the sector's valid bit is set only in `l2.complete_fill(key, generation)` invoked from the `MemResponse` handler (E1011) *before* SM wake; line eviction bumps the line generation so a stale fill response is dropped (mirror of E1013's drop rule); write-class continues to validate immediately (data carried), with the reply-carrying ATOM still fetching on the DRAM arm (E1011 retained).
+
+**Modeled vs unmodeled boundary.** Modeled: ATOM read-fetch + reply-carrying write-class misses (fetch bytes charged, DRAM-arm pricing — E1010/E1011). Unmodeled, typed flags never conflated with the modeled path: reply-less RED RMW read, writeback, full coherence tails (E1011's documented v0 scope becomes explicit `TailFlags`).
+
+**Tests.** *No-hit-before-response:* SM0 miss at t=0; SM1 same sector at t<response → miss; at ≥response → hit (breaks today, passes after patch). *Late-merge generation:* fill in flight → eviction → reallocation → stale response dropped, fresh fill installs. *Eviction/fill race:* equal timestamps resolved by (time,seq) with pinned outcome. *Terminal tail:* `terminal_modeled_event ≥` every scheduled response time. *Attribution:* local-only kernel emits zero gmem_ld sectors; shared unchanged; RED sets `red_rmw` flag.
+
+**Evidence:** E1009, E1010, E1011, E1012, E1013, E1014.
+
+---
+
+## Q1013 — AMEND
+
+**Taxonomy (one wire representation, JSON `status` closed enum with per-status payload):** `value` › `range{lo,hi}` (e.g., L1 capacity `value..bracket_upper`, E1017) › `censored{bound,side}` (MSHR lower-bounded, no knee — E1017) › `mixture{components[]}` (carveout-dependent capacities, E1017 sweep) › `surface{points[]}` / `surface_gap` (swept curve present/absent) › `unresolved_structure` (conflict-grid disagreement — `l1_associativity_ways`) › `research_gap{reason}` (E1016/E1037). **Precedence:** most-specific wins exactly once; an object satisfying two arms (any status plus foreign payload keys, or two statuses) is a **typed collision, rejected** — extending E1015's `Measured` "BOTH" rule to every arm. Unknown status strings are typed errors (closed enum, no catch-all).
+
+**Carded repair (E1032).** `Carded::deserialize` currently keys on `status` first and silently accepts status-plus-payload objects by selecting the status arm. Patch: if `status` present and any key outside {status, reason, challenge} present → error("BOTH payload and status"); unknown status → error. `RawProperty` (pchase): `kind:"value"` without `value` stays typed; add `kind:"typed"` with a stray `value` → collision error.
+
+**SimulatorArchInputs projection.** A strict allowlisted struct assembled at load: only simulator-consumed fields; contradiction checks promoted from tests to load-time typed errors (e.g., `dram_bandwidth.locked_sm_clock_mhz ≡ nvml.sm_clock_ref_mhz`, E1015/E1016); each field carries `{source_file_sha256, json_pointer}` evidence binding. **No diagnostic defaults in production:** `DOCUMENTED_DEFAULT_MSHR_COUNT` (E1032) and the L2 assoc/hash/policy defaults (E1014) are reachable only when the input manifest sets an explicit `documented_default_policy` allowlist and the output records default provenance; strict mode → typed gap.
+
+**Lockstep.** Schema (E1037) gains the closed status set; shared fixtures drive Python (E1038 pattern), schema validation, and Rust to identical accept/reject verdicts, including collision and unknown-status negatives.
+
+**Tests.** Positive: sm_86 card loads; MSHR resolves `censored` typed. Negative: `{"status":"research_gap","value":0}` under `Carded` → reject (fails today); `"status":"rangee"` → reject; strict mode with gapped MSHR → typed, never 32.
+
+**Evidence:** E1015, E1016, E1017, E1032, E1037, E1038.
+
+---
+
+## Q1014 — AMEND
+
+**Diagnostic boundary.** `KernelReplayResult.max_cycles` = final local issue time + 1 (E1009/E1010 `SmSimResult.cycles`) and excludes final response/coherence tails (E1011 discards the last response timestamp from it). Amend: label it `diagnostic_last_issue_cycles`; add `terminal_modeled_event_time` (Q1003/Q1005) with `unmodeled_tails`; the correction boundary is exactly the modeled-event set — no unmodeled tail is ever folded in silently.
+
+**Explicit RequiredUnimplemented.** Add `EmitOutcome::RequiredUnimplemented{ blocking: AggregationSemanticsStudy }` and one mandatory emission row `exec_cycles_gpc_max / gpc__cycles_elapsed.max` carrying it on every run (today the surface merely omits it — E1019/E1005). **Type-level firewall:** no constructor accepts `diagnostic_last_issue_cycles` for that key; the binding-cycles type is distinct and has no `From` path from any replay field. ADR 0002 bands (E1004) attach only after the checked-in study is admitted — that study is not embedded, so this remains a typed pending state.
+
+**Bidirectional lockstep.** Keep the descriptor→registry direction (E1036). Add direction 2: partition the full 61-entry registry (E1035) as `DESCRIPTORS ∪ TYPED_EXCLUSIONS` exactly — every non-descriptor key gets one exclusion row with a closed reason enum {RequiredUnimplemented (the cycles pair), MemUnitUnmodeled, OpClassUnmodeled (e.g., local/tex/surface families pending Q1012 attribution), LabelOnlyNoComposition, TypedUnavailableRegistryRow (the two dram op-spelling rows), InputRoleNotEmitted (the four occupancy inputs)}; the test asserts the exact partition, uniqueness both ways, and that key/unit/valid_max/parser/model_io_role bind in both directions.
+
+**Exact semantics.** `MetricValue::Exact` is documented and serialized as *exact within simulator scope* (`"semantics":"simulator_scope"`), never a silicon-accuracy claim.
+
+**Readiness binding.** Production-runner readiness = Q1007 ladder; the governing plan (E1039) and `hw_evidence_gate.sh` (E1040) own live readiness; an absent owner receipt is typed `HardwareEvidencePending`. No live evidence is fabricated here; the three ignored tests in E1021 remain ignored.
+
+**Tests.** Positive: every run's emission vector contains the RequiredUnimplemented cycles row; partition test green. Negative: adding an 8th descriptor without a registry row, or removing an exclusion row, fails lockstep; any attempted construction of a binding-cycles value from replay fields does not compile.
+
+**Evidence:** E1005, E1009, E1011, E1019, E1020, E1021, E1035, E1036, E1039, E1040.
+
+---
+
+## Q109001 — ACCEPT
+The single consolidated section-11 ledger below is this prompt's local blocker ledger; it contains exactly one row per embedded blocker, derives dependencies only among B1001–B1015, and cites only local evidence. For this question's scope (B1001, B1008, B1012): the identified evidence-closure defect is the traced-binary digest producer semantics (named but not embedded — E1008 carries only a `binary` name string); all other artifacts named (reader, program join, admission gates, bindings, pins, canary, cards, schema, lockstep suites — E1007/E1008/E1009/E1012/E1015–E1017/E1022–E1034/E1037/E1038/E1041) are literal. `offline_implementation_ready` remains false; no sibling authority is claimed.
+
+## Q109002 — ACCEPT
+Same consolidated ledger governs. Scope (B1001–B1007): unembedded dependencies required for exact closure are the aggregation-semantics study (named in E1002/E1005, not embedded) and admitted M5 inputs (state per E1002); both are recorded as typed pending/closure defects in the ledger, keeping `offline_implementation_ready` false. All named artifacts (ADRs E1003/E1004, workspace E1006, runner composition E1020, gate output E1021) are literal.
+
+## Q109003 — ACCEPT
+Same consolidated ledger governs. Scope (B1004, B1005, B1010): fully offline-implementable from embedded evidence (E1007, E1009–E1020, E1023–E1027, E1029, E1032) except that B1004 timing *facts* remain typed pending admitted M5 evidence; the arithmetic policy and type algebra have no unembedded dependency. Ledger rows reflect this split.
+
+## Q109004 — ACCEPT
+Same consolidated ledger governs. Scope (B1006, B1007, B1011): B1006 and B1011 are offline-implementable (E1005/E1006/E1009–E1014/E1019/E1020/E1021); B1007's rungs R3–R5 depend on non-embedded external facts (M5 start, owner-gate execution, aggregation study) and are typed pending — never inferred passes. The three ignored tests in E1021 are recorded as ignored.
+
+## Q109005 — ACCEPT
+Same consolidated ledger governs. Scope (B1009, B1013, B1014, B1015): B1009/B1013/B1014 are offline-implementable (E1005/E1007–E1011/E1019–E1027/E1029/E1035/E1036) with the co-residency limitation typed (no wire timestamps); B1015 is a state row — M4 in progress, M5 unstarted, M6/M7 blocked (E1039), owner gate defined but unexecuted here (E1040); no live-ready selection is permitted and none is made.
+
+---
+
+## Section 11 — Local blocker ledger (one closed row per blocker)
+
+| Blocker | Resolution (from Q dispositions) | Controlling constraints | State | Evidence |
+|---|---|---|---|---|
+| B1001 | AMENDED via Q1001: sealed LaunchEvidenceIdentity + validation order + hash edges | Fail-closed edges; no inferred producers | Offline-implementable; **binary-digest edge = evidence-closure defect (typed gap)** | E1007, E1008, E1009 |
+| B1002 | AMENDED via Q1002/Q1011: CoverageType + estimator provenance + aggregation rules | Sampled ⇒ cycles NotRecoverable, type-level | Offline-implementable | E1006, E1007, E1008, E1009 |
+| B1003 | AMENDED via Q1003 (with Q1012 patches): attribution + state machines + typed tails | RED/writeback/coherence = typed unmodeled tails, never conflated with ATOM fetch | Offline-implementable; tail constants = typed research gaps pending M5 | E1010–E1014, E1012 |
+| B1004 | AMENDED via Q1004: card-owned resource blocks; scaffolding now, facts post-M5 | Rule 1 + arch-locality (E1002); no borrowed constants | Scaffolding offline; **facts typed pending admitted M5** | E1009, E1010, E1015, E1016, E1017 |
+| B1005 | AMENDED via Q1005: full checked-arithmetic inventory + policy + terminal field | No wrap/saturate/expect/debug-assert in production; SHA-256 modular exemption documented | Offline-implementable | E1007, E1009–E1015, E1018–E1020, E1032 |
+| B1006 | AMENDED via Q1006: sim-runner/sim-cli from E1020, manifest-only, canonical JSON | No label-value input path; checked aggregation of sums only | Offline-implementable after B1001/B1002/B1005/B1010 | E1005, E1006, E1019, E1020, E1021 |
+| B1007 | ACCEPTED via Q1007: R0–R5 ladder | Ignored ≠ pass (E1021); milestones preserved (E1002) | R0 satisfied; **R3–R5 typed pending external** | E1002, E1003, E1004, E1005, E1019, E1021 |
+| B1008 | AMENDED via Q1009: parity-or-receipt, UNSPECIFIED/unknown-space closure, u128 ranges, flat-mode closure, regen authentication | Python owns snapshot defenses; receipts hash every payload byte | Offline-implementable; **binary-digest join = evidence-closure defect** | E1007, E1008, E1009, E1012, E1022–E1031, E1033, E1034, E1041 |
+| B1009 | AMENDED via Q1010: range/roster/segment predicates with owning layers | Co-residency = typed modeled property (wire lacks timestamps) | Offline-implementable with typed limitation | E1007–E1010, E1022–E1027, E1029 |
+| B1010 | AMENDED via Q1011: variant result algebra; sampled has no cycles field | No Sampled→Exact conversion exists | Offline-implementable | E1007, E1009, E1023–E1027, E1029 |
+| B1011 | AMENDED via Q1012: Local AccessKind + L2 pending-fill generations; modeled/unmodeled split | No hit before fill completion; stale fills dropped by generation | Offline-implementable | E1009–E1014 |
+| B1012 | AMENDED via Q1013: closed status taxonomy + precedence + Carded collision repair + strict projection | Collisions and unknown statuses reject; no production diagnostic defaults | Offline-implementable | E1015, E1016, E1017, E1032, E1037, E1038 |
+| B1013 | AMENDED via Q1014: diagnostic label + terminal field + explicit RequiredUnimplemented row with no max_cycles path | Binding cycles gated on the unembedded aggregation study | Offline-implementable; **study = evidence-closure defect for final binding contract; emission stays RequiredUnimplemented** | E1005, E1009, E1011, E1019, E1020, E1021 |
+| B1014 | AMENDED via Q1014: exact 61-entry partition, bidirectional lockstep, Exact = simulator scope | Descriptor ∪ typed-exclusion partition, both directions | Offline-implementable | E1005, E1019, E1021, E1035, E1036 |
+| B1015 | ACCEPTED as state via Q1007/Q1014: no live-ready selection permitted or made | Plan + hw_evidence_gate.sh own readiness; absent receipt = typed block | **Typed pending external** (M5 unstarted; owner gate unexecuted here); prohibited actions unchanged | E1039, E1040 |
+
+---
+
+## Completion fields
+
+- `response_complete`: **true** — all 19 questions and all 15 blockers answered exactly once.
+- `offline_implementation_ready`: **false** — unresolved evidence-closure defects: (1) traced-binary digest producer semantics (B1001/B1008; only a name string is embedded, E1008); (2) the aggregation-semantics study governing binding cycles (B1013/B1014; named in E1002/E1005, not embedded); admitted M5 inputs and hardware-owner receipts are additionally typed pending external (B1007/B1015).
+- `hardware_done`: **false** — no admitted hardware evidence is embedded; E1021's three owner tests are ignored, and E1040 defines but does not evidence a passing run.
+- `authorized_for_handoff`: **false**.
+
+No mutation, live capture, API use, commit, push, sudo, publication, or handoff is performed or authorized; all gates remain fail-closed as specified.

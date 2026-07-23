@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "simbench_bw/schemas/m4_archive_seal_receipt.schema.json",
+  "title": "M4 immutable archive sealing receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_kind",
+    "tool_id",
+    "status",
+    "sealed_at_utc",
+    "archive_root",
+    "chunk_count",
+    "file_count",
+    "directory_count",
+    "chunk_done_manifests",
+    "inventory",
+    "inventory_sha256",
+    "receipt_sha256"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "artifact_kind": {"type": "string", "const": "m4_archive_seal_receipt"},
+    "tool_id": {"type": "string", "const": "seal_m4_archive.v1"},
+    "status": {"type": "string", "const": "complete"},
+    "sealed_at_utc": {"type": "string", "format": "date-time"},
+    "archive_root": {"type": "string", "minLength": 1},
+    "chunk_count": {"type": "integer", "const": 18},
+    "file_count": {"type": "integer", "minimum": 18},
+    "directory_count": {"type": "integer", "minimum": 19},
+    "chunk_done_manifests": {
+      "type": "array",
+      "minItems": 18,
+      "maxItems": 18,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/chunkDone"}
+    },
+    "inventory": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"$ref": "#/$defs/inventoryEntry"}
+    },
+    "inventory_sha256": {"$ref": "#/$defs/sha256"},
+    "receipt_sha256": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "relativePath": {
+      "type": "string",
+      "pattern": "^chunks(?:/[A-Za-z0-9][A-Za-z0-9._-]*)*$"
+    },
+    "chunkDone": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["chunk_id", "relative_path", "sha256", "size_bytes"],
+      "properties": {
+        "chunk_id": {"type": "string", "minLength": 1},
+        "relative_path": {"type": "string", "pattern": "^chunks/[A-Za-z0-9][A-Za-z0-9._-]*/DONE\\.json$"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "size_bytes": {"type": "integer", "minimum": 1}
+      }
+    },
+    "inventoryEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "relative_path", "kind", "sha256", "size_bytes", "device",
+        "inode", "mode", "nlink"
+      ],
+      "properties": {
+        "relative_path": {"$ref": "#/$defs/relativePath"},
+        "kind": {"type": "string", "enum": ["file", "directory"]},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "size_bytes": {"type": "integer", "minimum": 0},
+        "device": {"type": "integer", "minimum": 0},
+        "inode": {"type": "integer", "minimum": 0},
+        "mode": {"type": "integer", "minimum": 0},
+        "nlink": {"type": "integer", "minimum": 1}
+      }
+    }
+  }
+}

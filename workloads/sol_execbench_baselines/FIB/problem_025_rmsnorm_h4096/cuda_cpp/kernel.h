@@ -1,0 +1,17 @@
+#pragma once
+
+#include <torch/extension.h>
+#include <cuda_runtime.h>
+
+// Host launcher for the (non-fused) RMSNorm kernel at hidden_size=4096.
+// Inputs and outputs are BF16; intermediate accumulation runs in FP32
+// per the precision contract (CLAUDE.md Rule 8). Output is pre-allocated
+// by the eval driver and written in-place (destination-passing style).
+// EPS is a compile-time constant baked into the kernel (1e-5 per the
+// definition's reference — note this slug uses 1e-5 while the other
+// landed RMSNorm slugs use 1e-6).
+void problem_025_rmsnorm_h4096_launcher(
+    const torch::Tensor& hidden_states,
+    const torch::Tensor& weight,
+    torch::Tensor& output,
+    cudaStream_t stream);

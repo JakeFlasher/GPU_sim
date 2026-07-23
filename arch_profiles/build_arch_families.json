@@ -1,0 +1,23 @@
+{
+  "_doc": "Build-arch families (Q5). This is a COMPILE-TIME vocabulary, kept separate from the deploy/collection arch_id. A kernel fatbin may legitimately carry server slices (sm_90a Hopper, sm_120a/sm_120f Blackwell, sm_100a datacenter) that are NEVER valid deploy arch_ids. The DEC-2 deploy ban (supported_arches restricted to sm_86 + sm_120-laptop) governs the deploy axis only; build Makefiles are excluded from that guard by design. Seed values mirror arch_resolver.CC_TO_ARCH_FAMILY + common.mk gencode tokens.",
+
+  "compute_capability_to_build_family": {
+    "8.6": ["sm_86"],
+    "9.0": ["sm_90", "sm_90a"],
+    "12.0": ["sm_120", "sm_120a", "sm_120f"],
+    "10.0": ["sm_100", "sm_100a"]
+  },
+
+  "gencode": {
+    "sm_86": "compute_86,code=sm_86",
+    "sm_90a": "compute_90a,code=sm_90a",
+    "sm_120": "compute_120,code=sm_120",
+    "sm_120a": "compute_120a,code=sm_120a",
+    "sm_120f": "compute_120f,code=sm_120f",
+    "sm_100a": "compute_100a,code=sm_100a"
+  },
+
+  "deploy_arch_ids": ["sm_86", "sm_120"],
+  "build_only_tokens": ["sm_90", "sm_90a", "sm_120a", "sm_120f", "sm_100", "sm_100a"],
+  "_deploy_doc": "deploy_arch_ids are the only tokens with a populated ArchProfile card and a place in the frozen label_admitted.json arch enum. build_only_tokens are compile/SASS-coverage slices (e.g. the Hopper wgmma kernels gated sm_90a); they must never appear in a supported_arches list or a label arch field."
+}

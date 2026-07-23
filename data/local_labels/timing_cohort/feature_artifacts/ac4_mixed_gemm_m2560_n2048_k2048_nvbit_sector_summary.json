@@ -1,0 +1,110 @@
+{
+  "arch": "sm_86",
+  "artifact_kind": "timing_nvbit_sector_summary",
+  "binary_sha256": "e2151e3732238acb4dcf030d1b0a191cc587a8b84e3d29224c25caff1d455592",
+  "deploy_legal": true,
+  "kernel_signature_sha256": "c5aaa10977b315c55d033f2c563f2966978b108314e8978c846767106ce25315",
+  "nvbit_launch_summary": {
+    "harmonized_kernel_name": "gemm_hmma_bf16_sm80_kernel",
+    "harmonized_kernel_signature_sha256": "c5aaa10977b315c55d033f2c563f2966978b108314e8978c846767106ce25315",
+    "inst_count": 245760,
+    "instruction_trace_mode": "bounded_observed_global_store_trace",
+    "launch_geometry": {
+      "block_x": 32,
+      "block_y": 1,
+      "block_z": 1,
+      "grid_x": 160,
+      "grid_y": 256,
+      "grid_z": 1,
+      "kernel_name": "gemm_hmma_bf16_sm80_kernel",
+      "shared_mem_dynamic_bytes": 0,
+      "shared_mem_static_bytes": 768
+    },
+    "launch_index": 0,
+    "path": "data/local_labels/timing_cohort/nvbit_launch_traces/ac4_mixed_gemm_m2560_n2048_k2048/nvbit_launch_summary.json",
+    "raw_kernel_name": "gemm_hmma_bf16_sm80_kernel___0",
+    "raw_kernel_signature_sha256": "637e10df3a82b9109aed91e402e379e05b8d9d1e7781a54824852cc9ae923aab",
+    "repeat_index": 0,
+    "sha256": "7ebb8ea57a75fb921c35acc1bdb0225e44a28d87a221a0981d97d9fb8b171d83",
+    "stats_csv_path": "data/local_labels/timing_cohort/nvbit_launch_traces/ac4_mixed_gemm_m2560_n2048_k2048/stats.csv",
+    "stats_csv_sha256": "a548badbae1e08d9bd0327f37da1d9dda4539224afafa9375e8075966cf46cfb"
+  },
+  "observation_basis": {
+    "memory_instruction_record_count": 122880,
+    "observed_access_count": 3932160,
+    "observed_hit_count": 3276800,
+    "observed_miss_count": 655360,
+    "stats_total_insts": 614400,
+    "stats_total_reported_insts": 614400,
+    "threadblock_proto_file_count": 40960,
+    "threadblock_proto_set_sha256": "fed0ea2d93e2dbf58d03809e171a0fbada1d9946b6572ea0322cf7b50333844d",
+    "trace_contract_ok": true
+  },
+  "observed_sector_summary": {
+    "artifact_kind": "timing_nvbit_observed_sector_summary",
+    "path": "data/local_labels/timing_cohort/nvbit_launch_traces/ac4_mixed_gemm_m2560_n2048_k2048/observed_sector_summary.json",
+    "sha256": "87d464f0a4b1fbeec929bf04c0ba2c725abfdf7a1b443edcac727312ac5f38a7"
+  },
+  "producer": "nvbit_observed_summarize_launch_sector_summary_v1",
+  "schema_version": 1,
+  "sector_count_derivation": {
+    "instruction_trace_mode": "bounded_observed_global_store_trace",
+    "observed_access_count": 3932160,
+    "observed_sector_summary_path": "data/local_labels/timing_cohort/nvbit_launch_traces/ac4_mixed_gemm_m2560_n2048_k2048/observed_sector_summary.json",
+    "source": "nvbit_observed_threadblock_proto_sector_stream"
+  },
+  "sector_counts": {
+    "estimated_bytes": 125829120,
+    "global_read_32b_sectors": 0,
+    "global_write_32b_sectors": 3932160,
+    "total_128b_lines": 983040,
+    "total_32b_sectors": 3932160
+  },
+  "shape_point": "ac4_mixed_gemm_m2560_n2048_k2048",
+  "slug": "gemm_hmma_bf16_sm80",
+  "source_commit": "3a715f5a9fe773046a266dac46a6d58caf135484",
+  "source_trace": {
+    "capture_mode": "per_cell_same_binary_same_shape_nvbit_bounded_observed_threadblock_trace",
+    "instr_begin": 168,
+    "instr_end": 174,
+    "instruction_trace_mode": "bounded_observed_global_store_trace",
+    "nvbit_trace_pb_path": "data/local_labels/timing_cohort/nvbit_launch_traces/ac4_mixed_gemm_m2560_n2048_k2048/dynamic_trace.pb",
+    "nvbit_trace_pb_sha256": "d862db8033bea5fc118916dbe133213fdfd001266be5f7b07eb26045693ca06e",
+    "threadblock_proto_file_count": 40960,
+    "threadblock_proto_retention": "summarized_then_pruned_after_digest",
+    "threadblock_proto_set_sha256": "fed0ea2d93e2dbf58d03809e171a0fbada1d9946b6572ea0322cf7b50333844d",
+    "trace_dir": "data/local_labels/timing_cohort/nvbit_launch_traces/ac4_mixed_gemm_m2560_n2048_k2048"
+  },
+  "static_inputs": {
+    "static_sass_features_path": "data/local_labels/timing_cohort/feature_artifacts/ac4_mixed_gemm_m2560_n2048_k2048_static_sass_features.json",
+    "static_sass_features_sha256": "3c1f4df9f606c46308ead4be578715ec04c121f6bcc5c0c4227631f6a8f612a3",
+    "static_work_path": "data/local_labels/timing_cohort/feature_artifacts/ac4_mixed_gemm_m2560_n2048_k2048_static_work.json",
+    "static_work_sha256": "5c58d7fe7a479ca0cd4b8401b53cab53a4bb849550591fa4381e579803ed5f24"
+  },
+  "summarize_launch": {
+    "async_copy_count": 0,
+    "atomic_count": 0,
+    "cold_count": 655360,
+    "finite_miss_count": 0,
+    "load_count": 0,
+    "per_access_kind_counts": {
+      "2": 3932160
+    },
+    "per_op_class_counts": {
+      "1": 3932160
+    },
+    "reuse_distance_finite_p50": 0,
+    "reuse_distance_finite_p90": 0,
+    "reuse_distance_finite_p99": 7,
+    "store_count": 3932160,
+    "unique_sector_count": 655360,
+    "unspecified_kind_count": 0,
+    "working_set_sector_count": 655360
+  },
+  "theoretical_occupancy": {
+    "active_blocks_per_sm": 32,
+    "active_warps_per_sm": 32,
+    "source": "launch_geometry_registers_shared_memory_limits",
+    "warps_per_block": 1
+  }
+}

@@ -1,0 +1,86 @@
+{
+  "artifact_kind": "task6_live_sweep_summary",
+  "generated_at_utc": "2026-06-01T17:04:49Z",
+  "schema_version": 1,
+  "source_commit": "4693d60456160041c808553c157578f2600ef4d5",
+  "summary": {
+    "admitted_config_rows": 245,
+    "admitted_config_rows_with_missing_payload": 35,
+    "config_rows": 390,
+    "duplicate_live_ready_rows": 8,
+    "failed_invocations": 240,
+    "final_excluded_cells": 0,
+    "floor_check": {
+      "admitted_cell_count": 49,
+      "admitted_unique_slug_count": 35,
+      "passes": true,
+      "required_admitted_cells": 31,
+      "required_unique_slugs": 30
+    },
+    "label_sidecars": 1710,
+    "live_ready_rows": 57,
+    "live_ready_unique_cells": 49,
+    "live_ready_unique_slugs": 35,
+    "non_admitted_config_rows": 145,
+    "planned_invocations": 1950,
+    "protocol": {
+      "cache_controls": [
+        "all",
+        "none"
+      ],
+      "repeats": [
+        5
+      ],
+      "stddev_threshold": 0.03,
+      "warmup_counts": [
+        0,
+        1,
+        5
+      ]
+    },
+    "repeatability_summaries": 342,
+    "selected_admitted_cells": 49,
+    "selected_unique_slugs": 35,
+    "sweep_count": 2
+  },
+  "sweeps": [
+    {
+      "admitted_config_rows": 218,
+      "admitted_config_rows_with_missing_payload": 35,
+      "config_rows": 342,
+      "failed_invocations": 240,
+      "label_sidecars": 1470,
+      "non_admitted_config_rows": 124,
+      "planned_invocations": 1710,
+      "repeatability_summaries": 294,
+      "sub_sweep_relpath": "data/local_labels/sweeps/sm86_submission_task6_round9/sweep_20260601T131729Z_9c760ab6e68a",
+      "unique_cells": 49,
+      "verdict": {
+        "config": null,
+        "evidence": "no (warmup, cache_control, repeats) config produced per-cell stddev <= 0.03 across the candidate cell set",
+        "verdict": "no_admitting_config_found"
+      },
+      "verdict_table_json_sha256": "00cdf71b8b9380f3d162c0d10c8fc72428aaf9b5c008c3faf87031204a8342fb",
+      "verdict_table_sha256": "971b914db1be64952319944b4d2823c1e6d9e9908c7f2e3047f55dc453f1eb43"
+    },
+    {
+      "admitted_config_rows": 27,
+      "admitted_config_rows_with_missing_payload": 0,
+      "config_rows": 48,
+      "failed_invocations": 0,
+      "label_sidecars": 240,
+      "non_admitted_config_rows": 21,
+      "planned_invocations": 240,
+      "repeatability_summaries": 48,
+      "sub_sweep_relpath": "data/local_labels/sweeps/sm86_submission_task6_round9_recovery/sweep_20260601T164614Z_35bd33f9cfae",
+      "unique_cells": 8,
+      "verdict": {
+        "config": null,
+        "evidence": "no (warmup, cache_control, repeats) config produced per-cell stddev <= 0.03 across the candidate cell set",
+        "verdict": "no_admitting_config_found"
+      },
+      "verdict_table_json_sha256": "6e8914027d93cbb6086c54945b5a086570dee8b373486dcc205c8f2dfee75ff9",
+      "verdict_table_sha256": "477f425cca2429c00fbe7e6598fb24498512bea1691570fb56ef203574c63a47"
+    }
+  ]
+}

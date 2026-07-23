@@ -1,0 +1,15 @@
+name: "RTX_3090_Ti"
+SRAM_capacity: 6291456  # L2 6MB (cudaDeviceProp.l2CacheSize on GA102 full-die)
+SRAM_byte_per_cycle: 1536  # 2.90TB/s @ 1.89GHz (NCU lts__t_bytes.sum.peak_sustained — measured on this 3090 Ti via probe.cu l2)
+DRAM_capacity: 25282478080  # ~23.55GiB GDDR6X visible (cudaDeviceProp.totalGlobalMem; advertised 24GB)
+DRAM_byte_per_cycle: 533.3  # 1008GB/s @ 1.89GHz (10501MHz mem × 2 × 384b / 8 = 1008GB/s)
+freq_GHz: 1.89  # boost clock (NVIDIA spec; nvidia-smi clocks.max.sm reports 2130 MHz hardware max)
+MAC_per_cycle_fp32_sm: 10752  # 84 SMs × 128 FP32 ALU: @ 1.89GHz = 40.6 TFLOPS
+MAC_per_cycle_int8_tc: 42328  # @ 1.89GHz: 160 TOPS dense (3rd-gen TC INT8)
+MAC_per_cycle_tf32_tc: 10582  # @ 1.89GHz: 40 TFLOPS dense (3rd-gen TC TF32)
+MAC_per_cycle_fp16_tc: 21164  # @ 1.89GHz: 80 TFLOPS dense (3rd-gen TC FP16)
+MAC_per_cycle_bf16_tc: 21164  # Same as FP16 on 3rd-gen TC
+# RTX 3090 Ti / GA102 (sm_86, Ampere) has no FP8 or NVFP4 tensor cores.
+# FP8 (e4m3 / e5m2) was introduced in Hopper (sm_89 / sm_90).
+# NVFP4 (e2m1) and MXFP8 / MXFP6 / MXFP4 are Blackwell-only (sm_100 / sm_120).
+# Intentionally omitted: MAC_per_cycle_fp8_tc, MAC_per_cycle_nvfp4_tc.

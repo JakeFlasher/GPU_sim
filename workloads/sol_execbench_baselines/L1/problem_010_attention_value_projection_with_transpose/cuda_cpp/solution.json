@@ -1,0 +1,40 @@
+{
+  "name": "problem_010_attention_value_projection_with_transpose_cuda_cpp",
+  "definition": "010_attention_value_projection_with_transpose",
+  "author": "sol-baselines-codegen",
+  "description": "GQA-style attention value projection with reshape and transpose. Pure ATen/cuBLAS dispatch chain: one F.linear-equivalent 2D bf16 cublasGemmEx call at transA=N transB=T orientation (the novel cublasGemmEx_2D_bf16_OP_N_OP_T family pinned by batch-043), then view + transpose + contiguous to materialise the [B, num_kv_heads, S, head_dim] layout. Const axes: hidden_size=5120, num_kv_heads=8, head_dim=128, kv_out_dim=1024. Destination-passing style.",
+  "spec": {
+    "languages": [
+      "cuda_cpp"
+    ],
+    "target_hardware": [
+      "LOCAL"
+    ],
+    "entry_point": "main.cpp::run",
+    "dependencies": [],
+    "destination_passing_style": true,
+    "binding": "torch",
+    "compile_options": {
+      "cflags": [
+        "-std=c++17"
+      ],
+      "cuda_cflags": [
+        "-O3",
+        "-std=c++17",
+        "-gencode",
+        "arch=compute_86,code=sm_86"
+      ],
+      "ld_flags": []
+    }
+  },
+  "sources": [
+    {
+      "path": "main.cpp",
+      "content": "#include <torch/extension.h>\n#include <ATen/cuda/CUDAContext.h>\n#include <c10/cuda/CUDAGuard.h>\n#include <string>\n\nstatic void check_bf16_contiguous_cuda(\n    const torch::Tensor& tensor, const std::string& name) {\n    TORCH_CHECK(tensor.is_cuda(), name, \" must be a CUDA tensor\");\n    TORCH_CHECK(tensor.dtype() == torch::kBFloat16,\n                name, \" must be bfloat16, got \", tensor.dtype());\n    TORCH_CHECK(tensor.is_contiguous(), name, \" must be contiguous\");\n}\n\n// Destination-passing-style entry for the GQA-style attention\n// value projection with reshape + transpose. Per definition.json:\n//   hidden_states  : [B, S, hidden_size=5120]                  bf16\n//   v_proj_weight  : [kv_out_dim=1024, hidden_size=5120]       bf16\n//   value_states   : [B, num_kv_heads=8, S, head_dim=128]      bf16 DPS\n//\n// Algorithm (mirrors the reference exactly):\n//   value_proj = F.linear(hidden_states, v_proj_weight)\n//     # F.linear computes `hidden_states @ v_proj_weight.T`. On\n//     # 2D bf16 contiguous operands this dispatches cublasGemmEx\n//     # with bf16 input/output, FP32 compute type, transA = N,\n//     # transB = T (the novel cublasGemmEx_2D_bf16_OP_N_OP_T\n//     # family pinned by batch-043).\n//     # shape: [B, S, kv_out_dim=1024]\n//   value_states = value_proj.view(B, S, num_kv_heads=8, head_dim=128)\n//   value_states = value_states.transpose(1, 2).contiguous()\n//     # logical reshape into [B, num_kv_heads, S, head_dim]\n//     # with a contiguous physical copy.\n//\n// Const axes pinned by definition.json AND enforced on every tensor\n// the kernel indexes with that fixed assumption:\n//   hidden_size  = 5120\n//   num_kv_heads = 8\n//   head_dim     = 128\n//   kv_out_dim   = num_kv_heads * head_dim = 1024\n//\n// Implementation: pure ATen / cuBLAS dispatch -- NO custom CUDA\n// kernels. The single 2D bf16 matmul dispatch routes through\n// cublasGemmEx (transA = N, transB = T orientation; the\n// cublasGemmEx_2D_bf16_OP_N_OP_T family). The\n// view + transpose + contiguous chain produces the GQA-attention\n// layout that downstream attention kernels consume.\nvoid run(\n    torch::Tensor hidden_states,\n    torch::Tensor v_proj_weight,\n    torch::Tensor value_states\n) {\n    check_bf16_contiguous_cuda(hidden_states, \"hidden_states\");\n    check_bf16_contiguous_cuda(v_proj_weight, \"v_proj_weight\");\n    check_bf16_contiguous_cuda(value_states, \"value_states\");\n\n    const c10::cuda::CUDAGuard device_guard(hidden_states.device());\n\n    constexpr int64_t kHiddenSize = 5120;\n    constexpr int64_t kNumKvHeads = 8;\n    constexpr int64_t kHeadDim = 128;\n    constexpr int64_t kKvOutDim = kNumKvHeads * kHeadDim;  // 1024\n\n    TORCH_CHECK(hidden_states.dim() == 3 &&\n                hidden_states.size(2) == kHiddenSize,\n                \"hidden_states must be [B, S, hidden_size=5120]\");\n    const int64_t B = hidden_states.size(0);\n    const int64_t S = hidden_states.size(1);\n    TORCH_CHECK(v_proj_weight.dim() == 2 &&\n                v_proj_weight.size(0) == kKvOutDim &&\n                v_proj_weight.size(1) == kHiddenSize,\n                \"v_proj_weight must be [kv_out_dim=1024, hidden_size=5120]\");\n    TORCH_CHECK(value_states.dim() == 4 && value_states.size(0) == B &&\n                value_states.size(1) == kNumKvHeads &&\n                value_states.size(2) == S &&\n                value_states.size(3) == kHeadDim,\n                \"value_states must be [B, num_kv_heads=8, S, head_dim=128]\");\n\n    // Linear projection (the only cuBLAS dispatch on this path).\n    auto value_proj = at::linear(hidden_states, v_proj_weight);\n\n    // View into [B, S, num_kv_heads, head_dim] then transpose +\n    // contiguous to match the GQA-attention layout. The\n    // .contiguous() produces a fresh physical buffer; .copy_()\n    // into the DPS output is the canonical materialisation.\n    auto value_reshaped = value_proj.view({B, S, kNumKvHeads, kHeadDim});\n    value_states.copy_(value_reshaped.transpose(1, 2).contiguous());\n}\n\nPYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {\n    m.def(\n        \"run\", &run,\n        \"GQA-style attention value projection with reshape and \"\n        \"transpose. Pure ATen / cuBLAS dispatch chain: one \"\n        \"F.linear-equivalent 2D bf16 cublasGemmEx call at \"\n        \"transA=N transB=T orientation (the novel \"\n        \"cublasGemmEx_2D_bf16_OP_N_OP_T family pinned by \"\n        \"batch-043), then view + transpose + contiguous to \"\n        \"materialise the [B, num_kv_heads, S, head_dim] layout \"\n        \"downstream attention consumes. Const axes: \"\n        \"hidden_size=5120, num_kv_heads=8, head_dim=128, \"\n        \"kv_out_dim=1024. Destination-passing style.\");\n}\n"
+    },
+    {
+      "path": "kernel.cu",
+      "content": "// The deployed problem_010 baseline implements its entire run()\n// via pure ATen / cuBLAS dispatch (one F.linear-equivalent bf16\n// 2D matmul dispatch through cublasGemmEx + view + transpose +\n// contiguous copy into the DPS output buffer). No custom CUDA\n// kernels are needed. This .cu file exists solely so that\n// torch.utils.cpp_extension.load detects the build as a CUDA\n// compilation and threads the CUDA toolkit include paths\n// (e.g. cuda_runtime_api.h) through nvcc, since main.cpp's ATen\n// includes transitively reference them. Same workaround as\n// problem_045, problem_074, problem_073, problem_068,\n// problem_064, problem_072, problem_031, problem_065,\n// problem_004, problem_050, problem_055, problem_054,\n// problem_083, problem_032, and problem_049.\n\n#include <cuda_runtime.h>\n"
+    }
+  ]
+}

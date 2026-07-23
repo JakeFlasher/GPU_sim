@@ -1,0 +1,714 @@
+{
+  "arch": "sm_86",
+  "artifact_kind": "gcom_lite_cycles",
+  "cells": [
+    {
+      "analytical_prior_cycles": 48649.448221216946,
+      "binary_sha256": "279546697af3639e17922fe444c1352acb171d48adfba44da3260ebe3d68f11e",
+      "component_terms": {
+        "compute": {
+          "cycles": 6442.0,
+          "formula": "per_sm_inst / issue_width",
+          "inputs": {
+            "active_sm_count": 64.0,
+            "inst_executed": 1649152.0,
+            "issue_width_per_sm": 4.0
+          }
+        },
+        "imbalance": {
+          "cycles": 0.0,
+          "formula": "wave_quantization_remainder",
+          "inputs": {
+            "note": "round_robin_uniform_distribution_assumed_by_the_trace_replay"
+          }
+        },
+        "memory": {
+          "cycles": 48649.448221216946,
+          "formula": "(walker_miss_count + walker_bypass_count) / active_sm * (l2_hit*l2_latency + (1-l2_hit)*dram_latency) / mshr_count",
+          "inputs": {
+            "dram_latency_cycles": 527.0255,
+            "l2_latency_cycles": 250.0092,
+            "mshr_count": 32,
+            "mshr_source": "documented_default",
+            "predicted_l2_hit_rate_raw": 0.9966686629350486,
+            "walker_bypass_count": 0,
+            "walker_miss_count": 397056
+          }
+        },
+        "stall": {
+          "cycles": 4296.460895721925,
+          "formula": "per_sm_inst * mean_static_stall / co_resident_warps",
+          "inputs": {
+            "co_resident_warps": 16.0,
+            "mean_static_stall_cycles": 2.6677807486631018,
+            "static_stall_evidence": {
+              "n_decoded": 1496,
+              "n_functions": 1,
+              "n_unknown_encoding": 0,
+              "scope": "all_binary_functions_fallback",
+              "toolkit_version": "V13.2"
+            }
+          }
+        }
+      },
+      "feature_vector": {
+        "active_sm_over_84": 0.7619047619047619,
+        "bias": 1.0,
+        "co_resident_warps_over_48": 0.3333333333333333,
+        "log1p_inst_executed": 14.315772380742768,
+        "log1p_walker_miss_stream_sectors": 12.891835126189358,
+        "mean_static_stall_cycles": 2.6677807486631018,
+        "predicted_l1_hit_rate": 0.00128783000643915,
+        "predicted_l2_hit_rate_raw": 0.9966686629350486
+      },
+      "kernel_signature_sha256": "4585d912ad82ae86356fa7d64c2782fc6948e8acc97cc30947abfc4633840f6d",
+      "label_consumed_for_fit": false,
+      "predicted_cycles": 161645.51453162447,
+      "prediction_channel": "deployable_gcom_lite_interval_no_same_slug_substitution",
+      "ridge_residual_log": 1.200765288997312,
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "carveout_sensitivity_probe",
+      "status": "modeled_holdout_reserved"
+    },
+    {
+      "binary_sha256": "19beb03abd72bc3583ce71dcf779c7f058ac0e0cb976c0a321759535c72d5e3a",
+      "evidence": {
+        "missing_inputs": [
+          "t1_inst_executed_unscored"
+        ]
+      },
+      "kernel_signature_sha256": "166c68126ca691ffffd1cf792265b04165b17f4a4d8d03860580b4eaf68e9acb",
+      "shape_point": "timing_shape",
+      "slug": "conv2d_implicit_gemm_bf16_sm80",
+      "status": "typed",
+      "typed_reason": "evaluator_input_unavailable"
+    },
+    {
+      "binary_sha256": "b0b510ca0263ad138574a0295f06a2207903b780fe4763cdfa61bb90a53fdc79",
+      "evidence": {
+        "missing_inputs": [
+          "v5_l2_raw_prediction_missing",
+          "walker_row_not_scalar"
+        ]
+      },
+      "kernel_signature_sha256": "a99c593cfe75c5246722662748ea2c5598a235cd79be8e80809a3e893ed1d354",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "cp_async_shared_tile_copy",
+      "status": "typed",
+      "typed_reason": "evaluator_input_unavailable"
+    },
+    {
+      "binary_sha256": "bb022917d38733a47694ea8bd63c2abb1b4e816a07fd1f5adeba707bc38dfd97",
+      "evidence": {
+        "missing_inputs": [
+          "v5_l2_raw_prediction_missing"
+        ]
+      },
+      "kernel_signature_sha256": "28bc636502da34541b1abb1b2e2f439fab06d0c2a46ba76e4ba1eb314a19346a",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "dram_streaming_dot_product",
+      "status": "typed",
+      "typed_reason": "evaluator_input_unavailable"
+    },
+    {
+      "binary_sha256": "ce2f77933a7ec3581aa62eaf52bd3e8c07de2a78ae61546632a70b2a7a0fe48e",
+      "evidence": {
+        "missing_inputs": [
+          "t1_inst_executed_unscored"
+        ]
+      },
+      "kernel_signature_sha256": "8dbf972a5fdbebe33768c592447108592664645c38e0d22514468f664795ff8b",
+      "shape_point": "timing_shape",
+      "slug": "embedding_gather_int32_sm80",
+      "status": "typed",
+      "typed_reason": "evaluator_input_unavailable"
+    },
+    {
+      "analytical_prior_cycles": 3777.0502053108803,
+      "binary_sha256": "55bfc93c0edebe35c6e78b16d6096bd3a21e60f25faa178a410fc59cbf21bbae",
+      "component_terms": {
+        "compute": {
+          "cycles": 121.75,
+          "formula": "per_sm_inst / issue_width",
+          "inputs": {
+            "active_sm_count": 16.0,
+            "inst_executed": 7792.0,
+            "issue_width_per_sm": 4.0
+          }
+        },
+        "imbalance": {
+          "cycles": 0.0,
+          "formula": "wave_quantization_remainder",
+          "inputs": {
+            "note": "round_robin_uniform_distribution_assumed_by_the_trace_replay"
+          }
+        },
+        "memory": {
+          "cycles": 3777.0502053108803,
+          "formula": "(walker_miss_count + walker_bypass_count) / active_sm * (l2_hit*l2_latency + (1-l2_hit)*dram_latency) / mshr_count",
+          "inputs": {
+            "dram_latency_cycles": 527.0255,
+            "l2_latency_cycles": 250.0092,
+            "mshr_count": 32,
+            "mshr_source": "documented_default",
+            "predicted_l2_hit_rate_raw": 0.9935233160621761,
+            "walker_bypass_count": 0,
+            "walker_miss_count": 7680
+          }
+        },
+        "stall": {
+          "cycles": 87.94681490384616,
+          "formula": "per_sm_inst * mean_static_stall / co_resident_warps",
+          "inputs": {
+            "co_resident_warps": 16.0,
+            "mean_static_stall_cycles": 2.889423076923077,
+            "static_stall_evidence": {
+              "n_decoded": 208,
+              "n_functions": 1,
+              "n_unknown_encoding": 0,
+              "scope": "all_binary_functions_fallback",
+              "toolkit_version": "V13.2"
+            }
+          }
+        }
+      },
+      "feature_vector": {
+        "active_sm_over_84": 0.19047619047619047,
+        "bias": 1.0,
+        "co_resident_warps_over_48": 0.3333333333333333,
+        "log1p_inst_executed": 8.96098117384356,
+        "log1p_walker_miss_stream_sectors": 8.946505025998682,
+        "mean_static_stall_cycles": 2.889423076923077,
+        "predicted_l1_hit_rate": 0.8484848484848485,
+        "predicted_l2_hit_rate_raw": 0.9935233160621761
+      },
+      "kernel_signature_sha256": "87f0eeb1256101173117148a10ac97d6367a9307c2b8e33c78df9d43c2f491f7",
+      "label_consumed_for_fit": true,
+      "predicted_cycles": 9325.992855256294,
+      "prediction_channel": "deployable_gcom_lite_interval_no_same_slug_substitution",
+      "ridge_residual_log": 0.9038620962558794,
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "fp32_fma_dep_chain",
+      "status": "modeled_fit_pool"
+    },
+    {
+      "binary_sha256": "1a638194443715e18b8753bfbde32c9be79e2d59be70585b318600e12d7f6b1d",
+      "evidence": {
+        "missing_inputs": [
+          "t1_inst_executed_unscored",
+          "walker_row_not_scalar"
+        ]
+      },
+      "kernel_signature_sha256": "6c3c64d7b03efd3c0fab89868ff75dc052370434282ac050bbb6c21d3310f9b9",
+      "shape_point": "timing_shape",
+      "slug": "gemm_hmma_fp16_sm80",
+      "status": "typed",
+      "typed_reason": "evaluator_input_unavailable"
+    },
+    {
+      "binary_sha256": "1a638194443715e18b8753bfbde32c9be79e2d59be70585b318600e12d7f6b1d",
+      "evidence": {
+        "missing_inputs": [
+          "t1_inst_executed_unscored",
+          "walker_row_not_scalar"
+        ]
+      },
+      "kernel_signature_sha256": "6c3c64d7b03efd3c0fab89868ff75dc052370434282ac050bbb6c21d3310f9b9",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "gemm_hmma_fp16_sm80",
+      "status": "typed",
+      "typed_reason": "evaluator_input_unavailable"
+    },
+    {
+      "binary_sha256": "6cd2cf81121ff58834c36aadf8667764e676aa1cb4fd322788a95ea283cca4f8",
+      "evidence": {
+        "missing_inputs": [
+          "t1_inst_executed_unscored",
+          "walker_row_not_scalar"
+        ]
+      },
+      "kernel_signature_sha256": "f7154498956f308d855299538f5255af01943add22c7bd17936b2b4eb8f39ce4",
+      "shape_point": "timing_shape",
+      "slug": "gemm_imma_int8_sm80",
+      "status": "typed",
+      "typed_reason": "evaluator_input_unavailable"
+    },
+    {
+      "binary_sha256": "6cd2cf81121ff58834c36aadf8667764e676aa1cb4fd322788a95ea283cca4f8",
+      "evidence": {
+        "missing_inputs": [
+          "t1_inst_executed_unscored",
+          "walker_row_not_scalar"
+        ]
+      },
+      "kernel_signature_sha256": "f7154498956f308d855299538f5255af01943add22c7bd17936b2b4eb8f39ce4",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "gemm_imma_int8_sm80",
+      "status": "typed",
+      "typed_reason": "evaluator_input_unavailable"
+    },
+    {
+      "binary_sha256": "dac635cbb91e33c54424581f6527dae3be4c1cd7fddf170c32bd055296952963",
+      "evidence": {
+        "missing_inputs": [
+          "t1_inst_executed_unscored",
+          "walker_row_not_scalar"
+        ]
+      },
+      "kernel_signature_sha256": "5f2fb866479f938277d0dae62cce21626e6c56c68c8e4e447739f5919aac2f9e",
+      "shape_point": "timing_shape",
+      "slug": "gemm_sparse_2to4_bf16_sm80",
+      "status": "typed",
+      "typed_reason": "evaluator_input_unavailable"
+    },
+    {
+      "analytical_prior_cycles": 24950.05671867613,
+      "binary_sha256": "e6aa9925f55f19d7ab575e27c0c1184609cc5a02f569cfed3dd8e91f9ea3d675",
+      "component_terms": {
+        "compute": {
+          "cycles": 3790.4761904761904,
+          "formula": "per_sm_inst / issue_width",
+          "inputs": {
+            "active_sm_count": 84.0,
+            "inst_executed": 1273600.0,
+            "issue_width_per_sm": 4.0
+          }
+        },
+        "imbalance": {
+          "cycles": 0.0,
+          "formula": "wave_quantization_remainder",
+          "inputs": {
+            "note": "round_robin_uniform_distribution_assumed_by_the_trace_replay"
+          }
+        },
+        "memory": {
+          "cycles": 24950.05671867613,
+          "formula": "(walker_miss_count + walker_bypass_count) / active_sm * (l2_hit*l2_latency + (1-l2_hit)*dram_latency) / mshr_count",
+          "inputs": {
+            "dram_latency_cycles": 527.0255,
+            "l2_latency_cycles": 250.0092,
+            "mshr_count": 32,
+            "mshr_source": "documented_default",
+            "predicted_l2_hit_rate_raw": 0.9966598409825258,
+            "walker_bypass_count": 0,
+            "walker_miss_count": 267264
+          }
+        },
+        "stall": {
+          "cycles": 2823.115079365079,
+          "formula": "per_sm_inst * mean_static_stall / co_resident_warps",
+          "inputs": {
+            "co_resident_warps": 16.0,
+            "mean_static_stall_cycles": 2.9791666666666665,
+            "static_stall_evidence": {
+              "n_decoded": 576,
+              "n_functions": 1,
+              "n_unknown_encoding": 0,
+              "scope": "all_binary_functions_fallback",
+              "toolkit_version": "V13.2"
+            }
+          }
+        }
+      },
+      "feature_vector": {
+        "active_sm_over_84": 1.0,
+        "bias": 1.0,
+        "co_resident_warps_over_48": 0.3333333333333333,
+        "log1p_inst_executed": 14.057358879247827,
+        "log1p_walker_miss_stream_sectors": 12.495995954533921,
+        "mean_static_stall_cycles": 2.9791666666666665,
+        "predicted_l1_hit_rate": 0.0,
+        "predicted_l2_hit_rate_raw": 0.9966598409825258
+      },
+      "kernel_signature_sha256": "9b26911afd5effa33f41ae15bce2a7a5d606f797c873e5617db53a36f9f5f6fc",
+      "label_consumed_for_fit": true,
+      "predicted_cycles": 82111.13459777043,
+      "prediction_channel": "deployable_gcom_lite_interval_no_same_slug_substitution",
+      "ridge_residual_log": 1.1911975341584586,
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "l2_persisting_window_sweep",
+      "status": "modeled_fit_pool"
+    },
+    {
+      "analytical_prior_cycles": 29858.5,
+      "binary_sha256": "a9e72c8106c33cee877a77343c49e3d8bda32182e681063b504d04b869efefb8",
+      "component_terms": {
+        "compute": {
+          "cycles": 16613.0,
+          "formula": "per_sm_inst / issue_width",
+          "inputs": {
+            "active_sm_count": 64.0,
+            "inst_executed": 4252928.0,
+            "issue_width_per_sm": 4.0
+          }
+        },
+        "imbalance": {
+          "cycles": 0.0,
+          "formula": "wave_quantization_remainder",
+          "inputs": {
+            "note": "round_robin_uniform_distribution_assumed_by_the_trace_replay"
+          }
+        },
+        "memory": {
+          "cycles": 4001.232571917644,
+          "formula": "(walker_miss_count + walker_bypass_count) / active_sm * (l2_hit*l2_latency + (1-l2_hit)*dram_latency) / mshr_count",
+          "inputs": {
+            "dram_latency_cycles": 527.0255,
+            "l2_latency_cycles": 250.0092,
+            "mshr_count": 32,
+            "mshr_source": "documented_default",
+            "predicted_l2_hit_rate_raw": 0.9926468360795782,
+            "walker_bypass_count": 0,
+            "walker_miss_count": 32512
+          }
+        },
+        "stall": {
+          "cycles": 13245.5,
+          "formula": "per_sm_inst * mean_static_stall / co_resident_warps",
+          "inputs": {
+            "co_resident_warps": 16.0,
+            "mean_static_stall_cycles": 3.189189189189189,
+            "static_stall_evidence": {
+              "n_decoded": 296,
+              "n_functions": 1,
+              "n_unknown_encoding": 0,
+              "scope": "all_binary_functions_fallback",
+              "toolkit_version": "V13.2"
+            }
+          }
+        }
+      },
+      "feature_vector": {
+        "active_sm_over_84": 0.7619047619047619,
+        "bias": 1.0,
+        "co_resident_warps_over_48": 0.3333333333333333,
+        "log1p_inst_executed": 15.26311847999814,
+        "log1p_walker_miss_stream_sectors": 10.389395288339156,
+        "mean_static_stall_cycles": 3.189189189189189,
+        "predicted_l1_hit_rate": 0.950390625,
+        "predicted_l2_hit_rate_raw": 0.9926468360795782
+      },
+      "kernel_signature_sha256": "30baaa0f6d6054d23fe69560cb76c4f54a907f9bc94fa89d9fc7fc4daf32dbc7",
+      "label_consumed_for_fit": true,
+      "predicted_cycles": 140449.39978038732,
+      "prediction_channel": "deployable_gcom_lite_interval_no_same_slug_substitution",
+      "ridge_residual_log": 1.5483777235726472,
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "l2_prefetch_hint_sweep",
+      "status": "modeled_fit_pool"
+    },
+    {
+      "binary_sha256": "962bd89b476b10d78a59a580436c2dae18fc371da32da7518c90ddfa2b6054ce",
+      "evidence": {
+        "missing_inputs": [
+          "t1_inst_executed_unscored"
+        ]
+      },
+      "kernel_signature_sha256": "a1042966e9ab38785b141c9f2e70b768575024abfa0ad97ddca145143f2b83c3",
+      "shape_point": "timing_shape",
+      "slug": "rmsnorm_bwd_bf16_sm80",
+      "status": "typed",
+      "typed_reason": "evaluator_input_unavailable"
+    },
+    {
+      "analytical_prior_cycles": 4730.200998549107,
+      "binary_sha256": "519142e2477c60471f3627af671e0229f159ee1e35375c7d24107aced64d7d99",
+      "component_terms": {
+        "compute": {
+          "cycles": 1322.6666666666667,
+          "formula": "per_sm_inst / issue_width",
+          "inputs": {
+            "active_sm_count": 84.0,
+            "inst_executed": 444416.0,
+            "issue_width_per_sm": 4.0
+          }
+        },
+        "imbalance": {
+          "cycles": 0.0,
+          "formula": "wave_quantization_remainder",
+          "inputs": {
+            "note": "round_robin_uniform_distribution_assumed_by_the_trace_replay"
+          }
+        },
+        "memory": {
+          "cycles": 4730.200998549107,
+          "formula": "(walker_miss_count + walker_bypass_count) / active_sm * (l2_hit*l2_latency + (1-l2_hit)*dram_latency) / mshr_count",
+          "inputs": {
+            "dram_latency_cycles": 527.0255,
+            "l2_latency_cycles": 250.0092,
+            "mshr_count": 32,
+            "mshr_source": "documented_default",
+            "predicted_l2_hit_rate_raw": 0.96868896484375,
+            "walker_bypass_count": 0,
+            "walker_miss_count": 49152
+          }
+        },
+        "stall": {
+          "cycles": 386.9259259259259,
+          "formula": "per_sm_inst * mean_static_stall / co_resident_warps",
+          "inputs": {
+            "co_resident_warps": 48.0,
+            "mean_static_stall_cycles": 3.5104166666666665,
+            "static_stall_evidence": {
+              "n_decoded": 192,
+              "n_functions": 1,
+              "n_unknown_encoding": 0,
+              "scope": "all_binary_functions_fallback",
+              "toolkit_version": "V13.2"
+            }
+          }
+        }
+      },
+      "feature_vector": {
+        "active_sm_over_84": 1.0,
+        "bias": 1.0,
+        "co_resident_warps_over_48": 1.0,
+        "log1p_inst_executed": 13.004518589841336,
+        "log1p_walker_miss_stream_sectors": 10.802693161352469,
+        "mean_static_stall_cycles": 3.5104166666666665,
+        "predicted_l1_hit_rate": 0.25,
+        "predicted_l2_hit_rate_raw": 0.96868896484375
+      },
+      "kernel_signature_sha256": "874881cf5162a340bdbfdf4061ab2917e382d64eb8bcd407b00e13fbe65507e1",
+      "label_consumed_for_fit": true,
+      "predicted_cycles": 15503.245671038925,
+      "prediction_channel": "deployable_gcom_lite_interval_no_same_slug_substitution",
+      "ridge_residual_log": 1.187081704127191,
+      "shape_point": "trace_00",
+      "slug": "rmsnorm_fwd_bf16",
+      "status": "modeled_fit_pool"
+    },
+    {
+      "binary_sha256": "e44f714645062197b42dda23e2a41c748e105c8e674b62305c979564d35dec21",
+      "evidence": {
+        "missing_inputs": [
+          "t1_inst_executed_unscored"
+        ]
+      },
+      "kernel_signature_sha256": "7848654da87ddb65a3469a248bb5572f936b4650fefbb1d22aaa25f24aa6cbe2",
+      "shape_point": "timing_shape",
+      "slug": "rmsnorm_fwd_bf16_sm80",
+      "status": "typed",
+      "typed_reason": "evaluator_input_unavailable"
+    },
+    {
+      "binary_sha256": "12b290606983bbecb919678c86fffb9a1df3e02bf66afe8487eeef085bfa6551",
+      "evidence": {
+        "missing_inputs": [
+          "t1_inst_executed_unscored"
+        ]
+      },
+      "kernel_signature_sha256": "2681564ef5ca9026d42106bbe862a40d3e38b89b52e720a90ad39322c0ff99dc",
+      "shape_point": "timing_shape",
+      "slug": "silu_fwd_bf16_sm80",
+      "status": "typed",
+      "typed_reason": "evaluator_input_unavailable"
+    },
+    {
+      "analytical_prior_cycles": 6558.063368749999,
+      "binary_sha256": "57d8c9f0a178b2617d4108d091178f090a037e44957508ed3b13594b661fdf65",
+      "component_terms": {
+        "compute": {
+          "cycles": 107.25,
+          "formula": "per_sm_inst / issue_width",
+          "inputs": {
+            "active_sm_count": 4.0,
+            "inst_executed": 1716.0,
+            "issue_width_per_sm": 4.0
+          }
+        },
+        "imbalance": {
+          "cycles": 0.0,
+          "formula": "wave_quantization_remainder",
+          "inputs": {
+            "note": "round_robin_uniform_distribution_assumed_by_the_trace_replay"
+          }
+        },
+        "memory": {
+          "cycles": 6558.063368749999,
+          "formula": "(walker_miss_count + walker_bypass_count) / active_sm * (l2_hit*l2_latency + (1-l2_hit)*dram_latency) / mshr_count",
+          "inputs": {
+            "dram_latency_cycles": 527.0255,
+            "l2_latency_cycles": 250.0092,
+            "mshr_count": 32,
+            "mshr_source": "documented_default",
+            "predicted_l2_hit_rate_raw": 0.9362244897959183,
+            "walker_bypass_count": 0,
+            "walker_miss_count": 3136
+          }
+        },
+        "stall": {
+          "cycles": 64.20888157894737,
+          "formula": "per_sm_inst * mean_static_stall / co_resident_warps",
+          "inputs": {
+            "co_resident_warps": 16.0,
+            "mean_static_stall_cycles": 2.3947368421052633,
+            "static_stall_evidence": {
+              "n_decoded": 152,
+              "n_functions": 1,
+              "n_unknown_encoding": 0,
+              "scope": "all_binary_functions_fallback",
+              "toolkit_version": "V13.2"
+            }
+          }
+        }
+      },
+      "feature_vector": {
+        "active_sm_over_84": 0.047619047619047616,
+        "bias": 1.0,
+        "co_resident_warps_over_48": 0.3333333333333333,
+        "log1p_inst_executed": 7.448333860897476,
+        "log1p_walker_miss_stream_sectors": 8.051022208190679,
+        "mean_static_stall_cycles": 2.3947368421052633,
+        "predicted_l1_hit_rate": 0.5,
+        "predicted_l2_hit_rate_raw": 0.9362244897959183
+      },
+      "kernel_signature_sha256": "4389fe984bc721ccf9bcd759d75c23d713f5d65ae7ca07ed2e4fe24f02b6d414",
+      "label_consumed_for_fit": true,
+      "predicted_cycles": 13387.974237337234,
+      "prediction_channel": "deployable_gcom_lite_interval_no_same_slug_substitution",
+      "ridge_residual_log": 0.7136615178450132,
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "tf32_hmma_gemm_traceable",
+      "status": "modeled_fit_pool"
+    },
+    {
+      "binary_sha256": "0d784a20e147ea35ee22b0f881863b4f53ecf4c023128ba636774d9f4f9daff1",
+      "evidence": {
+        "missing_inputs": [
+          "walker_row_not_scalar"
+        ]
+      },
+      "kernel_signature_sha256": "8009b80357819242aa59324689e41d345c7c27edc559c0db332e289d773adb39",
+      "shape_point": "trace_00",
+      "slug": "vendor_sgemm_strided_batched_cublas",
+      "status": "typed",
+      "typed_reason": "evaluator_input_unavailable"
+    },
+    {
+      "binary_sha256": "eb3ec15b1d54b498650a94c903d85e4e01881a9531311ac6e27e2d85c560a252",
+      "evidence": {
+        "missing_inputs": [
+          "walker_row_not_scalar"
+        ]
+      },
+      "kernel_signature_sha256": "779b4acb3473bca619d87757ae102a1e0e7c50006edfa5171689e06af94e7443",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "warm_cold_pair_relaunch",
+      "status": "typed",
+      "typed_reason": "evaluator_input_unavailable"
+    },
+    {
+      "analytical_prior_cycles": 40697.11009418332,
+      "binary_sha256": "197379525a6e267b2e018513086fb85b3b861a696b0e14fb061d3839ac8e7dd6",
+      "component_terms": {
+        "compute": {
+          "cycles": 6171.0,
+          "formula": "per_sm_inst / issue_width",
+          "inputs": {
+            "active_sm_count": 64.0,
+            "inst_executed": 1579776.0,
+            "issue_width_per_sm": 4.0
+          }
+        },
+        "imbalance": {
+          "cycles": 0.0,
+          "formula": "wave_quantization_remainder",
+          "inputs": {
+            "note": "round_robin_uniform_distribution_assumed_by_the_trace_replay"
+          }
+        },
+        "memory": {
+          "cycles": 40697.11009418332,
+          "formula": "(walker_miss_count + walker_bypass_count) / active_sm * (l2_hit*l2_latency + (1-l2_hit)*dram_latency) / mshr_count",
+          "inputs": {
+            "dram_latency_cycles": 527.0255,
+            "l2_latency_cycles": 250.0092,
+            "mshr_count": 32,
+            "mshr_source": "documented_default",
+            "predicted_l2_hit_rate_raw": 0.9963401490799588,
+            "walker_bypass_count": 0,
+            "walker_miss_count": 332032
+          }
+        },
+        "stall": {
+          "cycles": 4422.964717741936,
+          "formula": "per_sm_inst * mean_static_stall / co_resident_warps",
+          "inputs": {
+            "co_resident_warps": 16.0,
+            "mean_static_stall_cycles": 2.8669354838709675,
+            "static_stall_evidence": {
+              "n_decoded": 1240,
+              "n_functions": 1,
+              "n_unknown_encoding": 0,
+              "scope": "all_binary_functions_fallback",
+              "toolkit_version": "V13.2"
+            }
+          }
+        }
+      },
+      "feature_vector": {
+        "active_sm_over_84": 0.7619047619047619,
+        "bias": 1.0,
+        "co_resident_warps_over_48": 0.3333333333333333,
+        "log1p_inst_executed": 14.272794255801564,
+        "log1p_walker_miss_stream_sectors": 12.712989640549374,
+        "mean_static_stall_cycles": 2.8669354838709675,
+        "predicted_l1_hit_rate": 0.0,
+        "predicted_l2_hit_rate_raw": 0.9963401490799588
+      },
+      "kernel_signature_sha256": "4a89354e3a81afb6d1ee9c0aea25f10cb68d1d31779c978bd37c6ee5713622e1",
+      "label_consumed_for_fit": true,
+      "predicted_cycles": 136954.58348951547,
+      "prediction_channel": "deployable_gcom_lite_interval_no_same_slug_substitution",
+      "ridge_residual_log": 1.2134922786209583,
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "working_set_capacity_sweep",
+      "status": "modeled_fit_pool"
+    }
+  ],
+  "deployable_channel": "deployable_gcom_lite_interval_no_same_slug_substitution",
+  "feature_names": [
+    "bias",
+    "log1p_inst_executed",
+    "log1p_walker_miss_stream_sectors",
+    "predicted_l1_hit_rate",
+    "predicted_l2_hit_rate_raw",
+    "mean_static_stall_cycles",
+    "co_resident_warps_over_48",
+    "active_sm_over_84"
+  ],
+  "fit": {
+    "holdout_labels_consumed": false,
+    "n_fit": 6,
+    "pool": "expanded_cohort_minus_sealed_holdout_members",
+    "ridge_coefficients": {
+      "active_sm_over_84": -0.054499964235014436,
+      "bias": 0.026669088241559044,
+      "co_resident_warps_over_48": -0.01850802914882437,
+      "log1p_inst_executed": 0.11281000765763963,
+      "log1p_walker_miss_stream_sectors": -0.042903358483845515,
+      "mean_static_stall_cycles": 0.05049310947113931,
+      "predicted_l1_hit_rate": 0.11289916345288993,
+      "predicted_l2_hit_rate_raw": 0.025163847055325636
+    },
+    "target": "log(true_cycles / analytical_prior)"
+  },
+  "generated_at_commit": "502125d5a898d8b0e509a6e32c2d492726a25bbf",
+  "inputs": {
+    "card": "data/pchase/sm_86_static_card.json",
+    "cohort": "data/local_labels/timing_cohort/sm86_timing_cohort_expanded.json",
+    "pc_join_witness": "data/sass_control/pc_join_witness_sm_86.json",
+    "replay_emissions": "data/local_labels/replay_count_emissions_sm_86.json",
+    "split": "data/sm_86_predictor_accuracy_recovery_v2/cohort_split.json",
+    "v5_head": "data/local_labels/sm_86_v5_head.json",
+    "walker_artifact": "data/sm_86_predictor_accuracy_recovery_v2/warp_pool_l1_per_admitted_cell.json"
+  },
+  "issue_width_per_sm": 4.0,
+  "model_version": "gcom_lite_interval_cpi_stack_v1",
+  "n_modeled": 7,
+  "n_rows": 21,
+  "n_typed": 14,
+  "ridge_lambda": 10.0,
+  "schema_version": 1
+}

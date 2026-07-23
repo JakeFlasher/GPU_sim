@@ -1,0 +1,154 @@
+{
+  "advisory_robustness": {
+    "advisory": true,
+    "advisory_bands": true,
+    "bootstrap_ci": {
+      "ci_high": 1.0801459498439638,
+      "ci_low": 0.4093576299514915,
+      "geomean": 0.6530009446392582,
+      "n_resamples": 2000,
+      "percentile": 95.0,
+      "seed": 20260527
+    },
+    "gates_closure": false,
+    "loocv": {
+      "geomean_relative_error": 0.6530009446392582,
+      "median_absolute_error": 0.3723408,
+      "n": 30
+    },
+    "loso": {
+      "geomean_relative_error": 0.6671394302212698,
+      "median_absolute_error": 0.3880845833333334,
+      "n": 30
+    }
+  },
+  "arches": [
+    "sm_120"
+  ],
+  "closure_disjunct": "engineering_closure",
+  "cross_arch_precondition": false,
+  "failure_mode_decomposition": {
+    "model_parameter": {
+      "dominant": false,
+      "evidence": "Every pre-registered grid config (capacity-scale 0.75-1.25, associativity 8-32, slices, LRU/SRRIP/BIP) yields a near-identical prediction because all 30 cells' working sets fit the modeled L2 capacity. The capacity/associativity/slice/replacement axes are therefore inert: they cannot create the conflict/capacity misses the hardware exhibits.",
+      "fully_associative_single_slice_median_absolute_error": 0.275719239220445,
+      "max_grid_prediction_spread": 0.0006246436295082036,
+      "most_set_associative_median_absolute_error": 0.275719239220445
+    },
+    "residual_calibration": {
+      "calibrated_median_absolute_error": 0.35802,
+      "dominant": false,
+      "evidence": "The one-dimensional monotone residual cannot rescue accuracy because the mechanistic predictions are nearly constant and non-monotone with respect to the label (low-reuse cells with low labels receive higher predictions than some high-label GEMM cells). A monotone map over a near-constant feature cannot separate the cohort.",
+      "mechanistic_median_absolute_error": 0.275719239220445
+    },
+    "trace_fidelity": {
+      "cells_over_predicted_by_0p1": 16,
+      "dominant": true,
+      "evidence": "The mechanistic replay over the raw NVBit access stream systematically over-predicts L2 hit ratio for low-reuse kernels. NCU's L2 sector hit rate observes only the L1-miss stream, whereas the replay feeds the full access stream to the L2 model; intra-line burst reuse absorbed by the per-SM L1 in hardware is double-counted as L2 hits. Predicting L2 hit ratio from these traces requires an L1 filter (L1-miss stream -> L2) that this round's L2-headline scope does not model.",
+      "mean_signed_over_prediction": 0.33871095315001887
+    }
+  },
+  "gate_verdict": {
+    "criteria": [
+      {
+        "name": "full_cohort_median_absolute_error",
+        "passed": false,
+        "threshold": 0.055,
+        "value": 0.35802
+      },
+      {
+        "name": "full_cohort_geomean_relative_error",
+        "passed": false,
+        "threshold": 0.12,
+        "value": 0.2572218320903352
+      },
+      {
+        "name": "holdout_geomean_relative_error",
+        "passed": false,
+        "threshold": 0.25,
+        "value": 0.7408616418201277
+      }
+    ],
+    "passed": false,
+    "per_bucket_p90": [
+      {
+        "bucket": "activation_norm",
+        "evaluated": true,
+        "n": 7,
+        "p90_absolute_error": 0.35445000000000004,
+        "passed": false,
+        "threshold": 0.15
+      },
+      {
+        "bucket": "memory_stress",
+        "evaluated": true,
+        "n": 7,
+        "p90_absolute_error": 0.44641,
+        "passed": false,
+        "threshold": 0.15
+      },
+      {
+        "bucket": "other",
+        "evaluated": true,
+        "n": 7,
+        "p90_absolute_error": 0.50499,
+        "passed": false,
+        "threshold": 0.15
+      },
+      {
+        "bucket": "tensor_compute",
+        "evaluated": true,
+        "n": 9,
+        "p90_absolute_error": 0.46548999999999996,
+        "passed": false,
+        "threshold": 0.15
+      }
+    ],
+    "per_bucket_passed": false
+  },
+  "hypothesis": {
+    "confirmed_threshold_pct": 30.0,
+    "joint_contribution_pct": 0.0,
+    "rdh_baseline_median_absolute_error": 0.34225000000000005,
+    "reduction_vs_rdh_baseline_pct": 19.439228861813014,
+    "refuted_threshold_pct": 10.0,
+    "replay_calibrated_median_absolute_error": 0.35802,
+    "replay_mechanistic_median_absolute_error": 0.275719239220445,
+    "set_associative_realism_contribution_pct": 0.0,
+    "statement": "Set-associative conflict/slice realism reduces median absolute hit-rate error versus the fully-associative reuse-distance-histogram (RDH) baseline by >= 30% (confirmed) or < 10% (refuted).",
+    "verdict": "refuted"
+  },
+  "l1_diagnostic": {
+    "diagnostic_median_absolute_error": 0.47129,
+    "load_bearing": false,
+    "note": "L1 is diagnostic-only this iteration; it does not gate closure."
+  },
+  "missed_gates": [
+    "accuracy_gate",
+    "subsumption_gate",
+    "throughput_gate"
+  ],
+  "research_success": false,
+  "sampled_fidelity": {
+    "max_abs_delta": 0.006703131703131637,
+    "max_sampled_record_fraction": 0.03474903474903475,
+    "n_cells": 30,
+    "n_within_abs_delta_bar": 30,
+    "passed": true,
+    "set_sample_modulus": 32
+  },
+  "schema_version": 1,
+  "source_commit": "ee7c5ab43e23ca4d9a8ecb7a730e8bd2b24ca13f",
+  "subsumption": {
+    "passed": false,
+    "replay_vs_rdh_baseline_beat_fraction": 0.6333333333333333,
+    "replay_vs_v5_beat_fraction": 0.26666666666666666
+  },
+  "terminal_on_sm120_host": true,
+  "throughput": {
+    "passed": false,
+    "replay_sectors_per_sec": 5455296.758528506,
+    "speedup_vs_fenwick": 9.731037331693136
+  },
+  "top_level_admission_scope": "target_arch=sm_120"
+}

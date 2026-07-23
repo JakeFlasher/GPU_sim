@@ -1,0 +1,461 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "simbench_bw/schemas/trace_convergence_confidence.schema.json",
+  "title": "Trace Convergence Confidence Bundle (the adaptive-sampler clause)",
+  "description": "One bundle per (slug, shape_point, binary_sha256, source_commit, kernel_signature_sha256) tuple. Implements the adaptive-sampler clause from the original plan Section 7 (Condens-style adaptive NVBit sampling): cumulative-window MRC at sector and line layers; max-quantile-residual distance metric; K=3 stationary stopping rule with distance_threshold=0.02 hit-rate-fraction. Truncation always types - a budget-cap truncation produces both trace_convergence_not_reached_budget_cap (this sidecar) and trace_volume_exceeded.json (the existing trace-budget sidecar). Every closed branch uses additionalProperties: false. The FIVE typed_unavailable reasons are: trace_convergence_not_reached_budget_cap (plan-enumerated), mrc_quantile_underconfigured, hrd_layer_unavailable, trace_convergence_disabled (round-added), trace_convergence_window_count_underconfigured (R38-added; emitted when both layers have usable admitted bins but only one cumulative window of HRD evidence is available, K+1 windows being required to admit result_kind=ok).",
+  "schema_version": 1,
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "manifest_pairing_index",
+    "device",
+    "hrd_profile_path",
+    "mrc_quantiles",
+    "distance_metric",
+    "k_consecutive_windows",
+    "distance_threshold",
+    "trace_window_size_bytes",
+    "windows",
+    "admission",
+    "source_commit"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "manifest_pairing_index": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "slug",
+        "shape_point",
+        "binary_sha256",
+        "source_commit",
+        "kernel_signature_sha256"
+      ],
+      "properties": {
+        "slug": {
+          "type": "string",
+          "minLength": 1
+        },
+        "shape_point": {
+          "type": "string",
+          "minLength": 1
+        },
+        "binary_sha256": {
+          "type": "string"
+        },
+        "source_commit": {
+          "type": "string"
+        },
+        "kernel_signature_sha256": {
+          "type": "string"
+        },
+        "source_commit_override_from": {
+          "type": "string",
+          "description": "Audit annotation: the MPI source_commit value BEFORE refresh_predictor_trace_source_commit.py overwrote it. Optional; present only when the refresh utility actually rewrote the source_commit. Distinct from the bundle's top-level source_commit_override_from (which audits the trace JSON's source_commit, not the MPI's)."
+        }
+      }
+    },
+    "device": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "device_name",
+        "compute_capability_major",
+        "compute_capability_minor",
+        "sm_count",
+        "l2_cache_size_bytes"
+      ],
+      "properties": {
+        "device_name": {
+          "type": "string"
+        },
+        "compute_capability_major": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "compute_capability_minor": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sm_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "l2_cache_size_bytes": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "hrd_profile_path": {
+      "type": "string",
+      "minLength": 1
+    },
+    "mrc_quantiles": {
+      "type": "array",
+      "items": {
+        "type": "number",
+        "minimum": 0.0,
+        "maximum": 1.0
+      },
+      "minItems": 1
+    },
+    "distance_metric": {
+      "type": "string",
+      "const": "max_abs_mrc_quantile_delta"
+    },
+    "k_consecutive_windows": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "distance_threshold": {
+      "type": "number",
+      "minimum": 0.0,
+      "maximum": 1.0
+    },
+    "trace_window_size_bytes": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "windows": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "$ref": "#/$defs/window_record"
+      }
+    },
+    "admission": {
+      "$ref": "#/$defs/admission"
+    },
+    "source_commit": {
+      "type": "string"
+    },
+    "source_commit_override_from": {
+      "type": "string",
+      "description": "Audit annotation: the top-level source_commit value BEFORE refresh_predictor_trace_source_commit.py overwrote it per the BL-20260508 post-commit recapture discipline. Optional; present only when the refresh utility actually rewrote the artifact's source_commit. Distinct from manifest_pairing_index.source_commit_override_from (which audits the MPI's source_commit, not the artifact's)."
+    }
+  },
+  "$defs": {
+    "window_record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "window_index",
+        "observation_count_cumulative",
+        "trace_bytes_cumulative",
+        "mrc_at_quantile",
+        "distance_to_previous",
+        "converged"
+      ],
+      "properties": {
+        "window_index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "observation_count_cumulative": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "trace_bytes_cumulative": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "mrc_at_quantile": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/mrc_quantile_record"
+          },
+          "minItems": 1
+        },
+        "distance_to_previous": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0.0,
+          "maximum": 1.0
+        },
+        "converged": {
+          "type": "boolean"
+        }
+      }
+    },
+    "mrc_quantile_record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "hierarchy_layer",
+        "quantile",
+        "mrc_hit_rate_fraction",
+        "quantile_observation_count"
+      ],
+      "properties": {
+        "hierarchy_layer": {
+          "type": "string",
+          "enum": [
+            "sector",
+            "line"
+          ]
+        },
+        "quantile": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0
+        },
+        "mrc_hit_rate_fraction": {
+          "type": "number",
+          "minimum": 0.0,
+          "maximum": 1.0
+        },
+        "quantile_observation_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "admission": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "result_kind",
+            "windows_converged",
+            "final_residual"
+          ],
+          "properties": {
+            "result_kind": {
+              "type": "string",
+              "const": "ok"
+            },
+            "windows_converged": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "final_residual": {
+              "type": "number",
+              "minimum": 0.0,
+              "maximum": 1.0
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "result_kind",
+            "typed_reason",
+            "max_trace_bytes",
+            "actual_trace_bytes",
+            "trace_volume_exceeded_sidecar_path",
+            "windows_observed",
+            "trailing_converged_windows",
+            "final_residual"
+          ],
+          "properties": {
+            "result_kind": {
+              "type": "string",
+              "const": "typed_unavailable"
+            },
+            "typed_reason": {
+              "type": "string",
+              "const": "trace_convergence_not_reached_budget_cap"
+            },
+            "max_trace_bytes": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "actual_trace_bytes": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "trace_volume_exceeded_sidecar_path": {
+              "type": "string",
+              "minLength": 1
+            },
+            "windows_observed": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "trailing_converged_windows": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "final_residual": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0.0,
+              "maximum": 1.0
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "result_kind",
+            "typed_reason",
+            "hierarchy_layer",
+            "quantile",
+            "minimum_bin_sample_count",
+            "observed_bin_sample_count"
+          ],
+          "properties": {
+            "result_kind": {
+              "type": "string",
+              "const": "typed_unavailable"
+            },
+            "typed_reason": {
+              "type": "string",
+              "const": "mrc_quantile_underconfigured"
+            },
+            "hierarchy_layer": {
+              "type": "string",
+              "enum": [
+                "sector",
+                "line"
+              ]
+            },
+            "quantile": {
+              "type": "number",
+              "minimum": 0.0,
+              "maximum": 1.0
+            },
+            "minimum_bin_sample_count": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "observed_bin_sample_count": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "result_kind",
+            "typed_reason",
+            "hrd_profile_path",
+            "bundle_underconfigured",
+            "requested_layers",
+            "unavailable_layer",
+            "usable_bin_count"
+          ],
+          "properties": {
+            "result_kind": {
+              "type": "string",
+              "const": "typed_unavailable"
+            },
+            "typed_reason": {
+              "type": "string",
+              "const": "hrd_layer_unavailable"
+            },
+            "hrd_profile_path": {
+              "type": "string",
+              "minLength": 1
+            },
+            "bundle_underconfigured": {
+              "type": "boolean"
+            },
+            "requested_layers": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "enum": [
+                  "sector",
+                  "line"
+                ]
+              },
+              "minItems": 1
+            },
+            "unavailable_layer": {
+              "type": "string",
+              "enum": [
+                "sector",
+                "line"
+              ]
+            },
+            "usable_bin_count": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "result_kind",
+            "typed_reason",
+            "config_key",
+            "config_value"
+          ],
+          "properties": {
+            "result_kind": {
+              "type": "string",
+              "const": "typed_unavailable"
+            },
+            "typed_reason": {
+              "type": "string",
+              "const": "trace_convergence_disabled"
+            },
+            "config_key": {
+              "type": "string",
+              "const": "trace_convergence_enabled"
+            },
+            "config_value": {
+              "type": "boolean",
+              "const": false
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "result_kind",
+            "typed_reason",
+            "observed_window_count",
+            "required_window_count",
+            "actual_trace_bytes",
+            "required_trace_bytes"
+          ],
+          "properties": {
+            "result_kind": {
+              "type": "string",
+              "const": "typed_unavailable"
+            },
+            "typed_reason": {
+              "type": "string",
+              "const": "trace_convergence_window_count_underconfigured"
+            },
+            "observed_window_count": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "required_window_count": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "actual_trace_bytes": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "required_trace_bytes": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        }
+      ]
+    }
+  }
+}

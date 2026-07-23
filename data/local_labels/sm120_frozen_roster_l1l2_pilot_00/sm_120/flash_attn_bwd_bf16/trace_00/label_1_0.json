@@ -1,0 +1,33 @@
+{
+  "aggregation": "kernel",
+  "binary_sha256": "389614b3c704ab4a7052400cd025ba17fd9b142924b2e73238445829d2b14201",
+  "cache_hit_rate_l1tex_sector": 0.9823999999999999,
+  "cache_hit_rate_l2_sector": 0.934,
+  "confidence_interval_l1tex_sector": {
+    "aggregation": "kernel",
+    "confidence_level": 0.95,
+    "lower": 0.9823999999999999,
+    "units": "sector_hit_rate_fraction",
+    "upper": 0.9823999999999999
+  },
+  "confidence_interval_l2_sector": {
+    "aggregation": "kernel",
+    "confidence_level": 0.95,
+    "lower": 0.934,
+    "units": "sector_hit_rate_fraction",
+    "upper": 0.934
+  },
+  "cuda_version": "13.2",
+  "device": "sm_120",
+  "driver_version": "595.71.05",
+  "gpu_uuid_sha256": "ef017d784a3b6f40a69523223cfa6f793072c5656e64dc3f1cd3ec2fefaee188",
+  "launch_index": 0,
+  "profiler_family": "nsight_compute",
+  "profiler_version": "Version 2026.1.1.0 (build 37634170) (public-release)",
+  "repeat_index": 1,
+  "replay_mode": "kernel",
+  "schema_version": 1,
+  "shape_point": "trace_00",
+  "slug": "flash_attn_bwd_bf16",
+  "warmup_count": 0
+}

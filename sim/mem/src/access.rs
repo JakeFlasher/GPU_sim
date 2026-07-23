@@ -1,0 +1,141 @@
+//! Memory-record classification shared by the SM issue model and the
+//! memory hierarchy. Lives in sim-mem (not sim-sm) because the token is
+//! MEMORY semantics: which level a record stages into, whether it
+//! allocates, and (next increments) per-token L2 behavior — the
+//! `CacheOpToken → MemRole → AccessKind` chain keeps the token instead of
+//! flattening it away, so bypass/untagged/store sectors can take
+//! token-specific hierarchy paths without re-joining the sidecar.
+
+use crate::cache_op::{
+    CacheOpError, CacheOpToken, classify_opcode_checked, derive_l1_eligible, opcode_head,
+};
+
+/// How the memory hierarchy treats a global-class record at a static pc,
+/// classified from the sidecar's SASS text (see `cache_op` for why the
+/// Python classifier's own manifests are not consumed).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MemRole {
+    /// Load-class opcode staging into the modeled L1.
+    EligibleLoad(CacheOpToken),
+    /// Load-class opcode bypassing the modeled L1 (`.cg`/`.cs`/strong
+    /// scopes/LDGSTS/ATOM/TEX/OTHER).
+    BypassLoad(CacheOpToken),
+    /// Global-class store head (STG / RED): sectors hit-tested against
+    /// the L1 without allocating; write-allocate at the L2.
+    Store,
+    /// Not load-class and not a store head (LD.E, LDC, LDSM, non-memory
+    /// opcodes): counted in the unified sector denominator only when the
+    /// dynamic record is global-class.
+    None,
+}
+
+/// Is this opcode a global-class STORE head (STG / reduction)? STS/STL
+/// are not global stores (shared / local — STL is L1-eligible via its
+/// token).
+pub fn is_global_store_opcode(opcode_text: &str) -> bool {
+    matches!(opcode_head(opcode_text), "STG" | "RED")
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum MemRoleError {
+    #[error("cache-op classification failed: {0}")]
+    CacheOp(#[from] CacheOpError),
+}
+
+/// Checked architecture-aware classifier used by simulator composition.
+pub fn mem_role_of_checked(opcode_text: &str, arch_token: &str) -> Result<MemRole, MemRoleError> {
+    Ok(match classify_opcode_checked(opcode_text, arch_token)? {
+        Some(token) if derive_l1_eligible(token) => MemRole::EligibleLoad(token),
+        Some(token) => MemRole::BypassLoad(token),
+        None if is_global_store_opcode(opcode_text) => MemRole::Store,
+        None => MemRole::None,
+    })
+}
+
+/// Static heads that are intentionally left untagged by the closed cache-op
+/// vocabulary but are known load-family instructions. A dynamic global record
+/// with any other untagged head is a schema/sidecar mismatch and must fail
+/// closed in replay.
+pub fn is_known_untagged_opcode(opcode_text: &str) -> bool {
+    matches!(opcode_head(opcode_text), "LD" | "LDC" | "LDS" | "LDSM")
+}
+
+/// static [`MemRole`] of its pc joined with the record's decoded unique
+/// sectors. Sector payloads (`off`/`len`) index the owning warp's sector
+/// arena.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AccessKind {
+    NonMemory,
+    /// Shared-memory class: no L1TEX sector traffic; fixed shared latency.
+    Shared,
+    /// Manifest-eligible global-class record: modeled L1 sectors.
+    GlobalEligible {
+        off: u32,
+        len: u16,
+        token: CacheOpToken,
+    },
+    /// Sidecar-tagged INELIGIBLE record (`.cg`/`.cs`/LDGSTS/ATOM/...):
+    /// bypasses the modeled L1 straight to the L2.
+    GlobalBypass {
+        off: u32,
+        len: u16,
+        token: CacheOpToken,
+    },
+    /// Global-class record whose pc the classifier did not tag and whose
+    /// opcode is not a store: counted in the unified denominator only.
+    GlobalUntagged {
+        off: u32,
+        len: u16,
+    },
+    /// Global-class STORE (STG/RED...): sectors hit-tested against the
+    /// L1 without allocating (v0 write-through no-allocate); allocate at
+    /// the L2 (card policy `write_allocate_non_inclusive`).
+    GlobalStore {
+        off: u32,
+        len: u16,
+    },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn mem_role_of(opcode_text: &str, arch_token: &str) -> MemRole {
+        mem_role_of_checked(opcode_text, arch_token).unwrap()
+    }
+
+    #[test]
+    fn mem_roles_classified_from_sidecar_text() {
+        assert_eq!(
+            mem_role_of("LDG.E.U16.CONSTANT R0, [R2.64]", "sm_86"),
+            MemRole::EligibleLoad(CacheOpToken::LdgECa)
+        );
+        assert_eq!(
+            mem_role_of("LDGSTS.E.128 [R1], [R2.64]", "sm_86"),
+            MemRole::BypassLoad(CacheOpToken::Ldgsts)
+        );
+        assert_eq!(
+            mem_role_of("ATOMG.E.CAS.STRONG.GPU PT, R4, [R2.64], R6, R7", "sm_86"),
+            MemRole::BypassLoad(CacheOpToken::Atom)
+        );
+        assert_eq!(
+            mem_role_of("STG.E.U16 [R2.64], R0", "sm_86"),
+            MemRole::Store
+        );
+        assert_eq!(
+            mem_role_of("RED.E.ADD.STRONG.GPU [R2.64], R0", "sm_86"),
+            MemRole::Store
+        );
+        assert_eq!(
+            mem_role_of("STL [R1], R0", "sm_86"),
+            MemRole::EligibleLoad(CacheOpToken::Stl)
+        );
+        assert_eq!(mem_role_of("IADD3 R0, R1, R2, RZ", "sm_86"), MemRole::None);
+        assert_eq!(mem_role_of("LD.E R0, [R2.64]", "sm_86"), MemRole::None);
+        // Bare LDG.E off sm_86 is an architecture capability gap, never
+        // conservatively reclassified into a generic bypass.
+        assert!(mem_role_of_checked("LDG.E R0, [R2.64]", "sm_120").is_err());
+        // STS is a shared store, never a global store head.
+        assert_eq!(mem_role_of("STS [R1], R0", "sm_86"), MemRole::None);
+    }
+}

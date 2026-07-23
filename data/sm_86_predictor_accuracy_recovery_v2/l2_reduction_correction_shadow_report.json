@@ -1,0 +1,137 @@
+{
+  "allowlist_slugs": [
+    "layernorm_fwd_bf16_sm80",
+    "rmsnorm_fwd_bf16_sm80",
+    "softmax_safe_bf16_sm80"
+  ],
+  "budget_breaches_per_cell": [],
+  "correction_factor_status": "diagnostic_truth_fitted_demoted",
+  "diagnostic_source_path": "data/sm_86_predictor_accuracy_recovery_v2/interim_diagnostic_report_sidecar.json",
+  "factor_applied": null,
+  "factor_provenance_path": "data/sm_86_predictor_accuracy_recovery_v2/l2_reduction_correction_calibration.json",
+  "generator": "tools/sm_86_predictor_accuracy_recovery_v2/generate_l2_reduction_shadow_report.py",
+  "hard_targets": {
+    "hard_1_friendly_l2_lt_0_15": true,
+    "hard_2_friendly_l1_byte_identical": true,
+    "hard_3_cross_cell_stddev_in_bound": true
+  },
+  "headline_diagnostic_shadow": {
+    "cross_cell_stddev": 0.2232932043296355,
+    "friendly_l2_geomean_rel_err": 0.01163108658078573,
+    "hostile_l2_geomean_rel_err": 0.09109182098524968
+  },
+  "headline_post_correction": {
+    "cross_cell_stddev": 0.1971921674162875,
+    "friendly_l1_geomean_rel_err": 1.9469743371673827,
+    "friendly_l2_geomean_rel_err": 0.10103272844728349,
+    "hostile_l2_geomean_rel_err": 0.09109182098524968
+  },
+  "headline_pre_correction": {
+    "cross_cell_stddev": 0.14749140579727102,
+    "friendly_l1_geomean_rel_err": 1.9469743371673827,
+    "friendly_l2_geomean_rel_err": 0.10103272844728349,
+    "hostile_l2_geomean_rel_err": 0.09109182098524968
+  },
+  "max_delta_across_cells": 0.0,
+  "monitoring_goals": {
+    "mg_1_hostile_l2_decreases": false,
+    "mg_2_rmsnorm_rel_err_decreases": false,
+    "mg_3_softmax_safe_rel_err_decreases": false,
+    "mg_4_friendly_l2_widens_hard_1_margin": false
+  },
+  "monitoring_goals_diagnostic_shadow": {
+    "mg_1_hostile_l2_decreases": false,
+    "mg_2_rmsnorm_rel_err_decreases": true,
+    "mg_3_softmax_safe_rel_err_decreases": true,
+    "mg_4_friendly_l2_widens_hard_1_margin": true
+  },
+  "per_cell_budget_pass": true,
+  "per_cell_budget_threshold": 0.02,
+  "per_slug_factors_demoted": {
+    "layernorm_fwd_bf16_sm80": 0.88,
+    "rmsnorm_fwd_bf16_sm80": 0.71,
+    "softmax_safe_bf16_sm80": 0.6
+  },
+  "rows_sorted_by_descending_delta": [
+    {
+      "budget_pass": true,
+      "class_matched": false,
+      "delta": 0.0,
+      "factor_applied": null,
+      "point_post": 0.9966687347971862,
+      "point_pre": 0.9966687347971862,
+      "predictor_design_coverage_bucket": "predictor_hostile",
+      "rel_err_after": 0.09109182098524966,
+      "rel_err_before": 0.09109182098524966,
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "carveout_sensitivity_probe",
+      "truth": 0.91346
+    },
+    {
+      "budget_pass": true,
+      "class_matched": true,
+      "correction_factor_status": "diagnostic_truth_fitted_demoted",
+      "delta": 0.0,
+      "diagnostic_corrected_value": 0.6876391601562499,
+      "factor_applied": null,
+      "factor_demoted": 0.71,
+      "point_post": 0.968505859375,
+      "point_pre": 0.968505859375,
+      "predictor_design_coverage_bucket": "predictor_friendly",
+      "rel_err_after": 0.42536330631512337,
+      "rel_err_after_diagnostic": 0.0120079474837375,
+      "rel_err_before": 0.42536330631512337,
+      "shape_point": "timing_shape",
+      "slug": "rmsnorm_fwd_bf16_sm80",
+      "truth": 0.67948
+    },
+    {
+      "budget_pass": true,
+      "class_matched": false,
+      "delta": 0.0,
+      "factor_applied": null,
+      "point_post": 0.5406549165056636,
+      "point_pre": 0.5406549165056636,
+      "predictor_design_coverage_bucket": "predictor_friendly",
+      "rel_err_after": 0.002995912187710517,
+      "rel_err_before": 0.002995912187710517,
+      "shape_point": "timing_shape",
+      "slug": "silu_fwd_bf16_sm80",
+      "truth": 0.5390400000000001
+    },
+    {
+      "budget_pass": true,
+      "class_matched": true,
+      "correction_factor_status": "diagnostic_truth_fitted_demoted",
+      "delta": 0.0,
+      "diagnostic_corrected_value": 0.575,
+      "factor_applied": null,
+      "factor_demoted": 0.6,
+      "point_post": 0.9583333333333334,
+      "point_pre": 0.9583333333333334,
+      "predictor_design_coverage_bucket": "predictor_friendly",
+      "rel_err_after": 0.6736523460239843,
+      "rel_err_after_diagnostic": 0.004191407614390426,
+      "rel_err_before": 0.6736523460239843,
+      "shape_point": "timing_shape",
+      "slug": "softmax_safe_bf16_sm80",
+      "truth": 0.5726
+    },
+    {
+      "budget_pass": true,
+      "class_matched": false,
+      "delta": 0.0,
+      "factor_applied": null,
+      "point_post": 0.9963402358138527,
+      "point_pre": 0.9963402358138527,
+      "predictor_design_coverage_bucket": "predictor_friendly",
+      "rel_err_after": 0.12137336613826981,
+      "rel_err_before": 0.12137336613826981,
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "working_set_capacity_sweep",
+      "truth": 0.8885
+    }
+  ],
+  "schema_version": 1,
+  "source_commit": "999044faa4d2fa9e4ac520cc30edc75f5e09ca55"
+}

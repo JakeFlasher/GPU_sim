@@ -1,0 +1,44 @@
+{
+  "name": "problem_014_rotary_embedding_with_attention_scaling_backward_cuda_cpp_scaffold",
+  "definition": "014_rotary_embedding_with_attention_scaling_backward",
+  "author": "scaffold",
+  "spec": {
+    "languages": [
+      "cuda_cpp"
+    ],
+    "target_hardware": [
+      "LOCAL"
+    ],
+    "entry_point": "main.cpp::run",
+    "dependencies": [],
+    "destination_passing_style": true,
+    "binding": "torch",
+    "compile_options": {
+      "cflags": [],
+      "cuda_cflags": [
+        "-O3",
+        "--use_fast_math",
+        "-gencode",
+        "arch=compute_86,code=sm_86"
+      ],
+      "ld_flags": [
+        "-lcuda"
+      ]
+    }
+  },
+  "sources": [
+    {
+      "path": "main.cpp",
+      "content": "#include <torch/extension.h>\n#include <ATen/cuda/CUDAContext.h>\n#include <c10/cuda/CUDAGuard.h>\n#include <string>\n\n// Backward pass for rotary position embedding with attention scaling.\n//\n// Reference (problem_014_rotary_embedding_with_attention_scaling_backward):\n//     grad_cos = grad_cos.float()                       # bf16 -> fp32\n//     grad_sin = grad_sin.float()                       # bf16 -> fp32\n//     half_dim = head_dim // 2\n//     grad_cos_freqs = grad_cos[..., :half_dim] + grad_cos[..., half_dim:]\n//     grad_sin_freqs = grad_sin[..., :half_dim] + grad_sin[..., half_dim:]\n//     emb_half = emb[..., :half_dim]\n//     grad_emb = (grad_cos_freqs * (-emb_half.sin()) * attention_scaling\n//                 + grad_sin_freqs *  emb_half.cos()  * attention_scaling)\n//     grad_freqs = grad_emb.transpose(1, 2)             # (B, half_dim, seq_len)\n//     grad_position_ids_expanded =\n//         inv_freq_expanded.transpose(-2, -1) @ grad_freqs   # (B,1,H)@(B,H,S)->(B,1,S)\n//     grad_position_ids = grad_position_ids_expanded.squeeze(1)   # (B, seq_len)\n//\n// Per definition.json (insertion order):\n//   grad_cos           : [batch, seq_len, head_dim]   bf16\n//   grad_sin           : [batch, seq_len, head_dim]   bf16\n//   emb                : [batch, seq_len, head_dim]   fp32\n//   inv_freq_expanded  : [batch, half_dim, 1]         fp32\n//   attention_scaling  : scalar                       fp32   (shape: null ->\n//                                                              a plain C++ double)\n//   grad_position_ids  : [batch, seq_len]             fp32   (DPS, pre-alloc)\n//\n// Implementation: pure ATen dispatch -- NO custom CUDA kernels. The reference's\n// tensor algebra is reproduced op-for-op. The bf16->fp32 cast on grad_cos /\n// grad_sin happens up-front, exactly as the reference's .float() calls, before\n// any arithmetic; all subsequent math is fp32. attention_scaling is a scalar\n// (shape null in definition.json) and is applied to BOTH the -sin (cos-grad)\n// and +cos (sin-grad) terms. Output is written in place into the pre-allocated\n// destination (destination-passing style).\n\nvoid run(\n    const torch::Tensor& grad_cos,\n    const torch::Tensor& grad_sin,\n    const torch::Tensor& emb,\n    const torch::Tensor& inv_freq_expanded,\n    double attention_scaling,\n    torch::Tensor grad_position_ids\n) {\n    TORCH_CHECK(grad_cos.is_cuda(), \"grad_cos must be a CUDA tensor\");\n    TORCH_CHECK(grad_sin.is_cuda(), \"grad_sin must be a CUDA tensor\");\n    TORCH_CHECK(emb.is_cuda(), \"emb must be a CUDA tensor\");\n    TORCH_CHECK(inv_freq_expanded.is_cuda(), \"inv_freq_expanded must be a CUDA tensor\");\n    TORCH_CHECK(grad_position_ids.is_cuda(), \"grad_position_ids must be a CUDA tensor\");\n\n    TORCH_CHECK(grad_cos.dtype() == torch::kBFloat16, \"grad_cos must be bfloat16, got \", grad_cos.dtype());\n    TORCH_CHECK(grad_sin.dtype() == torch::kBFloat16, \"grad_sin must be bfloat16, got \", grad_sin.dtype());\n    TORCH_CHECK(emb.dtype() == torch::kFloat32, \"emb must be float32, got \", emb.dtype());\n    TORCH_CHECK(inv_freq_expanded.dtype() == torch::kFloat32, \"inv_freq_expanded must be float32, got \", inv_freq_expanded.dtype());\n    TORCH_CHECK(grad_position_ids.dtype() == torch::kFloat32, \"grad_position_ids must be float32, got \", grad_position_ids.dtype());\n\n    TORCH_CHECK(grad_cos.dim() == 3, \"grad_cos must be 3D [batch, seq_len, head_dim], got \", grad_cos.dim(), \"D\");\n    TORCH_CHECK(grad_sin.dim() == 3, \"grad_sin must be 3D [batch, seq_len, head_dim], got \", grad_sin.dim(), \"D\");\n    TORCH_CHECK(emb.dim() == 3, \"emb must be 3D [batch, seq_len, head_dim], got \", emb.dim(), \"D\");\n    TORCH_CHECK(inv_freq_expanded.dim() == 3, \"inv_freq_expanded must be 3D [batch, half_dim, 1], got \", inv_freq_expanded.dim(), \"D\");\n\n    const c10::cuda::CUDAGuard device_guard(grad_cos.device());\n\n    const int64_t head_dim = emb.size(-1);\n    const int64_t half_dim = head_dim / 2;\n\n    // bf16 -> fp32 up-front, exactly as the reference's grad_cos.float() /\n    // grad_sin.float(). All subsequent arithmetic is fp32.\n    torch::Tensor grad_cos_f = grad_cos.to(torch::kFloat32);\n    torch::Tensor grad_sin_f = grad_sin.to(torch::kFloat32);\n\n    // Split each grad into its two head_dim halves and sum (the cat(freqs,freqs)\n    // duplication in forward sends both halves' gradients back to freqs).\n    torch::Tensor grad_cos_freqs =\n        grad_cos_f.slice(/*dim=*/-1, /*start=*/0, /*end=*/half_dim) +\n        grad_cos_f.slice(/*dim=*/-1, /*start=*/half_dim, /*end=*/head_dim);\n    torch::Tensor grad_sin_freqs =\n        grad_sin_f.slice(/*dim=*/-1, /*start=*/0, /*end=*/half_dim) +\n        grad_sin_f.slice(/*dim=*/-1, /*start=*/half_dim, /*end=*/head_dim);\n\n    // emb_half = emb[..., :half_dim].\n    torch::Tensor emb_half = emb.slice(/*dim=*/-1, /*start=*/0, /*end=*/half_dim);\n\n    // grad_emb = grad_cos_freqs * (-sin(emb_half)) * scaling\n    //          + grad_sin_freqs *   cos(emb_half)  * scaling\n    torch::Tensor grad_emb =\n        grad_cos_freqs * (-at::sin(emb_half)) * attention_scaling +\n        grad_sin_freqs * at::cos(emb_half) * attention_scaling;\n\n    // Transpose freqs back: (B, seq_len, half_dim) -> (B, half_dim, seq_len).\n    torch::Tensor grad_freqs = grad_emb.transpose(1, 2);\n\n    // Gradient through the matmul:\n    //   inv_freq_expanded.T : (B, 1, half_dim)\n    //   grad_freqs          : (B, half_dim, seq_len)\n    //   -> (B, 1, seq_len)\n    torch::Tensor grad_position_ids_expanded =\n        at::matmul(inv_freq_expanded.transpose(-2, -1), grad_freqs);\n\n    // Squeeze the singleton dim: (B, 1, seq_len) -> (B, seq_len).\n    torch::Tensor result = grad_position_ids_expanded.squeeze(1);\n\n    TORCH_CHECK(result.sizes() == grad_position_ids.sizes(),\n                \"computed grad_position_ids shape \", result.sizes(),\n                \" does not match pre-allocated output \", grad_position_ids.sizes());\n    grad_position_ids.copy_(result);\n}\n\nPYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {\n    m.def(\"run\", &run,\n          \"RoPE-with-attention-scaling backward: grad_position_ids via bf16->fp32 \"\n          \"grad cast, half-split sum, scaled -sin/+cos grad, transpose, and \"\n          \"batched matmul(inv_freq_expanded.T, grad_freqs); destination-passing \"\n          \"style.\");\n}\n"
+    },
+    {
+      "path": "kernel.cu",
+      "content": "// Stub translation unit: this ATen-delegated port has no custom __global__\n// kernels. A bare .cu is still needed so torch's cpp_extension builds a CUDA\n// extension (adding CUDA include paths); a .cpp-only extension fails with\n// \"cuda_runtime_api.h: No such file or directory\".\n#include <cuda_runtime.h>\n"
+    },
+    {
+      "path": "kernel.h",
+      "content": "#pragma once\n// Intentionally empty: ATen-delegated port, no custom kernel launcher.\n"
+    }
+  ],
+  "description": "Scaffolded baseline for problem_014_rotary_embedding_with_attention_scaling_backward (language=cuda_cpp); hand-edit the copied exemplar to implement the target problem before harness-running. Destination-passing-style is set true; outputs appear after inputs in definition.json insertion order."
+}

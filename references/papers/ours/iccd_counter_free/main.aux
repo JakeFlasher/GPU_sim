@@ -1,0 +1,120 @@
+\relax 
+\providecommand\hyper@newdestlabel[2]{}
+\providecommand\HyField@AuxAddToFields[1]{}
+\providecommand\HyField@AuxAddToCoFields[2]{}
+\catcode 95\active
+\citation{naghibijouybari2018rendered,cve_2018_6260}
+\citation{nvidia_errnvgpuctrperm}
+\citation{nvidia_cupti}
+\citation{nvidia_nsightcompute,nvidia_cupti}
+\@writefile{toc}{\contentsline {section}{\numberline {I}Introduction}{1}{section.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {II}Background and Related Work}{1}{section.2}\protected@file@percent }
+\newlabel{sec:related}{{II}{1}{Background and Related Work}{section.2}{}}
+\citation{nvidia_errnvgpuctrperm,nvidia_nsightcompute,nvidia_cupti}
+\citation{villa2019nvbit,stephenson2015sassi}
+\citation{nvidia_cupti_activity}
+\citation{nvidia_nsightsystems}
+\citation{nvidia_cudabinutils}
+\citation{nvidia_computesanitizer}
+\citation{nvidia_nvml}
+\citation{bakhoda2009gpgpusim,khairy2020accelsim,villa2021nvarchsim,huerta2025moderncores}
+\citation{hong2009analytical,huang2014gpumech,wang2020mdm,lee2022gcom,ardalani2015xapp,lee2025neusight}
+\citation{williams2009roofline,yang2020hierarchical}
+\citation{mattson1970}
+\citation{nugteren2014gpucache,kiani2018reuse,arafa2020reuse,arafa2021pptgpu}
+\citation{maeda2017hrd}
+\citation{jiang2022shalom}
+\citation{villa2019nvbit,stephenson2015sassi,huang2025neutrino}
+\citation{wong2010demystifying,mei2017dissecting,jia2018volta,jarmusch2025blackwell}
+\citation{bakhoda2009gpgpusim,khairy2020accelsim}
+\citation{hong2009analytical,huang2014gpumech,wang2020mdm,lee2022gcom,lee2025neusight}
+\citation{williams2009roofline}
+\citation{nugteren2014gpucache,kiani2018reuse,maeda2017hrd,arafa2021pptgpu,arafa2020reuse}
+\citation{huang2025neutrino}
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces \textbf  {Counter-free observability under the privilege wall.} Counter-bearing profiler surfaces and clock controls are unavailable when the host keeps the post-CVE-2018-6260 default restriction in place. The pipeline uses only permission-free signals from the tenant process, accepts recoverable metrics only after predefined checks, and reports non-identifiable metrics as mechanism-level certificates rather than unsupported point predictions.}}{2}{figure.1}\protected@file@percent }
+\newlabel{fig:overview}{{1}{2}{\textbf {Counter-free observability under the privilege wall.} Counter-bearing profiler surfaces and clock controls are unavailable when the host keeps the post-CVE-2018-6260 default restriction in place. The pipeline uses only permission-free signals from the tenant process, accepts recoverable metrics only after predefined checks, and reports non-identifiable metrics as mechanism-level certificates rather than unsupported point predictions}{figure.1}{}}
+\citation{mattson1970}
+\citation{nugteren2014gpucache,kiani2018reuse}
+\citation{maeda2017hrd}
+\citation{jiang2022shalom}
+\citation{vovk2005alrw}
+\citation{villaverde2016structural}
+\@writefile{lot}{\contentsline {table}{\numberline {I}{\ignorespaces \textbf  {Baseline capabilities under the tenant-visible contract.}}}{3}{table.1}\protected@file@percent }
+\newlabel{tab:positioning}{{I}{3}{\textbf {Baseline capabilities under the tenant-visible contract.}}{table.1}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {III}Counter-Free Observation}{3}{section.3}\protected@file@percent }
+\newlabel{sec:method}{{III}{3}{Counter-Free Observation}{section.3}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {III-A}}Observation Surfaces}{3}{subsection.3.1}\protected@file@percent }
+\newlabel{sec:signals}{{\mbox  {III-A}}{3}{Observation Surfaces}{subsection.3.1}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {III-B}}Hierarchical Reuse-Distance Recovery}{3}{subsection.3.2}\protected@file@percent }
+\newlabel{sec:cachemodel}{{\mbox  {III-B}}{3}{Hierarchical Reuse-Distance Recovery}{subsection.3.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {III-C}}Acceptance Checks and Certificates}{3}{subsection.3.3}\protected@file@percent }
+\newlabel{sec:gates}{{\mbox  {III-C}}{3}{Acceptance Checks and Certificates}{subsection.3.3}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {IV}Identifiability Map}{3}{section.4}\protected@file@percent }
+\newlabel{sec:map}{{IV}{3}{Identifiability Map}{section.4}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces \textbf  {Why a reuse-distance trace succeeds and fails.} Visible reuse creates finite reuse distances that can be replayed. Reuse staged in scratchpad or registers can change hardware hit behavior without producing additional global-address observations, creating a structural erasure mechanism.}}{4}{figure.2}\protected@file@percent }
+\newlabel{fig:reuse}{{2}{4}{\textbf {Why a reuse-distance trace succeeds and fails.} Visible reuse creates finite reuse distances that can be replayed. Reuse staged in scratchpad or registers can change hardware hit behavior without producing additional global-address observations, creating a structural erasure mechanism}{figure.2}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {II}{\ignorespaces \textbf  {L2 hit-rate recoverability by kernel family.}}}{4}{table.2}\protected@file@percent }
+\newlabel{tab:l2family}{{II}{4}{\textbf {L2 hit-rate recoverability by kernel family.}}{table.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {\mbox  {IV-A}}Validation Discipline}{4}{subsection.4.1}\protected@file@percent }
+\newlabel{sec:microbench}{{\mbox  {IV-A}}{4}{Validation Discipline}{subsection.4.1}{}}
+\citation{nvidia2026solexecbench}
+\citation{nugteren2014gpucache}
+\citation{khairy2020accelsim}
+\@writefile{toc}{\contentsline {section}{\numberline {V}Framework at Benchmark Scale}{5}{section.5}\protected@file@percent }
+\newlabel{sec:framework}{{V}{5}{Framework at Benchmark Scale}{section.5}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {VI}Evaluation Protocol}{5}{section.6}\protected@file@percent }
+\newlabel{sec:evaluation}{{VI}{5}{Evaluation Protocol}{section.6}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {III}{\ignorespaces \textbf  {Evaluation questions and reported evidence.}}}{5}{table.3}\protected@file@percent }
+\newlabel{tab:evaluation}{{III}{5}{\textbf {Evaluation questions and reported evidence.}}{table.3}{}}
+\@writefile{lot}{\contentsline {table}{\numberline {IV}{\ignorespaces \textbf  {Metric-level comparison against timing-backed GPU models.}}}{5}{table.4}\protected@file@percent }
+\newlabel{tab:sotanorm}{{IV}{5}{\textbf {Metric-level comparison against timing-backed GPU models.}}{table.4}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {3}{\ignorespaces \textbf  {Microbenchmark validation against local Nsight Compute references.} Panels show Blackwell read-sector recovery, Ampere read/write traffic, Ampere L1 hit-rate boundary, and Blackwell L2 hit ratio by family. Accepted estimates follow the diagonal; unsupported estimates and certified families show the per-cell failure modes that suite averages would hide.}}{6}{figure.3}\protected@file@percent }
+\newlabel{fig:microbench}{{3}{6}{\textbf {Microbenchmark validation against local Nsight Compute references.} Panels show Blackwell read-sector recovery, Ampere read/write traffic, Ampere L1 hit-rate boundary, and Blackwell L2 hit ratio by family. Accepted estimates follow the diagonal; unsupported estimates and certified families show the per-cell failure modes that suite averages would hide}{figure.3}{}}
+\@writefile{lof}{\contentsline {figure}{\numberline {4}{\ignorespaces \textbf  {Benchmark-scale framework evidence.} Panel (a) reports SOL-ExecBench availability by genre on both GPUs. Panels (b)--(c) compare calibrated L1 and L2 hit-rate predictions with local Nsight Compute references on the RTX 3090 Ti cohort. Panel (d) summarizes cohort mean absolute errors against the thresholds shown in the panel; L1 points are circles and L2 points are diamonds.}}{6}{figure.4}\protected@file@percent }
+\newlabel{fig:framework}{{4}{6}{\textbf {Benchmark-scale framework evidence.} Panel (a) reports SOL-ExecBench availability by genre on both GPUs. Panels (b)--(c) compare calibrated L1 and L2 hit-rate predictions with local Nsight Compute references on the RTX 3090 Ti cohort. Panel (d) summarizes cohort mean absolute errors against the thresholds shown in the panel; L1 points are circles and L2 points are diamonds}{figure.4}{}}
+\@writefile{toc}{\contentsline {section}{\numberline {VII}Discussion and Limitations}{6}{section.7}\protected@file@percent }
+\newlabel{sec:discussion}{{VII}{6}{Discussion and Limitations}{section.7}{}}
+\bibstyle{IEEEtran}
+\bibdata{refs}
+\bibcite{naghibijouybari2018rendered}{1}
+\bibcite{cve_2018_6260}{2}
+\bibcite{nvidia_errnvgpuctrperm}{3}
+\bibcite{nvidia_cupti}{4}
+\bibcite{nvidia_nsightcompute}{5}
+\bibcite{villa2019nvbit}{6}
+\bibcite{stephenson2015sassi}{7}
+\bibcite{nvidia_cupti_activity}{8}
+\bibcite{nvidia_nsightsystems}{9}
+\bibcite{nvidia_cudabinutils}{10}
+\bibcite{nvidia_computesanitizer}{11}
+\bibcite{nvidia_nvml}{12}
+\bibcite{bakhoda2009gpgpusim}{13}
+\bibcite{khairy2020accelsim}{14}
+\bibcite{villa2021nvarchsim}{15}
+\bibcite{huerta2025moderncores}{16}
+\bibcite{hong2009analytical}{17}
+\bibcite{huang2014gpumech}{18}
+\bibcite{wang2020mdm}{19}
+\bibcite{lee2022gcom}{20}
+\bibcite{ardalani2015xapp}{21}
+\bibcite{lee2025neusight}{22}
+\bibcite{williams2009roofline}{23}
+\bibcite{yang2020hierarchical}{24}
+\bibcite{mattson1970}{25}
+\bibcite{nugteren2014gpucache}{26}
+\bibcite{kiani2018reuse}{27}
+\bibcite{arafa2020reuse}{28}
+\bibcite{arafa2021pptgpu}{29}
+\bibcite{maeda2017hrd}{30}
+\bibcite{jiang2022shalom}{31}
+\bibcite{huang2025neutrino}{32}
+\bibcite{wong2010demystifying}{33}
+\bibcite{mei2017dissecting}{34}
+\bibcite{jia2018volta}{35}
+\bibcite{jarmusch2025blackwell}{36}
+\bibcite{vovk2005alrw}{37}
+\bibcite{villaverde2016structural}{38}
+\bibcite{nvidia2026solexecbench}{39}
+\@writefile{toc}{\contentsline {section}{\numberline {VIII}Conclusion}{7}{section.8}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{References}{7}{section*.1}\protected@file@percent }
+\gdef \@abspage@last{7}

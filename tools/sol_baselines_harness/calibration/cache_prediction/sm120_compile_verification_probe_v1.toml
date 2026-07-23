@@ -1,0 +1,1565 @@
+# sm_120 compile / correctness verification probe.
+#
+# Refreshed by walking the harness trace bundles at
+# ``scripts/baselines_harness/.harness_traces/<slug>__<lang>/``
+# and extracting per-slug compile evidence (any harness
+# surface recording status=ok or the 'Compilation succeeded'
+# stderr substring) plus correctness evidence (every
+# trace.json row status=PASSED).
+
+[meta]
+schema_version = "1.0"
+host_arch = "sm_120"
+captured_at_utc = "2026-05-27T14:16:30+00:00"
+row_count = 91
+aggregate_compile_verified = 91
+aggregate_sol_execbench_correct_verified = 78
+aggregate_compile_failed = 0
+payload_sha256 = "0750e62641b1275a87bac0fe1c8849e11bc2b4354b774eb561b2fd5a87603284"
+
+[[entries]]
+slug = "problem_001_fused_add_rmsnorm_h2048"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T13:32:10.367461+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 7
+passed_row_count = 7
+bundle_relpath = "problem_001_fused_add_rmsnorm_h2048__cuda_cpp"
+dispatch_argv = ["sol-execbench", "/home/jakeshea/solbench_baseline/.tmp_staged_benchmarks/FlashInfer-Bench/001_fused_add_rmsnorm_h2048", "--solution", "/home/jakeshea/solbench_baseline/baselines/FIB/problem_001_fused_add_rmsnorm_h2048/cuda_cpp/solution.json", "--json", "--timeout", "1740", "--keep-staging", "--config", "/home/jakeshea/solbench_baseline/scripts/baselines_harness/.harness_traces/problem_001_fused_add_rmsnorm_h2048__cuda_cpp/_staged/eval_config.reduced.json"]
+solution_path = "baselines/FIB/problem_001_fused_add_rmsnorm_h2048/cuda_cpp/solution.json"
+solution_source_sha256 = "875fb7e7a92fa3248429a411b4404b420d94db61d284f97f587a7a53cad89f25"
+provenance_source = "argv_recorded"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_001_fused_vision_multihead_attention_with_norms_backward"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T20:24:21.953593+00:00"
+compile_verified = true
+sol_execbench_correct_verified = false
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 13
+bundle_relpath = "problem_001_fused_vision_multihead_attention_with_norms_backward__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/L2/problem_001_fused_vision_multihead_attention_with_norms_backward/cuda_cpp/solution.json"
+solution_source_sha256 = "1063ceccb277b99490697f9952cc1be8480243457901068f99ba1775a90545b8"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = "compile_succeeded_correctness_failed"
+
+[[entries]]
+slug = "problem_002_decoder_layer_full_block"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T20:24:21.953593+00:00"
+compile_verified = true
+sol_execbench_correct_verified = false
+compile_failed = false
+workload_row_count = 18
+passed_row_count = 16
+bundle_relpath = "problem_002_decoder_layer_full_block__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/L2/problem_002_decoder_layer_full_block/cuda_cpp/solution.json"
+solution_source_sha256 = "d39c503f862aa88a455efa1615d67cddcca231fb68845a137ccb32e2c20a6e49"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = "compile_succeeded_correctness_failed"
+
+[[entries]]
+slug = "problem_002_fused_add_rmsnorm_h4096"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 14
+passed_row_count = 14
+bundle_relpath = "problem_002_fused_add_rmsnorm_h4096__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/FIB/problem_002_fused_add_rmsnorm_h4096/cuda_cpp/solution.json"
+solution_source_sha256 = "d66d377696bcf08db8866096f1e9f10c13ca465872c35cff0e34cb839141e8b2"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_003_fused_add_rmsnorm_h7168"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 8
+passed_row_count = 8
+bundle_relpath = "problem_003_fused_add_rmsnorm_h7168__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/FIB/problem_003_fused_add_rmsnorm_h7168/cuda_cpp/solution.json"
+solution_source_sha256 = "44e2974eec779f06b6373cc001bb802178b708ec6681358357243c6859dbb7c8"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_003_grouped_query_attention_with_rope_backward"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 16
+bundle_relpath = "problem_003_grouped_query_attention_with_rope_backward__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/L2/problem_003_grouped_query_attention_with_rope_backward/cuda_cpp/solution.json"
+solution_source_sha256 = "5eba002d4280986b0ff1f4fce2dc86c59eba7dc719003353b9decf0cdb7c5643"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_003_lm_head_projection_with_logit_slicing"
+language = "cutlass"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 16
+bundle_relpath = "problem_003_lm_head_projection_with_logit_slicing__cutlass"
+dispatch_argv = []
+solution_path = "baselines/L1/problem_003_lm_head_projection_with_logit_slicing/cutlass/solution.json"
+solution_source_sha256 = "0dfba53fe6c9dd211d4e2d23a52b0736243875d7cd8eb40f0d9ed7585ffe26d5"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_004_attention_output_projection_with_reshape_backward"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 16
+bundle_relpath = "problem_004_attention_output_projection_with_reshape_backward__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/L1/problem_004_attention_output_projection_with_reshape_backward/cuda_cpp/solution.json"
+solution_source_sha256 = "5caae4a1e26557e95b3b632f753e6ca1e4031813f55ea5590730d50de0be1023"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_004_fused_residual_rms_mlp"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T20:24:21.953593+00:00"
+compile_verified = true
+sol_execbench_correct_verified = false
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 0
+bundle_relpath = "problem_004_fused_residual_rms_mlp__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/L2/problem_004_fused_residual_rms_mlp/cuda_cpp/solution.json"
+solution_source_sha256 = "5161995ee1f312c85d3a94f30659970d9af5d1a15a01fcf77d8776ce39344d44"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = "compile_succeeded_correctness_failed"
+
+[[entries]]
+slug = "problem_004_gemm_n128_k2048"
+language = "cutlass"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 25
+passed_row_count = 25
+bundle_relpath = "problem_004_gemm_n128_k2048__cutlass"
+dispatch_argv = []
+solution_path = "baselines/FIB/problem_004_gemm_n128_k2048/cutlass/solution.json"
+solution_source_sha256 = "5bc2930f159eb42e953cc07bd21abc92bd99b6716609af6ca2e9da3f5bc14c25"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_005_gemm_n256_k7168"
+language = "cutlass"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 17
+passed_row_count = 17
+bundle_relpath = "problem_005_gemm_n256_k7168__cutlass"
+dispatch_argv = []
+solution_path = "baselines/FIB/problem_005_gemm_n256_k7168/cutlass/solution.json"
+solution_source_sha256 = "cfdb9c71fe1910f03073072c618ec6c13aab17aebb19386d6fd81f35877e243c"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_005_swiglu_mlp_backward"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T20:24:21.953593+00:00"
+compile_verified = true
+sol_execbench_correct_verified = false
+compile_failed = false
+workload_row_count = 18
+passed_row_count = 0
+bundle_relpath = "problem_005_swiglu_mlp_backward__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/L2/problem_005_swiglu_mlp_backward/cuda_cpp/solution.json"
+solution_source_sha256 = "73a726a677dec89008beaa0adabb416af646b47d8228d844b779e3c6b72168e7"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = "compile_succeeded_correctness_failed"
+
+[[entries]]
+slug = "problem_006_gemm_n2048_k4096"
+language = "cutlass"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 29
+passed_row_count = 29
+bundle_relpath = "problem_006_gemm_n2048_k4096__cutlass"
+dispatch_argv = []
+solution_path = "baselines/FIB/problem_006_gemm_n2048_k4096/cutlass/solution.json"
+solution_source_sha256 = "98dc6007d9a139353599da6efc687663f0af24934b4ab8f93d60f8d78e9fcf9b"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_006_hyena_depthwise_conv1d_split_gate"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-27T22:00:00+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 16
+bundle_relpath = "problem_006_hyena_depthwise_conv1d_split_gate__cuda_cpp"
+dispatch_argv = ["/home/jakeshea/solbench_baseline/.venv/bin/sol-execbench", "/home/jakeshea/solbench_baseline/sol-execbench/data/benchmark/L1/006_hyena_depthwise_conv1d_split_gate", "--solution", "/home/jakeshea/solbench_baseline/baselines/L1/problem_006_hyena_depthwise_conv1d_split_gate/cuda_cpp/solution.json", "--json"]
+solution_path = "baselines/L1/problem_006_hyena_depthwise_conv1d_split_gate/cuda_cpp/solution.json"
+solution_source_sha256 = "48cd62b8ac6485ee388ccbf9c49fd51598b14be8ae9c5fdb02a8d4b3ce76e6d5"
+provenance_source = "argv_recorded"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_006_multimodal_rope_position_calculation"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 16
+bundle_relpath = "problem_006_multimodal_rope_position_calculation__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/L2/problem_006_multimodal_rope_position_calculation/cuda_cpp/solution.json"
+solution_source_sha256 = "8276d03edbc8e3b32c494817ce6a38cd639ea0891ffc439ff383410c79cc7629"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_007_gemm_n4096_k4096"
+language = "cutlass"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 43
+passed_row_count = 43
+bundle_relpath = "problem_007_gemm_n4096_k4096__cutlass"
+dispatch_argv = []
+solution_path = "baselines/FIB/problem_007_gemm_n4096_k4096/cutlass/solution.json"
+solution_source_sha256 = "a319ba7fe2e2873134ab29437b5785be70fe90ec73a981a9a2e83851ccc955af"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_008_expert_output_weighted_index_add_accumulation"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 16
+bundle_relpath = "problem_008_expert_output_weighted_index_add_accumulation__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/L1/problem_008_expert_output_weighted_index_add_accumulation/cuda_cpp/solution.json"
+solution_source_sha256 = "73d97633bcf8fd506ffd4e2fb59d36e6c147683d5b48e6376573fc0618bcf86c"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_008_gemm_n4096_k14336"
+language = "cutlass"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 43
+passed_row_count = 43
+bundle_relpath = "problem_008_gemm_n4096_k14336__cutlass"
+dispatch_argv = []
+solution_path = "baselines/FIB/problem_008_gemm_n4096_k14336/cutlass/solution.json"
+solution_source_sha256 = "c45a206253203b94099c07c7d7da5128c0d05be4ae5334765ba00caa3382680f"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_008_moe_sparse_routing_and_dispatch"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T11:47:03.271020+00:00"
+compile_verified = true
+sol_execbench_correct_verified = false
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 0
+bundle_relpath = "problem_008_moe_sparse_routing_and_dispatch__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/L2/problem_008_moe_sparse_routing_and_dispatch/cuda_cpp/solution.json"
+solution_source_sha256 = "e4134730b0f9174ddf5f8831c9baf0ed119fdb0890b672d2594acd20a0187b78"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = "compile_succeeded_correctness_failed"
+
+[[entries]]
+slug = "problem_009_gemm_n5120_k2048"
+language = "cutlass"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 25
+passed_row_count = 25
+bundle_relpath = "problem_009_gemm_n5120_k2048__cutlass"
+dispatch_argv = []
+solution_path = "baselines/FIB/problem_009_gemm_n5120_k2048/cutlass/solution.json"
+solution_source_sha256 = "81743b5cd2594be63163bc0643630a3a3b3b4a6abbc1f8fc3a0aa87b1abf1f2c"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_010_attention_value_projection_with_transpose"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 16
+bundle_relpath = "problem_010_attention_value_projection_with_transpose__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/L1/problem_010_attention_value_projection_with_transpose/cuda_cpp/solution.json"
+solution_source_sha256 = "54afe868d9814a296c9dc266d7ef7c1721c4e16004888768e4d1b0ea38c6a1a3"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_010_gemm_n6144_k4096"
+language = "cutlass"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 43
+passed_row_count = 43
+bundle_relpath = "problem_010_gemm_n6144_k4096__cutlass"
+dispatch_argv = []
+solution_path = "baselines/FIB/problem_010_gemm_n6144_k4096/cutlass/solution.json"
+solution_source_sha256 = "789a547352b4ba9345540a3a856c4efbbdd482cfd13744897b36dee1526ea18f"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_011_gemm_n28672_k4096"
+language = "cutlass"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 43
+passed_row_count = 43
+bundle_relpath = "problem_011_gemm_n28672_k4096__cutlass"
+dispatch_argv = []
+solution_path = "baselines/FIB/problem_011_gemm_n28672_k4096/cutlass/solution.json"
+solution_source_sha256 = "b35f43882263c1f5150008d6b05eabf656c952201b0e2c5d785464c24f96d9cb"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_011_moe_sparse_routing_and_dispatch_backward"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 16
+bundle_relpath = "problem_011_moe_sparse_routing_and_dispatch_backward__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/L2/problem_011_moe_sparse_routing_and_dispatch_backward/cuda_cpp/solution.json"
+solution_source_sha256 = "0ece10df44dbcd7488d3fdf431db07b9254739638c3c5b3f71e2c2aa69dc8ad1"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_011_rotary_position_embedding"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 16
+bundle_relpath = "problem_011_rotary_position_embedding__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/L1/problem_011_rotary_position_embedding/cuda_cpp/solution.json"
+solution_source_sha256 = "160653ec7e23007fb3da82fa701c629645e3642ac419ba4f5786c85c7a55315e"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_012_fused_cos_sin_embedding_generation"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 16
+bundle_relpath = "problem_012_fused_cos_sin_embedding_generation__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/L1/problem_012_fused_cos_sin_embedding_generation/cuda_cpp/solution.json"
+solution_source_sha256 = "78e7e13a3fc90d105191b09e44ebe1979454c3117806c8c9234e926521fcd444"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_013_fused_residual_rms_norm_backward"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T20:24:21.953593+00:00"
+compile_verified = true
+sol_execbench_correct_verified = false
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 13
+bundle_relpath = "problem_013_fused_residual_rms_norm_backward__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/L1/problem_013_fused_residual_rms_norm_backward/cuda_cpp/solution.json"
+solution_source_sha256 = "f0785465abf1e80d300209cb66dcf587ed9b2693a1e972420d0a4823be875f89"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = "compile_succeeded_correctness_failed"
+
+[[entries]]
+slug = "problem_014_fp8_yarn_rope_embedding"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 16
+bundle_relpath = "problem_014_fp8_yarn_rope_embedding__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/Quant/problem_014_fp8_yarn_rope_embedding/cuda_cpp/solution.json"
+solution_source_sha256 = "177c9975247afdb7fde4a6fa4ea59da9ecaf9dc55e401666490214efab6dda64"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_016_rope_inverse_frequency_computation"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 16
+bundle_relpath = "problem_016_rope_inverse_frequency_computation__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/L1/problem_016_rope_inverse_frequency_computation/cuda_cpp/solution.json"
+solution_source_sha256 = "5ddeb77131caffee1da73f8751c4215fb94bff73f67aa336799704b2d9ec15af"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_017_fused_vision_cu_seqlens_attention_with_2d_rope_backward"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 16
+bundle_relpath = "problem_017_fused_vision_cu_seqlens_attention_with_2d_rope_backward__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/L2/problem_017_fused_vision_cu_seqlens_attention_with_2d_rope_backward/cuda_cpp/solution.json"
+solution_source_sha256 = "94de9679c8d7bd80907aa12a28b5ad5cb5879d816e2557ee2d233e83874c1aed"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_018_fused_rope_with_qk_norm_and_kv_cache_update"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T20:24:21.953593+00:00"
+compile_verified = true
+sol_execbench_correct_verified = false
+compile_failed = false
+workload_row_count = 13
+passed_row_count = 8
+bundle_relpath = "problem_018_fused_rope_with_qk_norm_and_kv_cache_update__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/L1/problem_018_fused_rope_with_qk_norm_and_kv_cache_update/cuda_cpp/solution.json"
+solution_source_sha256 = "1632ca7ac78b8cb435d45d8083c43ea50a0709d222846ae368593eb251b10cdf"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = "compile_succeeded_correctness_failed"
+
+[[entries]]
+slug = "problem_019_vision_3d_rotary_embedding_with_spatial_merge_indexing_backward"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 16
+bundle_relpath = "problem_019_vision_3d_rotary_embedding_with_spatial_merge_indexing_backward__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/L1/problem_019_vision_3d_rotary_embedding_with_spatial_merge_indexing_backward/cuda_cpp/solution.json"
+solution_source_sha256 = "0ca24d47f4aeb3db1eb9bc916900fd232afbbb95aac92b8c11c1faf63a157af0"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_020_nvfp4_linear_layer"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 16
+bundle_relpath = "problem_020_nvfp4_linear_layer__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/Quant/problem_020_nvfp4_linear_layer/cuda_cpp/solution.json"
+solution_source_sha256 = "c1bcccffea3c0a59a8823a9f7915f4ee974b769c03e5d58022a16405550067ba"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_021_cross_attention_text_video_conditioning_backward"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 16
+bundle_relpath = "problem_021_cross_attention_text_video_conditioning_backward__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/L2/problem_021_cross_attention_text_video_conditioning_backward/cuda_cpp/solution.json"
+solution_source_sha256 = "e9da88add8f3be92718291c4bed2f8cce308d66f05b672ce588fb5c9b34e7cca"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_021_rmsnorm_h128"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 14
+passed_row_count = 14
+bundle_relpath = "problem_021_rmsnorm_h128__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/FIB/problem_021_rmsnorm_h128/cuda_cpp/solution.json"
+solution_source_sha256 = "f6404a5eff01bdb72fd227be65cbf6ccaa235206f1f110d7cac93511170dcb5c"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_022_rmsnorm_h512"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 8
+passed_row_count = 8
+bundle_relpath = "problem_022_rmsnorm_h512__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/FIB/problem_022_rmsnorm_h512/cuda_cpp/solution.json"
+solution_source_sha256 = "2336069b103e6bb0e91ebac32403a7dad58b700e7d99c4228f52c498ac92672d"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_022_vision_mlp_gelu_backward"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 16
+bundle_relpath = "problem_022_vision_mlp_gelu_backward__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/L1/problem_022_vision_mlp_gelu_backward/cuda_cpp/solution.json"
+solution_source_sha256 = "122e877c4e44c19c4230d6c1ca072d8beb51f6150ebad9367af3cc2a54e8b17f"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_023_rmsnorm_h1536"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 8
+passed_row_count = 8
+bundle_relpath = "problem_023_rmsnorm_h1536__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/FIB/problem_023_rmsnorm_h1536/cuda_cpp/solution.json"
+solution_source_sha256 = "53e453d31957e919eb3405bb00c18101f5e1cee24ab56a03eeee4226530b10f4"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_024_rmsnorm_h2048"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 7
+passed_row_count = 7
+bundle_relpath = "problem_024_rmsnorm_h2048__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/FIB/problem_024_rmsnorm_h2048/cuda_cpp/solution.json"
+solution_source_sha256 = "a508fb30763ba4c30abefe760df97ebb3bf7a4984c71d731e4017dc5bfe45b2e"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_025_rmsnorm_h4096"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 14
+passed_row_count = 14
+bundle_relpath = "problem_025_rmsnorm_h4096__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/FIB/problem_025_rmsnorm_h4096/cuda_cpp/solution.json"
+solution_source_sha256 = "8fa180c85e732c0230ff74d19e0562aa6fae316b111f87719978633389113e14"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_025_video_latent_gelu_activation"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 16
+bundle_relpath = "problem_025_video_latent_gelu_activation__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/L1/problem_025_video_latent_gelu_activation/cuda_cpp/solution.json"
+solution_source_sha256 = "38c88935ecbf74337b3b62c049d33627c627b811549ac225845d040bdbea037a"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_026_rmsnorm_h7168"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 8
+passed_row_count = 8
+bundle_relpath = "problem_026_rmsnorm_h7168__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/FIB/problem_026_rmsnorm_h7168/cuda_cpp/solution.json"
+solution_source_sha256 = "98ba726a4acd6a3b24aa50c59b264d59b8bac8d287e21b074bf0ba88fc3f7293"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_028_hybrid_attention_mask_preparation"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T20:24:21.953593+00:00"
+compile_verified = true
+sol_execbench_correct_verified = false
+compile_failed = false
+workload_row_count = 12
+passed_row_count = 9
+bundle_relpath = "problem_028_hybrid_attention_mask_preparation__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/L1/problem_028_hybrid_attention_mask_preparation/cuda_cpp/solution.json"
+solution_source_sha256 = "481fcd86eb349bfec502e738d3d09d1893f323d8e64da44963fb3a163c9a5462"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = "compile_succeeded_correctness_failed"
+
+[[entries]]
+slug = "problem_030_attention_output_projection_with_residual"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 16
+bundle_relpath = "problem_030_attention_output_projection_with_residual__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/L1/problem_030_attention_output_projection_with_residual/cuda_cpp/solution.json"
+solution_source_sha256 = "e45ca6fe196bdfceae6750e88a1476fab6f51e63984bc16b010e29e4feee6d74"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_030_flux_concatenated_sequence_processing_with_split"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 16
+bundle_relpath = "problem_030_flux_concatenated_sequence_processing_with_split__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/L2/problem_030_flux_concatenated_sequence_processing_with_split/cuda_cpp/solution.json"
+solution_source_sha256 = "bbba72fc59494757a01976540fc415ea6feb25df19a626fa614896cb34f8e6d4"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_031_flux_timestep_guidance_projection_embedding"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 16
+bundle_relpath = "problem_031_flux_timestep_guidance_projection_embedding__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/L2/problem_031_flux_timestep_guidance_projection_embedding/cuda_cpp/solution.json"
+solution_source_sha256 = "9c9af894c761023a5cf59dc0ba2981f510105838441d83b195e1f2a9ef562265"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_031_repeat_kv_attention_matmul"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T20:24:21.953593+00:00"
+compile_verified = true
+sol_execbench_correct_verified = false
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 14
+bundle_relpath = "problem_031_repeat_kv_attention_matmul__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/L1/problem_031_repeat_kv_attention_matmul/cuda_cpp/solution.json"
+solution_source_sha256 = "43fcd3a1aece6463fe8f440ece9829e330e6e7b6fe8b17d8d397e8dede285a9f"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = "compile_succeeded_correctness_failed"
+
+[[entries]]
+slug = "problem_032_attention_weights_matmul_with_value_projection"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 16
+bundle_relpath = "problem_032_attention_weights_matmul_with_value_projection__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/L1/problem_032_attention_weights_matmul_with_value_projection/cuda_cpp/solution.json"
+solution_source_sha256 = "8d9d35a171ada52e8fb7677596384dd2ac53218307dd1d963fc6627588cb23bc"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_033_post_norm_residual"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 16
+bundle_relpath = "problem_033_post_norm_residual__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/L1/problem_033_post_norm_residual/cuda_cpp/solution.json"
+solution_source_sha256 = "5eb7e8e3531619d07b3e9683f775e2de8e7e76aa28cb035d648a6ab5fb7dfb68"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_034_flux_multi_axis_rope_frequency_computation"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 16
+bundle_relpath = "problem_034_flux_multi_axis_rope_frequency_computation__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/L1/problem_034_flux_multi_axis_rope_frequency_computation/cuda_cpp/solution.json"
+solution_source_sha256 = "9d962b6127c476e8e75f2793cbfa885a52c20c7eca876fdca65d1e2355a03711"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_035_flux_ada_layer_norm_zero_modulation_extraction"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 16
+bundle_relpath = "problem_035_flux_ada_layer_norm_zero_modulation_extraction__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/L1/problem_035_flux_ada_layer_norm_zero_modulation_extraction/cuda_cpp/solution.json"
+solution_source_sha256 = "8d1c2aac90a23d270084406d73f44f13c37e6738fa1c8919ac5531d6bf1f8e6e"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_036_flux_output_norm_projection_chain"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 16
+bundle_relpath = "problem_036_flux_output_norm_projection_chain__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/L1/problem_036_flux_output_norm_projection_chain/cuda_cpp/solution.json"
+solution_source_sha256 = "6d1310f91af5a39aae0c3179d975a98e10f351d0f7778de73c9e0360109da0ce"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_037_flux_feedforward_gelu_approximate"
+language = "cutlass"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 16
+bundle_relpath = "problem_037_flux_feedforward_gelu_approximate__cutlass"
+dispatch_argv = []
+solution_path = "baselines/L1/problem_037_flux_feedforward_gelu_approximate/cutlass/solution.json"
+solution_source_sha256 = "ab90587bca1741bb364fb93a7e5b85b1d101eda57cb5d3defe4525211528937e"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_038_flux_multi_head_rmsnorm_qk"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 16
+bundle_relpath = "problem_038_flux_multi_head_rmsnorm_qk__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/L1/problem_038_flux_multi_head_rmsnorm_qk/cuda_cpp/solution.json"
+solution_source_sha256 = "de829617c7c62c00310e9432e97b51705cd30a9a61cac138c383fb4acc817c48"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_040_conv2d_residual_block"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-27T22:30:00+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 16
+bundle_relpath = "problem_040_conv2d_residual_block__cuda_cpp"
+dispatch_argv = ["/home/jakeshea/solbench_baseline/.venv/bin/sol-execbench", "/home/jakeshea/solbench_baseline/sol-execbench/data/benchmark/L1/040_conv2d_residual_block", "--solution", "/home/jakeshea/solbench_baseline/baselines/L1/problem_040_conv2d_residual_block/cuda_cpp/solution.json", "--json"]
+solution_path = "baselines/L1/problem_040_conv2d_residual_block/cuda_cpp/solution.json"
+solution_source_sha256 = "9d01a071e2a58cc90b91382016ff5c7ad48356c5d1c6bbfe34e9fddd080d2d43"
+provenance_source = "argv_recorded"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_045_fused_linear_gelu_grn_linear"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 14
+passed_row_count = 14
+bundle_relpath = "problem_045_fused_linear_gelu_grn_linear__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/L1/problem_045_fused_linear_gelu_grn_linear/cuda_cpp/solution.json"
+solution_source_sha256 = "345726b0fba42c153c554cbe43221c6aef458c8453b2e0d71de6d7cacf5c52be"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_046_attention_softmax_with_softcapping_and_dropout"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 16
+bundle_relpath = "problem_046_attention_softmax_with_softcapping_and_dropout__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/L1/problem_046_attention_softmax_with_softcapping_and_dropout/cuda_cpp/solution.json"
+solution_source_sha256 = "61abe045fbd8beff01ab0c00cc96f4b79bb360009e3182833f08ddcfce9fcb0e"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_048_fused_gate_up_projection_with_swiglu"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 16
+bundle_relpath = "problem_048_fused_gate_up_projection_with_swiglu__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/L1/problem_048_fused_gate_up_projection_with_swiglu/cuda_cpp/solution.json"
+solution_source_sha256 = "b973c610da3820fd7664f1f0b37d8ceac1d44b950f433b2724a8273d09a7069e"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_049_attention_qk_matmul_with_gqa_repeat_and_scaling"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 16
+bundle_relpath = "problem_049_attention_qk_matmul_with_gqa_repeat_and_scaling__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/L1/problem_049_attention_qk_matmul_with_gqa_repeat_and_scaling/cuda_cpp/solution.json"
+solution_source_sha256 = "7af317a800e5e23b3f1454e70f8c3cff55c534f5698af878dc39484039d37af0"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_050_attention_qkv_projection_with_bias_and_reshape"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 16
+bundle_relpath = "problem_050_attention_qkv_projection_with_bias_and_reshape__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/L1/problem_050_attention_qkv_projection_with_bias_and_reshape/cuda_cpp/solution.json"
+solution_source_sha256 = "78f018201178a6ce90e076456cd967b2bd02edb624b9f6128a0354b2f25a93ca"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_051_attention_qkv_with_qk_norm_single_kernel_backward"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 16
+bundle_relpath = "problem_051_attention_qkv_with_qk_norm_single_kernel_backward__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/L1/problem_051_attention_qkv_with_qk_norm_single_kernel_backward/cuda_cpp/solution.json"
+solution_source_sha256 = "a10a9a13c71b76f8dbbddf5fa76b9f9070e34787e4fc2313ea40db3914e4f10c"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_053_gaussian_topk_sparse_activation"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 12
+passed_row_count = 12
+bundle_relpath = "problem_053_gaussian_topk_sparse_activation__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/L1/problem_053_gaussian_topk_sparse_activation/cuda_cpp/solution.json"
+solution_source_sha256 = "97e732a3b5f4d827c8da7135fae90db48f756c49f5c6b822842264f000402fa3"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_054_audio_attention_qkv_projection_with_normalization"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 16
+bundle_relpath = "problem_054_audio_attention_qkv_projection_with_normalization__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/L1/problem_054_audio_attention_qkv_projection_with_normalization/cuda_cpp/solution.json"
+solution_source_sha256 = "39d094822b8082bdd23e7a473fd39634447f4cb4551ffc7d3374cbeee1ca95a7"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_055_attention_qkv_projection_with_gqa_reshape"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 16
+bundle_relpath = "problem_055_attention_qkv_projection_with_gqa_reshape__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/L1/problem_055_attention_qkv_projection_with_gqa_reshape/cuda_cpp/solution.json"
+solution_source_sha256 = "706998cfe5fd0a097a500dede5a30944ccfbe6f43dfe382f0fb7de74a8deb8d8"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_056_mamba_ssm_dt_projection_softplus_clamp_backward"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 16
+bundle_relpath = "problem_056_mamba_ssm_dt_projection_softplus_clamp_backward__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/L1/problem_056_mamba_ssm_dt_projection_softplus_clamp_backward/cuda_cpp/solution.json"
+solution_source_sha256 = "0e6e6e8fd2ede2166e45ee3dd4764a3c12a917a335b881a981a6fcf2521513af"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_059_moe_group_score_aggregation_and_masking"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 16
+bundle_relpath = "problem_059_moe_group_score_aggregation_and_masking__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/L1/problem_059_moe_group_score_aggregation_and_masking/cuda_cpp/solution.json"
+solution_source_sha256 = "b82f0891b1dfc96aeb4ad22ddc2b9c7e5239f637572994636a08e29a221e1b44"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_060_fused_attention_qk_matmul_scale_mask_softmax_backward"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T20:24:21.953593+00:00"
+compile_verified = true
+sol_execbench_correct_verified = false
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 13
+bundle_relpath = "problem_060_fused_attention_qk_matmul_scale_mask_softmax_backward__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/L1/problem_060_fused_attention_qk_matmul_scale_mask_softmax_backward/cuda_cpp/solution.json"
+solution_source_sha256 = "c1919dbf67e37cab311ad672dcc6a00d88746b93503abf483738bf8a61f3dd31"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = "compile_succeeded_correctness_failed"
+
+[[entries]]
+slug = "problem_061_tanh_gated_residual_add_backward"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 16
+bundle_relpath = "problem_061_tanh_gated_residual_add_backward__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/L1/problem_061_tanh_gated_residual_add_backward/cuda_cpp/solution.json"
+solution_source_sha256 = "bbac0acbe614c4e2642e49dd68ee2bfef4d4b12556c62ae7db7f3e03da62246a"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_063_attention_output_reshape_and_projection"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 16
+bundle_relpath = "problem_063_attention_output_reshape_and_projection__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/L1/problem_063_attention_output_reshape_and_projection/cuda_cpp/solution.json"
+solution_source_sha256 = "feb7af4b98ec8ca0e95346f4f037e5efe56f4b8d7e4ed7224928521dea16585a"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_064_multi_head_qkv_projection_with_rope_backward"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 16
+bundle_relpath = "problem_064_multi_head_qkv_projection_with_rope_backward__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/L2/problem_064_multi_head_qkv_projection_with_rope_backward/cuda_cpp/solution.json"
+solution_source_sha256 = "b0e236f1ff5a308c4047551bdc6533467a352872f220c74949f3734e202a69d0"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_065_fused_statistics_projection_and_split"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 16
+bundle_relpath = "problem_065_fused_statistics_projection_and_split__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/L1/problem_065_fused_statistics_projection_and_split/cuda_cpp/solution.json"
+solution_source_sha256 = "907d18750f4732a3d3d7061df0d6101cc40c5064262569ed859bfddda7ab8b4f"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_066_masked_softmax_with_attention_dropout_backward"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T20:24:21.953593+00:00"
+compile_verified = true
+sol_execbench_correct_verified = false
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 15
+bundle_relpath = "problem_066_masked_softmax_with_attention_dropout_backward__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/L1/problem_066_masked_softmax_with_attention_dropout_backward/cuda_cpp/solution.json"
+solution_source_sha256 = "661409f9bc5ddd64626a213f2fdfa65495722af8eea7eeef6d86083b602591a7"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = "compile_succeeded_correctness_failed"
+
+[[entries]]
+slug = "problem_066_resnet_block_with_time_embedding"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-27T23:30:00+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 16
+bundle_relpath = "problem_066_resnet_block_with_time_embedding__cuda_cpp"
+dispatch_argv = ["/home/jakeshea/solbench_baseline/.venv/bin/sol-execbench", "/home/jakeshea/solbench_baseline/sol-execbench/data/benchmark/L2/066_resnet_block_with_time_embedding", "--solution", "/home/jakeshea/solbench_baseline/baselines/L2/problem_066_resnet_block_with_time_embedding/cuda_cpp/solution.json", "--json"]
+solution_path = "baselines/L2/problem_066_resnet_block_with_time_embedding/cuda_cpp/solution.json"
+solution_source_sha256 = "bf4acfa4167021a334fc486a88b3729035918b5228a083ea7e1dc81036bf68b0"
+provenance_source = "argv_recorded"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_068_fused_rope_application_backward"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 16
+bundle_relpath = "problem_068_fused_rope_application_backward__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/L1/problem_068_fused_rope_application_backward/cuda_cpp/solution.json"
+solution_source_sha256 = "fd95d18d3b0cf77874b743d05cbe90c1dc483b54160be3bbe13b43f771e833c0"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_068_gelu_approximate_feedforward_backward"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 16
+bundle_relpath = "problem_068_gelu_approximate_feedforward_backward__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/L2/problem_068_gelu_approximate_feedforward_backward/cuda_cpp/solution.json"
+solution_source_sha256 = "c5eecb200d699540fbabe614d96eea967130f1e5292d09da0e1565e1da6c78a9"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_069_rms_norm"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 16
+bundle_relpath = "problem_069_rms_norm__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/L1/problem_069_rms_norm/cuda_cpp/solution.json"
+solution_source_sha256 = "135a0bddb71b7334720735a53eec2a544d1337bcb310c6726b6a999391eafd3c"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_071_kv_cache_update_with_rope"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 16
+bundle_relpath = "problem_071_kv_cache_update_with_rope__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/L1/problem_071_kv_cache_update_with_rope/cuda_cpp/solution.json"
+solution_source_sha256 = "dae2c74d3dff740122dbe0263f061a216ff3024239f1c5fbbc9ac14bad184b24"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_072_cross_attention_qkv_projection_with_gqa_repeat_backward"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 16
+bundle_relpath = "problem_072_cross_attention_qkv_projection_with_gqa_repeat_backward__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/L1/problem_072_cross_attention_qkv_projection_with_gqa_repeat_backward/cuda_cpp/solution.json"
+solution_source_sha256 = "3a05e23688faf0a5452cd9180dbf8a2362e6f8d9b2b97fdd91a6bef5cf4026ff"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_073_feedforward_mlp_backward"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T20:24:21.953593+00:00"
+compile_verified = true
+sol_execbench_correct_verified = false
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 15
+bundle_relpath = "problem_073_feedforward_mlp_backward__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/L2/problem_073_feedforward_mlp_backward/cuda_cpp/solution.json"
+solution_source_sha256 = "9cc3836f99e18c38d35c82aa466724d143e94de12c84f6d05c02839c22896bb3"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = "compile_succeeded_correctness_failed"
+
+[[entries]]
+slug = "problem_073_fused_encoder_final_norm_to_decoder_cross_attention_kv_projection"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-27T22:00:00+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 16
+bundle_relpath = "problem_073_fused_encoder_final_norm_to_decoder_cross_attention_kv_projection__cuda_cpp"
+dispatch_argv = ["/home/jakeshea/solbench_baseline/.venv/bin/sol-execbench", "/home/jakeshea/solbench_baseline/sol-execbench/data/benchmark/L1/073_fused_encoder_final_norm_to_decoder_cross_attention_kv_projection", "--solution", "/home/jakeshea/solbench_baseline/baselines/L1/problem_073_fused_encoder_final_norm_to_decoder_cross_attention_kv_projection/cuda_cpp/solution.json", "--json"]
+solution_path = "baselines/L1/problem_073_fused_encoder_final_norm_to_decoder_cross_attention_kv_projection/cuda_cpp/solution.json"
+solution_source_sha256 = "30c503b20efcd9c9ec8d176495b9c3ea3ba312e535899bebdff011138be78bb7"
+provenance_source = "argv_recorded"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_074_fused_gated_mlp_silu"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 16
+bundle_relpath = "problem_074_fused_gated_mlp_silu__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/L1/problem_074_fused_gated_mlp_silu/cuda_cpp/solution.json"
+solution_source_sha256 = "784b688c8f4e61da243b33243b3f59d13ed4ee2e638c0c2882b22b44ac9fef8f"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_077_whisper_decoder_output_projection"
+language = "cutlass"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T20:24:21.953593+00:00"
+compile_verified = true
+sol_execbench_correct_verified = false
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 15
+bundle_relpath = "problem_077_whisper_decoder_output_projection__cutlass"
+dispatch_argv = []
+solution_path = "baselines/L1/problem_077_whisper_decoder_output_projection/cutlass/solution.json"
+solution_source_sha256 = "d0132b0c104e7a95f8a40c3436425ea5312e52e89270a816d85f95f6706a2d83"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = "compile_succeeded_correctness_failed"
+
+[[entries]]
+slug = "problem_078_group_norm_fusion"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 16
+bundle_relpath = "problem_078_group_norm_fusion__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/L1/problem_078_group_norm_fusion/cuda_cpp/solution.json"
+solution_source_sha256 = "85253880e3d0ddf912972ef4149dd6fdb5a690374758e0c244a06b2b649c3c25"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_080_adaptive_layernorm_continuous_with_modulation"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 16
+bundle_relpath = "problem_080_adaptive_layernorm_continuous_with_modulation__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/L1/problem_080_adaptive_layernorm_continuous_with_modulation/cuda_cpp/solution.json"
+solution_source_sha256 = "162d775e1866740c2e1f432478de85f736775fd05a71a5d6253818702893e526"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_083_attention_score_value_matmul"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 16
+bundle_relpath = "problem_083_attention_score_value_matmul__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/L1/problem_083_attention_score_value_matmul/cuda_cpp/solution.json"
+solution_source_sha256 = "42d2628b06bb8c61f6c0ccf082c3713df5269c42f5266714d191914fcc1acf81"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_084_silu_activation_backward"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 16
+bundle_relpath = "problem_084_silu_activation_backward__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/L1/problem_084_silu_activation_backward/cuda_cpp/solution.json"
+solution_source_sha256 = "8dfbc334c11cf4c914e345ca5f54bf41c7eeca2158742aa53723bfa533183178"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_085_geglu_activation"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 16
+bundle_relpath = "problem_085_geglu_activation__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/L1/problem_085_geglu_activation/cuda_cpp/solution.json"
+solution_source_sha256 = "d7509ef6c8d240ad79870157a93d670d20d7f116d8774fdf28b6f0c8aef5703b"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_087_embedding_with_initial_layernorm_backward"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-27T14:14:23+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 16
+bundle_relpath = "problem_087_embedding_with_initial_layernorm_backward__cuda_cpp"
+dispatch_argv = ["/home/jakeshea/solbench_baseline/.venv/bin/sol-execbench", "/home/jakeshea/solbench_baseline/sol-execbench/data/benchmark/L1/087_embedding_with_initial_layernorm_backward", "--solution", "../baselines/L1/problem_087_embedding_with_initial_layernorm_backward/cuda_cpp/solution.json", "--json"]
+solution_path = "baselines/L1/problem_087_embedding_with_initial_layernorm_backward/cuda_cpp/solution.json"
+solution_source_sha256 = "52b45642d9cea150d9b2a0aaf322c14e87ece22aec2e26e8fe7c7a79aaca962b"
+provenance_source = "argv_recorded"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_088_rotary_position_embedding_application"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 16
+bundle_relpath = "problem_088_rotary_position_embedding_application__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/L1/problem_088_rotary_position_embedding_application/cuda_cpp/solution.json"
+solution_source_sha256 = "5390a7a6ddc52261e66055c008c532a4472f313dd76794c8ec93ce79bab99636"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_090_batched_2d_rope_position_encoding_backward"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 16
+bundle_relpath = "problem_090_batched_2d_rope_position_encoding_backward__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/L1/problem_090_batched_2d_rope_position_encoding_backward/cuda_cpp/solution.json"
+solution_source_sha256 = "2412fc56d1be5acd78d8786a88849302d54fda4fd63a2010d7a97a9123d1f112"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""
+
+[[entries]]
+slug = "problem_093_grouped_topk_moe_routing_backward"
+language = "cuda_cpp"
+arch_tag = "sm_120"
+bundle_captured_at_utc = "2026-05-25T04:05:33.000397+00:00"
+compile_verified = true
+sol_execbench_correct_verified = true
+compile_failed = false
+workload_row_count = 16
+passed_row_count = 16
+bundle_relpath = "problem_093_grouped_topk_moe_routing_backward__cuda_cpp"
+dispatch_argv = []
+solution_path = "baselines/L1/problem_093_grouped_topk_moe_routing_backward/cuda_cpp/solution.json"
+solution_source_sha256 = "7e9d7977d926befebba996f0bb23cb68152568476e70de529d3a13408c1ea5a1"
+provenance_source = "reconstructed_from_bundle"
+failure_reason = ""

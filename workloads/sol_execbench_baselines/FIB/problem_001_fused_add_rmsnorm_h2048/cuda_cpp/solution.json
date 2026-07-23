@@ -1,0 +1,44 @@
+{
+  "name": "sol_baseline_cuda_cpp_001_fused_add_rmsnorm_h2048",
+  "definition": "001_fused_add_rmsnorm_h2048",
+  "author": "sol-baselines-codegen",
+  "description": "Fused residual-add + RMSNorm kernel for hidden_size=2048, BF16 inputs with FP32 reduction. One CTA per row, warp-shuffle reduction, vectorised BF16x2 loads, destination-passing style.",
+  "spec": {
+    "languages": [
+      "cuda_cpp"
+    ],
+    "target_hardware": [
+      "LOCAL"
+    ],
+    "entry_point": "main.cpp::run",
+    "dependencies": [],
+    "destination_passing_style": true,
+    "binding": "torch",
+    "compile_options": {
+      "cflags": [],
+      "cuda_cflags": [
+        "-O3",
+        "--use_fast_math",
+        "-gencode",
+        "arch=compute_86,code=sm_86"
+      ],
+      "ld_flags": [
+        "-lcuda"
+      ]
+    }
+  },
+  "sources": [
+    {
+      "path": "kernel.h",
+      "content": "#pragma once\n\n#ifndef FUSED_ADD_RMSNORM_001_FUSED_ADD_RMSNORM_H2048_KERNEL_H\n#define FUSED_ADD_RMSNORM_001_FUSED_ADD_RMSNORM_H2048_KERNEL_H\n\n#include <torch/extension.h>\n#include <cuda_runtime.h>\n\n// Host launcher for the fused add + RMSNorm kernel for hidden_size=2048.\n// Inputs and outputs are BF16; intermediate accumulation runs in FP32 per the\n// precision contract (CLAUDE.md Rule 8). Output is pre-allocated by the eval\n// driver and written in-place (destination-passing style).\nvoid fused_add_rmsnorm_h2048_launcher(\n    const torch::Tensor& hidden_states,\n    const torch::Tensor& residual,\n    const torch::Tensor& weight,\n    torch::Tensor& output,\n    float eps,\n    cudaStream_t stream);\n\n#endif  // FUSED_ADD_RMSNORM_001_FUSED_ADD_RMSNORM_H2048_KERNEL_H\n"
+    },
+    {
+      "path": "kernel.cu",
+      "content": "#include \"kernel.h\"\n#include <cuda_bf16.h>\n#include <cuda_runtime.h>\n\n// Each CTA processes one row of [batch, hidden_size]. Threads cooperatively\n// reduce the sum-of-squares of (hidden_states + residual) in FP32, then\n// rescale (hidden_states + residual) * inv_rms * weight and store in BF16.\n\nnamespace {\n\n__device__ inline float warp_all_reduce_sum(float val) {\n    for (int offset = 16; offset > 0; offset >>= 1) {\n        val += __shfl_xor_sync(0xFFFFFFFFu, val, offset);\n    }\n    return val;\n}\n\nconstexpr int HIDDEN_SIZE = 2048;\nconstexpr int HIDDEN_SIZE_VEC = 1024;  // BF16x2 pairs per row\nconstexpr int BLOCK_THREADS = 1024;\nconstexpr int MAX_WARPS = 32;  // covers blockDim.x up to 1024\n\n__global__ void __launch_bounds__(BLOCK_THREADS, 1) fused_add_rmsnorm_h2048_kernel(\n    const __nv_bfloat16* __restrict__ hidden_states,\n    const __nv_bfloat16* __restrict__ residual,\n    const __nv_bfloat16* __restrict__ weight,\n    __nv_bfloat16* __restrict__ output,\n    int batch_size,\n    float eps) {\n\n    const int row = blockIdx.x;\n    if (row >= batch_size) {\n        return;\n    }\n\n    const __nv_bfloat162* hs_row =\n        reinterpret_cast<const __nv_bfloat162*>(hidden_states) + row * HIDDEN_SIZE_VEC;\n    const __nv_bfloat162* res_row =\n        reinterpret_cast<const __nv_bfloat162*>(residual) + row * HIDDEN_SIZE_VEC;\n    const __nv_bfloat162* w_vec =\n        reinterpret_cast<const __nv_bfloat162*>(weight);\n    __nv_bfloat162* out_row =\n        reinterpret_cast<__nv_bfloat162*>(output) + row * HIDDEN_SIZE_VEC;\n\n    const int tid = threadIdx.x;\n\n    float thread_sum_sq = 0.0f;\n    #pragma unroll 1\n    for (int i = tid; i < HIDDEN_SIZE_VEC; i += BLOCK_THREADS) {\n        __nv_bfloat162 hv = __ldg(hs_row + i);\n        __nv_bfloat162 rv = __ldg(res_row + i);\n        float2 h_f2 = __bfloat1622float2(hv);\n        float2 r_f2 = __bfloat1622float2(rv);\n        float x0 = h_f2.x + r_f2.x;\n        float x1 = h_f2.y + r_f2.y;\n        thread_sum_sq += x0 * x0 + x1 * x1;\n    }\n\n    thread_sum_sq = warp_all_reduce_sum(thread_sum_sq);\n\n    __shared__ float s_warp[MAX_WARPS];\n    const int lane = tid & 31;\n    const int warp = tid >> 5;\n    const int num_warps = (BLOCK_THREADS + 31) >> 5;\n    if (lane == 0) {\n        s_warp[warp] = thread_sum_sq;\n    }\n    __syncthreads();\n\n    float row_sum = 0.0f;\n    if (warp == 0) {\n        float partial = (lane < num_warps) ? s_warp[lane] : 0.0f;\n        partial = warp_all_reduce_sum(partial);\n        if (lane == 0) {\n            s_warp[0] = partial;\n        }\n    }\n    __syncthreads();\n    row_sum = s_warp[0];\n\n    const float inv_rms = rsqrtf(row_sum / static_cast<float>(HIDDEN_SIZE) + eps);\n\n    #pragma unroll 1\n    for (int i = tid; i < HIDDEN_SIZE_VEC; i += BLOCK_THREADS) {\n        __nv_bfloat162 hv = __ldg(hs_row + i);\n        __nv_bfloat162 rv = __ldg(res_row + i);\n        __nv_bfloat162 wv = __ldg(w_vec + i);\n        float2 h_f2 = __bfloat1622float2(hv);\n        float2 r_f2 = __bfloat1622float2(rv);\n        float2 w_f2 = __bfloat1622float2(wv);\n        float y0 = (h_f2.x + r_f2.x) * inv_rms * w_f2.x;\n        float y1 = (h_f2.y + r_f2.y) * inv_rms * w_f2.y;\n        out_row[i] = __float22bfloat162_rn(make_float2(y0, y1));\n    }\n}\n\n}  // namespace\n\nvoid fused_add_rmsnorm_h2048_launcher(\n    const torch::Tensor& hidden_states,\n    const torch::Tensor& residual,\n    const torch::Tensor& weight,\n    torch::Tensor& output,\n    float eps,\n    cudaStream_t stream) {\n\n    const auto batch_size = static_cast<int>(hidden_states.size(0));\n    dim3 grid(batch_size);\n    dim3 block(BLOCK_THREADS);\n\n    fused_add_rmsnorm_h2048_kernel<<<grid, block, 0, stream>>>(\n        reinterpret_cast<const __nv_bfloat16*>(hidden_states.data_ptr<at::BFloat16>()),\n        reinterpret_cast<const __nv_bfloat16*>(residual.data_ptr<at::BFloat16>()),\n        reinterpret_cast<const __nv_bfloat16*>(weight.data_ptr<at::BFloat16>()),\n        reinterpret_cast<__nv_bfloat16*>(output.data_ptr<at::BFloat16>()),\n        batch_size,\n        eps);\n}\n"
+    },
+    {
+      "path": "main.cpp",
+      "content": "#include <torch/extension.h>\n#include <ATen/cuda/CUDAContext.h>\n#include \"kernel.h\"\n#include <string>\n\n// PyBind11 entry point. The eval driver pre-allocates the output tensor and\n// passes it in destination-passing style; this function writes results\n// in-place and returns void per CLAUDE.md \"Submission Format\".\n\nstatic void check_bfloat16_cuda_contiguous(const torch::Tensor& t, const char* name) {\n    TORCH_CHECK(t.is_cuda(), name, \" must be a CUDA tensor\");\n    TORCH_CHECK(t.dtype() == torch::kBFloat16, name, \" must be bfloat16\");\n    TORCH_CHECK(t.is_contiguous(), name, \" must be contiguous\");\n}\n\nvoid run(torch::Tensor hidden_states, torch::Tensor residual, torch::Tensor weight, torch::Tensor output) {\n    check_bfloat16_cuda_contiguous(hidden_states, \"hidden_states\");\n    check_bfloat16_cuda_contiguous(residual, \"residual\");\n    check_bfloat16_cuda_contiguous(weight, \"weight\");\n    check_bfloat16_cuda_contiguous(output, \"output\");\n\n    TORCH_CHECK(hidden_states.dim() == 2, \"hidden_states must be 2-D\");\n    TORCH_CHECK(residual.dim() == 2, \"residual must be 2-D\");\n    TORCH_CHECK(weight.dim() == 1, \"weight must be 1-D\");\n    TORCH_CHECK(output.dim() == 2, \"output must be 2-D\");\n\n    const int64_t batch_size = hidden_states.size(0);\n    const int64_t hidden_size = hidden_states.size(1);\n\n    TORCH_CHECK(hidden_size == 2048, \"hidden_size must be 2048, got \", hidden_size);\n    TORCH_CHECK(residual.size(0) == batch_size && residual.size(1) == hidden_size,\n                \"residual shape mismatch\");\n    TORCH_CHECK(weight.size(0) == hidden_size, \"weight size must equal hidden_size\");\n    TORCH_CHECK(output.size(0) == batch_size && output.size(1) == hidden_size,\n                \"output shape mismatch\");\n\n    constexpr float kEps = 1.0000000e-06f;\n    cudaStream_t stream = at::cuda::getCurrentCUDAStream();\n    fused_add_rmsnorm_h2048_launcher(\n        hidden_states, residual, weight, output, kEps, stream);\n}\n\nPYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {\n    m.def(\"run\", &run, \"Fused add + RMSNorm kernel for hidden_size=2048 (BFloat16, CUDA, DPS).\");\n}\n"
+    }
+  ]
+}

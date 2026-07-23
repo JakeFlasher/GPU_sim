@@ -1,0 +1,85 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "simbench_bw/schemas/campaign_exclusion_ledger.schema.json",
+  "title": "sm_86 typed-exclusion authority ledger",
+  "description": "Emitted by tools/local_labels/campaign_exclusion_ledger.py. The single authority that types every non-captured cell into one closed reason and defends the denominator via universe == runnable + pending_build + pending_reconstitution + Σ(typed exclusions). Derived from (and sha256-pinned to) the roster authority.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "ledger_id",
+    "arch",
+    "source_commit",
+    "roster_authority_sha256",
+    "reason_vocabulary",
+    "source_vocabulary_map",
+    "counts",
+    "coverage",
+    "entries"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "ledger_id": {"type": "string"},
+    "arch": {"type": "string"},
+    "sku": {"type": ["string", "null"]},
+    "source_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "generated_at_utc": {"type": "string"},
+    "roster_authority_id": {"type": ["string", "null"]},
+    "roster_authority_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "reason_vocabulary": {
+      "type": "array",
+      "items": {"type": "string", "enum": [
+        "arch_gate", "semantic_mismatch", "trace_unsupported",
+        "repeatability_failed", "correctness_failed",
+        "calibration_inconclusive", "host_capacity_deferred"
+      ]}
+    },
+    "source_vocabulary_map": {"type": "object"},
+    "counts": {
+      "type": "object",
+      "required": ["total_exclusions", "by_reason"],
+      "properties": {
+        "total_exclusions": {"type": "integer", "minimum": 0},
+        "by_reason": {
+          "type": "object",
+          "additionalProperties": {"type": "integer", "minimum": 0}
+        }
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "required": ["universe", "typed_exclusions", "identity_holds"],
+      "properties": {
+        "universe": {"type": ["integer", "null"]},
+        "runnable": {"type": ["integer", "null"]},
+        "pending_build": {"type": ["integer", "null"]},
+        "pending_reconstitution": {"type": ["integer", "null"]},
+        "pending_shrink": {"type": ["integer", "null"]},
+        "typed_exclusions": {"type": "integer", "minimum": 0},
+        "identity_holds": {"type": "boolean"},
+        "untyped_excluded_rows": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["roster_source", "slug", "typed_reason"],
+        "properties": {
+          "roster_source": {"type": "string"},
+          "slug": {"type": "string"},
+          "typed_reason": {
+            "type": "string",
+            "enum": [
+              "arch_gate", "semantic_mismatch", "trace_unsupported",
+              "repeatability_failed", "correctness_failed",
+              "calibration_inconclusive", "host_capacity_deferred"
+            ]
+          },
+          "detail": {"type": ["string", "null"]}
+        }
+      }
+    }
+  }
+}

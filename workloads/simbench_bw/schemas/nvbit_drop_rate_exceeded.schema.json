@@ -1,0 +1,86 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "simbench_bw/schemas/nvbit_drop_rate_exceeded.schema.json",
+  "title": "SimBench-BW nvbit_drop_rate_exceeded sidecar",
+  "description": "Sidecar emitted when the NVBit-traced run's producer-side drop counters indicate the captured trace is missing more than the declared fraction of expected records. Member of the trace-budget typed-reason family declared in tools/cloud/trace_budgets.py NVBIT_DROP_RATE_EXCEEDED_SIDECAR; pinned in the original-plan exclusion-taxonomy list. The producer-side drop-counter sources enumerated by the per-source counts below are: (1) NVBit channel overflow (the producer-side communication channel between the injected tracer and the consumer ran out of capacity), (2) ring-buffer loss (the per-warp ring buffer wrapped before the consumer could drain it), (3) decoder gaps (the consumer-side decoder skipped records it could not parse), (4) expected-record mismatch (the count of records the producer declared it would emit minus the count the consumer admitted). Each source is reported individually so the downstream model can attribute drop-rate to root cause; the schema requires all four counter fields so a future regression that drops a source without updating the schema fails the C-AC-C parity scanner.",
+  "schema_version": 1,
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "slug",
+    "shape_point",
+    "max_drop_rate",
+    "actual_drop_rate",
+    "expected_record_count",
+    "admitted_record_count",
+    "channel_overflow_dropped",
+    "ring_buffer_loss_dropped",
+    "decoder_gap_dropped",
+    "expected_record_mismatch_dropped",
+    "trace_budgets_sha256"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Sidecar schema major version. Pinned to 1; a deliberate schema bump must update both this constant and consumers in lockstep."
+    },
+    "slug": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "description": "Row identifier from workloads/simbench_bw/roster.toml."
+    },
+    "shape_point": {
+      "type": "string",
+      "description": "Trace shape point name (from shapes/<slug>.toml) whose run crossed the drop-rate budget."
+    },
+    "max_drop_rate": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1,
+      "description": "Declared maximum drop rate as a fraction in [0, 1]. A row's value of 0.01 means up to 1% of expected records may be dropped before the sidecar is required."
+    },
+    "actual_drop_rate": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "maximum": 1,
+      "description": "Observed drop rate computed as 1 - admitted_record_count / max(1, expected_record_count). Strictly greater than 0; a value of 0 means no records were dropped and no sidecar should have been emitted."
+    },
+    "expected_record_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Total number of records the producer declared it would emit for this run. Sourced from the producer-side instrumentation count (one tick per warp memory instruction, threadblock-scope kernel record, etc.)."
+    },
+    "admitted_record_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Total number of records the consumer admitted after schema and contract validation."
+    },
+    "channel_overflow_dropped": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Drop counter source (1 of 4): records lost because the producer-side communication channel between the injected tracer and the consumer ran out of capacity."
+    },
+    "ring_buffer_loss_dropped": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Drop counter source (2 of 4): records lost because the per-warp ring buffer wrapped before the consumer could drain it."
+    },
+    "decoder_gap_dropped": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Drop counter source (3 of 4): records the consumer-side decoder skipped because it could not parse them (typed-exclusion routing applies separately to records it could parse but rejected on contract grounds)."
+    },
+    "expected_record_mismatch_dropped": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Drop counter source (4 of 4): the residual count when expected_record_count - admitted_record_count exceeds the sum of the other three named drop sources. A non-zero value here indicates an unattributed drop and should be treated as a reproducibility-blocking discrepancy."
+    },
+    "trace_budgets_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "SHA-256 of the canonical trace_budgets.toml at the time the run was admitted."
+    }
+  }
+}

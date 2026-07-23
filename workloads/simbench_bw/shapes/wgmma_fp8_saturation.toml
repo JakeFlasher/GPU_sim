@@ -1,0 +1,36 @@
+schema_version = 1
+slug = "wgmma_fp8_saturation"
+
+# Hopper wgmma FP8 saturation (sm_90a-only). Warpgroup-level
+# m64n64k32 FP8 MMA driving accumulator saturation. Reference is
+# the FP32 matmul on A and B after FP8 E4M3 round-trip quantization
+# (`mma_microbench.py::build_reference` dispatches through
+# `_quantize_matrix_fp8_e4m3`, which round-trips FP32 → FP8 E4M3
+# code → FP32 representable per the canonical 256-entry value table
+# with satfinite saturation to ±448, -0.0 sign-preserved as byte
+# 0x80, and FP32 NaN encoded as canonical positive E4M3 NaN byte 0x7F
+# — R31 alignment with `cuda_fp8.h::__nv_fp8_e4m3` per Codex
+# Round-29-review CUDA 13 host probe; same dispatch the
+# sparse_2to4_fp8_gemm and fp8_e4m3_qmma_dep_chain rows use; R19
+# added the elif branch for this Hopper wgmma row), under the
+# FP8_E4M3 fma_chain tolerance band.
+
+[[timing_shapes]]
+name = "timing_00"
+axes = { m = 1024, n = 1024, k = 4096 }
+launch_config = { grid = [16, 16, 1], block = [128, 1, 1] }
+warm_up_iters = 5
+repeat_iters = 30
+
+[[trace_shapes]]
+name = "trace_00"
+axes = { m = 64, n = 64, k = 128 }
+launch_config = { grid = [1, 1, 1], block = [128, 1, 1] }
+predicted_bytes = 83886080
+estimator_source = "static"
+
+[[correctness_shapes]]
+name = "correctness_00"
+axes = { m = 64, n = 64, k = 32 }
+launch_config = { grid = [1, 1, 1], block = [128, 1, 1] }
+digest_kind = "reduction_summary"

@@ -1,0 +1,665 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "simbench_bw/schemas/m6_determinism_done.v2.schema.json",
+  "title": "M6 determinism completion seal",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_kind",
+    "status",
+    "m6_state",
+    "m7_state",
+    "m6_m7_handoff_candidate",
+    "simulator_scoreability",
+    "publication_verdict",
+    "generated_at_utc",
+    "schedule",
+    "journal",
+    "analysis",
+    "source_snapshot",
+    "m4",
+    "retained_evidence",
+    "schemas",
+    "inventory",
+    "source_identity_sha256",
+    "config_identity_sha256",
+    "metric_identity_sha256",
+    "m4_identity_sha256",
+    "m4_status",
+    "counts",
+    "accounting_identity_holds",
+    "denominator_identity_holds",
+    "taxonomy",
+    "collect_implementation",
+    "done_sha256"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 2
+    },
+    "artifact_kind": {
+      "type": "string",
+      "const": "m6_determinism_done"
+    },
+    "status": {
+      "type": "string",
+      "const": "done"
+    },
+    "m6_state": {
+      "type": "string",
+      "const": "M6_DONE"
+    },
+    "m7_state": {
+      "type": "string",
+      "enum": [
+        "M7_BLOCKED",
+        "M6_M7_HANDOFF_CANDIDATE",
+        "M7_DONE"
+      ]
+    },
+    "m6_m7_handoff_candidate": {
+      "const": false
+    },
+    "simulator_scoreability": {
+      "type": "string",
+      "enum": [
+        "UNAVAILABLE_REQUIRED_CYCLES",
+        "SCOREABLE"
+      ]
+    },
+    "publication_verdict": {
+      "type": "string",
+      "enum": [
+        "NOT_EVALUATED",
+        "PASS",
+        "FLOOR_ONLY",
+        "FAIL"
+      ]
+    },
+    "generated_at_utc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "schedule": {
+      "$ref": "#/$defs/artifact"
+    },
+    "journal": {
+      "$ref": "#/$defs/artifact"
+    },
+    "analysis": {
+      "$ref": "#/$defs/analysisArtifact"
+    },
+    "source_snapshot": {
+      "$ref": "#/$defs/snapshotArtifact"
+    },
+    "m4": {
+      "$ref": "#/$defs/m4Artifact"
+    },
+    "retained_evidence": {
+      "$ref": "#/$defs/evidenceArtifact"
+    },
+    "schemas": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/schemaArtifact"
+      },
+      "allOf": [
+        {
+          "contains": {
+            "properties": {"schema_id": {"const": "m4_binding"}},
+            "required": ["schema_id"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {"schema_id": {"const": "schedule"}},
+            "required": ["schema_id"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {"schema_id": {"const": "observation_journal"}},
+            "required": ["schema_id"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {"schema_id": {"const": "analysis"}},
+            "required": ["schema_id"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {"schema_id": {"const": "done"}},
+            "required": ["schema_id"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        }
+      ]
+    },
+    "inventory": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "entries",
+        "inventory_sha256"
+      ],
+      "properties": {
+        "schema_version": {
+          "type": "integer",
+          "const": 1
+        },
+        "entries": {
+          "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/inventoryEntry"
+          }
+        },
+        "inventory_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "source_identity_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "config_identity_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "metric_identity_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "m4_identity_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "m4_status": {
+      "type": "string",
+      "const": "complete"
+    },
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "runnable_cells",
+        "configs",
+        "tier1_slots",
+        "triggered_cells",
+        "tier2_slots",
+        "total_slots",
+        "raw_rows_collected",
+        "classified_raw_rows",
+        "excluded_typed_raw_rows",
+        "not_collected_typed_rows"
+      ],
+      "properties": {
+        "runnable_cells": {
+          "type": "integer",
+          "const": 122
+        },
+        "configs": {
+          "type": "integer",
+          "const": 6
+        },
+        "tier1_slots": {
+          "type": "integer",
+          "const": 8540
+        },
+        "triggered_cells": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 122
+        },
+        "tier2_slots": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1220,
+          "multipleOf": 10
+        },
+        "total_slots": {
+          "type": "integer",
+          "minimum": 8540,
+          "maximum": 9760
+        },
+        "raw_rows_collected": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "classified_raw_rows": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "excluded_typed_raw_rows": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "not_collected_typed_rows": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "accounting_identity_holds": {
+      "const": true
+    },
+    "denominator_identity_holds": {
+      "const": true
+    },
+    "taxonomy": {
+      "const": [
+        "vendor_defect",
+        "insufficient_evidence",
+        "multimodal",
+        "deterministic",
+        "quasi_stable",
+        "clock_noise",
+        "noisy",
+        "unstable"
+      ]
+    },
+    "collect_implementation": {
+      "type": "string",
+      "const": "disabled_offline_source"
+    },
+    "done_sha256": {
+      "$ref": "#/$defs/sha256"
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "relative_path",
+        "artifact_sha256",
+        "size_bytes"
+      ],
+      "properties": {
+        "relative_path": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*//)(?!.*(?:^|/)\\./)(?!.*\\\\).+$"
+        },
+        "artifact_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "analysisArtifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "relative_path",
+        "artifact_sha256",
+        "size_bytes"
+      ],
+      "properties": {
+        "relative_path": {
+          "type": "string",
+          "const": "determinism_study.json"
+        },
+        "artifact_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 1
+        }
+      }
+    },
+    "inventoryEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "path",
+        "sha256",
+        "size_bytes"
+      ],
+      "properties": {
+        "kind": {
+          "oneOf": [
+            {
+              "type": "string",
+              "enum": [
+                "schedule",
+                "journal",
+                "analysis",
+                "m4_receipt",
+                "m4_archive_tree",
+                "m4_chunk_done",
+                "retained_evidence_tree",
+                "source_snapshot_identity",
+                "recovery_receipt"
+              ]
+            },
+            {
+              "type": "string",
+              "pattern": "^(source|schema|retained):[A-Za-z0-9_.:-]+$"
+            }
+          ]
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*//)(?!.*(?:^|/)\\./)(?!.*//$)(?!.*\\\\).+$"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "size_bytes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        }
+      }
+    },
+    "snapshotArtifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "relative_path",
+        "artifact_sha256",
+        "size_bytes",
+        "witness"
+      ],
+      "properties": {
+        "relative_path": {
+          "const": "source_snapshot/identity.json"
+        },
+        "artifact_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "witness": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/snapshotWitness"
+          },
+          "uniqueItems": true
+        }
+      }
+    },
+    "snapshotWitness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "canonical_path",
+        "role",
+        "declared_sha256",
+        "declared_size_bytes",
+        "observed_sha256",
+        "observed_size_bytes",
+        "pre_identity",
+        "post_identity"
+      ],
+      "properties": {
+        "canonical_path": {
+          "type": "string",
+          "minLength": 1,
+          "pattern": "^/"
+        },
+        "role": {
+          "type": "string",
+          "minLength": 1
+        },
+        "declared_sha256": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "declared_size_bytes": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        },
+        "observed_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "observed_size_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "pre_identity": {
+          "$ref": "#/$defs/snapshotIdentity"
+        },
+        "post_identity": {
+          "$ref": "#/$defs/snapshotIdentity"
+        }
+      }
+    },
+    "snapshotIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "device",
+        "inode",
+        "mode",
+        "nlink",
+        "size_bytes",
+        "mtime_ns",
+        "ctime_ns"
+      ],
+      "properties": {
+        "device": {"type": "integer", "minimum": 0},
+        "inode": {"type": "integer", "minimum": 0},
+        "mode": {"type": "integer", "minimum": 0},
+        "nlink": {"const": 1},
+        "size_bytes": {"type": "integer", "minimum": 0},
+        "mtime_ns": {"type": "integer"},
+        "ctime_ns": {"type": "integer"}
+      }
+    },
+    "m4Artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "relative_path",
+        "artifact_sha256",
+        "size_bytes",
+        "archive_root",
+        "chunk_done_sha256s"
+      ],
+      "properties": {
+        "relative_path": {
+          "const": "m4/m4_binding_receipt.json"
+        },
+        "artifact_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "archive_root": {
+          "type": "string",
+          "pattern": "^/",
+          "minLength": 2
+        },
+        "chunk_done_sha256s": {
+          "type": "array",
+          "minItems": 18,
+          "maxItems": 18,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/sha256"
+          }
+        }
+      }
+    },
+    "evidenceArtifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "relative_path",
+        "artifact_sha256",
+        "size_bytes",
+        "tree_sha256"
+      ],
+      "properties": {
+        "relative_path": {
+          "const": "retained_evidence/manifest.json"
+        },
+        "artifact_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "tree_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "schemaArtifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "schema_id": {
+          "type": "string",
+          "enum": [
+            "m4_binding",
+            "schedule",
+            "observation_journal",
+            "analysis",
+            "done"
+          ]
+        },
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      },
+      "required": [
+        "schema_id",
+        "path",
+        "sha256"
+      ],
+      "oneOf": [
+        {
+          "properties": {
+            "schema_id": {
+              "const": "m4_binding"
+            },
+            "path": {
+              "const": "workloads/simbench_bw/schemas/m6_m4_binding_receipt.schema.json"
+            }
+          },
+          "required": [
+            "schema_id",
+            "path"
+          ]
+        },
+        {
+          "properties": {
+            "schema_id": {
+              "const": "schedule"
+            },
+            "path": {
+              "const": "workloads/simbench_bw/schemas/m6_determinism_schedule.v2.schema.json"
+            }
+          },
+          "required": [
+            "schema_id",
+            "path"
+          ]
+        },
+        {
+          "properties": {
+            "schema_id": {
+              "const": "observation_journal"
+            },
+            "path": {
+              "const": "workloads/simbench_bw/schemas/m6_determinism_observation_journal.v2.schema.json"
+            }
+          },
+          "required": [
+            "schema_id",
+            "path"
+          ]
+        },
+        {
+          "properties": {
+            "schema_id": {
+              "const": "analysis"
+            },
+            "path": {
+              "const": "workloads/simbench_bw/schemas/m6_determinism_analysis.v2.schema.json"
+            }
+          },
+          "required": [
+            "schema_id",
+            "path"
+          ]
+        },
+        {
+          "properties": {
+            "schema_id": {
+              "const": "done"
+            },
+            "path": {
+              "const": "workloads/simbench_bw/schemas/m6_determinism_done.v2.schema.json"
+            }
+          },
+          "required": [
+            "schema_id",
+            "path"
+          ]
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "m7_state": {
+            "const": "M7_BLOCKED"
+          }
+        },
+        "required": [
+          "m7_state"
+        ]
+      },
+      "then": {
+        "properties": {
+          "m6_m7_handoff_candidate": {
+            "const": false
+          }
+        }
+      }
+    }
+  ]
+}

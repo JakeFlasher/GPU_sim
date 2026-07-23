@@ -1,0 +1,23 @@
+{
+  "schema_version": 1,
+  "slug": "rmsnorm_fwd_bf16",
+  "shape_point": "rows=1024,hidden=4096",
+  "kernel_signature_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "binary_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+  "data_provenance": "measured",
+  "claim_scope": "measured_local",
+  "fingerprint_axes": {
+    "kernel_feature_vector_ref": "results/kernel_feature_vector__rmsnorm_fwd_bf16__r0_l0.json",
+    "phase_cycle_ledger_ref": "results/phase_cycle_ledger__rmsnorm_fwd_bf16__r0_l0.json",
+    "roofline_coordinate_ref": "results/roofline_coordinate__rmsnorm_fwd_bf16.json",
+    "theta_vector_ref": "results/theta_vector__rmsnorm_fwd_bf16.json",
+    "distributional_metric_ref": "results/distributional_metric__rmsnorm_fwd_bf16.json"
+  },
+  "measurement_provenance": {
+    "preflight_manifest_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+    "cupti_run_id": "cupti_run_20260428_120000",
+    "nvbit_run_id": "nvbit_run_20260428_120500",
+    "dual_run_manifest_ref": "results/dual_run_manifest__rmsnorm_fwd_bf16__abc123.json",
+    "phase_cycle_ledger_ref": "results/phase_cycle_ledger__rmsnorm_fwd_bf16__r0_l0.json"
+  }
+}

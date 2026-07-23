@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "selected_per_cell": [
+    {
+      "arch": "sm_86",
+      "cache_control": "none",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "global_atomic_max_histogram",
+      "source_relpath": "cell=sm_86__global_atomic_max_histogram__trace_l2_accuracy_xl/cfg=warmup5_cache_none/_aggregator_out/label_admitted.json",
+      "source_sha256": "ab5f25298ca1f5ca1f0094a312fd03614e5eac3fe5d92ef4e038a65ab9023293",
+      "stddev_l1tex_sector": 0.0,
+      "stddev_l2_sector": 0.014511305937096113,
+      "warmup_count": 5
+    },
+    {
+      "arch": "sm_86",
+      "cache_control": "none",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "global_atomic_max_return_used",
+      "source_relpath": "cell=sm_86__global_atomic_max_return_used__trace_l2_accuracy_xl/cfg=warmup0_cache_none/_aggregator_out/label_admitted.json",
+      "source_sha256": "cc63b2e6e524f0379f46cd8383c6dc634fc4f5cf9fb4e2373d627d9407e52c93",
+      "stddev_l1tex_sector": 0.0,
+      "stddev_l2_sector": 0.0021789905919943745,
+      "warmup_count": 0
+    }
+  ],
+  "sub_sweep_relpath": "data/local_labels/sweeps/sweep_atommax_r40/sweep_20260603T150749Z_8e960ecd765a"
+}

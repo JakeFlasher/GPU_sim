@@ -1,0 +1,87 @@
+{
+  "admitted_cohort_artifact": {
+    "path": "data/local_labels/timing_cohort/ac4_long_duration_cohort_sm_86.json",
+    "sha256": "abe3d9f600e19a0d3a3f812f271cb4ac4fe3fbd144d56adae3646f2e19214d49"
+  },
+  "arch": "sm_86",
+  "artifact_kind": "timing_candidate_coverage_limits",
+  "candidate_catalog_artifact": {
+    "path": "data/sm_86_predictor_accuracy_recovery_v2/expansion_candidates.json",
+    "sha256": "28b1c855db3c07545abbcab0c91ad8aae16bc64522aefb9ea9e4aac000a03e6c"
+  },
+  "family_coverage": [
+    {
+      "admitted_slugs": [
+        "gemm_hmma_bf16_sm80"
+      ],
+      "candidate_slugs": [
+        "bf16_hmma_gemm_traceable",
+        "fp16_hmma_gemm_traceable",
+        "gemm_hmma_bf16_sm80",
+        "gemm_hmma_fp16_sm80",
+        "gemm_imma_int8_sm80",
+        "gemm_sparse_2to4_bf16_sm80",
+        "int8_imma_gemm_traceable",
+        "tf32_hmma_gemm_traceable"
+      ],
+      "counted_success_cells": 5,
+      "family_bucket": "gemm_family",
+      "status": "admitted",
+      "typed_reason": null
+    },
+    {
+      "admitted_slugs": [
+        "conv2d_implicit_gemm_bf16_sm80"
+      ],
+      "candidate_slugs": [
+        "conv2d_implicit_gemm_bf16_sm80"
+      ],
+      "counted_success_cells": 4,
+      "family_bucket": "conv",
+      "status": "admitted",
+      "typed_reason": null
+    },
+    {
+      "admitted_slugs": [
+        "flash_attn_fwd_bf16_sm80"
+      ],
+      "candidate_slugs": [
+        "flash_attn_fwd_bf16_sm80"
+      ],
+      "counted_success_cells": 2,
+      "family_bucket": "attention",
+      "status": "admitted",
+      "typed_reason": null
+    },
+    {
+      "admitted_slugs": [
+        "dram_streaming_dot_product"
+      ],
+      "candidate_slugs": [
+        "carveout_sensitivity_probe",
+        "cp_async_shared_tile_copy",
+        "dram_stream_stride_mix",
+        "dram_streaming_dot_product",
+        "l2_persisting_window_sweep",
+        "l2_prefetch_hint_sweep",
+        "l2_thrash_pointer_chase",
+        "shared_bank_conflict_stride",
+        "warm_cold_pair_relaunch",
+        "working_set_capacity_sweep"
+      ],
+      "counted_success_cells": 2,
+      "family_bucket": "memory_stress",
+      "status": "admitted",
+      "typed_reason": null
+    }
+  ],
+  "required_family_buckets": [
+    "gemm_family",
+    "conv",
+    "attention",
+    "memory_stress"
+  ],
+  "schema_version": 1,
+  "source_commit": "d8a5b887093263debcd3a9931644e315a56735f3",
+  "success_policy": "only cells in the admitted long-duration cohort count as successful timing cells"
+}

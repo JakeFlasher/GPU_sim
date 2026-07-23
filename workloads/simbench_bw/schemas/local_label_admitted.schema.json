@@ -1,0 +1,228 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "simbench_bw/schemas/local_label_admitted.schema.json",
+  "title": "Local Label Admitted Set",
+  "description": "Strict admission contract for the per-cell ground-truth labels written to data/local_labels/label_admitted.json by tools/local_labels/repeatability_aggregator.py. Each entry in cells must carry the runner-joinable 7-field key (slug, shape_point, binary_sha256, source_commit, kernel_signature_sha256, arch, ncu_metric_version), the runner-consumed cache_hit_rate_l2_sector_pct value, the n_repeats / stddev_l2_sector pair, the evidence_kind classifier (live | synthetic), and the schema_version=5 const pin. additionalProperties:false at every layer enforces the wire contract: any unknown field is a contract break. The 4->5 bump adds the optional per-cell unit_tagged_metrics block (non-percentage count/ns/cycles families) in lockstep with the committed metric registry and the sidecar schema's 1->5 bump; the earlier 3->4 bump added the nullable cache_hit_rate_l1tex_sector_pct field plus the required l1tex_label_status enum so the layer-aware comparison runner can compute per-arch L1 relative error alongside L2. A schema_version 4 record fed to a v5 consumer is rejected with typed reason local_label_admitted_v5_migration_required; a v3 record (missing the L1 mean field AND the l1tex_label_status enum) is rejected with local_label_admitted_l1_mean_migration_required, forcing the operator to re-aggregate.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "cells"],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 5,
+      "description": "Pinned at 5. The 4->5 bump adds the optional per-cell unit_tagged_metrics block (non-percentage count/ns/cycles label families and the L1 read-hit pct) carried in lockstep with the committed metric registry and the sidecar schema's 1->5 bump; the percentage hit-rate path (cache_hit_rate_l2_sector_pct / cache_hit_rate_l1tex_sector_pct) is unchanged. The const pin is a hard parse-time boundary: a schema_version 4 record fed to a v5 consumer is rejected (a v5 consumer surfaces it as local_label_admitted_v5_migration_required), and a v5 record fed to a pre-v5 consumer is likewise rejected. The earlier 3->4 bump added the nullable cache_hit_rate_l1tex_sector_pct + required l1tex_label_status enum (v3 records rejected as local_label_admitted_l1_mean_migration_required)."
+    },
+    "cells": {
+      "type": "array",
+      "items": {"$ref": "#/$defs/admitted_cell"},
+      "description": "List of admitted-cell records. The aggregator emits one entry per (arch, slug, shape_point) cell that survives the repeatability and provenance gates."
+    }
+  },
+  "$defs": {
+    "admitted_cell": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "slug",
+        "shape_point",
+        "binary_sha256",
+        "source_commit",
+        "kernel_signature_sha256",
+        "arch",
+        "ncu_metric_version",
+        "profiler_version",
+        "cache_hit_rate_l2_sector_pct",
+        "cache_hit_rate_l1tex_sector_pct",
+        "l1tex_label_status",
+        "n_repeats",
+        "stddev_l2_sector",
+        "evidence_kind"
+      ],
+      "properties": {
+        "schema_version": {
+          "type": "integer",
+          "const": 5,
+          "description": "Per-record pin to keep stale-shape records from creeping in via raw concatenation. Bumped 4->5 in lockstep with the file-level schema_version."
+        },
+        "evidence_kind": {
+          "type": "string",
+          "enum": ["live", "synthetic"],
+          "description": "Classifier for the cell's evidence provenance. \"live\" denotes records produced from a real NCU sweep (the only path the aggregator emits); \"synthetic\" denotes records authored by test fixtures and intended to exercise the wire format without standing in as evidence. The comparison runner's live-only floor counts only cells with evidence_kind == \"live\"; synthetic cells declare their nature explicitly so they cannot accidentally satisfy the smoke-test floor."
+        },
+        "slug": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Kernel slug from the workload roster (e.g. gemm_hmma_bf16_sm80). One leg of the 7-field join key."
+        },
+        "shape_point": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Shape-file row identifier the cell ran with."
+        },
+        "binary_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "SHA-256 of the kernel binary used in this cell's measurement run."
+        },
+        "source_commit": {
+          "type": "string",
+          "minLength": 1,
+          "description": "git rev-parse HEAD at the time of the NCU collection invocation. Captured by the per-launch label_run_manifest_<repeat>_<launch>.json."
+        },
+        "kernel_signature_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$",
+          "description": "Stable per-kernel hash sha256(slug|binary_path) mirroring run_suite.py::_kernel_signature_sha256."
+        },
+        "arch": {
+          "type": "string",
+          "enum": ["sm_86", "sm_120"],
+          "description": "Compute capability tag of the local device. CLAUDE.md's Two-Device Local Development Model pins the local arch set to sm_86 (RTX 3090 Ti) and sm_120 (RTX 5060 laptop); cross-arch admission is one-arch-at-a-time."
+        },
+        "ncu_metric_version": {
+          "type": "string",
+          "const": "ncu_2026.1.x",
+          "description": "Pinned protocol version for the NCU metric semantics. Mirrors workloads/simbench_bw/comparison_contract.toml's ncu_metric_version field. A non-pinned value is a contract break, not a configuration."
+        },
+        "profiler_version": {
+          "type": "string",
+          "const": "ncu_2026.1.x",
+          "description": "Normalized profiler version. The aggregator folds any raw NCU 2026.1.<patch>(.<build>) banner to this pinned form; raw forms outside the family produce label_profiler_version_drift before the cell ever reaches the schema validator."
+        },
+        "cache_hit_rate_l2_sector_pct": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100,
+          "description": "Mean L2 sector hit rate across the cell's repeats, expressed as percent in [0, 100]. The comparison runner consumes the percent form; the aggregator multiplies the per-repeat fraction by 100 at emission time."
+        },
+        "cache_hit_rate_l1tex_sector_pct": {
+          "anyOf": [
+            {"type": "number", "minimum": 0, "maximum": 100},
+            {"type": "null"}
+          ],
+          "description": "Mean L1/TEX sector hit rate across the cell's repeats, expressed as percent in [0, 100], OR null when the per-repeat sidecars did not carry a cache_hit_rate_l1tex_sector value (or carried it for fewer than the minimum needed for a cohort-wide mean). Nullability is required so cells migrating from v3 can declare L1 absence without spoofing a value; the paired l1tex_label_status field declares WHY the value is null when null. The conditional allOf arms below enforce status-vs-value consistency."
+        },
+        "l1tex_label_status": {
+          "type": "string",
+          "enum": [
+            "mean_present",
+            "mean_absent_label_missing",
+            "mean_absent_provenance_missing",
+            "all_zero"
+          ],
+          "description": "Closed-enum L1 label status. mean_present: cache_hit_rate_l1tex_sector_pct is a non-null number aggregated from at least one per-repeat L1 value AND at least one per-repeat L1 value was non-zero. mean_absent_label_missing: the per-repeat sidecars exist for this cell but did not contain a usable cache_hit_rate_l1tex_sector field for any repeat (the label collection path did not capture L1). mean_absent_provenance_missing: the cell's per-repeat provenance is missing (no usable sidecars) so neither L1 nor L2 mean can be derived from sidecars; status is set only for fail-closed migration records that the aggregator could not re-aggregate without re-running the NCU sweep. all_zero: every per-repeat L1 value WAS captured but each was exactly 0.0 (cell exercises the L1tex hardware path but does not produce sector hits, e.g., vendor_sgemm_cublas/timing_shape whose cublas-backed kernel bypasses the L1tex cache pipeline); cache_hit_rate_l1tex_sector_pct is the non-null number 0.0 and stddev_l1tex_sector is also 0.0; the runner consumes the cell normally for L2 prediction and emits a per-cell diagnostic noting the L1tex zero distribution. The comparison runner emits typed reason comparison_runner_l1tex_label_mean_missing for any cell whose status is one of the two mean_absent_* values before any L1 join fires; the L2 join continues normally."
+        },
+        "n_repeats": {
+          "type": "integer",
+          "minimum": 5,
+          "description": "Number of distinct repeat indices that contributed to this admitted cell. The repeatability_aggregator gates a cell on N >= 5 repeats."
+        },
+        "stddev_l2_sector": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 0.03,
+          "description": "Sample standard deviation of the per-repeat L2 hit-rate values (fraction units). Bounded above by the contract's pinned stddev_threshold = 0.03; cells exceeding the threshold are excluded with label_repeatability_failed before reaching this schema."
+        },
+        "stddev_l1tex_sector": {
+          "anyOf": [
+            {"type": "number", "minimum": 0},
+            {"type": "null"}
+          ],
+          "description": "Sample standard deviation of the per-repeat L1/TEX hit-rate values when present, else null."
+        },
+        "register_cap": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Optional register-cap build-variant axis value (the per-thread -maxrregcount cap for a register-spill build variant). Purely additive: NOT in 'required'; base cells (no build variant) omit it and remain valid. Present only for build-variant cells and paired with variant_id. No schema_version bump because the addition is purely additive per the CLAUDE.md wire-extension policy."
+        },
+        "variant_id": {
+          "type": "string",
+          "pattern": "^register_cap_(0|[1-9][0-9]*)$",
+          "description": "Optional build-variant identity component of the cell key (e.g. register_cap_64). Purely additive: NOT in 'required'; base cells omit it. When present it widens the canonical cell identity from (arch, slug, shape_point) to (arch, slug, shape_point, variant_id) so two build variants of the same shape are distinct admitted cells. Paired with register_cap. The pattern pins the CANONICAL decimal form (no leading zeros, e.g. register_cap_064 is rejected) so one physical cap cannot be admitted under two aliases; the aggregator's _variant_identity normalizer already fails such aliases closed before emission, so this output-side pattern is a belt-and-suspenders invariant. No schema_version bump (purely additive per the CLAUDE.md wire-extension policy)."
+        },
+        "source_commit_override_from": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Optional audit-annotation field carrying the pre-refresh source_commit SHA when a cell's source_commit was rewritten (e.g., via tools/local_labels/refresh_admitted_label_source_commit.py). Purely additive: NOT in 'required'; legacy cells that never needed the override remain valid; admitted cells that DID get refreshed pin the original SHA for audit traceability. Admission preserves additionalProperties:false on every other field; no schema_version bump because the addition is purely additive per the CLAUDE.md wire-extension policy."
+        },
+        "source_commit_refresh_history": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "description": "Optional audit-annotation field listing the immediate-prior source_commit SHA across each refresh cycle (appended on every non-no-op call to tools/local_labels/refresh_admitted_label_source_commit.py). Complements source_commit_override_from (which pins the ORIGINAL pre-refresh origin and is set only once on the first-ever refresh) by recording the IMMEDIATE prior of each subsequent refresh. Purely additive; NOT in 'required'; legacy cells without any refresh history remain valid. Added after review identified that an existing override_from could mask the immediate-prior across multiple refreshes."
+        },
+        "unit_tagged_metrics": {
+          "type": "array",
+          "description": "Optional v5 block of aggregated non-percentage label families (count / ns / cycles) and any non-flat-field pct family, one record per admitted target metric that survived its per-unit repeatability gate. ABSENT on cells that carry only the historical fraction hit-rate fields (backwards-compatible: the 4->5 migration stamps schema_version without adding this block). The percentage hit-rate path (cache_hit_rate_l2_sector_pct / cache_hit_rate_l1tex_sector_pct) is unchanged and never appears here. The item schema is inlined (not a $ref) so the admitted_cell sub-schema validates standalone.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["ncu_metric", "unit", "value", "dispersion", "repeatability_rule", "n_repeats"],
+            "properties": {
+              "ncu_metric": {"type": "string", "minLength": 1, "description": "Canonical Nsight Compute identifier; resolves to a registry entry."},
+              "unit": {"type": "string", "enum": ["pct", "count", "ns", "cycles"], "description": "Per-metric unit tag; equals the registry unit for this ncu_metric."},
+              "value": {"type": "number", "minimum": 0, "description": "Across-repeat mean in native unit (fraction in [0,1] for pct; non-negative raw count/ns/cycles otherwise)."},
+              "dispersion": {"type": "number", "minimum": 0, "description": "Across-repeat dispersion measured by repeatability_rule; within the rule's threshold or the cell is excluded before reaching this schema."},
+              "repeatability_rule": {"type": "string", "enum": ["stddev_abs", "coefficient_of_variation", "relative_tolerance"], "description": "Which per-unit repeatability rule gated this metric."},
+              "n_repeats": {"type": "integer", "minimum": 1, "description": "Number of repeats that carried a usable value for this metric."}
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "description": "Per-cell status-vs-value consistency arm A: l1tex_label_status=mean_present requires cache_hit_rate_l1tex_sector_pct to be a number (NOT null). A record declaring mean_present with a null L1 mean is a contract break.",
+          "if": {
+            "properties": {
+              "l1tex_label_status": {"const": "mean_present"}
+            },
+            "required": ["l1tex_label_status"]
+          },
+          "then": {
+            "properties": {
+              "cache_hit_rate_l1tex_sector_pct": {"type": "number"}
+            }
+          }
+        },
+        {
+          "description": "Per-cell status-vs-value consistency arm B: cache_hit_rate_l1tex_sector_pct=null requires l1tex_label_status to be one of the two mean_absent_* values. A record declaring a null L1 mean with status=mean_present is a contract break.",
+          "if": {
+            "properties": {
+              "cache_hit_rate_l1tex_sector_pct": {"type": "null"}
+            },
+            "required": ["cache_hit_rate_l1tex_sector_pct"]
+          },
+          "then": {
+            "properties": {
+              "l1tex_label_status": {
+                "enum": [
+                  "mean_absent_label_missing",
+                  "mean_absent_provenance_missing"
+                ]
+              }
+            }
+          }
+        },
+        {
+          "description": "Per-cell status-vs-value consistency arm C: l1tex_label_status of mean_absent_label_missing or mean_absent_provenance_missing requires cache_hit_rate_l1tex_sector_pct=null. A record declaring an absent status with a non-null L1 mean is a contract break.",
+          "if": {
+            "properties": {
+              "l1tex_label_status": {
+                "enum": [
+                  "mean_absent_label_missing",
+                  "mean_absent_provenance_missing"
+                ]
+              }
+            },
+            "required": ["l1tex_label_status"]
+          },
+          "then": {
+            "properties": {
+              "cache_hit_rate_l1tex_sector_pct": {"type": "null"}
+            }
+          }
+        }
+      ]
+    }
+  }
+}

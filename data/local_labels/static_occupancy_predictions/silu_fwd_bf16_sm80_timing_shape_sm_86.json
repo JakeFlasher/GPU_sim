@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "artifact_kind": "static_occupancy_prediction",
+  "claim_class": "static_predicted",
+  "arch": "sm_86",
+  "kernel": "silu_fwd_bf16_sm80_kernel",
+  "block_dim": 256,
+  "registers_per_thread": 18,
+  "static_shared_bytes": 0,
+  "dynamic_shared_bytes": 0,
+  "predictions": {
+    "launch__occupancy_limit_warps": {
+      "value": 6,
+      "status": "available",
+      "reason": null,
+      "unit": "count"
+    },
+    "launch__occupancy_limit_blocks": {
+      "value": 16,
+      "status": "available",
+      "reason": null,
+      "unit": "count"
+    },
+    "launch__occupancy_limit_registers": {
+      "value": 10,
+      "status": "available",
+      "reason": null,
+      "unit": "count"
+    },
+    "launch__occupancy_limit_shared_mem": {
+      "value": null,
+      "status": "typed_unavailable",
+      "reason": "requires_runtime_shared_mem_carveout",
+      "unit": "count"
+    }
+  },
+  "slug": "silu_fwd_bf16_sm80",
+  "shape_point": "timing_shape"
+}

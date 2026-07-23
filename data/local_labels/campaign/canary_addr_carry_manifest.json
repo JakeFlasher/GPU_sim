@@ -1,0 +1,77 @@
+{
+  "schema_version": 1,
+  "artifact_id": "sm86_addr_carry_canary_v1",
+  "arch": "sm_86",
+  "canary_pass": true,
+  "canary_failures": [],
+  "canary_source": "tools/local_labels/canary/sm86_addr_carry_canary.cu",
+  "provenance": {
+    "git_head": "60a94cba6d1b9763e251ba79f2340a182f7ab2f0",
+    "git_clean": false,
+    "tracer_so_present": true,
+    "clock_state": {
+      "nvidia_smi": "1350 MHz, 10501 MHz, Enabled"
+    },
+    "cuda_toolkit": "13.2"
+  },
+  "evidence": {
+    "validate_trace_dir": {
+      "ok": true,
+      "typed_reason": ""
+    },
+    "trace_contract_id": "sm86_addr_carry_v1",
+    "memory_payload_classes": [
+      1,
+      2,
+      3,
+      6,
+      8
+    ],
+    "admitted_records_by_class": {
+      "1": 1,
+      "6": 4,
+      "2": 3,
+      "8": 1
+    },
+    "admitted_atomic": 4,
+    "admitted_async_copy": 1,
+    "admitted_global": 1,
+    "address_space_histogram": {
+      "1": 4,
+      "4": 1,
+      "2": 4
+    },
+    "ldgsts_source_records_with_allocation_id": 1,
+    "unsupported_memory_path_total": 0,
+    "unsupported_memory_path_flipped_classes": 0,
+    "allocations_sidecar_entries": 4
+  },
+  "scorability_witnesses": {
+    "gemm_hmma_bf16": {
+      "surface": "op_ld",
+      "surface_class": "ASYNC_COPY",
+      "trace_contract_id": "sm86_addr_carry_v1",
+      "validate_ok": true,
+      "admitted_surface_class_records": 2,
+      "unsupported_memory_path_flipped_classes": 0,
+      "cache_replay_l2_stream_sectors": 192,
+      "cache_replay_surface_class_excluded_from_l2": 0,
+      "before": "na (records stripped to unsupported_memory_path pre-flip; surface starved)",
+      "after": "scorable",
+      "scorable": true
+    },
+    "ac4_global_atomic_histogram": {
+      "surface": "l2",
+      "surface_class": "ATOMIC",
+      "trace_contract_id": "sm86_addr_carry_v1",
+      "validate_ok": true,
+      "admitted_surface_class_records": 128,
+      "unsupported_memory_path_flipped_classes": 0,
+      "cache_replay_l2_stream_sectors": 8192,
+      "cache_replay_surface_class_excluded_from_l2": 0,
+      "before": "na (records stripped to unsupported_memory_path pre-flip; surface starved)",
+      "after": "scorable",
+      "scorable": true
+    }
+  }
+}

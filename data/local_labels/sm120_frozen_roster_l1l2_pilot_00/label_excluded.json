@@ -1,0 +1,343 @@
+{
+  "cells": [
+    {
+      "binary_sha256s": [
+        "eddc4c434414c969555a2d7503a6e12b7344f4f80fc3c97c10db8f6b24931e75"
+      ],
+      "detail": "cell ('sm_120', 'cluster_remote_reduction', 'correctness_00') L2 stddev 0.21918986518541408 exceeds threshold 0.03.",
+      "device": "sm_120",
+      "n_repeats": 5,
+      "shape_point": "correctness_00",
+      "slug": "cluster_remote_reduction",
+      "stddev_l1tex_sector": 0.0,
+      "stddev_l2_sector": 0.21918986518541408,
+      "typed_reason": "label_repeatability_failed"
+    },
+    {
+      "binary_sha256s": [
+        "eddc4c434414c969555a2d7503a6e12b7344f4f80fc3c97c10db8f6b24931e75"
+      ],
+      "detail": "cell ('sm_120', 'cluster_remote_reduction', 'timing_00') L2 stddev 0.2914341487457431 exceeds threshold 0.03.",
+      "device": "sm_120",
+      "n_repeats": 5,
+      "shape_point": "timing_00",
+      "slug": "cluster_remote_reduction",
+      "stddev_l1tex_sector": 0.0,
+      "stddev_l2_sector": 0.2914341487457431,
+      "typed_reason": "label_repeatability_failed"
+    },
+    {
+      "binary_sha256s": [
+        "eddc4c434414c969555a2d7503a6e12b7344f4f80fc3c97c10db8f6b24931e75"
+      ],
+      "detail": "cell ('sm_120', 'cluster_remote_reduction', 'trace_00') L2 stddev 0.3137617422907524 exceeds threshold 0.03.",
+      "device": "sm_120",
+      "n_repeats": 5,
+      "shape_point": "trace_00",
+      "slug": "cluster_remote_reduction",
+      "stddev_l1tex_sector": 0.0,
+      "stddev_l2_sector": 0.3137617422907524,
+      "typed_reason": "label_repeatability_failed"
+    },
+    {
+      "binary_sha256s": [
+        "50771372513a3ddd8822ce0398ffa928b59d3fb536ed534a9d1204bcb72332d5"
+      ],
+      "detail": "cell ('sm_120', 'cluster_rmsnorm_dsmem_bf16', 'correctness_00') L2 stddev 0.09389057206616712 exceeds threshold 0.03.",
+      "device": "sm_120",
+      "n_repeats": 5,
+      "shape_point": "correctness_00",
+      "slug": "cluster_rmsnorm_dsmem_bf16",
+      "stddev_l1tex_sector": 0.0,
+      "stddev_l2_sector": 0.09389057206616712,
+      "typed_reason": "label_repeatability_failed"
+    },
+    {
+      "binary_sha256s": [
+        "50771372513a3ddd8822ce0398ffa928b59d3fb536ed534a9d1204bcb72332d5"
+      ],
+      "detail": "cell ('sm_120', 'cluster_rmsnorm_dsmem_bf16', 'timing_00') L2 stddev 0.16178446708983538 exceeds threshold 0.03.",
+      "device": "sm_120",
+      "n_repeats": 5,
+      "shape_point": "timing_00",
+      "slug": "cluster_rmsnorm_dsmem_bf16",
+      "stddev_l1tex_sector": 0.0,
+      "stddev_l2_sector": 0.16178446708983538,
+      "typed_reason": "label_repeatability_failed"
+    },
+    {
+      "binary_sha256s": [
+        "50771372513a3ddd8822ce0398ffa928b59d3fb536ed534a9d1204bcb72332d5"
+      ],
+      "detail": "cell ('sm_120', 'cluster_rmsnorm_dsmem_bf16', 'trace_00') L2 stddev 0.17938398526939406 exceeds threshold 0.03.",
+      "device": "sm_120",
+      "n_repeats": 5,
+      "shape_point": "trace_00",
+      "slug": "cluster_rmsnorm_dsmem_bf16",
+      "stddev_l1tex_sector": 0.0,
+      "stddev_l2_sector": 0.17938398526939406,
+      "typed_reason": "label_repeatability_failed"
+    },
+    {
+      "binary_sha256s": [
+        "5451b4c70e2b14a7631249f2559c9422a0c1b42f0c765dd3ebaa8f5cb452b947"
+      ],
+      "detail": "cell ('sm_120', 'conformer_depthwise_glu_bf16', 'correctness_00') L2 stddev 0.3426957336437922 exceeds threshold 0.03.",
+      "device": "sm_120",
+      "n_repeats": 5,
+      "shape_point": "correctness_00",
+      "slug": "conformer_depthwise_glu_bf16",
+      "stddev_l1tex_sector": 0.0,
+      "stddev_l2_sector": 0.3426957336437922,
+      "typed_reason": "label_repeatability_failed"
+    },
+    {
+      "binary_sha256s": [
+        "5451b4c70e2b14a7631249f2559c9422a0c1b42f0c765dd3ebaa8f5cb452b947"
+      ],
+      "detail": "cell ('sm_120', 'conformer_depthwise_glu_bf16', 'timing_00') L2 stddev 0.1090688484400095 exceeds threshold 0.03.",
+      "device": "sm_120",
+      "n_repeats": 5,
+      "shape_point": "timing_00",
+      "slug": "conformer_depthwise_glu_bf16",
+      "stddev_l1tex_sector": 0.0,
+      "stddev_l2_sector": 0.1090688484400095,
+      "typed_reason": "label_repeatability_failed"
+    },
+    {
+      "binary_sha256s": [
+        "5451b4c70e2b14a7631249f2559c9422a0c1b42f0c765dd3ebaa8f5cb452b947"
+      ],
+      "detail": "cell ('sm_120', 'conformer_depthwise_glu_bf16', 'timing_01') L2 stddev 0.26045625736388056 exceeds threshold 0.03.",
+      "device": "sm_120",
+      "n_repeats": 5,
+      "shape_point": "timing_01",
+      "slug": "conformer_depthwise_glu_bf16",
+      "stddev_l1tex_sector": 0.0,
+      "stddev_l2_sector": 0.26045625736388056,
+      "typed_reason": "label_repeatability_failed"
+    },
+    {
+      "binary_sha256s": [
+        "5451b4c70e2b14a7631249f2559c9422a0c1b42f0c765dd3ebaa8f5cb452b947"
+      ],
+      "detail": "cell ('sm_120', 'conformer_depthwise_glu_bf16', 'trace_00') L2 stddev 0.07715819463932522 exceeds threshold 0.03.",
+      "device": "sm_120",
+      "n_repeats": 5,
+      "shape_point": "trace_00",
+      "slug": "conformer_depthwise_glu_bf16",
+      "stddev_l1tex_sector": 0.0,
+      "stddev_l2_sector": 0.07715819463932522,
+      "typed_reason": "label_repeatability_failed"
+    },
+    {
+      "binary_sha256s": [
+        "885f13d25fa31c2a50bdfe8f5b10c72bcbbe15d03f778cdfdfb242f2a16e8154"
+      ],
+      "detail": "cell ('sm_120', 'embedding_bag_scatter_atomic', 'correctness_00') L2 stddev 0.18063119311770795 exceeds threshold 0.03.",
+      "device": "sm_120",
+      "n_repeats": 5,
+      "shape_point": "correctness_00",
+      "slug": "embedding_bag_scatter_atomic",
+      "stddev_l1tex_sector": 0.0,
+      "stddev_l2_sector": 0.18063119311770795,
+      "typed_reason": "label_repeatability_failed"
+    },
+    {
+      "binary_sha256s": [
+        "885f13d25fa31c2a50bdfe8f5b10c72bcbbe15d03f778cdfdfb242f2a16e8154"
+      ],
+      "detail": "cell ('sm_120', 'embedding_bag_scatter_atomic', 'timing_00') L2 stddev 0.20892685066862277 exceeds threshold 0.03.",
+      "device": "sm_120",
+      "n_repeats": 5,
+      "shape_point": "timing_00",
+      "slug": "embedding_bag_scatter_atomic",
+      "stddev_l1tex_sector": 0.0,
+      "stddev_l2_sector": 0.20892685066862277,
+      "typed_reason": "label_repeatability_failed"
+    },
+    {
+      "binary_sha256s": [
+        "885f13d25fa31c2a50bdfe8f5b10c72bcbbe15d03f778cdfdfb242f2a16e8154"
+      ],
+      "detail": "cell ('sm_120', 'embedding_bag_scatter_atomic', 'timing_01') L2 stddev 0.25732207486998876 exceeds threshold 0.03.",
+      "device": "sm_120",
+      "n_repeats": 5,
+      "shape_point": "timing_01",
+      "slug": "embedding_bag_scatter_atomic",
+      "stddev_l1tex_sector": 0.0,
+      "stddev_l2_sector": 0.25732207486998876,
+      "typed_reason": "label_repeatability_failed"
+    },
+    {
+      "binary_sha256s": [
+        "885f13d25fa31c2a50bdfe8f5b10c72bcbbe15d03f778cdfdfb242f2a16e8154"
+      ],
+      "detail": "cell ('sm_120', 'embedding_bag_scatter_atomic', 'trace_00') L2 stddev 0.2879728744197205 exceeds threshold 0.03.",
+      "device": "sm_120",
+      "n_repeats": 5,
+      "shape_point": "trace_00",
+      "slug": "embedding_bag_scatter_atomic",
+      "stddev_l1tex_sector": 0.0,
+      "stddev_l2_sector": 0.2879728744197205,
+      "typed_reason": "label_repeatability_failed"
+    },
+    {
+      "binary_sha256s": [
+        "d80ae7de28447c6ced24cecbb9a9809de643ad15c2bcca66104a06d9eba3152c"
+      ],
+      "detail": "cell ('sm_120', 'embedding_gather_vocab128k', 'correctness_00') L2 stddev 0.2850534794926726 exceeds threshold 0.03.",
+      "device": "sm_120",
+      "n_repeats": 5,
+      "shape_point": "correctness_00",
+      "slug": "embedding_gather_vocab128k",
+      "stddev_l1tex_sector": 0.0,
+      "stddev_l2_sector": 0.2850534794926726,
+      "typed_reason": "label_repeatability_failed"
+    },
+    {
+      "binary_sha256s": [
+        "389614b3c704ab4a7052400cd025ba17fd9b142924b2e73238445829d2b14201"
+      ],
+      "detail": "cell ('sm_120', 'flash_attn_bwd_bf16', 'correctness_00') L2 stddev 0.04141669953050338 exceeds threshold 0.03.",
+      "device": "sm_120",
+      "n_repeats": 5,
+      "shape_point": "correctness_00",
+      "slug": "flash_attn_bwd_bf16",
+      "stddev_l1tex_sector": 8.944271910003759e-05,
+      "stddev_l2_sector": 0.04141669953050338,
+      "typed_reason": "label_repeatability_failed"
+    },
+    {
+      "binary_sha256s": [
+        "389614b3c704ab4a7052400cd025ba17fd9b142924b2e73238445829d2b14201"
+      ],
+      "detail": "cell ('sm_120', 'flash_attn_bwd_bf16', 'trace_00') L2 stddev 0.030234334786794947 exceeds threshold 0.03.",
+      "device": "sm_120",
+      "n_repeats": 5,
+      "shape_point": "trace_00",
+      "slug": "flash_attn_bwd_bf16",
+      "stddev_l1tex_sector": 0.00012247448713919074,
+      "stddev_l2_sector": 0.030234334786794947,
+      "typed_reason": "label_repeatability_failed"
+    },
+    {
+      "binary_sha256s": [
+        "353d6e0851457af87068528a296418c855109b36742fe66c9801cc6062382535"
+      ],
+      "detail": "cell ('sm_120', 'flash_attn_bwd_fp8', 'correctness_00') L2 stddev 0.30744248418538156 exceeds threshold 0.03.",
+      "device": "sm_120",
+      "n_repeats": 5,
+      "shape_point": "correctness_00",
+      "slug": "flash_attn_bwd_fp8",
+      "stddev_l1tex_sector": 0.0,
+      "stddev_l2_sector": 0.30744248418538156,
+      "typed_reason": "label_repeatability_failed"
+    },
+    {
+      "binary_sha256s": [
+        "7c1b7470457ca98056f110e02c4f14c726ce1d830e9b8a1da78466fee6522f06"
+      ],
+      "detail": "cell ('sm_120', 'groupnorm_fwd_bwd_bf16', 'correctness_00') L2 stddev 0.32567757449502815 exceeds threshold 0.03.",
+      "device": "sm_120",
+      "n_repeats": 5,
+      "shape_point": "correctness_00",
+      "slug": "groupnorm_fwd_bwd_bf16",
+      "stddev_l1tex_sector": 0.0,
+      "stddev_l2_sector": 0.32567757449502815,
+      "typed_reason": "label_repeatability_failed"
+    },
+    {
+      "binary_sha256s": [
+        "7c1b7470457ca98056f110e02c4f14c726ce1d830e9b8a1da78466fee6522f06"
+      ],
+      "detail": "cell ('sm_120', 'groupnorm_fwd_bwd_bf16', 'timing_00') L2 stddev 0.2836341516813517 exceeds threshold 0.03.",
+      "device": "sm_120",
+      "n_repeats": 5,
+      "shape_point": "timing_00",
+      "slug": "groupnorm_fwd_bwd_bf16",
+      "stddev_l1tex_sector": 0.0,
+      "stddev_l2_sector": 0.2836341516813517,
+      "typed_reason": "label_repeatability_failed"
+    },
+    {
+      "binary_sha256s": [
+        "7c1b7470457ca98056f110e02c4f14c726ce1d830e9b8a1da78466fee6522f06"
+      ],
+      "detail": "cell ('sm_120', 'groupnorm_fwd_bwd_bf16', 'trace_00') L2 stddev 0.16938094874556847 exceeds threshold 0.03.",
+      "device": "sm_120",
+      "n_repeats": 5,
+      "shape_point": "trace_00",
+      "slug": "groupnorm_fwd_bwd_bf16",
+      "stddev_l1tex_sector": 0.0,
+      "stddev_l2_sector": 0.16938094874556847,
+      "typed_reason": "label_repeatability_failed"
+    },
+    {
+      "binary_sha256s": [
+        "6b4e8c1a6b0640825241341e4ccc89e65fc43542f68150cfe7600e8b232e45d0"
+      ],
+      "detail": "cell ('sm_120', 'layernorm_fwd_bwd_bf16', 'correctness_00') L2 stddev 0.12258921949604813 exceeds threshold 0.03.",
+      "device": "sm_120",
+      "n_repeats": 5,
+      "shape_point": "correctness_00",
+      "slug": "layernorm_fwd_bwd_bf16",
+      "stddev_l1tex_sector": 0.0,
+      "stddev_l2_sector": 0.12258921949604813,
+      "typed_reason": "label_repeatability_failed"
+    },
+    {
+      "binary_sha256s": [
+        "6b4e8c1a6b0640825241341e4ccc89e65fc43542f68150cfe7600e8b232e45d0"
+      ],
+      "detail": "cell ('sm_120', 'layernorm_fwd_bwd_bf16', 'timing_00') L2 stddev 0.12932943593784052 exceeds threshold 0.03.",
+      "device": "sm_120",
+      "n_repeats": 5,
+      "shape_point": "timing_00",
+      "slug": "layernorm_fwd_bwd_bf16",
+      "stddev_l1tex_sector": 0.0,
+      "stddev_l2_sector": 0.12932943593784052,
+      "typed_reason": "label_repeatability_failed"
+    },
+    {
+      "binary_sha256s": [
+        "6b4e8c1a6b0640825241341e4ccc89e65fc43542f68150cfe7600e8b232e45d0"
+      ],
+      "detail": "cell ('sm_120', 'layernorm_fwd_bwd_bf16', 'trace_00') L2 stddev 0.06054038321649444 exceeds threshold 0.03.",
+      "device": "sm_120",
+      "n_repeats": 5,
+      "shape_point": "trace_00",
+      "slug": "layernorm_fwd_bwd_bf16",
+      "stddev_l1tex_sector": 0.0,
+      "stddev_l2_sector": 0.06054038321649444,
+      "typed_reason": "label_repeatability_failed"
+    },
+    {
+      "binary_sha256s": [
+        "caed687a00cecbf881ab0cf3239a40852712ed9835e289d934a71c7d5e48df56"
+      ],
+      "detail": "cell ('sm_120', 'rmsnorm_bwd_bf16', 'correctness_00') L2 stddev 0.09169846533634593 exceeds threshold 0.03.",
+      "device": "sm_120",
+      "n_repeats": 5,
+      "shape_point": "correctness_00",
+      "slug": "rmsnorm_bwd_bf16",
+      "stddev_l1tex_sector": 0.0,
+      "stddev_l2_sector": 0.09169846533634593,
+      "typed_reason": "label_repeatability_failed"
+    },
+    {
+      "binary_sha256s": [
+        "caed687a00cecbf881ab0cf3239a40852712ed9835e289d934a71c7d5e48df56"
+      ],
+      "detail": "cell ('sm_120', 'rmsnorm_bwd_bf16', 'timing_00') L2 stddev 0.1246059990530151 exceeds threshold 0.03.",
+      "device": "sm_120",
+      "n_repeats": 5,
+      "shape_point": "timing_00",
+      "slug": "rmsnorm_bwd_bf16",
+      "stddev_l1tex_sector": 0.0,
+      "stddev_l2_sector": 0.1246059990530151,
+      "typed_reason": "label_repeatability_failed"
+    }
+  ],
+  "schema_version": 1
+}

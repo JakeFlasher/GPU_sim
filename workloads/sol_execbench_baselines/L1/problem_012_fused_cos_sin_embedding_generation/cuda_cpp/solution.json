@@ -1,0 +1,44 @@
+{
+  "name": "problem_012_fused_cos_sin_embedding_generation_cuda_cpp",
+  "definition": "012_fused_cos_sin_embedding_generation",
+  "author": "solbench",
+  "spec": {
+    "languages": [
+      "cuda_cpp"
+    ],
+    "target_hardware": [
+      "LOCAL"
+    ],
+    "entry_point": "main.cpp::run",
+    "dependencies": [],
+    "destination_passing_style": true,
+    "binding": "torch",
+    "compile_options": {
+      "cflags": [],
+      "cuda_cflags": [
+        "-O3",
+        "--use_fast_math",
+        "-gencode",
+        "arch=compute_86,code=sm_86"
+      ],
+      "ld_flags": [
+        "-lcuda"
+      ]
+    }
+  },
+  "sources": [
+    {
+      "path": "main.cpp",
+      "content": "#include <torch/extension.h>\n#include <ATen/cuda/CUDAContext.h>\n#include \"kernel.h\"\n#include <string>\n\nstatic void check_fp32_contiguous_cuda(\n    const torch::Tensor& tensor, const std::string& name) {\n    TORCH_CHECK(tensor.is_cuda(), name, \" must be a CUDA tensor\");\n    TORCH_CHECK(\n        tensor.dtype() == torch::kFloat32,\n        name, \" must have float32 dtype, got \", tensor.dtype());\n    TORCH_CHECK(tensor.is_contiguous(), name, \" must be contiguous\");\n}\n\nstatic void check_bf16_contiguous_cuda(\n    const torch::Tensor& tensor, const std::string& name) {\n    TORCH_CHECK(tensor.is_cuda(), name, \" must be a CUDA tensor\");\n    TORCH_CHECK(\n        tensor.dtype() == torch::kBFloat16,\n        name, \" must have bfloat16 dtype, got \", tensor.dtype());\n    TORCH_CHECK(tensor.is_contiguous(), name, \" must be contiguous\");\n}\n\n// Destination-passing-style entry. definition.json declares:\n//   freqs             : [batch_size, seq_len, half_head_dim] fp32\n//   attention_scaling : scalar fp32\n//   cos               : [batch_size, seq_len, head_dim] bf16 (DPS)\n//   sin               : [batch_size, seq_len, head_dim] bf16 (DPS)\n//\n// head_dim is constant at 128 per definition.json; half_head_dim\n// is the derived axis head_dim // 2 = 64.\nvoid run(\n    const torch::Tensor& freqs,\n    double attention_scaling,\n    torch::Tensor cos,\n    torch::Tensor sin\n) {\n    TORCH_CHECK(freqs.dim() == 3, \"freqs must be 3D [batch, seq, half_head_dim]\");\n    TORCH_CHECK(cos.dim() == 3, \"cos must be 3D\");\n    TORCH_CHECK(sin.dim() == 3, \"sin must be 3D\");\n\n    const int64_t half_head_dim = freqs.size(2);\n    const int64_t head_dim = cos.size(2);\n    TORCH_CHECK(\n        head_dim == 2 * half_head_dim,\n        \"head_dim must equal 2 * half_head_dim; got head_dim=\",\n        head_dim, \" half_head_dim=\", half_head_dim);\n    TORCH_CHECK(\n        cos.size(0) == freqs.size(0) && cos.size(1) == freqs.size(1),\n        \"cos shape must match freqs leading dims\");\n    TORCH_CHECK(\n        sin.size(0) == freqs.size(0) && sin.size(1) == freqs.size(1),\n        \"sin shape must match freqs leading dims\");\n    TORCH_CHECK(\n        sin.size(2) == head_dim,\n        \"sin head_dim must match cos head_dim\");\n\n    check_fp32_contiguous_cuda(freqs, \"freqs\");\n    check_bf16_contiguous_cuda(cos, \"cos\");\n    check_bf16_contiguous_cuda(sin, \"sin\");\n\n    cudaStream_t stream = at::cuda::getCurrentCUDAStream();\n    problem_012_fused_cos_sin_launcher(\n        freqs,\n        static_cast<float>(attention_scaling),\n        cos,\n        sin,\n        stream);\n}\n\nPYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {\n    m.def(\n        \"run\", &run,\n        \"Fused cos/sin embedding generation for RoPE: \"\n        \"emb = cat(freqs, freqs); cos = bf16(cos(emb) * scale); \"\n        \"sin = bf16(sin(emb) * scale). Destination-passing style.\");\n}\n"
+    },
+    {
+      "path": "kernel.cu",
+      "content": "#include \"kernel.h\"\n#include <cuda_bf16.h>\n#include <cuda_runtime.h>\n\n// One thread per (head_dim) output position; one block per (batch,\n// seq) row. The reference performs emb = cat(freqs, freqs) along\n// the last dim then sin/cos with attention scaling. We fold the\n// replication into the index math: for lane d in [0, head_dim),\n// the input index is d % half_head_dim, so lanes [0, half) and\n// [half, head_dim) read freqs at the same position. Each thread\n// emits one cos element and one sin element.\n\nnamespace {\n\nconstexpr int BLOCK_THREADS = 128;  // head_dim baked at the spec value\n\n__global__ void problem_012_fused_cos_sin_kernel(\n    const float* __restrict__ freqs,\n    __nv_bfloat16* __restrict__ cos_out,\n    __nv_bfloat16* __restrict__ sin_out,\n    int row_count,\n    int half_head_dim,\n    int head_dim,\n    float attention_scaling) {\n\n    const int row = blockIdx.x;\n    if (row >= row_count) {\n        return;\n    }\n    const int d = threadIdx.x;\n    if (d >= head_dim) {\n        return;\n    }\n\n    const int freq_idx = d < half_head_dim ? d : d - half_head_dim;\n    const float x = freqs[row * half_head_dim + freq_idx];\n\n    float c, s;\n    __sincosf(x, &s, &c);\n    c *= attention_scaling;\n    s *= attention_scaling;\n\n    const int out_offset = row * head_dim + d;\n    cos_out[out_offset] = __float2bfloat16_rn(c);\n    sin_out[out_offset] = __float2bfloat16_rn(s);\n}\n\n}  // namespace\n\nvoid problem_012_fused_cos_sin_launcher(\n    const torch::Tensor& freqs,\n    float attention_scaling,\n    torch::Tensor& cos_out,\n    torch::Tensor& sin_out,\n    cudaStream_t stream) {\n\n    const int batch_size = static_cast<int>(freqs.size(0));\n    const int seq_len = static_cast<int>(freqs.size(1));\n    const int half_head_dim = static_cast<int>(freqs.size(2));\n    const int head_dim = static_cast<int>(cos_out.size(2));\n    const int row_count = batch_size * seq_len;\n\n    dim3 grid(row_count);\n    dim3 block(BLOCK_THREADS);\n\n    problem_012_fused_cos_sin_kernel<<<grid, block, 0, stream>>>(\n        freqs.data_ptr<float>(),\n        reinterpret_cast<__nv_bfloat16*>(cos_out.data_ptr<at::BFloat16>()),\n        reinterpret_cast<__nv_bfloat16*>(sin_out.data_ptr<at::BFloat16>()),\n        row_count,\n        half_head_dim,\n        head_dim,\n        attention_scaling);\n}\n"
+    },
+    {
+      "path": "kernel.h",
+      "content": "#pragma once\n\n#ifndef PROBLEM_012_FUSED_COS_SIN_EMBEDDING_GENERATION_KERNEL_H\n#define PROBLEM_012_FUSED_COS_SIN_EMBEDDING_GENERATION_KERNEL_H\n\n#include <cuda_runtime.h>\n#include <torch/extension.h>\n\n// Host launcher for the fused cos/sin embedding generation.\n// freqs is [batch_size, seq_len, half_head_dim] FP32 contiguous.\n// cos / sin are pre-allocated [batch_size, seq_len, head_dim] BF16\n// outputs (destination-passing style). head_dim = 2 * half_head_dim;\n// the emb = cat(freqs, freqs) replication is folded into the index\n// math so freqs is read only once per element.\nvoid problem_012_fused_cos_sin_launcher(\n    const torch::Tensor& freqs,\n    float attention_scaling,\n    torch::Tensor& cos_out,\n    torch::Tensor& sin_out,\n    cudaStream_t stream);\n\n#endif  // PROBLEM_012_FUSED_COS_SIN_EMBEDDING_GENERATION_KERNEL_H\n"
+    }
+  ],
+  "description": "Hand-port of problem_012 fused cos/sin RoPE embedding for the local sm_86 3090 Ti (FP32 freqs in, BF16 cos/sin out)."
+}

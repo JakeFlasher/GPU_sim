@@ -1,0 +1,393 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "$id": "simbench_bw/schemas/local_label_sidecar.schema.json",
+ "title": "Local Label Sidecar",
+ "description": "Per-launch ground-truth label produced by tools/local_labels/label_driver.sh on local hardware (RTX 3090 Ti sm_86 and RTX 5060 laptop sm_120) and consumed by tools/local_labels/import_label.py and tools/local_labels/repeatability_aggregator.py. Quarantined to data/local_labels/<device>/<slug>/<shape_point>/label_<repeat>_<launch>.json. Carries the L2 sector hit-rate metric (mandatory), the L1/TEX sector hit-rate metric (optional; either both cache_hit_rate_l1tex_sector + confidence_interval_l1tex_sector are present, or both are absent \u2014 the dependentRequired arm rejects a half-pair), per-target confidence intervals, and the provenance contract that lets downstream importers reject out-of-distribution sidecars. The L1 admission floor lives in the aggregator (tools/local_labels/repeatability_aggregator.py): an admitted v4 cell promotes to `l1tex_label_status=mean_present` only when at least the configured `repeats_required` (default 5) of the cell's repeats carry L1 values; partial L1 evidence emits null + `mean_absent_label_missing` so the comparison runner's pre-flight excludes the L1 join while L2 admission continues normally.",
+ "schema_version": 5,
+ "_schema_version_note": "Bumped 1->5 in lockstep with the admitted schema's 4->5 bump: per-launch sidecars now carry the optional unit_tagged_metrics block (non-percentage count/ns/cycles metrics) alongside the historical flat fraction hit-rate fields. The schema_version property is pinned const 5 so a pre-v5 (schema_version 1) sidecar fed to a v5 consumer is rejected at parse time, and a v5 sidecar fed to a pre-v5 consumer is likewise rejected.",
+ "type": "object",
+ "additionalProperties": false,
+ "required": [
+  "schema_version",
+  "device",
+  "slug",
+  "shape_point",
+  "repeat_index",
+  "launch_index",
+  "binary_sha256",
+  "profiler_family",
+  "profiler_version",
+  "cuda_version",
+  "driver_version",
+  "gpu_uuid_sha256",
+  "replay_mode",
+  "aggregation",
+  "warmup_count",
+  "cache_hit_rate_l2_sector",
+  "confidence_interval_l2_sector"
+ ],
+ "dependentRequired": {
+  "cache_hit_rate_l1tex_sector": [
+   "confidence_interval_l1tex_sector"
+  ],
+  "confidence_interval_l1tex_sector": [
+   "cache_hit_rate_l1tex_sector"
+  ]
+ },
+ "properties": {
+  "measurement_protocol": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "ncu_clock_control"
+   ],
+   "description": "OPTIONAL v2/v2.1-protocol provenance block (CLAUDE.md Rule 2, 2026-07-06 re-founding): the EXPLICIT NCU clock-control / cache-control / replay-mode used for this capture plus the observed host clock, persistence, power and temperature state. SEMANTICS: the host fields are ONE read-only nvidia-smi sample taken at sidecar-emission time (post-capture) on the device selected by LABEL_DRIVER_GPU_INDEX \u2014 a mid-capture excursion that clears before emission is not visible here. Absent on pre-v2 sidecars; the aggregator treats absence as protocol-unpinned legacy evidence.",
+   "properties": {
+    "ncu_clock_control": {
+     "type": "string",
+     "enum": [
+      "base",
+      "boost",
+      "none"
+     ],
+     "description": "The --clock-control mode passed EXPLICITLY to NCU (never defaulted; the NCU default changed base->boost in 2026.1). `none` is the correct mode when host clocks are externally locked via nvidia-smi -lgc."
+    },
+    "host_persistence_mode": {
+     "type": "string",
+     "description": "nvidia-smi persistence_mode at emission time (e.g. `Enabled`)."
+    },
+    "host_sm_clock_mhz": {
+     "type": "integer",
+     "minimum": 0,
+     "description": "Observed SM clock (MHz) at emission time. Under an -lgc min==max lock this equals the locked frequency."
+    },
+    "host_max_sm_clock_mhz": {
+     "type": "integer",
+     "minimum": 0,
+     "description": "Device maximum SM clock (MHz)."
+    },
+    "host_throttle_reasons_active": {
+     "type": "string",
+     "description": "Raw throttle/event reasons active bitmask string at emission time (clocks_event_reasons.active spelling, falling back to the deprecated clocks_throttle_reasons.active alias; 0x1 = GPU idle is benign)."
+    },
+    "ncu_cache_control": {
+     "type": "string",
+     "enum": [
+      "all",
+      "none"
+     ],
+     "description": "The --cache-control mode passed EXPLICITLY to NCU (Rule 2 pin; `all` = cold-cache-per-replay reference)."
+    },
+    "ncu_replay_mode": {
+     "type": "string",
+     "enum": [
+      "kernel",
+      "application",
+      "range"
+     ],
+     "description": "The --replay-mode passed EXPLICITLY to NCU (Rule 2 pin)."
+    },
+    "host_gpu_index": {
+     "type": "integer",
+     "minimum": 0,
+     "description": "nvidia-smi -i index the host-state sample was read from (LABEL_DRIVER_GPU_INDEX, default 0)."
+    },
+    "host_mem_clock_mhz": {
+     "type": "integer",
+     "minimum": 0,
+     "description": "Observed memory clock (MHz) at emission time. Under an -lmc min==max lock this equals the locked frequency (v2.1 pin: 10501 on the 3090 Ti)."
+    },
+    "host_power_draw_w": {
+     "type": "number",
+     "minimum": 0,
+     "description": "Board power draw (W) at emission time (NVML covariate per Rule 2)."
+    },
+    "host_temperature_c": {
+     "type": "integer",
+     "description": "GPU core temperature (C) at emission time (NVML covariate per Rule 2)."
+    }
+   }
+  },
+  "schema_version": {
+   "type": "integer",
+   "const": 5,
+   "description": "Sidecar schema major version, pinned at 5. The 1->5 bump introduced the optional unit_tagged_metrics block (count/ns/cycles families) in lockstep with the admitted schema's 4->5 bump and the committed metric registry. The const pin makes the version a hard parse-time boundary: a pre-v5 sidecar is rejected by a v5 consumer, and vice versa."
+  },
+  "device": {
+   "type": "string",
+   "minLength": 1,
+   "description": "Compute capability tag of the local device, e.g. `sm_86` for the 3090 Ti or `sm_120` for the 5060 laptop."
+  },
+  "slug": {
+   "type": "string",
+   "minLength": 1,
+   "description": "Kernel slug from the workload roster, e.g. `gemm_hmma_bf16_sm80`."
+  },
+  "shape_point": {
+   "type": "string",
+   "minLength": 1,
+   "description": "Shape-file row identifier the kernel ran with."
+  },
+  "repeat_index": {
+   "type": "integer",
+   "minimum": 0,
+   "description": "Zero-based repeat index. Repeats are independent NCU runs at fixed config; the repeatability aggregator gates a cell on N>=5 repeats."
+  },
+  "launch_index": {
+   "type": "integer",
+   "minimum": 0,
+   "description": "Zero-based launch index inside the repeat (kernels may launch multiple times per process)."
+  },
+  "binary_sha256": {
+   "type": "string",
+   "pattern": "^[0-9a-f]{64}$",
+   "description": "SHA-256 of the kernel binary used in this run. The repeatability aggregator rejects a cell whose imported sidecars disagree on this value (typed `label_provenance_inconsistent`)."
+  },
+  "profiler_family": {
+   "type": "string",
+   "default": "nsight_compute",
+   "minLength": 1,
+   "description": "Identifier for the profiling family that produced the metric. Default `nsight_compute`; user-overridable per the open profiler-family decision."
+  },
+  "profiler_version": {
+   "type": "string",
+   "minLength": 1,
+   "description": "Version string of the profiler used (e.g. NCU release version)."
+  },
+  "cuda_version": {
+   "type": "string",
+   "minLength": 1,
+   "description": "CUDA toolkit version used to build the kernel binary."
+  },
+  "driver_version": {
+   "type": "string",
+   "minLength": 1,
+   "description": "NVIDIA driver version observed during the run."
+  },
+  "gpu_uuid_sha256": {
+   "type": "string",
+   "pattern": "^[0-9a-f]{64}$",
+   "description": "SHA-256 of the device UUID. Hashed so the raw UUID does not leak into committed JSON."
+  },
+  "replay_mode": {
+   "type": "string",
+   "minLength": 1,
+   "description": "Replay mode used by the profiler (e.g. `application`, `kernel`)."
+  },
+  "aggregation": {
+   "type": "string",
+   "enum": [
+    "kernel"
+   ],
+   "description": "How the metric was aggregated across the launch. Pinned to `kernel` so importers know they are consuming a per-kernel scalar."
+  },
+  "warmup_count": {
+   "type": "integer",
+   "minimum": 0,
+   "description": "Number of warmup launches the driver performed before the measurement run."
+  },
+  "cache_hit_rate_l2_sector": {
+   "type": "number",
+   "minimum": 0,
+   "maximum": 1,
+   "description": "Mandatory L2 sector hit-rate label, expressed as a fraction in [0, 1]."
+  },
+  "cache_hit_rate_l1tex_sector": {
+   "type": "number",
+   "minimum": 0,
+   "maximum": 1,
+   "description": "Optional L1/TEX sector hit-rate label, expressed as a fraction in [0, 1]. The layer-aware admitted-cell migration (v3 -> v4) makes the L1 fields a coupled pair at the sidecar layer (either both cache_hit_rate_l1tex_sector + confidence_interval_l1tex_sector are present, or both are absent; the dependentRequired arms reject a half-pair). The L1 admission floor lives in the aggregator: a v4 admitted cell promotes to `l1tex_label_status=mean_present` only when at least the configured `repeats_required` (default 5) of the cell's repeats carry L1 values; partial or absent L1 evidence emits null + `mean_absent_label_missing` while L2 admission continues normally."
+  },
+  "confidence_interval_l2_sector": {
+   "$ref": "#/$defs/confidence_interval",
+   "description": "Confidence interval that brackets the L2 sector hit-rate label."
+  },
+  "confidence_interval_l1tex_sector": {
+   "$ref": "#/$defs/confidence_interval",
+   "description": "Confidence interval that brackets the L1/TEX sector hit-rate label, when present. Coupled to cache_hit_rate_l1tex_sector via dependentRequired: either both are present, or both are absent; a half-pair is rejected."
+  },
+  "parser_diagnostics": {
+   "$ref": "#/$defs/parser_diagnostics",
+   "description": "Optional non-fatal diagnostics the metric parser wishes the audit trail to retain. Persists NCU `lts__t_sector_hit_rate.pct` saturation-rounding clamp events (the parser admits values in [100, 105] as fraction 1.0 with a typed diagnostic). Sidecars without the field continue to validate; the field has its own closed `additionalProperties: false` so only known typed diagnostics are accepted."
+  },
+  "register_cap": {
+   "type": "integer",
+   "minimum": 0,
+   "description": "Optional register-cap build-variant axis value written by label_driver.sh for a register-spill build variant (the per-thread -maxrregcount cap). Purely additive: NOT in 'required'; base-cell sidecars omit it and remain valid. The repeatability aggregator folds it (with variant_id) into the cell key so two build variants of the same shape do not collapse. No schema_version bump (purely additive per the CLAUDE.md wire-extension policy)."
+  },
+  "variant_id": {
+   "type": "string",
+   "pattern": "^register_cap_[0-9]+$",
+   "description": "Optional build-variant identity component (e.g. register_cap_64). Purely additive: NOT in 'required'; base-cell sidecars omit it. Paired with register_cap; the aggregator keys cells by (device, slug, shape_point, variant_id) when present. No schema_version bump (purely additive per the CLAUDE.md wire-extension policy)."
+  },
+  "unit_tagged_metrics": {
+   "type": "array",
+   "description": "Optional v5 block carrying non-percentage label families (count / ns / cycles) and any pct family not on the historical flat-field path. Each record pins its own unit tag; the importer cross-checks every record's (ncu_metric, unit) against the committed metric registry so a count/ns/cycles value can never travel the percentage path. ABSENT on legacy hit-rate-only cells (backwards-compatible); the historical fraction fields cache_hit_rate_l2_sector / cache_hit_rate_l1tex_sector stay on the flat path.",
+   "items": {
+    "$ref": "#/$defs/unit_tagged_metric"
+   }
+  }
+ },
+ "$defs": {
+  "unit_tagged_metric": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "ncu_metric",
+    "unit",
+    "value"
+   ],
+   "description": "One per-launch unit-tagged metric value. `ncu_metric` is the canonical Nsight Compute identifier (resolved against tools/local_labels/metric_registry.json); `unit` is the per-metric unit tag; `value` is the metric value in its native unit (a fraction in [0,1] for pct via the percentage transform, a non-negative raw count/ns/cycles otherwise). Field names avoid import_label.py's forbidden-field denylist.",
+   "properties": {
+    "ncu_metric": {
+     "type": "string",
+     "minLength": 1,
+     "description": "Canonical Nsight Compute metric identifier (e.g. gpc__cycles_elapsed.max, gpu__time_duration.sum, dram__sectors_read.sum). Must resolve to a registry entry."
+    },
+    "unit": {
+     "type": "string",
+     "enum": [
+      "pct",
+      "count",
+      "ns",
+      "cycles"
+     ],
+     "description": "Per-metric unit tag. Must equal the registry's unit for this ncu_metric; a mismatch is rejected by the importer."
+    },
+    "value": {
+     "type": "number",
+     "minimum": 0,
+     "description": "Metric value in native unit. Non-negative for every family. The pct family carries a fraction in [0,1] (the percentage transform ran upstream in the parser); count/ns/cycles carry the raw non-negative magnitude."
+    },
+    "confidence_interval": {
+     "$ref": "#/$defs/unit_tagged_confidence_interval",
+     "description": "Optional confidence interval bracketing this metric value, in the same native unit."
+    }
+   }
+  },
+  "unit_tagged_confidence_interval": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "lower",
+    "upper",
+    "confidence_level",
+    "unit",
+    "aggregation"
+   ],
+   "properties": {
+    "lower": {
+     "type": "number",
+     "minimum": 0,
+     "description": "Lower bound, native unit. Must satisfy lower <= upper (the importer enforces the cross-field constraint)."
+    },
+    "upper": {
+     "type": "number",
+     "minimum": 0,
+     "description": "Upper bound, native unit. Must satisfy lower <= upper."
+    },
+    "confidence_level": {
+     "type": "number",
+     "const": 0.95,
+     "description": "Pinned to 0.95 by the contract."
+    },
+    "unit": {
+     "type": "string",
+     "enum": [
+      "pct",
+      "count",
+      "ns",
+      "cycles"
+     ],
+     "description": "Unit of the interval bounds; must equal the parent metric's unit."
+    },
+    "aggregation": {
+     "type": "string",
+     "const": "kernel",
+     "description": "Per-kernel aggregation only."
+    }
+   }
+  },
+  "parser_diagnostics": {
+   "type": "object",
+   "additionalProperties": false,
+   "description": "Closed object whose properties enumerate every typed parser diagnostic. Adding a new diagnostic class requires a coordinated producer + schema widening (see BL-20260507-arch-token-multi-surface-lockstep + BL-20260506-schema-validator-probe-driven-tightening).",
+   "properties": {
+    "ncu_sector_hit_rate_clamped_to_100": {
+     "type": "array",
+     "description": "Records every metric value the parser clamped from the NCU saturation-rounding window [100, 105] down to exactly 1.0. Per-launch sidecars from configs that did not trigger the clamp omit this field; sidecars that did trigger the clamp record one record per offending metric.",
+     "items": {
+      "$ref": "#/$defs/parser_diagnostics_clamped_record"
+     }
+    },
+    "ncu_lts_pct_overcount_raw_counter_ratio_used": {
+     "type": "array",
+     "description": "Records every metric value where the parser's raw-counter ratio fallback fired because NCU's reported `.pct` value exceeded the saturation-rounding clamp window's upper bound (i.e., > 105.0). The parser derives the metric as the raw-counter ratio (hit/total) instead of the reported .pct and records the original raw_value here for audit. Sidecars from configs that did not trigger the fallback omit this field; sidecars that did trigger the fallback record one record per offending metric. Same record shape as `ncu_sector_hit_rate_clamped_to_100`.",
+     "items": {
+      "$ref": "#/$defs/parser_diagnostics_clamped_record"
+     }
+    }
+   }
+  },
+  "parser_diagnostics_clamped_record": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "metric_label",
+    "raw_value"
+   ],
+   "description": "One clamp event. `metric_label` carries the NCU metric token the parser was asked to read (e.g. `lts__t_sector_hit_rate.pct`); `raw_value` carries the percentage NCU reported BEFORE the clamp (e.g. 101.45). Both fields avoid names blocked by `tools/local_labels/import_label.py:_FORBIDDEN_FIELD_NAME_PATTERNS`.",
+   "properties": {
+    "metric_label": {
+     "type": "string",
+     "minLength": 1,
+     "description": "The NCU metric token (e.g. `lts__t_sector_hit_rate.pct`)."
+    },
+    "raw_value": {
+     "type": "number",
+     "description": "The percentage value NCU emitted, in [100.0, 105.0]. The parser admits this metric as fraction 1.0 and records the raw value here for audit."
+    }
+   }
+  },
+  "confidence_interval": {
+   "type": "object",
+   "additionalProperties": false,
+   "required": [
+    "lower",
+    "upper",
+    "confidence_level",
+    "units",
+    "aggregation"
+   ],
+   "properties": {
+    "lower": {
+     "type": "number",
+     "minimum": 0,
+     "maximum": 1,
+     "description": "Lower bound of the interval, fractional. Must satisfy `lower <= upper`; the importer enforces the cross-field constraint."
+    },
+    "upper": {
+     "type": "number",
+     "minimum": 0,
+     "maximum": 1,
+     "description": "Upper bound of the interval, fractional. Must satisfy `lower <= upper`."
+    },
+    "confidence_level": {
+     "type": "number",
+     "const": 0.95,
+     "description": "Pinned to 0.95 by the contract. A different value is a contract violation, not a configuration."
+    },
+    "units": {
+     "type": "string",
+     "const": "sector_hit_rate_fraction",
+     "description": "Pinned units string. Importers reject any other value."
+    },
+    "aggregation": {
+     "type": "string",
+     "const": "kernel",
+     "description": "Per-kernel aggregation only. Importers reject any other value."
+    }
+   }
+  }
+ }
+}

@@ -1,0 +1,164 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "sm120 tri-label duration-leg engineering-closure",
+  "description": "Terminal engineering-closure for the per-cell four-source (trace + L1 + L2 + duration) requirement's DURATION leg on the sm_120 tri-label roster. Records, from committed live evidence (the Goldilocks trace-vs-duration sweep, the production duration cohort, duration_admitted.json, and the live tri-label coverage), that the NVBit-trace-budget-admissible size window and the CUPTI dual-source duration-reconciling size window are disjoint, so no single cell can carry both. The verdict is engineering_closure_refuted for the duration leg; the immutable AC is unmeetable for that leg, not weakened. Measured byte facts (within- and over-budget) and timed-out (unmeasured) facts are kept in separate first-class sections. This artifact does NOT claim the four-source roster is satisfied with bi-label cells. Every object is recursively closed (additionalProperties:false).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "closure_id", "arch", "source_commit", "closed_leg",
+    "verdict", "trace_budget_mib", "verified_live_sm120_proof",
+    "evidence_artifact_paths", "reconciling_slugs", "reconciling_slugs_swept",
+    "measured", "timed_out_traces", "timed_out_note", "skipped_traces",
+    "production_duration_reconcile_floor", "current_tri_label_coverage",
+    "windows_disjoint", "rationale", "claims_four_source_roster_satisfied"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "closure_id": {"const": "sm120_tri_label_duration_leg_closure_v1"},
+    "arch": {"const": "sm_120"},
+    "source_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "closed_leg": {"const": "duration"},
+    "verdict": {"const": "engineering_closure_refuted"},
+    "trace_budget_mib": {"type": "number", "exclusiveMinimum": 0},
+    "verified_live_sm120_proof": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["gpu", "compute_capability", "driver_version", "cuda_toolkit"],
+      "properties": {
+        "gpu": {"type": "string"},
+        "compute_capability": {"const": "sm_120"},
+        "driver_version": {"type": "string"},
+        "cuda_toolkit": {"type": "string"},
+        "evidence_kind": {"type": "string"}
+      }
+    },
+    "evidence_artifact_paths": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["goldilocks_sweep", "duration_cohort", "duration_admitted", "tri_label_roster"],
+      "properties": {
+        "goldilocks_sweep": {"const": "data/local_labels/duration_trace_goldilocks_sweep.json"},
+        "duration_cohort": {"const": "data/local_labels/sm120_duration_cohort.json"},
+        "duration_admitted": {"const": "data/local_labels/duration_admitted.json"},
+        "tri_label_roster": {"const": "data/local_labels/sm120_tri_label_roster.json"}
+      }
+    },
+    "reconciling_slugs": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+    "reconciling_slugs_swept": {"type": "array", "items": {"type": "string"}},
+    "measured": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["trace_within_budget_points", "trace_over_budget_points", "trace_admissible_ceiling"],
+      "properties": {
+        "trace_within_budget_points": {
+          "type": "array", "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["slug", "size", "trace_bytes"],
+            "properties": {
+              "slug": {"type": "string"},
+              "size": {"type": "integer"},
+              "trace_bytes": {"type": "integer", "minimum": 1},
+              "duration_ms": {"type": ["number", "null"]},
+              "duration_reconciled": {"type": ["boolean", "null"]}
+            }
+          }
+        },
+        "trace_over_budget_points": {
+          "type": "array", "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["slug", "size", "trace_bytes"],
+            "properties": {
+              "slug": {"type": "string"},
+              "size": {"type": "integer"},
+              "trace_bytes": {"type": "integer", "minimum": 1},
+              "duration_ms": {"type": ["number", "null"]},
+              "duration_reconciled": {"type": ["boolean", "null"]}
+            }
+          }
+        },
+        "trace_admissible_ceiling": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["slug", "size", "trace_bytes"],
+          "properties": {
+            "slug": {"type": "string"},
+            "size": {"type": "integer"},
+            "trace_bytes": {"type": "integer", "minimum": 1},
+            "duration_ms": {"type": ["number", "null"]},
+            "duration_reconciled": {"type": ["boolean", "null"]}
+          }
+        },
+        "note": {"type": "string"}
+      }
+    },
+    "timed_out_traces": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["slug", "size", "trace_status"],
+        "properties": {
+          "slug": {"type": "string"},
+          "size": {"type": "integer"},
+          "trace_status": {"const": "timeout"}
+        }
+      }
+    },
+    "timed_out_note": {"type": "string"},
+    "skipped_traces": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["slug", "size", "trace_status"],
+        "properties": {
+          "slug": {"type": "string"},
+          "size": {"type": "integer"},
+          "trace_status": {"enum": ["skipped_after_timeout", "skipped_after_measured_over_budget"]}
+        }
+      }
+    },
+    "production_duration_reconcile_floor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["evidence", "smallest_reconciling_cells"],
+      "properties": {
+        "evidence": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+        "smallest_reconciling_cells": {
+          "type": "array", "minItems": 3, "maxItems": 3,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["slug", "shape_point", "median_duration_ns"],
+            "properties": {
+              "slug": {"type": "string"},
+              "shape_point": {"type": "string"},
+              "median_duration_ns": {"type": ["number", "null"]}
+            }
+          }
+        },
+        "note": {"type": "string"}
+      }
+    },
+    "current_tri_label_coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["four_source_gaps", "total_cells"],
+      "properties": {
+        "trace": {"type": "integer"},
+        "l2": {"type": "integer"},
+        "l1": {"type": "integer"},
+        "duration": {"type": "integer"},
+        "four_source_gaps": {"type": "integer", "minimum": 1},
+        "total_cells": {"type": "integer"}
+      }
+    },
+    "windows_disjoint": {"const": true},
+    "rationale": {"type": "string", "minLength": 1},
+    "claims_four_source_roster_satisfied": {"const": false}
+  }
+}

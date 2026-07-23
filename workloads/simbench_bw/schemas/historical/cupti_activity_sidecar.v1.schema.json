@@ -1,0 +1,295 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "simbench_bw/schemas/cupti_activity_sidecar.schema.json",
+  "title": "SimBench-BW CUPTI Activity sidecar",
+  "description": "Per-launch CUPTI Activity API sidecar emitted by workloads/simbench_bw/cupti_activity_collector.{h,cu} alongside every kernel launch when run_suite.py is invoked with --enable-cupti-activity on --mode timing. Carries the per-launch wall-clock telemetry that, paired with the cudaEventRecord-derived wall_time_ms, defines the dual-source primary observable: a (kernel, repeat) measurement is admissible into the per-kernel MAPE input only when both timestamps reconcile within max(5% relative, 5us absolute). Cross-references: workloads/simbench_bw/schemas/measurement_manifest.schema.json (the parent timing manifest), tools/cloud/preflight_manifest.py (the preflight_manifest_sha256 anchor), workloads/simbench_bw/schemas/kernel_signature.spec.md (the kernel_signature_sha256 canonical inputs).",
+  "schema_version": 1,
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "preflight_manifest_sha256",
+    "binary_sha256",
+    "collector_binary_sha256",
+    "slug",
+    "shape_point",
+    "repeat_index",
+    "launch_index",
+    "kernel_name",
+    "kernel_signature_sha256",
+    "kernel_correlation_id",
+    "stream_id",
+    "context_id",
+    "grid",
+    "block",
+    "regs_per_thread",
+    "shared_mem_static_bytes",
+    "shared_mem_dynamic_bytes",
+    "start_ns",
+    "end_ns",
+    "duration_ns",
+    "cuda_event_wall_time_ms",
+    "dual_source_reconciliation_gap_ns",
+    "dual_source_reconciliation_passed",
+    "memcpy_records",
+    "memset_records",
+    "collector_status",
+    "dropped_records_count",
+    "cupti_flush_reason",
+    "buffer_bytes",
+    "deployment_mode",
+    "enabled_activity_kinds",
+    "degraded_activity_kinds"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Sidecar schema version. Bumped only when fields are added, removed, or change semantics. Drift detection in validate.py rejects sidecars with extra fields whose schema_version is not also bumped."
+    },
+
+    "preflight_manifest_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "SHA-256 of the preflight manifest the run was anchored to. Computed via tools/cloud/preflight_manifest.compute_preflight_sha256(); ties the sidecar to the toolchain + capabilities snapshot in effect when the run started."
+    },
+    "binary_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "SHA-256 of the kernel runner binary that produced this launch."
+    },
+    "collector_binary_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "SHA-256 of the cupti_activity_collector .so / executable that emitted the sidecar."
+    },
+
+    "slug": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "description": "SimBench-BW row slug (e.g. rmsnorm_fwd_bf16); matches workloads/simbench_bw/roster.toml conventions."
+    },
+    "shape_point": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Shape-point label for this launch (e.g. 'rows=1024,hidden=4096')."
+    },
+    "repeat_index": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Zero-based index of the repeat within this (slug, shape_point) cell."
+    },
+    "launch_index": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Zero-based index of this kernel launch within this (slug, shape_point, repeat) tuple. A single repeat may launch multiple kernels."
+    },
+
+    "kernel_name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Demangled kernel symbol name as reported by CUPTI."
+    },
+    "kernel_signature_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "SHA-256 over the canonical kernel-signature inputs defined in workloads/simbench_bw/schemas/kernel_signature.spec.md. Used to join CUPTI-side and NVBit-side launches in the offline two-run merge handled by workloads/simbench_bw/merge_evidence.py."
+    },
+    "kernel_correlation_id": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "CUPTI correlation_id from the kernel activity record."
+    },
+    "stream_id": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "CUDA stream id the kernel was launched on."
+    },
+    "context_id": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "CUDA context id the kernel ran under."
+    },
+
+    "grid": { "$ref": "#/$defs/dim3" },
+    "block": { "$ref": "#/$defs/dim3" },
+
+    "regs_per_thread": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Per-thread register usage as reported by CUPTI."
+    },
+    "shared_mem_static_bytes": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Static shared-memory allocation per block, bytes."
+    },
+    "shared_mem_dynamic_bytes": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Dynamic shared-memory allocation per block, bytes."
+    },
+
+    "start_ns": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "CUPTI Activity kernel record start timestamp, nanoseconds. The collector binds CUPTI's timestamp source to host CLOCK_MONOTONIC via `cuptiActivityRegisterTimestampCallback` so this value shares the clock domain with the matched per-repeat NVML covariate sidecar's `samples[].timestamp_ns`. When the timestamp-callback registration fails AND NVML emission was requested, the collector exits with the typed runtime-unavailable code instead of writing records on a different clock domain."
+    },
+    "end_ns": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "CUPTI Activity kernel record end timestamp, nanoseconds (same CLOCK_MONOTONIC source as start_ns). Must satisfy end_ns >= start_ns."
+    },
+    "duration_ns": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "end_ns - start_ns. Recorded explicitly so consumers do not have to recompute."
+    },
+
+    "cuda_event_wall_time_ms": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Host-side wall-clock duration for this launch, captured via cudaEventRecord/cudaEventElapsedTime around the kernel. Co-required primary observable for the dual-source wall-clock contract (paired with CUPTI Activity duration_ns; admissible into the per-kernel MAPE input only when both sources reconcile within the dual_source_reconciliation_passed gate)."
+    },
+    "dual_source_reconciliation_gap_ns": {
+      "type": "integer",
+      "description": "Signed delta duration_ns - cuda_event_wall_time_ms * 1e6. May be negative when the host event observed a longer duration than the CUPTI Activity record (e.g. host queueing overhead)."
+    },
+    "dual_source_reconciliation_passed": {
+      "type": "boolean",
+      "description": "True iff abs(dual_source_reconciliation_gap_ns) <= effective_bound_ns under the canonical formula `effective_bound_ns = max(0.05 * cuda_event_wall_time_ms * 1e6, max(tolerance_ns_calibrated_or_5000, 5000))`. The `tolerance_ns_calibrated` field of workloads/simbench_bw/golden/cupti_dual_source_tolerance.json is the calibrated ABSOLUTE FLOOR — it can only RAISE the absolute branch above the spec-default 5000 ns; the relative 5% branch is always honored, so longer-duration kernels see the looser 5%-of-duration bound. When the fixture's calibrated value is null, the formula reduces to the spec-default `max(0.05 * cuda_event_wall_time_ms * 1e6, 5000)`. Both the collector library and the validator compute this identical formula."
+    },
+
+    "memcpy_records": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/memcpy_record" },
+      "description": "CUPTI Activity memcpy records observed during this launch's lifetime. May be empty for kernels with no associated memcpys."
+    },
+    "memset_records": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/memset_record" },
+      "description": "CUPTI Activity memset records observed during this launch's lifetime."
+    },
+
+    "collector_status": {
+      "type": "string",
+      "enum": ["ok", "degraded"],
+      "description": "'ok' when every required Activity kind enabled successfully; 'degraded' when one or more optional Activity kinds returned CUPTI_ERROR_INSUFFICIENT_PRIVILEGES (recorded in degraded_activity_kinds[])."
+    },
+    "dropped_records_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Number of CUPTI Activity records the collector observed but could not retain (buffer-overflow / drained-during-shutdown / etc.). Zero is the normal case."
+    },
+    "cupti_flush_reason": {
+      "type": "string",
+      "enum": ["sync_point", "process_exit"],
+      "description": "Origin of the cuptiActivityFlushAll(0) call that produced this sidecar's records."
+    },
+    "buffer_bytes": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Size in bytes of the CUPTI Activity callback buffer the collector allocated."
+    },
+
+    "deployment_mode": {
+      "type": "string",
+      "enum": [
+        "non_root_cloud_default",
+        "mig_disabled",
+        "mig_na",
+        "cc_off",
+        "cc_devtools",
+        "cc_unsupported_query",
+        "cc_unknown"
+      ],
+      "description": "Snapshot of the deployment-mode capabilities the collector observed at startup. Sidecars from MIG-enabled or CC-on regimes are not admissible (those manifests are rejected at preflight time)."
+    },
+
+    "enabled_activity_kinds": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/activity_kind" },
+      "minItems": 2,
+      "description": "Activity kinds the collector enabled successfully on this run. Required: _KERNEL, _CONCURRENT_KERNEL. Optional: _MEMCPY, _MEMSET, _DRIVER, _RUNTIME, _OVERHEAD, _DEVICE, _CONTEXT, _SOURCE_LOCATOR."
+    },
+    "degraded_activity_kinds": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/activity_kind" },
+      "description": "Optional Activity kinds for which cuptiActivityEnable returned CUPTI_ERROR_INSUFFICIENT_PRIVILEGES. The collector continues with collector_status='degraded'. Required-kind failures exit the collector with typed CuptiKernelTimestampUnavailable instead of degrading."
+    }
+  },
+
+  "$defs": {
+    "dim3": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["x", "y", "z"],
+      "properties": {
+        "x": { "type": "integer", "minimum": 1 },
+        "y": { "type": "integer", "minimum": 1 },
+        "z": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "memcpy_record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["start_ns", "end_ns", "duration_ns", "bytes", "kind"],
+      "properties": {
+        "start_ns": { "type": "integer", "minimum": 0 },
+        "end_ns": { "type": "integer", "minimum": 0 },
+        "duration_ns": { "type": "integer", "minimum": 0 },
+        "bytes": { "type": "integer", "minimum": 0 },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "HtoD", "DtoH", "HtoH", "DtoD", "AtoH", "AtoD", "AtoA",
+            "HtoA", "DtoA", "HtoD_async", "DtoH_async", "DtoD_async",
+            "PtoP", "unknown"
+          ],
+          "description": "CUPTI memcpy kind enum, surface form (host-to-device, device-to-host, etc.)."
+        },
+        "src_kind": {
+          "type": "string",
+          "enum": ["host", "device", "array", "unknown"]
+        },
+        "dst_kind": {
+          "type": "string",
+          "enum": ["host", "device", "array", "unknown"]
+        }
+      }
+    },
+    "memset_record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["start_ns", "end_ns", "duration_ns", "bytes"],
+      "properties": {
+        "start_ns": { "type": "integer", "minimum": 0 },
+        "end_ns": { "type": "integer", "minimum": 0 },
+        "duration_ns": { "type": "integer", "minimum": 0 },
+        "bytes": { "type": "integer", "minimum": 0 },
+        "value": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 255,
+          "description": "Byte value the memset wrote (one byte). CUPTI exposes this as uint32_t but only the low byte is the memset value."
+        }
+      }
+    },
+    "activity_kind": {
+      "type": "string",
+      "enum": [
+        "_KERNEL",
+        "_CONCURRENT_KERNEL",
+        "_MEMCPY",
+        "_MEMSET",
+        "_DRIVER",
+        "_RUNTIME",
+        "_OVERHEAD",
+        "_DEVICE",
+        "_CONTEXT",
+        "_SOURCE_LOCATOR"
+      ],
+      "description": "CUPTI Activity kind enum surface form (suffix only; the CUPTI_ACTIVITY_KIND prefix is implicit). Limited to the kinds the wall-clock telemetry contract recognizes — required (`_KERNEL`, `_CONCURRENT_KERNEL`) and optional (memcpy / memset / driver / runtime / overhead / device / context / source-locator). Profiling-equivalent kinds (PC_SAMPLING, EVENT, METRIC, INSTRUCTION_EXECUTION, INSTRUCTION_CORRELATION, PC_SAMPLING_RECORD_INFO, SASS_METRIC) are NOT admissible per the CUPTI Profiling blocklist enforced in tests/test_no_root_or_ncu_static_guard.py."
+    }
+  }
+}

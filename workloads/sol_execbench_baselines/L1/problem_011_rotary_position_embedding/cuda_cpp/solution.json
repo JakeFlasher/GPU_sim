@@ -1,0 +1,44 @@
+{
+  "name": "problem_011_rotary_position_embedding_cuda_cpp",
+  "definition": "011_rotary_position_embedding",
+  "author": "sol-baselines-codegen",
+  "description": "Compute RoPE cos/sin embeddings from position_ids, inv_freq, and attention_scaling. head_dim=128 pinned by problem definition; output cos_sin[batch, seq, head_dim, 2] in bf16. One CTA per (batch, seq) pair, 64 threads per block; destination-passing style.",
+  "spec": {
+    "languages": [
+      "cuda_cpp"
+    ],
+    "target_hardware": [
+      "LOCAL"
+    ],
+    "entry_point": "main.cpp::run",
+    "dependencies": [],
+    "destination_passing_style": true,
+    "binding": "torch",
+    "compile_options": {
+      "cflags": [],
+      "cuda_cflags": [
+        "-O3",
+        "--use_fast_math",
+        "-gencode",
+        "arch=compute_86,code=sm_86"
+      ],
+      "ld_flags": [
+        "-lcuda"
+      ]
+    }
+  },
+  "sources": [
+    {
+      "path": "main.cpp",
+      "content": "#include <torch/extension.h>\n#include <ATen/cuda/CUDAContext.h>\n#include \"kernel.h\"\n\n// Destination-passing-style entry. Per definition.json:\n//   position_ids       : [batch, seq_len]                int64\n//   inv_freq           : [half_head_dim]                 float32  (llama3-scaled)\n//   attention_scaling  : scalar                          float32\n//   cos_sin (output)   : [batch, seq_len, head_dim, 2]   bfloat16 (DPS)\n// head_dim is pinned at 128, so half_head_dim = 64.\n\nvoid run(\n    torch::Tensor position_ids,\n    torch::Tensor inv_freq,\n    double attention_scaling,\n    torch::Tensor cos_sin) {\n\n    TORCH_CHECK(position_ids.is_cuda(), \"position_ids must be a CUDA tensor\");\n    TORCH_CHECK(inv_freq.is_cuda(),     \"inv_freq must be a CUDA tensor\");\n    TORCH_CHECK(cos_sin.is_cuda(),      \"cos_sin must be a CUDA tensor\");\n\n    TORCH_CHECK(\n        position_ids.dtype() == torch::kInt64,\n        \"position_ids must be int64\");\n    TORCH_CHECK(\n        inv_freq.dtype() == torch::kFloat32,\n        \"inv_freq must be float32\");\n    TORCH_CHECK(\n        cos_sin.dtype() == torch::kBFloat16,\n        \"cos_sin must be bfloat16\");\n\n    TORCH_CHECK(position_ids.is_contiguous(), \"position_ids must be contiguous\");\n    TORCH_CHECK(inv_freq.is_contiguous(),     \"inv_freq must be contiguous\");\n    TORCH_CHECK(cos_sin.is_contiguous(),      \"cos_sin must be contiguous\");\n\n    TORCH_CHECK(position_ids.dim() == 2, \"position_ids must be 2D\");\n    TORCH_CHECK(inv_freq.dim() == 1,     \"inv_freq must be 1D\");\n    TORCH_CHECK(cos_sin.dim() == 4,      \"cos_sin must be 4D\");\n\n    TORCH_CHECK(\n        inv_freq.size(0) == 64,\n        \"inv_freq must have 64 elements (head_dim=128/2), got \",\n        inv_freq.size(0));\n    TORCH_CHECK(\n        cos_sin.size(2) == 128 && cos_sin.size(3) == 2,\n        \"cos_sin must have shape [batch, seq, 128, 2]\");\n    TORCH_CHECK(\n        cos_sin.size(0) == position_ids.size(0) &&\n        cos_sin.size(1) == position_ids.size(1),\n        \"cos_sin batch/seq dims must match position_ids\");\n\n    cudaStream_t stream = at::cuda::getCurrentCUDAStream();\n    problem_011_rotary_position_embedding_launcher(\n        position_ids,\n        inv_freq,\n        static_cast<float>(attention_scaling),\n        cos_sin,\n        stream);\n}\n\nPYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {\n    m.def(\n        \"run\", &run,\n        \"RoPE cos/sin embedding computation; one CTA per (batch, seq) \"\n        \"pair, half_head_dim threads each writing a duplicated (cos, \"\n        \"sin) pair to head_dim slots; destination-passing style.\");\n}\n"
+    },
+    {
+      "path": "kernel.cu",
+      "content": "#include \"kernel.h\"\n#include <cuda_bf16.h>\n#include <cuda_runtime.h>\n\n// One CTA per (batch, seq) pair. half_head_dim threads cooperatively\n// compute the cos/sin pair for one position. The second half of the\n// concatenation `emb = cat(freqs, freqs)` is bit-identical to the\n// first, so each thread fans its (cos, sin) pair to TWO output slots\n// at offsets `tid` and `tid + half_head_dim` along head_dim.\n//\n// inv_freq[half_head_dim] is small (64 fp32 = 256 B) and identical\n// across all blocks; we stage it into shared memory once per CTA so\n// the per-row loop does not re-fetch from global memory.\n\nnamespace {\n\nconstexpr int HEAD_DIM = 128;\nconstexpr int HALF_HEAD_DIM = 64;\n\n__global__ void __launch_bounds__(HALF_HEAD_DIM, 16)\nproblem_011_rotary_position_embedding_kernel(\n    const long* __restrict__ position_ids,\n    const float* __restrict__ inv_freq,\n    float attention_scaling,\n    __nv_bfloat16* __restrict__ cos_sin,\n    int batch_size,\n    int seq_len) {\n\n    const int batch_idx = blockIdx.y;\n    const int seq_idx = blockIdx.x;\n    if (batch_idx >= batch_size || seq_idx >= seq_len) return;\n\n    __shared__ float s_inv_freq[HALF_HEAD_DIM];\n    const int tid = threadIdx.x;\n    if (tid < HALF_HEAD_DIM) {\n        s_inv_freq[tid] = inv_freq[tid];\n    }\n    __syncthreads();\n\n    const long pos = position_ids[batch_idx * seq_len + seq_idx];\n    const float pos_f = static_cast<float>(pos);\n\n    const float freq = s_inv_freq[tid] * pos_f;\n    float c, s;\n    __sincosf(freq, &s, &c);\n    const float cos_val = c * attention_scaling;\n    const float sin_val = s * attention_scaling;\n\n    // cos_sin layout: [batch, seq, head_dim, 2] contiguous.\n    // Index of (batch_idx, seq_idx, d, k) is\n    //   ((batch_idx * seq_len + seq_idx) * HEAD_DIM + d) * 2 + k.\n    const long row_base =\n        (static_cast<long>(batch_idx) * seq_len + seq_idx) *\n        (HEAD_DIM * 2);\n\n    const __nv_bfloat16 cos_bf = __float2bfloat16(cos_val);\n    const __nv_bfloat16 sin_bf = __float2bfloat16(sin_val);\n\n    // First-half slot: d = tid.\n    cos_sin[row_base + tid * 2 + 0] = cos_bf;\n    cos_sin[row_base + tid * 2 + 1] = sin_bf;\n    // Second-half slot: d = tid + HALF_HEAD_DIM. emb is concat(f, f) so\n    // the cos/sin pair is identical to the first-half slot.\n    cos_sin[row_base + (tid + HALF_HEAD_DIM) * 2 + 0] = cos_bf;\n    cos_sin[row_base + (tid + HALF_HEAD_DIM) * 2 + 1] = sin_bf;\n}\n\n}  // namespace\n\nvoid problem_011_rotary_position_embedding_launcher(\n    const torch::Tensor& position_ids,\n    const torch::Tensor& inv_freq,\n    float attention_scaling,\n    torch::Tensor& cos_sin,\n    cudaStream_t stream) {\n\n    const int batch_size = static_cast<int>(position_ids.size(0));\n    const int seq_len = static_cast<int>(position_ids.size(1));\n\n    dim3 grid(seq_len, batch_size);\n    dim3 block(HALF_HEAD_DIM);\n\n    problem_011_rotary_position_embedding_kernel<<<grid, block, 0, stream>>>(\n        position_ids.data_ptr<long>(),\n        inv_freq.data_ptr<float>(),\n        attention_scaling,\n        reinterpret_cast<__nv_bfloat16*>(cos_sin.data_ptr<at::BFloat16>()),\n        batch_size,\n        seq_len);\n}\n"
+    },
+    {
+      "path": "kernel.h",
+      "content": "#pragma once\n\n#include <torch/extension.h>\n#include <cuda_runtime.h>\n\n// Host launcher for the RoPE cos/sin embedding kernel. Given\n// `position_ids[batch, seq_len]` (int64), `inv_freq[half_head_dim]`\n// (float32, llama3-scaled), and a scalar `attention_scaling`, write\n// `cos_sin[batch, seq_len, head_dim, 2]` (bfloat16) in-place. head_dim\n// is pinned at 128 per the problem definition, so half_head_dim = 64.\n// Destination-passing style: cos_sin is pre-allocated by the eval\n// driver and written by the kernel; no return value.\nvoid problem_011_rotary_position_embedding_launcher(\n    const torch::Tensor& position_ids,\n    const torch::Tensor& inv_freq,\n    float attention_scaling,\n    torch::Tensor& cos_sin,\n    cudaStream_t stream);\n"
+    }
+  ]
+}

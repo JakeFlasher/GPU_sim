@@ -1,0 +1,28 @@
+{
+  "arch": "sm_86",
+  "artifact_kind": "holdout_touch_ledger",
+  "schema_version": 1,
+  "touches": [
+    {
+      "config_digest": "a8fdb1150500c6a7e44bfd104df8a620c1fa033d2ca0ea09d423861d0dc22d6f",
+      "scope": "t1_lockstep_count_replacement",
+      "scored_artifact": "data/local_labels/t1_lockstep_verdict_sm_86.json",
+      "sealed_digest": "86eada375e8d8812d204eaeaba3f246fad40b1eb6396709d3eda49b50de5e163",
+      "source_commit": "08c2478948f910cbc4b709d19b513badb78f9c7f"
+    },
+    {
+      "config_digest": "c86d40a7468457912c01602731e1c097365fd422c7504abcc2cf4ac56de0664a",
+      "scope": "l1_warp_pool_rescore",
+      "scored_artifact": "data/sm_86_predictor_accuracy_recovery_v2/warp_pool_l1_rescore_sm_86.json",
+      "sealed_digest": "86eada375e8d8812d204eaeaba3f246fad40b1eb6396709d3eda49b50de5e163",
+      "source_commit": "a55c199f80ac838e0a67032575901230bbc34c32"
+    },
+    {
+      "config_digest": "4418e8472b663a86d623734d4bac9018685bd734c92ab581043f0eed422a094b",
+      "scope": "per_metric_evidence_harness",
+      "scored_artifact": "data/sm_86_predictor_accuracy_recovery_v2/per_metric_evidence_harness_sm_86.json",
+      "sealed_digest": "86eada375e8d8812d204eaeaba3f246fad40b1eb6396709d3eda49b50de5e163",
+      "source_commit": "2fee3e6b11b2e5ec96b6379c07d72c1fc869b638"
+    }
+  ]
+}

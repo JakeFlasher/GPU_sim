@@ -1,0 +1,23 @@
+{
+  "cells": [
+    {
+      "arch": "sm_86",
+      "binary_sha256": "9c43b9f7674c7a3a8c4fbfbfab44ba574f9d50f947cd8df4e05c1088e5ca9a9f",
+      "cache_hit_rate_l1tex_sector_pct": 0.0,
+      "cache_hit_rate_l2_sector_pct": 95.253289,
+      "evidence_kind": "live",
+      "kernel_signature_sha256": "575ad657992d58bc685ff58e6a950429dc939463980ce6fe1524c8c7efeb9154",
+      "l1tex_label_status": "all_zero",
+      "n_repeats": 5,
+      "ncu_metric_version": "ncu_2026.1.x",
+      "profiler_version": "ncu_2026.1.x",
+      "schema_version": 5,
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "global_atomic_return_used",
+      "source_commit": "ae4664f7ee51df026d4800432ea5af6d42a4dd67",
+      "stddev_l1tex_sector": 0.0,
+      "stddev_l2_sector": 0.015225417649568003
+    }
+  ],
+  "schema_version": 5
+}

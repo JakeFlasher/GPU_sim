@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "simbench_bw/schemas/nvbit_unmapped_memory_range.schema.json",
+  "title": "NVBit Unmapped Memory Range Exclusion",
+  "description": "Per-(kernel, op-class, instruction-pc) sidecar emitted by the NVBit tracer when it encounters a memory operation whose target address falls outside any allocator-tracked memory range. AC4 requires that such instructions are recorded as a typed exclusion rather than silently emitted with a default allocation id (which would bias the downstream coalescer / HRD profiler toward unowned memory). This schema is the offline-checkable surface for that exclusion path.",
+  "schema_version": 1,
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kernel_unique_id",
+    "device",
+    "slug",
+    "excluded_op_class",
+    "instruction_pc",
+    "count",
+    "typed_reason"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Sidecar schema major version. Pinned to 1; a deliberate schema bump must update both this constant and consumers in lockstep. A different value is a contract violation, not a configuration."
+    },
+    "kernel_unique_id": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Tracer-assigned unique id for the kernel function whose instruction was excluded. Matches `instruction.function_unique_id` and `kernel.function_unique_id` in the trace proto."
+    },
+    "device": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Compute capability tag of the device that produced the trace (e.g. `sm_86`, `sm_120`)."
+    },
+    "slug": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Kernel slug from the workload roster (e.g. `gemm_hmma_bf16_sm80`)."
+    },
+    "excluded_op_class": {
+      "type": "string",
+      "enum": [
+        "GLOBAL",
+        "SHARED",
+        "LOCAL",
+        "TEXTURE",
+        "SURFACE",
+        "ATOMIC",
+        "TMA",
+        "ASYNC_COPY",
+        "CLUSTER_DSMEM",
+        "TMEM",
+        "UNSPECIFIED"
+      ],
+      "description": "Memory operation class the tracer was attempting to emit when the address fell outside any allocator-tracked range. Uppercase string form of the `MemoryOpClass` enum in `instruction.proto`. `TMEM` covers Blackwell (sm_100) tensor-memory accesses via the `tcgen05.{ld,st}` family. `UNSPECIFIED` covers the case where the classifier could not match the opcode against any known prefix; the schemas mirror each other for symmetry even though `unmapped_memory_range` is typically only emitted for the 3 supported classes (GLOBAL, SHARED, LOCAL) once allocation lookup misses."
+    },
+    "instruction_pc": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Virtual program counter of the static instruction. Matches `instruction.vpc` (or, for legacy emitters, `instruction.pc`)."
+    },
+    "count": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Number of distinct dynamic instruction-instances of this static PC whose target address fell outside any allocator-tracked range. Aggregated per (kernel, instruction_pc) so the sidecar does not blow up on hot loops."
+    },
+    "typed_reason": {
+      "type": "string",
+      "const": "unmapped_memory_range",
+      "description": "Pinned to `unmapped_memory_range`. A different value is a contract violation."
+    }
+  }
+}

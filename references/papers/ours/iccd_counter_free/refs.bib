@@ -1,0 +1,450 @@
+% ===========================================================================
+% Bibliography for the counter-free GPU observability paper
+% Verified entries: web-research bibtex + a curated GPU-modeling bibliography.
+% ===========================================================================
+
+% --- The privilege barrier: counters / profilers / cloud denial -------------
+@misc{nvidia_errnvgpuctrperm,
+  author       = {{NVIDIA Corporation}},
+  title        = {{ERR\_NVGPUCTRPERM: Permission Issue with Performance Counters}},
+  howpublished = {\url{https://developer.nvidia.com/ERR_NVGPUCTRPERM}},
+  year         = {2019}
+}
+
+@inproceedings{naghibijouybari2018rendered,
+  author    = {Naghibijouybari, Hoda and Neupane, Ajaya and Qian, Zhiyun and Abu-Ghazaleh, Nael},
+  title     = {{Rendered Insecure: GPU Side Channel Attacks are Practical}},
+  booktitle = {Proc.\ ACM SIGSAC Conf.\ on Computer and Communications Security (CCS)},
+  pages     = {2139--2153},
+  year      = {2018},
+  doi       = {10.1145/3243734.3243831}
+}
+
+@misc{cve_2018_6260,
+  author       = {{NVIDIA Corporation}},
+  title        = {{CVE-2018-6260: Risk of Application Data Leakage via GPU Performance Counters}},
+  howpublished = {MITRE CVE / NVIDIA Security Bulletin},
+  year         = {2018}
+}
+
+@misc{cloudgpu_containers,
+  title        = {{Containerized Access to Rented Datacenter GPUs: Provider Documentation}},
+  howpublished = {Provider documentation, e.g., \url{https://docs.runpod.io/}},
+  year         = {2026}
+}
+
+@misc{nvidia_cupti,
+  author       = {{NVIDIA Corporation}},
+  title        = {{CUPTI: CUDA Profiling Tools Interface}},
+  howpublished = {\url{https://docs.nvidia.com/cupti/}},
+  year         = {2024}
+}
+
+@misc{nvidia_nsightcompute,
+  author       = {{NVIDIA Corporation}},
+  title        = {{Nsight Compute Profiling Guide}},
+  howpublished = {\url{https://docs.nvidia.com/nsight-compute/}},
+  year         = {2024}
+}
+
+% --- The non-privileged measurement substrate (the five named surfaces) -----
+@misc{nvidia_cupti_activity,
+  author       = {{NVIDIA Corporation}},
+  title        = {{CUPTI Activity API}},
+  howpublished = {CUPTI User Guide, \url{https://docs.nvidia.com/cupti/}},
+  year         = {2024}
+}
+
+@misc{nvidia_nsightsystems,
+  author       = {{NVIDIA Corporation}},
+  title        = {{Nsight Systems User Guide}},
+  howpublished = {\url{https://docs.nvidia.com/nsight-systems/}},
+  year         = {2024}
+}
+
+@misc{nvidia_nvml,
+  author       = {{NVIDIA Corporation}},
+  title        = {{NVML: NVIDIA Management Library Reference Manual}},
+  howpublished = {\url{https://docs.nvidia.com/deploy/nvml-api/}},
+  year         = {2024}
+}
+
+@misc{nvidia_cudabinutils,
+  author       = {{NVIDIA Corporation}},
+  title        = {{CUDA Binary Utilities}},
+  howpublished = {\url{https://docs.nvidia.com/cuda/cuda-binary-utilities/}},
+  year         = {2024}
+}
+
+@misc{nvidia_computesanitizer,
+  author       = {{NVIDIA Corporation}},
+  title        = {{Compute Sanitizer User Manual}},
+  howpublished = {\url{https://docs.nvidia.com/compute-sanitizer/}},
+  year         = {2024}
+}
+
+@article{fenwick1994,
+  author  = {Fenwick, Peter M.},
+  title   = {{A New Data Structure for Cumulative Frequency Tables}},
+  journal = {Software: Practice and Experience},
+  volume  = {24},
+  number  = {3},
+  pages   = {327--336},
+  year    = {1994},
+  doi     = {10.1002/spe.4380240306}
+}
+
+% --- User-space binary instrumentation --------------------------------------
+@inproceedings{villa2019nvbit,
+  author    = {Villa, Oreste and Stephenson, Mark and Nellans, David and Keckler, Stephen W.},
+  title     = {{NVBit: A Dynamic Binary Instrumentation Framework for NVIDIA GPUs}},
+  booktitle = {Proc.\ 52nd Annual IEEE/ACM Int.\ Symp.\ on Microarchitecture (MICRO-52)},
+  pages     = {372--383},
+  year      = {2019},
+  doi       = {10.1145/3352460.3358307}
+}
+
+@inproceedings{stephenson2015sassi,
+  author    = {Stephenson, Mark and Hari, Siva Kumar Sastry and Lee, Yunsup and Ebrahimi, Eiman and Johnson, Daniel R. and Nellans, David and O'Connor, Mike and Keckler, Stephen W.},
+  title     = {{Flexible Software Profiling of GPU Architectures}},
+  booktitle = {Proc.\ 42nd Annual Int.\ Symp.\ on Computer Architecture (ISCA)},
+  pages     = {185--197},
+  year      = {2015},
+  doi       = {10.1145/2749469.2750375}
+}
+
+% --- Simulation as the classic counter-substitute ---------------------------
+@inproceedings{bakhoda2009gpgpusim,
+  author    = {Bakhoda, Ali and Yuan, George L. and Fung, Wilson W. L. and Wong, Henry and Aamodt, Tor M.},
+  title     = {{Analyzing CUDA Workloads Using a Detailed GPU Simulator}},
+  booktitle = {Proc.\ IEEE Int.\ Symp.\ on Performance Analysis of Systems and Software (ISPASS)},
+  pages     = {163--174},
+  year      = {2009},
+  doi       = {10.1109/ISPASS.2009.4919648}
+}
+
+@inproceedings{khairy2020accelsim,
+  author    = {Khairy, Mahmoud and Shen, Zhesheng and Aamodt, Tor M. and Rogers, Timothy G.},
+  title     = {{Accel-Sim: An Extensible Simulation Framework for Validated GPU Modeling}},
+  booktitle = {Proc.\ ACM/IEEE 47th Annual Int.\ Symp.\ on Computer Architecture (ISCA)},
+  pages     = {473--486},
+  year      = {2020},
+  doi       = {10.1109/ISCA45697.2020.00047}
+}
+
+@misc{khairy2018voltamem,
+  author       = {Khairy, Mahmoud and Jain, Akshay and Aamodt, Tor M. and Rogers, Timothy G.},
+  title        = {{Exploring Modern GPU Memory System Design Challenges through Accurate Modeling}},
+  howpublished = {arXiv preprint arXiv:1810.07269},
+  year         = {2018},
+  doi          = {10.48550/arXiv.1810.07269}
+}
+
+@inproceedings{villa2021nvarchsim,
+  author    = {Villa, Oreste and Lustig, Daniel and Yan, Zi and Bolotin, Evgeny and Fu, Yaosheng and Chatterjee, Niladrish and Jiang, Nan and Nellans, David},
+  title     = {{Need for Speed: Experiences Building a Trustworthy System-Level GPU Simulator}},
+  booktitle = {Proc.\ IEEE Int.\ Symp.\ on High-Performance Computer Architecture (HPCA)},
+  pages     = {868--880},
+  year      = {2021},
+  doi       = {10.1109/HPCA51647.2021.00077}
+}
+
+@inproceedings{huerta2025moderncores,
+  author    = {Huerta, Rodrigo and Abaie Shoushtary, Mojtaba and Cruz, Jos{\'e}-Lorenzo and Gonz{\'a}lez, Antonio},
+  title     = {{Dissecting and Modeling the Architecture of Modern GPU Cores}},
+  booktitle = {Proc.\ 58th Annual IEEE/ACM Int.\ Symp.\ on Microarchitecture (MICRO)},
+  year      = {2025},
+  doi       = {10.48550/arXiv.2503.20481}
+}
+
+@inproceedings{kandiah2021accelwattch,
+  author    = {Kandiah, Vijay and Peverelle, Scott and Khairy, Mahmoud and Pan, Junrui and Manjunath, Amogh and Rogers, Timothy G. and Aamodt, Tor M. and Hardavellas, Nikos},
+  title     = {{AccelWattch: A Power Modeling Framework for Modern GPUs}},
+  booktitle = {Proc.\ 54th Annual IEEE/ACM Int.\ Symp.\ on Microarchitecture (MICRO-54)},
+  pages     = {738--753},
+  year      = {2021},
+  doi       = {10.1145/3466752.3480063}
+}
+
+% --- Analytical / ML performance models (counter-calibrated) ----------------
+@inproceedings{hong2009analytical,
+  author    = {Hong, Sunpyo and Kim, Hyesoon},
+  title     = {{An Analytical Model for a GPU Architecture with Memory-Level and Thread-Level Parallelism Awareness}},
+  booktitle = {Proc.\ 36th Annual Int.\ Symp.\ on Computer Architecture (ISCA)},
+  pages     = {152--163},
+  year      = {2009},
+  doi       = {10.1145/1555754.1555775}
+}
+
+@inproceedings{huang2014gpumech,
+  author    = {Huang, Jen-Cheng and Lee, Joo Hwan and Kim, Hyesoon and Lee, Hsien-Hsin S.},
+  title     = {{GPUMech: GPU Performance Modeling Technique Based on Interval Analysis}},
+  booktitle = {Proc.\ 47th Annual IEEE/ACM Int.\ Symp.\ on Microarchitecture (MICRO)},
+  pages     = {268--279},
+  year      = {2014},
+  doi       = {10.1109/MICRO.2014.59}
+}
+
+@inproceedings{lee2022gcom,
+  author    = {Lee, Jounghoo and Ha, Yeonan and Lee, Suhyun and Woo, Jinyoung and Lee, Jinho and Jang, Hanhwi and Kim, Youngsok},
+  title     = {{GCoM: A Detailed GPU Core Model for Accurate Analytical Modeling of Modern GPUs}},
+  booktitle = {Proc.\ ACM/IEEE 49th Annual Int.\ Symp.\ on Computer Architecture (ISCA)},
+  pages     = {424--436},
+  year      = {2022},
+  doi       = {10.1145/3470496.3527384}
+}
+
+@inproceedings{wang2020mdm,
+  author    = {Wang, Lu and Jahre, Magnus and Adileh, Almutaz and Eeckhout, Lieven},
+  title     = {{MDM: The GPU Memory Divergence Model}},
+  booktitle = {Proc.\ 53rd Annual IEEE/ACM Int.\ Symp.\ on Microarchitecture (MICRO)},
+  pages     = {1009--1021},
+  year      = {2020},
+  doi       = {10.1109/MICRO50266.2020.00085}
+}
+
+@inproceedings{lym2019delta,
+  author    = {Lym, Sangkug and Lee, Donghyuk and O'Connor, Mike and Chatterjee, Niladrish and Erez, Mattan},
+  title     = {{DeLTA: GPU Performance Model for Deep Learning Applications with In-Depth Memory System Traffic Analysis}},
+  booktitle = {Proc.\ IEEE Int.\ Symp.\ on Performance Analysis of Systems and Software (ISPASS)},
+  pages     = {293--303},
+  year      = {2019},
+  doi       = {10.1109/ISPASS.2019.00041}
+}
+
+@inproceedings{ardalani2015xapp,
+  author    = {Ardalani, Newsha and Lestourgeon, Clint and Sankaralingam, Karthikeyan and Zhu, Xiaojin},
+  title     = {{Cross-Architecture Performance Prediction (XAPP) Using CPU Code to Predict GPU Performance}},
+  booktitle = {Proc.\ 48th Annual IEEE/ACM Int.\ Symp.\ on Microarchitecture (MICRO)},
+  pages     = {725--737},
+  year      = {2015},
+  doi       = {10.1145/2830772.2830780}
+}
+
+@inproceedings{lee2025neusight,
+  author    = {Lee, Seonho and Phanishayee, Amar and Mahajan, Divya},
+  title     = {{Forecasting GPU Performance for Deep Learning Training and Inference}},
+  booktitle = {Proc.\ ACM Int.\ Conf.\ on Architectural Support for Programming Languages and Operating Systems (ASPLOS)},
+  year      = {2025},
+  doi       = {10.1145/3669940.3707265}
+}
+
+@misc{wadle2025neuroscalar,
+  author       = {Wadle, Spencer and Zhang, Yuxuan and Singh, Vimuth and Sankaralingam, Karthikeyan},
+  title        = {{NeuroScalar: A Deep Learning Framework for Fast, Accurate Cycle-Level Performance Prediction}},
+  howpublished = {arXiv preprint arXiv:2509.22410},
+  year         = {2025}
+}
+
+% --- Cache modeling from traces (reuse / stack distance) --------------------
+@article{kiani2018reuse,
+  author  = {Kiani, Mohsen and Rajabzadeh, Amir},
+  title   = {{Efficient Cache Performance Modeling in GPUs Using Reuse Distance Analysis}},
+  journal = {ACM Transactions on Architecture and Code Optimization},
+  volume  = {15},
+  number  = {4},
+  pages   = {58:1--58:24},
+  year    = {2018},
+  doi     = {10.1145/3291051}
+}
+
+@article{mattson1970,
+  author  = {Mattson, Richard L. and Gecsei, Jan and Slutz, Donald R. and Traiger, Irving L.},
+  title   = {{Evaluation Techniques for Storage Hierarchies}},
+  journal = {IBM Systems Journal},
+  volume  = {9},
+  number  = {2},
+  pages   = {78--117},
+  year    = {1970},
+  doi     = {10.1147/sj.92.0078}
+}
+
+@inproceedings{nugteren2014gpucache,
+  author    = {Nugteren, Cedric and van den Braak, Gert-Jan and Corporaal, Henk and Bal, Henri E.},
+  title     = {{A Detailed GPU Cache Model Based on Reuse Distance Theory}},
+  booktitle = {Proc.\ 20th IEEE Int.\ Symp.\ on High-Performance Computer Architecture (HPCA)},
+  pages     = {37--48},
+  year      = {2014},
+  doi       = {10.1109/HPCA.2014.6835955}
+}
+
+@inproceedings{maeda2017hrd,
+  author    = {Maeda, Rafael K. V. and Cai, Qiong and Xu, Jiang and Wang, Zhe and Tian, Zhongyuan},
+  title     = {{Fast and Accurate Exploration of Multi-Level Caches Using Hierarchical Reuse Distance}},
+  booktitle = {Proc.\ 23rd IEEE Int.\ Symp.\ on High-Performance Computer Architecture (HPCA)},
+  pages     = {145--156},
+  year      = {2017},
+  doi       = {10.1109/HPCA.2017.11}
+}
+
+@article{jiang2022shalom,
+  author  = {Jiang, Fan and Maeda, Rafael K. V. and Feng, Jun and Chen, Shixi and Chen, Lin and Li, Xiao and Xu, Jiang},
+  title   = {{Fast and Accurate Statistical Simulation of Shared-Memory Applications on Multicore Systems}},
+  journal = {IEEE Transactions on Parallel and Distributed Systems},
+  volume  = {33},
+  number  = {10},
+  pages   = {2455--2469},
+  year    = {2022},
+  doi     = {10.1109/TPDS.2022.3143535}
+}
+
+% --- Analytical bounds: roofline / speed-of-light ---------------------------
+@article{williams2009roofline,
+  author  = {Williams, Samuel and Waterman, Andrew and Patterson, David},
+  title   = {{Roofline: An Insightful Visual Performance Model for Multicore Architectures}},
+  journal = {Communications of the ACM},
+  volume  = {52},
+  number  = {4},
+  pages   = {65--76},
+  year    = {2009},
+  doi     = {10.1145/1498765.1498785}
+}
+
+@inproceedings{huang2024orojenesis,
+  author    = {Huang, Qijing and Tsai, Po-An and Emer, Joel S. and Parashar, Angshuman},
+  title     = {{Mind the Gap: Attainable Data Movement and Operational Intensity Bounds for Tensor Algorithms}},
+  booktitle = {Proc.\ ACM/IEEE 51st Annual Int.\ Symp.\ on Computer Architecture (ISCA)},
+  year      = {2024},
+  doi       = {10.1109/ISCA59077.2024.00021}
+}
+
+@article{yang2020hierarchical,
+  author  = {Yang, Charlene and Kurth, Thorsten and Williams, Samuel},
+  title   = {{Hierarchical Roofline Analysis for GPUs: Accelerating Performance Optimization for the NERSC-9 Perlmutter System}},
+  journal = {Concurrency and Computation: Practice and Experience},
+  volume  = {32},
+  number  = {20},
+  pages   = {e5547},
+  year    = {2020},
+  doi     = {10.1002/cpe.5547}
+}
+
+% --- Microarchitecture dissection (counter/microbenchmark-based) ------------
+@article{mei2017dissecting,
+  author  = {Mei, Xinxin and Chu, Xiaowen},
+  title   = {{Dissecting GPU Memory Hierarchy Through Microbenchmarking}},
+  journal = {IEEE Transactions on Parallel and Distributed Systems},
+  volume  = {28},
+  number  = {1},
+  pages   = {72--86},
+  year    = {2017},
+  doi     = {10.1109/TPDS.2016.2549523}
+}
+
+@misc{jia2018volta,
+  author       = {Jia, Zhe and Maggioni, Marco and Staiger, Benjamin and Scarpazza, Daniele P.},
+  title        = {{Dissecting the NVIDIA Volta GPU Architecture via Microbenchmarking}},
+  howpublished = {arXiv preprint arXiv:1804.06826},
+  year         = {2018}
+}
+
+@inproceedings{wang2024hopper,
+  author    = {Luo, Weile and Fan, Ruibo and Li, Zeyu and Du, Dayou and Wang, Qiang and Chu, Xiaowen},
+  title     = {{Benchmarking and Dissecting the Nvidia Hopper GPU Architecture}},
+  booktitle = {Proc.\ IEEE Int.\ Parallel and Distributed Processing Symp.\ (IPDPS)},
+  pages     = {656--667},
+  year      = {2024},
+  doi       = {10.1109/IPDPS57955.2024.00064},
+  note      = {arXiv:2402.13499}
+}
+
+@misc{jarmusch2025blackwell,
+  author       = {Jarmusch, Aaron and Graddon, Nathan and Chandrasekaran, Sunita},
+  title        = {{Dissecting the NVIDIA Blackwell Architecture with Microbenchmarks}},
+  howpublished = {arXiv preprint arXiv:2507.10789},
+  year         = {2025}
+}
+
+% --- Calibrated uncertainty: conformal prediction ---------------------------
+@book{vovk2005alrw,
+  author    = {Vovk, Vladimir and Gammerman, Alexander and Shafer, Glenn},
+  title     = {{Algorithmic Learning in a Random World}},
+  publisher = {Springer},
+  year      = {2005},
+  doi       = {10.1007/b106715}
+}
+
+@misc{angelopoulos2021gentle,
+  author       = {Angelopoulos, Anastasios N. and Bates, Stephen},
+  title        = {{A Gentle Introduction to Conformal Prediction and Distribution-Free Uncertainty Quantification}},
+  howpublished = {arXiv preprint arXiv:2107.07511},
+  year         = {2021},
+  doi          = {10.48550/arXiv.2107.07511}
+}
+
+% --- Identifiability / observability theory (borrowed lens) -----------------
+@article{villaverde2019observability,
+  author  = {Villaverde, Alejandro F.},
+  title   = {{Observability and Structural Identifiability of Nonlinear Biological Systems}},
+  journal = {Complexity},
+  volume  = {2019},
+  pages   = {8497093},
+  year    = {2019},
+  doi     = {10.1155/2019/8497093}
+}
+
+@article{villaverde2016structural,
+  author  = {Villaverde, Alejandro F. and Barreiro, Antonio and Papachristodoulou, Antonis},
+  title   = {{Structural Identifiability of Dynamic Systems Biology Models}},
+  journal = {PLOS Computational Biology},
+  volume  = {12},
+  number  = {10},
+  pages   = {e1005153},
+  year    = {2016},
+  doi     = {10.1371/journal.pcbi.1005153}
+}
+
+% --- The benchmark / agentic-optimizer ecosystem (Project 2 context) --------
+@misc{nvidia2026solexecbench,
+  author       = {Lin, Edward and others},
+  title        = {{SOL-ExecBench: Speed-of-Light Benchmarking for Real-World GPU Kernels Against Hardware Limits}},
+  howpublished = {arXiv preprint arXiv:2603.19173},
+  year         = {2026}
+}
+
+@misc{chen2026avo,
+  author       = {Chen, Terry and Ye, Zhifan and Xu, Bing and others},
+  title        = {{AVO: Agentic Variation Operators for Autonomous Evolutionary Search}},
+  howpublished = {arXiv preprint arXiv:2603.24517},
+  year         = {2026}
+}
+
+@inproceedings{ouyang2025kernelbench,
+  author    = {Ouyang, Anne and Guo, Simon and Arora, Simran and Zhang, Alex L. and Hu, William and R{\'e}, Christopher and Mirhoseini, Azalia},
+  title     = {{KernelBench: Can LLMs Write Efficient GPU Kernels?}},
+  booktitle = {Proc.\ 42nd Int.\ Conf.\ on Machine Learning (ICML)},
+  year      = {2025},
+  note      = {arXiv:2502.10517}
+}
+
+@inproceedings{arafa2021pptgpu,
+  author    = {Arafa, Yehia and Badawy, Abdel-Hameed A. and ElWazir, Ammar and Barai, Atanu and Eker, Ali and Chennupati, Gopinath and Santhi, Nandakishore and Eidenbenz, Stephan},
+  title     = {{Hybrid, Scalable, Trace-Driven Performance Modeling of GPGPUs}},
+  booktitle = {Proc.\ Int.\ Conf.\ for High Performance Computing, Networking, Storage and Analysis (SC)},
+  year      = {2021},
+  doi       = {10.1145/3458817.3476221}
+}
+
+@inproceedings{arafa2020reuse,
+  author    = {Arafa, Yehia and Badawy, Abdel-Hameed A. and Chennupati, Gopinath and Barai, Atanu and Santhi, Nandakishore and Eidenbenz, Stephan},
+  title     = {{Fast, Accurate, and Scalable Memory Modeling of GPGPUs Using Reuse Profiles}},
+  booktitle = {Proc.\ 34th ACM Int.\ Conf.\ on Supercomputing (ICS)},
+  year      = {2020},
+  doi       = {10.1145/3392717.3392761}
+}
+
+@inproceedings{huang2025neutrino,
+  author    = {Huang, Songlin and Wu, Chenshu},
+  title     = {{Neutrino: Fine-grained GPU Kernel Profiling via Programmable Probing}},
+  booktitle = {Proc.\ 19th USENIX Symp.\ on Operating Systems Design and Implementation (OSDI)},
+  year      = {2025}
+}
+
+@inproceedings{wong2010demystifying,
+  author    = {Wong, Henry and Papadopoulou, Misel-Myrto and Sadooghi-Alvandi, Maryam and Moshovos, Andreas},
+  title     = {{Demystifying GPU Microarchitecture through Microbenchmarking}},
+  booktitle = {Proc.\ IEEE Int.\ Symp.\ on Performance Analysis of Systems and Software (ISPASS)},
+  year      = {2010},
+  pages     = {235--246},
+  doi       = {10.1109/ISPASS.2010.5452013}
+}

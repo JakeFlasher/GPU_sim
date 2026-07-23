@@ -1,0 +1,30 @@
+{
+  "_doc": "Canonical arch-id / SKU alias map (Q9). The canonical architecture identity is the bare sm_XX token; device-tier SKUs disambiguate cards that share a compute capability. Build-only tokens (sm_90a, sm_120a, sm_120f, sm_100a) normalise to their deploy family here but are NOT valid deploy arch_ids — see build_arch_families.json and Q5.",
+
+  "token_to_arch_id": {
+    "sm_86": "sm_86",
+    "sm_120": "sm_120",
+    "sm_120-laptop": "sm_120",
+    "sm_120a": "sm_120",
+    "sm_120f": "sm_120"
+  },
+
+  "device_substring_to_arch_id": {
+    "3090 ti": "sm_86",
+    "5060": "sm_120"
+  },
+
+  "compute_capability_to_arch_id": {
+    "8.6": "sm_86",
+    "12.0": "sm_120"
+  },
+
+  "sku_tokens": ["rtx_3090_ti", "rtx_5060_laptop"],
+  "device_substring_to_sku": {
+    "3090 ti": "rtx_3090_ti",
+    "5060": "rtx_5060_laptop"
+  },
+
+  "rejected_device_substrings": ["pro 6000", "b200", "h100", "h200", "gb202", "gb200"],
+  "_rejected_doc": "These are non-local server/workstation cards. They share the sm_120 (GB202) or sm_100 (B200) build family with the local parts but have DIFFERENT hardware facts (L2 size, SM count, L1 geometry). Resolving them as a local deploy arch_id would silently return 5060-laptop values, so the loader rejects them until a dedicated SKU card is captured. This mirrors preflight_manifest.REJECTED_SM120_NAME_SUBSTRINGS."
+}

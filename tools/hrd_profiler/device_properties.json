@@ -1,0 +1,21 @@
+{
+  "schema_version": "1.0",
+  "doc": "Maeda 2017 HRD second-layer device-properties manifest. Each entry is keyed by the 5-tuple (arch, sku, driver_version, cuda_toolkit_version, nvbit_build). Required geometry fields: l2_capacity_bytes, sector_size_bytes, num_l2_slices, slice_hash_model, write_policy_model, cta_interleave_model, geometry_confidence. The downstream cache_model_geometry_provenance bundle field references one entry by its 5-tuple key.",
+  "entries": [
+    {
+      "arch": "sm_86",
+      "sku": "rtx_3090_ti",
+      "driver_version": "595.71.05",
+      "cuda_toolkit_version": "13.2",
+      "nvbit_build": "1.8",
+      "l2_capacity_bytes": 6291456,
+      "sector_size_bytes": 32,
+      "num_l2_slices": 6,
+      "slice_hash_model": "sector_id_mod_num_l2_slices",
+      "write_policy_model": "write_allocate_non_inclusive",
+      "cta_interleave_model": "round_robin_per_sm",
+      "geometry_confidence": "vendor_documented",
+      "note": "RTX 3090 Ti (GA102) sm_86; L2 capacity 6 MiB split across 6 partitions of 1 MiB each (each sector maps to slice sector_id % 6). The 6-partition count is the canonical sm_86 GA102 value also pinned in workloads/simbench_bw/run_suite.py::_static_card_num_l2_slices_for_props and workloads/simbench_bw/schemas/cache_predictor.schema.json's description for cache_model_num_l2_slices. Write policy (write-allocate, non-inclusive) empirically confirmed in archived/miscellaneous/2024__usenix_sec_invalidate_compare_*.pdf (Zhang et al. USENIX Security 2024, sections 3.2-3.4). slice_hash_model is the existing observation_builder.py:391 sector_id % num_l2_slices identity; cta_interleave_model is round_robin_per_sm to match the local-label producer's cache_model_cta_interleave_enabled=True setting (per run_headline_cohort_predict_compare.py)."
+    }
+  ]
+}

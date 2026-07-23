@@ -1,0 +1,3098 @@
+{
+  "cohort_size": 92,
+  "operator_notes": "READY rows have a scalar predictor bundle on disk AND all three required sidecars on disk; the v5 fitter + closure + baseline runs can consume them directly. REGENERATE_SIDECARS_LOCAL invokes regenerate_sidecars_for_cell.py on the in-place dynamic_trace.pb. REBUILD_BUNDLE_LOCAL invokes the task5 cascade for cells with sidecars but no bundle. REBUILD_BINARY_LOCAL / REBUILD_TRACE_LOCAL are for cells that fail upstream of sidecar regeneration. CROSS_HOST_SCP / CROSS_HOST_SCP_SIDECARS fetch artifacts from another host when local regeneration is not possible. BUNDLE_TYPED_UNAVAILABLE rows have a typed-unavailable bundle on disk (e.g. cache_model_underconfigured) \u2014 these cells cannot be admitted by regenerating sidecars; the producer's underlying input is the bottleneck. BUNDLE_NON_SCALAR captures any other non-scalar result_kind. TERMINAL_TYPED_FAILURE rows are cells that cannot be admitted within the current producer surface: either excluded at the LABEL layer (relabel sweep stddev failure or provenance-duplicate eviction) OR walker-terminal (the predictor bundle's typed_reason is on the terminal allowlist, e.g. cache_model_underconfigured, where regenerating sidecars or re-running the cascade will not promote the bundle to scalar). Each terminal row carries its root cause in action_typed_reason. Root causes for {BUNDLE_TYPED_UNAVAILABLE, BUNDLE_NON_SCALAR, TERMINAL_TYPED_FAILURE} live in the separate `action_typed_reason` field (the legacy single-field colon-form is now schema-rejected). The summary `legacy_bundle_quarantined` count is the TOTAL number of stale-MPI legacy bundles on disk across admitted cells (sum of per-row `legacy_bundle_quarantined_count` values); a cell with 38 stale bundles contributes 38 to the summary, not 1. Per CLAUDE.md, sm_86 cells captured on a 3090 Ti host's sweeps survive raw scp but NOT git fetch; this manifest lets a future operator session see exactly which cells need which staging step.",
+  "rows": [
+    {
+      "action_typed_reason": null,
+      "arch": "sm_120",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/simbench_bw/results/carveout_sensitivity_probe/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/simbench_bw/results/carveout_sensitivity_probe/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/simbench_bw/results/carveout_sensitivity_probe/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/simbench_bw/results/carveout_sensitivity_probe/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 12,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm120_cohort_bundles_20260526T154829Z/predictor_bundles/sm_120__carveout_sensitivity_probe__trace_l2_accuracy_xl.json"
+        ],
+        "present": true
+      },
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "carveout_sensitivity_probe",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_120",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/portable_lcd/results/conv2d_implicit_gemm_bf16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/portable_lcd/results/conv2d_implicit_gemm_bf16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/portable_lcd/results/conv2d_implicit_gemm_bf16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/portable_lcd/results/conv2d_implicit_gemm_bf16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 3,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm120_cohort_bundles_20260526T154829Z/predictor_bundles/sm_120__conv2d_implicit_gemm_bf16_sm80__timing_shape.json"
+        ],
+        "present": true
+      },
+      "shape_point": "timing_shape",
+      "slug": "conv2d_implicit_gemm_bf16_sm80",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_120",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/simbench_bw/results/cross_entropy_fwd_fp32_sm80/rtx_5060_laptop/sm_120/trace_correctness_shape/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/simbench_bw/results/cross_entropy_fwd_fp32_sm80/rtx_5060_laptop/sm_120/trace_correctness_shape/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/portable_lcd/results/cross_entropy_fwd_fp32_sm80/rtx_5060_laptop/sm_120/trace_correctness_shape/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/simbench_bw/results/cross_entropy_fwd_fp32_sm80/rtx_5060_laptop/sm_120/trace_correctness_shape/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 0,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm120_cohort_bundles_20260526T154829Z/predictor_bundles/sm_120__cross_entropy_fwd_fp32_sm80__correctness_shape.json"
+        ],
+        "present": true
+      },
+      "shape_point": "correctness_shape",
+      "slug": "cross_entropy_fwd_fp32_sm80",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_120",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/simbench_bw/results/cross_entropy_fwd_fp32_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/simbench_bw/results/cross_entropy_fwd_fp32_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/portable_lcd/results/cross_entropy_fwd_fp32_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/simbench_bw/results/cross_entropy_fwd_fp32_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 3,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm120_cohort_bundles_20260526T154829Z/predictor_bundles/sm_120__cross_entropy_fwd_fp32_sm80__timing_shape.json"
+        ],
+        "present": true
+      },
+      "shape_point": "timing_shape",
+      "slug": "cross_entropy_fwd_fp32_sm80",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_120",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/portable_lcd/results/cross_entropy_fwd_fp32_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/portable_lcd/results/cross_entropy_fwd_fp32_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/portable_lcd/results/cross_entropy_fwd_fp32_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/portable_lcd/results/cross_entropy_fwd_fp32_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 0,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm120_cohort_bundles_20260526T154829Z/predictor_bundles/sm_120__cross_entropy_fwd_fp32_sm80__trace_l2_accuracy_xl.json"
+        ],
+        "present": true
+      },
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "cross_entropy_fwd_fp32_sm80",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_120",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/simbench_bw/results/embedding_gather_int32_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/simbench_bw/results/embedding_gather_int32_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/portable_lcd/results/embedding_gather_int32_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/simbench_bw/results/embedding_gather_int32_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 2,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm120_cohort_bundles_20260526T154829Z/predictor_bundles/sm_120__embedding_gather_int32_sm80__timing_shape.json"
+        ],
+        "present": true
+      },
+      "shape_point": "timing_shape",
+      "slug": "embedding_gather_int32_sm80",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_120",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/portable_lcd/results/embedding_gather_int32_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/portable_lcd/results/embedding_gather_int32_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/portable_lcd/results/embedding_gather_int32_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/portable_lcd/results/embedding_gather_int32_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 0,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm120_cohort_bundles_20260526T154829Z/predictor_bundles/sm_120__embedding_gather_int32_sm80__trace_l2_accuracy_xl.json"
+        ],
+        "present": true
+      },
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "embedding_gather_int32_sm80",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_120",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/simbench_bw/results/flash_attn_fwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/simbench_bw/results/flash_attn_fwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/portable_lcd/results/flash_attn_fwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/simbench_bw/results/flash_attn_fwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 1,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm120_cohort_bundles_20260526T154829Z/predictor_bundles/sm_120__flash_attn_fwd_bf16_sm80__timing_shape.json"
+        ],
+        "present": true
+      },
+      "shape_point": "timing_shape",
+      "slug": "flash_attn_fwd_bf16_sm80",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_120",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/simbench_bw/results/gemm_hmma_bf16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/simbench_bw/results/gemm_hmma_bf16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/portable_lcd/results/gemm_hmma_bf16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/simbench_bw/results/gemm_hmma_bf16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 3,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm120_cohort_bundles_20260526T154829Z/predictor_bundles/sm_120__gemm_hmma_bf16_sm80__timing_shape.json"
+        ],
+        "present": true
+      },
+      "shape_point": "timing_shape",
+      "slug": "gemm_hmma_bf16_sm80",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_120",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/portable_lcd/results/gemm_hmma_bf16_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_lg/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/portable_lcd/results/gemm_hmma_bf16_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_lg/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/portable_lcd/results/gemm_hmma_bf16_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_lg/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/portable_lcd/results/gemm_hmma_bf16_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_lg/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 0,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm120_cohort_bundles_20260526T154829Z/predictor_bundles/sm_120__gemm_hmma_bf16_sm80__trace_l2_accuracy_lg.json"
+        ],
+        "present": true
+      },
+      "shape_point": "trace_l2_accuracy_lg",
+      "slug": "gemm_hmma_bf16_sm80",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_120",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/portable_lcd/results/gemm_hmma_bf16_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/portable_lcd/results/gemm_hmma_bf16_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/portable_lcd/results/gemm_hmma_bf16_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/portable_lcd/results/gemm_hmma_bf16_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 3,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm120_cohort_bundles_20260526T154829Z/predictor_bundles/sm_120__gemm_hmma_bf16_sm80__trace_l2_accuracy_xl.json"
+        ],
+        "present": true
+      },
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "gemm_hmma_bf16_sm80",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_120",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/simbench_bw/results/gemm_hmma_fp16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/simbench_bw/results/gemm_hmma_fp16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/portable_lcd/results/gemm_hmma_fp16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/simbench_bw/results/gemm_hmma_fp16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 3,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm120_cohort_bundles_20260526T154829Z/predictor_bundles/sm_120__gemm_hmma_fp16_sm80__timing_shape.json"
+        ],
+        "present": true
+      },
+      "shape_point": "timing_shape",
+      "slug": "gemm_hmma_fp16_sm80",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_120",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/portable_lcd/results/gemm_hmma_fp16_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/portable_lcd/results/gemm_hmma_fp16_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/portable_lcd/results/gemm_hmma_fp16_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/portable_lcd/results/gemm_hmma_fp16_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 3,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm120_cohort_bundles_20260526T154829Z/predictor_bundles/sm_120__gemm_hmma_fp16_sm80__trace_l2_accuracy_xl.json"
+        ],
+        "present": true
+      },
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "gemm_hmma_fp16_sm80",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_120",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/simbench_bw/results/gemm_imma_int8_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/simbench_bw/results/gemm_imma_int8_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/portable_lcd/results/gemm_imma_int8_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/simbench_bw/results/gemm_imma_int8_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 3,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm120_cohort_bundles_20260526T154829Z/predictor_bundles/sm_120__gemm_imma_int8_sm80__timing_shape.json"
+        ],
+        "present": true
+      },
+      "shape_point": "timing_shape",
+      "slug": "gemm_imma_int8_sm80",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_120",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/portable_lcd/results/gemm_imma_int8_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/portable_lcd/results/gemm_imma_int8_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/portable_lcd/results/gemm_imma_int8_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/portable_lcd/results/gemm_imma_int8_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 3,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm120_cohort_bundles_20260526T154829Z/predictor_bundles/sm_120__gemm_imma_int8_sm80__trace_l2_accuracy_xl.json"
+        ],
+        "present": true
+      },
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "gemm_imma_int8_sm80",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_120",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/portable_lcd/results/gemm_sparse_2to4_bf16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/portable_lcd/results/gemm_sparse_2to4_bf16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/portable_lcd/results/gemm_sparse_2to4_bf16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/portable_lcd/results/gemm_sparse_2to4_bf16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 3,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm120_cohort_bundles_20260526T154829Z/predictor_bundles/sm_120__gemm_sparse_2to4_bf16_sm80__timing_shape.json"
+        ],
+        "present": true
+      },
+      "shape_point": "timing_shape",
+      "slug": "gemm_sparse_2to4_bf16_sm80",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_120",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/simbench_bw/results/l2_persisting_window_sweep/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/simbench_bw/results/l2_persisting_window_sweep/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/simbench_bw/results/l2_persisting_window_sweep/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/simbench_bw/results/l2_persisting_window_sweep/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 10,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm120_cohort_bundles_20260526T154829Z/predictor_bundles/sm_120__l2_persisting_window_sweep__trace_l2_accuracy_xl.json"
+        ],
+        "present": true
+      },
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "l2_persisting_window_sweep",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_120",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/simbench_bw/results/l2_prefetch_hint_sweep/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/simbench_bw/results/l2_prefetch_hint_sweep/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/simbench_bw/results/l2_prefetch_hint_sweep/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/simbench_bw/results/l2_prefetch_hint_sweep/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 10,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm120_cohort_bundles_20260526T154829Z/predictor_bundles/sm_120__l2_prefetch_hint_sweep__trace_l2_accuracy_xl.json"
+        ],
+        "present": true
+      },
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "l2_prefetch_hint_sweep",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_120",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/simbench_bw/results/layernorm_fwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/simbench_bw/results/layernorm_fwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/simbench_bw/results/layernorm_fwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/simbench_bw/results/layernorm_fwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 37,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm120_cohort_bundles_20260525T031911Z/predictor_bundles/sm_120__layernorm_fwd_bf16_sm80__timing_shape.json",
+          "data/local_labels/sweeps/sm120_cohort_bundles_20260526T154829Z/predictor_bundles/sm_120__layernorm_fwd_bf16_sm80__timing_shape.json"
+        ],
+        "present": true
+      },
+      "shape_point": "timing_shape",
+      "slug": "layernorm_fwd_bf16_sm80",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_120",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/portable_lcd/results/layernorm_fwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/portable_lcd/results/layernorm_fwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/portable_lcd/results/layernorm_fwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/portable_lcd/results/layernorm_fwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 0,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm120_cohort_bundles_20260526T154829Z/predictor_bundles/sm_120__layernorm_fwd_bf16_sm80__trace_l2_accuracy_xl.json"
+        ],
+        "present": true
+      },
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "layernorm_fwd_bf16_sm80",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_120",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/portable_lcd/results/rmsnorm_bwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/portable_lcd/results/rmsnorm_bwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/portable_lcd/results/rmsnorm_bwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/portable_lcd/results/rmsnorm_bwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 2,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm120_cohort_bundles_20260526T154829Z/predictor_bundles/sm_120__rmsnorm_bwd_bf16_sm80__timing_shape.json"
+        ],
+        "present": true
+      },
+      "shape_point": "timing_shape",
+      "slug": "rmsnorm_bwd_bf16_sm80",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_120",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/simbench_bw/results/rmsnorm_fwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/simbench_bw/results/rmsnorm_fwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/simbench_bw/results/rmsnorm_fwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/simbench_bw/results/rmsnorm_fwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 38,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm120_cohort_bundles_20260525T031911Z/predictor_bundles/sm_120__rmsnorm_fwd_bf16_sm80__timing_shape.json",
+          "data/local_labels/sweeps/sm120_cohort_bundles_20260526T154829Z/predictor_bundles/sm_120__rmsnorm_fwd_bf16_sm80__timing_shape.json"
+        ],
+        "present": true
+      },
+      "shape_point": "timing_shape",
+      "slug": "rmsnorm_fwd_bf16_sm80",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_120",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/portable_lcd/results/rmsnorm_fwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/portable_lcd/results/rmsnorm_fwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/portable_lcd/results/rmsnorm_fwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/portable_lcd/results/rmsnorm_fwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 0,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm120_cohort_bundles_20260526T154829Z/predictor_bundles/sm_120__rmsnorm_fwd_bf16_sm80__trace_l2_accuracy_xl.json"
+        ],
+        "present": true
+      },
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "rmsnorm_fwd_bf16_sm80",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_120",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/simbench_bw/results/silu_fwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/simbench_bw/results/silu_fwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/simbench_bw/results/silu_fwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/simbench_bw/results/silu_fwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 38,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm120_cohort_bundles_20260525T031911Z/predictor_bundles/sm_120__silu_fwd_bf16_sm80__timing_shape.json",
+          "data/local_labels/sweeps/sm120_cohort_bundles_20260526T154829Z/predictor_bundles/sm_120__silu_fwd_bf16_sm80__timing_shape.json"
+        ],
+        "present": true
+      },
+      "shape_point": "timing_shape",
+      "slug": "silu_fwd_bf16_sm80",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_120",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/simbench_bw/results/softmax_safe_bf16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/simbench_bw/results/softmax_safe_bf16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/simbench_bw/results/softmax_safe_bf16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/simbench_bw/results/softmax_safe_bf16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 38,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm120_cohort_bundles_20260525T031911Z/predictor_bundles/sm_120__softmax_safe_bf16_sm80__timing_shape.json",
+          "data/local_labels/sweeps/sm120_cohort_bundles_20260526T154829Z/predictor_bundles/sm_120__softmax_safe_bf16_sm80__timing_shape.json"
+        ],
+        "present": true
+      },
+      "shape_point": "timing_shape",
+      "slug": "softmax_safe_bf16_sm80",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_120",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/portable_lcd/results/softmax_safe_bf16_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/portable_lcd/results/softmax_safe_bf16_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/portable_lcd/results/softmax_safe_bf16_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/portable_lcd/results/softmax_safe_bf16_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 0,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm120_cohort_bundles_20260526T154829Z/predictor_bundles/sm_120__softmax_safe_bf16_sm80__trace_l2_accuracy_xl.json"
+        ],
+        "present": true
+      },
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "softmax_safe_bf16_sm80",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_120",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/portable_lcd/results/swiglu_fwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/portable_lcd/results/swiglu_fwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/portable_lcd/results/swiglu_fwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/portable_lcd/results/swiglu_fwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 1,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm120_cohort_bundles_20260526T154829Z/predictor_bundles/sm_120__swiglu_fwd_bf16_sm80__timing_shape.json"
+        ],
+        "present": true
+      },
+      "shape_point": "timing_shape",
+      "slug": "swiglu_fwd_bf16_sm80",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_120",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/simbench_bw/results/swiglu_fwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/simbench_bw/results/swiglu_fwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/simbench_bw/results/swiglu_fwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/simbench_bw/results/swiglu_fwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 1,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm120_cohort_bundles_20260525T031911Z/predictor_bundles/sm_120__swiglu_fwd_bf16_sm80__trace_l2_accuracy_xl.json",
+          "data/local_labels/sweeps/sm120_cohort_bundles_20260526T154829Z/predictor_bundles/sm_120__swiglu_fwd_bf16_sm80__trace_l2_accuracy_xl.json"
+        ],
+        "present": true
+      },
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "swiglu_fwd_bf16_sm80",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_120",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/simbench_bw/results/warm_cold_pair_relaunch/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/simbench_bw/results/warm_cold_pair_relaunch/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/simbench_bw/results/warm_cold_pair_relaunch/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/simbench_bw/results/warm_cold_pair_relaunch/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 9,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm120_cohort_bundles_20260526T154829Z/predictor_bundles/sm_120__warm_cold_pair_relaunch__trace_l2_accuracy_xl.json"
+        ],
+        "present": true
+      },
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "warm_cold_pair_relaunch",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_120",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/simbench_bw/results/working_set_capacity_sweep/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/simbench_bw/results/working_set_capacity_sweep/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/simbench_bw/results/working_set_capacity_sweep/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/simbench_bw/results/working_set_capacity_sweep/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 9,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm120_cohort_bundles_20260526T154829Z/predictor_bundles/sm_120__working_set_capacity_sweep__trace_l2_accuracy_xl.json"
+        ],
+        "present": true
+      },
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "working_set_capacity_sweep",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_86",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/simbench_bw/results/carveout_sensitivity_probe/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/simbench_bw/results/carveout_sensitivity_probe/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/simbench_bw/results/carveout_sensitivity_probe/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/simbench_bw/results/carveout_sensitivity_probe/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 12,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm86_cohort_regen_20260604T060000Z/comparison/predictor_bundles/sm_86__carveout_sensitivity_probe__trace_l2_accuracy_xl.json"
+        ],
+        "present": true
+      },
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "carveout_sensitivity_probe",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_86",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/portable_lcd/results/conv2d_implicit_gemm_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/portable_lcd/results/conv2d_implicit_gemm_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/portable_lcd/results/conv2d_implicit_gemm_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/portable_lcd/results/conv2d_implicit_gemm_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 2,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm86_cohort_regen_20260528T163207Z/comparison/predictor_bundles/sm_86__conv2d_implicit_gemm_bf16_sm80__timing_shape.json"
+        ],
+        "present": true
+      },
+      "shape_point": "timing_shape",
+      "slug": "conv2d_implicit_gemm_bf16_sm80",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_86",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/portable_lcd/results/cross_entropy_fwd_fp32_sm80/rtx_3090_ti/sm_86/trace_timing_shape/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/portable_lcd/results/cross_entropy_fwd_fp32_sm80/rtx_3090_ti/sm_86/trace_timing_shape/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/portable_lcd/results/cross_entropy_fwd_fp32_sm80/rtx_3090_ti/sm_86/trace_timing_shape/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/portable_lcd/results/cross_entropy_fwd_fp32_sm80/rtx_3090_ti/sm_86/trace_timing_shape/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 2,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm86_cohort_regen_20260528T163207Z/comparison/predictor_bundles/sm_86__cross_entropy_fwd_fp32_sm80__timing_shape.json"
+        ],
+        "present": true
+      },
+      "shape_point": "timing_shape",
+      "slug": "cross_entropy_fwd_fp32_sm80",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": "cache_model_underconfigured",
+      "arch": "sm_86",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/simbench_bw/results/dram_streaming_dot_product/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/simbench_bw/results/dram_streaming_dot_product/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/simbench_bw/results/dram_streaming_dot_product/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/simbench_bw/results/dram_streaming_dot_product/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 4,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm86_cohort_regen_20260604T060000Z/comparison/predictor_bundles/sm_86__dram_streaming_dot_product__trace_l2_accuracy_xl.json"
+        ],
+        "present": true
+      },
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "dram_streaming_dot_product",
+      "suggested_operator_action": "TERMINAL_TYPED_FAILURE",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_86",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/portable_lcd/results/embedding_gather_int32_sm80/rtx_3090_ti/sm_86/trace_timing_shape/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/portable_lcd/results/embedding_gather_int32_sm80/rtx_3090_ti/sm_86/trace_timing_shape/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/portable_lcd/results/embedding_gather_int32_sm80/rtx_3090_ti/sm_86/trace_timing_shape/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/portable_lcd/results/embedding_gather_int32_sm80/rtx_3090_ti/sm_86/trace_timing_shape/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 2,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm86_cohort_regen_20260528T160419Z/comparison/predictor_bundles/sm_86__embedding_gather_int32_sm80__timing_shape.json"
+        ],
+        "present": true
+      },
+      "shape_point": "timing_shape",
+      "slug": "embedding_gather_int32_sm80",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_86",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/portable_lcd/results/gemm_hmma_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/portable_lcd/results/gemm_hmma_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/portable_lcd/results/gemm_hmma_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/portable_lcd/results/gemm_hmma_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 2,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm86_cohort_regen_20260528T163207Z/comparison/predictor_bundles/sm_86__gemm_hmma_bf16_sm80__timing_shape.json"
+        ],
+        "present": true
+      },
+      "shape_point": "timing_shape",
+      "slug": "gemm_hmma_bf16_sm80",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_86",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/portable_lcd/results/gemm_hmma_bf16_sm80/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/portable_lcd/results/gemm_hmma_bf16_sm80/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/portable_lcd/results/gemm_hmma_bf16_sm80/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/portable_lcd/results/gemm_hmma_bf16_sm80/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 2,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm86_cohort_regen_20260528T163207Z/comparison/predictor_bundles/sm_86__gemm_hmma_bf16_sm80__trace_l2_accuracy_xl.json"
+        ],
+        "present": true
+      },
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "gemm_hmma_bf16_sm80",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_86",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/portable_lcd/results/gemm_hmma_fp16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/portable_lcd/results/gemm_hmma_fp16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/portable_lcd/results/gemm_hmma_fp16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/portable_lcd/results/gemm_hmma_fp16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 2,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm86_cohort_regen_20260528T163207Z/comparison/predictor_bundles/sm_86__gemm_hmma_fp16_sm80__timing_shape.json"
+        ],
+        "present": true
+      },
+      "shape_point": "timing_shape",
+      "slug": "gemm_hmma_fp16_sm80",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_86",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/portable_lcd/results/gemm_hmma_fp16_sm80/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/portable_lcd/results/gemm_hmma_fp16_sm80/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/portable_lcd/results/gemm_hmma_fp16_sm80/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/portable_lcd/results/gemm_hmma_fp16_sm80/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 2,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm86_cohort_regen_20260528T163207Z/comparison/predictor_bundles/sm_86__gemm_hmma_fp16_sm80__trace_l2_accuracy_xl.json"
+        ],
+        "present": true
+      },
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "gemm_hmma_fp16_sm80",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_86",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/portable_lcd/results/gemm_imma_int8_sm80/rtx_3090_ti/sm_86/trace_timing_shape/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/portable_lcd/results/gemm_imma_int8_sm80/rtx_3090_ti/sm_86/trace_timing_shape/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/portable_lcd/results/gemm_imma_int8_sm80/rtx_3090_ti/sm_86/trace_timing_shape/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/portable_lcd/results/gemm_imma_int8_sm80/rtx_3090_ti/sm_86/trace_timing_shape/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 2,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm86_cohort_regen_20260528T163207Z/comparison/predictor_bundles/sm_86__gemm_imma_int8_sm80__timing_shape.json"
+        ],
+        "present": true
+      },
+      "shape_point": "timing_shape",
+      "slug": "gemm_imma_int8_sm80",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_86",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/portable_lcd/results/gemm_imma_int8_sm80/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/portable_lcd/results/gemm_imma_int8_sm80/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/portable_lcd/results/gemm_imma_int8_sm80/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/portable_lcd/results/gemm_imma_int8_sm80/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 2,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm86_cohort_regen_20260528T163207Z/comparison/predictor_bundles/sm_86__gemm_imma_int8_sm80__trace_l2_accuracy_xl.json"
+        ],
+        "present": true
+      },
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "gemm_imma_int8_sm80",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_86",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/portable_lcd/results/gemm_sparse_2to4_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/portable_lcd/results/gemm_sparse_2to4_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/portable_lcd/results/gemm_sparse_2to4_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/portable_lcd/results/gemm_sparse_2to4_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 2,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm86_cohort_regen_20260528T163207Z/comparison/predictor_bundles/sm_86__gemm_sparse_2to4_bf16_sm80__timing_shape.json"
+        ],
+        "present": true
+      },
+      "shape_point": "timing_shape",
+      "slug": "gemm_sparse_2to4_bf16_sm80",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_86",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/portable_lcd/results/rmsnorm_bwd_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/portable_lcd/results/rmsnorm_bwd_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/portable_lcd/results/rmsnorm_bwd_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/portable_lcd/results/rmsnorm_bwd_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 2,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm86_cohort_regen_20260528T160419Z/comparison/predictor_bundles/sm_86__rmsnorm_bwd_bf16_sm80__timing_shape.json"
+        ],
+        "present": true
+      },
+      "shape_point": "timing_shape",
+      "slug": "rmsnorm_bwd_bf16_sm80",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_86",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/portable_lcd/results/rmsnorm_fwd_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/portable_lcd/results/rmsnorm_fwd_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/portable_lcd/results/rmsnorm_fwd_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/portable_lcd/results/rmsnorm_fwd_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 39,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm86_cohort_regen_20260604T000000Z/comparison/predictor_bundles/sm_86__rmsnorm_fwd_bf16_sm80__timing_shape.json"
+        ],
+        "present": true
+      },
+      "shape_point": "timing_shape",
+      "slug": "rmsnorm_fwd_bf16_sm80",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_86",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/portable_lcd/results/silu_fwd_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/portable_lcd/results/silu_fwd_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/portable_lcd/results/silu_fwd_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/portable_lcd/results/silu_fwd_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 39,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm86_cohort_regen_20260604T000000Z/comparison/predictor_bundles/sm_86__silu_fwd_bf16_sm80__timing_shape.json"
+        ],
+        "present": true
+      },
+      "shape_point": "timing_shape",
+      "slug": "silu_fwd_bf16_sm80",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_86",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/portable_lcd/results/softmax_safe_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/portable_lcd/results/softmax_safe_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/portable_lcd/results/softmax_safe_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/portable_lcd/results/softmax_safe_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 38,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm86_cohort_regen_20260604T000000Z/comparison/predictor_bundles/sm_86__softmax_safe_bf16_sm80__timing_shape.json"
+        ],
+        "present": true
+      },
+      "shape_point": "timing_shape",
+      "slug": "softmax_safe_bf16_sm80",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_86",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/portable_lcd/results/swiglu_fwd_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/portable_lcd/results/swiglu_fwd_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/portable_lcd/results/swiglu_fwd_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/portable_lcd/results/swiglu_fwd_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 1,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm86_cohort_regen_20260528T160419Z/comparison/predictor_bundles/sm_86__swiglu_fwd_bf16_sm80__timing_shape.json"
+        ],
+        "present": true
+      },
+      "shape_point": "timing_shape",
+      "slug": "swiglu_fwd_bf16_sm80",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_86",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/portable_lcd/results/swiglu_fwd_bf16_sm80/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/portable_lcd/results/swiglu_fwd_bf16_sm80/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/portable_lcd/results/swiglu_fwd_bf16_sm80/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/portable_lcd/results/swiglu_fwd_bf16_sm80/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 2,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm86_cohort_regen_20260528T160419Z/comparison/predictor_bundles/sm_86__swiglu_fwd_bf16_sm80__trace_l2_accuracy_xl.json"
+        ],
+        "present": true
+      },
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "swiglu_fwd_bf16_sm80",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_86",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/simbench_bw/results/tf32_hmma_gemm_traceable/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/simbench_bw/results/tf32_hmma_gemm_traceable/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/simbench_bw/results/tf32_hmma_gemm_traceable/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/simbench_bw/results/tf32_hmma_gemm_traceable/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 2,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm86_cohort_regen_20260604T060000Z/comparison/predictor_bundles/sm_86__tf32_hmma_gemm_traceable__trace_l2_accuracy_xl.json"
+        ],
+        "present": true
+      },
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "tf32_hmma_gemm_traceable",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_86",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/simbench_bw/results/register_spill_local_mem/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/simbench_bw/results/register_spill_local_mem/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/simbench_bw/results/register_spill_local_mem/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/simbench_bw/results/register_spill_local_mem/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 12,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm86_cohort_regen_20260604T000000Z/comparison/predictor_bundles/sm_86__register_spill_local_mem__trace_l2_accuracy_xl__register_cap_24.json"
+        ],
+        "present": true
+      },
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "register_spill_local_mem",
+      "suggested_operator_action": "READY",
+      "variant_id": "register_cap_24"
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_86",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/simbench_bw/results/register_spill_local_mem/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/simbench_bw/results/register_spill_local_mem/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/simbench_bw/results/register_spill_local_mem/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/simbench_bw/results/register_spill_local_mem/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 12,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm86_cohort_regen_20260604T000000Z/comparison/predictor_bundles/sm_86__register_spill_local_mem__trace_l2_accuracy_xl__register_cap_32.json"
+        ],
+        "present": true
+      },
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "register_spill_local_mem",
+      "suggested_operator_action": "READY",
+      "variant_id": "register_cap_32"
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_86",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/simbench_bw/results/register_spill_local_mem/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/simbench_bw/results/register_spill_local_mem/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/simbench_bw/results/register_spill_local_mem/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/simbench_bw/results/register_spill_local_mem/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 12,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm86_cohort_regen_20260604T000000Z/comparison/predictor_bundles/sm_86__register_spill_local_mem__trace_l2_accuracy_xl__register_cap_64.json"
+        ],
+        "present": true
+      },
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "register_spill_local_mem",
+      "suggested_operator_action": "READY",
+      "variant_id": "register_cap_64"
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_86",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/simbench_bw/results/register_spill_local_mem/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/simbench_bw/results/register_spill_local_mem/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/simbench_bw/results/register_spill_local_mem/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/simbench_bw/results/register_spill_local_mem/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 12,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm86_cohort_regen_20260604T000000Z/comparison/predictor_bundles/sm_86__register_spill_local_mem__trace_l2_accuracy_xl__register_cap_255.json"
+        ],
+        "present": true
+      },
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "register_spill_local_mem",
+      "suggested_operator_action": "READY",
+      "variant_id": "register_cap_255"
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_86",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/simbench_bw/results/global_atomic_return_used/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/simbench_bw/results/global_atomic_return_used/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/simbench_bw/results/global_atomic_return_used/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/simbench_bw/results/global_atomic_return_used/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 0,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm86_cohort_regen_20260603T070000Z/comparison/predictor_bundles/sm_86__global_atomic_return_used__trace_l2_accuracy_xl.json"
+        ],
+        "present": true
+      },
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "global_atomic_return_used",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_86",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/simbench_bw/results/global_scalar_32b_copy/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/simbench_bw/results/global_scalar_32b_copy/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/simbench_bw/results/global_scalar_32b_copy/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/simbench_bw/results/global_scalar_32b_copy/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 0,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm86_cohort_regen_20260603T100000Z/comparison/predictor_bundles/sm_86__global_scalar_32b_copy__trace_l2_accuracy_xl.json"
+        ],
+        "present": true
+      },
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "global_scalar_32b_copy",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_86",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/simbench_bw/results/global_vectorized_128b_copy/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/simbench_bw/results/global_vectorized_128b_copy/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/simbench_bw/results/global_vectorized_128b_copy/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/simbench_bw/results/global_vectorized_128b_copy/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 0,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm86_cohort_regen_20260603T100000Z/comparison/predictor_bundles/sm_86__global_vectorized_128b_copy__trace_l2_accuracy_xl.json"
+        ],
+        "present": true
+      },
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "global_vectorized_128b_copy",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_86",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/simbench_bw/results/global_vectorized_64b_copy/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/simbench_bw/results/global_vectorized_64b_copy/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/simbench_bw/results/global_vectorized_64b_copy/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/simbench_bw/results/global_vectorized_64b_copy/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 0,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm86_cohort_regen_20260603T120000Z/comparison/predictor_bundles/sm_86__global_vectorized_64b_copy__trace_l2_accuracy_xl.json"
+        ],
+        "present": true
+      },
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "global_vectorized_64b_copy",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_86",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/simbench_bw/results/global_atomic_histogram/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/simbench_bw/results/global_atomic_histogram/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/simbench_bw/results/global_atomic_histogram/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/simbench_bw/results/global_atomic_histogram/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 1,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm86_cohort_regen_20260603T130000Z/comparison/predictor_bundles/sm_86__global_atomic_histogram__trace_l2_accuracy_xl.json"
+        ],
+        "present": true
+      },
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "global_atomic_histogram",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_86",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/simbench_bw/results/global_atomic_max_histogram/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/simbench_bw/results/global_atomic_max_histogram/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/simbench_bw/results/global_atomic_max_histogram/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/simbench_bw/results/global_atomic_max_histogram/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 0,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm86_cohort_regen_20260603T160000Z/comparison/predictor_bundles/sm_86__global_atomic_max_histogram__trace_l2_accuracy_xl.json"
+        ],
+        "present": true
+      },
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "global_atomic_max_histogram",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_86",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/simbench_bw/results/global_atomic_max_return_used/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/simbench_bw/results/global_atomic_max_return_used/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/simbench_bw/results/global_atomic_max_return_used/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/simbench_bw/results/global_atomic_max_return_used/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 0,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm86_cohort_regen_20260603T160000Z/comparison/predictor_bundles/sm_86__global_atomic_max_return_used__trace_l2_accuracy_xl.json"
+        ],
+        "present": true
+      },
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "global_atomic_max_return_used",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_86",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/simbench_bw/results/global_atomic_and_histogram/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/simbench_bw/results/global_atomic_and_histogram/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/simbench_bw/results/global_atomic_and_histogram/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/simbench_bw/results/global_atomic_and_histogram/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 0,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm86_cohort_regen_20260603T170000Z/comparison/predictor_bundles/sm_86__global_atomic_and_histogram__trace_l2_accuracy_xl.json"
+        ],
+        "present": true
+      },
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "global_atomic_and_histogram",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_86",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/simbench_bw/results/global_atomic_and_return_used/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/simbench_bw/results/global_atomic_and_return_used/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/simbench_bw/results/global_atomic_and_return_used/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/simbench_bw/results/global_atomic_and_return_used/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 0,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm86_cohort_regen_20260603T170000Z/comparison/predictor_bundles/sm_86__global_atomic_and_return_used__trace_l2_accuracy_xl.json"
+        ],
+        "present": true
+      },
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "global_atomic_and_return_used",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_86",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/simbench_bw/results/local_dynamic_index_array/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/simbench_bw/results/local_dynamic_index_array/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/simbench_bw/results/local_dynamic_index_array/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/simbench_bw/results/local_dynamic_index_array/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 0,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm86_cohort_regen_20260604T120000Z/comparison/predictor_bundles/sm_86__local_dynamic_index_array__trace_l2_accuracy_xl.json"
+        ],
+        "present": true
+      },
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "local_dynamic_index_array",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_86",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/simbench_bw/results/local_volatile_array/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/simbench_bw/results/local_volatile_array/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/simbench_bw/results/local_volatile_array/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/simbench_bw/results/local_volatile_array/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 0,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm86_cohort_regen_20260604T120000Z/comparison/predictor_bundles/sm_86__local_volatile_array__trace_l2_accuracy_xl.json"
+        ],
+        "present": true
+      },
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "local_volatile_array",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": "cache_model_underconfigured",
+      "arch": "sm_86",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/simbench_bw/results/bf16_hmma_gemm_traceable/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/simbench_bw/results/bf16_hmma_gemm_traceable/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/simbench_bw/results/bf16_hmma_gemm_traceable/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/simbench_bw/results/bf16_hmma_gemm_traceable/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 1,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm86_cohort_regen_20260604T020000Z/comparison/predictor_bundles/sm_86__bf16_hmma_gemm_traceable__trace_l2_accuracy_xl.json"
+        ],
+        "present": true
+      },
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "bf16_hmma_gemm_traceable",
+      "suggested_operator_action": "TERMINAL_TYPED_FAILURE",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": "cache_model_underconfigured",
+      "arch": "sm_86",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/simbench_bw/results/cp_async_shared_tile_copy/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/simbench_bw/results/cp_async_shared_tile_copy/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/simbench_bw/results/cp_async_shared_tile_copy/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/simbench_bw/results/cp_async_shared_tile_copy/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 1,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm86_cohort_regen_20260604T020000Z/comparison/predictor_bundles/sm_86__cp_async_shared_tile_copy__trace_l2_accuracy_xl.json"
+        ],
+        "present": true
+      },
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "cp_async_shared_tile_copy",
+      "suggested_operator_action": "TERMINAL_TYPED_FAILURE",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": "cache_model_underconfigured",
+      "arch": "sm_86",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/simbench_bw/results/fp16_hmma_gemm_traceable/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/simbench_bw/results/fp16_hmma_gemm_traceable/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/simbench_bw/results/fp16_hmma_gemm_traceable/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/simbench_bw/results/fp16_hmma_gemm_traceable/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 1,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm86_cohort_regen_20260604T020000Z/comparison/predictor_bundles/sm_86__fp16_hmma_gemm_traceable__trace_l2_accuracy_xl.json"
+        ],
+        "present": true
+      },
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "fp16_hmma_gemm_traceable",
+      "suggested_operator_action": "TERMINAL_TYPED_FAILURE",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_86",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/simbench_bw/results/fp32_fma_dep_chain/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/simbench_bw/results/fp32_fma_dep_chain/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/simbench_bw/results/fp32_fma_dep_chain/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/simbench_bw/results/fp32_fma_dep_chain/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 1,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm86_cohort_regen_20260604T020000Z/comparison/predictor_bundles/sm_86__fp32_fma_dep_chain__trace_l2_accuracy_xl.json"
+        ],
+        "present": true
+      },
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "fp32_fma_dep_chain",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_86",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/simbench_bw/results/l2_persisting_window_sweep/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/simbench_bw/results/l2_persisting_window_sweep/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/simbench_bw/results/l2_persisting_window_sweep/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/simbench_bw/results/l2_persisting_window_sweep/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 10,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm86_cohort_regen_20260604T020000Z/comparison/predictor_bundles/sm_86__l2_persisting_window_sweep__trace_l2_accuracy_xl.json"
+        ],
+        "present": true
+      },
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "l2_persisting_window_sweep",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_86",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/simbench_bw/results/l2_prefetch_hint_sweep/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/simbench_bw/results/l2_prefetch_hint_sweep/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/simbench_bw/results/l2_prefetch_hint_sweep/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/simbench_bw/results/l2_prefetch_hint_sweep/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 10,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm86_cohort_regen_20260604T020000Z/comparison/predictor_bundles/sm_86__l2_prefetch_hint_sweep__trace_l2_accuracy_xl.json"
+        ],
+        "present": true
+      },
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "l2_prefetch_hint_sweep",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_86",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/simbench_bw/results/rmsnorm_fwd_bf16/rtx_3090_ti/sm_86/trace_trace_00/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/simbench_bw/results/rmsnorm_fwd_bf16/rtx_3090_ti/sm_86/trace_trace_00/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/simbench_bw/results/rmsnorm_fwd_bf16/rtx_3090_ti/sm_86/trace_trace_00/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/simbench_bw/results/rmsnorm_fwd_bf16/rtx_3090_ti/sm_86/trace_trace_00/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 1,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm86_cohort_regen_20260604T020000Z/comparison/predictor_bundles/sm_86__rmsnorm_fwd_bf16__trace_00.json"
+        ],
+        "present": true
+      },
+      "shape_point": "trace_00",
+      "slug": "rmsnorm_fwd_bf16",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_86",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/simbench_bw/results/vendor_sgemm_strided_batched_cublas/rtx_3090_ti/sm_86/trace_trace_00/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/simbench_bw/results/vendor_sgemm_strided_batched_cublas/rtx_3090_ti/sm_86/trace_trace_00/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/simbench_bw/results/vendor_sgemm_strided_batched_cublas/rtx_3090_ti/sm_86/trace_trace_00/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/simbench_bw/results/vendor_sgemm_strided_batched_cublas/rtx_3090_ti/sm_86/trace_trace_00/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 0,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm86_cohort_regen_20260604T020000Z/comparison/predictor_bundles/sm_86__vendor_sgemm_strided_batched_cublas__trace_00.json"
+        ],
+        "present": true
+      },
+      "shape_point": "trace_00",
+      "slug": "vendor_sgemm_strided_batched_cublas",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_86",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/simbench_bw/results/warm_cold_pair_relaunch/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/simbench_bw/results/warm_cold_pair_relaunch/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/simbench_bw/results/warm_cold_pair_relaunch/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/simbench_bw/results/warm_cold_pair_relaunch/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 9,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm86_cohort_regen_20260604T020000Z/comparison/predictor_bundles/sm_86__warm_cold_pair_relaunch__trace_l2_accuracy_xl.json"
+        ],
+        "present": true
+      },
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "warm_cold_pair_relaunch",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": null,
+      "arch": "sm_86",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": "workloads/simbench_bw/results/working_set_capacity_sweep/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/dynamic_trace.pb",
+          "present": true
+        },
+        "hrd_profile": {
+          "path": "workloads/simbench_bw/results/working_set_capacity_sweep/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/hrd_profile/hrd_profile.json",
+          "present": true
+        },
+        "sector_stream": {
+          "path": "workloads/simbench_bw/results/working_set_capacity_sweep/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sector_stream/sector_stream.jsonl",
+          "present": true
+        },
+        "sharing_locality": {
+          "path": "workloads/simbench_bw/results/working_set_capacity_sweep/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sharing_locality/sharing_locality.json",
+          "present": true
+        }
+      },
+      "cohort_membership": "admitted",
+      "legacy_bundle_quarantined_count": 9,
+      "predictor_bundle": {
+        "paths": [
+          "data/local_labels/sweeps/sm86_cohort_regen_20260604T020000Z/comparison/predictor_bundles/sm_86__working_set_capacity_sweep__trace_l2_accuracy_xl.json"
+        ],
+        "present": true
+      },
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "working_set_capacity_sweep",
+      "suggested_operator_action": "READY",
+      "variant_id": null
+    },
+    {
+      "action_typed_reason": "label_repeatability_failed",
+      "arch": "sm_86",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": null,
+          "present": false
+        },
+        "hrd_profile": {
+          "path": null,
+          "present": false
+        },
+        "sector_stream": {
+          "path": null,
+          "present": false
+        },
+        "sharing_locality": {
+          "path": null,
+          "present": false
+        }
+      },
+      "cohort_membership": "excluded",
+      "legacy_bundle_quarantined_count": 0,
+      "predictor_bundle": {
+        "paths": [],
+        "present": false
+      },
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "dram_stream_stride_mix",
+      "suggested_operator_action": "TERMINAL_TYPED_FAILURE"
+    },
+    {
+      "action_typed_reason": "label_repeatability_failed",
+      "arch": "sm_86",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": null,
+          "present": false
+        },
+        "hrd_profile": {
+          "path": null,
+          "present": false
+        },
+        "sector_stream": {
+          "path": null,
+          "present": false
+        },
+        "sharing_locality": {
+          "path": null,
+          "present": false
+        }
+      },
+      "cohort_membership": "excluded",
+      "legacy_bundle_quarantined_count": 0,
+      "predictor_bundle": {
+        "paths": [],
+        "present": false
+      },
+      "shape_point": "timing_shape",
+      "slug": "flash_attn_bwd_bf16_sm80",
+      "suggested_operator_action": "TERMINAL_TYPED_FAILURE"
+    },
+    {
+      "action_typed_reason": "label_provenance_duplicate",
+      "arch": "sm_86",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": null,
+          "present": false
+        },
+        "hrd_profile": {
+          "path": null,
+          "present": false
+        },
+        "sector_stream": {
+          "path": null,
+          "present": false
+        },
+        "sharing_locality": {
+          "path": null,
+          "present": false
+        }
+      },
+      "cohort_membership": "excluded",
+      "legacy_bundle_quarantined_count": 0,
+      "predictor_bundle": {
+        "paths": [],
+        "present": false
+      },
+      "shape_point": "trace_l2_accuracy_lg",
+      "slug": "flash_attn_bwd_bf16_sm80",
+      "suggested_operator_action": "TERMINAL_TYPED_FAILURE"
+    },
+    {
+      "action_typed_reason": "label_repeatability_failed",
+      "arch": "sm_86",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": null,
+          "present": false
+        },
+        "hrd_profile": {
+          "path": null,
+          "present": false
+        },
+        "sector_stream": {
+          "path": null,
+          "present": false
+        },
+        "sharing_locality": {
+          "path": null,
+          "present": false
+        }
+      },
+      "cohort_membership": "excluded",
+      "legacy_bundle_quarantined_count": 0,
+      "predictor_bundle": {
+        "paths": [],
+        "present": false
+      },
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "flash_attn_bwd_bf16_sm80",
+      "suggested_operator_action": "TERMINAL_TYPED_FAILURE"
+    },
+    {
+      "action_typed_reason": "label_repeatability_failed",
+      "arch": "sm_86",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": null,
+          "present": false
+        },
+        "hrd_profile": {
+          "path": null,
+          "present": false
+        },
+        "sector_stream": {
+          "path": null,
+          "present": false
+        },
+        "sharing_locality": {
+          "path": null,
+          "present": false
+        }
+      },
+      "cohort_membership": "excluded",
+      "legacy_bundle_quarantined_count": 0,
+      "predictor_bundle": {
+        "paths": [],
+        "present": false
+      },
+      "shape_point": "timing_shape",
+      "slug": "flash_attn_fwd_bf16_sm80",
+      "suggested_operator_action": "TERMINAL_TYPED_FAILURE"
+    },
+    {
+      "action_typed_reason": "label_provenance_duplicate",
+      "arch": "sm_86",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": null,
+          "present": false
+        },
+        "hrd_profile": {
+          "path": null,
+          "present": false
+        },
+        "sector_stream": {
+          "path": null,
+          "present": false
+        },
+        "sharing_locality": {
+          "path": null,
+          "present": false
+        }
+      },
+      "cohort_membership": "excluded",
+      "legacy_bundle_quarantined_count": 0,
+      "predictor_bundle": {
+        "paths": [],
+        "present": false
+      },
+      "shape_point": "trace_l2_accuracy_lg",
+      "slug": "flash_attn_fwd_bf16_sm80",
+      "suggested_operator_action": "TERMINAL_TYPED_FAILURE"
+    },
+    {
+      "action_typed_reason": "label_repeatability_failed",
+      "arch": "sm_86",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": null,
+          "present": false
+        },
+        "hrd_profile": {
+          "path": null,
+          "present": false
+        },
+        "sector_stream": {
+          "path": null,
+          "present": false
+        },
+        "sharing_locality": {
+          "path": null,
+          "present": false
+        }
+      },
+      "cohort_membership": "excluded",
+      "legacy_bundle_quarantined_count": 0,
+      "predictor_bundle": {
+        "paths": [],
+        "present": false
+      },
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "flash_attn_fwd_bf16_sm80",
+      "suggested_operator_action": "TERMINAL_TYPED_FAILURE"
+    },
+    {
+      "action_typed_reason": "label_provenance_duplicate",
+      "arch": "sm_86",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": null,
+          "present": false
+        },
+        "hrd_profile": {
+          "path": null,
+          "present": false
+        },
+        "sector_stream": {
+          "path": null,
+          "present": false
+        },
+        "sharing_locality": {
+          "path": null,
+          "present": false
+        }
+      },
+      "cohort_membership": "excluded",
+      "legacy_bundle_quarantined_count": 0,
+      "predictor_bundle": {
+        "paths": [],
+        "present": false
+      },
+      "shape_point": "trace_l2_accuracy_lg",
+      "slug": "gemm_hmma_bf16_sm80",
+      "suggested_operator_action": "TERMINAL_TYPED_FAILURE"
+    },
+    {
+      "action_typed_reason": "label_provenance_duplicate",
+      "arch": "sm_86",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": null,
+          "present": false
+        },
+        "hrd_profile": {
+          "path": null,
+          "present": false
+        },
+        "sector_stream": {
+          "path": null,
+          "present": false
+        },
+        "sharing_locality": {
+          "path": null,
+          "present": false
+        }
+      },
+      "cohort_membership": "excluded",
+      "legacy_bundle_quarantined_count": 0,
+      "predictor_bundle": {
+        "paths": [],
+        "present": false
+      },
+      "shape_point": "trace_l2_accuracy_lg",
+      "slug": "gemm_hmma_fp16_sm80",
+      "suggested_operator_action": "TERMINAL_TYPED_FAILURE"
+    },
+    {
+      "action_typed_reason": "label_provenance_duplicate",
+      "arch": "sm_86",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": null,
+          "present": false
+        },
+        "hrd_profile": {
+          "path": null,
+          "present": false
+        },
+        "sector_stream": {
+          "path": null,
+          "present": false
+        },
+        "sharing_locality": {
+          "path": null,
+          "present": false
+        }
+      },
+      "cohort_membership": "excluded",
+      "legacy_bundle_quarantined_count": 0,
+      "predictor_bundle": {
+        "paths": [],
+        "present": false
+      },
+      "shape_point": "trace_l2_accuracy_lg",
+      "slug": "gemm_imma_int8_sm80",
+      "suggested_operator_action": "TERMINAL_TYPED_FAILURE"
+    },
+    {
+      "action_typed_reason": "label_repeatability_failed",
+      "arch": "sm_86",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": null,
+          "present": false
+        },
+        "hrd_profile": {
+          "path": null,
+          "present": false
+        },
+        "sector_stream": {
+          "path": null,
+          "present": false
+        },
+        "sharing_locality": {
+          "path": null,
+          "present": false
+        }
+      },
+      "cohort_membership": "excluded",
+      "legacy_bundle_quarantined_count": 0,
+      "predictor_bundle": {
+        "paths": [],
+        "present": false
+      },
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "l2_thrash_pointer_chase",
+      "suggested_operator_action": "TERMINAL_TYPED_FAILURE"
+    },
+    {
+      "action_typed_reason": "label_repeatability_failed",
+      "arch": "sm_86",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": null,
+          "present": false
+        },
+        "hrd_profile": {
+          "path": null,
+          "present": false
+        },
+        "sector_stream": {
+          "path": null,
+          "present": false
+        },
+        "sharing_locality": {
+          "path": null,
+          "present": false
+        }
+      },
+      "cohort_membership": "excluded",
+      "legacy_bundle_quarantined_count": 0,
+      "predictor_bundle": {
+        "paths": [],
+        "present": false
+      },
+      "shape_point": "timing_shape",
+      "slug": "layernorm_fwd_bf16_sm80",
+      "suggested_operator_action": "TERMINAL_TYPED_FAILURE"
+    },
+    {
+      "action_typed_reason": "label_repeatability_failed",
+      "arch": "sm_86",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": null,
+          "present": false
+        },
+        "hrd_profile": {
+          "path": null,
+          "present": false
+        },
+        "sector_stream": {
+          "path": null,
+          "present": false
+        },
+        "sharing_locality": {
+          "path": null,
+          "present": false
+        }
+      },
+      "cohort_membership": "excluded",
+      "legacy_bundle_quarantined_count": 0,
+      "predictor_bundle": {
+        "paths": [],
+        "present": false
+      },
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "register_spill_local_mem",
+      "suggested_operator_action": "TERMINAL_TYPED_FAILURE"
+    },
+    {
+      "action_typed_reason": "label_repeatability_failed",
+      "arch": "sm_86",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": null,
+          "present": false
+        },
+        "hrd_profile": {
+          "path": null,
+          "present": false
+        },
+        "sector_stream": {
+          "path": null,
+          "present": false
+        },
+        "sharing_locality": {
+          "path": null,
+          "present": false
+        }
+      },
+      "cohort_membership": "excluded",
+      "legacy_bundle_quarantined_count": 0,
+      "predictor_bundle": {
+        "paths": [],
+        "present": false
+      },
+      "shape_point": "correctness_shape",
+      "slug": "silu_fwd_bf16_sm80",
+      "suggested_operator_action": "TERMINAL_TYPED_FAILURE"
+    },
+    {
+      "action_typed_reason": "label_provenance_duplicate",
+      "arch": "sm_86",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": null,
+          "present": false
+        },
+        "hrd_profile": {
+          "path": null,
+          "present": false
+        },
+        "sector_stream": {
+          "path": null,
+          "present": false
+        },
+        "sharing_locality": {
+          "path": null,
+          "present": false
+        }
+      },
+      "cohort_membership": "excluded",
+      "legacy_bundle_quarantined_count": 0,
+      "predictor_bundle": {
+        "paths": [],
+        "present": false
+      },
+      "shape_point": "trace_l2_accuracy_lg",
+      "slug": "swiglu_fwd_bf16_sm80",
+      "suggested_operator_action": "TERMINAL_TYPED_FAILURE"
+    },
+    {
+      "action_typed_reason": "label_repeatability_failed",
+      "arch": "sm_86",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": null,
+          "present": false
+        },
+        "hrd_profile": {
+          "path": null,
+          "present": false
+        },
+        "sector_stream": {
+          "path": null,
+          "present": false
+        },
+        "sharing_locality": {
+          "path": null,
+          "present": false
+        }
+      },
+      "cohort_membership": "excluded",
+      "legacy_bundle_quarantined_count": 0,
+      "predictor_bundle": {
+        "paths": [],
+        "present": false
+      },
+      "shape_point": "timing_shape",
+      "slug": "vendor_sgemm_cublas",
+      "suggested_operator_action": "TERMINAL_TYPED_FAILURE"
+    },
+    {
+      "action_typed_reason": "label_repeatability_failed",
+      "arch": "sm_86",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": null,
+          "present": false
+        },
+        "hrd_profile": {
+          "path": null,
+          "present": false
+        },
+        "sector_stream": {
+          "path": null,
+          "present": false
+        },
+        "sharing_locality": {
+          "path": null,
+          "present": false
+        }
+      },
+      "cohort_membership": "excluded",
+      "legacy_bundle_quarantined_count": 0,
+      "predictor_bundle": {
+        "paths": [],
+        "present": false
+      },
+      "shape_point": "timing_shape",
+      "slug": "vendor_sgemm_strided_batched_cublas",
+      "suggested_operator_action": "TERMINAL_TYPED_FAILURE"
+    },
+    {
+      "action_typed_reason": "label_repeatability_failed",
+      "arch": "sm_86",
+      "artifacts": {
+        "dynamic_trace_pb": {
+          "path": null,
+          "present": false
+        },
+        "hrd_profile": {
+          "path": null,
+          "present": false
+        },
+        "sector_stream": {
+          "path": null,
+          "present": false
+        },
+        "sharing_locality": {
+          "path": null,
+          "present": false
+        }
+      },
+      "cohort_membership": "excluded",
+      "legacy_bundle_quarantined_count": 0,
+      "predictor_bundle": {
+        "paths": [],
+        "present": false
+      },
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "int8_imma_gemm_traceable",
+      "suggested_operator_action": "TERMINAL_TYPED_FAILURE"
+    }
+  ],
+  "schema_version": 1,
+  "source_commit": "999044faa4d2fa9e4ac520cc30edc75f5e09ca55",
+  "summary": {
+    "admitted_count": 74,
+    "by_action": {
+      "READY": 70,
+      "TERMINAL_TYPED_FAILURE": 22
+    },
+    "excluded_count": 18,
+    "legacy_bundle_quarantined": 486,
+    "ready_count": 70,
+    "terminal_typed_failure_count": 22
+  }
+}

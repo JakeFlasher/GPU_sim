@@ -1,0 +1,61 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "simbench_bw/schemas/sol_native_env_fingerprint.live.v2.schema.json",
+  "title": "Live sm_86 SOL native-environment fingerprint",
+  "description": "Relocation-stable, non-degraded compiler and build-input identity for the additive live SOL campaign. This authority is distinct from the frozen historical v1 fingerprint.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "fingerprint_id",
+    "arch",
+    "sku",
+    "native_env_hash",
+    "components",
+    "missing_components",
+    "degraded"
+  ],
+  "properties": {
+    "schema_version": {"const": 2},
+    "fingerprint_id": {"const": "sm86_sol_native_env_fingerprint_live_v2"},
+    "arch": {"const": "sm_86"},
+    "sku": {"const": "rtx_3090_ti"},
+    "native_env_hash": {"$ref": "#/$defs/sha256"},
+    "components": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "python_version",
+        "torch_version",
+        "nvcc_version",
+        "cuda_runtime_version",
+        "cutlass_tree_hash",
+        "cudnn_version",
+        "sol_execbench_package_version",
+        "nvcc_ccbin",
+        "cxx_compiler",
+        "c_compiler"
+      ],
+      "properties": {
+        "python_version": {"type": "string", "minLength": 1, "not": {"const": "unknown"}},
+        "torch_version": {"type": "string", "minLength": 1, "not": {"const": "unknown"}},
+        "nvcc_version": {"type": "string", "minLength": 1, "not": {"const": "unknown"}},
+        "cuda_runtime_version": {"type": "string", "minLength": 1, "not": {"const": "unknown"}},
+        "cutlass_tree_hash": {"$ref": "#/$defs/sha256"},
+        "cudnn_version": {"type": "string", "minLength": 1, "not": {"const": "unknown"}},
+        "sol_execbench_package_version": {"type": "string", "minLength": 1, "not": {"const": "unknown"}},
+        "nvcc_ccbin": {"type": "string", "minLength": 1, "not": {"const": "unknown"}},
+        "cxx_compiler": {"type": "string", "minLength": 1, "not": {"const": "unknown"}},
+        "c_compiler": {"type": "string", "minLength": 1, "not": {"const": "unknown"}}
+      }
+    },
+    "missing_components": {"const": []},
+    "degraded": {"const": false}
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    }
+  }
+}

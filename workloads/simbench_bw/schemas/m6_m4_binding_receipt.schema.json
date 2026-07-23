@@ -1,0 +1,114 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "simbench_bw/schemas/m6_m4_binding_receipt.schema.json",
+  "title": "Verified canonical M4 binding receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "artifact_kind", "generated_at_utc", "status",
+    "archive_root", "source_commit", "capture_matrix_sha256",
+    "matrix_seal_sha256", "roster_authority_sha256",
+    "runnable_membership_sha256", "preflight_sha256s",
+    "preflight_set_sha256", "protocol_version", "expected_cells",
+    "completed_cells", "chunk_done_manifests", "cell_launch_identities",
+    "identity_sha256"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "artifact_kind": {"type": "string", "const": "m6_verified_m4_binding"},
+    "generated_at_utc": {"type": "string", "format": "date-time"},
+    "status": {"type": "string", "const": "complete"},
+    "archive_root": {"type": "string", "pattern": "^/", "minLength": 2},
+    "source_commit": {"$ref": "#/$defs/commit"},
+    "capture_matrix_sha256": {"$ref": "#/$defs/sha256"},
+    "matrix_seal_sha256": {"$ref": "#/$defs/sha256"},
+    "roster_authority_sha256": {"$ref": "#/$defs/sha256"},
+    "runnable_membership_sha256": {"$ref": "#/$defs/sha256"},
+    "preflight_sha256s": {
+      "type": "array", "minItems": 1, "maxItems": 18,
+      "uniqueItems": true, "items": {"$ref": "#/$defs/sha256"}
+    },
+    "preflight_set_sha256": {"$ref": "#/$defs/sha256"},
+    "protocol_version": {"type": "string", "const": "2.1"},
+    "expected_cells": {"type": "integer", "const": 122},
+    "completed_cells": {"type": "integer", "const": 122},
+    "chunk_done_manifests": {
+      "type": "array", "minItems": 18, "maxItems": 18,
+      "uniqueItems": true, "items": {"$ref": "#/$defs/chunk"}
+    },
+    "cell_launch_identities": {
+      "type": "array", "minItems": 122, "maxItems": 122,
+      "uniqueItems": true, "items": {"$ref": "#/$defs/cell"}
+    },
+    "identity_sha256": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "relativePath": {
+      "type": "string", "minLength": 1,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"
+    },
+    "chunk": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "chunk_id", "membership_sha256", "done_path", "done_sha256",
+        "done_size_bytes", "source_commit", "capture_matrix_sha256",
+        "preflight_sha256", "cell_count"
+      ],
+      "properties": {
+        "chunk_id": {"type": "string", "minLength": 1},
+        "membership_sha256": {"$ref": "#/$defs/sha256"},
+        "done_path": {"$ref": "#/$defs/relativePath"},
+        "done_sha256": {"$ref": "#/$defs/sha256"},
+        "done_size_bytes": {"type": "integer", "minimum": 1},
+        "source_commit": {"$ref": "#/$defs/commit"},
+        "capture_matrix_sha256": {"$ref": "#/$defs/sha256"},
+        "preflight_sha256": {"$ref": "#/$defs/sha256"},
+        "cell_count": {"type": "integer", "minimum": 1, "maximum": 8}
+      }
+    },
+    "cell": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "cell_id", "cell_identity_sha256", "authority_cell_sha256",
+        "binary_sha256", "launch_set_sha256", "launches"
+      ],
+      "properties": {
+        "cell_id": {"type": "string", "minLength": 3},
+        "cell_identity_sha256": {"$ref": "#/$defs/sha256"},
+        "authority_cell_sha256": {"$ref": "#/$defs/sha256"},
+        "binary_sha256": {"$ref": "#/$defs/sha256"},
+        "launch_set_sha256": {"$ref": "#/$defs/sha256"},
+        "launches": {
+          "type": "array", "minItems": 1, "maxItems": 1,
+          "items": {"$ref": "#/$defs/launch"}
+        }
+      }
+    },
+    "launch": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "launch_index", "kernel_name", "kernel_signature_sha256",
+        "kernel_signature_source", "label_sidecar_sha256",
+        "label_run_manifest_sha256", "label_capture_manifest_sha256",
+        "ncu_launch_observation_sha256",
+        "ncu_observation_sha256", "ncu_report_sha256",
+        "launch_identity_sha256"
+      ],
+      "properties": {
+        "launch_index": {"type": "integer", "minimum": 0},
+        "kernel_name": {"type": "string", "minLength": 1},
+        "kernel_signature_sha256": {"$ref": "#/$defs/sha256"},
+        "kernel_signature_source": {"type": "string", "minLength": 1},
+        "label_sidecar_sha256": {"$ref": "#/$defs/sha256"},
+        "label_run_manifest_sha256": {"$ref": "#/$defs/sha256"},
+        "label_capture_manifest_sha256": {"$ref": "#/$defs/sha256"},
+        "ncu_launch_observation_sha256": {"$ref": "#/$defs/sha256"},
+        "ncu_observation_sha256": {"$ref": "#/$defs/sha256"},
+        "ncu_report_sha256": {"$ref": "#/$defs/sha256"},
+        "launch_identity_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    }
+  }
+}

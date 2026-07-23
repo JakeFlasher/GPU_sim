@@ -1,0 +1,44 @@
+{
+  "name": "problem_035_convnextv2_block_with_grn_cuda_cpp_scaffold",
+  "definition": "035_convnextv2_block_with_grn",
+  "author": "scaffold",
+  "spec": {
+    "languages": [
+      "cuda_cpp"
+    ],
+    "target_hardware": [
+      "LOCAL"
+    ],
+    "entry_point": "main.cpp::run",
+    "dependencies": [],
+    "destination_passing_style": true,
+    "binding": "torch",
+    "compile_options": {
+      "cflags": [],
+      "cuda_cflags": [
+        "-O3",
+        "--use_fast_math",
+        "-gencode",
+        "arch=compute_86,code=sm_86"
+      ],
+      "ld_flags": [
+        "-lcuda"
+      ]
+    }
+  },
+  "sources": [
+    {
+      "path": "main.cpp",
+      "content": "#include <torch/extension.h>\n#include <ATen/cuda/CUDAContext.h>\n#include <c10/cuda/CUDAGuard.h>\n#include <vector>\n#include <string>\n\n// ConvNeXtV2 block with Global Response Normalization (GRN), reproduced\n// op-for-op from the reference run():\n//\n//   residual = x                                          # [B, C, H, W]\n//   out = conv2d(x, dwconv_w, dwconv_b, padding=3, groups=C)   # depthwise 7x7\n//   out = out.permute(0, 2, 3, 1)                         # [B, H, W, C]\n//   out = layer_norm(out, (C,), ln_w, ln_b, layer_norm_eps)\n//   out = matmul(out, pwconv1_w.T) + pwconv1_b            # [B, H, W, 4C]\n//   out = gelu(out)\n//   global_features = vector_norm(out, ord=2, dim=(1,2), keepdim=True) # [B,1,1,4C]\n//   norm_features   = global_features / (global_features.mean(-1, keepdim) + eps)\n//   out = grn_w * (out * norm_features) + grn_b + out\n//   out = matmul(out, pwconv2_w.T) + pwconv2_b            # [B, H, W, C]\n//   out = out.permute(0, 3, 1, 2)                         # [B, C, H, W]\n//   out = residual + out\n//\n// The depthwise convolution carries one filter per channel (groups == dim) with\n// padding 3 so the 7x7 kernel preserves spatial size. The two pointwise layers\n// are channel-mixing matmuls against the transposed weights with a bias add,\n// applied in the channels-last [B, H, W, *] layout. The GRN aggregates an L2\n// norm over the two spatial axes per channel, divides by the channel-wise mean\n// of those norms (offset by eps), then applies the learnable affine and adds the\n// pre-GRN feature back. LayerNorm normalizes over the channel axis with its own\n// epsilon. eps and layer_norm_eps arrive as fp32 scalars (passed as double).\n//\n// Per definition.json (insertion order):\n//   x                : [batch_size, dim, height, width]        fp32\n//   dwconv_weight    : [dim, 1, kernel_size, kernel_size]      fp32\n//   dwconv_bias      : [dim]                                   fp32\n//   layernorm_weight : [dim]                                   fp32\n//   layernorm_bias   : [dim]                                   fp32\n//   pwconv1_weight   : [expansion_dim, dim]                    fp32\n//   pwconv1_bias     : [expansion_dim]                         fp32\n//   grn_weight       : [1, 1, 1, expansion_dim]                fp32\n//   grn_bias         : [1, 1, 1, expansion_dim]                fp32\n//   pwconv2_weight   : [dim, expansion_dim]                    fp32\n//   pwconv2_bias     : [dim]                                   fp32\n//   eps              : scalar                                  fp32\n//   layer_norm_eps   : scalar                                  fp32\n//   output           : [batch_size, dim, height, width]        fp32 DPS (pre-alloc)\n//\n// Implementation: pure ATen / cuDNN / cuBLAS dispatch -- NO custom CUDA kernels.\n// at::conv2d routes the depthwise convolution through cuDNN, at::layer_norm /\n// at::gelu / at::linalg_vector_norm reproduce the normalization and activation,\n// and the pointwise layers reuse at::linear (matmul against the transposed\n// weight plus bias). Every op keeps the reference's native fp32 precision\n// profile -- no extra casts. Output is written in place (destination-passing\n// style).\n\nstatic void check_fp32_cuda(const torch::Tensor& t, const std::string& name) {\n    TORCH_CHECK(t.is_cuda(), name, \" must be a CUDA tensor\");\n    TORCH_CHECK(t.dtype() == torch::kFloat32, name, \" must be float32, got \", t.dtype());\n}\n\nvoid run(\n    const torch::Tensor& x,\n    const torch::Tensor& dwconv_weight,\n    const torch::Tensor& dwconv_bias,\n    const torch::Tensor& layernorm_weight,\n    const torch::Tensor& layernorm_bias,\n    const torch::Tensor& pwconv1_weight,\n    const torch::Tensor& pwconv1_bias,\n    const torch::Tensor& grn_weight,\n    const torch::Tensor& grn_bias,\n    const torch::Tensor& pwconv2_weight,\n    const torch::Tensor& pwconv2_bias,\n    double eps,\n    double layer_norm_eps,\n    torch::Tensor output\n) {\n    check_fp32_cuda(x, \"x\");\n    check_fp32_cuda(dwconv_weight, \"dwconv_weight\");\n    check_fp32_cuda(dwconv_bias, \"dwconv_bias\");\n    check_fp32_cuda(layernorm_weight, \"layernorm_weight\");\n    check_fp32_cuda(layernorm_bias, \"layernorm_bias\");\n    check_fp32_cuda(pwconv1_weight, \"pwconv1_weight\");\n    check_fp32_cuda(pwconv1_bias, \"pwconv1_bias\");\n    check_fp32_cuda(grn_weight, \"grn_weight\");\n    check_fp32_cuda(grn_bias, \"grn_bias\");\n    check_fp32_cuda(pwconv2_weight, \"pwconv2_weight\");\n    check_fp32_cuda(pwconv2_bias, \"pwconv2_bias\");\n    check_fp32_cuda(output, \"output\");\n\n    TORCH_CHECK(x.dim() == 4, \"x must be 4D [B, C, H, W], got \", x.dim(), \"D\");\n\n    const c10::cuda::CUDAGuard device_guard(x.device());\n\n    const int64_t channels = x.size(1);\n\n    auto residual = x;\n\n    // Depthwise 7x7 convolution: groups == channels, padding 3 preserves H, W.\n    const std::vector<int64_t> dw_stride{1, 1};\n    const std::vector<int64_t> dw_pad{3, 3};\n    const std::vector<int64_t> dw_dilation{1, 1};\n    auto out = at::conv2d(x, dwconv_weight, dwconv_bias,\n                          /*stride=*/dw_stride, /*padding=*/dw_pad,\n                          /*dilation=*/dw_dilation, /*groups=*/channels);\n\n    // Move to channels-last for the per-channel LayerNorm and pointwise matmuls.\n    out = out.permute({0, 2, 3, 1});\n\n    // LayerNorm over the channel axis with its own epsilon.\n    out = at::layer_norm(out, /*normalized_shape=*/{channels},\n                         layernorm_weight, layernorm_bias, layer_norm_eps);\n\n    // Pointwise expansion: matmul against pwconv1_weight.T plus bias -> 4C.\n    out = at::linear(out, pwconv1_weight, pwconv1_bias);\n\n    out = at::gelu(out);\n\n    // GRN: L2 norm over the two spatial axes (channels-last dims 1 and 2),\n    // keepdim so the result is [B, 1, 1, 4C].\n    auto global_features = at::linalg_vector_norm(\n        out, /*ord=*/2, /*dim=*/std::vector<int64_t>{1, 2}, /*keepdim=*/true);\n\n    // Divide by the channel-wise mean of those norms (offset by eps).\n    auto norm_features = global_features /\n                         (global_features.mean(/*dim=*/-1, /*keepdim=*/true) + eps);\n\n    // Learnable affine on the response-normalized feature, with the pre-GRN\n    // feature added back.\n    out = grn_weight * (out * norm_features) + grn_bias + out;\n\n    // Pointwise projection: matmul against pwconv2_weight.T plus bias -> C.\n    out = at::linear(out, pwconv2_weight, pwconv2_bias);\n\n    // Back to channels-first and add the input residual.\n    out = out.permute({0, 3, 1, 2});\n    auto result = residual + out;\n\n    TORCH_CHECK(result.sizes() == output.sizes(),\n                \"output shape \", result.sizes(),\n                \" does not match pre-allocated \", output.sizes());\n    output.copy_(result);\n}\n\nPYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {\n    m.def(\"run\", &run,\n          \"ConvNeXtV2 block with Global Response Normalization via pure ATen \"\n          \"dispatch: depthwise 7x7 convolution (groups=dim, padding=3), \"\n          \"channels-last LayerNorm, pointwise expansion to 4x channels, GELU, \"\n          \"GRN (spatial L2 norm divided by its channel-wise mean plus a \"\n          \"learnable affine and pre-GRN add), pointwise projection back to dim, \"\n          \"and an input residual. fp32; destination-passing style.\");\n}\n"
+    },
+    {
+      "path": "kernel.cu",
+      "content": "// Stub translation unit: this ATen-delegated port has no custom device kernels.\n// A bare .cu is still needed so torch's cpp_extension builds a CUDA extension\n// (adding CUDA include paths); a .cpp-only extension fails to find\n// cuda_runtime_api.h.\n#include <cuda_runtime.h>\n"
+    },
+    {
+      "path": "kernel.h",
+      "content": "#pragma once\n// Intentionally empty: ATen-delegated port, no custom kernel launcher.\n"
+    }
+  ],
+  "description": "Scaffolded baseline for problem_035_convnextv2_block_with_grn (language=cuda_cpp); hand-edit the copied exemplar to implement the target problem before harness-running. Destination-passing-style is set true; outputs appear after inputs in definition.json insertion order."
+}

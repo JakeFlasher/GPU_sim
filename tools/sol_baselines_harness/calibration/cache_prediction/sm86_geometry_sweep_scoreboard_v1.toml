@@ -1,0 +1,125 @@
+# sm_86 L2-associativity geometry-sweep scoreboard (predictor accuracy-gate evidence).
+# GENERATED (deterministic) by sm86_geometry_sweep/run_sweep.py.
+# `bare_*` = geometry sweep only (no exclusions); `excluded_*` = with the
+# capability-ledger typed exclusions. Empirical model SELECTION, not an
+# authoritative hardware fact (BL-20260526-empirical-geometry-sweep).
+
+[meta]
+schema_version = 1
+host_arch = "sm_86"
+candidates = [4, 8, 16, 32, 64]
+capability_ledger_sha256 = "13433b0002a79b546a66f7ac18e9c0aeac2960539b6bbc7cdafd8d406568f061"
+winner_associativity_l2 = 4
+winner_all_gates_pass = false
+winner_selection = "min_aggregate_fraction_mape_then_smaller_assoc"
+geometry_provenance = "empirical_sweep_winner"
+
+[[bare_candidate]]
+associativity_l2 = 4
+admitted = 50
+friendly_n = 46
+hostile_n = 4
+friendly_l1_mape = 0.07100653830283374
+friendly_l2_mape = 0.1673203481791135
+hostile_l1_mape = 0.40771082089552235
+hostile_l2_mape = 0.15946426704445082
+all_gates_pass = false
+
+[[bare_candidate]]
+associativity_l2 = 8
+admitted = 50
+friendly_n = 46
+hostile_n = 4
+friendly_l1_mape = 0.07100653830283374
+friendly_l2_mape = 0.18384472835073015
+hostile_l1_mape = 0.40771082089552235
+hostile_l2_mape = 0.166504701936356
+all_gates_pass = false
+
+[[bare_candidate]]
+associativity_l2 = 16
+admitted = 50
+friendly_n = 46
+hostile_n = 4
+friendly_l1_mape = 0.07100653830283374
+friendly_l2_mape = 0.17526843074385057
+hostile_l1_mape = 0.40771082089552235
+hostile_l2_mape = 0.17041940603395112
+all_gates_pass = false
+
+[[bare_candidate]]
+associativity_l2 = 32
+admitted = 50
+friendly_n = 46
+hostile_n = 4
+friendly_l1_mape = 0.07100653830283374
+friendly_l2_mape = 0.24890730988345075
+hostile_l1_mape = 0.40771082089552235
+hostile_l2_mape = 0.21759519305230046
+all_gates_pass = false
+
+[[bare_candidate]]
+associativity_l2 = 64
+admitted = 50
+friendly_n = 46
+hostile_n = 4
+friendly_l1_mape = 0.07100653830283374
+friendly_l2_mape = 0.26551714209356375
+hostile_l1_mape = 0.40771082089552235
+hostile_l2_mape = 0.21188050161892447
+all_gates_pass = false
+
+[[excluded_candidate]]
+associativity_l2 = 4
+admitted = 35
+friendly_n = 34
+hostile_n = 1
+friendly_l1_mape = 0.03294529928550848
+friendly_l2_mape = 0.06615095371507408
+hostile_l1_mape = 0.0
+hostile_l2_mape = 0.03169246816691973
+all_gates_pass = false
+
+[[excluded_candidate]]
+associativity_l2 = 8
+admitted = 35
+friendly_n = 34
+hostile_n = 1
+friendly_l1_mape = 0.03294529928550848
+friendly_l2_mape = 0.0792998197727881
+hostile_l1_mape = 0.0
+hostile_l2_mape = 0.028846484413707518
+all_gates_pass = false
+
+[[excluded_candidate]]
+associativity_l2 = 16
+admitted = 35
+friendly_n = 34
+hostile_n = 1
+friendly_l1_mape = 0.03294529928550848
+friendly_l2_mape = 0.08639292975238629
+hostile_l1_mape = 0.0
+hostile_l2_mape = 0.02661334137954452
+all_gates_pass = false
+
+[[excluded_candidate]]
+associativity_l2 = 32
+admitted = 35
+friendly_n = 34
+hostile_n = 1
+friendly_l1_mape = 0.03294529928550848
+friendly_l2_mape = 0.23879207904312483
+hostile_l1_mape = 0.0
+hostile_l2_mape = 0.3388688814955879
+all_gates_pass = false
+
+[[excluded_candidate]]
+associativity_l2 = 64
+admitted = 35
+friendly_n = 34
+hostile_n = 1
+friendly_l1_mape = 0.03294529928550848
+friendly_l2_mape = 0.260406774868873
+hostile_l1_mape = 0.0
+hostile_l2_mape = 0.284297822719647
+all_gates_pass = false

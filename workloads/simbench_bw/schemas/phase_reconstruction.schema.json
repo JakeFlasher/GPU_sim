@@ -1,0 +1,175 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "phase_reconstruction.schema.json",
+  "title": "Round-28 problem-070 phase reconstruction",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "record_type",
+    "amendment_id",
+    "interval_type",
+    "reconstruction_late",
+    "contemporaneous",
+    "reconstructed_at",
+    "cell",
+    "chunk",
+    "anchors",
+    "phases"
+  ],
+  "properties": {
+    "record_type": {"const": "phase_reconstruction"},
+    "amendment_id": {"const": "ANNEX_C_AMEND_R28_PREP070_RECON_V2"},
+    "interval_type": {"const": "non_certifying_reconstruction"},
+    "reconstruction_late": {"const": true},
+    "contemporaneous": {"const": false},
+    "reconstructed_at": {"$ref": "#/$defs/utc_timestamp"},
+    "cell": {"const": "sol_execbench__problem_070_mamba2_fused_intra_chunk_diagonal_computation"},
+    "chunk": {"const": "sol_execbench-000-bootstrap"},
+    "anchors": {
+      "type": "array",
+      "prefixItems": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "value", "basis", "evidence_sha256", "certainty"],
+          "properties": {
+            "name": {"const": "prepare_stdout_mtime"},
+            "value": {"const": "2026-07-10T13:34:52.699087829Z"},
+            "basis": {"const": "filesystem_stat_mtime"},
+            "evidence_sha256": {"const": "ca3249b38c8c5dc3c8d428aed3aa8c650978d629903640befb46517aed7d8cdc"},
+            "certainty": {"const": "exact_observed"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["name", "value", "basis", "evidence_sha256", "certainty"],
+          "properties": {
+            "name": {"const": "journal_start"},
+            "value": {"const": null},
+            "basis": {"const": "journal_start_sha256"},
+            "evidence_sha256": {"const": "6b6dcce8cb7f4a21385c6e52c693f7c398258877ec702090438ee67bea8faa4f"},
+            "certainty": {"const": "content_sealed_time_unknown"}
+          }
+        }
+      ],
+      "items": false,
+      "minItems": 2,
+      "maxItems": 2
+    },
+    "phases": {
+      "type": "array",
+      "prefixItems": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["phase", "occurred", "start", "end", "certainty", "evidence_basis"],
+          "properties": {
+            "phase": {"const": "admission"},
+            "occurred": {"const": true},
+            "start": {"const": null},
+            "end": {"const": null},
+            "certainty": {"const": "unknown_interval"},
+            "evidence_basis": {
+              "const": ["admission_run:0ff22c451824e77fa4ec20392866c50a7356b6de4e1e986ba788bd1b5ee1a658"]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["phase", "occurred", "start", "end", "certainty", "evidence_basis"],
+          "properties": {
+            "phase": {"const": "prepare_execution"},
+            "occurred": {"const": true},
+            "start": {"const": null},
+            "end": {"const": "2026-07-10T13:34:52.699087829Z"},
+            "certainty": {"const": "end_bounded_by_mtime"},
+            "evidence_basis": {
+              "const": ["prepare_stdout_sha256:ca3249b38c8c5dc3c8d428aed3aa8c650978d629903640befb46517aed7d8cdc"]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "phase",
+            "occurred",
+            "start",
+            "end",
+            "certainty",
+            "evidence_basis",
+            "refusal_code",
+            "reason"
+          ],
+          "properties": {
+            "phase": {"const": "stage_semantic_validation_refusal"},
+            "occurred": {"const": true},
+            "start": {"const": null},
+            "end": {"const": null},
+            "certainty": {"const": "unknown_interval"},
+            "evidence_basis": {
+              "const": [
+                "annex_c_adjudication",
+                "deterministic_legacy_9b8e0e40_normalized_definition_comparator_over_sealed_bytes"
+              ]
+            },
+            "refusal_code": {"const": "sol_stage_source_mismatch"},
+            "reason": {"const": "STAGE_SEMANTIC_VALIDATION_FAILED"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["phase", "occurred", "start", "end", "certainty", "evidence_basis"],
+          "properties": {
+            "phase": {"const": "gpu_execution"},
+            "occurred": {"const": false},
+            "start": {"const": null},
+            "end": {"const": null},
+            "certainty": {"const": "certified_absent"},
+            "evidence_basis": {
+              "const": ["journal_forensic_absence_scan", "annex_c_adjudication"]
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["phase", "occurred", "start", "end", "certainty", "evidence_basis"],
+          "properties": {
+            "phase": {"const": "finalization"},
+            "occurred": {"const": false},
+            "start": {"const": null},
+            "end": {"const": null},
+            "certainty": {"const": "certified_absent"},
+            "evidence_basis": {"const": ["journal_complete_json_absent"]}
+          }
+        }
+      ],
+      "items": false,
+      "minItems": 5,
+      "maxItems": 5
+    }
+  },
+  "not": {
+    "properties": {
+      "phases": {
+        "contains": {
+          "type": "object",
+          "properties": {
+            "evidence_basis": {
+              "contains": {"const": "deterministic_v1_comparator_over_sealed_bytes"}
+            }
+          },
+          "required": ["evidence_basis"]
+        }
+      }
+    },
+    "required": ["phases"]
+  },
+  "$defs": {
+    "utc_timestamp": {"type": "string", "format": "date-time", "pattern": "Z$"}
+  }
+}

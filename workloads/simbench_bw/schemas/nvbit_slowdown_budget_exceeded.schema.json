@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "simbench_bw/schemas/nvbit_slowdown_budget_exceeded.schema.json",
+  "title": "SimBench-BW nvbit_slowdown_budget_exceeded sidecar",
+  "description": "Sidecar emitted when an NVBit-traced kernel launch's wall-clock time exceeds the declared slowdown budget relative to a baseline non-traced reference run for the same row. Format mirrors the trace-budget family pattern at workloads/simbench_bw/schemas/trace_volume_exceeded.schema.json. Member of the trace-budget typed-reason family declared in tools/cloud/trace_budgets.py NVBIT_SLOWDOWN_BUDGET_EXCEEDED_SIDECAR; pinned in the original-plan exclusion-taxonomy list. The slowdown is computed as actual_wall_time_s / baseline_wall_time_s; the sidecar records both numerator and denominator so a downstream consumer can re-derive the ratio without re-walking the run summary.",
+  "schema_version": 1,
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "slug",
+    "shape_point",
+    "max_slowdown_ratio",
+    "actual_slowdown_ratio",
+    "baseline_wall_time_s",
+    "actual_wall_time_s",
+    "trace_budgets_sha256"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Sidecar schema major version. Pinned to 1; a deliberate schema bump must update both this constant and consumers in lockstep."
+    },
+    "slug": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "description": "Row identifier from workloads/simbench_bw/roster.toml. Matches the row whose budget was exceeded."
+    },
+    "shape_point": {
+      "type": "string",
+      "description": "Trace shape point name (from shapes/<slug>.toml trace_shapes[].name) whose launch crossed the slowdown budget."
+    },
+    "max_slowdown_ratio": {
+      "type": "number",
+      "exclusiveMinimum": 1.0,
+      "description": "Declared maximum slowdown ratio (actual / baseline). A row's value of 4.0 means the NVBit-traced run is allowed to take up to 4x the baseline wall time. Strictly greater than 1.0 because no slowdown is the baseline."
+    },
+    "actual_slowdown_ratio": {
+      "type": "number",
+      "exclusiveMinimum": 1.0,
+      "description": "Observed slowdown ratio (actual_wall_time_s / baseline_wall_time_s) for the run that produced this sidecar. Strictly greater than 1.0; a value at or below 1.0 means the run was at or faster than baseline and no sidecar should have been emitted."
+    },
+    "baseline_wall_time_s": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "description": "Wall-clock seconds for the non-traced reference run used as the slowdown denominator."
+    },
+    "actual_wall_time_s": {
+      "type": "number",
+      "exclusiveMinimum": 0,
+      "description": "Wall-clock seconds for the NVBit-traced run."
+    },
+    "trace_budgets_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "SHA-256 of the canonical trace_budgets.toml at the time the run was admitted. Downstream consumers compare this to the current canonical hash to refuse stale evidence."
+    }
+  },
+  "allOf": [
+    {
+      "description": "actual_slowdown_ratio must exceed max_slowdown_ratio (otherwise the sidecar is BudgetViolationUntracked-equivalent noise). This invariant is enforced producer-side in workloads/simbench_bw/run_suite.py before sidecar emission; JSON Schema 2020-12 has no native cross-property comparison, so this allOf block documents the invariant for downstream consumers but does NOT structurally validate it. Compare workloads/simbench_bw/schemas/trace_volume_exceeded.schema.json which uses anyOf over const-pinned boolean flags to express its analogous invariant structurally.",
+      "properties": {
+        "actual_slowdown_ratio": { "type": "number" },
+        "max_slowdown_ratio": { "type": "number" }
+      }
+    }
+  ]
+}

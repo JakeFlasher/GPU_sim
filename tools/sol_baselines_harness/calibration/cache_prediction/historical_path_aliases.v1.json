@@ -1,0 +1,16 @@
+{
+  "aliases": [
+    {
+      "alias_id": "sm120_metric_extractor_calibration_v1",
+      "current_prefix": "data/annex/s5_metric_extractor_divergence/solbench_tests",
+      "historical_prefix": "/home/jakeshea/solbench_baseline/nvbit_tracer/metric_extractor/tests"
+    },
+    {
+      "alias_id": "sm86_harness_traces_v1",
+      "current_prefix": "data/annex/harness_traces_sm86",
+      "historical_prefix": "scripts/baselines_harness/.harness_traces"
+    }
+  ],
+  "kind": "sol_calibration_historical_path_aliases_v1",
+  "schema_version": 1
+}

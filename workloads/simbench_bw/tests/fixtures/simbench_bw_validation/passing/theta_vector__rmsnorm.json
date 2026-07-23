@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "slug": "rmsnorm_fwd_bf16",
+  "perturbation_sweep_id": "rmsnorm_perturbation_sweep_v1",
+  "claim_scope": "measured_local",
+  "theta_components": {
+    "theta_compute": {
+      "value": 1.05,
+      "ci_lower": 1.02,
+      "ci_upper": 1.08,
+      "ci_width": 0.06,
+      "component_status": "component_admitted"
+    },
+    "theta_hbm_bw": {
+      "value": 0.92,
+      "ci_lower": 0.88,
+      "ci_upper": 0.96,
+      "ci_width": 0.08,
+      "component_status": "component_admitted"
+    },
+    "theta_l2_bw": {
+      "value": 1.12,
+      "ci_lower": 0.98,
+      "ci_upper": 1.26,
+      "ci_width": 0.28,
+      "component_status": "component_admitted"
+    },
+    "theta_l1_bw": {
+      "value": 1.30,
+      "ci_lower": 0.50,
+      "ci_upper": 2.10,
+      "ci_width": 1.60,
+      "component_status": "theta_component_unreliable"
+    },
+    "theta_latency_floor": {
+      "value": 256.0,
+      "ci_lower": 240.0,
+      "ci_upper": 272.0,
+      "ci_width": 32.0,
+      "component_status": "component_admitted"
+    }
+  },
+  "fit_diagnostics": {
+    "n_sweep_points": 12,
+    "covariate_regression_residual_variance_reduction_pct": 14.5,
+    "fit_status": "fit_admitted"
+  }
+}

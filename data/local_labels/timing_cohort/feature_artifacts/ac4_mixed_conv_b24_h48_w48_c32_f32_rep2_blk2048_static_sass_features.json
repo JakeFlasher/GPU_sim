@@ -1,0 +1,96 @@
+{
+  "binary_sha256": "93bd779ba719542965c18d9f73f5aa5a545c6631bbfb87575a9239e0765bab30",
+  "claim_class": "static_sanity_check_only",
+  "claim_scope": "measured_local",
+  "kernel_name": "conv2d_implicit_gemm_bf16_sm80_kernel",
+  "kernel_signature_sha256": "1d29284c3ed372c9a85d2c0fb3c173e86a5eb6285294eb46e17b3db03f38c0ff",
+  "mnemonic_histogram": {
+    "families": {
+      "atomics": {
+        "count": 0,
+        "exemplar_mnemonics": []
+      },
+      "control": {
+        "count": 55,
+        "exemplar_mnemonics": [
+          "BRA",
+          "BSSY",
+          "BSYNC",
+          "CALL",
+          "EXIT",
+          "RET"
+        ]
+      },
+      "floating_point": {
+        "count": 53,
+        "exemplar_mnemonics": [
+          "FADD",
+          "FFMA",
+          "FMUL",
+          "MUFU"
+        ]
+      },
+      "integer": {
+        "count": 267,
+        "exemplar_mnemonics": [
+          "IADD3",
+          "IMAD",
+          "LEA",
+          "LOP3",
+          "SHF"
+        ]
+      },
+      "load_store": {
+        "count": 63,
+        "exemplar_mnemonics": [
+          "LDG",
+          "STG"
+        ]
+      },
+      "other": {
+        "count": 146,
+        "exemplar_mnemonics": [
+          "I2FP",
+          "MOV",
+          "S2R",
+          "UIADD3",
+          "UIMAD",
+          "ULDC",
+          "UMOV",
+          "USHF"
+        ]
+      },
+      "predication": {
+        "count": 56,
+        "exemplar_mnemonics": [
+          "FSETP",
+          "ISETP",
+          "PLOP3"
+        ]
+      },
+      "shared_memory_ops": {
+        "count": 0,
+        "exemplar_mnemonics": []
+      },
+      "tensor_core": {
+        "count": 0,
+        "exemplar_mnemonics": []
+      }
+    },
+    "schema_version": 1,
+    "total_instruction_count": 640
+  },
+  "register_usage": {
+    "regs_per_thread": 47,
+    "spill_loads_static": 0,
+    "spill_stores_static": 0,
+    "stack_frame_bytes": 0
+  },
+  "schema_version": 1,
+  "slug": "conv2d_implicit_gemm_bf16_sm80",
+  "tool_provenance": {
+    "extracted_dated_iso8601": "2026-06-01T00:02:53Z",
+    "extractor_name": "cuobjdump_dump_sass",
+    "extractor_version": "Cuda compilation tools, release 13.2, V13.2.78"
+  }
+}

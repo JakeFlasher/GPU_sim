@@ -1,0 +1,14 @@
+# Compiled direct-NCU-harvest binaries produced by the sibling
+# Makefile (`make ARCH=sm_86`). They are build artifacts and should
+# not be tracked in git — operators rebuild them locally from the
+# `.cu` sources. Matches the source-only convention used by
+# `nvbit_tracer/metric_extractor/tests/calibration_warm_cold/` and
+# `nvbit_tracer/metric_extractor/tests/calibration_cohort_b/`.
+problem_018_fused_rope_with_qk_norm_and_kv_cache_update
+problem_071_kv_cache_update_with_rope
+
+# NVBit metric_extractor runtime artifacts produced by the smoke
+# harness (`end_to_end_smoke.py`) when it runs the direct-NCU binaries
+# under instrumentation. Per-process runtime state; not tracked.
+metric_extractor_filter_stats.json
+metric_extractor_filter_stats.json.lock

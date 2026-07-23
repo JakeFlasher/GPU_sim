@@ -1,0 +1,892 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "simbench_bw/schemas/comparison_bundle.schema.json",
+  "title": "Predictor-vs-NCU Comparison Bundle (per-run)",
+  "description": "One bundle per comparison run. Carries the headline geomean of per-cell relative errors between admitted predictor bundles and admitted NCU label cells joined on the contract-pinned 7-field key. The bundle records both the diagnostic comparable-cell denominator (cells matched on all 7 fields) and the headline-cell denominator (comparable cells with predictor result_kind in {scalar, bounded}); the geomean is computed only over headline cells. Two arms: 'admitted' carries the headline geomean and bootstrap CI; 'typed_unavailable' carries a typed_reason from the runner's enum (e.g., headline_geomean_admitted_cell_count_below_threshold). The schema mirrors cache_predictor.schema.json's discipline (additionalProperties: false; manifest_pairing_index analog; oneOf arm exclusivity; per-arm required clauses).",
+  "schema_version": 1,
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "algorithm_version",
+    "comparison_run_pairing_index",
+    "top_level_admission_scope",
+    "result_kind",
+    "comparable_cells_per_arch",
+    "headline_cells_per_arch",
+    "headline_floor_per_arch",
+    "included_cells",
+    "excluded_cells"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Bundle schema major version. A deliberate schema bump must update both this constant and consumers in lockstep."
+    },
+    "algorithm_version": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Algorithm identifier for the comparison runner. Initial value is 'comparison_runner_v1'."
+    },
+    "comparison_run_pairing_index": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ncu_metric_name",
+        "ncu_metric_version",
+        "epsilon",
+        "bootstrap_resamples",
+        "bootstrap_seed",
+        "ci_confidence",
+        "split_label"
+      ],
+      "properties": {
+        "ncu_metric_name": {"type": "string", "minLength": 1},
+        "ncu_metric_version": {"type": "string", "minLength": 1},
+        "epsilon": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+        "bootstrap_resamples": {"type": "integer", "const": 2000},
+        "bootstrap_seed": {"type": "integer", "minimum": 0},
+        "ci_confidence": {"type": "number", "const": 0.95},
+        "split_label": {"type": "string", "minLength": 1, "description": "One of 'calibration', 'validation', 'holdout', or 'all'. The split selects which slugs participate."}
+      },
+      "description": "Provenance binding for the comparison run. The runner pins these fields from the loaded contract; downstream readers can replay the comparison by reading the same contract version."
+    },
+    "result_kind": {
+      "type": "string",
+      "enum": ["admitted", "typed_unavailable"],
+      "description": "Two arms. 'admitted' carries the headline geomean. 'typed_unavailable' carries a typed_reason."
+    },
+    "top_level_admission_scope": {
+      "type": "string",
+      "pattern": "^(target_arch=[A-Za-z0-9_-]+|cross_arch_require_both_arches|cross_arch_any_arch)$",
+      "description": "Documents which admission path produced the verdict. 'target_arch=<arch>' means the runner was invoked with target_arch=<arch> (the documented Verified-live-<arch> baseline shape; relaxes the cross-arch floor check to that arch alone). 'cross_arch_require_both_arches' means the runner was invoked with target_arch=None under a contract whose coverage_gate.require_both_arches_for_cross_arch=true (every arch in arch_set must meet its live floor). 'cross_arch_any_arch' means target_arch=None AND require_both_arches_for_cross_arch=false (any arch meeting its floor admits). Without this field a bundle with result_kind='admitted' + per_arch.<other_arch>.meets_floor=false is ambiguous between Verified-live-<arch> and a cross-arch-any-arch admission off the lone-arch floor."
+    },
+    "comparable_cells_per_arch": {
+      "type": "object",
+      "additionalProperties": {"type": "integer", "minimum": 0},
+      "description": "Diagnostic denominator: per-arch count of label cells that joined a predictor bundle on all 7 key fields. Includes typed_unavailable predictor bundles."
+    },
+    "headline_cells_per_arch": {
+      "type": "object",
+      "additionalProperties": {"type": "integer", "minimum": 0},
+      "description": "Admission-floor denominator: per-arch count of comparable cells whose predictor result_kind is in {scalar, bounded}. The geomean is computed only over headline cells; the smoke-test floor is enforced against this count."
+    },
+    "arches": {
+      "type": "array",
+      "items": {"type": "string"},
+      "description": "Round-14 (AC-5.2): explicit list of arches present in the per-arch tally surfaces. Mirrors sorted(comparable_cells_per_arch.keys()). When target_arch is set, the list contains exactly [target_arch]; under cross-arch admission paths it contains every arch in contract.arch_set."
+    },
+    "scalar_or_bounded_headline_cells_per_arch": {
+      "type": "object",
+      "additionalProperties": {"type": "integer", "minimum": 0},
+      "description": "Round-14 (AC-4.3): mirror of headline_cells_per_arch — cells that survived the typed-availability filter and have a usable comparison scalar (predictor result_kind in {scalar, bounded}). The plan's AC-4.3 threshold (>= 24 for sm_120) is checked against this canonical field rather than re-derived per call site."
+    },
+    "full_cohort_geomean": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Round-15 (AC-5.3): geomean of per-cell relative errors over ALL included live scalar/bounded headline cells. Identical to the legacy `geomean` field on the admitted arm; exposed under the AC-5.3-named key so downstream readers can assert on the canonical AC-5.3 field. Emitted only on the admitted arm."
+    },
+    "full_cohort_geomean_ci_low": {
+      "type": "number",
+      "description": "Round-15 (AC-5.3): lower bound of the bootstrap CI on the full-cohort geomean (contract pin: 2000 resamples, 0.95 confidence)."
+    },
+    "full_cohort_geomean_ci_high": {
+      "type": "number",
+      "description": "Round-15 (AC-5.3): upper bound of the bootstrap CI on the full-cohort geomean."
+    },
+    "full_cohort_geomean_ci_half_width": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Round-15 (AC-5.3): half-width ((upper - lower) / 2) of the bootstrap CI on the full-cohort geomean."
+    },
+    "holdout_geomean": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Round-15 (AC-5.3): geomean of per-cell relative errors over the included live scalar/bounded headline cells whose roster row has split == 'holdout'. The plan reserves 7 cells in the holdout split; typed-unavailable holdout cells are NOT silently substituted from calibration/validation. Emitted only on the admitted arm."
+    },
+    "holdout_geomean_ci_low": {
+      "type": "number",
+      "description": "Round-15 (AC-5.3): lower bound of the bootstrap CI on the holdout geomean (contract pin: 2000 resamples, 0.95 confidence). Returns 0 when no holdout cells are in the included set."
+    },
+    "holdout_geomean_ci_high": {
+      "type": "number",
+      "description": "Round-15 (AC-5.3): upper bound of the bootstrap CI on the holdout geomean."
+    },
+    "holdout_geomean_ci_half_width": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Round-15 (AC-5.3): half-width ((upper - lower) / 2) of the bootstrap CI on the holdout geomean."
+    },
+    "holdout_cell_count": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Round-15 (AC-5.3): count of included live scalar/bounded cells whose roster row has split == 'holdout'. The plan's 7-cell holdout pool may have typed-unavailable cells excluded; this count records the actual headline-included holdout cells."
+    },
+    "headline_floor_per_arch": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Pinned per-arch smoke-test floor from the contract. Recorded for auditability of gate decisions."
+    },
+    "included_cells": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "join_key",
+          "predictor_result_kind",
+          "predicted_hit_rate",
+          "ground_truth_fraction",
+          "relative_error"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {"predictor_result_kind": {"const": "bounded"}},
+              "required": ["predictor_result_kind"]
+            },
+            "then": {
+              "required": [
+                "relative_error_lower_diagnostic",
+                "relative_error_upper_diagnostic"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {"predictor_result_kind": {"const": "scalar"}},
+              "required": ["predictor_result_kind"]
+            },
+            "then": {
+              "not": {
+                "anyOf": [
+                  {"required": ["relative_error_lower_diagnostic"]},
+                  {"required": ["relative_error_upper_diagnostic"]}
+                ]
+              }
+            }
+          },
+          {
+            "description": "Per-record cache_layer mirror arm L1TEX: when join_key.cache_layer is L1TEX, the per-record cache_layer MUST also be L1TEX. The mirror catches the case where a downstream consumer rewrites the per-record field without updating the join_key (or vice versa) so cross-surface drift is rejected at schema parse. Codex R58 code-review P2: the `then` clause now requires `cache_layer`; without `required` JSON Schema admits records that omit the field entirely, silently bypassing the mirror invariant.",
+            "if": {
+              "properties": {
+                "join_key": {
+                  "properties": {"cache_layer": {"const": "L1TEX"}},
+                  "required": ["cache_layer"]
+                }
+              },
+              "required": ["join_key"]
+            },
+            "then": {
+              "properties": {"cache_layer": {"const": "L1TEX"}},
+              "required": ["cache_layer"]
+            }
+          },
+          {
+            "description": "Per-record cache_layer mirror arm L2: when join_key.cache_layer is L2, the per-record cache_layer MUST also be L2. The symmetric mirror to arm L1TEX. Codex R58 code-review P2: the `then` clause now requires `cache_layer` so a missing field can no longer silently pass the mirror invariant.",
+            "if": {
+              "properties": {
+                "join_key": {
+                  "properties": {"cache_layer": {"const": "L2"}},
+                  "required": ["cache_layer"]
+                }
+              },
+              "required": ["join_key"]
+            },
+            "then": {
+              "properties": {"cache_layer": {"const": "L2"}},
+              "required": ["cache_layer"]
+            }
+          }
+        ],
+        "properties": {
+          "join_key": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "slug",
+              "shape_point",
+              "binary_sha256",
+              "source_commit",
+              "kernel_signature_sha256",
+              "arch",
+              "ncu_metric_version"
+            ],
+            "properties": {
+              "slug": {"type": "string", "minLength": 1},
+              "shape_point": {"type": "string", "minLength": 1},
+              "binary_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+              "source_commit": {"type": "string", "minLength": 1},
+              "kernel_signature_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+              "arch": {"type": "string", "minLength": 1},
+              "ncu_metric_version": {"type": "string", "minLength": 1},
+              "cache_layer": {"type": "string", "enum": ["L1TEX", "L2"], "description": "Closed-enum cache-layer classifier mirroring the predictor bundle's cache_layer field. Added as the 8th join-key element so per-layer bundles join independently against the same admitted-cell row (the layer-aware ground-truth resolution reads cache_hit_rate_l1tex_sector_pct for L1TEX vs cache_hit_rate_l2_sector_pct for L2)."}
+            }
+          },
+          "predictor_result_kind": {
+            "type": "string",
+            "enum": ["scalar", "bounded"]
+          },
+          "cache_layer": {
+            "type": "string",
+            "enum": ["L1TEX", "L2"],
+            "description": "Per-record cache-layer classifier mirroring the join_key.cache_layer field. Records for L1TEX-layer joins carry 'L1TEX'; records for L2-layer joins carry 'L2'. Legacy records without the field are treated as L2 by downstream consumers."
+          },
+          "predicted_hit_rate": {
+            "type": "number",
+            "minimum": 0.0,
+            "maximum": 1.0,
+            "description": "Canonical predicted hit rate. For 'scalar' arm this is the bundle's predicted_hit_rate. For 'bounded' arm this is the midpoint of [hit_rate_lower, hit_rate_upper] per the bounded-arm midpoint-canonical policy."
+          },
+          "ground_truth_fraction": {
+            "type": "number",
+            "minimum": 0.0,
+            "maximum": 1.0,
+            "description": "NCU label hit rate as a fraction in [0, 1]. The label cell carries percent in [0, 100]; the runner normalizes to fraction at point of use."
+          },
+          "relative_error": {
+            "type": "number",
+            "minimum": 0.0,
+            "description": "Headline relative error per the contract formula |predicted - ground_truth| / max(ground_truth, epsilon). For the bounded arm this is the midpoint-derived error (canonical headline)."
+          },
+          "relative_error_lower_diagnostic": {
+            "type": "number",
+            "minimum": 0.0,
+            "description": "Diagnostic-only: the relative error computed from the bundle's hit_rate_lower. Required when predictor_result_kind == 'bounded'."
+          },
+          "relative_error_upper_diagnostic": {
+            "type": "number",
+            "minimum": 0.0,
+            "description": "Diagnostic-only: the relative error computed from the bundle's hit_rate_upper. Required when predictor_result_kind == 'bounded'."
+          },
+          "label_profiler_version": {
+            "type": "string",
+            "minLength": 1,
+            "description": "The label cell's profiler_version, which the runner cross-checks against the contract's pinned ncu_metric_version. Recorded for traceability."
+          },
+          "evidence_kind": {
+            "type": "string",
+            "enum": ["live", "synthetic"],
+            "description": "Optional classifier for the cell's evidence provenance, propagated from the joined label cell. Records emitted before the v3 admitted-cell schema migration may lack the field; the runner fills in 'synthetic' as a conservative default when absent so the live-only floor cannot count an unclassified cell."
+          },
+          "predictor_design_coverage": {
+            "type": ["string", "null"],
+            "enum": ["predictor_friendly", "predictor_hostile", null],
+            "description": "Additive contract-pinned classifier mapping cohort cells to one of two buckets describing whether the Smith-Eklund LRU stack-distance baseline directly models the dominant cache behavior. Cells outside the headline cohort emit null. The runner sources the bucket from _PREDICTOR_DESIGN_COVERAGE_BY_CELL keyed on (slug, shape_point); per-bucket relative-error stats appear under per_arch_diagnostics.per_arch.<arch>.relative_error_stats_per_predictor_design_coverage."
+          },
+          "grid_dim_alpha_source": {
+            "type": "string",
+            "enum": ["sm_86_calibrated", "sm_86_extrapolated", "sm120_uncalibrated", "uncalibrated"],
+            "description": "Optional cross-arch extrapolation provenance for the gridDim density penalty alpha, propagated verbatim from the predictor bundle's top-level grid_dim_alpha_source field when present. METADATA ONLY: the runner does NOT gate cell admission or coverage-floor decisions on this value. Downstream auditors use the field to inspect whether a cell's predictor was run on the calibrated arch (sm_86_calibrated), extrapolated cross-arch under the legacy reuse policy (sm_86_extrapolated), decoupled on sm_120 with the penalty disabled (sm120_uncalibrated, emitted on the RTX 5060 Laptop GPU under the sm_120-only decoupled framework), or unrecognized device (uncalibrated). Records emitted from bundles that pre-date the field continue to validate (the field is OPTIONAL on the included-cell items)."
+          }
+        }
+      }
+    },
+    "excluded_cells": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["diagnostic", "reason"],
+        "allOf": [
+          {
+            "if": {
+              "properties": {"reason": {"const": "join_key_unmatched"}},
+              "required": ["reason"]
+            },
+            "then": {"required": ["unmatched_field"]}
+          },
+          {
+            "if": {
+              "properties": {"reason": {"const": "comparison_contract_drift"}},
+              "required": ["reason"]
+            },
+            "then": {"required": ["unmatched_field"]}
+          },
+          {
+            "if": {
+              "properties": {"reason": {"const": "predictor_typed_unavailable"}},
+              "required": ["reason"]
+            },
+            "then": {"required": ["upstream_typed_reason"]}
+          }
+        ],
+        "properties": {
+          "diagnostic": {
+            "type": "string",
+            "enum": [
+              "comparison_runner_join_key_unmatched",
+              "comparison_contract_drift",
+              "predictor_typed_unavailable"
+            ],
+            "description": "Externally-emitted defect token. The first two values are members of comparison_runner._RUNNER_DEFECT_TOKENS (the runner-level vocabulary the bidirectional structural lockstep test asserts against); the third names an upstream/predictor-side exclusion that is intentionally NOT in the runner vocabulary (the predictor is the producer of the typed_unavailable bundle; the runner only records the exclusion). The diagnostic field is required on every excluded record so the on-disk artifact carries the failure-shape token externally rather than only as a private exception name."
+          },
+          "reason": {
+            "type": "string",
+            "enum": [
+              "predictor_typed_unavailable",
+              "join_key_unmatched",
+              "comparison_contract_drift",
+              "comparison_runner_l1tex_label_mean_missing",
+              "local_label_admitted_l1_mean_migration_required"
+            ],
+            "description": "Short category tag for grouping in downstream reports. The diagnostic field carries the externally-visible token; this field categorizes by exclusion class. The layer-aware migration added two new reasons: comparison_runner_l1tex_label_mean_missing fires when a v4 admitted cell's L1 mean is absent and the L1 join is suppressed; local_label_admitted_l1_mean_migration_required fires when a v3 admitted cell record is rejected at parse time because it lacks the new l1tex_label_status field."
+          },
+          "join_key": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "Partial or full key depending on what was available at exclusion time."
+          },
+          "upstream_typed_reason": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Required when reason == 'predictor_typed_unavailable'. Verbatim from the upstream predictor bundle's typed_reason field."
+          },
+          "unmatched_field": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Required when reason == 'join_key_unmatched' or 'comparison_contract_drift'. Names the join-key field whose drift caused the exclusion."
+          },
+          "label_profiler_version": {
+            "type": "string",
+            "minLength": 1
+          },
+          "contract_ncu_metric_version": {
+            "type": "string",
+            "minLength": 1
+          },
+          "l1tex_label_status": {
+            "type": "string",
+            "enum": [
+              "mean_present",
+              "mean_absent_label_missing",
+              "mean_absent_provenance_missing"
+            ],
+            "description": "Optional. Recorded on comparison_runner_l1tex_label_mean_missing exclusions to preserve the v4 admitted-cell record's L1 status verbatim so downstream consumers can audit why the L1 join was suppressed."
+          },
+          "bundle_cache_layer": {
+            "type": "string",
+            "enum": ["L1TEX", "L2"],
+            "description": "Optional. Recorded on cache_layer-driven comparison_contract_drift exclusions to preserve the offending bundle's declared cache_layer."
+          },
+          "contract_cache_layers": {
+            "type": "array",
+            "items": {"type": "string"},
+            "description": "Optional. Recorded on cache_layer-driven comparison_contract_drift exclusions to preserve the contract's cache_layers scope so the operator can see the gating decision."
+          }
+        }
+      }
+    },
+    "geomean": {
+      "type": "number",
+      "minimum": 0.0,
+      "description": "Log-space geomean of relative_error across all included headline cells. Required when result_kind == 'admitted'."
+    },
+    "geomean_ci_low": {
+      "type": "number",
+      "minimum": 0.0,
+      "description": "Bootstrap CI lower bound on the geomean. Required when result_kind == 'admitted'."
+    },
+    "geomean_ci_high": {
+      "type": "number",
+      "minimum": 0.0,
+      "description": "Bootstrap CI upper bound on the geomean. Required when result_kind == 'admitted'."
+    },
+    "geomean_ci_half_width": {
+      "type": "number",
+      "minimum": 0.0,
+      "description": "(geomean_ci_high - geomean_ci_low) / 2. Required when result_kind == 'admitted'."
+    },
+    "typed_reason": {
+      "type": "string",
+      "enum": [
+        "headline_geomean_admitted_cell_count_below_threshold",
+        "calibration_covariate_out_of_envelope",
+        "calibration_loocv_p90_residual_exceeded",
+        "calibration_reuse_distance_out_of_envelope",
+        "calibration_variance_precondition_failed",
+        "trace_opcode_coverage_incomplete",
+        "unsupported_blackwell_memory_path",
+        "target_arch_unlabeled_extrapolation"
+      ],
+      "description": "Required when result_kind == 'typed_unavailable'. The runner-level typed-reason enum carries 8 values: the runner-specific 'headline_geomean_admitted_cell_count_below_threshold' (fired when the live coverage gate floor is unmet) plus the 7 headline-validity reasons that match `headline_validity_failed_reasons.items.enum`. The headline-validity reasons are admitted as top-level typed_reason values so the comparison-level fail-closed gate (added by the variance-precondition adjudication round's repair) can short-circuit the bundle to `typed_unavailable` whenever `headline_validity_failed_reasons` is non-empty; the top-level typed_reason mirrors the first failed reason in canonical `HEADLINE_VALIDITY_FAILED_REASONS_ALL` order. The 'calibration_loocv_p90_residual_exceeded' value also remains the value emitted by the LOOCV-specific short-circuit that runs after the comparison-level fail-closed gate. The 'calibration_variance_precondition_failed' value is the typed reason promoted from upstream predictor bundles whose variance-precondition gate fired (cross-cell prediction stddev below the documented 0.10 floor)."
+    },
+    "per_arch_diagnostics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["per_arch", "unattributed_excluded_reason_counts"],
+      "description": "Optional additive extension carrying per-arch summary statistics, exclusion-token tallies, and a coverage-gate verdict. Every arch in contract.arch_set appears as a key under per_arch with deterministic shape (zero-count arches use the no_cells statistics_status). The unattributed_excluded_reason_counts block tallies excluded records lacking a join_key.arch field. Existing bundles without this field continue to validate.",
+      "properties": {
+        "per_arch": {
+          "type": "object",
+          "propertyNames": {"pattern": "^sm_[0-9]+$"},
+          "additionalProperties": {"$ref": "#/$defs/per_arch_record"},
+          "description": "Object whose keys are arch tokens (e.g. sm_86, sm_120) and whose values are per-arch diagnostic records. Arch tokens must match the ^sm_[0-9]+$ pattern; non-conforming keys are rejected."
+        },
+        "unattributed_excluded_reason_counts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "comparison_contract_drift",
+            "comparison_runner_join_key_unmatched",
+            "predictor_typed_unavailable"
+          ],
+          "properties": {
+            "comparison_contract_drift": {"type": "integer", "minimum": 0},
+            "comparison_runner_join_key_unmatched": {"type": "integer", "minimum": 0},
+            "predictor_typed_unavailable": {"type": "integer", "minimum": 0}
+          },
+          "description": "Tally of excluded records lacking a join_key.arch field. The three keys mirror the runner-side _EXCLUDED_DIAGNOSTIC_VALUES vocabulary; zero defaults are emitted on every key."
+        }
+      }
+    },
+    "headline_validity_status": {
+      "type": "string",
+      "enum": ["valid", "typed_unavailable"],
+      "description": "Additive optional field emitted by run_comparison when either headline_validity_inputs or calibration_evaluation_sidecar is supplied. 'valid' means no headline-validity guard fired; 'typed_unavailable' means the companion headline_validity_failed_reasons array is non-empty. Bundles emitted with neither input omit this field; downstream readers MUST treat its absence as 'unspecified' rather than 'valid'. Paired with headline_validity_failed_reasons via dependentRequired so a producer cannot emit one field without the other; the cardinality invariant enforced by the allOf branches below ties the status value to the array length (valid <-> empty; typed_unavailable <-> non-empty)."
+    },
+    "headline_validity_failed_reasons": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "calibration_covariate_out_of_envelope",
+          "calibration_loocv_p90_residual_exceeded",
+          "calibration_reuse_distance_out_of_envelope",
+          "calibration_variance_precondition_failed",
+          "trace_opcode_coverage_incomplete",
+          "unsupported_blackwell_memory_path",
+          "target_arch_unlabeled_extrapolation"
+        ]
+      },
+      "uniqueItems": true,
+      "description": "Additive optional field listing every headline-validity typed reason that fired during the run. The enum admits SEVEN values: five sm_86-active reasons (the LOOCV reason plus the three earlier Tier-2 reasons plus the variance-precondition reason added by the recovery loop's variance-precondition adjudication round) plus two cross-arch reasons (unsupported_blackwell_memory_path, target_arch_unlabeled_extrapolation) added by the AC-T5.2 offline-schema closure. Production fire-path status: the five sm_86-active reasons fire from the existing per-input detection helpers + the calibration-evaluation sidecar + the variance-precondition gate (which promotes from upstream cache_predictor bundles whose typed_reason is `calibration_variance_precondition_failed`); `unsupported_blackwell_memory_path` fires when `run_comparison(...)` is invoked with the `unsupported_memory_path_sidecar` kwarg carrying producer entries with `path_resolved=true` and a memory-touching `excluded_op_class` (TMEM / CLUSTER_DSMEM / ASYNC_COPY / TMA / TEXTURE / SURFACE / ATOMIC); `target_arch_unlabeled_extrapolation` is the only enum member whose firing remains DEFERRED — it requires AC-T6 cross-arch zero-shot prediction artifacts (separate schema) and depends on live sm_100 evidence per the user's 2026-05-16 directive. Order inside the array is deterministic (sm_86-active reasons first matching comparison_runner.HEADLINE_VALIDITY_FAILED_REASONS_SM_86_ACTIVE; cross-arch reasons appended per HEADLINE_VALIDITY_FAILED_REASONS_CROSS_ARCH). The array captures ALL fired reasons (multi-failure invariant) even though the existing typed_reason field carries only the first gate that short-circuited. Removing any enum member breaks the AC-T7 schema-stability scan in tools/local_labels/test_headline_validity_guard_scanner.py."
+    },
+    "publication_grade_floor_verdict": {
+      "type": "object",
+      "description": "Per-arch publication-grade contract-floor gate verdict emitted by the headline runner. Always present in current bundles; mirrors ContractFloorGateVerdict in tools/sm_86_predictor_accuracy_recovery_v2/publication_gate.py.",
+      "additionalProperties": false,
+      "required": ["passed", "admitted_count", "required_floor", "typed_diagnostic"],
+      "properties": {
+        "passed": {"type": "boolean"},
+        "admitted_count": {"type": "integer", "minimum": 0},
+        "required_floor": {"type": "integer", "minimum": 0},
+        "typed_diagnostic": {"type": ["string", "null"], "minLength": 1}
+      }
+    },
+    "publication_grade_submission_verdict": {
+      "type": "object",
+      "description": "Per-arch publication-grade submission-gate verdict emitted by the headline runner when a submission-track overlay is active. Mirrors SubmissionGateVerdict in tools/sm_86_predictor_accuracy_recovery_v2/publication_gate.py.",
+      "additionalProperties": false,
+      "required": ["passed", "unique_slugs", "total_cells", "required_unique_slugs", "required_cells", "typed_diagnostic"],
+      "properties": {
+        "passed": {"type": "boolean"},
+        "unique_slugs": {"type": "integer", "minimum": 0},
+        "total_cells": {"type": "integer", "minimum": 0},
+        "required_unique_slugs": {"type": "integer", "minimum": 0},
+        "required_cells": {"type": "integer", "minimum": 0},
+        "typed_diagnostic": {"type": ["string", "null"], "minLength": 1}
+      }
+    },
+    "publication_grade_tags": {
+      "type": "array",
+      "description": "Top-level publication-grade tag bag. Emitted when an overlay is active and at least one tag (e.g., 'submission_gate_not_met') applies. Each element is a non-empty string identifier.",
+      "items": {"type": "string", "minLength": 1},
+      "uniqueItems": true
+    }
+  },
+  "dependentRequired": {
+    "headline_validity_status": ["headline_validity_failed_reasons"],
+    "headline_validity_failed_reasons": ["headline_validity_status"]
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": ["headline_validity_status"],
+        "properties": {"headline_validity_status": {"const": "valid"}}
+      },
+      "then": {
+        "properties": {
+          "headline_validity_failed_reasons": {"maxItems": 0}
+        }
+      }
+    },
+    {
+      "if": {
+        "required": ["headline_validity_status"],
+        "properties": {"headline_validity_status": {"const": "typed_unavailable"}}
+      },
+      "then": {
+        "properties": {
+          "headline_validity_failed_reasons": {"minItems": 1}
+        }
+      }
+    },
+    {
+      "if": {
+        "required": ["result_kind"],
+        "properties": {"result_kind": {"const": "admitted"}}
+      },
+      "then": {
+        "properties": {
+          "headline_validity_failed_reasons": {"maxItems": 0}
+        }
+      },
+      "description": "Admitted-arm cardinality invariant: the admitted arm forbids non-empty headline_validity_failed_reasons. Any bundle that emits with result_kind=admitted MUST have either an empty headline_validity_failed_reasons array OR omit the field entirely. The runner's comparison-level fail-closed gate enforces this on the producer side; this guard catches drift if a future producer regresses the gate. Paired with the negative jsonschema test test_schema_admitted_arm_with_nonempty_failed_reasons_rejected."
+    },
+    {
+      "if": {
+        "required": ["result_kind", "top_level_admission_scope"],
+        "properties": {
+          "result_kind": {"const": "admitted"},
+          "top_level_admission_scope": {"const": "target_arch=sm_120"}
+        }
+      },
+      "then": {
+        "required": [
+          "full_cohort_geomean",
+          "full_cohort_geomean_ci_low",
+          "full_cohort_geomean_ci_high",
+          "full_cohort_geomean_ci_half_width",
+          "holdout_geomean",
+          "holdout_geomean_ci_low",
+          "holdout_geomean_ci_high",
+          "holdout_geomean_ci_half_width",
+          "holdout_cell_count"
+        ]
+      },
+      "description": "Dual-geomean enforcement on the sm_120-only admitted arm. When result_kind=='admitted' AND top_level_admission_scope=='target_arch=sm_120', the bundle MUST emit all 9 dual-geomean fields (full-cohort geomean + 3 CI fields; holdout geomean + 3 CI fields; holdout cell count). The plan's AC-5.3 negative test requires a bundle without holdout_geomean to be rejected; this conditional fires that rejection. Paired with the negative jsonschema tests test_schema_admitted_sm120_arm_requires_holdout_geomean and siblings."
+    }
+  ],
+  "oneOf": [
+    {
+      "type": "object",
+      "properties": {
+        "result_kind": {"const": "admitted"}
+      },
+      "required": [
+        "result_kind",
+        "geomean",
+        "geomean_ci_low",
+        "geomean_ci_high",
+        "geomean_ci_half_width"
+      ],
+      "not": {
+        "anyOf": [
+          {"required": ["typed_reason"]}
+        ]
+      },
+      "description": "Admitted arm forbids typed_reason. Carries the headline geomean and bootstrap CI."
+    },
+    {
+      "type": "object",
+      "properties": {
+        "result_kind": {"const": "typed_unavailable"}
+      },
+      "required": ["result_kind", "typed_reason"],
+      "not": {
+        "anyOf": [
+          {"required": ["geomean"]},
+          {"required": ["geomean_ci_low"]},
+          {"required": ["geomean_ci_high"]},
+          {"required": ["geomean_ci_half_width"]},
+          {"required": ["full_cohort_geomean"]},
+          {"required": ["full_cohort_geomean_ci_low"]},
+          {"required": ["full_cohort_geomean_ci_high"]},
+          {"required": ["full_cohort_geomean_ci_half_width"]},
+          {"required": ["holdout_geomean"]},
+          {"required": ["holdout_geomean_ci_low"]},
+          {"required": ["holdout_geomean_ci_high"]},
+          {"required": ["holdout_geomean_ci_half_width"]},
+          {"required": ["holdout_cell_count"]}
+        ]
+      },
+      "description": "Typed-unavailable arm forbids the geomean and the dual-geomean fields. Carries only the typed_reason; arm-exclusivity for the 9 dual-geomean fields mirrors the legacy geomean's arm exclusivity."
+    }
+  ],
+  "$defs": {
+    "per_arch_record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "arch",
+        "n_comparable_cells",
+        "n_headline_cells",
+        "statistics_status",
+        "relative_error_stats",
+        "relative_error_stats_l1tex",
+        "relative_error_stats_l2",
+        "signed_residual_stats",
+        "bounded_arm_relative_error_stats",
+        "relative_error_geomean_ci",
+        "excluded_reason_counts",
+        "coverage_gate_verdict",
+        "relative_error_stats_per_predictor_design_coverage"
+      ],
+      "description": "Per-arch diagnostic record. The relative_error_stats and signed_residual_stats shapes are determined by statistics_status via the oneOf branches that bind statistics_status with const so quartile fields can ONLY appear when statistics_status == 'quartile_emitted'. signed_residual is predicted_hit_rate - ground_truth_fraction so the values can be negative; only stdev is constrained to be non-negative. The bounded_arm_relative_error_stats block aggregates only over cells with predictor_result_kind == 'bounded' so it carries its own statistics_status (independent of the per-arch outer status, which is driven by the canonical relative_error sample over BOTH scalar and bounded cells).",
+      "properties": {
+        "arch": {
+          "type": "string",
+          "pattern": "^sm_[0-9]+$"
+        },
+        "n_comparable_cells": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Per-arch count of included cells plus excluded cells with join_key.arch == arch and a diagnostic in the three-token enum."
+        },
+        "n_headline_cells": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Per-arch count of included cells with join_key.arch == arch (the relative_error sample)."
+        },
+        "statistics_status": {
+          "type": "string",
+          "enum": [
+            "quartile_emitted",
+            "insufficient_cells_for_quartile_statistics",
+            "no_cells"
+          ]
+        },
+        "relative_error_stats": {},
+        "relative_error_stats_l1tex": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["n_cells", "n_scalar", "n_bounded", "n_typed_unavailable", "geomean"],
+          "properties": {
+            "n_cells": {"type": "integer", "minimum": 0},
+            "n_scalar": {"type": "integer", "minimum": 0},
+            "n_bounded": {"type": "integer", "minimum": 0},
+            "n_typed_unavailable": {"type": "integer", "minimum": 0},
+            "geomean": {"type": "number", "minimum": 0.0}
+          },
+          "description": "Per-arch relative-error stat block for the L1TEX cache layer. Aggregates only over included cells whose cache_layer == 'L1TEX'; the L2 block aggregates the symmetric L2 slice. The two blocks are emitted independently so the layer-aware comparison can report per-arch L1 and L2 diagnostics without merging into a layer-mixed geomean."
+        },
+        "relative_error_stats_l2": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["n_cells", "n_scalar", "n_bounded", "n_typed_unavailable", "geomean"],
+          "properties": {
+            "n_cells": {"type": "integer", "minimum": 0},
+            "n_scalar": {"type": "integer", "minimum": 0},
+            "n_bounded": {"type": "integer", "minimum": 0},
+            "n_typed_unavailable": {"type": "integer", "minimum": 0},
+            "geomean": {"type": "number", "minimum": 0.0}
+          },
+          "description": "Per-arch relative-error stat block for the L2 cache layer. See relative_error_stats_l1tex for the symmetric L1TEX block."
+        },
+        "signed_residual_stats": {},
+        "bounded_arm_relative_error_stats": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["n_bounded_cells", "lower", "upper"],
+          "properties": {
+            "n_bounded_cells": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "Per-arch count of included cells with predictor_result_kind == 'bounded'."
+            },
+            "lower": {"$ref": "#/$defs/bounded_arm_arm_stats"},
+            "upper": {"$ref": "#/$defs/bounded_arm_arm_stats"}
+          }
+        },
+        "relative_error_geomean_ci": {},
+        "excluded_reason_counts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "comparison_contract_drift",
+            "comparison_runner_join_key_unmatched",
+            "predictor_typed_unavailable"
+          ],
+          "properties": {
+            "comparison_contract_drift": {"type": "integer", "minimum": 0},
+            "comparison_runner_join_key_unmatched": {"type": "integer", "minimum": 0},
+            "predictor_typed_unavailable": {"type": "integer", "minimum": 0}
+          }
+        },
+        "coverage_gate_verdict": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "arch",
+            "headline_count_live",
+            "headline_count_synthetic",
+            "floor",
+            "meets_floor"
+          ],
+          "properties": {
+            "arch": {"type": "string", "pattern": "^sm_[0-9]+$"},
+            "headline_count_live": {"type": "integer", "minimum": 0},
+            "headline_count_synthetic": {"type": "integer", "minimum": 0},
+            "floor": {"type": "integer", "minimum": 0},
+            "meets_floor": {"type": "boolean"}
+          }
+        },
+        "relative_error_stats_per_predictor_design_coverage": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["predictor_friendly", "predictor_hostile"],
+          "description": "Additive per-bucket aggregation of relative-error stats over admitted cells in each predictor_design_coverage bucket. Each bucket entry carries {statistics_status, stats}; stats is null when the bucket has no cells (statistics_status == 'no_cells') and otherwise carries the same small-n shape as the per-arch outer relative_error_stats helper. The bucket vocabulary mirrors _PREDICTOR_DESIGN_COVERAGE_BY_CELL value enum.",
+          "properties": {
+            "predictor_friendly": {"$ref": "#/$defs/bounded_arm_arm_stats"},
+            "predictor_hostile": {"$ref": "#/$defs/bounded_arm_arm_stats"}
+          }
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "statistics_status": {"const": "quartile_emitted"},
+            "relative_error_stats": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["mean", "stdev", "min", "max", "q25", "q50", "q75"],
+              "properties": {
+                "mean": {"type": "number", "minimum": 0.0},
+                "stdev": {"type": "number", "minimum": 0.0},
+                "min": {"type": "number", "minimum": 0.0},
+                "max": {"type": "number", "minimum": 0.0},
+                "q25": {"type": "number", "minimum": 0.0},
+                "q50": {"type": "number", "minimum": 0.0},
+                "q75": {"type": "number", "minimum": 0.0}
+              }
+            },
+            "signed_residual_stats": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["mean", "stdev", "min", "max", "q25", "q50", "q75"],
+              "properties": {
+                "mean": {"type": "number"},
+                "stdev": {"type": "number", "minimum": 0.0},
+                "min": {"type": "number"},
+                "max": {"type": "number"},
+                "q25": {"type": "number"},
+                "q50": {"type": "number"},
+                "q75": {"type": "number"}
+              }
+            },
+            "relative_error_geomean_ci": {"$ref": "#/$defs/per_arch_geomean_ci_block"}
+          }
+        },
+        {
+          "properties": {
+            "statistics_status": {"const": "insufficient_cells_for_quartile_statistics"},
+            "relative_error_stats": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["mean", "stdev", "min", "max"],
+              "properties": {
+                "mean": {"type": "number", "minimum": 0.0},
+                "stdev": {"type": "number", "minimum": 0.0},
+                "min": {"type": "number", "minimum": 0.0},
+                "max": {"type": "number", "minimum": 0.0}
+              }
+            },
+            "signed_residual_stats": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["mean", "stdev", "min", "max"],
+              "properties": {
+                "mean": {"type": "number"},
+                "stdev": {"type": "number", "minimum": 0.0},
+                "min": {"type": "number"},
+                "max": {"type": "number"}
+              }
+            },
+            "relative_error_geomean_ci": {"$ref": "#/$defs/per_arch_geomean_ci_block"}
+          }
+        },
+        {
+          "properties": {
+            "statistics_status": {"const": "no_cells"},
+            "relative_error_stats": {"type": "null"},
+            "signed_residual_stats": {"type": "null"},
+            "relative_error_geomean_ci": {"$ref": "#/$defs/per_arch_geomean_ci_block"}
+          }
+        }
+      ]
+    },
+    "per_arch_geomean_ci_block": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "geomean",
+        "ci_low",
+        "ci_high",
+        "ci_half_width",
+        "bootstrap_resamples",
+        "bootstrap_seed"
+      ],
+      "description": "Per-arch bootstrap CI on the log-space geomean of relative_error. Resampling unit is the cell; bootstrap_seed is recorded so byte-identical re-runs reproduce byte-identical CIs.",
+      "properties": {
+        "geomean": {"type": "number", "minimum": 0.0},
+        "ci_low": {"type": "number", "minimum": 0.0},
+        "ci_high": {"type": "number", "minimum": 0.0},
+        "ci_half_width": {"type": "number", "minimum": 0.0},
+        "bootstrap_resamples": {"type": "integer", "minimum": 1},
+        "bootstrap_seed": {"type": "integer", "minimum": 0}
+      }
+    },
+    "bounded_arm_arm_stats": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["statistics_status", "stats"],
+      "description": "One arm (lower or upper) of the bounded-arm relative-error stats. The stats shape is bound to statistics_status via the oneOf branches; quartile fields can only appear when statistics_status == 'quartile_emitted'. The values are absolute relative errors against hit_rate_lower (lower) or hit_rate_upper (upper) so all numeric fields are >= 0.",
+      "properties": {
+        "statistics_status": {
+          "type": "string",
+          "enum": [
+            "quartile_emitted",
+            "insufficient_cells_for_quartile_statistics",
+            "no_cells"
+          ]
+        },
+        "stats": {}
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "statistics_status": {"const": "quartile_emitted"},
+            "stats": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["mean", "stdev", "min", "max", "q25", "q50", "q75"],
+              "properties": {
+                "mean": {"type": "number", "minimum": 0.0},
+                "stdev": {"type": "number", "minimum": 0.0},
+                "min": {"type": "number", "minimum": 0.0},
+                "max": {"type": "number", "minimum": 0.0},
+                "q25": {"type": "number", "minimum": 0.0},
+                "q50": {"type": "number", "minimum": 0.0},
+                "q75": {"type": "number", "minimum": 0.0}
+              }
+            }
+          }
+        },
+        {
+          "properties": {
+            "statistics_status": {"const": "insufficient_cells_for_quartile_statistics"},
+            "stats": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["mean", "stdev", "min", "max"],
+              "properties": {
+                "mean": {"type": "number", "minimum": 0.0},
+                "stdev": {"type": "number", "minimum": 0.0},
+                "min": {"type": "number", "minimum": 0.0},
+                "max": {"type": "number", "minimum": 0.0}
+              }
+            }
+          }
+        },
+        {
+          "properties": {
+            "statistics_status": {"const": "no_cells"},
+            "stats": {"type": "null"}
+          }
+        }
+      ]
+    }
+  }
+}

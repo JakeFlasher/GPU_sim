@@ -1,0 +1,34 @@
+schema_version = 1
+slug = "sparse_2to4_fp8_gemm"
+
+# FP8 sparse 2:4 GEMM (sm_120a-only). Same M, N, K conventions as
+# the dense FP8 path; reference is FP32 matmul on the 2:4-masked A
+# and B after FP8 E4M3 round-trip quantization (`mma_microbench.py::
+# build_reference` dispatches through `_apply_2to4_mask` +
+# `_quantize_matrix_fp8_e4m3`, which round-trips FP32 → FP8 E4M3 code
+# → FP32 representable per the canonical 256-entry value table with
+# satfinite saturation to ±448, -0.0 sign-preserved as byte 0x80,
+# and FP32 NaN encoded as canonical positive E4M3 NaN byte 0x7F —
+# R31 alignment with `cuda_fp8.h::__nv_fp8_e4m3` per Codex
+# Round-29-review CUDA 13 host probe), under the FP8 fma_chain
+# tolerance.
+
+[[timing_shapes]]
+name = "timing_00"
+axes = { m = 1024, n = 1024, k = 4096 }
+launch_config = { grid = [64, 128, 1], block = [32, 1, 1] }
+warm_up_iters = 5
+repeat_iters = 30
+
+[[trace_shapes]]
+name = "trace_00"
+axes = { m = 64, n = 64, k = 128 }
+launch_config = { grid = [4, 8, 1], block = [32, 1, 1] }
+predicted_bytes = 83886080
+estimator_source = "static"
+
+[[correctness_shapes]]
+name = "correctness_00"
+axes = { m = 32, n = 16, k = 64 }
+launch_config = { grid = [2, 2, 1], block = [32, 1, 1] }
+digest_kind = "reduction_summary"

@@ -1,0 +1,105 @@
+{
+  "argv_clock_policy_flag": "",
+  "argv_provenance": [
+    [
+      "ncu",
+      "--launch-skip",
+      "5",
+      "--launch-count",
+      "1",
+      "--clock-control",
+      "none",
+      "--replay-mode",
+      "kernel",
+      "--section",
+      "MemoryWorkloadAnalysis",
+      "--metrics",
+      "l1tex__t_sector_pipe_lsu_mem_global_op_ld_hit_rate.pct,l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum,l1tex__t_sectors_pipe_lsu_mem_global_op_ld_lookup_hit.sum,lts__t_sectors_srcunit_tex_op_read.sum,lts__t_sectors_srcunit_tex_op_read_lookup_hit.sum",
+      "--csv",
+      "/home/jakeshea/3090ti_5060laptop_cross_study/3090ti_5060laptop_cross_study/solbench_baseline/nvbit_tracer/metric_extractor/tests/calibration_cohort_b/problem_088_rotary_position_embedding_application"
+    ],
+    [
+      "ncu",
+      "--launch-skip",
+      "5",
+      "--launch-count",
+      "1",
+      "--clock-control",
+      "none",
+      "--replay-mode",
+      "kernel",
+      "--section",
+      "MemoryWorkloadAnalysis",
+      "--metrics",
+      "l1tex__t_sector_pipe_lsu_mem_global_op_ld_hit_rate.pct,l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum,l1tex__t_sectors_pipe_lsu_mem_global_op_ld_lookup_hit.sum,lts__t_sectors_srcunit_tex_op_read.sum,lts__t_sectors_srcunit_tex_op_read_lookup_hit.sum",
+      "--csv",
+      "/home/jakeshea/3090ti_5060laptop_cross_study/3090ti_5060laptop_cross_study/solbench_baseline/nvbit_tracer/metric_extractor/tests/calibration_cohort_b/problem_088_rotary_position_embedding_application"
+    ],
+    [
+      "ncu",
+      "--launch-skip",
+      "5",
+      "--launch-count",
+      "1",
+      "--clock-control",
+      "none",
+      "--replay-mode",
+      "kernel",
+      "--section",
+      "MemoryWorkloadAnalysis",
+      "--metrics",
+      "l1tex__t_sector_pipe_lsu_mem_global_op_ld_hit_rate.pct,l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum,l1tex__t_sectors_pipe_lsu_mem_global_op_ld_lookup_hit.sum,lts__t_sectors_srcunit_tex_op_read.sum,lts__t_sectors_srcunit_tex_op_read_lookup_hit.sum",
+      "--csv",
+      "/home/jakeshea/3090ti_5060laptop_cross_study/3090ti_5060laptop_cross_study/solbench_baseline/nvbit_tracer/metric_extractor/tests/calibration_cohort_b/problem_088_rotary_position_embedding_application"
+    ]
+  ],
+  "captured_at_utc": "2026-05-29T21:40:01+00:00",
+  "completed": true,
+  "cv_cap": 0.05,
+  "cv_quarantined": false,
+  "failure_reason": "",
+  "language": "cuda_cpp",
+  "launch_skip_count": 5,
+  "ncu_l1_hit_rate_mean": 0.263,
+  "ncu_l2_hit_rate_mean": 0.6308301917870686,
+  "ncu_metric_family": [
+    "l1tex__t_sector_pipe_lsu_mem_global_op_ld_hit_rate.pct",
+    "l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum",
+    "l1tex__t_sectors_pipe_lsu_mem_global_op_ld_lookup_hit.sum",
+    "lts__t_sectors_srcunit_tex_op_read.sum",
+    "lts__t_sectors_srcunit_tex_op_read_lookup_hit.sum"
+  ],
+  "no_read_only_traffic": false,
+  "predictor_bucket": "predictor_friendly",
+  "probe_binary_sha256": "275243e95ce001f033d3bf8d5144bbb8cd8e2c85c73a3def30275441158728ad",
+  "relative_cv_l1": 0.0007604562737641748,
+  "relative_cv_l2": 0.0015034192223924393,
+  "runs": [
+    {
+      "l1_global_load_hit_rate": 0.2632,
+      "l1_global_load_sectors_hit": 482888,
+      "l1_global_load_sectors_total": 1835008,
+      "l2_read_hit_rate": 0.6317397864094902,
+      "l2_read_sectors_hit": 854188,
+      "l2_read_sectors_total": 1352120
+    },
+    {
+      "l1_global_load_hit_rate": 0.263,
+      "l1_global_load_sectors_hit": 482516,
+      "l1_global_load_sectors_total": 1835008,
+      "l2_read_hit_rate": 0.6309035469341039,
+      "l2_read_sectors_hit": 853292,
+      "l2_read_sectors_total": 1352492
+    },
+    {
+      "l1_global_load_hit_rate": 0.26280000000000003,
+      "l1_global_load_sectors_hit": 482280,
+      "l1_global_load_sectors_total": 1835008,
+      "l2_read_hit_rate": 0.6298472420176118,
+      "l2_read_sectors_hit": 852012,
+      "l2_read_sectors_total": 1352728
+    }
+  ],
+  "schema_version": 2,
+  "slug": "problem_088_rotary_position_embedding_application"
+}

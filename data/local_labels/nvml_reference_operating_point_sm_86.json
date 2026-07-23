@@ -1,0 +1,44 @@
+{
+  "accepted_sample_dispersion": {
+    "power_mw_stdev": 8578.97532163211,
+    "sm_clock_mhz_stdev": 37.90166708134553
+  },
+  "anchor_regime": "sustained",
+  "arch": "sm_86",
+  "artifact_kind": "nvml_reference_operating_point",
+  "device_name": "NVIDIA GeForce RTX 3090 Ti",
+  "driver_version": "595.71.05",
+  "max_sm_clock_mhz": 2130,
+  "n_accepted": 2431,
+  "n_rejected": 926,
+  "n_samples_total": 3357,
+  "reference_operating_point": {
+    "mem_clock_ref_mhz": 10251.0,
+    "power_ref_mw": 294543.0,
+    "sm_clock_ref_mhz": 1350.0,
+    "temp_ref_c": 90.0
+  },
+  "rejection_reason_counts": {
+    "warmup_window": 926
+  },
+  "sampling_method": {
+    "duration_s": 20.0,
+    "getters": [
+      "nvmlDeviceGetClockInfo(NVML_CLOCK_SM)",
+      "nvmlDeviceGetClockInfo(NVML_CLOCK_MEM)",
+      "nvmlDeviceGetTemperature(NVML_TEMPERATURE_GPU)",
+      "nvmlDeviceGetPowerUsage",
+      "nvmlDeviceGetCurrentClocksThrottleReasons"
+    ],
+    "matmul_dim": 4096,
+    "no_clock_lock_or_persistence_or_power_mutation": true,
+    "read_only_nvml": true,
+    "target_poll_hz": 200.0,
+    "warmup_s": 5.0,
+    "workload": "user_space_cuda_matmul"
+  },
+  "schema_version": 1,
+  "source_commit": "a2c7a8e24d544d5704e6e6fdd1fc71263f907394",
+  "sw_thermal_active_fraction": 1.0,
+  "workload_class": "user_space_cuda_matmul_sustained"
+}

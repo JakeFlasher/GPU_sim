@@ -1,0 +1,110 @@
+{
+  "arch": "sm_86",
+  "artifact_kind": "timing_nvbit_sector_summary",
+  "binary_sha256": "93bd779ba719542965c18d9f73f5aa5a545c6631bbfb87575a9239e0765bab30",
+  "deploy_legal": true,
+  "kernel_signature_sha256": "87d363f1b9e4ec045ffee0a0e10d21754667f7391ab24539711751e8d303df67",
+  "nvbit_launch_summary": {
+    "harmonized_kernel_name": "flash_attn_fwd_bf16_sm80_kernel",
+    "harmonized_kernel_signature_sha256": "87d363f1b9e4ec045ffee0a0e10d21754667f7391ab24539711751e8d303df67",
+    "inst_count": 24576,
+    "instruction_trace_mode": "bounded_observed_global_store_trace",
+    "launch_geometry": {
+      "block_x": 256,
+      "block_y": 1,
+      "block_z": 1,
+      "grid_x": 2304,
+      "grid_y": 1,
+      "grid_z": 1,
+      "kernel_name": "flash_attn_fwd_bf16_sm80_kernel",
+      "shared_mem_dynamic_bytes": 0,
+      "shared_mem_static_bytes": 0
+    },
+    "launch_index": 0,
+    "path": "data/local_labels/timing_cohort/nvbit_launch_traces/ac4_mixed_flash_bh16_sq512_sk512_d16_rep48_blk2304/nvbit_launch_summary.json",
+    "raw_kernel_name": "flash_attn_fwd_bf16_sm80_kernel___0",
+    "raw_kernel_signature_sha256": "96c46385069e0d3fb355b252e51354f06835b091cc95f9d94bacb68a6f50d6f0",
+    "repeat_index": 0,
+    "sha256": "b0ec1f2b88fb103df6d208d3c09b9ad5910473807a2fec8468a7e216e7749118",
+    "stats_csv_path": "data/local_labels/timing_cohort/nvbit_launch_traces/ac4_mixed_flash_bh16_sq512_sk512_d16_rep48_blk2304/stats.csv",
+    "stats_csv_sha256": "a1387e6c679d02c57f89d8489b855f1e102590dc57f4df8b47e180629f8d6c9f"
+  },
+  "observation_basis": {
+    "memory_instruction_record_count": 4096,
+    "observed_access_count": 131072,
+    "observed_hit_count": 122880,
+    "observed_miss_count": 8192,
+    "stats_total_insts": 73728,
+    "stats_total_reported_insts": 73728,
+    "threadblock_proto_file_count": 512,
+    "threadblock_proto_set_sha256": "01724ba5ea0f4065310ff63e6d449256ef18de12007a8f3c4cfc31f90cb2a9ea",
+    "trace_contract_ok": true
+  },
+  "observed_sector_summary": {
+    "artifact_kind": "timing_nvbit_observed_sector_summary",
+    "path": "data/local_labels/timing_cohort/nvbit_launch_traces/ac4_mixed_flash_bh16_sq512_sk512_d16_rep48_blk2304/observed_sector_summary.json",
+    "sha256": "6e319d00d1c32d48f92096df84ede920f3d14cba9cec02ae11ea80caa8dc7c43"
+  },
+  "producer": "nvbit_observed_summarize_launch_sector_summary_v1",
+  "schema_version": 1,
+  "sector_count_derivation": {
+    "instruction_trace_mode": "bounded_observed_global_store_trace",
+    "observed_access_count": 131072,
+    "observed_sector_summary_path": "data/local_labels/timing_cohort/nvbit_launch_traces/ac4_mixed_flash_bh16_sq512_sk512_d16_rep48_blk2304/observed_sector_summary.json",
+    "source": "nvbit_observed_threadblock_proto_sector_stream"
+  },
+  "sector_counts": {
+    "estimated_bytes": 4194304,
+    "global_read_32b_sectors": 0,
+    "global_write_32b_sectors": 131072,
+    "total_128b_lines": 32768,
+    "total_32b_sectors": 131072
+  },
+  "shape_point": "ac4_mixed_flash_bh16_sq512_sk512_d16_rep48_blk2304",
+  "slug": "flash_attn_fwd_bf16_sm80",
+  "source_commit": "d8a5b887093263debcd3a9931644e315a56735f3",
+  "source_trace": {
+    "capture_mode": "per_cell_same_binary_same_shape_nvbit_bounded_observed_threadblock_trace",
+    "instr_begin": 560,
+    "instr_end": 566,
+    "instruction_trace_mode": "bounded_observed_global_store_trace",
+    "nvbit_trace_pb_path": "data/local_labels/timing_cohort/nvbit_launch_traces/ac4_mixed_flash_bh16_sq512_sk512_d16_rep48_blk2304/dynamic_trace.pb",
+    "nvbit_trace_pb_sha256": "07ee4599f990971f5580a68d83f651bbfd2abb93031f1fd0225895315dbbdb39",
+    "threadblock_proto_file_count": 512,
+    "threadblock_proto_retention": "summarized_then_pruned_after_digest",
+    "threadblock_proto_set_sha256": "01724ba5ea0f4065310ff63e6d449256ef18de12007a8f3c4cfc31f90cb2a9ea",
+    "trace_dir": "data/local_labels/timing_cohort/nvbit_launch_traces/ac4_mixed_flash_bh16_sq512_sk512_d16_rep48_blk2304"
+  },
+  "static_inputs": {
+    "static_sass_features_path": "data/local_labels/timing_cohort/feature_artifacts/ac4_mixed_flash_bh16_sq512_sk512_d16_rep48_blk2304_static_sass_features.json",
+    "static_sass_features_sha256": "a2276638c7fc32af267fa47ea9fa32a522024b36e97cabd1eff38efca6f56609",
+    "static_work_path": "data/local_labels/timing_cohort/feature_artifacts/ac4_mixed_flash_bh16_sq512_sk512_d16_rep48_blk2304_static_work.json",
+    "static_work_sha256": "fbd6091d15db3e85095ae45143a2e695c3346b3c0b7dcf6cd7566ce2377eeb3b"
+  },
+  "summarize_launch": {
+    "async_copy_count": 0,
+    "atomic_count": 0,
+    "cold_count": 8192,
+    "finite_miss_count": 0,
+    "load_count": 0,
+    "per_access_kind_counts": {
+      "2": 131072
+    },
+    "per_op_class_counts": {
+      "1": 131072
+    },
+    "reuse_distance_finite_p50": 0,
+    "reuse_distance_finite_p90": 0,
+    "reuse_distance_finite_p99": 0,
+    "store_count": 131072,
+    "unique_sector_count": 8192,
+    "unspecified_kind_count": 0,
+    "working_set_sector_count": 8192
+  },
+  "theoretical_occupancy": {
+    "active_blocks_per_sm": 6,
+    "active_warps_per_sm": 48,
+    "source": "launch_geometry_registers_shared_memory_limits",
+    "warps_per_block": 8
+  }
+}

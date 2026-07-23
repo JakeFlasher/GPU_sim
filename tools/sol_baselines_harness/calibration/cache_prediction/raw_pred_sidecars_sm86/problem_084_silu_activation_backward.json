@@ -1,0 +1,14 @@
+{
+  "associativity_l2": 16,
+  "captured_at_utc": "2026-05-29T22:40:04+00:00",
+  "geometry_source": "sm86_pilot_static_device_card_v1",
+  "language": "cuda_cpp",
+  "num_l2_slices": 6,
+  "raw_l1_hit_rate": 0.0,
+  "raw_l2_hit_rate": 0.0,
+  "schema_version": 1,
+  "scored": true,
+  "slug": "problem_084_silu_activation_backward",
+  "tier2_sidecar_sha256": "62a8c750bd5f67bf3bd58aab6d44b457b283ce2ebe4e218b6f12371d681d954b",
+  "typed_reason": ""
+}

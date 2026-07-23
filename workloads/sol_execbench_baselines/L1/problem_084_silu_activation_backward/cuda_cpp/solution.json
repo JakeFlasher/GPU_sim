@@ -1,0 +1,43 @@
+{
+  "name": "problem_084_silu_activation_backward_cuda_cpp",
+  "definition": "084_silu_activation_backward",
+  "author": "sol-baselines-codegen",
+  "spec": {
+    "languages": [
+      "cuda_cpp"
+    ],
+    "target_hardware": [
+      "LOCAL"
+    ],
+    "entry_point": "main.cpp::run",
+    "dependencies": [],
+    "destination_passing_style": true,
+    "binding": "torch",
+    "compile_options": {
+      "cflags": [],
+      "cuda_cflags": [
+        "-O3",
+        "--use_fast_math",
+        "-gencode",
+        "arch=compute_86,code=sm_86"
+      ],
+      "ld_flags": [
+        "-lcuda"
+      ]
+    }
+  },
+  "sources": [
+    {
+      "path": "main.cpp",
+      "content": "#include <torch/extension.h>\n#include <ATen/cuda/CUDAContext.h>\n#include \"kernel.h\"\n#include <string>\n\nstatic void check_fp32_contiguous_cuda(\n    const torch::Tensor& tensor, const std::string& name) {\n    TORCH_CHECK(tensor.is_cuda(), name, \" must be a CUDA tensor\");\n    TORCH_CHECK(\n        tensor.dtype() == torch::kFloat32,\n        name, \" must have float32 dtype, got \", tensor.dtype());\n    TORCH_CHECK(tensor.is_contiguous(), name, \" must be contiguous\");\n}\n\n// Destination-passing-style entry. definition.json declares:\n//   grad_output : [num_elements]  fp32\n//   x           : [num_elements]  fp32\n//   sigmoid_x   : [num_elements]  fp32\n//   grad_input  : [num_elements]  fp32 (DPS, pre-alloc)\n//\n// All four tensors share the same flat 1D shape; num_elements is\n// variable per workload. Algorithm:\n//   grad_input = grad_output * sigmoid_x * (1 + x * (1 - sigmoid_x))\nvoid run(\n    const torch::Tensor& grad_output,\n    const torch::Tensor& x,\n    const torch::Tensor& sigmoid_x,\n    torch::Tensor grad_input\n) {\n    TORCH_CHECK(grad_output.dim() == 1, \"grad_output must be 1D\");\n    TORCH_CHECK(x.dim() == 1, \"x must be 1D\");\n    TORCH_CHECK(sigmoid_x.dim() == 1, \"sigmoid_x must be 1D\");\n    TORCH_CHECK(grad_input.dim() == 1, \"grad_input must be 1D\");\n\n    const int64_t n = grad_output.numel();\n    TORCH_CHECK(x.numel() == n, \"x must have same numel as grad_output\");\n    TORCH_CHECK(sigmoid_x.numel() == n, \"sigmoid_x must have same numel as grad_output\");\n    TORCH_CHECK(grad_input.numel() == n, \"grad_input must have same numel as grad_output\");\n\n    check_fp32_contiguous_cuda(grad_output, \"grad_output\");\n    check_fp32_contiguous_cuda(x, \"x\");\n    check_fp32_contiguous_cuda(sigmoid_x, \"sigmoid_x\");\n    check_fp32_contiguous_cuda(grad_input, \"grad_input\");\n\n    cudaStream_t stream = at::cuda::getCurrentCUDAStream();\n    problem_084_silu_activation_backward_launcher(\n        grad_output, x, sigmoid_x, grad_input, stream);\n}\n\nPYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {\n    m.def(\n        \"run\", &run,\n        \"FP32 SiLU backward: grad_input = grad_output * sigmoid_x * \"\n        \"(1 + x * (1 - sigmoid_x)). Destination-passing style; \"\n        \"float4-vectorized load/store with scalar tail fallback.\");\n}\n"
+    },
+    {
+      "path": "kernel.cu",
+      "content": "#include \"kernel.h\"\n#include <cuda_runtime.h>\n\n// FP32 SiLU (Swish) backward pass:\n//   grad_input = grad_output * sigmoid_x * (1 + x * (1 - sigmoid_x))\n//\n// All four tensors are flat [num_elements] FP32 row-major. The\n// reference caches `sigmoid_x` from the forward pass so the backward\n// kernel does not need to recompute the sigmoid; the algebraic form\n// above is identical to `d/dx[silu(x)] = sigmoid(x) * (1 + x * (1 -\n// sigmoid(x)))` once the chain rule with the upstream `grad_output`\n// is applied.\n//\n// Streams the three inputs and writes `grad_input` via float4\n// vectorized loads/stores when the element count is a multiple of 4\n// (always true for ATen-allocated CUDA tensors of fp32 with a power-\n// of-2-aligned base; the tail kernel handles any remainder).\n\nnamespace {\n\n__device__ __forceinline__ float silu_backward_elem(\n    float go, float xv, float sx) {\n    return go * sx * (1.0f + xv * (1.0f - sx));\n}\n\n__global__ void problem_084_silu_bwd_vec4_kernel(\n    const float4* __restrict__ grad_output,\n    const float4* __restrict__ x,\n    const float4* __restrict__ sigmoid_x,\n    float4* __restrict__ grad_input,\n    int n_vec4) {\n\n    const int idx = blockIdx.x * blockDim.x + threadIdx.x;\n    if (idx >= n_vec4) {\n        return;\n    }\n    const float4 go = grad_output[idx];\n    const float4 xv = x[idx];\n    const float4 sx = sigmoid_x[idx];\n\n    float4 out;\n    out.x = silu_backward_elem(go.x, xv.x, sx.x);\n    out.y = silu_backward_elem(go.y, xv.y, sx.y);\n    out.z = silu_backward_elem(go.z, xv.z, sx.z);\n    out.w = silu_backward_elem(go.w, xv.w, sx.w);\n    grad_input[idx] = out;\n}\n\n__global__ void problem_084_silu_bwd_tail_kernel(\n    const float* __restrict__ grad_output,\n    const float* __restrict__ x,\n    const float* __restrict__ sigmoid_x,\n    float* __restrict__ grad_input,\n    int tail_start,\n    int total) {\n\n    const int idx = tail_start + blockIdx.x * blockDim.x + threadIdx.x;\n    if (idx >= total) {\n        return;\n    }\n    grad_input[idx] = silu_backward_elem(\n        grad_output[idx], x[idx], sigmoid_x[idx]);\n}\n\n}  // namespace\n\nvoid problem_084_silu_activation_backward_launcher(\n    const torch::Tensor& grad_output,\n    const torch::Tensor& x,\n    const torch::Tensor& sigmoid_x,\n    torch::Tensor& grad_input,\n    cudaStream_t stream) {\n\n    const int total = static_cast<int>(grad_output.numel());\n    const int n_vec4 = total / 4;\n    const int tail_start = n_vec4 * 4;\n\n    constexpr int BLOCK_THREADS = 256;\n\n    if (n_vec4 > 0) {\n        const int grid = (n_vec4 + BLOCK_THREADS - 1) / BLOCK_THREADS;\n        problem_084_silu_bwd_vec4_kernel<<<grid, BLOCK_THREADS, 0, stream>>>(\n            reinterpret_cast<const float4*>(grad_output.data_ptr<float>()),\n            reinterpret_cast<const float4*>(x.data_ptr<float>()),\n            reinterpret_cast<const float4*>(sigmoid_x.data_ptr<float>()),\n            reinterpret_cast<float4*>(grad_input.data_ptr<float>()),\n            n_vec4);\n    }\n    if (tail_start < total) {\n        const int remaining = total - tail_start;\n        const int grid = (remaining + BLOCK_THREADS - 1) / BLOCK_THREADS;\n        problem_084_silu_bwd_tail_kernel<<<grid, BLOCK_THREADS, 0, stream>>>(\n            grad_output.data_ptr<float>(),\n            x.data_ptr<float>(),\n            sigmoid_x.data_ptr<float>(),\n            grad_input.data_ptr<float>(),\n            tail_start,\n            total);\n    }\n}\n"
+    },
+    {
+      "path": "kernel.h",
+      "content": "#pragma once\n\n#ifndef PROBLEM_084_SILU_ACTIVATION_BACKWARD_KERNEL_H\n#define PROBLEM_084_SILU_ACTIVATION_BACKWARD_KERNEL_H\n\n#include <cuda_runtime.h>\n#include <torch/extension.h>\n\n// Host launcher for the FP32 SiLU backward element-wise kernel.\n//\n// Inputs `grad_output`, `x`, `sigmoid_x` are all shape [num_elements]\n// FP32 contiguous; `grad_input` is pre-allocated with the same shape\n// (destination-passing style). Algorithm:\n//\n//   grad_input = grad_output * sigmoid_x * (1 + x * (1 - sigmoid_x))\n//\n// The kernel streams the three inputs once and writes the output\n// once; no shared-memory reductions, no shape coordination.\nvoid problem_084_silu_activation_backward_launcher(\n    const torch::Tensor& grad_output,\n    const torch::Tensor& x,\n    const torch::Tensor& sigmoid_x,\n    torch::Tensor& grad_input,\n    cudaStream_t stream);\n\n#endif  // PROBLEM_084_SILU_ACTIVATION_BACKWARD_KERNEL_H\n"
+    }
+  ]
+}

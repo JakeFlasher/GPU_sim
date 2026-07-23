@@ -1,0 +1,88 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "sm120_multi_claim_closure_registry",
+  "description": "Unified terminal closure registry: exactly one sm_120-host verdict per predictive target (the wall-clock duration predictor plus every cache/memory registry metric), each with a Verified-live-sm_120 proof and cross_arch_precondition false. Each record is recomputed from an already-validated source closure.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "registry_id",
+    "arch",
+    "registry_version",
+    "cross_arch_precondition",
+    "source_artifact_paths",
+    "records",
+    "record_counts",
+    "source_commit"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "registry_id": {"type": "string", "const": "sm120_multi_claim_closure_registry_v1"},
+    "arch": {"type": "string", "const": "sm_120"},
+    "registry_version": {"type": "string", "const": "cache_memory_registry_v1"},
+    "cross_arch_precondition": {"type": "boolean", "const": false},
+    "source_artifact_paths": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["duration_predictor_report", "duration_leg_closure", "l1l2_frozen_grain_closure", "cache_metric_closure"],
+      "properties": {
+        "duration_predictor_report": {"type": "string", "const": "data/local_labels/duration_predictor_report.json"},
+        "duration_leg_closure": {"type": "string", "const": "data/local_labels/sm120_tri_label_engineering_closure.json"},
+        "l1l2_frozen_grain_closure": {"type": "string", "const": "data/local_labels/sm120_l1l2_frozen_grain_engineering_closure.json"},
+        "cache_metric_closure": {"type": "string", "const": "data/local_labels/sm120_cache_metric_closure.json"}
+      }
+    },
+    "records": {
+      "type": "array",
+      "minItems": 23,
+      "maxItems": 23,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["target_id", "kind", "ac_coverage", "verdict", "evidence_artifact_paths", "verified_live_sm120_proof", "success_or_falsification_details", "cross_arch_precondition"],
+        "properties": {
+          "target_id": {"type": "string"},
+          "kind": {"type": "string", "enum": ["duration", "fraction", "count", "ratio"]},
+          "ac_coverage": {
+            "type": "array",
+            "minItems": 1,
+            "items": {"type": "string", "minLength": 1}
+          },
+          "verdict": {"type": "string", "enum": ["research_success", "engineering_closure_refuted", "indeterminate"]},
+          "evidence_artifact_paths": {
+            "type": "array",
+            "minItems": 1,
+            "items": {"type": "string", "minLength": 1}
+          },
+          "verified_live_sm120_proof": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["gpu", "compute_capability", "driver", "cuda", "nvbit", "observed_clocks", "label_source"],
+            "properties": {
+              "gpu": {"type": "string", "minLength": 1},
+              "compute_capability": {"type": "string", "const": "sm_120"},
+              "driver": {"type": "string", "minLength": 1},
+              "cuda": {"type": "string", "minLength": 1},
+              "nvbit": {"type": "string", "minLength": 1},
+              "observed_clocks": {"type": "string", "minLength": 1},
+              "label_source": {"type": "string", "minLength": 1}
+            }
+          },
+          "success_or_falsification_details": {"type": "string", "minLength": 1},
+          "cross_arch_precondition": {"type": "boolean", "const": false}
+        }
+      }
+    },
+    "record_counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["total", "research_success", "engineering_closure_refuted"],
+      "properties": {
+        "total": {"type": "integer", "const": 23},
+        "research_success": {"type": "integer", "minimum": 0},
+        "engineering_closure_refuted": {"type": "integer", "minimum": 0}
+      }
+    },
+    "source_commit": {"type": "string", "pattern": "^[0-9a-f]{7,40}$"}
+  }
+}

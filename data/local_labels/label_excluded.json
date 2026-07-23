@@ -1,0 +1,246 @@
+{
+  "cells": [
+    {
+      "binary_sha256s": [
+        "090beaa48733f0742d599e4c1198667b1c8c14d6eb26dc41aae94023c8aeb845"
+      ],
+      "detail": "cell ('sm_86', 'dram_stream_stride_mix', 'trace_l2_accuracy_xl') L2 stddev 0.16199306157980964 exceeds threshold 0.03.",
+      "device": "sm_86",
+      "n_repeats": 5,
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "dram_stream_stride_mix",
+      "stddev_l1tex_sector": 0.0,
+      "stddev_l2_sector": 0.16199306157980964,
+      "typed_reason": "label_repeatability_failed"
+    },
+    {
+      "binary_sha256s": [
+        "89950e9092cbef0045782365918db570443adfe0c6b8751fc03a33ba3b3daa03"
+      ],
+      "detail": "cell ('sm_86', 'flash_attn_bwd_bf16_sm80', 'timing_shape') L2 stddev 0.0935095289262009 exceeds threshold 0.03.",
+      "device": "sm_86",
+      "n_repeats": 5,
+      "shape_point": "timing_shape",
+      "slug": "flash_attn_bwd_bf16_sm80",
+      "stddev_l1tex_sector": 0.0,
+      "stddev_l2_sector": 0.0935095289262009,
+      "typed_reason": "label_repeatability_failed"
+    },
+    {
+      "binary_sha256s": [
+        "89950e9092cbef0045782365918db570443adfe0c6b8751fc03a33ba3b3daa03",
+        "e47b31f156d98656a659640280e19876cfd9efc50018422cbc8d9129d7b2f661"
+      ],
+      "detail": "cell ('sm_86', 'flash_attn_bwd_bf16_sm80', 'trace_l2_accuracy_lg') has manifests disagreeing on source_commit: ['13777154bbd7f041b68e743f293baabc99ad8c9d', '3c54325f964295b3e890d501cea38fa3d96b7ed7']",
+      "device": "sm_86",
+      "n_repeats": 5,
+      "shape_point": "trace_l2_accuracy_lg",
+      "slug": "flash_attn_bwd_bf16_sm80",
+      "stddev_l1tex_sector": 0.004736216844697888,
+      "stddev_l2_sector": 0.1604397527111034,
+      "typed_reason": "label_provenance_duplicate"
+    },
+    {
+      "binary_sha256s": [
+        "89950e9092cbef0045782365918db570443adfe0c6b8751fc03a33ba3b3daa03"
+      ],
+      "detail": "cell ('sm_86', 'flash_attn_bwd_bf16_sm80', 'trace_l2_accuracy_xl') L2 stddev 0.10259696826178864 exceeds threshold 0.03.",
+      "device": "sm_86",
+      "n_repeats": 5,
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "flash_attn_bwd_bf16_sm80",
+      "stddev_l1tex_sector": 0.0,
+      "stddev_l2_sector": 0.10259696826178864,
+      "typed_reason": "label_repeatability_failed"
+    },
+    {
+      "binary_sha256s": [
+        "f71c2f5cabc89f1eb893c4fd8dadd3fe0426cfaae03b1b4838f6629351b08dbd"
+      ],
+      "detail": "cell ('sm_86', 'flash_attn_fwd_bf16_sm80', 'timing_shape') L2 stddev 0.03625200684100122 exceeds threshold 0.03.",
+      "device": "sm_86",
+      "n_repeats": 5,
+      "shape_point": "timing_shape",
+      "slug": "flash_attn_fwd_bf16_sm80",
+      "stddev_l1tex_sector": 0.0,
+      "stddev_l2_sector": 0.03625200684100122,
+      "typed_reason": "label_repeatability_failed"
+    },
+    {
+      "binary_sha256s": [
+        "45d87043098326e9eb57459ccf88dcb92f14bb0aca92d32e596a7f4c8e4110c5",
+        "f71c2f5cabc89f1eb893c4fd8dadd3fe0426cfaae03b1b4838f6629351b08dbd"
+      ],
+      "detail": "cell ('sm_86', 'flash_attn_fwd_bf16_sm80', 'trace_l2_accuracy_lg') has manifests disagreeing on source_commit: ['13777154bbd7f041b68e743f293baabc99ad8c9d', '3c54325f964295b3e890d501cea38fa3d96b7ed7']",
+      "device": "sm_86",
+      "n_repeats": 5,
+      "shape_point": "trace_l2_accuracy_lg",
+      "slug": "flash_attn_fwd_bf16_sm80",
+      "stddev_l1tex_sector": 0.00015247950681978367,
+      "stddev_l2_sector": 0.04328842801488638,
+      "typed_reason": "label_provenance_duplicate"
+    },
+    {
+      "binary_sha256s": [
+        "f71c2f5cabc89f1eb893c4fd8dadd3fe0426cfaae03b1b4838f6629351b08dbd"
+      ],
+      "detail": "cell ('sm_86', 'flash_attn_fwd_bf16_sm80', 'trace_l2_accuracy_xl') L2 stddev 0.06288523674122572 exceeds threshold 0.03.",
+      "device": "sm_86",
+      "n_repeats": 5,
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "flash_attn_fwd_bf16_sm80",
+      "stddev_l1tex_sector": 0.0,
+      "stddev_l2_sector": 0.06288523674122572,
+      "typed_reason": "label_repeatability_failed"
+    },
+    {
+      "binary_sha256s": [
+        "2a9640ae0db61b64b2aab24fdd8134b208f3ade75622f941112069a0e302004f",
+        "678e939bd0842056cb6e3c3fc585f372f8ec71333c362b05134421ff365397aa"
+      ],
+      "detail": "cell ('sm_86', 'gemm_hmma_bf16_sm80', 'trace_l2_accuracy_lg') has manifests disagreeing on source_commit: ['13777154bbd7f041b68e743f293baabc99ad8c9d', '3c54325f964295b3e890d501cea38fa3d96b7ed7']",
+      "device": "sm_86",
+      "n_repeats": 5,
+      "shape_point": "trace_l2_accuracy_lg",
+      "slug": "gemm_hmma_bf16_sm80",
+      "stddev_l1tex_sector": 0.001232071426500916,
+      "stddev_l2_sector": 0.0027976329280304025,
+      "typed_reason": "label_provenance_duplicate"
+    },
+    {
+      "binary_sha256s": [
+        "1a638194443715e18b8753bfbde32c9be79e2d59be70585b318600e12d7f6b1d",
+        "81bc1671a2858e6b20dd3c0e9928b238cfc79068a7fecc481dacfb1fb4128bb3"
+      ],
+      "detail": "cell ('sm_86', 'gemm_hmma_fp16_sm80', 'trace_l2_accuracy_lg') has manifests disagreeing on source_commit: ['13777154bbd7f041b68e743f293baabc99ad8c9d', '3c54325f964295b3e890d501cea38fa3d96b7ed7']",
+      "device": "sm_86",
+      "n_repeats": 5,
+      "shape_point": "trace_l2_accuracy_lg",
+      "slug": "gemm_hmma_fp16_sm80",
+      "stddev_l1tex_sector": 0.000737733014036923,
+      "stddev_l2_sector": 0.007799807689936978,
+      "typed_reason": "label_provenance_duplicate"
+    },
+    {
+      "binary_sha256s": [
+        "3f1241c4aced4ab211ba20644457c6dc4fa27377dbb757dbded4b2e7b1a5017c",
+        "6cd2cf81121ff58834c36aadf8667764e676aa1cb4fd322788a95ea283cca4f8"
+      ],
+      "detail": "cell ('sm_86', 'gemm_imma_int8_sm80', 'trace_l2_accuracy_lg') has manifests disagreeing on source_commit: ['13777154bbd7f041b68e743f293baabc99ad8c9d', '3c54325f964295b3e890d501cea38fa3d96b7ed7']",
+      "device": "sm_86",
+      "n_repeats": 5,
+      "shape_point": "trace_l2_accuracy_lg",
+      "slug": "gemm_imma_int8_sm80",
+      "stddev_l1tex_sector": 0.0005689903338370845,
+      "stddev_l2_sector": 0.0041965759852527346,
+      "typed_reason": "label_provenance_duplicate"
+    },
+    {
+      "binary_sha256s": [
+        "40a8dab327609ab8c3bd029fe2d48e7816699f1bb1c50e7d661dd51489fd6098"
+      ],
+      "detail": "cell ('sm_86', 'l2_thrash_pointer_chase', 'trace_l2_accuracy_xl') L2 stddev 0.12101926706107585 exceeds threshold 0.03.",
+      "device": "sm_86",
+      "n_repeats": 5,
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "l2_thrash_pointer_chase",
+      "stddev_l1tex_sector": 0.0,
+      "stddev_l2_sector": 0.12101926706107585,
+      "typed_reason": "label_repeatability_failed"
+    },
+    {
+      "binary_sha256s": [
+        "95475bce66e6e5ca22e82bbc454641ee96ad299293605b9f8e32fcb76b452f4d"
+      ],
+      "detail": "cell ('sm_86', 'layernorm_fwd_bf16_sm80', 'timing_shape') L2 stddev 0.05449287109338251 exceeds threshold 0.03.",
+      "device": "sm_86",
+      "n_repeats": 5,
+      "shape_point": "timing_shape",
+      "slug": "layernorm_fwd_bf16_sm80",
+      "stddev_l1tex_sector": 0.002286263326915783,
+      "stddev_l2_sector": 0.05449287109338251,
+      "typed_reason": "label_repeatability_failed"
+    },
+    {
+      "binary_sha256s": [
+        "b6a021ae85ed5a60d0a53a8aa14fa2be62512a2c087cd0616b315e113963be77"
+      ],
+      "detail": "cell ('sm_86', 'register_spill_local_mem', 'trace_l2_accuracy_xl') L2 stddev 0.16804924873381613 exceeds threshold 0.03.",
+      "device": "sm_86",
+      "n_repeats": 5,
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "register_spill_local_mem",
+      "stddev_l1tex_sector": 0.0,
+      "stddev_l2_sector": 0.16804924873381613,
+      "typed_reason": "label_repeatability_failed"
+    },
+    {
+      "binary_sha256s": [
+        "12b290606983bbecb919678c86fffb9a1df3e02bf66afe8487eeef085bfa6551"
+      ],
+      "detail": "cell ('sm_86', 'silu_fwd_bf16_sm80', 'correctness_shape') L2 stddev 0.13197917638779236 exceeds threshold 0.03.",
+      "device": "sm_86",
+      "n_repeats": 5,
+      "shape_point": "correctness_shape",
+      "slug": "silu_fwd_bf16_sm80",
+      "stddev_l1tex_sector": 0.01440704688685367,
+      "stddev_l2_sector": 0.13197917638779236,
+      "typed_reason": "label_repeatability_failed"
+    },
+    {
+      "binary_sha256s": [
+        "eb9b80a6565ce36f38302169a95a171865fe6ed47c1e4a4c85b7f69b7d06b56d",
+        "ef9df6be093061fcdeff373b79601b6090c6a50434af7e53503240a683e6b9d9"
+      ],
+      "detail": "cell ('sm_86', 'swiglu_fwd_bf16_sm80', 'trace_l2_accuracy_lg') has manifests disagreeing on source_commit: ['13777154bbd7f041b68e743f293baabc99ad8c9d', '3c54325f964295b3e890d501cea38fa3d96b7ed7']",
+      "device": "sm_86",
+      "n_repeats": 5,
+      "shape_point": "trace_l2_accuracy_lg",
+      "slug": "swiglu_fwd_bf16_sm80",
+      "stddev_l1tex_sector": 0.0017899022319668731,
+      "stddev_l2_sector": 0.006475781806083349,
+      "typed_reason": "label_provenance_duplicate"
+    },
+    {
+      "binary_sha256s": [
+        "792a4557465ff6b89af9505b6365a1ce53ea02683c042300f749bb52f066b39c"
+      ],
+      "detail": "cell ('sm_86', 'vendor_sgemm_cublas', 'timing_shape') L2 stddev 0.11190073726298681 exceeds threshold 0.03.",
+      "device": "sm_86",
+      "n_repeats": 5,
+      "shape_point": "timing_shape",
+      "slug": "vendor_sgemm_cublas",
+      "stddev_l1tex_sector": 0.0,
+      "stddev_l2_sector": 0.11190073726298681,
+      "typed_reason": "label_repeatability_failed"
+    },
+    {
+      "binary_sha256s": [
+        "57be6f87f583e05bf12436157f8d26daf4f3c3e94cd4605c42a8dc17c4948e8e"
+      ],
+      "detail": "cell ('sm_86', 'vendor_sgemm_strided_batched_cublas', 'timing_shape') L2 stddev 0.04771375063857376 exceeds threshold 0.03.",
+      "device": "sm_86",
+      "n_repeats": 5,
+      "shape_point": "timing_shape",
+      "slug": "vendor_sgemm_strided_batched_cublas",
+      "stddev_l1tex_sector": 0.0,
+      "stddev_l2_sector": 0.04771375063857376,
+      "typed_reason": "label_repeatability_failed"
+    },
+    {
+      "binary_sha256s": [
+        "48acedd5b8267c4d0bfeb6739279b0d61e859504742eb84751ce324458ce0505"
+      ],
+      "detail": "cell ('sm_86', 'int8_imma_gemm_traceable', 'trace_l2_accuracy_xl') canonical-geometry full-matrix re-capture (cache{all,none} x warmup{0,1,5} x 5 repeats, axes --m 32 --n 16 --k 256): no admitting config; best L2 stddev 0.1225 exceeds threshold 0.03. The prior admitted row was a default-geometry (K=64) mislabel captured via bare --shape-point.",
+      "device": "sm_86",
+      "n_repeats": 5,
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "int8_imma_gemm_traceable",
+      "stddev_l1tex_sector": 0.0,
+      "stddev_l2_sector": 0.1225,
+      "typed_reason": "label_repeatability_failed"
+    }
+  ],
+  "cohort_size": 24,
+  "schema_version": 1
+}

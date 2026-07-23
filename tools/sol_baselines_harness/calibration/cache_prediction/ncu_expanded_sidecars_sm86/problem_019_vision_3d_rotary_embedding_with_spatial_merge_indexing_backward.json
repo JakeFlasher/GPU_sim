@@ -1,0 +1,105 @@
+{
+  "argv_clock_policy_flag": "",
+  "argv_provenance": [
+    [
+      "ncu",
+      "--launch-skip",
+      "5",
+      "--launch-count",
+      "1",
+      "--clock-control",
+      "none",
+      "--replay-mode",
+      "kernel",
+      "--section",
+      "MemoryWorkloadAnalysis",
+      "--metrics",
+      "l1tex__t_sector_pipe_lsu_mem_global_op_ld_hit_rate.pct,l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum,l1tex__t_sectors_pipe_lsu_mem_global_op_ld_lookup_hit.sum,lts__t_sectors_srcunit_tex_op_read.sum,lts__t_sectors_srcunit_tex_op_read_lookup_hit.sum",
+      "--csv",
+      "/home/jakeshea/3090ti_5060laptop_cross_study/3090ti_5060laptop_cross_study/solbench_baseline/nvbit_tracer/metric_extractor/tests/calibration_cohort_b/problem_019_vision_3d_rotary_embedding_with_spatial_merge_indexing_backward"
+    ],
+    [
+      "ncu",
+      "--launch-skip",
+      "5",
+      "--launch-count",
+      "1",
+      "--clock-control",
+      "none",
+      "--replay-mode",
+      "kernel",
+      "--section",
+      "MemoryWorkloadAnalysis",
+      "--metrics",
+      "l1tex__t_sector_pipe_lsu_mem_global_op_ld_hit_rate.pct,l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum,l1tex__t_sectors_pipe_lsu_mem_global_op_ld_lookup_hit.sum,lts__t_sectors_srcunit_tex_op_read.sum,lts__t_sectors_srcunit_tex_op_read_lookup_hit.sum",
+      "--csv",
+      "/home/jakeshea/3090ti_5060laptop_cross_study/3090ti_5060laptop_cross_study/solbench_baseline/nvbit_tracer/metric_extractor/tests/calibration_cohort_b/problem_019_vision_3d_rotary_embedding_with_spatial_merge_indexing_backward"
+    ],
+    [
+      "ncu",
+      "--launch-skip",
+      "5",
+      "--launch-count",
+      "1",
+      "--clock-control",
+      "none",
+      "--replay-mode",
+      "kernel",
+      "--section",
+      "MemoryWorkloadAnalysis",
+      "--metrics",
+      "l1tex__t_sector_pipe_lsu_mem_global_op_ld_hit_rate.pct,l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum,l1tex__t_sectors_pipe_lsu_mem_global_op_ld_lookup_hit.sum,lts__t_sectors_srcunit_tex_op_read.sum,lts__t_sectors_srcunit_tex_op_read_lookup_hit.sum",
+      "--csv",
+      "/home/jakeshea/3090ti_5060laptop_cross_study/3090ti_5060laptop_cross_study/solbench_baseline/nvbit_tracer/metric_extractor/tests/calibration_cohort_b/problem_019_vision_3d_rotary_embedding_with_spatial_merge_indexing_backward"
+    ]
+  ],
+  "captured_at_utc": "2026-05-29T21:37:21+00:00",
+  "completed": false,
+  "cv_cap": 0.05,
+  "cv_quarantined": true,
+  "failure_reason": "ncu_repeatability_failed",
+  "language": "cuda_cpp",
+  "launch_skip_count": 5,
+  "ncu_l1_hit_rate_mean": 0.32103333333333334,
+  "ncu_l2_hit_rate_mean": 0.011506305984496744,
+  "ncu_metric_family": [
+    "l1tex__t_sector_pipe_lsu_mem_global_op_ld_hit_rate.pct",
+    "l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum",
+    "l1tex__t_sectors_pipe_lsu_mem_global_op_ld_lookup_hit.sum",
+    "lts__t_sectors_srcunit_tex_op_read.sum",
+    "lts__t_sectors_srcunit_tex_op_read_lookup_hit.sum"
+  ],
+  "no_read_only_traffic": false,
+  "predictor_bucket": "predictor_friendly",
+  "probe_binary_sha256": "864d6d322ac7b1cf1e0a907dd26c7e23da64d4de0d2d9492424be015abe0e3be",
+  "relative_cv_l1": 0.005540160553194463,
+  "relative_cv_l2": 0.21208512220909642,
+  "runs": [
+    {
+      "l1_global_load_hit_rate": 0.319,
+      "l1_global_load_sectors_hit": 1013864,
+      "l1_global_load_sectors_total": 3178496,
+      "l2_read_hit_rate": 0.014228746502869772,
+      "l2_read_sectors_hit": 30800,
+      "l2_read_sectors_total": 2164632
+    },
+    {
+      "l1_global_load_hit_rate": 0.3223,
+      "l1_global_load_sectors_hit": 1024536,
+      "l1_global_load_sectors_total": 3178496,
+      "l2_read_hit_rate": 0.009515497038013705,
+      "l2_read_sectors_hit": 20496,
+      "l2_read_sectors_total": 2153960
+    },
+    {
+      "l1_global_load_hit_rate": 0.3218,
+      "l1_global_load_sectors_hit": 1022700,
+      "l1_global_load_sectors_total": 3178496,
+      "l2_read_hit_rate": 0.01077467441260676,
+      "l2_read_sectors_hit": 23228,
+      "l2_read_sectors_total": 2155796
+    }
+  ],
+  "schema_version": 2,
+  "slug": "problem_019_vision_3d_rotary_embedding_with_spatial_merge_indexing_backward"
+}

@@ -1,0 +1,43 @@
+{
+  "name": "problem_085_geglu_activation_cuda_cpp",
+  "definition": "085_geglu_activation",
+  "author": "sol-baselines-codegen",
+  "spec": {
+    "languages": [
+      "cuda_cpp"
+    ],
+    "target_hardware": [
+      "LOCAL"
+    ],
+    "entry_point": "main.cpp::run",
+    "dependencies": [],
+    "destination_passing_style": true,
+    "binding": "torch",
+    "compile_options": {
+      "cflags": [],
+      "cuda_cflags": [
+        "-O3",
+        "--use_fast_math",
+        "-gencode",
+        "arch=compute_86,code=sm_86"
+      ],
+      "ld_flags": [
+        "-lcuda"
+      ]
+    }
+  },
+  "sources": [
+    {
+      "path": "main.cpp",
+      "content": "#include <torch/extension.h>\n#include <ATen/cuda/CUDAContext.h>\n#include \"kernel.h\"\n#include <string>\n\nstatic void check_fp32_contiguous_cuda(\n    const torch::Tensor& tensor, const std::string& name) {\n    TORCH_CHECK(tensor.is_cuda(), name, \" must be a CUDA tensor\");\n    TORCH_CHECK(\n        tensor.dtype() == torch::kFloat32,\n        name, \" must have float32 dtype, got \", tensor.dtype());\n    TORCH_CHECK(tensor.is_contiguous(), name, \" must be contiguous\");\n}\n\n// Destination-passing-style entry. definition.json declares:\n//   x      : [batch_size, seq_len, inner_dim*2]  fp32\n//   output : [batch_size, seq_len, inner_dim]    fp32 (DPS)\n//\n// inner_dim is constant at 5120 per definition.json; batch_size and\n// seq_len are variable. The last axis of x is split into two equal\n// halves (x_gate, x_linear); output is GELU_tanh(x_gate) * x_linear.\nvoid run(\n    const torch::Tensor& x,\n    torch::Tensor output\n) {\n    TORCH_CHECK(x.dim() == 3, \"x must be 3D [batch, seq, inner_dim*2]\");\n    TORCH_CHECK(output.dim() == 3, \"output must be 3D\");\n\n    const int64_t inner_dim = output.size(2);\n    TORCH_CHECK(\n        inner_dim == 5120,\n        \"inner_dim must be 5120 for problem_085, got \", inner_dim);\n    TORCH_CHECK(\n        x.size(2) == 2 * inner_dim,\n        \"x last dim must be 2*inner_dim=\", 2 * inner_dim,\n        \", got \", x.size(2));\n    TORCH_CHECK(\n        x.size(0) == output.size(0) && x.size(1) == output.size(1),\n        \"x and output must share batch and seq dims\");\n\n    check_fp32_contiguous_cuda(x, \"x\");\n    check_fp32_contiguous_cuda(output, \"output\");\n\n    cudaStream_t stream = at::cuda::getCurrentCUDAStream();\n    problem_085_geglu_activation_launcher(x, output, stream);\n}\n\nPYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {\n    m.def(\n        \"run\", &run,\n        \"FP32 GEGLU activation: GELU_tanh(x_gate) * x_linear. \"\n        \"Destination-passing style; float4-vectorized load/store \"\n        \"along the contiguous last dim.\");\n}\n"
+    },
+    {
+      "path": "kernel.cu",
+      "content": "#include \"kernel.h\"\n#include <cuda_runtime.h>\n\n// FP32 GEGLU (Gated GLU with GELU):\n//   output[..., c] = GELU_tanh(x[..., c]) * x[..., inner_dim + c]\n//\n// GELU tanh approximation:\n//   GELU_tanh(v) = 0.5 * v * (1 + tanh(sqrt(2/pi) * (v + 0.044715 * v^3)))\n//\n// Layout: input x is [B, S, 2*inner_dim] row-major; the gate and\n// linear halves are contiguous regions of each row separated by\n// `inner_dim` fp32 elements. Output is [B, S, inner_dim] row-major.\n//\n// Vectorization: inner_dim is pinned at 5120, which is a multiple of\n// 4, and ATen-allocated CUDA tensors are 16-byte aligned, so float4\n// loads/stores aligned at column offsets of 4 within each row are\n// safe for both the gate half (offset 0 within the row) and the\n// linear half (offset inner_dim within the row). Each thread handles\n// 1 float4 of output (4 consecutive cols within the same row),\n// reading 1 float4 from the gate half and 1 float4 from the linear\n// half at the matching cols.\n//\n// Numerical contract: the reference uses `torch.nn.functional.gelu(\n// x_gate, approximate='tanh')` (FP32). `tanhf` matches the\n// reference's tolerance.\n\nnamespace {\n\nconstexpr int kInnerDim = 5120;\nconstexpr int kInputCols = 2 * kInnerDim;\nconstexpr int kInnerDimVec4 = kInnerDim / 4;     // 1280\nconstexpr int kInputColsVec4 = kInputCols / 4;   // 2560\n\nconstexpr float kSqrt2OverPi = 0.7978845608028654f;\nconstexpr float kCoeff = 0.044715f;\n\n__device__ __forceinline__ float gelu_tanh_approx_f(float x) {\n    float inner = kSqrt2OverPi * (x + kCoeff * x * x * x);\n    return 0.5f * x * (1.0f + tanhf(inner));\n}\n\n// Each thread emits one float4 of output. There are\n// `n_rows * kInnerDimVec4` total output float4s; the thread maps to\n// `(row, col_v4)` via integer division / mod on its global thread\n// index.\n__global__ void problem_085_geglu_vec4_kernel(\n    const float4* __restrict__ x,\n    float4* __restrict__ output,\n    int n_rows) {\n\n    const int idx_v4 = blockIdx.x * blockDim.x + threadIdx.x;\n    const int total_v4 = n_rows * kInnerDimVec4;\n    if (idx_v4 >= total_v4) {\n        return;\n    }\n\n    const int row = idx_v4 / kInnerDimVec4;\n    const int col_v4 = idx_v4 - row * kInnerDimVec4;\n\n    const int gate_v4   = row * kInputColsVec4 + col_v4;\n    const int linear_v4 = gate_v4 + kInnerDimVec4;\n\n    const float4 g = x[gate_v4];\n    const float4 l = x[linear_v4];\n\n    float4 out;\n    out.x = gelu_tanh_approx_f(g.x) * l.x;\n    out.y = gelu_tanh_approx_f(g.y) * l.y;\n    out.z = gelu_tanh_approx_f(g.z) * l.z;\n    out.w = gelu_tanh_approx_f(g.w) * l.w;\n    output[idx_v4] = out;\n}\n\n}  // namespace\n\nvoid problem_085_geglu_activation_launcher(\n    const torch::Tensor& x,\n    torch::Tensor& output,\n    cudaStream_t stream) {\n\n    // x is [B, S, 2*inner_dim] fp32; n_rows = B*S.\n    const int n_rows = static_cast<int>(x.numel() / kInputCols);\n    const int total_v4 = n_rows * kInnerDimVec4;\n\n    constexpr int BLOCK_THREADS = 256;\n    if (total_v4 == 0) {\n        return;\n    }\n    const int grid = (total_v4 + BLOCK_THREADS - 1) / BLOCK_THREADS;\n    problem_085_geglu_vec4_kernel<<<grid, BLOCK_THREADS, 0, stream>>>(\n        reinterpret_cast<const float4*>(x.data_ptr<float>()),\n        reinterpret_cast<float4*>(output.data_ptr<float>()),\n        n_rows);\n}\n"
+    },
+    {
+      "path": "kernel.h",
+      "content": "#pragma once\n\n#ifndef PROBLEM_085_GEGLU_ACTIVATION_KERNEL_H\n#define PROBLEM_085_GEGLU_ACTIVATION_KERNEL_H\n\n#include <cuda_runtime.h>\n#include <torch/extension.h>\n\n// Host launcher for the FP32 GEGLU activation kernel.\n//\n// Input `x` is [batch_size, seq_len, inner_dim*2] FP32 contiguous;\n// `output` is pre-allocated with shape [batch_size, seq_len, inner_dim]\n// (destination-passing style). Algorithm:\n//\n//   x_gate, x_linear = x.chunk(2, dim=-1)\n//   output = GELU_tanh(x_gate) * x_linear\n//\n// inner_dim is pinned at 5120 by the problem definition.\nvoid problem_085_geglu_activation_launcher(\n    const torch::Tensor& x,\n    torch::Tensor& output,\n    cudaStream_t stream);\n\n#endif  // PROBLEM_085_GEGLU_ACTIVATION_KERNEL_H\n"
+    }
+  ]
+}

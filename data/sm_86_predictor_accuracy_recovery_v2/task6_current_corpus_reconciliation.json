@@ -1,0 +1,422 @@
+{
+  "artifact_kind": "task6_current_corpus_reconciliation",
+  "cells": [
+    {
+      "classification": "current_admitted",
+      "excluded_typed_reason": null,
+      "is_cache_shape": true,
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "bf16_hmma_gemm_traceable"
+    },
+    {
+      "classification": "current_admitted",
+      "excluded_typed_reason": null,
+      "is_cache_shape": true,
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "carveout_sensitivity_probe"
+    },
+    {
+      "classification": "missing_from_root",
+      "excluded_typed_reason": null,
+      "is_cache_shape": false,
+      "shape_point": "correctness_shape",
+      "slug": "conv2d_implicit_gemm_bf16_sm80"
+    },
+    {
+      "classification": "current_admitted",
+      "excluded_typed_reason": null,
+      "is_cache_shape": false,
+      "shape_point": "timing_shape",
+      "slug": "conv2d_implicit_gemm_bf16_sm80"
+    },
+    {
+      "classification": "missing_from_root",
+      "excluded_typed_reason": null,
+      "is_cache_shape": true,
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "conv2d_implicit_gemm_bf16_sm80"
+    },
+    {
+      "classification": "current_admitted",
+      "excluded_typed_reason": null,
+      "is_cache_shape": true,
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "cp_async_shared_tile_copy"
+    },
+    {
+      "classification": "current_admitted",
+      "excluded_typed_reason": null,
+      "is_cache_shape": false,
+      "shape_point": "timing_shape",
+      "slug": "cross_entropy_fwd_fp32_sm80"
+    },
+    {
+      "classification": "current_excluded_repeatability_failed",
+      "excluded_typed_reason": "label_repeatability_failed",
+      "is_cache_shape": true,
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "dram_stream_stride_mix"
+    },
+    {
+      "classification": "current_admitted",
+      "excluded_typed_reason": null,
+      "is_cache_shape": true,
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "dram_streaming_dot_product"
+    },
+    {
+      "classification": "current_admitted",
+      "excluded_typed_reason": null,
+      "is_cache_shape": false,
+      "shape_point": "timing_shape",
+      "slug": "embedding_gather_int32_sm80"
+    },
+    {
+      "classification": "missing_from_root",
+      "excluded_typed_reason": null,
+      "is_cache_shape": false,
+      "shape_point": "correctness_shape",
+      "slug": "flash_attn_bwd_bf16_sm80"
+    },
+    {
+      "classification": "current_excluded_repeatability_failed",
+      "excluded_typed_reason": "label_repeatability_failed",
+      "is_cache_shape": false,
+      "shape_point": "timing_shape",
+      "slug": "flash_attn_bwd_bf16_sm80"
+    },
+    {
+      "classification": "current_excluded_repeatability_failed",
+      "excluded_typed_reason": "label_repeatability_failed",
+      "is_cache_shape": true,
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "flash_attn_bwd_bf16_sm80"
+    },
+    {
+      "classification": "missing_from_root",
+      "excluded_typed_reason": null,
+      "is_cache_shape": false,
+      "shape_point": "correctness_shape",
+      "slug": "flash_attn_fwd_bf16_sm80"
+    },
+    {
+      "classification": "current_excluded_repeatability_failed",
+      "excluded_typed_reason": "label_repeatability_failed",
+      "is_cache_shape": false,
+      "shape_point": "timing_shape",
+      "slug": "flash_attn_fwd_bf16_sm80"
+    },
+    {
+      "classification": "current_excluded_repeatability_failed",
+      "excluded_typed_reason": "label_repeatability_failed",
+      "is_cache_shape": true,
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "flash_attn_fwd_bf16_sm80"
+    },
+    {
+      "classification": "current_admitted",
+      "excluded_typed_reason": null,
+      "is_cache_shape": true,
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "fp16_hmma_gemm_traceable"
+    },
+    {
+      "classification": "current_admitted",
+      "excluded_typed_reason": null,
+      "is_cache_shape": true,
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "fp32_fma_dep_chain"
+    },
+    {
+      "classification": "missing_from_root",
+      "excluded_typed_reason": null,
+      "is_cache_shape": false,
+      "shape_point": "correctness_shape",
+      "slug": "gemm_hmma_bf16_sm80"
+    },
+    {
+      "classification": "current_admitted",
+      "excluded_typed_reason": null,
+      "is_cache_shape": false,
+      "shape_point": "timing_shape",
+      "slug": "gemm_hmma_bf16_sm80"
+    },
+    {
+      "classification": "current_admitted",
+      "excluded_typed_reason": null,
+      "is_cache_shape": true,
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "gemm_hmma_bf16_sm80"
+    },
+    {
+      "classification": "missing_from_root",
+      "excluded_typed_reason": null,
+      "is_cache_shape": false,
+      "shape_point": "correctness_shape",
+      "slug": "gemm_hmma_fp16_sm80"
+    },
+    {
+      "classification": "current_admitted",
+      "excluded_typed_reason": null,
+      "is_cache_shape": false,
+      "shape_point": "timing_shape",
+      "slug": "gemm_hmma_fp16_sm80"
+    },
+    {
+      "classification": "current_admitted",
+      "excluded_typed_reason": null,
+      "is_cache_shape": true,
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "gemm_hmma_fp16_sm80"
+    },
+    {
+      "classification": "missing_from_root",
+      "excluded_typed_reason": null,
+      "is_cache_shape": false,
+      "shape_point": "correctness_shape",
+      "slug": "gemm_imma_int8_sm80"
+    },
+    {
+      "classification": "current_admitted",
+      "excluded_typed_reason": null,
+      "is_cache_shape": false,
+      "shape_point": "timing_shape",
+      "slug": "gemm_imma_int8_sm80"
+    },
+    {
+      "classification": "current_admitted",
+      "excluded_typed_reason": null,
+      "is_cache_shape": true,
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "gemm_imma_int8_sm80"
+    },
+    {
+      "classification": "current_admitted",
+      "excluded_typed_reason": null,
+      "is_cache_shape": false,
+      "shape_point": "timing_shape",
+      "slug": "gemm_sparse_2to4_bf16_sm80"
+    },
+    {
+      "classification": "current_admitted",
+      "excluded_typed_reason": null,
+      "is_cache_shape": true,
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "global_atomic_histogram"
+    },
+    {
+      "classification": "current_excluded_repeatability_failed",
+      "excluded_typed_reason": "label_repeatability_failed",
+      "is_cache_shape": true,
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "int8_imma_gemm_traceable"
+    },
+    {
+      "classification": "current_admitted",
+      "excluded_typed_reason": null,
+      "is_cache_shape": true,
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "l2_persisting_window_sweep"
+    },
+    {
+      "classification": "current_admitted",
+      "excluded_typed_reason": null,
+      "is_cache_shape": true,
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "l2_prefetch_hint_sweep"
+    },
+    {
+      "classification": "current_excluded_repeatability_failed",
+      "excluded_typed_reason": "label_repeatability_failed",
+      "is_cache_shape": true,
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "l2_thrash_pointer_chase"
+    },
+    {
+      "classification": "missing_from_root",
+      "excluded_typed_reason": null,
+      "is_cache_shape": false,
+      "shape_point": "correctness_shape",
+      "slug": "layernorm_fwd_bf16_sm80"
+    },
+    {
+      "classification": "current_excluded_repeatability_failed",
+      "excluded_typed_reason": "label_repeatability_failed",
+      "is_cache_shape": false,
+      "shape_point": "timing_shape",
+      "slug": "layernorm_fwd_bf16_sm80"
+    },
+    {
+      "classification": "current_excluded_repeatability_failed",
+      "excluded_typed_reason": "label_repeatability_failed",
+      "is_cache_shape": true,
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "register_spill_local_mem"
+    },
+    {
+      "classification": "current_admitted",
+      "excluded_typed_reason": null,
+      "is_cache_shape": false,
+      "shape_point": "timing_shape",
+      "slug": "rmsnorm_bwd_bf16_sm80"
+    },
+    {
+      "classification": "current_admitted",
+      "excluded_typed_reason": null,
+      "is_cache_shape": true,
+      "shape_point": "trace_00",
+      "slug": "rmsnorm_fwd_bf16"
+    },
+    {
+      "classification": "current_admitted",
+      "excluded_typed_reason": null,
+      "is_cache_shape": false,
+      "shape_point": "timing_shape",
+      "slug": "rmsnorm_fwd_bf16_sm80"
+    },
+    {
+      "classification": "missing_from_root",
+      "excluded_typed_reason": null,
+      "is_cache_shape": true,
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "shared_bank_conflict_stride"
+    },
+    {
+      "classification": "current_admitted",
+      "excluded_typed_reason": null,
+      "is_cache_shape": false,
+      "shape_point": "timing_shape",
+      "slug": "silu_fwd_bf16_sm80"
+    },
+    {
+      "classification": "missing_from_root",
+      "excluded_typed_reason": null,
+      "is_cache_shape": false,
+      "shape_point": "correctness_shape",
+      "slug": "softmax_safe_bf16_sm80"
+    },
+    {
+      "classification": "current_admitted",
+      "excluded_typed_reason": null,
+      "is_cache_shape": false,
+      "shape_point": "timing_shape",
+      "slug": "softmax_safe_bf16_sm80"
+    },
+    {
+      "classification": "current_admitted",
+      "excluded_typed_reason": null,
+      "is_cache_shape": false,
+      "shape_point": "timing_shape",
+      "slug": "swiglu_fwd_bf16_sm80"
+    },
+    {
+      "classification": "current_admitted",
+      "excluded_typed_reason": null,
+      "is_cache_shape": true,
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "tf32_hmma_gemm_traceable"
+    },
+    {
+      "classification": "current_excluded_repeatability_failed",
+      "excluded_typed_reason": "label_repeatability_failed",
+      "is_cache_shape": false,
+      "shape_point": "timing_shape",
+      "slug": "vendor_sgemm_cublas"
+    },
+    {
+      "classification": "current_admitted",
+      "excluded_typed_reason": null,
+      "is_cache_shape": true,
+      "shape_point": "trace_00",
+      "slug": "vendor_sgemm_strided_batched_cublas"
+    },
+    {
+      "classification": "current_admitted",
+      "excluded_typed_reason": null,
+      "is_cache_shape": true,
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "warm_cold_pair_relaunch"
+    },
+    {
+      "classification": "current_admitted",
+      "excluded_typed_reason": null,
+      "is_cache_shape": true,
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "working_set_capacity_sweep"
+    }
+  ],
+  "classification_counts": {
+    "current_admitted": 29,
+    "current_excluded_repeatability_failed": 10,
+    "missing_from_root": 10
+  },
+  "current_admitted_base_count": 40,
+  "recapturable_cache_cell_count": 8,
+  "recapturable_cache_cells": [
+    {
+      "classification": "missing_from_root",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "conv2d_implicit_gemm_bf16_sm80"
+    },
+    {
+      "classification": "current_excluded_repeatability_failed",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "dram_stream_stride_mix"
+    },
+    {
+      "classification": "current_excluded_repeatability_failed",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "flash_attn_bwd_bf16_sm80"
+    },
+    {
+      "classification": "current_excluded_repeatability_failed",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "flash_attn_fwd_bf16_sm80"
+    },
+    {
+      "classification": "current_excluded_repeatability_failed",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "int8_imma_gemm_traceable"
+    },
+    {
+      "classification": "current_excluded_repeatability_failed",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "l2_thrash_pointer_chase"
+    },
+    {
+      "classification": "current_excluded_repeatability_failed",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "register_spill_local_mem"
+    },
+    {
+      "classification": "missing_from_root",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "shared_bank_conflict_stride"
+    }
+  ],
+  "register_cap_variant_count": 4,
+  "register_cap_variants": [
+    {
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "register_spill_local_mem",
+      "variant_id": "register_cap_24"
+    },
+    {
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "register_spill_local_mem",
+      "variant_id": "register_cap_255"
+    },
+    {
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "register_spill_local_mem",
+      "variant_id": "register_cap_32"
+    },
+    {
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "register_spill_local_mem",
+      "variant_id": "register_cap_64"
+    }
+  ],
+  "schema_version": 1,
+  "task6_cell_count": 49
+}

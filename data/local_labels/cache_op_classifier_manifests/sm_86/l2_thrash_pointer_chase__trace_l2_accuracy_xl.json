@@ -1,0 +1,250 @@
+{
+  "arch_token": "sm_86",
+  "binary_path": "workloads/simbench_bw/l1/l2_thrash_pointer_chase/l2_thrash_pointer_chase_run",
+  "binary_source": "live_cuobjdump",
+  "kernel_mangled_name": "l2_thrash_pointer_chase_kernel",
+  "per_pc_instruction_cache_op": [
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x2c0",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x430",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x510",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x5f0",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x840",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0xae0",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0xbb0",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0xbd0",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0xbf0",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0xc00",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x2d0",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x440",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x520",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x600",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x860",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0xb20",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0xbe0",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0xc00",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0xc20",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0xc30",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x2c0",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x440",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x520",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x600",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x6e0",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x7c0",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x8a0",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x980",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0xc70",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0xd50",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0xe30",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0xf10",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x1160",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x1240",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x1440",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x1720",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x17f0",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x1820",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x1840",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x1850",
+      "raw_mnemonic": "LDG.E"
+    }
+  ],
+  "sass_provenance_status": "matched",
+  "schema_version": 1
+}

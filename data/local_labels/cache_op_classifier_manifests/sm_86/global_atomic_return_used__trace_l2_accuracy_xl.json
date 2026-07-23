@@ -1,0 +1,184 @@
+{
+  "arch_token": "sm_86",
+  "binary_path": "workloads/simbench_bw/l1/global_atomic_return_used/global_atomic_return_used_run",
+  "binary_source": "live_cuobjdump",
+  "kernel_mangled_name": "global_atomic_return_used_kernel",
+  "per_pc_instruction_cache_op": [
+    {
+      "instruction_cache_op": "ATOM",
+      "l1_eligible": false,
+      "pc": "0x240",
+      "raw_mnemonic": "ATOMG"
+    },
+    {
+      "instruction_cache_op": "ATOM",
+      "l1_eligible": false,
+      "pc": "0x360",
+      "raw_mnemonic": "ATOMG"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x790",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x860",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x880",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x8a0",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x8b0",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "ATOM",
+      "l1_eligible": false,
+      "pc": "0x230",
+      "raw_mnemonic": "ATOMG"
+    },
+    {
+      "instruction_cache_op": "ATOM",
+      "l1_eligible": false,
+      "pc": "0x330",
+      "raw_mnemonic": "ATOMG"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x780",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x840",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x860",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x880",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x890",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "ATOM",
+      "l1_eligible": false,
+      "pc": "0x610",
+      "raw_mnemonic": "ATOMG"
+    },
+    {
+      "instruction_cache_op": "ATOM",
+      "l1_eligible": false,
+      "pc": "0x630",
+      "raw_mnemonic": "ATOMG"
+    },
+    {
+      "instruction_cache_op": "ATOM",
+      "l1_eligible": false,
+      "pc": "0x650",
+      "raw_mnemonic": "ATOMG"
+    },
+    {
+      "instruction_cache_op": "ATOM",
+      "l1_eligible": false,
+      "pc": "0x660",
+      "raw_mnemonic": "ATOMG"
+    },
+    {
+      "instruction_cache_op": "ATOM",
+      "l1_eligible": false,
+      "pc": "0x8e0",
+      "raw_mnemonic": "ATOMG"
+    },
+    {
+      "instruction_cache_op": "ATOM",
+      "l1_eligible": false,
+      "pc": "0xc20",
+      "raw_mnemonic": "ATOMG"
+    },
+    {
+      "instruction_cache_op": "ATOM",
+      "l1_eligible": false,
+      "pc": "0xd40",
+      "raw_mnemonic": "ATOMG"
+    },
+    {
+      "instruction_cache_op": "ATOM",
+      "l1_eligible": false,
+      "pc": "0xd50",
+      "raw_mnemonic": "ATOMG"
+    },
+    {
+      "instruction_cache_op": "ATOM",
+      "l1_eligible": false,
+      "pc": "0xd60",
+      "raw_mnemonic": "ATOMG"
+    },
+    {
+      "instruction_cache_op": "ATOM",
+      "l1_eligible": false,
+      "pc": "0xd70",
+      "raw_mnemonic": "ATOMG"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x1280",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x1350",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x1380",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x13a0",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x13b0",
+      "raw_mnemonic": "LDG.E"
+    }
+  ],
+  "sass_provenance_status": "matched",
+  "schema_version": 1
+}

@@ -1,0 +1,253 @@
+{
+  "calibration_head_version": 4,
+  "calibrator_libraries": {
+    "beta": {
+      "library_id": "stdlib_handrolled",
+      "stdlib_only": true
+    },
+    "isotonic": {
+      "library_id": "sklearn",
+      "version": "1.8.0"
+    },
+    "platt": {
+      "library_id": "stdlib_handrolled",
+      "stdlib_only": true
+    }
+  },
+  "chosen_head": "PlattCalibrator",
+  "chosen_head_parameters": {
+    "A": 7.989973183885253,
+    "B": -5.970678348539345
+  },
+  "comparison_contract_sha256": "7bb5eb9d9e3ca4f517f1c3290e5a688e59674a614ff019fad7d6ebb45f864dcf",
+  "schema_version": 1,
+  "source_commit": "656e474a287e9d903466c23a56a40da34c16efc6",
+  "target_arch": "sm_120",
+  "trained_head_sha256": "5b8dfc281d4f09f658a1dc1fdecf4defa6249b55b845ac61e0f2336b7d82a999",
+  "training_cells": [
+    {
+      "arch": "sm_120",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "carveout_sensitivity_probe"
+    },
+    {
+      "arch": "sm_120",
+      "shape_point": "correctness_shape",
+      "slug": "cross_entropy_fwd_fp32_sm80"
+    },
+    {
+      "arch": "sm_120",
+      "shape_point": "timing_shape",
+      "slug": "flash_attn_fwd_bf16_sm80"
+    },
+    {
+      "arch": "sm_120",
+      "shape_point": "timing_shape",
+      "slug": "gemm_hmma_bf16_sm80"
+    },
+    {
+      "arch": "sm_120",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "gemm_hmma_bf16_sm80"
+    },
+    {
+      "arch": "sm_120",
+      "shape_point": "timing_shape",
+      "slug": "gemm_hmma_fp16_sm80"
+    },
+    {
+      "arch": "sm_120",
+      "shape_point": "timing_shape",
+      "slug": "gemm_imma_int8_sm80"
+    },
+    {
+      "arch": "sm_120",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "l2_persisting_window_sweep"
+    },
+    {
+      "arch": "sm_120",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "l2_prefetch_hint_sweep"
+    },
+    {
+      "arch": "sm_120",
+      "shape_point": "timing_shape",
+      "slug": "layernorm_fwd_bf16_sm80"
+    },
+    {
+      "arch": "sm_120",
+      "shape_point": "timing_shape",
+      "slug": "rmsnorm_fwd_bf16_sm80"
+    },
+    {
+      "arch": "sm_120",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "rmsnorm_fwd_bf16_sm80"
+    },
+    {
+      "arch": "sm_120",
+      "shape_point": "timing_shape",
+      "slug": "softmax_safe_bf16_sm80"
+    },
+    {
+      "arch": "sm_120",
+      "shape_point": "timing_shape",
+      "slug": "swiglu_fwd_bf16_sm80"
+    },
+    {
+      "arch": "sm_120",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "working_set_capacity_sweep"
+    }
+  ],
+  "training_cohort_size": 15,
+  "training_pair_count": 13,
+  "training_rows": [
+    {
+      "arch": "sm_120",
+      "binary_sha256": "d41b20f5a9eb5990587c14a235389ffd9b04dcf1fbd2c77b064518e6ffc3c458",
+      "kernel_signature_sha256": "4585d912ad82ae86356fa7d64c2782fc6948e8acc97cc30947abfc4633840f6d",
+      "label": 0.97240093,
+      "ncu_metric_version": "ncu_2026.1.x",
+      "predicted": 0.99666959468368,
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "carveout_sensitivity_probe",
+      "source_commit": "b6372fddd6078896b831cbecc0cf1be8724c2ecb"
+    },
+    {
+      "arch": "sm_120",
+      "binary_sha256": "924a6b3e919ad8658099f245f40ac3c1749939441e77a20b0c3d452c01ceb469",
+      "kernel_signature_sha256": "9002820601c6d1724a0382d66385e6f5bbdff64a0f14fae694255aa255d2ece2",
+      "label": 0.61188,
+      "ncu_metric_version": "ncu_2026.1.x",
+      "predicted": 0.9372586872586872,
+      "shape_point": "correctness_shape",
+      "slug": "cross_entropy_fwd_fp32_sm80",
+      "source_commit": "7d5a3979ae26add1a09ff5cc7085e8674610d108"
+    },
+    {
+      "arch": "sm_120",
+      "binary_sha256": "3c83f07a3a5b9b0af2f1d8bc3344061da04a63f2da5e735d6b879ec1013f7845",
+      "kernel_signature_sha256": "3971b46d4d2eb9a475d5998f2ac661841bdbfe91499f9255499d89d5b75cf734",
+      "label": 0.9936799999999999,
+      "ncu_metric_version": "ncu_2026.1.x",
+      "predicted": 0.9375,
+      "shape_point": "timing_shape",
+      "slug": "flash_attn_fwd_bf16_sm80",
+      "source_commit": "412867fdafbb113b74f570317104ce26924595b6"
+    },
+    {
+      "arch": "sm_120",
+      "binary_sha256": "6b34ab25197db484dbe488fa344e8d7c294216d1b0a32cf377d0aa62e8bcce90",
+      "kernel_signature_sha256": "9d6646ab084678ddf0524cb8ab03af4fa8a3d4e4d652010442a6f9f6a915e2a4",
+      "label": 0.9190600000000001,
+      "ncu_metric_version": "ncu_2026.1.x",
+      "predicted": 0.875,
+      "shape_point": "timing_shape",
+      "slug": "gemm_hmma_bf16_sm80",
+      "source_commit": "7d5a3979ae26add1a09ff5cc7085e8674610d108"
+    },
+    {
+      "arch": "sm_120",
+      "binary_sha256": "6b34ab25197db484dbe488fa344e8d7c294216d1b0a32cf377d0aa62e8bcce90",
+      "kernel_signature_sha256": "9d6646ab084678ddf0524cb8ab03af4fa8a3d4e4d652010442a6f9f6a915e2a4",
+      "label": 0.9213800000000001,
+      "ncu_metric_version": "ncu_2026.1.x",
+      "predicted": 0.875,
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "gemm_hmma_bf16_sm80",
+      "source_commit": "17d02488d53a014544fda2ea0fdd0127e8e62d7b"
+    },
+    {
+      "arch": "sm_120",
+      "binary_sha256": "cf09ee4a4cc16b7d07e11dead8145fec643e2ff5c103d2d6a76779af3ac9b966",
+      "kernel_signature_sha256": "a751169dc1fed77df7b80a2bd2e30b34c416f4f8d67325033045e27c7224bea7",
+      "label": 0.9983,
+      "ncu_metric_version": "ncu_2026.1.x",
+      "predicted": 0.875,
+      "shape_point": "timing_shape",
+      "slug": "gemm_hmma_fp16_sm80",
+      "source_commit": "412867fdafbb113b74f570317104ce26924595b6"
+    },
+    {
+      "arch": "sm_120",
+      "binary_sha256": "f6134d91285b5d153bedddf959b2aa90112c2a78e3ae48d0866671427a385956",
+      "kernel_signature_sha256": "612476892630fc2fdc2209e7f6a93cf82c7ef460fd8ce93f0b8148b8fc192b04",
+      "label": 0.99834,
+      "ncu_metric_version": "ncu_2026.1.x",
+      "predicted": 0.875,
+      "shape_point": "timing_shape",
+      "slug": "gemm_imma_int8_sm80",
+      "source_commit": "412867fdafbb113b74f570317104ce26924595b6"
+    },
+    {
+      "arch": "sm_120",
+      "binary_sha256": "b6f284c004555bccbdb9a1da1d479bdf2a449ebf88a371b767b0c8dab8de8305",
+      "kernel_signature_sha256": "30baaa0f6d6054d23fe69560cb76c4f54a907f9bc94fa89d9fc7fc4daf32dbc7",
+      "label": 0.96592,
+      "ncu_metric_version": "ncu_2026.1.x",
+      "predicted": 0.9926466776756688,
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "l2_prefetch_hint_sweep",
+      "source_commit": "b6372fddd6078896b831cbecc0cf1be8724c2ecb"
+    },
+    {
+      "arch": "sm_120",
+      "binary_sha256": "cb2ec7a8ae5763fbc47ff5deb9f4aab970ebf1239468067b51737ce655348b5d",
+      "kernel_signature_sha256": "4e67133229c83d42c23af358bc313cc3e9d8f4746c817bc2cb237c45ec86c3ce",
+      "label": 0.44848,
+      "ncu_metric_version": "ncu_2026.1.x",
+      "predicted": 0.85765625,
+      "shape_point": "timing_shape",
+      "slug": "layernorm_fwd_bf16_sm80",
+      "source_commit": "1cb21ef6282102c0f5106cf3ab620d7b98294978"
+    },
+    {
+      "arch": "sm_120",
+      "binary_sha256": "a14ef57357134ff031ee8f5da7822e7399bdbca60881eae4b4725aaa798d3371",
+      "kernel_signature_sha256": "7848654da87ddb65a3469a248bb5572f936b4650fefbb1d22aaa25f24aa6cbe2",
+      "label": 0.374,
+      "ncu_metric_version": "ncu_2026.1.x",
+      "predicted": 0.6876391601562499,
+      "shape_point": "timing_shape",
+      "slug": "rmsnorm_fwd_bf16_sm80",
+      "source_commit": "1cb21ef6282102c0f5106cf3ab620d7b98294978"
+    },
+    {
+      "arch": "sm_120",
+      "binary_sha256": "a14ef57357134ff031ee8f5da7822e7399bdbca60881eae4b4725aaa798d3371",
+      "kernel_signature_sha256": "14b74a166bd42dbd7e144798f5c2e8bdde8f1dba2224f4c08acadcfe00e1f63c",
+      "label": 0.32298000000000004,
+      "ncu_metric_version": "ncu_2026.1.x",
+      "predicted": 0.6876391601562499,
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "rmsnorm_fwd_bf16_sm80",
+      "source_commit": "19feef1b08b437814f06f940818763494b498202"
+    },
+    {
+      "arch": "sm_120",
+      "binary_sha256": "4f85c8a402121057c7a6d2f8de1614cf0a41c795d8030be5f21fdf944dcd7eae",
+      "kernel_signature_sha256": "dc75edc616c84481008a935794005890d51160f8eafe175a1e530098b3be3e43",
+      "label": 0.18045999999999998,
+      "ncu_metric_version": "ncu_2026.1.x",
+      "predicted": 0.575,
+      "shape_point": "timing_shape",
+      "slug": "softmax_safe_bf16_sm80",
+      "source_commit": "1cb21ef6282102c0f5106cf3ab620d7b98294978"
+    },
+    {
+      "arch": "sm_120",
+      "binary_sha256": "9a5cb056923492736913f128d0f6e6dc2e50946fb427efa1145fce8da7f9d3eb",
+      "kernel_signature_sha256": "f3486aec4ba945d91798499ceb42c06aa306b265734a08daef38cd62755dd4a5",
+      "label": 0.12634,
+      "ncu_metric_version": "ncu_2026.1.x",
+      "predicted": 0.9375,
+      "shape_point": "timing_shape",
+      "slug": "swiglu_fwd_bf16_sm80",
+      "source_commit": "19feef1b08b437814f06f940818763494b498202"
+    }
+  ],
+  "training_timestamp": "2026-05-27T04:46:42Z",
+  "training_typed_unavailable_count": 2
+}

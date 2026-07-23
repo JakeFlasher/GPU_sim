@@ -1,0 +1,150 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "simbench_bw/schemas/dual_run_manifest.schema.json",
+  "title": "Paired CUPTI-run + NVBit-run manifest",
+  "description": "Closed-object schema for a `dual_run_manifest.json` recording the pairing between a CUPTI-Activity timing run and a NVBit-instrumented trace run on the same kernel set. The dual-run protocol exists because NVBit instrumentation (LD_PRELOAD + CUDA_INJECTION64_PATH) and the CUPTI Activity collector cannot share a process — both attach to the CUDA driver in mutually-exclusive ways per the project's NVBit injection playbook (`tools/nvbit_tracer/README.md`). The two runs are therefore executed back-to-back against bit-identical kernel binaries, and the join layer uses this manifest to match per-launch records across the two runs by `launch_match_key`. Pairs whose per-launch NVML state diverges by more than `drift_tolerance_ns` are excluded from downstream metric and gate consumers with a typed `dual_run_drift_exceeded` diagnostic.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "cupti_run_id",
+    "nvbit_run_id",
+    "drift_tolerance_ns",
+    "binary_sha256",
+    "preflight_manifest_sha256",
+    "launches",
+    "claim_scope"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Manifest schema version."
+    },
+    "cupti_run_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{8,64}$",
+      "description": "Stable identifier for the CUPTI-Activity timing run. Generated at run start by `run_suite.py --mode timing` and recorded in the run's measurement manifest. The join layer rejects manifests whose `cupti_run_id` is not present in any committed CUPTI-side measurement manifest with a typed `dual_run_manifest_ambiguous` diagnostic."
+    },
+    "nvbit_run_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{8,64}$",
+      "description": "Stable identifier for the NVBit-instrumented trace run. Generated at run start by `run_suite.py --mode trace` and recorded in the run's measurement manifest."
+    },
+    "drift_tolerance_ns": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Maximum tolerated divergence in NVML state between the two runs at a per-launch boundary, in nanoseconds. The default is registered in the pre-registration TOML; this field carries the value actually applied for reproducibility. The join layer rejects per-launch pairs whose `(cupti_run_nvml_state, nvbit_run_nvml_state)` differ by more than this threshold (interpretation: see `nvml_state_divergence` definition in `canonical_serialization_spec.md`)."
+    },
+    "binary_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "SHA-256 of the kernel runner binary used by BOTH runs. Required to be identical across the CUPTI run and the NVBit run; if the two runs used different binaries, the manifest is invalid and emits `dual_run_manifest_binary_sha256_disagreement`."
+    },
+    "preflight_manifest_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "SHA-256 of the preflight manifest both runs anchored against. Required to be identical across the two runs."
+    },
+    "launches": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/per_launch_pair" },
+      "description": "Per-launch pair records. Each record describes a (kernel, shape_point, repeat_index, launch_index) tuple that is matched between the two runs by `launch_match_key`."
+    },
+    "claim_scope": {
+      "$ref": "#/$defs/claim_scope_enum",
+      "description": "Claim-scope label for any downstream artifact that consumes this manifest. Local single-die measurement always uses `measured_local`; cross-die transfer claims use `methodology_transfer_only` or `deferred` per the closure plan's cross-die discipline."
+    }
+  },
+  "$defs": {
+    "claim_scope_enum": {
+      "type": "string",
+      "enum": ["measured_local", "methodology_transfer_only", "deferred"],
+      "description": "Cross-die claim-scope label per the closure plan's cross-die discipline acceptance criterion. `measured_local` denotes a claim grounded in observations on the local single die. `methodology_transfer_only` denotes a claim that uses local methodology applied to a die where no measurements are recorded; the consumer must accompany such claims with an explicit transfer-methodology citation. `deferred` denotes that the cross-die measurement is not yet collected."
+    },
+    "per_launch_pair": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "launch_match_key",
+        "cupti_run_nvml_state",
+        "nvbit_run_nvml_state"
+      ],
+      "properties": {
+        "launch_match_key": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "slug",
+            "shape_point",
+            "repeat_index",
+            "launch_index",
+            "kernel_signature_sha256"
+          ],
+          "properties": {
+            "slug": {
+              "type": "string",
+              "pattern": "^[a-z][a-z0-9_]*$",
+              "description": "SimBench-BW kernel slug; matches roster.toml conventions."
+            },
+            "shape_point": {
+              "type": "string",
+              "minLength": 1,
+              "description": "Shape-point identifier; the same value appears in both runs' per-launch sidecars for this pair."
+            },
+            "repeat_index": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "launch_index": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "kernel_signature_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$",
+              "description": "SHA-256 over the canonical kernel-signature inputs (see `kernel_signature.spec.md`). Required to be byte-identical between the CUPTI sidecar and the NVBit summary for the pair to be admissible."
+            }
+          },
+          "description": "Natural-key tuple by which the join layer matches this pair across the two runs."
+        },
+        "cupti_run_nvml_state": {
+          "$ref": "#/$defs/nvml_state_at_launch"
+        },
+        "nvbit_run_nvml_state": {
+          "$ref": "#/$defs/nvml_state_at_launch"
+        }
+      }
+    },
+    "nvml_state_at_launch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sm_clock_mhz",
+        "mem_clock_mhz",
+        "temp_c",
+        "power_mw",
+        "throttle_reasons_bitmask",
+        "sample_timestamp_ns_host_monotonic"
+      ],
+      "properties": {
+        "sm_clock_mhz": { "type": "integer", "minimum": 0 },
+        "mem_clock_mhz": { "type": "integer", "minimum": 0 },
+        "temp_c": { "type": "number" },
+        "power_mw": { "type": "integer", "minimum": 0 },
+        "throttle_reasons_bitmask": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "NVML clocks-throttle-reasons bitmask captured at the launch boundary. Bits unset means no throttling reason is currently active."
+        },
+        "sample_timestamp_ns_host_monotonic": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Host-monotonic timestamp of the NVML sample, nanoseconds. Same clock domain as CUPTI Activity per-launch start_ns / end_ns when CLOCK_MONOTONIC is the configured CUPTI activity timestamp clock."
+        }
+      },
+      "description": "NVML covariate snapshot at the launch boundary of one run, used to detect drift between the CUPTI run and the NVBit run."
+    }
+  }
+}

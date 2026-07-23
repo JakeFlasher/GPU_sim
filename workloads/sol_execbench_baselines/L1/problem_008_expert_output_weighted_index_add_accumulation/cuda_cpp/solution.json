@@ -1,0 +1,44 @@
+{
+  "name": "problem_008_expert_output_weighted_index_add_accumulation_cuda_cpp",
+  "definition": "008_expert_output_weighted_index_add_accumulation",
+  "author": "sol-baselines-codegen",
+  "description": "MoE atomic accumulation: copy final_hidden_states into output then atomicAdd expert_outputs[i] into output[token_indices[i]] across hidden lanes. hidden_size=3072 pinned. bf16 atomicAdd on sm_80+. Destination-passing style.",
+  "spec": {
+    "languages": [
+      "cuda_cpp"
+    ],
+    "target_hardware": [
+      "LOCAL"
+    ],
+    "entry_point": "main.cpp::run",
+    "dependencies": [],
+    "destination_passing_style": true,
+    "binding": "torch",
+    "compile_options": {
+      "cflags": [],
+      "cuda_cflags": [
+        "-O3",
+        "--use_fast_math",
+        "-gencode",
+        "arch=compute_86,code=sm_86"
+      ],
+      "ld_flags": [
+        "-lcuda"
+      ]
+    }
+  },
+  "sources": [
+    {
+      "path": "main.cpp",
+      "content": "#include <torch/extension.h>\n#include <ATen/cuda/CUDAContext.h>\n#include \"kernel.h\"\n\n// Destination-passing-style entry. Per definition.json:\n//   final_hidden_states: [batch_seq_len, 3072] bf16\n//   expert_outputs:      [num_selected_tokens, 3072] bf16\n//   token_indices:       [num_selected_tokens] int64\n//   output (DPS):        [batch_seq_len, 3072] bf16\n// hidden_size is pinned at 3072.\n\nvoid run(\n    torch::Tensor final_hidden_states,\n    torch::Tensor expert_outputs,\n    torch::Tensor token_indices,\n    torch::Tensor output) {\n\n    TORCH_CHECK(final_hidden_states.is_cuda(),\n                \"final_hidden_states must be CUDA\");\n    TORCH_CHECK(expert_outputs.is_cuda(),\n                \"expert_outputs must be CUDA\");\n    TORCH_CHECK(token_indices.is_cuda(),\n                \"token_indices must be CUDA\");\n    TORCH_CHECK(output.is_cuda(), \"output must be CUDA\");\n\n    TORCH_CHECK(\n        final_hidden_states.dtype() == torch::kBFloat16,\n        \"final_hidden_states must be bfloat16\");\n    TORCH_CHECK(\n        expert_outputs.dtype() == torch::kBFloat16,\n        \"expert_outputs must be bfloat16\");\n    TORCH_CHECK(\n        token_indices.dtype() == torch::kInt64,\n        \"token_indices must be int64\");\n    TORCH_CHECK(\n        output.dtype() == torch::kBFloat16,\n        \"output must be bfloat16\");\n\n    TORCH_CHECK(final_hidden_states.is_contiguous() &&\n                expert_outputs.is_contiguous() &&\n                token_indices.is_contiguous() &&\n                output.is_contiguous(),\n                \"all tensors must be contiguous\");\n\n    TORCH_CHECK(final_hidden_states.dim() == 2,\n                \"final_hidden_states must be 2D\");\n    TORCH_CHECK(expert_outputs.dim() == 2,\n                \"expert_outputs must be 2D\");\n    TORCH_CHECK(output.dim() == 2, \"output must be 2D\");\n    TORCH_CHECK(\n        final_hidden_states.size(1) == 3072,\n        \"hidden_size must be 3072\");\n    TORCH_CHECK(\n        expert_outputs.size(1) == 3072,\n        \"expert_outputs last dim must be 3072\");\n    TORCH_CHECK(\n        token_indices.size(0) == expert_outputs.size(0),\n        \"token_indices length must equal num_selected_tokens\");\n    TORCH_CHECK(\n        output.size(0) == final_hidden_states.size(0) &&\n        output.size(1) == final_hidden_states.size(1),\n        \"output must match final_hidden_states shape\");\n\n    cudaStream_t stream = at::cuda::getCurrentCUDAStream();\n    problem_008_expert_output_weighted_index_add_accumulation_launcher(\n        final_hidden_states,\n        expert_outputs,\n        token_indices,\n        output,\n        stream);\n}\n\nPYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {\n    m.def(\n        \"run\", &run,\n        \"MoE expert-output atomic scatter-add accumulation. Phase 1 \"\n        \"memcpy final_hidden_states \u2192 output, Phase 2 atomic bf16 \"\n        \"scatter-add over (num_selected_tokens, hidden_size). \"\n        \"Destination-passing style.\");\n}\n"
+    },
+    {
+      "path": "kernel.cu",
+      "content": "#include \"kernel.h\"\n#include <cuda_bf16.h>\n#include <cuda_runtime.h>\n\n// Two-phase MoE accumulation:\n//   Phase 1: copy final_hidden_states \u2192 output (cudaMemcpyAsync on the\n//            current stream).\n//   Phase 2: for each (selected_token_idx i, hidden lane h):\n//              atomicAdd(&output[token_indices[i] * H + h],\n//                        expert_outputs[i * H + h])\n//\n// hidden_size=3072 is pinned by the problem definition. We tile the\n// hidden axis across blockDim.x and use a 2D grid (selected_tokens,\n// H_tiles). atomicAdd on `__nv_bfloat16` is available on compute\n// capability >= 8.0 (sm_80+), which covers both the local 3090 Ti\n// (sm_86) and the Phase-2 B200 (sm_100a) target.\n\nnamespace {\n\nconstexpr int HIDDEN_SIZE = 3072;\nconstexpr int BLOCK_THREADS = 256;\n\n__global__ void __launch_bounds__(BLOCK_THREADS, 8)\nindex_add_kernel(\n    const __nv_bfloat16* __restrict__ expert_outputs,\n    const long* __restrict__ token_indices,\n    __nv_bfloat16* __restrict__ output,\n    int num_selected) {\n\n    const int sel = blockIdx.x;\n    if (sel >= num_selected) return;\n\n    const int h_base = blockIdx.y * BLOCK_THREADS + threadIdx.x;\n    if (h_base >= HIDDEN_SIZE) return;\n\n    const long tok = token_indices[sel];\n    const long src_off = static_cast<long>(sel) * HIDDEN_SIZE + h_base;\n    const long dst_off = tok * HIDDEN_SIZE + h_base;\n\n    const __nv_bfloat16 v = expert_outputs[src_off];\n    atomicAdd(output + dst_off, v);\n}\n\n}  // namespace\n\nvoid problem_008_expert_output_weighted_index_add_accumulation_launcher(\n    const torch::Tensor& final_hidden_states,\n    const torch::Tensor& expert_outputs,\n    const torch::Tensor& token_indices,\n    torch::Tensor& output,\n    cudaStream_t stream) {\n\n    const int batch_seq_len = static_cast<int>(final_hidden_states.size(0));\n    const int H = static_cast<int>(final_hidden_states.size(1));\n    const int num_selected = static_cast<int>(expert_outputs.size(0));\n    (void)H;  // pinned at HIDDEN_SIZE; checked in main.cpp\n\n    // Phase 1: byte-exact copy of the accumulation buffer into output.\n    cudaMemcpyAsync(\n        output.data_ptr<at::BFloat16>(),\n        final_hidden_states.data_ptr<at::BFloat16>(),\n        static_cast<size_t>(batch_seq_len) * HIDDEN_SIZE * sizeof(at::BFloat16),\n        cudaMemcpyDeviceToDevice,\n        stream);\n\n    // Phase 2: atomic scatter-add expert_outputs into output rows\n    // indexed by token_indices.\n    const int h_tiles = (HIDDEN_SIZE + BLOCK_THREADS - 1) / BLOCK_THREADS;\n    dim3 grid(num_selected, h_tiles);\n    dim3 block(BLOCK_THREADS);\n    index_add_kernel<<<grid, block, 0, stream>>>(\n        reinterpret_cast<const __nv_bfloat16*>(\n            expert_outputs.data_ptr<at::BFloat16>()),\n        token_indices.data_ptr<long>(),\n        reinterpret_cast<__nv_bfloat16*>(\n            output.data_ptr<at::BFloat16>()),\n        num_selected);\n}\n"
+    },
+    {
+      "path": "kernel.h",
+      "content": "#pragma once\n\n#include <torch/extension.h>\n#include <cuda_runtime.h>\n\n// Host launcher for the MoE atomic-accumulation kernel.\n// final_hidden_states: [batch_seq_len, hidden_size] bf16 \u2014 copied to output.\n// expert_outputs:      [num_selected_tokens, hidden_size] bf16 \u2014 atomically\n//                      added back into output[token_indices[i]] per row.\n// token_indices:       [num_selected_tokens] int64.\n// output:              [batch_seq_len, hidden_size] bf16 (DPS, pre-allocated).\n// hidden_size is pinned at 3072 by the problem definition.\nvoid problem_008_expert_output_weighted_index_add_accumulation_launcher(\n    const torch::Tensor& final_hidden_states,\n    const torch::Tensor& expert_outputs,\n    const torch::Tensor& token_indices,\n    torch::Tensor& output,\n    cudaStream_t stream);\n"
+    }
+  ]
+}

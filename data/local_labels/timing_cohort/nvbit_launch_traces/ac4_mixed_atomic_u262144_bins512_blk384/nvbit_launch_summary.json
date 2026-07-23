@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "slug": "global_atomic_histogram",
+  "shape_point": "ac4_mixed_atomic_u262144_bins512_blk384",
+  "repeat_index": 0,
+  "launch_index": 0,
+  "kernel_name": "global_atomic_histogram_kernel___0",
+  "kernel_signature_sha256": "3d58558e19dc323b2cfd0a8678e284979f65c8b15b6df5708fcfc721fd609d54",
+  "inst_count": 12650496,
+  "binary_sha256": "e2151e3732238acb4dcf030d1b0a191cc587a8b84e3d29224c25caff1d455592",
+  "nvbit_trace_pb_path": "data/local_labels/timing_cohort/nvbit_launch_traces/ac4_mixed_atomic_u262144_bins512_blk384/dynamic_trace.pb",
+  "nvbit_trace_pb_sha256": "f795bd2a9af06625047172affbe7909edfdd28e0cd110dae2462f46d78ef5eb0",
+  "nvbit_tracer_build_hash": "67083eace7f6257ce5e33a6eb80ae0d3f240bbd667f254cdb67e1b7d20d5ed51"
+}

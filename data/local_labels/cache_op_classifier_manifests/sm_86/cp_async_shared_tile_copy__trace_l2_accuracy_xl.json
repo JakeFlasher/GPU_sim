@@ -1,0 +1,52 @@
+{
+  "arch_token": "sm_86",
+  "binary_path": "workloads/simbench_bw/l1/cp_async_shared_tile_copy/cp_async_shared_tile_copy_run",
+  "binary_source": "live_cuobjdump",
+  "kernel_mangled_name": "cp_async_shared_tile_copy_kernel",
+  "per_pc_instruction_cache_op": [
+    {
+      "instruction_cache_op": "LDGSTS",
+      "l1_eligible": false,
+      "pc": "0x100",
+      "raw_mnemonic": "LDGSTS"
+    },
+    {
+      "instruction_cache_op": "LDGSTS",
+      "l1_eligible": false,
+      "pc": "0x140",
+      "raw_mnemonic": "LDGSTS"
+    },
+    {
+      "instruction_cache_op": "LDGSTS",
+      "l1_eligible": false,
+      "pc": "0x350",
+      "raw_mnemonic": "LDGSTS"
+    },
+    {
+      "instruction_cache_op": "LDGSTS",
+      "l1_eligible": false,
+      "pc": "0x480",
+      "raw_mnemonic": "LDGSTS"
+    },
+    {
+      "instruction_cache_op": "LDGSTS",
+      "l1_eligible": false,
+      "pc": "0x4c0",
+      "raw_mnemonic": "LDGSTS"
+    },
+    {
+      "instruction_cache_op": "LDGSTS",
+      "l1_eligible": false,
+      "pc": "0x500",
+      "raw_mnemonic": "LDGSTS"
+    },
+    {
+      "instruction_cache_op": "LDGSTS",
+      "l1_eligible": false,
+      "pc": "0x530",
+      "raw_mnemonic": "LDGSTS"
+    }
+  ],
+  "sass_provenance_status": "matched",
+  "schema_version": 1
+}

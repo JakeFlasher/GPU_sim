@@ -1,0 +1,405 @@
+# Frozen sm_86 prediction baseline. Generated from
+# end_to_end_smoke_report.toml + label_ledger_v1_full_partition.toml.
+# Drift gate: test_sm86_no_per_cell_drift.py re-runs the LOOCV
+# calibrator from these inputs and asserts per-cell calibrated
+# outputs match the snapshot within drift_tolerance_abs (1e-12).
+
+[meta]
+schema_version = "1.0"
+captured_at_utc = "2026-05-26T06:56:27.242178+00:00"
+host_arch = "sm_86"
+source_smoke_report = "scripts/baselines_harness/calibration/cache_prediction/end_to_end_smoke_report.toml"
+source_smoke_report_sha256 = "2fee9a0eb5fbff6218c0cde6250836897e3dbeba0ca8340893743dc2c569924b"
+source_ledger = "scripts/baselines_harness/calibration/cache_prediction/label_ledger_v1_full_partition.toml"
+source_ledger_sha256 = "f9962fd454fafa1036d2965387f35f39b7365c66fe153f5d8e646015bc920539"
+drift_tolerance_abs = 1e-12
+python_version = "3.12.13"
+sklearn_version = "1.8.0"
+numpy_version = "2.4.4"
+scipy_version = "1.17.1"
+
+[[audit_hashes]]
+path = "scripts/baselines_harness/metrics/cache_predictor.py"
+sha256 = "6a441d43d07336e49056e50063329a7d15b9cebebb06629f7ceb982d4e6e9976"
+
+[[audit_hashes]]
+path = "scripts/baselines_harness/metrics/isotonic_calibrator.py"
+sha256 = "02e318f6101ed94c57c10353fbed49c1c6af9755b49b31bb830ab9ebac81fa9f"
+
+[[audit_hashes]]
+path = "scripts/baselines_harness/metrics/cache_geometry.py"
+sha256 = "3f207ded82189032f0bce87335b08eff07b53375ef0996ca521fb9a9af03a66f"
+
+[[audit_hashes]]
+path = "scripts/baselines_harness/metrics/cache_access_policy.py"
+sha256 = "50c091d432703b627f59420857e61b4ef664b4c2a54e092e90bfea5f5a3446ea"
+
+[[audit_hashes]]
+path = "scripts/baselines_harness/metrics/predictor_design_coverage.py"
+sha256 = "fe9ac5878a1aebc0c711e32944b2c4e0c81ff41a87d3338fe7de3b7fba6cb118"
+
+[[audit_hashes]]
+path = "scripts/baselines_harness/metrics/predictor_bundle_schema.py"
+sha256 = "d0ab549bbde0978b9eb337513418bf40feea04ba5bbf48de26aa0dacbf7047e3"
+
+[[audit_hashes]]
+path = "scripts/baselines_harness/metrics/set_associative_simulator.py"
+sha256 = "58ffa94efe91ba0fe0ea17d42171b7d2bbc45be99d0629418dc851f7ecfcc964"
+
+[[audit_hashes]]
+path = "scripts/baselines_harness/metrics/typed_unavailable_bundle.py"
+sha256 = "b2af70bc90ec0d5d7f32baa2f9c952df162e48a640aaebe03fe66bcaa28da26f"
+
+[[audit_hashes]]
+path = "scripts/baselines_harness/metrics/tier2_sidecar_parser.py"
+sha256 = "af11c5673c85caaa96c8bf78b7061d494a6f03e5672ab1dea095e09d3e1354b6"
+
+[[audit_hashes]]
+path = "scripts/baselines_harness/metrics/framework_contract.py"
+sha256 = "05a31cfa01c5e2e22daf0aeaaaec76e07efd844447cef6bbbcc1dfc119d7471c"
+
+[[audit_hashes]]
+path = "scripts/baselines_harness/calibration/cache_prediction/label_ledger_v1_full_partition.toml"
+sha256 = "f9962fd454fafa1036d2965387f35f39b7365c66fe153f5d8e646015bc920539"
+
+[[audit_hashes]]
+path = "scripts/baselines_harness/calibration/cache_prediction/calibration_validation_split_v1.toml"
+sha256 = "8a53fb14357ece6da318c2c5a83b3733305dc58f980bbddfd000be917a436987"
+
+[[audit_hashes]]
+path = "scripts/baselines_harness/calibration/cache_prediction/calibration_corpus.toml"
+sha256 = "db7a351423635b03881c07ca3bdf0211717ce1d403ce02271c312ce6db133b09"
+
+[[audit_hashes]]
+path = "scripts/baselines_harness/calibration/cache_prediction/end_to_end_smoke_report.toml"
+sha256 = "2fee9a0eb5fbff6218c0cde6250836897e3dbeba0ca8340893743dc2c569924b"
+
+[[per_cell]]
+cell_name = "calib_broadcast_global"
+predictor_bucket = "predictor_friendly"
+status = "measured"
+ncu_l1_hit_rate = 0.0
+ncu_l2_hit_rate = 0.0
+predicted_l1_hit_rate = 0.0
+predicted_l2_hit_rate = 0.0
+predicted_l1_calibrated = 0.0
+predicted_l2_calibrated = 0.0
+shape_point = "calib_broadcast_global"
+binary_sha256 = "e0bbe3d0bebdefec5541e78ff04cb61bd488e7bbdf3165b990e15e756f309597"
+source_commit = "6453447ced7b576874b1d0a1305b502ab8c91d43"
+kernel_signature_sha256 = "ef306b5d24229a18e628ef2e028d581015ba5730037a450a19f9b68f60652b3f"
+arch = "sm_86"
+ncu_metric_version = "ncu-2026.1"
+
+[[per_cell]]
+cell_name = "calib_cg_cache_bypass"
+predictor_bucket = "predictor_hostile"
+status = "typed_unavailable"
+ncu_l1_hit_rate = 0.0
+ncu_l2_hit_rate = 0.0
+predicted_l1_hit_rate = "null"
+predicted_l2_hit_rate = "null"
+predicted_l1_calibrated = "null"
+predicted_l2_calibrated = "null"
+shape_point = "calib_cg_cache_bypass"
+binary_sha256 = "97b7588eb58d0205c26106214285e14bc06475c727f289798c71ff13b9f4f0d9"
+source_commit = "6453447ced7b576874b1d0a1305b502ab8c91d43"
+kernel_signature_sha256 = "61a0f3abf8e7e28b235da1b4285f597471e0af07b15d8dd4a6b11647d6d38585"
+arch = "sm_86"
+ncu_metric_version = "ncu-2026.1"
+
+[[per_cell]]
+cell_name = "calib_coalesced_32x4B"
+predictor_bucket = "predictor_friendly"
+status = "measured"
+ncu_l1_hit_rate = 0.0
+ncu_l2_hit_rate = 0.0
+predicted_l1_hit_rate = 0.0
+predicted_l2_hit_rate = 0.0
+predicted_l1_calibrated = 0.0
+predicted_l2_calibrated = 0.0
+shape_point = "calib_coalesced_32x4B"
+binary_sha256 = "0e7214e806c4d099ef7441514ade9483998bea2d1594905c73cb131d16e7efb2"
+source_commit = "6453447ced7b576874b1d0a1305b502ab8c91d43"
+kernel_signature_sha256 = "47aa34009afb81543870709e1c38298c931f9dea8a2878688c3fd07207f7fe31"
+arch = "sm_86"
+ncu_metric_version = "ncu-2026.1"
+
+[[per_cell]]
+cell_name = "calib_coalesced_32x8B"
+predictor_bucket = "predictor_friendly"
+status = "measured"
+ncu_l1_hit_rate = 0.0
+ncu_l2_hit_rate = 0.0
+predicted_l1_hit_rate = 0.0
+predicted_l2_hit_rate = 0.0
+predicted_l1_calibrated = 0.0
+predicted_l2_calibrated = 0.0
+shape_point = "calib_coalesced_32x8B"
+binary_sha256 = "4ef8f9763e1442b9e094832c079a740faa3786c73436db68e57e00365f50ae50"
+source_commit = "6453447ced7b576874b1d0a1305b502ab8c91d43"
+kernel_signature_sha256 = "72bfc4193baf672a3183d45dddf61f99ec040ec2ebb3fbb47e63e9c0b3621fc1"
+arch = "sm_86"
+ncu_metric_version = "ncu-2026.1"
+
+[[per_cell]]
+cell_name = "calib_cpasync_global_to_shared"
+predictor_bucket = "predictor_friendly"
+status = "measured"
+ncu_l1_hit_rate = 0.0
+ncu_l2_hit_rate = 0.0
+predicted_l1_hit_rate = 0.0
+predicted_l2_hit_rate = 0.0
+predicted_l1_calibrated = 0.0
+predicted_l2_calibrated = 0.0
+shape_point = "calib_cpasync_global_to_shared"
+binary_sha256 = "fe773dcc96330dfb45996bef65532df09d9b2391728acb533807bc32052e6051"
+source_commit = "6453447ced7b576874b1d0a1305b502ab8c91d43"
+kernel_signature_sha256 = "806449b2ccd5ec8a3cf4132cdb58d938c841e605340b84cc1b0f573786d0cf37"
+arch = "sm_86"
+ncu_metric_version = "ncu-2026.1"
+
+[[per_cell]]
+cell_name = "calib_layernorm_fwd_bf16"
+predictor_bucket = "predictor_friendly"
+status = "typed_unavailable"
+ncu_l1_hit_rate = 0.5859000000000001
+ncu_l2_hit_rate = 0.3915094339622642
+predicted_l1_hit_rate = "null"
+predicted_l2_hit_rate = "null"
+predicted_l1_calibrated = "null"
+predicted_l2_calibrated = "null"
+shape_point = "calib_layernorm_fwd_bf16"
+binary_sha256 = "b9fb7c320102574fd16ad937b2e2826bea5970ec919c20c864324642eb40f098"
+source_commit = "6453447ced7b576874b1d0a1305b502ab8c91d43"
+kernel_signature_sha256 = "071bdd8ed4414cd9a0fef943d0f49f8b50dc315acc0d8b799cb1c5637bcbc005"
+arch = "sm_86"
+ncu_metric_version = "ncu-2026.1"
+
+[[per_cell]]
+cell_name = "calib_divergent_lanes"
+predictor_bucket = "predictor_hostile"
+status = "measured"
+ncu_l1_hit_rate = 0.0
+ncu_l2_hit_rate = 0.0
+predicted_l1_hit_rate = 0.0
+predicted_l2_hit_rate = 0.0
+predicted_l1_calibrated = 0.0
+predicted_l2_calibrated = 0.0
+shape_point = "calib_divergent_lanes"
+binary_sha256 = "0077de94e284132b0b1714190e5620835c199ceebdfe27139be3dc6bb4092052"
+source_commit = "6453447ced7b576874b1d0a1305b502ab8c91d43"
+kernel_signature_sha256 = "714347c65b9d03a7ba916499149e1c563b179cf5a8a39d09e0a62c3215e84c68"
+arch = "sm_86"
+ncu_metric_version = "ncu-2026.1"
+
+[[per_cell]]
+cell_name = "calib_hostile_gemm_stream_smoke"
+predictor_bucket = "predictor_hostile"
+status = "measured"
+ncu_l1_hit_rate = 0.0
+ncu_l2_hit_rate = 0.0
+predicted_l1_hit_rate = 0.0
+predicted_l2_hit_rate = 0.0
+predicted_l1_calibrated = 0.0
+predicted_l2_calibrated = 0.0
+shape_point = "calib_hostile_gemm_stream_smoke"
+binary_sha256 = "d2820f25b0667f741ab816864acd4ddbc564e3b0f07c510ae2c22deba0c028c5"
+source_commit = "05d1d9ea02cfdb024447aec7dd2f717d8db496ac"
+kernel_signature_sha256 = "f1598e38fefbef1566a5b3fcd9ec62783af1d7eddb02e513564758e281378397"
+arch = "sm_86"
+ncu_metric_version = "ncu-2026.1"
+
+[[per_cell]]
+cell_name = "calib_hostile_gqa_paged_decode_smoke"
+predictor_bucket = "predictor_hostile"
+status = "measured"
+ncu_l1_hit_rate = 0.0
+ncu_l2_hit_rate = 0.0
+predicted_l1_hit_rate = 0.0
+predicted_l2_hit_rate = 0.0
+predicted_l1_calibrated = 0.0
+predicted_l2_calibrated = 0.0
+shape_point = "calib_hostile_gqa_paged_decode_smoke"
+binary_sha256 = "1985aede5478966a8074155b39aec6fe940f24ee61adbc047a877e6dca906207"
+source_commit = "05d1d9ea02cfdb024447aec7dd2f717d8db496ac"
+kernel_signature_sha256 = "7c7bac1523817bcff395b331e09785bf902c046d9984bdcdfb9f430b9ec07021"
+arch = "sm_86"
+ncu_metric_version = "ncu-2026.1"
+
+[[per_cell]]
+cell_name = "calib_smoke_broadcast_loop"
+predictor_bucket = "predictor_friendly"
+status = "measured"
+ncu_l1_hit_rate = 0.0
+ncu_l2_hit_rate = 0.0
+predicted_l1_hit_rate = 0.0
+predicted_l2_hit_rate = 0.0
+predicted_l1_calibrated = 0.0
+predicted_l2_calibrated = 0.0
+shape_point = "calib_smoke_broadcast_loop"
+binary_sha256 = "f4f3a6991488984892a6e4ef1f578eb69183297dbc8408b0a4d1ee6a32c78cb6"
+source_commit = "6453447ced7b576874b1d0a1305b502ab8c91d43"
+kernel_signature_sha256 = "9e328fb419394d9b88a19a162b42a72fd18a4aa184fcd745d32a709c057a7c6c"
+arch = "sm_86"
+ncu_metric_version = "ncu-2026.1"
+
+[[per_cell]]
+cell_name = "calib_smoke_capacity_overflow_loop"
+predictor_bucket = "predictor_hostile"
+status = "typed_unavailable"
+ncu_l1_hit_rate = 0.0
+ncu_l2_hit_rate = 0.0
+predicted_l1_hit_rate = "null"
+predicted_l2_hit_rate = "null"
+predicted_l1_calibrated = "null"
+predicted_l2_calibrated = "null"
+shape_point = "calib_smoke_capacity_overflow_loop"
+binary_sha256 = "9ab57368121dba43ea3da5909d2ae15d5443b832b07657a94ee307a732a3cde1"
+source_commit = "6453447ced7b576874b1d0a1305b502ab8c91d43"
+kernel_signature_sha256 = "bc92fb7ccc0746087bc8f7b64128b8ec4e4b4bf9b338e08f0b27fb3ab0d84155"
+arch = "sm_86"
+ncu_metric_version = "ncu-2026.1"
+
+[[per_cell]]
+cell_name = "calib_smoke_coalesced_loop"
+predictor_bucket = "predictor_friendly"
+status = "measured"
+ncu_l1_hit_rate = 0.0
+ncu_l2_hit_rate = 0.0
+predicted_l1_hit_rate = 0.0
+predicted_l2_hit_rate = 0.0
+predicted_l1_calibrated = 0.0
+predicted_l2_calibrated = 0.0
+shape_point = "calib_smoke_coalesced_loop"
+binary_sha256 = "53bf678b7349a278b29e2d45224eede0ffc4a6993cbecc890b1569bb19e22fc6"
+source_commit = "6453447ced7b576874b1d0a1305b502ab8c91d43"
+kernel_signature_sha256 = "10af855bab956b4ae5a03b443d3035c1a018b7755a1b38e338160d5072272287"
+arch = "sm_86"
+ncu_metric_version = "ncu-2026.1"
+
+[[per_cell]]
+cell_name = "calib_stride2_32x4B"
+predictor_bucket = "predictor_hostile"
+status = "measured"
+ncu_l1_hit_rate = 0.0
+ncu_l2_hit_rate = 0.0
+predicted_l1_hit_rate = 0.0
+predicted_l2_hit_rate = 0.0
+predicted_l1_calibrated = 0.0
+predicted_l2_calibrated = 0.0
+shape_point = "calib_stride2_32x4B"
+binary_sha256 = "dbb8a751f244c7e4304400d9abe22c34a0d99f1d940ccc93f234252203c16d97"
+source_commit = "6453447ced7b576874b1d0a1305b502ab8c91d43"
+kernel_signature_sha256 = "34b0d658369bad14d8956ac9a087795c407230389f59e91156baf4d011b639ef"
+arch = "sm_86"
+ncu_metric_version = "ncu-2026.1"
+
+[[per_cell]]
+cell_name = "calib_vector_32x16B"
+predictor_bucket = "predictor_friendly"
+status = "measured"
+ncu_l1_hit_rate = 0.0
+ncu_l2_hit_rate = 0.0
+predicted_l1_hit_rate = 0.0
+predicted_l2_hit_rate = 0.0
+predicted_l1_calibrated = 0.0
+predicted_l2_calibrated = 0.0
+shape_point = "calib_vector_32x16B"
+binary_sha256 = "7cdb0277de7965a246b3820b082737c375abe17576980c55edf5cbdcbd7917de"
+source_commit = "6453447ced7b576874b1d0a1305b502ab8c91d43"
+kernel_signature_sha256 = "49bf5475f5a82fbb49f394214a7a0da5da675ea17d575a1abce0e16371fac907"
+arch = "sm_86"
+ncu_metric_version = "ncu-2026.1"
+
+[[per_cell]]
+cell_name = "calib_vector_cross_32B"
+predictor_bucket = "predictor_hostile"
+status = "measured"
+ncu_l1_hit_rate = 0.0
+ncu_l2_hit_rate = 0.0
+predicted_l1_hit_rate = 0.0
+predicted_l2_hit_rate = 0.0
+predicted_l1_calibrated = 0.0
+predicted_l2_calibrated = 0.0
+shape_point = "calib_vector_cross_32B"
+binary_sha256 = "663edf24899549ecd4833061849b204f255780c807f0a463c5237072af3064c3"
+source_commit = "6453447ced7b576874b1d0a1305b502ab8c91d43"
+kernel_signature_sha256 = "160df7d5d3e448e7afaabdbfb9892289228c0da06574b24811a565c35173f314"
+arch = "sm_86"
+ncu_metric_version = "ncu-2026.1"
+
+# Variant-dispatch baseline snapshot (cross-arch plan task15, AC-10).
+# Pinned per-cell predictions produced via the deployed
+# load_calibrator_for_arch_variant("sm_86", "pilot_v1") path:
+#   parse_launch_frames(t2a)
+#       -> predict_from_launch_frame(sm_86 static geometry)
+#       -> (raw_l1, raw_l2)
+#       -> variant_calibrator.predict_l1/l2(raw)
+#       -> (predicted_l1_calibrated, predicted_l2_calibrated).
+# The drift gate at test_sm86_no_per_cell_drift.py re-runs the
+# same path and asserts every cell matches within
+# drift_tolerance_abs (1e-12). The audit_hashes array adds a
+# strict gate over the dispatch module + sidecar + ledger +
+# split; a silent edit to any of those fails the strict gate
+# even if per-cell predictions happen to remain identical.
+
+[variant_dispatch_v1]
+schema_version = "1.0"
+variant_arch = "sm_86"
+variant_token = "pilot_v1"
+captured_at_utc = "2026-05-28T23:45:00+00:00"
+drift_tolerance_abs = 1e-12
+wrapper_entry_point = "baselines_harness.calibration.cache_prediction.sm120_coverage_expansion.calibrator_dispatch_variant.load_calibrator_for_arch_variant"
+geometry_source = "sm86_pilot_static_device_card_v1"
+pilot_cell_count = 5
+
+[[variant_dispatch_v1.per_cell]]
+cell_name = "problem_006_hyena_depthwise_conv1d_split_gate"
+raw_l1 = 0.769408326048951
+raw_l2 = 0.004856956702007937
+predicted_l1_calibrated = 0.7651
+predicted_l2_calibrated = 0.08433478433949515
+
+[[variant_dispatch_v1.per_cell]]
+cell_name = "problem_040_conv2d_residual_block"
+raw_l1 = 0.9948309762893643
+raw_l2 = 0.11554109031733116
+predicted_l1_calibrated = 0.8427
+predicted_l2_calibrated = 0.9845174344415961
+
+[[variant_dispatch_v1.per_cell]]
+cell_name = "problem_066_resnet_block_with_time_embedding"
+raw_l1 = 0.4724609375
+raw_l2 = 0.04568678267308404
+predicted_l1_calibrated = 0.595
+predicted_l2_calibrated = 0.08433478433949515
+
+[[variant_dispatch_v1.per_cell]]
+cell_name = "problem_073_fused_encoder_final_norm_to_decoder_cross_attention_kv_projection"
+raw_l1 = 0.5315387237662909
+raw_l2 = 0.07507059247925763
+predicted_l1_calibrated = 0.6426000000000001
+predicted_l2_calibrated = 0.08433478433949515
+
+[[variant_dispatch_v1.per_cell]]
+cell_name = "problem_087_embedding_with_initial_layernorm_backward"
+raw_l1 = 0.21631599913087565
+raw_l2 = 0.0017767488499652274
+predicted_l1_calibrated = 0.0748
+predicted_l2_calibrated = 0.08433478433949515
+[[variant_dispatch_v1.audit_hashes]]
+path = "scripts/baselines_harness/calibration/cache_prediction/sm120_coverage_expansion/calibrator_dispatch_variant.py"
+sha256 = "2fc01dcec2aa1b467481069f2efd2745069020b6327f3868570672e4b191b2d7"
+
+[[variant_dispatch_v1.audit_hashes]]
+path = "scripts/baselines_harness/calibration/cache_prediction/isotonic_params_sm86.toml"
+sha256 = "bd2160b13bf026b1868e8e4a8838c118b020a61991bdba6a0fcf221e7f149827"
+
+[[variant_dispatch_v1.audit_hashes]]
+path = "scripts/baselines_harness/calibration/cache_prediction/label_ledger_v1_sm86_pilot_v1.toml"
+sha256 = "9bc5e96dbb7ad82b2a04b9f654e536cd10ed66de4276a756233f9fd1efb30c96"
+
+[[variant_dispatch_v1.audit_hashes]]
+path = "scripts/baselines_harness/calibration/cache_prediction/historical_label_split_v1_sm86_pilot_v1.toml"
+sha256 = "270a1f31054afe0b6f7b302acab04d4ffde5086e88a88d7b4148f6c717472377"

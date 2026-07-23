@@ -1,0 +1,132 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "simbench_bw/schemas/sector_stream.schema.json",
+  "title": "Sector Stream Record",
+  "description": "Per-(warp, memory access) record produced by the C-AC-F sector stream generator under tools/sector_stream/. Each record is one of two top-level shapes: an admitted sector-stream summary (result_kind=sector_stream) or a typed exclusion (result_kind=typed_exclusion). The schema covers both branches via the oneOf below so downstream consumers can validate both paths against the same artifact. Producer-side enforcement of the `MemoryOpClass` vocabulary is handled before this generator runs (UNSPECIFIED is routed to nvbit_unsupported_memory_path.schema.json upstream); a value reaching this generator that is not in {GLOBAL, LOCAL, SHARED, TEXTURE, SURFACE, ATOMIC, TMA, ASYNC_COPY, CLUSTER_DSMEM} is rejected with sector_stream_class_unsupported so the validator can still admit the record.",
+  "schema_version": 1,
+  "type": "object",
+  "oneOf": [
+    {
+      "title": "Admitted sector stream record",
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "result_kind",
+        "touched_32B_sectors",
+        "touched_128B_lines",
+        "sectors_per_request",
+        "classification",
+        "memory_op_class",
+        "active_lane_count"
+      ],
+      "properties": {
+        "result_kind": {
+          "type": "string",
+          "const": "sector_stream",
+          "description": "Discriminator. Pinned to `sector_stream` for the admitted branch."
+        },
+        "touched_32B_sectors": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Number of distinct 32-byte sector identifiers the warp's active+predicated lanes touched. Vector loads (data_width > 32) that span a 32B boundary contribute the additional sector(s)."
+        },
+        "touched_128B_lines": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Number of distinct 128-byte line identifiers the warp's active+predicated lanes touched. Always less than or equal to touched_32B_sectors (a 128B line contains four 32B sectors)."
+        },
+        "sectors_per_request": {
+          "type": "number",
+          "minimum": 1.0,
+          "description": "Per-warp memory-request metric: number of distinct 32B sectors touched by this single warp instruction. One warp instruction issues one memory request to the L1 path; the request touches between 1 sector (broadcast/uniform: every active lane lands in the same 32B sector) and 32 sectors (scattered worst case). The original plan's sector-stream regression invariant pins uniform/broadcast warps at sectors_per_request == 1.0; this is identical to touched_32B_sectors and is reported separately so downstream consumers can read the coalescer-efficiency signal without reaching into the touched-sector set."
+        },
+        "classification": {
+          "type": "string",
+          "enum": [
+            "uniform",
+            "broadcast",
+            "overlap",
+            "strided",
+            "scattered"
+          ],
+          "description": "Categorical access pattern. `uniform`: all active lanes hit the same 32B sector (good case). `broadcast`: all active lanes share the same starting address (degenerate uniform). `strided`: active lanes' sorted starting addresses form a constant nonzero stride. `overlap`: distinct lanes' [addr, addr+data_width) ranges intersect. `scattered`: nothing simpler matches (worst case)."
+        },
+        "memory_op_class": {
+          "type": "string",
+          "enum": [
+            "GLOBAL",
+            "LOCAL"
+          ],
+          "description": "Admitted memory class. Only GLOBAL and LOCAL produce admitted sector-stream records in this loop; the other classes route through the typed_exclusion branch."
+        },
+        "active_lane_count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 32,
+          "description": "Number of lanes contributing to the touched-sector / touched-line counts (i.e., bits set in active_mask & predicate_mask). Always >= 1 in the admitted branch (zero participation routes to the no_lanes_active typed exclusion)."
+        }
+      }
+    },
+    {
+      "title": "Typed exclusion record",
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "result_kind",
+        "typed_reason",
+        "memory_op_class"
+      ],
+      "properties": {
+        "result_kind": {
+          "type": "string",
+          "const": "typed_exclusion",
+          "description": "Discriminator. Pinned to `typed_exclusion` for the rejection branch."
+        },
+        "typed_reason": {
+          "type": "string",
+          "enum": [
+            "no_lanes_active",
+            "lane_address_length_invalid",
+            "data_width_invalid",
+            "sector_stream_class_unsupported"
+          ],
+          "description": "Member of the sector-stream taxonomy family declared at C-AC-C. `no_lanes_active`: (active_mask & predicate_mask) == 0. `lane_address_length_invalid`: lane_addresses sequence length != 32 (NVIDIA SIMT warp width). `data_width_invalid`: data_width not in {1, 2, 4, 8, 16}. `sector_stream_class_unsupported`: memory_op_class is one of {SHARED, TEXTURE, SURFACE, ATOMIC, TMA, ASYNC_COPY, CLUSTER_DSMEM} or any other unrecognized value."
+        },
+        "memory_op_class": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Memory operation class observed on the rejected record. Free-form string (not enum-restricted) so producer-side caller bugs (e.g. a stray sentinel value) are visible at the schema level rather than masked by enum rejection."
+        },
+        "observed_length": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Length of lane_addresses observed when typed_reason is lane_address_length_invalid; absent for other typed reasons."
+        },
+        "expected_length": {
+          "type": "integer",
+          "const": 32,
+          "description": "Pinned to 32 (the NVIDIA SIMT warp width) when typed_reason is lane_address_length_invalid; absent for other typed reasons."
+        },
+        "observed_data_width": {
+          "type": "integer",
+          "description": "Value of data_width observed when typed_reason is data_width_invalid; absent for other typed reasons. Free-form integer so caller bugs (e.g., a stray negative) are visible."
+        },
+        "allowed_data_widths": {
+          "type": "array",
+          "items": {"type": "integer"},
+          "description": "Sorted list of allowed data widths {1, 2, 4, 8, 16} when typed_reason is data_width_invalid; absent for other typed reasons."
+        },
+        "active_mask": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Active mask observed when typed_reason is no_lanes_active; absent for other typed reasons."
+        },
+        "predicate_mask": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Predicate mask observed when typed_reason is no_lanes_active; absent for other typed reasons."
+        }
+      }
+    }
+  ]
+}

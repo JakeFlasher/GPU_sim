@@ -1,0 +1,125 @@
+{
+  "schema_version": 1,
+  "artifact_name": "ncu_csv_metric_out_of_range_fixture",
+  "documented_clamp_window": {
+    "metric": "lts__t_sector_hit_rate.pct",
+    "lower_bound": 0,
+    "upper_bound": 105,
+    "saturation_rounding_range": [
+      100,
+      105
+    ],
+    "saturation_rounding_target": 1.0,
+    "rationale": "The parser rejects metric percentages outside [0, 105] and clamps the (100, 105] window down to fraction 1.0 to absorb NCU saturation rounding. Values above 105 are physically impossible for a hit-rate percentage and indicate either an NCU internal rollup artifact or a producer-side counter misalignment."
+  },
+  "fixture_purpose": "Pin the raw NCU CSV evidence for the lts__t_sector_hit_rate.pct >100% configs from the R26 full-sweep so a future round can decide (a) whether the metric overflow correlates with kernel-pattern features (small miss counters), (b) whether the underlying lts__t_sectors_lookup_miss counters give a defensible fallback for hit-rate computation, and (c) whether the kernel/shape can be repaired to keep the metric inside the parser clamp without widening the clamp itself.",
+  "do_not_widen_clamp_in_this_round": true,
+  "kernel_signature_under_investigation": "dram_stream_stride_mix per-warp isolated layered-reuse pattern (R25 kernel rewrite at commit c423f775011f)",
+  "investigated_cells": [
+    {
+      "cell_id": "sm_86/dram_stream_stride_mix/trace_l2_accuracy_xl",
+      "sweep_id": "sweep_20260513T094819Z_9eea75dc57dd",
+      "sub_sweep_id": "sweep_20260513T094820Z_567b8e0a38e8",
+      "binary_sha256_under_investigation": "1d32ea480cf0ed2a0956183476b643023477ec38b6e544904610adb1e97471f6",
+      "ncu_version": "Version 2026.1.0.0 (build 37166530) (public-release)",
+      "cuda_version": "13.2",
+      "driver_version": "595.71.05",
+      "device": "sm_86 (NVIDIA GeForce RTX 3090 Ti)",
+      "kernel_launch_geometry": {
+        "block_size": 32,
+        "grid_size": 4,
+        "comment": "Effective 4 warps per launch despite the trace shape's warps=8 axis -- the binary's main() drives the launch from its own CLI args plus the shape TOML, and the label_driver's invocation lands at this small geometry. The kernel issues 214344 instructions per launch."
+      },
+      "failing_configs": [
+        {
+          "config": "warmup=0/cache=all",
+          "n_sidecars": 0,
+          "label_driver_stderr_value": 156.086375,
+          "ncu_lts_hit_rate_pct_run_8": 156.086375,
+          "ncu_lts_hit_rate_pct_run_0": 61.638472,
+          "ncu_l1tex_hit_rate_pct_run_0": 99.541730,
+          "lts_sectors_lookup_miss_sum_run_0": 557,
+          "raw_report_path": "data/local_labels/sweeps/sweep_20260513T094819Z_9eea75dc57dd/sweep_20260513T094820Z_567b8e0a38e8/cell=sm_86__dram_stream_stride_mix__trace_l2_accuracy_xl/cfg=warmup0_cache_all/sm_86/dram_stream_stride_mix/trace_l2_accuracy_xl/run_8_0.ncu-rep"
+        },
+        {
+          "config": "warmup=0/cache=none",
+          "n_sidecars": 0,
+          "label_driver_stderr_value": 134.8,
+          "raw_report_path_pattern": "data/local_labels/sweeps/sweep_20260513T094819Z_9eea75dc57dd/sweep_20260513T094820Z_567b8e0a38e8/cell=sm_86__dram_stream_stride_mix__trace_l2_accuracy_xl/cfg=warmup0_cache_none/sm_86/dram_stream_stride_mix/trace_l2_accuracy_xl/run_*_0.ncu-rep"
+        },
+        {
+          "config": "warmup=1/cache=all",
+          "n_sidecars": 0,
+          "label_driver_stderr_value": 154.544387,
+          "ncu_lts_hit_rate_pct_run_0": 97.373690,
+          "lts_sectors_lookup_miss_sum_run_0": 558,
+          "raw_report_path_pattern": "data/local_labels/sweeps/sweep_20260513T094819Z_9eea75dc57dd/sweep_20260513T094820Z_567b8e0a38e8/cell=sm_86__dram_stream_stride_mix__trace_l2_accuracy_xl/cfg=warmup1_cache_all/sm_86/dram_stream_stride_mix/trace_l2_accuracy_xl/run_*_0.ncu-rep"
+        },
+        {
+          "config": "warmup=1/cache=none",
+          "n_sidecars": 0,
+          "label_driver_stderr_value": 109.711381,
+          "raw_report_path_pattern": "data/local_labels/sweeps/sweep_20260513T094819Z_9eea75dc57dd/sweep_20260513T094820Z_567b8e0a38e8/cell=sm_86__dram_stream_stride_mix__trace_l2_accuracy_xl/cfg=warmup1_cache_none/sm_86/dram_stream_stride_mix/trace_l2_accuracy_xl/run_*_0.ncu-rep"
+        },
+        {
+          "config": "warmup=5/cache=all",
+          "n_sidecars": 0,
+          "label_driver_stderr_value": 133.424741,
+          "raw_report_path_pattern": "data/local_labels/sweeps/sweep_20260513T094819Z_9eea75dc57dd/sweep_20260513T094820Z_567b8e0a38e8/cell=sm_86__dram_stream_stride_mix__trace_l2_accuracy_xl/cfg=warmup5_cache_all/sm_86/dram_stream_stride_mix/trace_l2_accuracy_xl/run_*_0.ncu-rep"
+        },
+        {
+          "config": "warmup=10/cache=none",
+          "n_sidecars": 0,
+          "label_driver_stderr_value_observed_pattern": "occasional overshoot >105",
+          "raw_report_path_pattern": "data/local_labels/sweeps/sweep_20260513T094819Z_9eea75dc57dd/sweep_20260513T094820Z_567b8e0a38e8/cell=sm_86__dram_stream_stride_mix__trace_l2_accuracy_xl/cfg=warmup10_cache_none/sm_86/dram_stream_stride_mix/trace_l2_accuracy_xl/run_*_0.ncu-rep"
+        }
+      ],
+      "parsing_configs": [
+        {
+          "config": "warmup=5/cache=none",
+          "n_sidecars": 10,
+          "stddev_l2_sector": 0.128003,
+          "mean_l2_sector": 0.512420,
+          "ncu_lts_hit_rate_pct_run_0": 43.987812,
+          "lts_sectors_lookup_miss_sum_run_0": 28532,
+          "comment": "Cache=none + warmup=5: miss counter is ~50x larger than cache=all configs because cache eviction between repeats produces stable misses. The metric stays within [0, 100] and the parser accepts."
+        },
+        {
+          "config": "warmup=10/cache=all",
+          "n_sidecars": 10,
+          "stddev_l2_sector": 0.165646,
+          "mean_l2_sector": 0.848680,
+          "ncu_lts_hit_rate_pct_run_0": 61.216166,
+          "lts_sectors_lookup_miss_sum_run_0": 428,
+          "comment": "Cache=all + warmup=10: miss counter is small (~428) but with 10 warmups the metric appears to stabilize below 100 on most runs. Inter-run variance is still high (stddev 0.166) because the kernel is too small for stable measurement."
+        }
+      ],
+      "hypothesis": "lts__t_sector_hit_rate.pct overflows the parser clamp window when the kernel produces a small number of L2 sector lookups (miss_sum on the order of 400-600). At small denominators, the NCU CSV rollup arithmetic computes hits / lookups using counters that are sampled across replay iterations, and the inter-replay denominator under-counts relative to the numerator. With cache=none and high warmup, the miss counter grows ~50x and the metric stays in range. With cache=all (the documented warm-cache config), the kernel produces too few L2 lookups for NCU to compute the rate stably.",
+      "non_widening_remediation_options": {
+        "option_a_kernel_resize": "Increase the dram_stream kernel's per-launch L2 lookup count by (a) growing the per-warp slice from 4096 floats to a larger size, (b) increasing target_lines or repeats_per_target so each launch issues more sector accesses, or (c) increasing the grid dimension so more warps issue accesses concurrently. The expected lts__t_sectors_lookup_miss.sum target is at least 10000 per launch, which is large enough for NCU's metric rollup to be stable based on the cache=none parsing-config evidence above.",
+        "option_b_metric_substitution": "Replace lts__t_sector_hit_rate.pct with a parser-side computation from lts__t_sectors_lookup_miss + a hit counter. The cache_predictor / aggregator both want a single hit-rate fraction; the substitution requires either a documented hit counter or a denominator counter (total lookups). The available counters in the CSV do not include a documented total_lookups; lts__t_sectors_lookup_miss_data_promoted is a subset of miss, not a denominator. Defer this option pending an NCU documentation review.",
+        "option_c_quarantine_cell": "Treat dram_stream_stride_mix as a typed-failed cell while the kernel is at its current small geometry; the predictor side already emits a scalar bundle so the cell could still appear in the headline if the label-side gets a typed-quarantine treatment rather than a typed-failed-config exclusion. This is a documentation route, not a measurement repair, and is NOT recommended."
+      }
+    },
+    {
+      "cell_id": "sm_86/warm_cold_pair_relaunch/trace_l2_accuracy_xl",
+      "sweep_id": "sweep_20260513T094819Z_9eea75dc57dd",
+      "sub_sweep_id": "sweep_20260513T094820Z_567b8e0a38e8",
+      "failing_configs": [
+        {
+          "config": "warmup=1/cache=all",
+          "n_sidecars": 0,
+          "label_driver_stderr_value": 132.37,
+          "raw_report_path_pattern": "data/local_labels/sweeps/sweep_20260513T094819Z_9eea75dc57dd/sweep_20260513T094820Z_567b8e0a38e8/cell=sm_86__warm_cold_pair_relaunch__trace_l2_accuracy_xl/cfg=warmup1_cache_all/sm_86/warm_cold_pair_relaunch/trace_l2_accuracy_xl/run_*_0.ncu-rep",
+          "comment": "Single failing config, otherwise the cell parses cleanly at the other 7 configs. Likely a single-replay overflow rather than a structural issue."
+        }
+      ],
+      "hypothesis": "Same NCU small-kernel rollup artifact as dram_stream, but localized to a single config rather than affecting most configs. warm_cold's shape is allocation_bytes=524288 accesses=512 eviction_bytes=524288 warps=8 (per R24 close), which produces enough sector lookups for the parser at 7 of 8 configs. The single failing config is more likely transient than structural."
+    }
+  ],
+  "current_round_disposition": {
+    "do_not_widen_parser_clamp": "The parser at workloads/simbench_bw/tools/parse_ncu_metrics.py keeps the [0, 105] clamp window unchanged in the current round. The clamp is physically defensible (hit rates above 105% indicate a metric-rollup artifact rather than a true measurement).",
+    "do_not_silently_drop_metric": "The parser continues to fail closed on out-of-range values; this fixture records the evidence so future kernel/shape decisions are auditable.",
+    "queue_kernel_resize_decision_for_follow_up": "The kernel-resize remediation (grow lts__t_sectors_lookup_miss.sum to at least 10000 per launch) is the most defensible path. This work is queued out of the current round's mainline because the current recovery set explicitly excludes dram_stream_stride_mix on the basis of this evidence; dram_stream remains label-side typed-failed until a future round resizes the kernel."
+  }
+}

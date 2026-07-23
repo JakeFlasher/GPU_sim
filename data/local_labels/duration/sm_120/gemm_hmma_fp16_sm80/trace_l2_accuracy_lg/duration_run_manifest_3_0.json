@@ -1,0 +1,11 @@
+{
+  "arch": "sm_120",
+  "binary_sha256": "cf09ee4a4cc16b7d07e11dead8145fec643e2ff5c103d2d6a76779af3ac9b966",
+  "kernel_signature_sha256": "6c3c64d7b03efd3c0fab89868ff75dc052370434282ac050bbb6c21d3310f9b9",
+  "launch_index": 0,
+  "repeat_index": 3,
+  "schema_version": 1,
+  "shape_point": "trace_l2_accuracy_lg",
+  "slug": "gemm_hmma_fp16_sm80",
+  "source_commit": "d64a01dc018e7396c29627c24151b354ee7b10ef"
+}

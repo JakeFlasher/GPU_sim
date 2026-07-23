@@ -1,0 +1,64 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "simbench_bw/schemas/cross_gen_note.schema.json",
+  "title": "SimBench-BW cross-generation comparability note",
+  "description": "Per-row note documenting known Hopper-vs-Blackwell behavioral differences that affect the comparability of a portable row's numbers. Template-constrained to prevent prose drift. Required (non-null) for rows that use cp.async.bulk.tensor, clusters, DSMEM, or cluster-scoped mbarrier. An embedded-instance note under a roster row inherits its enclosing schema_version; a standalone note file must declare schema_version explicitly.",
+  "schema_version": 1,
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "subsystem",
+    "hopper_behavior",
+    "blackwell_behavior",
+    "observed_delta",
+    "evidence_source",
+    "implication_for_comparability"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Artifact-instance schema version. Bumped in lockstep with other cross_gen_note-producing tooling so version-drift enforcement holds."
+    },
+    "subsystem": {
+      "type": "string",
+      "pattern": "^S(?:[1-9]|1[0-9]|20)$",
+      "description": "Subsystem identifier per draft §4b. Matches a primary_subsystem or secondary_subsystem of the declaring row."
+    },
+    "hopper_behavior": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Short prose description of the behavior observed on sm_90a (H100)."
+    },
+    "blackwell_behavior": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Short prose description of the behavior observed on sm_120 (RTX PRO 6000 Blackwell)."
+    },
+    "observed_delta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["latency_delta_ns", "bandwidth_ratio", "cycle_count_delta", "throughput_ratio", "qualitative"]
+        },
+        "value": { "type": "number" },
+        "unit": { "type": "string" },
+        "prose": { "type": "string" }
+      }
+    },
+    "evidence_source": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Citable evidence — a local artifact path (e.g. results/.../<slug>.json), a KB card path, a peer-reviewed paper identifier (arXiv:YYMM.NNNNN), or a vendor-doc URL."
+    },
+    "implication_for_comparability": {
+      "type": "string",
+      "minLength": 1,
+      "description": "How a simulator or benchmark consumer should interpret the row's Hopper vs Blackwell numbers (e.g. \"cross-gen latency drift is within reported envelope; bandwidth ratio means L2-bound kernels compare with a multiplicative factor\")."
+    }
+  }
+}

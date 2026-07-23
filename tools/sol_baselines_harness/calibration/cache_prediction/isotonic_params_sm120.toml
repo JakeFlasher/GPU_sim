@@ -1,0 +1,44 @@
+# sm_120 isotonic calibrator params (Round 10: fitted via empirical-sweep geometry).
+# associativity_l2=32 picked by sweep_associativity.py over {4, 8, 16, 32, 64} candidates.
+# L2 simulator-effective capacity = 30 MiB (24 slices x 1280 KiB each); physical 32 MiB divides unevenly by 24 so a
+# clean per-slice capacity was used. The 2 MiB shortfall (6.25%) is within the calibrator's anchor-fit tolerance.
+
+[meta]
+schema_version = "1.0"
+arch = "sm_120"
+captured_at_utc = "2026-05-26T22:36:32.964504+00:00"
+ledger_sha256 = "b3fbd09e32b08f522f26626da701faf9ab1d0681fdde2d5e56e7c486aee0f594"
+validation_split_sha256 = "8e75ee1d2ac41df290159c4ebdb34211ccfc356f682f6535061bb02e08ea0216"
+historical_label_split_sha256 = "2a818dc622ee22b711751b51fc4582fdaa2ba348260866f08e6603056febdfa6"
+fit_record_count = 43
+admitted_cell_count = 43
+calibration_only_cell_names = ["calib_broadcast_global", "calib_coalesced_32x4B", "calib_coalesced_32x8B", "calib_cpasync_global_to_shared", "calib_divergent_lanes", "calib_hostile_gemm_stream_smoke", "calib_hostile_gqa_paged_decode_smoke", "calib_layernorm_fwd_bf16", "calib_smoke_broadcast_loop", "calib_smoke_capacity_overflow_loop", "calib_smoke_coalesced_loop", "calib_stride2_32x4B", "calib_vector_32x16B", "calib_warm_cold_synthetic", "problem_001_fused_add_rmsnorm_h2048", "problem_002_decoder_layer_full_block", "problem_003_fused_add_rmsnorm_h7168", "problem_003_lm_head_projection_with_logit_slicing", "problem_004_fused_residual_rms_mlp", "problem_004_gemm_n128_k2048", "problem_005_gemm_n256_k7168", "problem_005_swiglu_mlp_backward", "problem_006_gemm_n2048_k4096", "problem_007_gemm_n4096_k4096", "problem_008_expert_output_weighted_index_add_accumulation", "problem_008_gemm_n4096_k14336", "problem_008_moe_sparse_routing_and_dispatch", "problem_009_gemm_n5120_k2048", "problem_010_gemm_n6144_k4096", "problem_013_fused_residual_rms_norm_backward", "problem_019_vision_3d_rotary_embedding_with_spatial_merge_indexing_backward", "problem_021_rmsnorm_h128", "problem_022_rmsnorm_h512", "problem_022_vision_mlp_gelu_backward", "problem_025_rmsnorm_h4096", "problem_026_rmsnorm_h7168", "problem_030_attention_output_projection_with_residual", "problem_033_post_norm_residual", "problem_036_flux_output_norm_projection_chain", "problem_037_flux_feedforward_gelu_approximate", "problem_046_attention_softmax_with_softcapping_and_dropout", "problem_054_audio_attention_qkv_projection_with_normalization", "problem_056_mamba_ssm_dt_projection_softplus_clamp_backward"]
+validation_only_cell_names = ["calib_vector_cross_32B", "problem_011_gemm_n28672_k4096", "problem_059_moe_group_score_aggregation_and_masking", "problem_061_tanh_gated_residual_add_backward", "problem_074_fused_gated_mlp_silu", "problem_077_whisper_decoder_output_projection", "problem_078_group_norm_fusion", "problem_080_adaptive_layernorm_continuous_with_modulation", "problem_084_silu_activation_backward", "problem_085_geglu_activation", "problem_088_rotary_position_embedding_application", "problem_090_batched_2d_rope_position_encoding_backward"]
+ncu_version = "Version 2026.1.1.0 (build 37634170) (public-release)"
+driver_version = "595.71.05"
+calibrator_class_name = "IsotonicRegression"
+out_of_bounds = "clip"
+accepted_metric_selectors = ["l1tex__t_sector_pipe_lsu_mem_global_op_ld_hit_rate.pct", "l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum", "l1tex__t_sectors_pipe_lsu_mem_global_op_ld_lookup_hit.sum", "lts__t_sectors_srcunit_tex_op_read.sum", "lts__t_sectors_srcunit_tex_op_read_lookup_hit.sum"]
+calibrator_status = "fitted"
+fit_input_geometry_associativity_l2 = 32
+fit_input_geometry_l2_capacity_bytes_simulator_effective = 31457280
+fit_input_geometry_num_l2_slices = 24
+denied_typed_unavailable_cells = ["calib_cg_cache_bypass", "problem_004_attention_output_projection_with_reshape_backward", "problem_031_repeat_kv_attention_matmul", "problem_032_attention_weights_matmul_with_value_projection", "problem_035_flux_ada_layer_norm_zero_modulation_extraction", "problem_048_fused_gate_up_projection_with_swiglu", "problem_049_attention_qk_matmul_with_gqa_repeat_and_scaling", "problem_050_attention_qkv_projection_with_bias_and_reshape", "problem_055_attention_qkv_projection_with_gqa_reshape", "problem_083_attention_score_value_matmul"]
+simulator_unavailable_manifest_sha256 = "b7d6b6d00555ee22bb3753b31c36b668bc3b530d0beee2488beae3730700a7b2"
+simulator_unavailable_cells_excluded_from_fit = ["problem_011_rotary_position_embedding", "problem_012_gqa_paged_decode_h32_kv4_d128_ps1", "problem_014_gqa_paged_prefill_causal_h32_kv4_d128_ps1", "problem_034_flux_multi_axis_rope_frequency_computation", "problem_038_flux_multi_head_rmsnorm_qk"]
+
+[reproducibility]
+python_version = "3.12.13"
+numpy_version = "2.4.4"
+scipy_version = "1.17.1"
+sklearn_version = "1.8.0"
+fitter_sort_key = "input_order"
+float_format = "%r (Python repr)"
+
+[l1_head]
+x_thresholds = [0.0, 0.008936774409087113, 0.011586481716098712, 0.08179219563802083, 0.12175438927962438, 0.15582786914615357, 0.17095424107142856, 0.39579035863988377, 0.40364555236932514, 0.5, 0.5213165283203125, 0.6666666666666666]
+y_thresholds = [0.0, 0.0, 3.973642985026042e-09, 3.973642985026042e-09, 0.10344962593069874, 0.10344962593069874, 0.31582648030349186, 0.31582648030349186, 0.36786598849606206, 0.36786598849606206, 0.6666793823242188, 0.6666793823242188]
+
+[l2_head]
+x_thresholds = [0.0, 0.23501539537197638, 0.3333604060913706, 0.473654011666826, 0.4749699134010901, 0.5000989691977404, 0.5079052398979085, 0.5156328879614983, 0.5358832995305701, 0.5605991728312252, 0.5893762398060393, 0.6177202588352414, 0.7510708925382618, 0.7653866757007506, 0.8118597906055461, 0.8375906755814854, 0.8474605699046455, 0.8500584404742028, 0.9319326194973605]
+y_thresholds = [0.0005176807015211649, 0.02829652260900721, 0.17523316017255738, 0.24557789841153402, 0.2743580230830319, 0.2743580230830319, 0.31257442942962743, 0.31257442942962743, 0.4565711796318239, 0.4565711796318239, 0.5885728420776196, 0.6842105263157895, 0.888082242424383, 0.888082242424383, 0.8972582341709795, 0.8972582341709795, 0.927710843373494, 0.9530625192248539, 0.9530625192248539]

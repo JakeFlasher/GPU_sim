@@ -1,0 +1,5 @@
+[
+  {"allocation_id": 1, "context_id": 1, "device_id": 0, "base_address": "0x7f8dd8400000", "size_bytes": 4194304, "alive": false},
+  {"allocation_id": 2, "context_id": 1, "device_id": 0, "base_address": "0x7f8dd8800000", "size_bytes": 8388608, "alive": false},
+  {"allocation_id": 3, "context_id": 1, "device_id": 0, "base_address": "0x7f8de4000000", "size_bytes": 33554432, "alive": false}
+]

@@ -1,0 +1,32 @@
+{
+  "schema_version": 1,
+  "_note": "Authoritative host, toolchain, and clock reference for the separate sm_86 SOL workload launch-set v3 campaign. The SOL adapter build/capture contract is pinned to nvcc release 13.2; this document is intentionally distinct from campaign_protocol_pins.json, whose canonical C1 compiler release is 13.3. These are provenance/environment pins only; no NCU metric value is a pin.",
+  "arch": "sm_86",
+  "sku": "rtx_3090_ti",
+  "toolchain": {
+    "ncu_version_prefix": "2026.1.0",
+    "driver_version": "610.43.02",
+    "nvcc_release": "13.2",
+    "nvbit_version": "1.8",
+    "_nvcc_note": "The SOL live-v2 environment and capture_toolchain_contract.py require the CUDA 13.2 nvcc release. This is not an alternative accepted release for canonical C1; it is a campaign-specific retained authority."
+  },
+  "reference_clock_state": {
+    "sm_clock_mhz": 1350,
+    "mem_clock_mhz": 10501,
+    "persistence_mode": "Enabled",
+    "_note": "The v2.1 reference config (clock=none x cache=all) is captured with host persistence enabled and clocks locked to these device-local values."
+  },
+  "measurement_protocol": {
+    "version": "v2.1",
+    "ncu_clock_control": "none",
+    "ncu_cache_control": "all",
+    "ncu_replay_mode": "kernel"
+  },
+  "injection_runtime": {
+    "pb_lib_relpath": ".toolchain/pb/lib",
+    "tracer_so_relpath": "tools/nvbit_tracer/tracer_tool/tracer_tool.so",
+    "nvbit_version_header_relpath": "tools/nvbit_tracer/nvbit_release/core/nvbit.h",
+    "smoke_binary_relpath": "workloads/portable_lcd/silu_fwd_bf16_sm80/silu_fwd_bf16_sm80_run",
+    "smoke_shape_argv": ["--correctness_shape"]
+  }
+}

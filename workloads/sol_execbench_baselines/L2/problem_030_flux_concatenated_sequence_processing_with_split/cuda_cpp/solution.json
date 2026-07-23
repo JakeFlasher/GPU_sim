@@ -1,0 +1,44 @@
+{
+  "name": "problem_030_flux_concatenated_sequence_processing_with_split_cuda_cpp",
+  "definition": "030_flux_concatenated_sequence_processing_with_split",
+  "author": "reconstructed-from-rlcr-2026-05-13",
+  "spec": {
+    "languages": [
+      "cuda_cpp"
+    ],
+    "target_hardware": [
+      "LOCAL"
+    ],
+    "entry_point": "main.cpp::run",
+    "dependencies": [],
+    "destination_passing_style": true,
+    "binding": "torch",
+    "compile_options": {
+      "cflags": [],
+      "cuda_cflags": [
+        "-O3",
+        "--use_fast_math",
+        "-gencode",
+        "arch=compute_86,code=sm_86"
+      ],
+      "ld_flags": [
+        "-lcuda"
+      ]
+    }
+  },
+  "sources": [
+    {
+      "path": "main.cpp",
+      "content": "#include <torch/extension.h>\n#include <ATen/cuda/CUDAContext.h>\n#include \"kernel.h\"\n\n#include <cstdint>\n#include <string>\n\nstatic void check_f32_cuda_contiguous(\n    const torch::Tensor& t, const char* name) {\n    TORCH_CHECK(t.is_cuda(), name, \" must be a CUDA tensor\");\n    TORCH_CHECK(\n        t.dtype() == torch::kFloat32, name, \" must be float32, got \", t.dtype());\n    TORCH_CHECK(t.is_contiguous(), name, \" must be contiguous\");\n}\n\n// DPS entry point. Reference (sol-execbench L2/030):\n//   concatenated = torch.cat([encoder_hidden_states, hidden_states], dim=1)\n//   processed    = torch.matmul(concatenated, process_weight.t())\n//   processed_encoder = processed[:, :text_seq_len, :]\n//   processed_hidden  = processed[:, text_seq_len:, :]\n//\n// Strategy (a): the linear projection is the same for both streams, so\n// we compute each stream's projection directly into its destination\n// buffer via at::matmul_out. The reference's concat + slice memcpy\n// traffic is eliminated; cuBLAS launches twice instead of once. The\n// kernel beats the reference on large workloads (where the saved\n// memcpy dominates) and trails on small workloads (where the second\n// cuBLAS launch overhead dominates). Speedup on every workload would\n// require a hand-written fused TF32 GEMM matching cuBLAS heuristics;\n// per the project's correctness-only landing contract (CLAUDE.md\n// \u00a7\"Acceptance contract for *.cu template solutions\"), local speedup\n// is diagnostic only.\nvoid run(\n    torch::Tensor hidden_states,\n    torch::Tensor encoder_hidden_states,\n    torch::Tensor process_weight,\n    torch::Tensor processed_encoder,\n    torch::Tensor processed_hidden) {\n    check_f32_cuda_contiguous(hidden_states, \"hidden_states\");\n    check_f32_cuda_contiguous(\n        encoder_hidden_states, \"encoder_hidden_states\");\n    check_f32_cuda_contiguous(process_weight, \"process_weight\");\n    check_f32_cuda_contiguous(processed_encoder, \"processed_encoder\");\n    check_f32_cuda_contiguous(processed_hidden, \"processed_hidden\");\n\n    TORCH_CHECK(\n        hidden_states.dim() == 3, \"hidden_states must be 3D [B, S, D]\");\n    TORCH_CHECK(\n        encoder_hidden_states.dim() == 3,\n        \"encoder_hidden_states must be 3D [B, S, D]\");\n    TORCH_CHECK(\n        process_weight.dim() == 2, \"process_weight must be 2D [D, D]\");\n    TORCH_CHECK(\n        processed_encoder.dim() == 3, \"processed_encoder must be 3D\");\n    TORCH_CHECK(\n        processed_hidden.dim() == 3, \"processed_hidden must be 3D\");\n\n    const int64_t hidden_dim = process_weight.size(0);\n    TORCH_CHECK(\n        hidden_dim == 3072,\n        \"hidden_dim must be 3072, got \", hidden_dim);\n    TORCH_CHECK(\n        process_weight.size(1) == hidden_dim,\n        \"process_weight must be square [3072, 3072]\");\n    TORCH_CHECK(\n        hidden_states.size(2) == hidden_dim,\n        \"hidden_states last dim must be 3072, got \", hidden_states.size(2));\n    TORCH_CHECK(\n        encoder_hidden_states.size(2) == hidden_dim,\n        \"encoder_hidden_states last dim must be 3072, got \",\n        encoder_hidden_states.size(2));\n\n    const int64_t batch = hidden_states.size(0);\n    const int64_t img_seq_len = hidden_states.size(1);\n    const int64_t text_seq_len = encoder_hidden_states.size(1);\n    TORCH_CHECK(\n        encoder_hidden_states.size(0) == batch,\n        \"encoder_hidden_states batch dim must match\");\n    TORCH_CHECK(\n        processed_encoder.size(0) == batch\n            && processed_encoder.size(1) == text_seq_len\n            && processed_encoder.size(2) == hidden_dim,\n        \"processed_encoder must be [B, text_seq_len, 3072]\");\n    TORCH_CHECK(\n        processed_hidden.size(0) == batch\n            && processed_hidden.size(1) == img_seq_len\n            && processed_hidden.size(2) == hidden_dim,\n        \"processed_hidden must be [B, img_seq_len, 3072]\");\n\n    cudaStream_t stream = at::cuda::getCurrentCUDAStream();\n    problem_030_flux_concat_split_launcher(\n        hidden_states,\n        encoder_hidden_states,\n        process_weight,\n        processed_encoder,\n        processed_hidden,\n        stream);\n}\n\nPYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {\n    m.def(\n        \"run\", &run,\n        \"FLUX concat-then-project-then-split pattern: per-stream \"\n        \"at::matmul_out (cuBLAS dispatch on the current CUDA stream). \"\n        \"float32, destination-passing-style.\");\n}\n"
+    },
+    {
+      "path": "kernel.cu",
+      "content": "#include \"kernel.h\"\n\n#include <ATen/cuda/CUDAContext.h>\n#include <torch/extension.h>\n\n// Strategy (a): two direct at::matmul_out calls, one per output\n// stream. Each call goes through PyTorch's cuBLAS dispatch on the\n// current CUDA stream, so cuBLAS handles are managed by PyTorch\n// (CLAUDE.md Rule 5: cuBLAS is a host API; handles cached by torch,\n// stream is current at::cuda::getCurrentCUDAStream()).\n//\n// Why no custom __global__ kernel: the reference is a 3072x3072\n// linear projection with float32 IEEE compute; on sm_120 this is the\n// FFMA SM pipe (not tensor cores under FP32 IEEE), and cuBLAS already\n// emits the tuned heuristic. A hand-written GEMM matching cuBLAS's\n// heuristics is out of scope for a template solution. Per-stream\n// matmul saves the reference's concat + slice memcpy traffic.\n//\n// Note: the (void) stream cast silences -Wunused-parameter; PyTorch\n// dispatch picks up the current CUDA stream internally via\n// at::cuda::getCurrentCUDAStream() at the call site of at::matmul_out.\nvoid problem_030_flux_concat_split_launcher(\n    const torch::Tensor& hidden_states,\n    const torch::Tensor& encoder_hidden_states,\n    const torch::Tensor& process_weight,\n    torch::Tensor& processed_encoder,\n    torch::Tensor& processed_hidden,\n    cudaStream_t stream) {\n    (void)stream;\n    auto W_t = process_weight.t();\n    at::matmul_out(processed_encoder, encoder_hidden_states, W_t);\n    at::matmul_out(processed_hidden, hidden_states, W_t);\n}\n"
+    },
+    {
+      "path": "kernel.h",
+      "content": "#pragma once\n\n#include <torch/extension.h>\n#include <cuda_runtime.h>\n\n// FLUX dual-stream linear projection. The reference concatenates the\n// encoder + image streams along the sequence dimension, applies a\n// single linear projection, and slices the result back into two\n// streams. This launcher uses the per-stream strategy: two direct\n// at::matmul_out calls, one per output stream, sharing the\n// transposed weight view. Avoids the reference's concat + slice\n// memcpy chain at the cost of one additional cuBLAS launch.\nvoid problem_030_flux_concat_split_launcher(\n    const torch::Tensor& hidden_states,          // [B, img_seq_len, 3072]\n    const torch::Tensor& encoder_hidden_states,  // [B, text_seq_len, 3072]\n    const torch::Tensor& process_weight,         // [3072, 3072]\n    torch::Tensor& processed_encoder,            // [B, text_seq_len, 3072] DPS\n    torch::Tensor& processed_hidden,             // [B, img_seq_len, 3072] DPS\n    cudaStream_t stream);\n"
+    }
+  ],
+  "description": "FLUX concatenated sequence processing pattern: per-stream at::matmul_out (cuBLAS dispatch) avoiding the reference concat+slice memcpys. Faithful re-implementation of the per-stream strategy after the 2026-05-13 re-anchor to a correctness-only landing contract. Template solution, not an optimized kernel \u2014 local speedup vs cuBLAS reference is diagnostic; correctness on every workload is the landing requirement."
+}

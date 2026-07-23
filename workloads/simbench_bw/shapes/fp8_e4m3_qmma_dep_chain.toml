@@ -1,0 +1,34 @@
+schema_version = 1
+slug = "fp8_e4m3_qmma_dep_chain"
+
+# FP8 (E4M3) dependent-QMMA chain. Reference is the FP32 matmul on
+# A and B after FP8 E4M3 round-trip quantization
+# (`mma_microbench.py::build_reference` dispatches through
+# `_quantize_matrix_fp8_e4m3`, which round-trips FP32 → FP8 E4M3
+# code → FP32 representable per the canonical 256-entry value table
+# with satfinite saturation to ±448, -0.0 sign-preserved as byte
+# 0x80, and FP32 NaN encoded as canonical positive E4M3 NaN byte 0x7F
+# — R31 alignment with `cuda_fp8.h::__nv_fp8_e4m3` per Codex
+# Round-29-review CUDA 13 host probe; same dispatch the
+# sparse_2to4_fp8_gemm row uses; R19 added the elif branch for
+# this dense row), under the FP8_E4M3 fma_chain tolerance band.
+
+[[timing_shapes]]
+name = "timing_00"
+axes = { m = 1024, n = 1024, k = 4096 }
+launch_config = { grid = [64, 128, 1], block = [32, 1, 1] }
+warm_up_iters = 5
+repeat_iters = 30
+
+[[trace_shapes]]
+name = "trace_00"
+axes = { m = 32, n = 16, k = 64 }
+launch_config = { grid = [2, 2, 1], block = [32, 1, 1] }
+predicted_bytes = 5242880
+estimator_source = "static"
+
+[[correctness_shapes]]
+name = "correctness_00"
+axes = { m = 16, n = 16, k = 32 }
+launch_config = { grid = [1, 2, 1], block = [32, 1, 1] }
+digest_kind = "reduction_summary"

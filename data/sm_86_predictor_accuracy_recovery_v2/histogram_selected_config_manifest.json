@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "selected_per_cell": [
+    {
+      "arch": "sm_86",
+      "cache_control": "none",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "global_atomic_histogram",
+      "source_relpath": "cell=sm_86__global_atomic_histogram__trace_l2_accuracy_xl/cfg=warmup5_cache_none/_aggregator_out/label_admitted.json",
+      "source_sha256": "be04e241e0cfd1911c71f2f295c05ee3934bd99ef4730ea2ab0268c4647ef860",
+      "stddev_l1tex_sector": 0.0,
+      "stddev_l2_sector": 0.0033146643872344283,
+      "warmup_count": 5
+    }
+  ],
+  "sub_sweep_relpath": "data/local_labels/sweeps/sweep_histogram_r38/sweep_20260603T120157Z_7dfc7fd86cbc"
+}

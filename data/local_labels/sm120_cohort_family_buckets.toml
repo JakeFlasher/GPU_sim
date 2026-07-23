@@ -1,0 +1,100 @@
+# sm_120 L2 cohort family-bucket mapping.
+#
+# Maps raw `family` values present in
+# workloads/simbench_bw/roster.toml and
+# workloads/portable_lcd/roster.toml to derived family_bucket values
+# in {memory_stress, tensor_compute, activation_norm, other}. The
+# mapping is the load-bearing surface for the family-bucket validator
+# (AC-2.4) and for the family-bucket minimum/cap constraints on the
+# cohort roster (AC-2.2).
+#
+# Discipline: when a new raw family value is introduced in either
+# source roster, it must land in lockstep across this mapping, the
+# cohort roster, the validator, and the validator's tests. Unmapped
+# raw values DEFAULT to "other" at lookup time (a safe fallback that
+# does NOT count toward any required-bucket minimum), but the cohort
+# roster validator separately requires that every cohort row's raw
+# family is explicitly present in this mapping; an unmapped raw value
+# in a cohort row is rejected by the AC-2.4 mapping validator.
+
+schema_version = 1
+
+# ---------------------------------------------------------------------
+# Family bucket vocabulary (closed enum)
+# ---------------------------------------------------------------------
+# The four buckets must match the AC-2 schema validator's allowed-enum.
+# Adding a fifth bucket requires a coordinated update across this
+# mapping, the cohort roster, the validator, and the comparison
+# contract's per_arch_diagnostics_config.diagnostic_vocabulary if the
+# bucket later gates a diagnostic.
+
+family_buckets = [
+    "memory_stress",
+    "tensor_compute",
+    "activation_norm",
+    "other",
+]
+
+# ---------------------------------------------------------------------
+# Raw family -> derived bucket
+# ---------------------------------------------------------------------
+# Keys are raw `family` values as they appear in the source rosters.
+# Values are the cohort-roster `family_bucket` that the validator
+# enforces in lockstep with the family field.
+
+[family_to_bucket]
+# --- tensor_compute: matmul, attention, convolution, sparse / grouped gemm ---
+gemm_hmma             = "tensor_compute"
+gemm_imma             = "tensor_compute"
+gemm_sparse           = "tensor_compute"
+attention             = "tensor_compute"   # portable_lcd flash_attn fwd/bwd
+flash_attn            = "tensor_compute"   # simbench_bw L2 flash_attn cells
+conv2d                = "tensor_compute"
+conformer             = "tensor_compute"   # depthwise conv + GLU; matmul-dominant
+moe_grouped_gemm      = "tensor_compute"
+hmma_gemm             = "tensor_compute"   # simbench_bw L1 *_hmma_gemm_traceable
+imma_gemm             = "tensor_compute"   # simbench_bw L1 int8_imma_gemm_traceable
+sparse_gemm           = "tensor_compute"   # simbench_bw L1 sparse_2to4_*
+qmma_dep_chain        = "tensor_compute"   # simbench_bw L1 fp8_e4m3_qmma_dep_chain
+qmma_saturation       = "tensor_compute"   # simbench_bw L1 fp8_e5m2_saturation
+vendor_cublas         = "tensor_compute"   # simbench_bw L1 vendor_gemm_cublas (cuBLAS GEMM)
+vendor_cublaslt       = "tensor_compute"   # simbench_bw L1 vendor_fp8_matmul_cublaslt
+cp_async              = "tensor_compute"   # simbench_bw L1 cp_async_shared_tile_copy (TC feeder)
+tma                   = "tensor_compute"   # simbench_bw L1 tma_tensor_copy_2d (TC feeder)
+cluster_bandwidth     = "tensor_compute"   # simbench_bw L1 dsmem_ring_bandwidth (DSMEM throughput)
+cluster_latency       = "tensor_compute"   # simbench_bw L1 dsmem_pairwise_latency
+
+# --- activation_norm: norm + softmax + activation + gated FFN ---
+norm_fwd              = "activation_norm"
+norm_bwd              = "activation_norm"
+softmax               = "activation_norm"
+activation            = "activation_norm"
+layernorm             = "activation_norm"
+rmsnorm               = "activation_norm"
+groupnorm             = "activation_norm"
+geglu_ffn             = "activation_norm"
+swiglu_ffn            = "activation_norm"
+cluster_norm          = "activation_norm"
+
+# --- memory_stress: gather, scatter, decoders, paged KV, reductions, DRAM-bound microbenches ---
+embedding             = "memory_stress"    # portable_lcd embedding_gather
+loss                  = "memory_stress"    # portable_lcd cross_entropy (reduction)
+embedding_gather      = "memory_stress"
+embedding_scatter     = "memory_stress"
+cluster_reduction     = "memory_stress"
+kv_update             = "memory_stress"
+paged_decode          = "memory_stress"
+paged_mla             = "memory_stress"
+ragged_attn           = "memory_stress"
+moe_router            = "memory_stress"
+topk_sampling         = "memory_stress"
+rope                  = "memory_stress"    # gather-heavy position embeddings
+memory                = "memory_stress"    # simbench_bw L1 dram_stream_stride_mix-style DRAM microbench
+cache                 = "memory_stress"    # simbench_bw L1 l2_*_sweep / working_set / carveout / warm_cold microbenches
+atomics               = "memory_stress"    # simbench_bw L1 global_atomic_histogram (atomic-bound DRAM)
+shared_mem            = "memory_stress"    # simbench_bw L1 shared_bank_conflict_stride (SMEM-bound)
+
+# --- other: microbenches that don't fit the three required buckets ---
+fma_dep_chain         = "other"            # simbench_bw L1 fp32_fma_dep_chain (pure FMA latency)
+register              = "other"            # simbench_bw L1 register_spill_local_mem (RF / local mem)
+control_flow          = "other"            # simbench_bw L1 warp_divergence_reconvergence

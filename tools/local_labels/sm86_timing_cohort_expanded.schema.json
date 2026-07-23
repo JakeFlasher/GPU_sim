@@ -1,0 +1,250 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "sm86_timing_cohort_expanded",
+  "description": "The slug-disjoint-scoreable sm_86 timing cohort derived from the committed label store: admitted rows carry both timing labels with re-checked admission statistics at generation-time-verified binary pins (mirrored from the store, never hand-edited); cells that cannot bind stay typed with sha evidence; the distinct-admitted-slug floor is a hard gate.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_kind",
+    "arch",
+    "generated_at_commit",
+    "timing_metrics",
+    "rule_thresholds",
+    "min_distinct_slugs",
+    "n_admitted",
+    "n_typed",
+    "distinct_admitted_slugs",
+    "admitted",
+    "typed"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "artifact_kind": {
+      "const": "sm86_timing_cohort_expanded"
+    },
+    "arch": {
+      "const": "sm_86"
+    },
+    "generated_at_commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "timing_metrics": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "items": {
+        "enum": [
+          "gpu__time_duration.sum",
+          "gpc__cycles_elapsed.max"
+        ]
+      }
+    },
+    "rule_thresholds": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "number",
+        "exclusiveMinimum": 0
+      }
+    },
+    "min_distinct_slugs": {
+      "const": 10
+    },
+    "n_admitted": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "n_typed": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "distinct_admitted_slugs": {
+      "type": "array",
+      "minItems": 10,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "admitted": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "slug",
+          "shape_point",
+          "arch",
+          "binary_sha256",
+          "source_commit",
+          "kernel_signature_sha256",
+          "ncu_metric_version",
+          "status",
+          "timing_labels",
+          "binary_pin_verification"
+        ],
+        "properties": {
+          "slug": {
+            "type": "string",
+            "minLength": 1
+          },
+          "shape_point": {
+            "type": "string",
+            "minLength": 1
+          },
+          "arch": {
+            "const": "sm_86"
+          },
+          "binary_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "source_commit": {
+            "type": "string",
+            "minLength": 7
+          },
+          "kernel_signature_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "ncu_metric_version": {
+            "type": "string",
+            "minLength": 1
+          },
+          "status": {
+            "const": "admitted"
+          },
+          "timing_labels": {
+            "type": "object",
+            "minProperties": 2,
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "value",
+                "unit",
+                "dispersion",
+                "n_repeats",
+                "repeatability_rule",
+                "rule_threshold"
+              ],
+              "properties": {
+                "value": {
+                  "type": "number"
+                },
+                "unit": {
+                  "type": "string"
+                },
+                "dispersion": {
+                  "type": "number",
+                  "minimum": 0
+                },
+                "n_repeats": {
+                  "type": "integer",
+                  "minimum": 5
+                },
+                "repeatability_rule": {
+                  "type": "string"
+                },
+                "rule_threshold": {
+                  "type": "number",
+                  "exclusiveMinimum": 0
+                }
+              }
+            }
+          },
+          "binary_pin_verification": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "binary_path",
+              "on_disk_sha256_at_generation",
+              "matches_store_pin"
+            ],
+            "properties": {
+              "binary_path": {
+                "type": "string"
+              },
+              "on_disk_sha256_at_generation": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "matches_store_pin": {
+                "const": true
+              }
+            }
+          }
+        }
+      }
+    },
+    "typed": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "slug",
+          "shape_point",
+          "status",
+          "typed_reason",
+          "evidence"
+        ],
+        "properties": {
+          "slug": {
+            "type": "string"
+          },
+          "shape_point": {
+            "type": "string"
+          },
+          "arch": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "binary_sha256": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "source_commit": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "kernel_signature_sha256": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "ncu_metric_version": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "status": {
+            "const": "typed"
+          },
+          "typed_reason": {
+            "enum": [
+              "timing_binary_sha256_mismatch",
+              "timing_admission_stats_violated",
+              "timing_legacy_cell_binds_pending_recapture"
+            ]
+          },
+          "evidence": {
+            "type": "object"
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,1598 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "simbench_bw/schemas/m6_determinism_analysis.v2.schema.json",
+  "title": "M6 uncensored determinism study",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_kind",
+    "study_id",
+    "generated_at_utc",
+    "schedule_sha256",
+    "journal_sha256",
+    "source_identity_sha256",
+    "config_identity_sha256",
+    "metric_identity_sha256",
+    "m4_identity_sha256",
+    "completion_state",
+    "publication_state",
+    "m7_state",
+    "simulator_scoreability",
+    "publication_verdict",
+    "taxonomy",
+    "accounting",
+    "trigger_decisions",
+    "row_accounting",
+    "classifications",
+    "out_of_range_rates",
+    "noise_floors",
+    "denominators",
+    "protocol_sensitivity",
+    "class_migrations",
+    "analysis_policy",
+    "scientific_gates",
+    "m6_m7_handoff_candidate",
+    "m7_consumer_contract_version",
+    "analysis_sha256"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 2
+    },
+    "artifact_kind": {
+      "type": "string",
+      "const": "determinism_study"
+    },
+    "study_id": {
+      "type": "string",
+      "pattern": "^m6-study-[0-9a-f]{16}$"
+    },
+    "generated_at_utc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "schedule_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "journal_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "source_identity_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "config_identity_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "metric_identity_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "m4_identity_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "completion_state": {
+      "type": "string",
+      "enum": [
+        "incomplete_cost_gate",
+        "trigger_decisions_required",
+        "tier2_required",
+        "incomplete_evidence",
+        "complete"
+      ]
+    },
+    "publication_state": {
+      "type": "string",
+      "enum": [
+        "DIAGNOSTIC_PUBLICATION",
+        "M6_INCOMPLETE_EVIDENCE",
+        "M6_DONE"
+      ]
+    },
+    "m7_state": {
+      "type": "string",
+      "enum": [
+        "M7_BLOCKED",
+        "M6_M7_HANDOFF_CANDIDATE",
+        "M7_DONE"
+      ]
+    },
+    "simulator_scoreability": {
+      "type": "string",
+      "enum": [
+        "UNAVAILABLE_REQUIRED_CYCLES",
+        "SCOREABLE"
+      ]
+    },
+    "publication_verdict": {
+      "type": "string",
+      "enum": [
+        "NOT_EVALUATED",
+        "PASS",
+        "FLOOR_ONLY",
+        "FAIL"
+      ]
+    },
+    "taxonomy": {
+      "const": [
+        "vendor_defect",
+        "insufficient_evidence",
+        "multimodal",
+        "deterministic",
+        "quasi_stable",
+        "clock_noise",
+        "noisy",
+        "unstable"
+      ]
+    },
+    "accounting": {
+      "$ref": "#/$defs/accounting"
+    },
+    "trigger_decisions": {
+      "type": "array",
+      "minItems": 122,
+      "maxItems": 122,
+      "uniqueItems": true,
+      "items": {
+        "$ref": "#/$defs/triggerDecision"
+      }
+    },
+    "row_accounting": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/row"
+      }
+    },
+    "classifications": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/classification"
+      }
+    },
+    "out_of_range_rates": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/oorRate"
+      }
+    },
+    "noise_floors": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/noiseFloor"
+      }
+    },
+    "denominators": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/denominator"
+      }
+    },
+    "protocol_sensitivity": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/sensitivity"
+      }
+    },
+    "class_migrations": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/migration"
+      }
+    },
+    "analysis_policy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "bootstrap_replicates",
+        "bootstrap_seed",
+        "floor_quantile",
+        "floor_upper_confidence",
+        "within_session_only",
+        "raw_values_clamped",
+        "admitted_summary_consumed",
+        "reference_oor_zero_confirmed",
+        "multiplicity_policy",
+        "limitations",
+        "floor_fallback_authorizations"
+      ],
+      "properties": {
+        "bootstrap_replicates": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "bootstrap_seed": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
+        "floor_quantile": {
+          "type": "number",
+          "const": 0.9
+        },
+        "floor_upper_confidence": {
+          "type": "number",
+          "const": 0.9
+        },
+        "within_session_only": {
+          "const": true
+        },
+        "raw_values_clamped": {
+          "const": false
+        },
+        "admitted_summary_consumed": {
+          "const": false
+        },
+        "reference_oor_zero_confirmed": {
+          "type": "boolean"
+        },
+        "multiplicity_policy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "method",
+            "q",
+            "family_definition",
+            "status",
+            "hypothesis_count",
+            "discoveries",
+            "discoveries_sha256",
+            "policy_sha256"
+          ],
+          "properties": {
+            "method": {
+              "const": "BH-FDR"
+            },
+            "q": {
+              "type": "number",
+              "exclusiveMinimum": 0,
+              "maximum": 1
+            },
+            "family_definition": {
+              "type": "string",
+              "minLength": 1
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "external_pending",
+                "sealed"
+              ]
+            },
+            "hypothesis_count": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "discoveries": {
+              "type": "array",
+              "items": {
+                "type": "boolean"
+              }
+            },
+            "discoveries_sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "policy_sha256": {
+              "$ref": "#/$defs/sha256"
+            }
+          }
+        },
+        "limitations": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "censoring",
+            "finite_n",
+            "within_session",
+            "multiplicity",
+            "historical_reconciliation"
+          ],
+          "properties": {
+            "censoring": {
+              "type": "string",
+              "minLength": 1
+            },
+            "finite_n": {
+              "type": "string",
+              "minLength": 1
+            },
+            "within_session": {
+              "type": "string",
+              "minLength": 1
+            },
+            "multiplicity": {
+              "type": "string",
+              "minLength": 1
+            },
+            "historical_reconciliation": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        "floor_fallback_authorizations": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "metric_key",
+              "authorized",
+              "authority_receipt"
+            ],
+            "properties": {
+              "metric_key": {
+                "type": "string",
+                "minLength": 1
+              },
+              "authorized": {
+                "type": "boolean"
+              },
+              "authority_receipt": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            },
+            "allOf": [
+              {
+                "if": {
+                  "properties": {
+                    "authorized": {
+                      "const": true
+                    }
+                  },
+                  "required": [
+                    "authorized"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "authority_receipt": {
+                      "type": "string",
+                      "pattern": "^[0-9a-f]{64}$"
+                    }
+                  },
+                  "required": [
+                    "authority_receipt"
+                  ]
+                }
+              },
+              {
+                "if": {
+                  "properties": {
+                    "authorized": {
+                      "const": false
+                    }
+                  },
+                  "required": [
+                    "authorized"
+                  ]
+                },
+                "then": {
+                  "properties": {
+                    "authority_receipt": {
+                      "type": "null"
+                    }
+                  },
+                  "required": [
+                    "authority_receipt"
+                  ]
+                }
+              }
+            ]
+          }
+        }
+      }
+    },
+    "scientific_gates": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "floor_checks",
+        "denominator_checks",
+        "bucket_set_exact",
+        "floor_nonvacuous",
+        "denominator_closed",
+        "limitations_sealed",
+        "multiplicity_sealed",
+        "historical_reconciliation",
+        "reference_oor_zero",
+        "done_eligible"
+      ],
+      "properties": {
+        "floor_checks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "metric_key",
+              "valid_cells",
+              "finite_nonnegative",
+              "fallback_authorized",
+              "passes",
+              "fallback_receipt_valid"
+            ],
+            "properties": {
+              "metric_key": {
+                "type": "string",
+                "minLength": 1
+              },
+              "valid_cells": {
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 122
+              },
+              "finite_nonnegative": {
+                "type": "boolean"
+              },
+              "fallback_authorized": {
+                "type": "boolean"
+              },
+              "passes": {
+                "type": "boolean"
+              },
+              "fallback_receipt_valid": {
+                "type": "boolean"
+              }
+            }
+          }
+        },
+        "denominator_checks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "cell_id",
+              "metric_key",
+              "pending",
+              "deterministic_exact"
+            ],
+            "properties": {
+              "cell_id": {
+                "type": "string",
+                "minLength": 3
+              },
+              "metric_key": {
+                "type": "string",
+                "minLength": 1
+              },
+              "pending": {
+                "type": "boolean"
+              },
+              "deterministic_exact": {
+                "type": "boolean"
+              }
+            }
+          }
+        },
+        "bucket_set_exact": {
+          "type": "boolean"
+        },
+        "floor_nonvacuous": {
+          "type": "boolean"
+        },
+        "denominator_closed": {
+          "type": "boolean"
+        },
+        "limitations_sealed": {
+          "type": "boolean"
+        },
+        "multiplicity_sealed": {
+          "type": "boolean"
+        },
+        "historical_reconciliation": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reference_oor_zero": {
+          "type": "boolean"
+        },
+        "done_eligible": {
+          "type": "boolean"
+        }
+      }
+    },
+    "m6_m7_handoff_candidate": {
+      "const": false
+    },
+    "m7_consumer_contract_version": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "analysis_sha256": {
+      "$ref": "#/$defs/sha256"
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "numberOrNull": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "class": {
+      "type": "string",
+      "enum": [
+        "vendor_defect",
+        "insufficient_evidence",
+        "multimodal",
+        "deterministic",
+        "quasi_stable",
+        "clock_noise",
+        "noisy",
+        "unstable"
+      ]
+    },
+    "triggerDecision": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cell_id",
+        "cell_identity_sha256",
+        "triggered",
+        "reason_codes",
+        "evidence_metric_keys",
+        "decision_sha256"
+      ],
+      "properties": {
+        "cell_id": {
+          "type": "string",
+          "minLength": 3
+        },
+        "cell_identity_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "triggered": {
+          "type": "boolean"
+        },
+        "reason_codes": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "boundary_proximity",
+              "discrete_multiple_values",
+              "modality_flag",
+              "out_of_range",
+              "single_point_outlier"
+            ]
+          }
+        },
+        "evidence_metric_keys": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "decision_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "accounting": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "tier1_slots",
+        "triggered_cells",
+        "active_tier2_slots",
+        "active_slots",
+        "terminal_slots",
+        "pending_slots",
+        "observed_slots",
+        "excluded_typed_slots",
+        "raw_rows_collected",
+        "classified_raw_rows",
+        "excluded_typed_raw_rows",
+        "not_collected_typed_rows",
+        "expected_rows",
+        "pending_expected_rows",
+        "denominator_scope",
+        "collected_identity_holds",
+        "terminal_identity_holds",
+        "denominator_identity_holds",
+        "per_config_metric"
+      ],
+      "properties": {
+        "tier1_slots": {
+          "type": "integer",
+          "const": 8540
+        },
+        "triggered_cells": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 122
+        },
+        "active_tier2_slots": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1220,
+          "multipleOf": 10
+        },
+        "active_slots": {
+          "type": "integer",
+          "minimum": 8540,
+          "maximum": 9760
+        },
+        "terminal_slots": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9760
+        },
+        "pending_slots": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9760
+        },
+        "observed_slots": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9760
+        },
+        "excluded_typed_slots": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9760
+        },
+        "raw_rows_collected": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "classified_raw_rows": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "excluded_typed_raw_rows": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "not_collected_typed_rows": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "expected_rows": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "pending_expected_rows": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "denominator_scope": {
+          "type": "string",
+          "enum": [
+            "complete_m4_launch_set",
+            "provisional_incomplete_m4"
+          ]
+        },
+        "collected_identity_holds": {
+          "const": true
+        },
+        "terminal_identity_holds": {
+          "const": true
+        },
+        "denominator_identity_holds": {
+          "const": true
+        },
+        "per_config_metric": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/accountingBucket"
+          }
+        }
+      }
+    },
+    "accountingBucket": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "config_id",
+        "metric_key",
+        "expected_rows",
+        "collected_rows",
+        "classified_rows",
+        "excluded_typed_rows",
+        "not_collected_typed_rows",
+        "pending_rows"
+      ],
+      "properties": {
+        "config_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "metric_key": {
+          "type": "string",
+          "minLength": 1
+        },
+        "expected_rows": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "collected_rows": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "classified_rows": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "excluded_typed_rows": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "not_collected_typed_rows": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "pending_rows": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "row_id",
+        "slot_id",
+        "slot_sha256",
+        "cell_id",
+        "cell_identity_sha256",
+        "config_id",
+        "config_sha256",
+        "metric_key",
+        "metric_sha256",
+        "repeat_index",
+        "sweep_index",
+        "launch_index",
+        "sidecar_sha256",
+        "value",
+        "source_emitted_value",
+        "source_emitted_unit",
+        "validity",
+        "disposition",
+        "typed_reason",
+        "row_sha256"
+      ],
+      "properties": {
+        "row_id": {
+          "type": "string",
+          "minLength": 12
+        },
+        "slot_id": {
+          "type": "string",
+          "minLength": 16
+        },
+        "slot_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "cell_id": {
+          "type": "string",
+          "minLength": 3
+        },
+        "cell_identity_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "config_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "config_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "metric_key": {
+          "type": "string",
+          "minLength": 1
+        },
+        "metric_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "repeat_index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 29
+        },
+        "sweep_index": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 29
+        },
+        "launch_index": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "sidecar_sha256": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "value": {
+          "$ref": "#/$defs/numberOrNull"
+        },
+        "source_emitted_value": {
+          "$ref": "#/$defs/numberOrNull"
+        },
+        "source_emitted_unit": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "percent",
+            null
+          ]
+        },
+        "validity": {
+          "type": "string",
+          "enum": [
+            "in_range",
+            "out_of_range_low",
+            "out_of_range_high",
+            "not_collected"
+          ]
+        },
+        "disposition": {
+          "type": "string",
+          "enum": [
+            "classified",
+            "excluded_typed",
+            "not_collected_typed"
+          ]
+        },
+        "typed_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "row_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "validity": {
+                "const": "in_range"
+              }
+            },
+            "required": [
+              "validity"
+            ]
+          },
+          "then": {
+            "properties": {
+              "value": {
+                "type": "number"
+              },
+              "disposition": {
+                "const": "classified"
+              },
+              "typed_reason": {
+                "type": "null"
+              }
+            },
+            "required": [
+              "value",
+              "disposition",
+              "typed_reason"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "validity": {
+                "enum": [
+                  "out_of_range_low",
+                  "out_of_range_high"
+                ]
+              }
+            },
+            "required": [
+              "validity"
+            ]
+          },
+          "then": {
+            "properties": {
+              "value": {
+                "type": "number"
+              },
+              "disposition": {
+                "const": "excluded_typed"
+              },
+              "typed_reason": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "value",
+              "disposition",
+              "typed_reason"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "validity": {
+                "const": "not_collected"
+              }
+            },
+            "required": [
+              "validity"
+            ]
+          },
+          "then": {
+            "properties": {
+              "value": {
+                "type": "null"
+              },
+              "disposition": {
+                "const": "not_collected_typed"
+              },
+              "typed_reason": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "value",
+              "disposition",
+              "typed_reason"
+            ]
+          }
+        }
+      ]
+    },
+    "modality": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "flagged",
+        "outlier_flag",
+        "certified",
+        "suspected",
+        "split_index",
+        "gap",
+        "reason",
+        "regime_means",
+        "regime_counts",
+        "within_regime_sigma_rel"
+      ],
+      "properties": {
+        "flagged": {
+          "type": "boolean"
+        },
+        "outlier_flag": {
+          "type": "boolean"
+        },
+        "certified": {
+          "type": "boolean"
+        },
+        "suspected": {
+          "type": "boolean"
+        },
+        "split_index": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 1
+        },
+        "gap": {
+          "$ref": "#/$defs/numberOrNull"
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "regime_means": {
+          "type": "array",
+          "items": {
+            "type": "number"
+          }
+        },
+        "regime_counts": {
+          "type": "array",
+          "items": {
+            "type": "integer",
+            "minimum": 1
+          }
+        },
+        "within_regime_sigma_rel": {
+          "$ref": "#/$defs/numberOrNull"
+        }
+      }
+    },
+    "classification": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cell_id",
+        "cell_identity_sha256",
+        "config_id",
+        "config_sha256",
+        "metric_key",
+        "metric_sha256",
+        "repeatability_rule",
+        "expected_repeats",
+        "collected_repeats",
+        "in_range_repeats",
+        "out_of_range_repeats",
+        "values_sha256",
+        "mean_in_range",
+        "dispersion_gate",
+        "admission_threshold",
+        "would_have_been_admitted",
+        "sigma_rel",
+        "sigma_rel_upper_95",
+        "determinism_class",
+        "dispersion_class",
+        "modality",
+        "annotations",
+        "classification_sha256"
+      ],
+      "properties": {
+        "cell_id": {
+          "type": "string",
+          "minLength": 3
+        },
+        "cell_identity_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "config_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "config_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "metric_key": {
+          "type": "string",
+          "minLength": 1
+        },
+        "metric_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "repeatability_rule": {
+          "type": "string",
+          "enum": [
+            "coefficient_of_variation",
+            "stddev_abs",
+            "relative_tolerance"
+          ]
+        },
+        "expected_repeats": {
+          "type": "integer",
+          "minimum": 10,
+          "maximum": 30
+        },
+        "collected_repeats": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 30
+        },
+        "in_range_repeats": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 30
+        },
+        "out_of_range_repeats": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 30
+        },
+        "values_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "mean_in_range": {
+          "$ref": "#/$defs/numberOrNull"
+        },
+        "dispersion_gate": {
+          "$ref": "#/$defs/numberOrNull"
+        },
+        "admission_threshold": {
+          "type": "number",
+          "minimum": 0
+        },
+        "would_have_been_admitted": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "sigma_rel": {
+          "$ref": "#/$defs/numberOrNull"
+        },
+        "sigma_rel_upper_95": {
+          "$ref": "#/$defs/numberOrNull"
+        },
+        "determinism_class": {
+          "$ref": "#/$defs/class"
+        },
+        "dispersion_class": {
+          "$ref": "#/$defs/class"
+        },
+        "modality": {
+          "$ref": "#/$defs/modality"
+        },
+        "annotations": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "suspected_multimodal",
+              "outlier_flag",
+              "uncertain_boundary",
+              "oor_floor_lower_bound",
+              "tier2_not_collected"
+            ]
+          }
+        },
+        "classification_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "oorRate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "metric_key",
+        "config_id",
+        "observed_rows",
+        "out_of_range_rows",
+        "rate",
+        "floor_is_lower_bound",
+        "rule_of_three_upper_bound",
+        "rare_event_upper_bound"
+      ],
+      "properties": {
+        "metric_key": {
+          "type": "string",
+          "minLength": 1
+        },
+        "config_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "observed_rows": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "out_of_range_rows": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "rate": {
+          "$ref": "#/$defs/numberOrNull"
+        },
+        "floor_is_lower_bound": {
+          "type": "boolean"
+        },
+        "rule_of_three_upper_bound": {
+          "$ref": "#/$defs/numberOrNull"
+        },
+        "rare_event_upper_bound": {
+          "$ref": "#/$defs/numberOrNull"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "observed_rows": {
+                "minimum": 1
+              }
+            },
+            "required": [
+              "observed_rows"
+            ]
+          },
+          "then": {
+            "properties": {
+              "rate": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "rule_of_three_upper_bound": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "rare_event_upper_bound": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              }
+            },
+            "required": [
+              "rate"
+            ]
+          }
+        }
+      ]
+    },
+    "noiseFloor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "metric_key",
+        "valid_cells",
+        "cross_cell_p90",
+        "p90_upper_90",
+        "absolute_resolution",
+        "floor",
+        "lower_bound",
+        "status",
+        "fallback_authorized",
+        "fallback_reason"
+      ],
+      "properties": {
+        "metric_key": {
+          "type": "string",
+          "minLength": 1
+        },
+        "valid_cells": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 122
+        },
+        "cross_cell_p90": {
+          "$ref": "#/$defs/numberOrNull"
+        },
+        "p90_upper_90": {
+          "$ref": "#/$defs/numberOrNull"
+        },
+        "absolute_resolution": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "floor": {
+          "$ref": "#/$defs/numberOrNull"
+        },
+        "lower_bound": {
+          "type": "boolean"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "available",
+            "insufficient_cells"
+          ]
+        },
+        "fallback_authorized": {
+          "type": "boolean"
+        },
+        "fallback_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "available"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "valid_cells": {
+                "minimum": 30
+              },
+              "floor": {
+                "type": "number",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "valid_cells",
+              "floor"
+            ]
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "fallback_authorized": {
+                "const": true
+              }
+            },
+            "required": [
+              "fallback_authorized"
+            ]
+          },
+          "then": {
+            "properties": {
+              "fallback_reason": {
+                "type": "string",
+                "minLength": 1
+              }
+            },
+            "required": [
+              "fallback_reason"
+            ]
+          }
+        }
+      ]
+    },
+    "denominator": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cell_id",
+        "metric_key",
+        "determinism_class",
+        "absolute_resolution",
+        "pooled_floor",
+        "cell_override",
+        "denominator",
+        "denominator_kind",
+        "gate_target",
+        "exact_match",
+        "status"
+      ],
+      "properties": {
+        "cell_id": {
+          "type": "string",
+          "minLength": 3
+        },
+        "metric_key": {
+          "type": "string",
+          "minLength": 1
+        },
+        "determinism_class": {
+          "$ref": "#/$defs/class"
+        },
+        "absolute_resolution": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "pooled_floor": {
+          "$ref": "#/$defs/numberOrNull"
+        },
+        "cell_override": {
+          "$ref": "#/$defs/numberOrNull"
+        },
+        "denominator": {
+          "$ref": "#/$defs/numberOrNull"
+        },
+        "denominator_kind": {
+          "type": "string",
+          "enum": [
+            "absolute",
+            "relative",
+            "none"
+          ]
+        },
+        "gate_target": {
+          "type": "string",
+          "enum": [
+            "exact_value",
+            "mean",
+            "nearest_regime_mean",
+            "none"
+          ]
+        },
+        "exact_match": {
+          "type": "boolean"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "available",
+            "no_gate_insufficient_evidence",
+            "pending"
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "pending"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "denominator": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "available"
+              },
+              "denominator_kind": {
+                "const": "absolute"
+              }
+            },
+            "required": [
+              "status",
+              "denominator_kind"
+            ]
+          },
+          "then": {
+            "properties": {
+              "denominator": {
+                "type": "number",
+                "minimum": 0
+              }
+            },
+            "required": [
+              "denominator"
+            ]
+          }
+        }
+      ]
+    },
+    "sensitivity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "metric_key",
+        "axis",
+        "baseline_config_id",
+        "comparison_config_id",
+        "paired_cells",
+        "median_relative_shift",
+        "ci_lower",
+        "ci_upper",
+        "equivalence_band",
+        "label"
+      ],
+      "properties": {
+        "metric_key": {
+          "type": "string",
+          "minLength": 1
+        },
+        "axis": {
+          "type": "string",
+          "enum": [
+            "clock",
+            "cache"
+          ]
+        },
+        "baseline_config_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "comparison_config_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "paired_cells": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 122
+        },
+        "median_relative_shift": {
+          "$ref": "#/$defs/numberOrNull"
+        },
+        "ci_lower": {
+          "$ref": "#/$defs/numberOrNull"
+        },
+        "ci_upper": {
+          "$ref": "#/$defs/numberOrNull"
+        },
+        "equivalence_band": {
+          "$ref": "#/$defs/numberOrNull"
+        },
+        "label": {
+          "type": "string",
+          "enum": [
+            "protocol_invariant",
+            "protocol_sensitive",
+            "undetermined"
+          ]
+        }
+      }
+    },
+    "migration": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "metric_key",
+        "from_config_id",
+        "to_config_id",
+        "from_class",
+        "to_class",
+        "cell_count"
+      ],
+      "properties": {
+        "metric_key": {
+          "type": "string",
+          "minLength": 1
+        },
+        "from_config_id": {
+          "type": "string",
+          "const": "cfg=clock_none__cache_all"
+        },
+        "to_config_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "from_class": {
+          "$ref": "#/$defs/class"
+        },
+        "to_class": {
+          "$ref": "#/$defs/class"
+        },
+        "cell_count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 122
+        }
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "m7_state": {
+            "const": "M7_BLOCKED"
+          }
+        },
+        "required": [
+          "m7_state"
+        ]
+      },
+      "then": {
+        "properties": {
+          "m6_m7_handoff_candidate": {
+            "const": false
+          }
+        }
+      }
+    }
+  ]
+}

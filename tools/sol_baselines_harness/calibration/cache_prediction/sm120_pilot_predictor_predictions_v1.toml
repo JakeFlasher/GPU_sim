@@ -1,0 +1,183 @@
+# sm_120 pilot predictor-predictions artifact.
+#
+# Per-cell raw + calibrated L1/L2 hit rates from
+# the simulator + deployed sm_120 calibrator drive over
+# the pilot Tier-2 sidecars. NCU labels carried
+# as ground-truth-side evidence for the next-round
+# residual computation.
+
+[meta]
+schema_version = "1.0"
+host_arch = "sm_120"
+captured_at_utc = "2026-05-27T18:35:00+00:00"
+row_count = 12
+aggregate_predictions_emitted = 4
+aggregate_typed_unavailable = 8
+
+[[entries]]
+slug = "problem_002_fused_add_rmsnorm_h4096"
+language = "cuda_cpp"
+sidecar_sha256 = "101f17af8cfbce6b7ec0ca769cdd995e0ab90ab1fce26e7e426e7ab8481c1f54"
+raw_l1 = 0.5714285714285714
+raw_l2 = 0.0
+predicted_l1 = 0.6666793823242188
+predicted_l2 = 0.0005176807015211649
+ncu_l1 = 0.4000000000000001
+ncu_l2 = 0.2857142857142857
+predictor_success = true
+failure_reason = ""
+captured_at_utc = "2026-05-27T18:35:00+00:00"
+
+[[entries]]
+slug = "problem_010_attention_value_projection_with_transpose"
+language = "cuda_cpp"
+sidecar_sha256 = ""
+raw_l1 = -1.0
+raw_l2 = -1.0
+predicted_l1 = -1.0
+predicted_l2 = -1.0
+ncu_l1 = -1.0
+ncu_l2 = -1.0
+predictor_success = false
+failure_reason = "predictor_pilot_not_in_ncu_status"
+captured_at_utc = "2026-05-27T18:35:00+00:00"
+
+[[entries]]
+slug = "problem_021_cross_attention_text_video_conditioning_backward"
+language = "cuda_cpp"
+sidecar_sha256 = ""
+raw_l1 = -1.0
+raw_l2 = -1.0
+predicted_l1 = -1.0
+predicted_l2 = -1.0
+ncu_l1 = -1.0
+ncu_l2 = -1.0
+predictor_success = false
+failure_reason = "predictor_pilot_not_in_ncu_status"
+captured_at_utc = "2026-05-27T18:35:00+00:00"
+
+[[entries]]
+slug = "problem_024_rmsnorm_h2048"
+language = "cuda_cpp"
+sidecar_sha256 = "29cdbdcdd9174686724cff646a8c75a631697dbafc35e75134232c63697b2844"
+raw_l1 = 0.6111111111111112
+raw_l2 = 0.0
+predicted_l1 = 0.6666793823242188
+predicted_l2 = 0.0005176807015211649
+ncu_l1 = 0.3333
+ncu_l2 = 0.4166666666666667
+predictor_success = true
+failure_reason = ""
+captured_at_utc = "2026-05-27T18:35:00+00:00"
+
+[[entries]]
+slug = "problem_025_video_latent_gelu_activation"
+language = "cuda_cpp"
+sidecar_sha256 = "50bf2deff5b59d48457c6da2164523ca48afdc62c50a020aec131c4c26659eb9"
+raw_l1 = 0.0
+raw_l2 = 0.0
+predicted_l1 = 0.0
+predicted_l2 = 0.0005176807015211649
+ncu_l1 = 0.0
+ncu_l2 = 0.0
+predictor_success = true
+failure_reason = ""
+captured_at_utc = "2026-05-27T18:35:00+00:00"
+
+[[entries]]
+slug = "problem_030_flux_concatenated_sequence_processing_with_split"
+language = "cuda_cpp"
+sidecar_sha256 = ""
+raw_l1 = -1.0
+raw_l2 = -1.0
+predicted_l1 = -1.0
+predicted_l2 = -1.0
+ncu_l1 = -1.0
+ncu_l2 = -1.0
+predictor_success = false
+failure_reason = "predictor_pilot_not_in_ncu_status"
+captured_at_utc = "2026-05-27T18:35:00+00:00"
+
+[[entries]]
+slug = "problem_045_fused_linear_gelu_grn_linear"
+language = "cuda_cpp"
+sidecar_sha256 = ""
+raw_l1 = -1.0
+raw_l2 = -1.0
+predicted_l1 = -1.0
+predicted_l2 = -1.0
+ncu_l1 = -1.0
+ncu_l2 = -1.0
+predictor_success = false
+failure_reason = "predictor_pilot_not_in_ncu_status"
+captured_at_utc = "2026-05-27T18:35:00+00:00"
+
+[[entries]]
+slug = "problem_051_attention_qkv_with_qk_norm_single_kernel_backward"
+language = "cuda_cpp"
+sidecar_sha256 = ""
+raw_l1 = -1.0
+raw_l2 = -1.0
+predicted_l1 = -1.0
+predicted_l2 = -1.0
+ncu_l1 = -1.0
+ncu_l2 = -1.0
+predictor_success = false
+failure_reason = "predictor_pilot_not_in_ncu_status"
+captured_at_utc = "2026-05-27T18:35:00+00:00"
+
+[[entries]]
+slug = "problem_063_attention_output_reshape_and_projection"
+language = "cuda_cpp"
+sidecar_sha256 = ""
+raw_l1 = -1.0
+raw_l2 = -1.0
+predicted_l1 = -1.0
+predicted_l2 = -1.0
+ncu_l1 = -1.0
+ncu_l2 = -1.0
+predictor_success = false
+failure_reason = "predictor_pilot_not_in_ncu_status"
+captured_at_utc = "2026-05-27T18:35:00+00:00"
+
+[[entries]]
+slug = "problem_068_gelu_approximate_feedforward_backward"
+language = "cuda_cpp"
+sidecar_sha256 = ""
+raw_l1 = -1.0
+raw_l2 = -1.0
+predicted_l1 = -1.0
+predicted_l2 = -1.0
+ncu_l1 = -1.0
+ncu_l2 = -1.0
+predictor_success = false
+failure_reason = "predictor_pilot_not_in_ncu_status"
+captured_at_utc = "2026-05-27T18:35:00+00:00"
+
+[[entries]]
+slug = "problem_069_rms_norm"
+language = "cuda_cpp"
+sidecar_sha256 = "d028c84b201c3041e51889575c32ee19a5b1504e695fbce1fd1c2289fe8e8d4c"
+raw_l1 = 0.18079607990477603
+raw_l2 = 0.500882588721364
+predicted_l1 = 0.31582648030349186
+predicted_l2 = 0.2781943135841134
+ncu_l1 = 0.5466000000000001
+ncu_l2 = 0.11769499199723428
+predictor_success = true
+failure_reason = ""
+captured_at_utc = "2026-05-27T18:35:00+00:00"
+
+[[entries]]
+slug = "problem_093_grouped_topk_moe_routing_backward"
+language = "cuda_cpp"
+sidecar_sha256 = ""
+raw_l1 = -1.0
+raw_l2 = -1.0
+predicted_l1 = -1.0
+predicted_l2 = -1.0
+ncu_l1 = -1.0
+ncu_l2 = -1.0
+predictor_success = false
+failure_reason = "predictor_pilot_not_in_ncu_status"
+captured_at_utc = "2026-05-27T18:35:00+00:00"

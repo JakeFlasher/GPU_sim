@@ -1,0 +1,56 @@
+# sm_86 EXPANDED isotonic calibrator params (full fit on the admitted cells
+# at the empirically-selected L2 associativity, with the capability-ledger
+# simulator-out-of-domain cells typed-excluded). Raw = SetAssociativeSimulator
+# output, label = NCU read-only-sector hit rate (non-identity fit). NEW
+# artifact: the frozen pilot isotonic_params_sm86.toml is never clobbered.
+
+[meta]
+schema_version = "1.0"
+arch = "sm_86"
+captured_at_utc = "2026-05-29T22:40:18+00:00"
+expanded_ledger_sha256 = "cbf05dd4a14bb732b2d1e3aca2e51176db69b46925e9ade4dd50664e19622b8c"
+raw_predictions_sha256 = "5b65ebff747edcbf8bc6a9f96a25e64fa519463f0a6f4fbc27e88caa9eb2d6f0"
+seed_ledger_sha256 = "9bc5e96dbb7ad82b2a04b9f654e536cd10ed66de4276a756233f9fd1efb30c96"
+fit_record_count = 35
+admitted_cell_count = 35
+calibrator_class_name = "IsotonicRegression"
+out_of_bounds = "clip"
+ncu_label_aggregation = "median_of_3_runs"
+identity_fit_rejection_epsilon = 1e-09
+l1_identity_max_gap = 0.23679025297619047
+l2_identity_max_gap = 0.14625545992326083
+accepted_metric_selectors = ["l1tex__t_sector_pipe_lsu_mem_global_op_ld_hit_rate.pct", "l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum", "l1tex__t_sectors_pipe_lsu_mem_global_op_ld_lookup_hit.sum", "lts__t_sectors_srcunit_tex_op_read.sum", "lts__t_sectors_srcunit_tex_op_read_lookup_hit.sum"]
+fit_input_geometry_associativity_l2 = 4
+fit_input_geometry_num_l2_slices = 6
+fit_input_geometry_source = "empirical_sweep_winner"
+capability_ledger_sha256 = "13433b0002a79b546a66f7ac18e9c0aeac2960539b6bbc7cdafd8d406568f061"
+sweep_scoreboard_sha256 = "da61134fda3826d2af6032650eb287295b4b620c5678b5f680993e60612a113c"
+
+[reproducibility]
+python_version = "3.12.12"
+numpy_version = "2.4.4"
+scipy_version = "1.17.1"
+sklearn_version = "1.8.0"
+fitter_sort_key = "slug_lexicographic"
+
+[l1_head]
+feature = "raw_l1_simulator"
+x_thresholds = [0.0, 0.014025376490981616, 0.016845549790580734, 0.15712653430623905, 0.17408220022148763, 0.19867919921875, 0.19969308035714287, 0.26251220703125, 0.31995849609375, 0.4978118078653139, 0.5009505626303136, 0.5072292751736112, 0.5315387237662909, 0.6521708170572916, 0.6651204427083334, 0.769408326048951, 0.9948309762893643]
+y_thresholds = [0.0, 0.0, 0.0023, 0.0023, 0.009433333333333334, 0.26113333333333333, 0.43648333333333333, 0.43648333333333333, 0.522611111111111, 0.522611111111111, 0.5406, 0.6366, 0.6426000000000001, 0.6578666666666666, 0.6629333333333333, 0.7651, 0.8427]
+
+[l2_head]
+model = "streaming_vs_reuse_segmented"
+streaming_feature = "dense_reuse_factor"
+reuse_feature = "raw_l2_simulator"
+segment_threshold_reuse_factor = 4.0
+segment_threshold_source = "fixed_physical_hyperparameter_not_label_tuned"
+dense_reuse_feature_formula = "total_sector_accesses_div_distinct_sectors"
+sweep_sidecar_schema_version = 2
+
+[l2_head.streaming]   # reuse_factor < threshold -> isotonic(reuse_factor -> label)
+x_thresholds = [1.0104140970507378, 1.0156230628527396, 1.037050693971119, 1.0416656070296153, 1.6983008660757373, 1.8114969360957105, 1.9386066201099725, 2.0326294917730547, 2.499828350409289, 2.525185856326971, 2.8482057361725412]
+y_thresholds = [0.0, 0.0, 0.000742593354451248, 0.000742593354451248, 0.03634491703204122, 0.03634491703204122, 0.08949597268780163, 0.11636483132244725, 0.11636483132244725, 0.1621347523123217, 0.1621347523123217]
+
+[l2_head.reuse]       # reuse_factor >= threshold -> isotonic(raw_l2 -> label)
+x_thresholds = [0.091402224030377, 0.6008661758336943]
+y_thresholds = [0.9114212787532042, 0.9114212787532042]

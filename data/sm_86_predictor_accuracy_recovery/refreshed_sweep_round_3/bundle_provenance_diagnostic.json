@@ -1,0 +1,125 @@
+{
+  "generator": "regenerate_refreshed_sweep.py",
+  "geometry_provenance_template": {
+    "arch": "sm_86",
+    "cuda_toolkit_version": "13.2",
+    "driver_version": "595.71.05",
+    "nvbit_build": "1.8",
+    "sku": "rtx_3090_ti"
+  },
+  "loop_session": "2026-05-17_11-26-33",
+  "manifest_sha256": "ba7ff98ad18f3d68a12de8f07b8b79ff7d1b2150680466f859ebd413ddc6eec1",
+  "per_cell_field_audit": {
+    "sm_86__layernorm_fwd_bf16_sm80__timing_shape.json": {
+      "baseline": {
+        "cache_model_cta_interleave_enabled": true,
+        "cache_model_geometry_provenance_present": false,
+        "cache_model_hrd_second_layer_enabled": null,
+        "cache_model_num_l2_slices": 6,
+        "cache_model_num_l2_slices_source": "static_device_card",
+        "manifest_sha256": null,
+        "predicted_hit_rate": 0.9771133330406533,
+        "result_kind": "scalar"
+      },
+      "refreshed": {
+        "cache_model_cta_interleave_enabled": true,
+        "cache_model_geometry_provenance_present": true,
+        "cache_model_hrd_second_layer_enabled": true,
+        "cache_model_num_l2_slices": 6,
+        "cache_model_num_l2_slices_source": "device_properties_manifest",
+        "manifest_sha256": "ba7ff98ad18f3d68a12de8f07b8b79ff7d1b2150680466f859ebd413ddc6eec1",
+        "predicted_hit_rate": 0.9771133330406533,
+        "result_kind": "scalar"
+      }
+    },
+    "sm_86__rmsnorm_fwd_bf16_sm80__timing_shape.json": {
+      "baseline": {
+        "cache_model_cta_interleave_enabled": true,
+        "cache_model_geometry_provenance_present": false,
+        "cache_model_hrd_second_layer_enabled": null,
+        "cache_model_num_l2_slices": 6,
+        "cache_model_num_l2_slices_source": "static_device_card",
+        "manifest_sha256": null,
+        "predicted_hit_rate": 0.9698870262390671,
+        "result_kind": "scalar"
+      },
+      "refreshed": {
+        "cache_model_cta_interleave_enabled": true,
+        "cache_model_geometry_provenance_present": true,
+        "cache_model_hrd_second_layer_enabled": true,
+        "cache_model_num_l2_slices": 6,
+        "cache_model_num_l2_slices_source": "device_properties_manifest",
+        "manifest_sha256": "ba7ff98ad18f3d68a12de8f07b8b79ff7d1b2150680466f859ebd413ddc6eec1",
+        "predicted_hit_rate": 0.9698870262390671,
+        "result_kind": "scalar"
+      }
+    },
+    "sm_86__silu_fwd_bf16_sm80__correctness_shape.json": {
+      "baseline": {
+        "cache_model_cta_interleave_enabled": true,
+        "cache_model_geometry_provenance_present": false,
+        "cache_model_hrd_second_layer_enabled": null,
+        "cache_model_num_l2_slices": 6,
+        "cache_model_num_l2_slices_source": "static_device_card",
+        "manifest_sha256": null,
+        "predicted_hit_rate": 0.9375,
+        "result_kind": "scalar"
+      },
+      "refreshed": {
+        "cache_model_cta_interleave_enabled": true,
+        "cache_model_geometry_provenance_present": true,
+        "cache_model_hrd_second_layer_enabled": true,
+        "cache_model_num_l2_slices": 6,
+        "cache_model_num_l2_slices_source": "device_properties_manifest",
+        "manifest_sha256": "ba7ff98ad18f3d68a12de8f07b8b79ff7d1b2150680466f859ebd413ddc6eec1",
+        "predicted_hit_rate": 0.9375,
+        "result_kind": "scalar"
+      }
+    },
+    "sm_86__silu_fwd_bf16_sm80__timing_shape.json": {
+      "baseline": {
+        "cache_model_cta_interleave_enabled": true,
+        "cache_model_geometry_provenance_present": false,
+        "cache_model_hrd_second_layer_enabled": null,
+        "cache_model_num_l2_slices": 6,
+        "cache_model_num_l2_slices_source": "static_device_card",
+        "manifest_sha256": null,
+        "predicted_hit_rate": 0.9375,
+        "result_kind": "scalar"
+      },
+      "refreshed": {
+        "cache_model_cta_interleave_enabled": true,
+        "cache_model_geometry_provenance_present": true,
+        "cache_model_hrd_second_layer_enabled": true,
+        "cache_model_num_l2_slices": 6,
+        "cache_model_num_l2_slices_source": "device_properties_manifest",
+        "manifest_sha256": "ba7ff98ad18f3d68a12de8f07b8b79ff7d1b2150680466f859ebd413ddc6eec1",
+        "predicted_hit_rate": 0.9375,
+        "result_kind": "scalar"
+      }
+    },
+    "sm_86__softmax_safe_bf16_sm80__timing_shape.json": {
+      "baseline": {
+        "cache_model_cta_interleave_enabled": true,
+        "cache_model_geometry_provenance_present": false,
+        "cache_model_hrd_second_layer_enabled": null,
+        "cache_model_num_l2_slices": 6,
+        "cache_model_num_l2_slices_source": "static_device_card",
+        "manifest_sha256": null,
+        "predicted_hit_rate": 0.9607112762371687,
+        "result_kind": "scalar"
+      },
+      "refreshed": {
+        "cache_model_cta_interleave_enabled": true,
+        "cache_model_geometry_provenance_present": true,
+        "cache_model_hrd_second_layer_enabled": true,
+        "cache_model_num_l2_slices": 6,
+        "cache_model_num_l2_slices_source": "device_properties_manifest",
+        "manifest_sha256": "ba7ff98ad18f3d68a12de8f07b8b79ff7d1b2150680466f859ebd413ddc6eec1",
+        "predicted_hit_rate": 0.9607112762371687,
+        "result_kind": "scalar"
+      }
+    }
+  },
+  "round": "round-3"
+}

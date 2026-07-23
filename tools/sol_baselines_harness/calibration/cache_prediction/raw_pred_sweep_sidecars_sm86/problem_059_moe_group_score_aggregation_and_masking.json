@@ -1,0 +1,53 @@
+{
+  "by_assoc": {
+    "16": {
+      "raw_l1_hit_rate": 0.0,
+      "raw_l2_hit_rate": 0.0,
+      "scored": true,
+      "typed_reason": ""
+    },
+    "32": {
+      "raw_l1_hit_rate": 0.0,
+      "raw_l2_hit_rate": 0.0,
+      "scored": true,
+      "typed_reason": ""
+    },
+    "4": {
+      "raw_l1_hit_rate": 0.0,
+      "raw_l2_hit_rate": 0.0,
+      "scored": true,
+      "typed_reason": ""
+    },
+    "64": {
+      "raw_l1_hit_rate": 0.0,
+      "raw_l2_hit_rate": 0.0,
+      "scored": true,
+      "typed_reason": ""
+    },
+    "8": {
+      "raw_l1_hit_rate": 0.0,
+      "raw_l2_hit_rate": 0.0,
+      "scored": true,
+      "typed_reason": ""
+    }
+  },
+  "candidates": [
+    4,
+    8,
+    16,
+    32,
+    64
+  ],
+  "captured_at_utc": "2026-05-30T01:05:36+00:00",
+  "dense_reuse": {
+    "distinct_sectors": 133122,
+    "reuse_factor": 1.6922822673938192,
+    "total_sector_accesses": 225280,
+    "truncated": false
+  },
+  "schema_version": 2,
+  "scored": true,
+  "slug": "problem_059_moe_group_score_aggregation_and_masking",
+  "tier2_sidecar_sha256": "83c4d233adbf1ff7caf505f51233a318cf3cb796e4a2c20ca2b05d61a2e12fb4",
+  "typed_reason": ""
+}

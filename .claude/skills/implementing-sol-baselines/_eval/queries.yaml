@@ -1,0 +1,288 @@
+# Routing probes for the implementing-sol-baselines skill (DEC-2: new
+# SOL-specific skill owning the sources/, patterns/, problems/ subcorpora).
+#
+# Schema matches scripts/kb/run_evals.py:
+#   - prompt:          query text
+#   - expected_skill:  the skill that should rank first
+#   - required_cards:  paths that MUST appear in the returned set (full
+#                      credit only when every entry is recalled)
+#   - helpful_cards:   bonus paths (partial credit on hit)
+#
+# Negative probes live in scripts/kb/_relevance_evals.yaml `negative:`
+# section; that suite is enforced by run_relevance_evals.py.
+
+queries:
+  # Pattern-level probes — surface the matching pattern card
+  - prompt: "GEMM baseline canonical CUTLASS recipe TiledMma CollectiveMainloop tcgen05"
+    expected_skill: implementing-sol-baselines
+    required_cards:
+      - .claude/knowledge/patterns/gemm_baseline.md
+
+  - prompt: "fused add and RMSNorm kernel recipe"
+    expected_skill: implementing-sol-baselines
+    required_cards:
+      - .claude/knowledge/patterns/fused_add_rmsnorm.md
+
+  - prompt: "FP8 block-scaled quantization MMA"
+    expected_skill: implementing-sol-baselines
+    required_cards:
+      - .claude/knowledge/patterns/fp8_blockwise_quant.md
+
+  - prompt: "NVFP4 e2m1 block scaling for B200"
+    expected_skill: implementing-sol-baselines
+    required_cards:
+      - .claude/knowledge/patterns/fp8_blockwise_quant.md
+
+  # RoPE probe — rope_attention.md must surface in top-3.
+  - prompt: "RoPE attention with KV sharing"
+    expected_skill: implementing-sol-baselines
+    required_cards:
+      - .claude/knowledge/patterns/rope_attention.md
+
+  # Round-2 pattern-card coverage (Codex Round-2 Blocking 3 fix: every new
+  # pattern card carries a routing probe so future regressions are caught).
+  - prompt: "GQA paged decode FlashInfer-style online-softmax kernel recipe"
+    expected_skill: implementing-sol-baselines
+    required_cards:
+      - .claude/knowledge/patterns/gqa_paged_decode.md
+
+  - prompt: "SwiGLU MLP gate up down projection"
+    expected_skill: implementing-sol-baselines
+    required_cards:
+      - .claude/knowledge/patterns/swiglu_mlp.md
+
+  - prompt: "MoE dispatch top-k routing permutation grouped GEMM inverse permute recipe"
+    expected_skill: implementing-sol-baselines
+    required_cards:
+      - .claude/knowledge/patterns/moe_dispatch.md
+
+  # Pattern-card completion probes — one per pattern family in the atlas.
+  # Each prompt targets the pattern's primary kernel family + a routing
+  # tag from the corresponding card so the BM25 scorer ranks the right
+  # pattern card first.
+  - prompt: "attention backward Q K V matmul softmax dropout backward kernel"
+    expected_skill: implementing-sol-baselines
+    required_cards:
+      - .claude/knowledge/patterns/attention_backward.md
+
+  - prompt: "forward attention core QK matmul softmax AV without RoPE"
+    expected_skill: implementing-sol-baselines
+    required_cards:
+      - .claude/knowledge/patterns/attention_core.md
+
+  - prompt: "fused conv groupnorm SiLU residual vision audio block"
+    expected_skill: implementing-sol-baselines
+    required_cards:
+      - .claude/knowledge/patterns/vision_audio_conv_blocks.md
+
+  - prompt: "selective scan Mamba Hyena SSM kernel recipe"
+    expected_skill: implementing-sol-baselines
+    required_cards:
+      - .claude/knowledge/patterns/hyena_mamba_ssm.md
+
+  - prompt: "LayerNorm GroupNorm Welford reduction kernel recipe"
+    expected_skill: implementing-sol-baselines
+    required_cards:
+      - .claude/knowledge/patterns/norm_layernorm_groupnorm.md
+
+  - prompt: "full transformer decoder layer pre-norm attention MLP residual"
+    expected_skill: implementing-sol-baselines
+    required_cards:
+      - .claude/knowledge/patterns/transformer_layer.md
+
+  - prompt: "RoPE cos sin frequency table build dynamic NTK YaRN"
+    expected_skill: implementing-sol-baselines
+    required_cards:
+      - .claude/knowledge/patterns/rope_embedding_tables.md
+
+  - prompt: "pure RMSNorm kernel single pass without fused add"
+    expected_skill: implementing-sol-baselines
+    required_cards:
+      - .claude/knowledge/patterns/rmsnorm.md
+
+  - prompt: "MLP block GELU GEGLU activation gated"
+    expected_skill: implementing-sol-baselines
+    required_cards:
+      - .claude/knowledge/patterns/mlp_gelu_geglu.md
+
+  - prompt: "token embedding lookup initial LayerNorm projection"
+    expected_skill: implementing-sol-baselines
+    required_cards:
+      - .claude/knowledge/patterns/embedding_norm_projection.md
+
+  - prompt: "GQA paged prefill causal multi-query attention kernel"
+    expected_skill: implementing-sol-baselines
+    required_cards:
+      - .claude/knowledge/patterns/gqa_paged_prefill.md
+
+  - prompt: "elementwise activation SiLU GELU ReLU sigmoid kernel"
+    expected_skill: implementing-sol-baselines
+    required_cards:
+      - .claude/knowledge/patterns/activation_elementwise.md
+
+  - prompt: "SAM HQ mask decoder IoU hypernetwork fused MLP"
+    expected_skill: implementing-sol-baselines
+    required_cards:
+      - .claude/knowledge/patterns/sam_mask_decoder.md
+
+  - prompt: "attention masking causal padding block diagonal kernel"
+    expected_skill: implementing-sol-baselines
+    required_cards:
+      - .claude/knowledge/patterns/attention_masking.md
+
+  - prompt: "MLA multi-head latent attention paged decode DeepSeek"
+    expected_skill: implementing-sol-baselines
+    required_cards:
+      - .claude/knowledge/patterns/mla_paged_attention.md
+
+  - prompt: "sparse activation top-k thresholded sigmoid gating kernel"
+    expected_skill: implementing-sol-baselines
+    required_cards:
+      - .claude/knowledge/patterns/sparse_activation.md
+
+  - prompt: "Flash Attention 3 forward online softmax TMA producer warp"
+    expected_skill: implementing-sol-baselines
+    required_cards:
+      - .claude/knowledge/patterns/flash_attention.md
+
+  - prompt: "multimodal sequence packing text image tokens segment mask"
+    expected_skill: implementing-sol-baselines
+    required_cards:
+      - .claude/knowledge/patterns/multimodal_sequence_packing.md
+
+  - prompt: "normalizing flow coupling layer affine RealNVP Glow"
+    expected_skill: implementing-sol-baselines
+    required_cards:
+      - .claude/knowledge/patterns/flow_coupling.md
+
+  - prompt: "perceptual loss VGG feature L2 LPIPS"
+    expected_skill: implementing-sol-baselines
+    required_cards:
+      - .claude/knowledge/patterns/loss_perceptual.md
+
+  # Problem-start probes — surface the matching dossier
+  - prompt: "I want to start problem_004_gemm_n128_k2048"
+    expected_skill: implementing-sol-baselines
+    required_cards:
+      - .claude/knowledge/problems/problem_004_gemm_n128_k2048.md
+
+  - prompt: "start problem_080_moe_complete_layer_with_shared_expert_backward"
+    expected_skill: implementing-sol-baselines
+    required_cards:
+      - .claude/knowledge/problems/problem_080_moe_complete_layer_with_shared_expert_backward.md
+
+  - prompt: "start problem_004_fp8_moe_expert_linear"
+    expected_skill: implementing-sol-baselines
+    required_cards:
+      - .claude/knowledge/problems/problem_004_fp8_moe_expert_linear.md
+
+  - prompt: "start problem_012_gqa_paged_decode_h32_kv4_d128_ps1"
+    expected_skill: implementing-sol-baselines
+    required_cards:
+      - .claude/knowledge/problems/problem_012_gqa_paged_decode_h32_kv4_d128_ps1.md
+
+  # Source-stub probes — citation-shaped queries hit sources/
+  - prompt: "what does the SOL-ExecBench paper say about reward hacking"
+    expected_skill: implementing-sol-baselines
+    required_cards:
+      - .claude/knowledge/sources/sol-execbench-paper.md
+
+  - prompt: "where are the Blackwell tuning docs mirrored locally"
+    expected_skill: tuning-blackwell-sm120-kernels
+    required_cards:
+      - .claude/knowledge/sources/blackwell-tuning-docs.md
+
+  - prompt: "CuTe Layout reference for CUTLASS C++"
+    expected_skill: implementing-sol-baselines
+    required_cards:
+      - .claude/knowledge/sources/cutlass-cute-docs.md
+
+  # Round-4 source-stub coverage (7 new citation gateways).
+  - prompt: "where are the SOL-ExecBench problem specs mirrored"
+    expected_skill: implementing-sol-baselines
+    required_cards:
+      - .claude/knowledge/sources/solbench-problems-specs.md
+
+  - prompt: "AVO paper SOL-ExecBench agent optimizer scoring baseline Tb"
+    expected_skill: implementing-sol-baselines
+    required_cards:
+      - .claude/knowledge/sources/avo-paper.md
+
+  - prompt: "CUDA C++ Programming Guide reference docs mirrored"
+    expected_skill: optimizing-cuda-kernels
+    required_cards:
+      - .claude/knowledge/sources/cuda-guide.md
+
+  - prompt: "CUDA Best Practices Guide for coalescing occupancy cp-async"
+    expected_skill: optimizing-cuda-kernels
+    required_cards:
+      - .claude/knowledge/sources/cuda-best-practices.md
+
+  - prompt: "NVCC compiler driver flags reference gencode std c++ fast-math"
+    expected_skill: compiling-cuda-artifacts
+    required_cards:
+      - .claude/knowledge/sources/nvcc-guide.md
+
+  - prompt: "PTX ISA tcgen05 mma cp.async instruction semantics reference"
+    expected_skill: interpreting-ptx-isa
+    required_cards:
+      - .claude/knowledge/sources/ptx-isa.md
+
+  - prompt: "inline PTX asm volatile constraints reference for CUDA C++"
+    expected_skill: interpreting-ptx-isa
+    required_cards:
+      - .claude/knowledge/sources/cuda-inline-ptx.md
+
+  # Source-stub probes for the two new upstream-codebase discovery cards
+  # (sol-execbench-framework.md and solar-tsol-deriver.md). Each probe
+  # uses stub-unique compound vocabulary per BL-20260512-fts5-length-
+  # norm-dossier-flood — `evaluator-framework`, `run-docker-entrypoint`,
+  # `solution-json-schema`, `tsol-deriver`, `orojenesis-elements`,
+  # `einsum-graph`, `arch-config-B200`, `5-stage pipeline`, `CUPTI-vs-
+  # paper`, `local checkout` — to avoid BM25 length-normalization
+  # collisions with the 27 pattern cards and 235 problem dossiers.
+  - prompt: "run the SOL-ExecBench evaluator-framework via run-docker-entrypoint with a solution-json-schema submission"
+    expected_skill: implementing-sol-baselines
+    required_cards:
+      - .claude/knowledge/sources/sol-execbench-framework.md
+
+  - prompt: "tsol-deriver einsum-graph 5-stage pipeline orojenesis-elements arch-config-B200"
+    expected_skill: implementing-sol-baselines
+    required_cards:
+      - .claude/knowledge/sources/solar-tsol-deriver.md
+
+  - prompt: "where is the CUPTI-vs-paper timing divergence documented in the sol-execbench evaluator-framework local checkout"
+    expected_skill: implementing-sol-baselines
+    required_cards:
+      - .claude/knowledge/sources/sol-execbench-framework.md
+
+  # Round-4 cutlass_constructs subcorpus coverage.
+  - prompt: "CUTLASS CollectiveMainloop collective builder schedule for GEMM"
+    expected_skill: implementing-sol-baselines
+    required_cards:
+      - .claude/knowledge/cutlass_constructs/collective_mainloop.md
+
+  - prompt: "CUTLASS TiledMma cute MMA atom selection for GEMM"
+    expected_skill: implementing-sol-baselines
+    required_cards:
+      - .claude/knowledge/cutlass_constructs/tiled_mma.md
+
+  - prompt: "CUTLASS Epilogue Visitor fusion callbacks aux store for GEMM"
+    expected_skill: implementing-sol-baselines
+    required_cards:
+      - .claude/knowledge/cutlass_constructs/epilogue_visitor.md
+
+  - prompt: "CuTe TMA descriptor async bulk tensor copy for GEMM"
+    expected_skill: implementing-sol-baselines
+    required_cards:
+      - .claude/knowledge/cutlass_constructs/tma_descriptor.md
+
+  - prompt: "tcgen05 mma TMEM accumulator register file for GEMM kernel"
+    expected_skill: implementing-sol-baselines
+    required_cards:
+      - .claude/knowledge/cutlass_constructs/tcgen05_tmem.md
+
+  - prompt: "sm100_blockscaled_layout tcgen05.mma.block_scale construct e8m0 scale dtype"
+    expected_skill: implementing-sol-baselines
+    required_cards:
+      - .claude/knowledge/cutlass_constructs/block_scaled_mma.md

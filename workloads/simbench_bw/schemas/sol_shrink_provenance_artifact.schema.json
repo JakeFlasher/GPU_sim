@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "simbench_bw/schemas/sol_shrink_provenance_artifact.schema.json",
+  "title": "sm_86 SOL-ExecBench shrink provenance artifact",
+  "description": "Emitted by tools/local_labels/sol_shrink_apply.py. The host-capacity shrink evidence package: per host-capacity cell a structured shrink verdict (native-shape ref, shrink vector, reduced-run status/detail, correctness result, replay-mode check, L2/roofline/occupancy verdicts, native_predictive, classification), plus a reconciliation of all 23 prior host-capacity cells. Only classification unavailable::oom_shape_gated with a capacity/shape-gated reduced_run_status backs a host_capacity_deferred exclusion; correctness_failed / calibration_inconclusive route to their own reasons.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "artifact_id", "arch", "native_env_hash",
+    "cells", "prior_host_capacity_reconciliation"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "artifact_id": {"type": "string", "const": "sm86_sol_shrink_provenance_v1"},
+    "arch": {"type": "string"},
+    "sku": {"type": "string"},
+    "native_env_hash": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "cells": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true,
+        "required": [
+          "slug", "classification", "native_predictive", "correctness_result",
+          "replay_mode_check", "l2_side_verdict", "roofline_class_verdict",
+          "occupancy_wave_verdict", "shrink_vector",
+          "native_shape_ref", "reduced_run_status", "reduced_run_detail",
+          "reduced_workload_ref"
+        ],
+        "allOf": [
+          {
+            "$comment": "A null reduced_workload_ref is legal ONLY when no reduced workload was run (no_safe_axis / resolve_error / null); any status that actually ran a reduced workload must carry a non-null reduced_workload_ref.",
+            "if": {
+              "required": ["reduced_workload_ref"],
+              "properties": {"reduced_workload_ref": {"type": "null"}}
+            },
+            "then": {
+              "properties": {
+                "reduced_run_status": {
+                  "enum": ["no_safe_axis", "resolve_error", null]
+                }
+              }
+            }
+          }
+        ],
+        "properties": {
+          "slug": {"type": "string"},
+          "category": {"type": ["string", "null"]},
+          "language": {"type": ["string", "null"]},
+          "classification": {
+            "type": "string",
+            "enum": [
+              "shape_adjusted", "reduced_representative",
+              "native_captured_via_replay_mode", "unavailable::oom_shape_gated",
+              "correctness_failed", "calibration_inconclusive"
+            ]
+          },
+          "detail": {"type": ["string", "null"]},
+          "native_predictive": {"type": "boolean"},
+          "native_shape_ref": {"type": ["string", "null"]},
+          "shrink_vector": {"type": "array"},
+          "reduced_workload_ref": {"type": ["string", "null"]},
+          "reduced_run_status": {"type": ["string", "null"]},
+          "reduced_run_detail": {"type": ["string", "null"]},
+          "correctness_result": {
+            "type": "string",
+            "enum": ["passed", "failed", "not_reached"]
+          },
+          "replay_mode_check": {"type": "string"},
+          "l2_side_verdict": {"type": "string"},
+          "roofline_class_verdict": {"type": "string"},
+          "occupancy_wave_verdict": {"type": "string"},
+          "halvings": {"type": ["integer", "null"]}
+        }
+      }
+    },
+    "prior_host_capacity_reconciliation": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["slug", "native_sweep_status", "disposition"],
+        "properties": {
+          "slug": {"type": "string"},
+          "category": {"type": ["string", "null"]},
+          "language": {"type": ["string", "null"]},
+          "prior_status": {"type": ["string", "null"]},
+          "native_sweep_status": {"type": ["string", "null"]},
+          "disposition": {
+            "type": "string",
+            "enum": ["shrunk", "retyped_by_native_sweep"]
+          },
+          "shrink_classification": {"type": ["string", "null"]}
+        }
+      }
+    }
+  }
+}

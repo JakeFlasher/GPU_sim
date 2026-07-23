@@ -1,0 +1,43 @@
+queries:
+  - prompt: "my warp is suffering from bank conflicts on shared memory loads"
+    expected_skill: optimizing-cuda-kernels
+    expected_cards:
+      - .claude/knowledge/best-practices/perf-coalescing-memory.md
+      - .claude/knowledge/cuda/cuda-memory-hierarchy.md
+    forbidden_behavior:
+      - confuses bank conflict (shared mem) with coalescing (global mem)
+  - prompt: "register pressure with __launch_bounds__ on a heavy kernel"
+    expected_skill: optimizing-cuda-kernels
+    expected_cards:
+      - .claude/knowledge/best-practices/perf-occupancy-launch.md
+      - .claude/knowledge/cuda/cuda-register-file.md
+    forbidden_behavior:
+      - uses NCU metrics to attribute (NCU is forbidden)
+  - prompt: "explain warp divergence behavior under ITS"
+    expected_skill: optimizing-cuda-kernels
+    expected_cards:
+      - .claude/knowledge/cuda/cuda-warp-divergence.md
+      - .claude/knowledge/cuda/cuda-warp-scheduling.md
+    forbidden_behavior:
+      - claims pre-Volta active-mask reconvergence is still default (ITS replaced it on sm_70+)
+  - prompt: "use cluster.sync correctly with DSMEM peer reads"
+    expected_skill: optimizing-cuda-kernels
+    expected_cards:
+      - .claude/knowledge/cuda/cuda-clusters-dsmem.md
+      - .claude/knowledge/cuda/cuda-cluster-modeling.md
+    forbidden_behavior:
+      - claims DSMEM is "one big merged shared memory" (it is distributed sharing, each block owns its piece)
+      - omits the cluster.sync requirement before peer access
+  - prompt: "diagnose data races between blocks using atomicCAS and memory fences"
+    expected_skill: optimizing-cuda-kernels
+    expected_cards:
+      - .claude/knowledge/cuda/cuda-sync-memory-ordering.md
+    forbidden_behavior:
+      - claims atomics imply memory ordering (they don't without a fence)
+  - prompt: "control flow perf — predication vs branch on a divergent kernel"
+    expected_skill: optimizing-cuda-kernels
+    expected_cards:
+      - .claude/knowledge/best-practices/perf-instruction-controlflow.md
+      - .claude/knowledge/cuda/cuda-warp-divergence.md
+    forbidden_behavior:
+      - claims branch and predication have identical cost (predication kills serialization)

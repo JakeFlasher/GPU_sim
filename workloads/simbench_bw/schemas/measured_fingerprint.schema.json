@@ -1,0 +1,112 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "simbench_bw/schemas/measured_fingerprint.schema.json",
+  "title": "Measured fingerprint (closed-object, gate-evaluator input)",
+  "description": "Closed-object schema for a measured fingerprint consumed by the pillar4 G1-G6 gate scaffold. The closed-object discipline (`additionalProperties: false` at every level) enforces the fixture-only contract STRUCTURALLY, not via field-name blacklist: any artifact under `golden/synthetic_pillar4_pilot/` whose JSON content contains an unknown field (regardless of name) is rejected with `loop_a_alt4_unknown_field` naming the offending JSON path. The `data_provenance` field is fixed at `measured`; a fingerprint with `data_provenance != measured` cannot be admitted by this schema. Aggregate consumers MUST stratify by `data_provenance` per the gate-evaluator's three-level provenance discipline.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "slug",
+    "shape_point",
+    "kernel_signature_sha256",
+    "binary_sha256",
+    "data_provenance",
+    "claim_scope",
+    "fingerprint_axes",
+    "measurement_provenance"
+  ],
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "slug": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+    "shape_point": { "type": "string", "minLength": 1 },
+    "kernel_signature_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "binary_sha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+    "data_provenance": {
+      "type": "string",
+      "const": "measured",
+      "description": "Provenance class. Frozen at `measured` for every record this schema admits; synthetic predictions live in predicted_fingerprint.schema.json."
+    },
+    "claim_scope": {
+      "type": "string",
+      "enum": ["measured_local", "methodology_transfer_only", "deferred"],
+      "description": "Cross-die claim-scope label. Local single-die measurements use `measured_local`; methodology-transfer claims to other dies use `methodology_transfer_only` and require accompanying transfer-methodology citations. `deferred` denotes a record that names a die where measurement is not yet collected."
+    },
+    "fingerprint_axes": { "$ref": "#/$defs/fingerprint_axes" },
+    "measurement_provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "preflight_manifest_sha256",
+        "cupti_run_id",
+        "nvbit_run_id",
+        "dual_run_manifest_ref",
+        "phase_cycle_ledger_ref"
+      ],
+      "properties": {
+        "preflight_manifest_sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "cupti_run_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{8,64}$"
+        },
+        "nvbit_run_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]{8,64}$"
+        },
+        "dual_run_manifest_ref": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Repo-relative path to the dual_run_manifest.json that pairs the CUPTI and NVBit runs the measurement derived from."
+        },
+        "phase_cycle_ledger_ref": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Repo-relative path to the phase_cycle_ledger.json sidecar this measurement consumed."
+        }
+      }
+    }
+  },
+  "$defs": {
+    "fingerprint_axes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kernel_feature_vector_ref",
+        "phase_cycle_ledger_ref",
+        "roofline_coordinate_ref",
+        "theta_vector_ref",
+        "distributional_metric_ref"
+      ],
+      "properties": {
+        "kernel_feature_vector_ref": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Repo-relative path to the per-kernel feature-vector sidecar."
+        },
+        "phase_cycle_ledger_ref": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Repo-relative path to the phase-cycle-ledger sidecar."
+        },
+        "roofline_coordinate_ref": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Repo-relative path to the roofline-coordinate sidecar."
+        },
+        "theta_vector_ref": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Repo-relative path to the theta-vector sidecar."
+        },
+        "distributional_metric_ref": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Repo-relative path to the distributional-metric sidecar (KL/Wasserstein/KS over per-kernel `|gap_ns|`)."
+        }
+      }
+    }
+  }
+}

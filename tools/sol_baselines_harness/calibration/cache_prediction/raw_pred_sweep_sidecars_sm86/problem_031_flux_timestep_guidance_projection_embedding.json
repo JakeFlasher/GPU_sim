@@ -1,0 +1,53 @@
+{
+  "by_assoc": {
+    "16": {
+      "raw_l1_hit_rate": 0.006152295250872811,
+      "raw_l2_hit_rate": 0.20600541471818853,
+      "scored": true,
+      "typed_reason": ""
+    },
+    "32": {
+      "raw_l1_hit_rate": 0.006152295250872811,
+      "raw_l2_hit_rate": 0.2915296205968123,
+      "scored": true,
+      "typed_reason": ""
+    },
+    "4": {
+      "raw_l1_hit_rate": 0.006152295250872811,
+      "raw_l2_hit_rate": 0.0833985933665973,
+      "scored": true,
+      "typed_reason": ""
+    },
+    "64": {
+      "raw_l1_hit_rate": 0.006152295250872811,
+      "raw_l2_hit_rate": 0.3021129334198495,
+      "scored": true,
+      "typed_reason": ""
+    },
+    "8": {
+      "raw_l1_hit_rate": 0.006152295250872811,
+      "raw_l2_hit_rate": 0.14331103304768084,
+      "scored": true,
+      "typed_reason": ""
+    }
+  },
+  "candidates": [
+    4,
+    8,
+    16,
+    32,
+    64
+  ],
+  "captured_at_utc": "2026-05-30T01:00:45+00:00",
+  "dense_reuse": {
+    "distinct_sectors": 371912,
+    "reuse_factor": 14.902444664329197,
+    "total_sector_accesses": 5542398,
+    "truncated": true
+  },
+  "schema_version": 2,
+  "scored": true,
+  "slug": "problem_031_flux_timestep_guidance_projection_embedding",
+  "tier2_sidecar_sha256": "746b3efc23eb70e9a45144088da924f700a1cf649c9f8bbf936752f5279771f2",
+  "typed_reason": ""
+}

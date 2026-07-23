@@ -1,0 +1,1335 @@
+{
+  "arch": "sm_86",
+  "calibration_head_version": 5,
+  "candidate_scores": [
+    {
+      "n_cv_predictions": 34,
+      "name": "isotonic_regression_on_frozen_projection",
+      "parameter_count": 0,
+      "primary": 0.0877058283740508,
+      "secondary": 0.1252017927761538,
+      "tertiary": 0.5117099455706677
+    }
+  ],
+  "cohort_scope": {
+    "admitted": [
+      {
+        "arch": "sm_86",
+        "family_bucket": "memory_stress",
+        "features": {
+          "footprint_ratio": 16.302083333333332,
+          "global_share": 0.9083386378103119,
+          "gridDim_density": 0.0,
+          "intra_lane_reuse": 0.011597934495454928,
+          "long_rd_tail_mass": 0.0,
+          "raw_prediction": 0.9966686629350486
+        },
+        "label": 0.98492,
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "carveout_sensitivity_probe",
+        "split_assignment": "holdout"
+      },
+      {
+        "arch": "sm_86",
+        "family_bucket": "tensor_compute",
+        "features": {
+          "footprint_ratio": 2.1002604166666665,
+          "global_share": 0.024539877300613498,
+          "gridDim_density": 0.0,
+          "intra_lane_reuse": 0.9350253807106599,
+          "long_rd_tail_mass": 0.0,
+          "raw_prediction": 0.5
+        },
+        "label": 0.83292,
+        "shape_point": "timing_shape",
+        "slug": "conv2d_implicit_gemm_bf16_sm80",
+        "split_assignment": "holdout"
+      },
+      {
+        "arch": "sm_86",
+        "family_bucket": "other",
+        "features": {
+          "footprint_ratio": 3.3321126302083335,
+          "global_share": 0.3837037037037037,
+          "gridDim_density": 0.0,
+          "intra_lane_reuse": 0.9993880088384408,
+          "long_rd_tail_mass": 0.0,
+          "raw_prediction": 0.9374923733984136
+        },
+        "label": 0.10552,
+        "shape_point": "timing_shape",
+        "slug": "cross_entropy_fwd_fp32_sm80",
+        "split_assignment": "validation"
+      },
+      {
+        "arch": "sm_86",
+        "family_bucket": "memory_stress",
+        "features": {
+          "footprint_ratio": 15.333323160807291,
+          "global_share": 0.6657997399219766,
+          "gridDim_density": 0.0,
+          "intra_lane_reuse": 0.007751937984496124,
+          "long_rd_tail_mass": 0.0,
+          "raw_prediction": 0.9375
+        },
+        "label": 0.5297999999999999,
+        "shape_point": "timing_shape",
+        "slug": "embedding_gather_int32_sm80",
+        "split_assignment": "calibration"
+      },
+      {
+        "arch": "sm_86",
+        "family_bucket": "tensor_compute",
+        "features": {
+          "footprint_ratio": 8.291544596354166,
+          "global_share": 0.02702702702702703,
+          "gridDim_density": 0.0,
+          "intra_lane_reuse": 1.0,
+          "long_rd_tail_mass": 0.0,
+          "raw_prediction": 0.875
+        },
+        "label": 0.93726,
+        "shape_point": "timing_shape",
+        "slug": "gemm_hmma_bf16_sm80",
+        "split_assignment": "calibration"
+      },
+      {
+        "arch": "sm_86",
+        "family_bucket": "tensor_compute",
+        "features": {
+          "footprint_ratio": 8.291544596354166,
+          "global_share": 0.02702702702702703,
+          "gridDim_density": 0.0,
+          "intra_lane_reuse": 1.0,
+          "long_rd_tail_mass": 0.0,
+          "raw_prediction": 0.875
+        },
+        "label": 0.94162,
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "gemm_hmma_bf16_sm80",
+        "split_assignment": "calibration"
+      },
+      {
+        "arch": "sm_86",
+        "family_bucket": "tensor_compute",
+        "features": {
+          "footprint_ratio": 8.291544596354166,
+          "global_share": 0.02702702702702703,
+          "gridDim_density": 0.0,
+          "intra_lane_reuse": 1.0,
+          "long_rd_tail_mass": 0.0,
+          "raw_prediction": 0.875
+        },
+        "label": 0.94232,
+        "shape_point": "timing_shape",
+        "slug": "gemm_hmma_fp16_sm80",
+        "split_assignment": "calibration"
+      },
+      {
+        "arch": "sm_86",
+        "family_bucket": "tensor_compute",
+        "features": {
+          "footprint_ratio": 8.291544596354166,
+          "global_share": 0.02702702702702703,
+          "gridDim_density": 0.0,
+          "intra_lane_reuse": 1.0,
+          "long_rd_tail_mass": 0.0,
+          "raw_prediction": 0.875
+        },
+        "label": 0.9429000000000001,
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "gemm_hmma_fp16_sm80",
+        "split_assignment": "calibration"
+      },
+      {
+        "arch": "sm_86",
+        "family_bucket": "tensor_compute",
+        "features": {
+          "footprint_ratio": 4.291605631510417,
+          "global_share": 0.04,
+          "gridDim_density": 0.0,
+          "intra_lane_reuse": 1.0,
+          "long_rd_tail_mass": 0.0,
+          "raw_prediction": 0.875
+        },
+        "label": 0.94048,
+        "shape_point": "timing_shape",
+        "slug": "gemm_imma_int8_sm80",
+        "split_assignment": "calibration"
+      },
+      {
+        "arch": "sm_86",
+        "family_bucket": "tensor_compute",
+        "features": {
+          "footprint_ratio": 4.291605631510417,
+          "global_share": 0.04,
+          "gridDim_density": 0.0,
+          "intra_lane_reuse": 1.0,
+          "long_rd_tail_mass": 0.0,
+          "raw_prediction": 0.875
+        },
+        "label": 0.92948,
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "gemm_imma_int8_sm80",
+        "split_assignment": "calibration"
+      },
+      {
+        "arch": "sm_86",
+        "family_bucket": "tensor_compute",
+        "features": {
+          "footprint_ratio": 0.7394205729166666,
+          "global_share": 0.08333333333333333,
+          "gridDim_density": 0.0,
+          "intra_lane_reuse": 1.0,
+          "long_rd_tail_mass": 0.0,
+          "raw_prediction": 0.875
+        },
+        "label": 0.9081199999999999,
+        "shape_point": "timing_shape",
+        "slug": "gemm_sparse_2to4_bf16_sm80",
+        "split_assignment": "validation"
+      },
+      {
+        "arch": "sm_86",
+        "family_bucket": "activation_norm",
+        "features": {
+          "footprint_ratio": 9.9130859375,
+          "global_share": 0.896,
+          "gridDim_density": 0.0,
+          "intra_lane_reuse": 0.7012522361359571,
+          "long_rd_tail_mass": 0.0,
+          "raw_prediction": 0.9730747767857143
+        },
+        "label": 0.49828000000000006,
+        "shape_point": "timing_shape",
+        "slug": "rmsnorm_bwd_bf16_sm80",
+        "split_assignment": "holdout"
+      },
+      {
+        "arch": "sm_86",
+        "family_bucket": "activation_norm",
+        "features": {
+          "footprint_ratio": 5.580891927083333,
+          "global_share": 0.7111111111111111,
+          "gridDim_density": 0.0,
+          "intra_lane_reuse": 0.3239263803680982,
+          "long_rd_tail_mass": 0.0,
+          "raw_prediction": 0.968505859375
+        },
+        "label": 0.6622,
+        "shape_point": "timing_shape",
+        "slug": "rmsnorm_fwd_bf16_sm80",
+        "split_assignment": "calibration"
+      },
+      {
+        "arch": "sm_86",
+        "family_bucket": "other",
+        "features": {
+          "footprint_ratio": 2.5,
+          "global_share": 1.0,
+          "gridDim_density": 0.0,
+          "intra_lane_reuse": 0.0,
+          "long_rd_tail_mass": 0.0,
+          "raw_prediction": 0.9375
+        },
+        "label": 0.54174,
+        "shape_point": "timing_shape",
+        "slug": "silu_fwd_bf16_sm80",
+        "split_assignment": "holdout"
+      },
+      {
+        "arch": "sm_86",
+        "family_bucket": "activation_norm",
+        "features": {
+          "footprint_ratio": 4.248697916666667,
+          "global_share": 0.8807339449541285,
+          "gridDim_density": 0.0,
+          "intra_lane_reuse": 0.4718498659517426,
+          "long_rd_tail_mass": 0.0,
+          "raw_prediction": 0.9583333333333334
+        },
+        "label": 0.51078,
+        "shape_point": "timing_shape",
+        "slug": "softmax_safe_bf16_sm80",
+        "split_assignment": "validation"
+      },
+      {
+        "arch": "sm_86",
+        "family_bucket": "other",
+        "features": {
+          "footprint_ratio": 3.75,
+          "global_share": 1.0,
+          "gridDim_density": 0.0,
+          "intra_lane_reuse": 0.0,
+          "long_rd_tail_mass": 0.0,
+          "raw_prediction": 0.9375
+        },
+        "label": 0.3789,
+        "shape_point": "timing_shape",
+        "slug": "swiglu_fwd_bf16_sm80",
+        "split_assignment": "calibration"
+      },
+      {
+        "arch": "sm_86",
+        "family_bucket": "other",
+        "features": {
+          "footprint_ratio": 3.75,
+          "global_share": 1.0,
+          "gridDim_density": 0.0,
+          "intra_lane_reuse": 0.0,
+          "long_rd_tail_mass": 0.0,
+          "raw_prediction": 0.9375
+        },
+        "label": 0.37915999999999994,
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "swiglu_fwd_bf16_sm80",
+        "split_assignment": "calibration"
+      },
+      {
+        "arch": "sm_86",
+        "family_bucket": "other",
+        "features": {
+          "footprint_ratio": 0.11946614583333333,
+          "global_share": 1.0,
+          "gridDim_density": 0.0,
+          "intra_lane_reuse": 1.0,
+          "long_rd_tail_mass": 0.0,
+          "raw_prediction": 0.9362244897959183
+        },
+        "label": 0.47859999999999997,
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "tf32_hmma_gemm_traceable",
+        "split_assignment": "calibration"
+      },
+      {
+        "arch": "sm_86",
+        "family_bucket": "other",
+        "features": {
+          "footprint_ratio": 90.05200703938802,
+          "global_share": 0.02228122835372893,
+          "gridDim_density": 0.0,
+          "intra_lane_reuse": 0.15560393479735923,
+          "long_rd_tail_mass": 4.292586054348093e-06,
+          "raw_prediction": 0.9981517363355816
+        },
+        "label": 0.9947,
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "register_spill_local_mem",
+        "split_assignment": "calibration",
+        "variant_id": "register_cap_24"
+      },
+      {
+        "arch": "sm_86",
+        "family_bucket": "other",
+        "features": {
+          "footprint_ratio": 78.83326212565105,
+          "global_share": 0.025444957152274225,
+          "gridDim_density": 0.0,
+          "intra_lane_reuse": 0.15000598858607864,
+          "long_rd_tail_mass": 4.9034630707937484e-06,
+          "raw_prediction": 0.9978893297483981
+        },
+        "label": 0.9941,
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "register_spill_local_mem",
+        "split_assignment": "calibration",
+        "variant_id": "register_cap_32"
+      },
+      {
+        "arch": "sm_86",
+        "family_bucket": "other",
+        "features": {
+          "footprint_ratio": 15.937479654947916,
+          "global_share": 0.12475759534583064,
+          "gridDim_density": 0.0,
+          "intra_lane_reuse": 0.08965438339209751,
+          "long_rd_tail_mass": 2.4254524426220926e-05,
+          "raw_prediction": 0.9896491356066514
+        },
+        "label": 0.96872,
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "register_spill_local_mem",
+        "split_assignment": "calibration",
+        "variant_id": "register_cap_64"
+      },
+      {
+        "arch": "sm_86",
+        "family_bucket": "other",
+        "features": {
+          "footprint_ratio": 1.8333333333333333,
+          "global_share": 1.0,
+          "gridDim_density": 0.0,
+          "intra_lane_reuse": 0.06304393592840653,
+          "long_rd_tail_mass": 0.0002108487215909091,
+          "raw_prediction": 0.9166643354687106
+        },
+        "label": 0.87492,
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "register_spill_local_mem",
+        "split_assignment": "calibration",
+        "variant_id": "register_cap_255"
+      },
+      {
+        "arch": "sm_86",
+        "family_bucket": "memory_stress",
+        "features": {
+          "footprint_ratio": 0.29180908203125,
+          "global_share": 1.0,
+          "gridDim_density": 0.0,
+          "intra_lane_reuse": 0.0,
+          "long_rd_tail_mass": 0.0,
+          "raw_prediction": 0.875
+        },
+        "label": 0.95253289,
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "global_atomic_return_used",
+        "split_assignment": "validation"
+      },
+      {
+        "arch": "sm_86",
+        "family_bucket": "other",
+        "features": {
+          "footprint_ratio": 0.2916666666666667,
+          "global_share": 1.0,
+          "gridDim_density": 0.0,
+          "intra_lane_reuse": 0.0,
+          "long_rd_tail_mass": 0.0,
+          "raw_prediction": 0.875
+        },
+        "label": 0.72444,
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "global_scalar_32b_copy",
+        "split_assignment": "calibration"
+      },
+      {
+        "arch": "sm_86",
+        "family_bucket": "other",
+        "features": {
+          "footprint_ratio": 0.041666666666666664,
+          "global_share": 1.0,
+          "gridDim_density": 0.0,
+          "intra_lane_reuse": 0.0,
+          "long_rd_tail_mass": 0.0,
+          "raw_prediction": 0.5
+        },
+        "label": 0.6789000000000001,
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "global_vectorized_128b_copy",
+        "split_assignment": "calibration"
+      },
+      {
+        "arch": "sm_86",
+        "family_bucket": "other",
+        "features": {
+          "footprint_ratio": 0.125,
+          "global_share": 1.0,
+          "gridDim_density": 0.0,
+          "intra_lane_reuse": 0.0,
+          "long_rd_tail_mass": 0.0,
+          "raw_prediction": 0.75
+        },
+        "label": 0.69868,
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "global_vectorized_64b_copy",
+        "split_assignment": "calibration"
+      },
+      {
+        "arch": "sm_86",
+        "family_bucket": "memory_stress",
+        "features": {
+          "footprint_ratio": 0.2916666666666667,
+          "global_share": 1.0,
+          "gridDim_density": 0.0,
+          "intra_lane_reuse": 0.0,
+          "long_rd_tail_mass": 0.0,
+          "raw_prediction": 0.875
+        },
+        "label": 0.9560200000000001,
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "global_atomic_histogram",
+        "split_assignment": "validation"
+      },
+      {
+        "arch": "sm_86",
+        "family_bucket": "memory_stress",
+        "features": {
+          "footprint_ratio": 0.2916666666666667,
+          "global_share": 1.0,
+          "gridDim_density": 0.0,
+          "intra_lane_reuse": 0.0,
+          "long_rd_tail_mass": 0.0,
+          "raw_prediction": 0.875
+        },
+        "label": 0.94446,
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "global_atomic_max_histogram",
+        "split_assignment": "calibration"
+      },
+      {
+        "arch": "sm_86",
+        "family_bucket": "memory_stress",
+        "features": {
+          "footprint_ratio": 0.29180908203125,
+          "global_share": 1.0,
+          "gridDim_density": 0.0,
+          "intra_lane_reuse": 0.0,
+          "long_rd_tail_mass": 0.0,
+          "raw_prediction": 0.875
+        },
+        "label": 0.94636,
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "global_atomic_max_return_used",
+        "split_assignment": "holdout"
+      },
+      {
+        "arch": "sm_86",
+        "family_bucket": "memory_stress",
+        "features": {
+          "footprint_ratio": 0.2916666666666667,
+          "global_share": 1.0,
+          "gridDim_density": 0.0,
+          "intra_lane_reuse": 0.0,
+          "long_rd_tail_mass": 0.0,
+          "raw_prediction": 0.875
+        },
+        "label": 0.9599668,
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "global_atomic_and_histogram",
+        "split_assignment": "calibration"
+      },
+      {
+        "arch": "sm_86",
+        "family_bucket": "memory_stress",
+        "features": {
+          "footprint_ratio": 0.29180908203125,
+          "global_share": 1.0,
+          "gridDim_density": 0.0,
+          "intra_lane_reuse": 0.0,
+          "long_rd_tail_mass": 0.0,
+          "raw_prediction": 0.875
+        },
+        "label": 0.96209503,
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "global_atomic_and_return_used",
+        "split_assignment": "holdout"
+      },
+      {
+        "arch": "sm_86",
+        "family_bucket": "other",
+        "features": {
+          "footprint_ratio": 1.3046468098958333,
+          "global_share": 0.3791853015834643,
+          "gridDim_density": 0.0,
+          "intra_lane_reuse": 0.503477009317476,
+          "long_rd_tail_mass": 0.0,
+          "raw_prediction": 0.9690183411722484
+        },
+        "label": 0.90366,
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "local_dynamic_index_array",
+        "split_assignment": "calibration"
+      },
+      {
+        "arch": "sm_86",
+        "family_bucket": "other",
+        "features": {
+          "footprint_ratio": 1.3228759765625,
+          "global_share": 0.25199761478831245,
+          "gridDim_density": 0.0,
+          "intra_lane_reuse": 0.008120596924475419,
+          "long_rd_tail_mass": 0.0,
+          "raw_prediction": 0.9694322167513391
+        },
+        "label": 0.83014,
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "local_volatile_array",
+        "split_assignment": "calibration"
+      },
+      {
+        "arch": "sm_86",
+        "family_bucket": "other",
+        "features": {
+          "footprint_ratio": 0.4993489583333333,
+          "global_share": 1.0,
+          "gridDim_density": 0.0,
+          "intra_lane_reuse": 0.11009174311926606,
+          "long_rd_tail_mass": 0.0,
+          "raw_prediction": 0.9935233160621761
+        },
+        "label": 0.8947799999999999,
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "fp32_fma_dep_chain",
+        "split_assignment": "validation"
+      },
+      {
+        "arch": "sm_86",
+        "family_bucket": "memory_stress",
+        "features": {
+          "footprint_ratio": 10.880208333333334,
+          "global_share": 1.0,
+          "gridDim_density": 0.0,
+          "intra_lane_reuse": 0.0,
+          "long_rd_tail_mass": 0.0,
+          "raw_prediction": 0.9966598409825258
+        },
+        "label": 0.9531399999999999,
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "l2_persisting_window_sweep",
+        "split_assignment": "calibration"
+      },
+      {
+        "arch": "sm_86",
+        "family_bucket": "memory_stress",
+        "features": {
+          "footprint_ratio": 22.5,
+          "global_share": 1.0,
+          "gridDim_density": 0.0,
+          "intra_lane_reuse": 0.6706910509507449,
+          "long_rd_tail_mass": 0.0,
+          "raw_prediction": 0.9926468360795782
+        },
+        "label": 0.99894,
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "l2_prefetch_hint_sweep",
+        "split_assignment": "calibration"
+      },
+      {
+        "arch": "sm_86",
+        "family_bucket": "activation_norm",
+        "features": {
+          "footprint_ratio": 6.828938802083333,
+          "global_share": 0.38095238095238093,
+          "gridDim_density": 0.0,
+          "intra_lane_reuse": 0.301255230125523,
+          "long_rd_tail_mass": 0.0,
+          "raw_prediction": 0.96868896484375
+        },
+        "label": 0.9731799999999999,
+        "shape_point": "trace_00",
+        "slug": "rmsnorm_fwd_bf16",
+        "split_assignment": "validation"
+      },
+      {
+        "arch": "sm_86",
+        "family_bucket": "other",
+        "features": {
+          "footprint_ratio": 1.3905893961588542,
+          "global_share": 0.3012987012987013,
+          "gridDim_density": 0.0,
+          "intra_lane_reuse": 0.8710389405644017,
+          "long_rd_tail_mass": 0.0,
+          "raw_prediction": 0.875
+        },
+        "label": 0.38986,
+        "shape_point": "trace_00",
+        "slug": "vendor_sgemm_strided_batched_cublas",
+        "split_assignment": "calibration"
+      },
+      {
+        "arch": "sm_86",
+        "family_bucket": "memory_stress",
+        "features": {
+          "footprint_ratio": 4.916666666666667,
+          "global_share": 1.0,
+          "gridDim_density": 0.0,
+          "intra_lane_reuse": 0.18518476656366065,
+          "long_rd_tail_mass": 0.0,
+          "raw_prediction": 0.9236095569791404
+        },
+        "label": 0.97712,
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "warm_cold_pair_relaunch",
+        "split_assignment": "calibration"
+      },
+      {
+        "arch": "sm_86",
+        "family_bucket": "memory_stress",
+        "features": {
+          "footprint_ratio": 13.471354166666666,
+          "global_share": 1.0,
+          "gridDim_density": 0.0,
+          "intra_lane_reuse": 0.0,
+          "long_rd_tail_mass": 0.0,
+          "raw_prediction": 0.9963401490799588
+        },
+        "label": 0.98554,
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "working_set_capacity_sweep",
+        "split_assignment": "calibration"
+      }
+    ],
+    "admitted_count": 40,
+    "skipped": [
+      {
+        "arch": "sm_86",
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "dram_streaming_dot_product",
+        "typed_reason": "predictor_bundle_absent"
+      },
+      {
+        "arch": "sm_86",
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "bf16_hmma_gemm_traceable",
+        "typed_reason": "predictor_bundle_absent"
+      },
+      {
+        "arch": "sm_86",
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "cp_async_shared_tile_copy",
+        "typed_reason": "predictor_bundle_absent"
+      },
+      {
+        "arch": "sm_86",
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "fp16_hmma_gemm_traceable",
+        "typed_reason": "predictor_bundle_absent"
+      }
+    ],
+    "skipped_count": 4
+  },
+  "composite_score_formula": {
+    "primary": "mean_cv_geomean_relative_error",
+    "secondary_tiebreaker": "median_absolute_hit_rate_error",
+    "simpler_model_tiebreaker_scope": "primary_metric_only_within_2pct_diff",
+    "simpler_model_tiebreaker_threshold_fraction": "0.02",
+    "tertiary": "log_loss_eps_1e_minus_6_fractional_bernoulli"
+  },
+  "dependency_availability": {
+    "isotonic_regression_on_frozen_projection": {
+      "available": true,
+      "import_path": "sklearn.isotonic",
+      "package": "sklearn",
+      "version": "1.8.0"
+    },
+    "monotone_gam_on_six_features": {
+      "available": false,
+      "import_path": "pygam",
+      "package": "pygam",
+      "version": null
+    },
+    "monotone_gbm_on_six_features": {
+      "available": false,
+      "import_path": "lightgbm",
+      "package": "lightgbm",
+      "version": null
+    },
+    "monotone_xgboost_last_resort": {
+      "available": false,
+      "import_path": "xgboost",
+      "package": "xgboost",
+      "version": null
+    }
+  },
+  "dependency_versions": {
+    "lightgbm": null,
+    "pygam": null,
+    "sklearn": "1.8.0",
+    "xgboost": null
+  },
+  "feature_schema": {
+    "canonical_feature_names": [
+      "raw_prediction",
+      "footprint_ratio",
+      "long_rd_tail_mass",
+      "intra_lane_reuse",
+      "global_share",
+      "gridDim_density"
+    ],
+    "monotonic_constraints_by_feature": {
+      "footprint_ratio": -1,
+      "global_share": 0,
+      "gridDim_density": -1,
+      "intra_lane_reuse": 1,
+      "long_rd_tail_mass": -1,
+      "raw_prediction": 1
+    }
+  },
+  "fit_scope": {
+    "cohort_split_path": "data/sm_86_predictor_accuracy_recovery_v2/cohort_split.json",
+    "fit_splits": [
+      "calibration",
+      "validation"
+    ],
+    "n_fit": 34,
+    "n_holdout_excluded_from_fit": 6,
+    "split_aware": true
+  },
+  "fit_status": "ok",
+  "fold_assignments": {
+    "['sm_86', 'cross_entropy_fwd_fp32_sm80', 'timing_shape', '']": 1,
+    "['sm_86', 'embedding_gather_int32_sm80', 'timing_shape', '']": 1,
+    "['sm_86', 'fp32_fma_dep_chain', 'trace_l2_accuracy_xl', '']": 2,
+    "['sm_86', 'gemm_hmma_bf16_sm80', 'timing_shape', '']": 0,
+    "['sm_86', 'gemm_hmma_bf16_sm80', 'trace_l2_accuracy_xl', '']": 1,
+    "['sm_86', 'gemm_hmma_fp16_sm80', 'timing_shape', '']": 2,
+    "['sm_86', 'gemm_hmma_fp16_sm80', 'trace_l2_accuracy_xl', '']": 0,
+    "['sm_86', 'gemm_imma_int8_sm80', 'timing_shape', '']": 1,
+    "['sm_86', 'gemm_imma_int8_sm80', 'trace_l2_accuracy_xl', '']": 0,
+    "['sm_86', 'gemm_sparse_2to4_bf16_sm80', 'timing_shape', '']": 2,
+    "['sm_86', 'global_atomic_and_histogram', 'trace_l2_accuracy_xl', '']": 0,
+    "['sm_86', 'global_atomic_histogram', 'trace_l2_accuracy_xl', '']": 0,
+    "['sm_86', 'global_atomic_max_histogram', 'trace_l2_accuracy_xl', '']": 2,
+    "['sm_86', 'global_atomic_return_used', 'trace_l2_accuracy_xl', '']": 2,
+    "['sm_86', 'global_scalar_32b_copy', 'trace_l2_accuracy_xl', '']": 0,
+    "['sm_86', 'global_vectorized_128b_copy', 'trace_l2_accuracy_xl', '']": 1,
+    "['sm_86', 'global_vectorized_64b_copy', 'trace_l2_accuracy_xl', '']": 0,
+    "['sm_86', 'l2_persisting_window_sweep', 'trace_l2_accuracy_xl', '']": 1,
+    "['sm_86', 'l2_prefetch_hint_sweep', 'trace_l2_accuracy_xl', '']": 0,
+    "['sm_86', 'local_dynamic_index_array', 'trace_l2_accuracy_xl', '']": 0,
+    "['sm_86', 'local_volatile_array', 'trace_l2_accuracy_xl', '']": 1,
+    "['sm_86', 'register_spill_local_mem', 'trace_l2_accuracy_xl', 'register_cap_24']": 0,
+    "['sm_86', 'register_spill_local_mem', 'trace_l2_accuracy_xl', 'register_cap_255']": 1,
+    "['sm_86', 'register_spill_local_mem', 'trace_l2_accuracy_xl', 'register_cap_32']": 2,
+    "['sm_86', 'register_spill_local_mem', 'trace_l2_accuracy_xl', 'register_cap_64']": 1,
+    "['sm_86', 'rmsnorm_fwd_bf16', 'trace_00', '']": 2,
+    "['sm_86', 'rmsnorm_fwd_bf16_sm80', 'timing_shape', '']": 1,
+    "['sm_86', 'softmax_safe_bf16_sm80', 'timing_shape', '']": 0,
+    "['sm_86', 'swiglu_fwd_bf16_sm80', 'timing_shape', '']": 2,
+    "['sm_86', 'swiglu_fwd_bf16_sm80', 'trace_l2_accuracy_xl', '']": 2,
+    "['sm_86', 'tf32_hmma_gemm_traceable', 'trace_l2_accuracy_xl', '']": 0,
+    "['sm_86', 'vendor_sgemm_strided_batched_cublas', 'trace_00', '']": 2,
+    "['sm_86', 'warm_cold_pair_relaunch', 'trace_l2_accuracy_xl', '']": 2,
+    "['sm_86', 'working_set_capacity_sweep', 'trace_l2_accuracy_xl', '']": 1
+  },
+  "fold_construction": {
+    "n_folds": 3,
+    "seed": 20260527,
+    "stratification": "stratified_round_robin",
+    "stratum_sizes": {
+      "('sm_86', 'activation_norm')": 3,
+      "('sm_86', 'memory_stress')": 9,
+      "('sm_86', 'other')": 15,
+      "('sm_86', 'tensor_compute')": 7
+    }
+  },
+  "head_scope": "standalone_single_arch",
+  "model_class_per_bucket": {
+    "sm_86/activation_norm": "isotonic_regression_on_frozen_projection__pooled_fallback_with_one_hot",
+    "sm_86/memory_stress": "isotonic_regression_on_frozen_projection",
+    "sm_86/other": "isotonic_regression_on_frozen_projection",
+    "sm_86/tensor_compute": "isotonic_regression_on_frozen_projection__pooled_fallback_with_one_hot"
+  },
+  "monotonic_constraints_by_feature": {
+    "sm_86/activation_norm": {
+      "family_bucket_one_hot": 0,
+      "footprint_ratio": -1,
+      "long_rd_tail_mass": -1,
+      "raw_prediction": 1
+    },
+    "sm_86/memory_stress": {
+      "footprint_ratio": -1,
+      "long_rd_tail_mass": -1,
+      "raw_prediction": 1
+    },
+    "sm_86/other": {
+      "footprint_ratio": -1,
+      "long_rd_tail_mass": -1,
+      "raw_prediction": 1
+    },
+    "sm_86/tensor_compute": {
+      "family_bucket_one_hot": 0,
+      "footprint_ratio": -1,
+      "long_rd_tail_mass": -1,
+      "raw_prediction": 1
+    }
+  },
+  "per_bucket_provenance": {
+    "by_bucket": {
+      "sm_86/activation_norm": {
+        "kind": "pooled_fallback",
+        "n_train": 3,
+        "pooled_bias": -0.15344733333333324,
+        "training_cell_ids": [
+          [
+            "sm_86",
+            "rmsnorm_fwd_bf16_sm80",
+            "timing_shape",
+            ""
+          ],
+          [
+            "sm_86",
+            "softmax_safe_bf16_sm80",
+            "timing_shape",
+            ""
+          ],
+          [
+            "sm_86",
+            "rmsnorm_fwd_bf16",
+            "trace_00",
+            ""
+          ]
+        ]
+      },
+      "sm_86/memory_stress": {
+        "kind": "per_bucket",
+        "n_train": 9,
+        "training_cell_ids": [
+          [
+            "sm_86",
+            "embedding_gather_int32_sm80",
+            "timing_shape",
+            ""
+          ],
+          [
+            "sm_86",
+            "global_atomic_return_used",
+            "trace_l2_accuracy_xl",
+            ""
+          ],
+          [
+            "sm_86",
+            "global_atomic_histogram",
+            "trace_l2_accuracy_xl",
+            ""
+          ],
+          [
+            "sm_86",
+            "global_atomic_max_histogram",
+            "trace_l2_accuracy_xl",
+            ""
+          ],
+          [
+            "sm_86",
+            "global_atomic_and_histogram",
+            "trace_l2_accuracy_xl",
+            ""
+          ],
+          [
+            "sm_86",
+            "l2_persisting_window_sweep",
+            "trace_l2_accuracy_xl",
+            ""
+          ],
+          [
+            "sm_86",
+            "l2_prefetch_hint_sweep",
+            "trace_l2_accuracy_xl",
+            ""
+          ],
+          [
+            "sm_86",
+            "warm_cold_pair_relaunch",
+            "trace_l2_accuracy_xl",
+            ""
+          ],
+          [
+            "sm_86",
+            "working_set_capacity_sweep",
+            "trace_l2_accuracy_xl",
+            ""
+          ]
+        ]
+      },
+      "sm_86/other": {
+        "kind": "per_bucket",
+        "n_train": 15,
+        "training_cell_ids": [
+          [
+            "sm_86",
+            "cross_entropy_fwd_fp32_sm80",
+            "timing_shape",
+            ""
+          ],
+          [
+            "sm_86",
+            "swiglu_fwd_bf16_sm80",
+            "timing_shape",
+            ""
+          ],
+          [
+            "sm_86",
+            "swiglu_fwd_bf16_sm80",
+            "trace_l2_accuracy_xl",
+            ""
+          ],
+          [
+            "sm_86",
+            "tf32_hmma_gemm_traceable",
+            "trace_l2_accuracy_xl",
+            ""
+          ],
+          [
+            "sm_86",
+            "register_spill_local_mem",
+            "trace_l2_accuracy_xl",
+            "register_cap_24"
+          ],
+          [
+            "sm_86",
+            "register_spill_local_mem",
+            "trace_l2_accuracy_xl",
+            "register_cap_32"
+          ],
+          [
+            "sm_86",
+            "register_spill_local_mem",
+            "trace_l2_accuracy_xl",
+            "register_cap_64"
+          ],
+          [
+            "sm_86",
+            "register_spill_local_mem",
+            "trace_l2_accuracy_xl",
+            "register_cap_255"
+          ],
+          [
+            "sm_86",
+            "global_scalar_32b_copy",
+            "trace_l2_accuracy_xl",
+            ""
+          ],
+          [
+            "sm_86",
+            "global_vectorized_128b_copy",
+            "trace_l2_accuracy_xl",
+            ""
+          ],
+          [
+            "sm_86",
+            "global_vectorized_64b_copy",
+            "trace_l2_accuracy_xl",
+            ""
+          ],
+          [
+            "sm_86",
+            "local_dynamic_index_array",
+            "trace_l2_accuracy_xl",
+            ""
+          ],
+          [
+            "sm_86",
+            "local_volatile_array",
+            "trace_l2_accuracy_xl",
+            ""
+          ],
+          [
+            "sm_86",
+            "fp32_fma_dep_chain",
+            "trace_l2_accuracy_xl",
+            ""
+          ],
+          [
+            "sm_86",
+            "vendor_sgemm_strided_batched_cublas",
+            "trace_00",
+            ""
+          ]
+        ]
+      },
+      "sm_86/tensor_compute": {
+        "kind": "pooled_fallback",
+        "n_train": 7,
+        "pooled_bias": 0.06576314285714298,
+        "training_cell_ids": [
+          [
+            "sm_86",
+            "gemm_hmma_bf16_sm80",
+            "timing_shape",
+            ""
+          ],
+          [
+            "sm_86",
+            "gemm_hmma_bf16_sm80",
+            "trace_l2_accuracy_xl",
+            ""
+          ],
+          [
+            "sm_86",
+            "gemm_hmma_fp16_sm80",
+            "timing_shape",
+            ""
+          ],
+          [
+            "sm_86",
+            "gemm_hmma_fp16_sm80",
+            "trace_l2_accuracy_xl",
+            ""
+          ],
+          [
+            "sm_86",
+            "gemm_imma_int8_sm80",
+            "timing_shape",
+            ""
+          ],
+          [
+            "sm_86",
+            "gemm_imma_int8_sm80",
+            "trace_l2_accuracy_xl",
+            ""
+          ],
+          [
+            "sm_86",
+            "gemm_sparse_2to4_bf16_sm80",
+            "timing_shape",
+            ""
+          ]
+        ]
+      }
+    },
+    "pooled_fallback_present": true,
+    "pooled_used_features": [
+      "raw_prediction",
+      "footprint_ratio",
+      "long_rd_tail_mass",
+      "family_bucket_one_hot"
+    ]
+  },
+  "schema_version": 1,
+  "selected_class": {
+    "name": "isotonic_regression_on_frozen_projection",
+    "parameter_count": 0,
+    "primary": 0.0877058283740508,
+    "secondary": 0.1252017927761538,
+    "selection_reason": "primary_unique_leader (primary=0.087706)",
+    "tertiary": 0.5117099455706677
+  },
+  "selected_hyperparameters": {
+    "isotonic_regression_on_frozen_projection": {
+      "increasing": true,
+      "out_of_bounds": "clip",
+      "projection_features": [
+        "raw_prediction",
+        "footprint_ratio",
+        "long_rd_tail_mass"
+      ],
+      "projection_weights": [
+        1.0,
+        -1.0,
+        -1.0
+      ]
+    }
+  },
+  "skipped_candidates": [
+    {
+      "dependency_package": "pygam",
+      "name": "monotone_gam_on_six_features",
+      "skip_reason": "dependency_unavailable"
+    },
+    {
+      "dependency_package": "lightgbm",
+      "name": "monotone_gbm_on_six_features",
+      "skip_reason": "dependency_unavailable"
+    },
+    {
+      "dependency_package": "xgboost",
+      "name": "monotone_xgboost_last_resort",
+      "skip_reason": "dependency_unavailable"
+    }
+  ],
+  "source_commit": "e56cd825afde2ae8748e4a9987e86d52acdf5cd9",
+  "status": "ok",
+  "training_cell_ids": {
+    "sm_86/activation_norm": [
+      [
+        "sm_86",
+        "rmsnorm_fwd_bf16_sm80",
+        "timing_shape",
+        ""
+      ],
+      [
+        "sm_86",
+        "softmax_safe_bf16_sm80",
+        "timing_shape",
+        ""
+      ],
+      [
+        "sm_86",
+        "rmsnorm_fwd_bf16",
+        "trace_00",
+        ""
+      ]
+    ],
+    "sm_86/memory_stress": [
+      [
+        "sm_86",
+        "embedding_gather_int32_sm80",
+        "timing_shape",
+        ""
+      ],
+      [
+        "sm_86",
+        "global_atomic_return_used",
+        "trace_l2_accuracy_xl",
+        ""
+      ],
+      [
+        "sm_86",
+        "global_atomic_histogram",
+        "trace_l2_accuracy_xl",
+        ""
+      ],
+      [
+        "sm_86",
+        "global_atomic_max_histogram",
+        "trace_l2_accuracy_xl",
+        ""
+      ],
+      [
+        "sm_86",
+        "global_atomic_and_histogram",
+        "trace_l2_accuracy_xl",
+        ""
+      ],
+      [
+        "sm_86",
+        "l2_persisting_window_sweep",
+        "trace_l2_accuracy_xl",
+        ""
+      ],
+      [
+        "sm_86",
+        "l2_prefetch_hint_sweep",
+        "trace_l2_accuracy_xl",
+        ""
+      ],
+      [
+        "sm_86",
+        "warm_cold_pair_relaunch",
+        "trace_l2_accuracy_xl",
+        ""
+      ],
+      [
+        "sm_86",
+        "working_set_capacity_sweep",
+        "trace_l2_accuracy_xl",
+        ""
+      ]
+    ],
+    "sm_86/other": [
+      [
+        "sm_86",
+        "cross_entropy_fwd_fp32_sm80",
+        "timing_shape",
+        ""
+      ],
+      [
+        "sm_86",
+        "swiglu_fwd_bf16_sm80",
+        "timing_shape",
+        ""
+      ],
+      [
+        "sm_86",
+        "swiglu_fwd_bf16_sm80",
+        "trace_l2_accuracy_xl",
+        ""
+      ],
+      [
+        "sm_86",
+        "tf32_hmma_gemm_traceable",
+        "trace_l2_accuracy_xl",
+        ""
+      ],
+      [
+        "sm_86",
+        "register_spill_local_mem",
+        "trace_l2_accuracy_xl",
+        "register_cap_24"
+      ],
+      [
+        "sm_86",
+        "register_spill_local_mem",
+        "trace_l2_accuracy_xl",
+        "register_cap_32"
+      ],
+      [
+        "sm_86",
+        "register_spill_local_mem",
+        "trace_l2_accuracy_xl",
+        "register_cap_64"
+      ],
+      [
+        "sm_86",
+        "register_spill_local_mem",
+        "trace_l2_accuracy_xl",
+        "register_cap_255"
+      ],
+      [
+        "sm_86",
+        "global_scalar_32b_copy",
+        "trace_l2_accuracy_xl",
+        ""
+      ],
+      [
+        "sm_86",
+        "global_vectorized_128b_copy",
+        "trace_l2_accuracy_xl",
+        ""
+      ],
+      [
+        "sm_86",
+        "global_vectorized_64b_copy",
+        "trace_l2_accuracy_xl",
+        ""
+      ],
+      [
+        "sm_86",
+        "local_dynamic_index_array",
+        "trace_l2_accuracy_xl",
+        ""
+      ],
+      [
+        "sm_86",
+        "local_volatile_array",
+        "trace_l2_accuracy_xl",
+        ""
+      ],
+      [
+        "sm_86",
+        "fp32_fma_dep_chain",
+        "trace_l2_accuracy_xl",
+        ""
+      ],
+      [
+        "sm_86",
+        "vendor_sgemm_strided_batched_cublas",
+        "trace_00",
+        ""
+      ]
+    ],
+    "sm_86/tensor_compute": [
+      [
+        "sm_86",
+        "gemm_hmma_bf16_sm80",
+        "timing_shape",
+        ""
+      ],
+      [
+        "sm_86",
+        "gemm_hmma_bf16_sm80",
+        "trace_l2_accuracy_xl",
+        ""
+      ],
+      [
+        "sm_86",
+        "gemm_hmma_fp16_sm80",
+        "timing_shape",
+        ""
+      ],
+      [
+        "sm_86",
+        "gemm_hmma_fp16_sm80",
+        "trace_l2_accuracy_xl",
+        ""
+      ],
+      [
+        "sm_86",
+        "gemm_imma_int8_sm80",
+        "timing_shape",
+        ""
+      ],
+      [
+        "sm_86",
+        "gemm_imma_int8_sm80",
+        "trace_l2_accuracy_xl",
+        ""
+      ],
+      [
+        "sm_86",
+        "gemm_sparse_2to4_bf16_sm80",
+        "timing_shape",
+        ""
+      ]
+    ]
+  }
+}

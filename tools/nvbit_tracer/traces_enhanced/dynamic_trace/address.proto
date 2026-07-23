@@ -1,0 +1,77 @@
+syntax = "proto3";
+
+package dynamic_trace;
+
+// Effective memory space of an address record's operand. Net-new with the
+// ASYNC_COPY+ATOM address-carrying contract transition: a single instruction can
+// carry operands in different spaces (LDGSTS reads GLOBAL, writes SHARED), so the
+// space is a per-ADDRESS property, not the instruction-level MemoryOpClass. This
+// is the discriminator the allocation-identity gate keys on — only
+// MEMORY_SPACE_GLOBAL (and generic that resolves global) requires an
+// allocation_id; MEMORY_SPACE_SHARED/LOCAL are exempt (allocation_id 0 legit). A
+// dedicated enum (not MemoryOpClass) because instruction.proto imports
+// address.proto — reusing MemoryOpClass here would be a circular import — and
+// because a space is semantically distinct from an op class. Additive per the
+// CLAUDE.md wire-extension policy; absent on pre-transition traces.
+enum MemorySpace {
+  MEMORY_SPACE_UNSPECIFIED = 0;
+  MEMORY_SPACE_GLOBAL = 1;
+  MEMORY_SPACE_SHARED = 2;
+  MEMORY_SPACE_LOCAL = 3;
+  MEMORY_SPACE_GENERIC = 4;
+}
+
+// Per-instruction memory address record. The contents of `addrs`
+// depend on `compression_format`:
+//
+//   * compression_format == 0 (list_all): `addrs` carries exactly
+//     32 entries, one per warp lane. Active+predicated lanes hold
+//     the real per-lane address; inactive lanes hold the sentinel
+//     value -1 (declared in tracer_tool.cu as LANE_INACTIVE_SENTINEL).
+//     Real GPU virtual addresses are non-negative uint64 values, so
+//     -1 (cast through int64) is unambiguous and cannot collide
+//     with a real address. Consumers reading list_all records can
+//     skip sentinel entries; the count of non-sentinel entries
+//     equals popcount(active_mask & predicate_mask).
+//   * compression_format == 1 (base_stride): `addrs` is empty;
+//     `base_address + stride` defines the address sequence.
+//   * compression_format == 2 (base_delta): `addrs` carries deltas
+//     relative to `base_address`, length up to 31 (the base lane
+//     is implicit). Compressed formats are an optimization; consumers
+//     reconstruct them into 32 lane slots downstream.
+message address {
+  int32 data_width = 1;
+  uint32 udesc_value = 2;
+  int32 compression_format = 3;
+  uint64 base_address = 4;
+  int32 stride = 5;
+  repeated int64 addrs = 6;
+
+  // Monotonic allocation id from the tracer's per-context
+  // allocator registry (see `nvbit_at_cuda_event` hooks for
+  // cuMemAlloc_v2 / cuMemFree_v2 in tracer_tool.cu). Allocation
+  // ids start at 1, so proto3 default 0 stays distinct as the
+  // "unresolved" sentinel; HasField=false means the producer's
+  // registry lookup did not resolve this record's address to
+  // any registered allocation. That distinction is the wire
+  // signal a future `unmapped_memory_range` sidecar (task11b)
+  // will use. The field carries the id of the allocation
+  // containing the lowest active+predicated-lane address; for
+  // gather/scatter patterns where active lanes touch different
+  // allocations, the out-of-range lanes will surface separately
+  // through the typed-exclusion sidecar path. The full
+  // allocation registry is also serialized to
+  // `traces/extra_info/allocations.json` so consumers can
+  // resolve `allocation_id` -> {base, size, alive} without
+  // re-instrumenting.
+  optional uint32 allocation_id = 7;
+
+  // Effective memory space of this address record's operand (see MemorySpace).
+  // Net-new with the address-carrying contract; absent on pre-transition traces
+  // (HasField=false → legacy fallback: consumers treat the instruction-level
+  // MemoryOpClass as the space, as before the transition). For a global-source /
+  // shared-destination instruction (LDGSTS) each address record carries its own
+  // space so the identity gate applies allocation resolution to the global side
+  // only. See plans/sm86_ldgsts_atoms_operand_adjudication.md.
+  optional MemorySpace address_space = 8;
+}

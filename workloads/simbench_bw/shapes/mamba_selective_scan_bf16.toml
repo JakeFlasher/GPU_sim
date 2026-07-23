@@ -1,0 +1,22 @@
+schema_version = 1
+slug = "mamba_selective_scan_bf16"
+
+[[timing_shapes]]
+name = "timing_00"
+axes = { batch = 4, seq = 4096, state_dim = 16, channels = 1024 }
+launch_config = { grid = [64, 4, 1], block = [128, 1, 1] }
+warm_up_iters = 5
+repeat_iters = 30
+
+[[trace_shapes]]
+name = "trace_00"
+axes = { batch = 1, seq = 512, state_dim = 16, channels = 256 }
+launch_config = { grid = [64, 4, 1], block = [128, 1, 1] }
+predicted_bytes = 335544320
+estimator_source = "static"
+
+[[correctness_shapes]]
+name = "correctness_00"
+axes = { batch = 1, seq = 128, state_dim = 16, channels = 64 }
+launch_config = { grid = [64, 4, 1], block = [128, 1, 1] }
+digest_kind = "reduction_summary"

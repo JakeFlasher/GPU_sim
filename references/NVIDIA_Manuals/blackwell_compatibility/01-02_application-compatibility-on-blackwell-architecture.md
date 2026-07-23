@@ -1,0 +1,17 @@
+---
+title: "1.2. Application Compatibility on Blackwell Architecture"
+section: "1.2"
+source: "https://docs.nvidia.com/cuda/blackwell-compatibility-guide/#application-compatibility-on-blackwell-architecture"
+---
+
+## [1.2. Application Compatibility on Blackwell Architecture](https://docs.nvidia.com/cuda/blackwell-compatibility-guide#application-compatibility-on-blackwell-architecture)[](https://docs.nvidia.com/cuda/blackwell-compatibility-guide/#application-compatibility-on-blackwell-architecture "Permalink to this headline")
+
+A CUDA application binary (with one or more GPU kernels) can contain the compiled GPU code in two forms, binary cubin objects and forward-compatible PTX assembly for each kernel. Both cubin and PTX are generated for a certain target compute capability. A cubin generated for a certain compute capability is supported to run on any GPU with the same major revision and same or higher minor revision of compute capability. For example, a cubin generated for compute capability 8.0 is supported to run on a GPU with compute capability 8.6, however a cubin generated for compute capability 8.6 is _not_ supported to run on a GPU with compute capability 8.0, and a cubin generated with compute capability 8.x is _not_ supported to run on a GPU with compute capability 9.0.
+
+Kernel can also be compiled to a PTX form. PTX is compiled at runtime to cubin and the cubin is used for kernel execution. Unlike cubin, PTX is forward-compatible. Meaning PTX is supported to run on any GPU with compute capability higher than the compute capability assumed for generation of that PTX. For example, PTX code generated for compute capability 9.x is supported to run on compute capability 9.x or any higher revision (major or minor), including compute capability 10.0. Therefore although it is optional, **it is recommended that all applications should include PTX of the kernels to ensure forward-compatibility.** To read more about cubin and PTX compatibilities see [Compilation with NVCC](https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#compilation-with-nvcc) from the _CUDA C++ Programming Guide_.
+
+When a CUDA application launches a kernel on a GPU, the CUDA Runtime determines the compute capability of the GPU in the system and uses this information to find the best matching cubin or PTX version of the kernel. If a cubin compatible with that GPU is present in the binary, the cubin is used as-is for execution. Otherwise, the CUDA Runtime first generates compatible cubin by JIT-compiling [^1] the PTX and then the cubin is used for the execution. If neither compatible cubin nor PTX is available, kernel launch results in a failure.
+
+Application binaries that include PTX version of kernels, should work as-is on the Blackwell GPUs. In such cases, rebuilding the application is not required. However application binaries which do not include PTX (only include cubins), need to be rebuilt to run on the Blackwell GPUs. To know more about building compatible applications read [Building Applications with Blackwell Architecture Support](https://docs.nvidia.com/cuda/blackwell-compatibility-guide/#building-applications-with-blackwell-support).
+
+Application binaries that include PTX version of kernels with architecture conditional features using `sm_100a` or `compute_100a` in order to take full advantage of Blackwell GPU architecture, are not forward or backward compatible. For example, PTX compiled for `compute_90a` (Hopper) are not supported on the Blackwell architecture.

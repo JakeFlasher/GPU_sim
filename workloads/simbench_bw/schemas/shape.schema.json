@@ -1,0 +1,141 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "simbench_bw/schemas/shape.schema.json",
+  "title": "SimBench-BW per-kernel shape file",
+  "description": "Per-kernel shape declaration at workloads/simbench_bw/shapes/<slug>.toml. Every row declares three distinct shape sets: timing_shapes (for timing), trace_shapes (for NVBit capture), correctness_shapes (for reference comparison). Trace shapes carry a predicted_bytes field enforced against the roster row's trace_budget_mib before any run.",
+  "schema_version": 1,
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "slug", "timing_shapes", "trace_shapes", "correctness_shapes"],
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "slug": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "description": "Must match the row's slug in roster.toml."
+    },
+    "timing_shapes": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/timing_shape_point" }
+    },
+    "trace_shapes": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/trace_shape_point" }
+    },
+    "correctness_shapes": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/correctness_shape_point" }
+    }
+  },
+  "$defs": {
+    "shape_axes": {
+      "type": "object",
+      "description": "Shape-axis map (e.g. {batch: 8, seq: 4096, heads: 32, head_dim: 128}). Keys must be lowercase_identifier. Values are either positive integers or a nested axis-group object whose leaf values are positive integers. Strings, booleans, floats, and unbounded nested structures are rejected so downstream trace_size_estimator and reference-family code can rely on integer-only shape arithmetic.",
+      "propertyNames": { "pattern": "^[a-z][a-z0-9_]*$" },
+      "additionalProperties": { "$ref": "#/$defs/shape_axis_value" },
+      "minProperties": 1
+    },
+    "shape_axis_value": {
+      "oneOf": [
+        { "type": "integer", "minimum": 1 },
+        {
+          "type": "object",
+          "description": "Axis group: nested axis map one level deep. Values must be positive integers.",
+          "propertyNames": { "pattern": "^[a-z][a-z0-9_]*$" },
+          "additionalProperties": { "type": "integer", "minimum": 1 },
+          "minProperties": 1
+        }
+      ]
+    },
+    "launch_config": {
+      "type": "object",
+      "description": "Launch configuration decomposition used by trace_size_estimator.py for predicted_bytes.",
+      "additionalProperties": false,
+      "required": ["grid", "block"],
+      "properties": {
+        "grid": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 1 },
+          "minItems": 1,
+          "maxItems": 3
+        },
+        "block": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 1 },
+          "minItems": 1,
+          "maxItems": 3
+        },
+        "cluster": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 1 },
+          "minItems": 1,
+          "maxItems": 3
+        },
+        "dynamic_shared_bytes": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "timing_shape_point": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "axes"],
+      "properties": {
+        "name": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+        "axes": { "$ref": "#/$defs/shape_axes" },
+        "launch_config": { "$ref": "#/$defs/launch_config" },
+        "warm_up_iters": { "type": "integer", "minimum": 0 },
+        "repeat_iters": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "trace_shape_point": {
+      "type": "object",
+      "description": "Trace-mode shape point. predicted_bytes is the trace_size_estimator.py output and must be ≤ trace_budget_mib × 1024 × 1024; shape points that would exceed budget are refused at admission rather than producing a partial trace.",
+      "additionalProperties": false,
+      "required": ["name", "axes", "predicted_bytes", "estimator_source"],
+      "properties": {
+        "name": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+        "axes": { "$ref": "#/$defs/shape_axes" },
+        "launch_config": { "$ref": "#/$defs/launch_config" },
+        "predicted_bytes": { "type": "integer", "minimum": 0 },
+        "estimator_source": {
+          "type": "string",
+          "enum": ["static", "empirical_calibration"],
+          "description": "Which estimator produced predicted_bytes. static is the default; empirical_calibration means an empirical_calibration_manifest.json overrides the static model for this point."
+        },
+        "empirical_calibration_manifest": {
+          "type": "string",
+          "description": "Relative path to the empirical calibration manifest when estimator_source = empirical_calibration.",
+          "pattern": "^[A-Za-z0-9._/-]+\\.json$"
+        },
+        "sampling_policy": {
+          "type": "string",
+          "description": "Same grammar as tools/cloud/trace_budgets.py VALID_SAMPLING_POLICY_PATTERN.",
+          "pattern": "^(?:off|threadblock_stride_[1-9][0-9]*|kernel_limit_[1-9][0-9]*)$"
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "estimator_source": { "const": "empirical_calibration" } } },
+          "then": { "required": ["empirical_calibration_manifest"] }
+        }
+      ]
+    },
+    "correctness_shape_point": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "axes"],
+      "properties": {
+        "name": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+        "axes": { "$ref": "#/$defs/shape_axes" },
+        "launch_config": { "$ref": "#/$defs/launch_config" },
+        "digest_kind": {
+          "type": "string",
+          "enum": ["full_tensor", "reduction_summary", "hash"],
+          "description": "How the correctness output is stored in the golden file. full_tensor: small dense tensor. reduction_summary: scalar / vector statistics (mean, std, max-abs-diff). hash: deterministic hash digest."
+        }
+      }
+    }
+  }
+}

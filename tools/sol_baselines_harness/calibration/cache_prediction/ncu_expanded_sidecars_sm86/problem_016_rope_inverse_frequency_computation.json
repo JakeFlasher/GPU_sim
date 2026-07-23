@@ -1,0 +1,105 @@
+{
+  "argv_clock_policy_flag": "",
+  "argv_provenance": [
+    [
+      "ncu",
+      "--launch-skip",
+      "5",
+      "--launch-count",
+      "1",
+      "--clock-control",
+      "none",
+      "--replay-mode",
+      "kernel",
+      "--section",
+      "MemoryWorkloadAnalysis",
+      "--metrics",
+      "l1tex__t_sector_pipe_lsu_mem_global_op_ld_hit_rate.pct,l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum,l1tex__t_sectors_pipe_lsu_mem_global_op_ld_lookup_hit.sum,lts__t_sectors_srcunit_tex_op_read.sum,lts__t_sectors_srcunit_tex_op_read_lookup_hit.sum",
+      "--csv",
+      "/home/jakeshea/3090ti_5060laptop_cross_study/3090ti_5060laptop_cross_study/solbench_baseline/nvbit_tracer/metric_extractor/tests/calibration_cohort_b/problem_016_rope_inverse_frequency_computation"
+    ],
+    [
+      "ncu",
+      "--launch-skip",
+      "5",
+      "--launch-count",
+      "1",
+      "--clock-control",
+      "none",
+      "--replay-mode",
+      "kernel",
+      "--section",
+      "MemoryWorkloadAnalysis",
+      "--metrics",
+      "l1tex__t_sector_pipe_lsu_mem_global_op_ld_hit_rate.pct,l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum,l1tex__t_sectors_pipe_lsu_mem_global_op_ld_lookup_hit.sum,lts__t_sectors_srcunit_tex_op_read.sum,lts__t_sectors_srcunit_tex_op_read_lookup_hit.sum",
+      "--csv",
+      "/home/jakeshea/3090ti_5060laptop_cross_study/3090ti_5060laptop_cross_study/solbench_baseline/nvbit_tracer/metric_extractor/tests/calibration_cohort_b/problem_016_rope_inverse_frequency_computation"
+    ],
+    [
+      "ncu",
+      "--launch-skip",
+      "5",
+      "--launch-count",
+      "1",
+      "--clock-control",
+      "none",
+      "--replay-mode",
+      "kernel",
+      "--section",
+      "MemoryWorkloadAnalysis",
+      "--metrics",
+      "l1tex__t_sector_pipe_lsu_mem_global_op_ld_hit_rate.pct,l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum,l1tex__t_sectors_pipe_lsu_mem_global_op_ld_lookup_hit.sum,lts__t_sectors_srcunit_tex_op_read.sum,lts__t_sectors_srcunit_tex_op_read_lookup_hit.sum",
+      "--csv",
+      "/home/jakeshea/3090ti_5060laptop_cross_study/3090ti_5060laptop_cross_study/solbench_baseline/nvbit_tracer/metric_extractor/tests/calibration_cohort_b/problem_016_rope_inverse_frequency_computation"
+    ]
+  ],
+  "captured_at_utc": "2026-05-29T21:37:17+00:00",
+  "completed": false,
+  "cv_cap": 0.05,
+  "cv_quarantined": false,
+  "failure_reason": "ncu_label_no_read_only_traffic",
+  "language": "cuda_cpp",
+  "launch_skip_count": 5,
+  "ncu_l1_hit_rate_mean": 0.0,
+  "ncu_l2_hit_rate_mean": 0.0,
+  "ncu_metric_family": [
+    "l1tex__t_sector_pipe_lsu_mem_global_op_ld_hit_rate.pct",
+    "l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum",
+    "l1tex__t_sectors_pipe_lsu_mem_global_op_ld_lookup_hit.sum",
+    "lts__t_sectors_srcunit_tex_op_read.sum",
+    "lts__t_sectors_srcunit_tex_op_read_lookup_hit.sum"
+  ],
+  "no_read_only_traffic": true,
+  "predictor_bucket": "predictor_friendly",
+  "probe_binary_sha256": "d1a25ae5e914c852df7d21d109ef3c6356c0213fbcd00611a898ad8ae71ffa55",
+  "relative_cv_l1": 0.0,
+  "relative_cv_l2": 0.0,
+  "runs": [
+    {
+      "l1_global_load_hit_rate": 0.0,
+      "l1_global_load_sectors_hit": 0,
+      "l1_global_load_sectors_total": 0,
+      "l2_read_hit_rate": 0.0,
+      "l2_read_sectors_hit": 0,
+      "l2_read_sectors_total": 0
+    },
+    {
+      "l1_global_load_hit_rate": 0.0,
+      "l1_global_load_sectors_hit": 0,
+      "l1_global_load_sectors_total": 0,
+      "l2_read_hit_rate": 0.0,
+      "l2_read_sectors_hit": 0,
+      "l2_read_sectors_total": 0
+    },
+    {
+      "l1_global_load_hit_rate": 0.0,
+      "l1_global_load_sectors_hit": 0,
+      "l1_global_load_sectors_total": 0,
+      "l2_read_hit_rate": 0.0,
+      "l2_read_sectors_hit": 0,
+      "l2_read_sectors_total": 0
+    }
+  ],
+  "schema_version": 2,
+  "slug": "problem_016_rope_inverse_frequency_computation"
+}

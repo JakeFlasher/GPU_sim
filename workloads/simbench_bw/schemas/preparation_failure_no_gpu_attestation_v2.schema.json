@@ -1,0 +1,98 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "preparation_failure_no_gpu_attestation_v2.schema.json",
+  "title": "Round-28 reconstructed problem-070 no-GPU attestation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "record_type",
+    "record_version",
+    "amendment_id",
+    "cell",
+    "chunk",
+    "attestation",
+    "certifying_elements",
+    "journal_forensic_absence_scan",
+    "non_certifying_elements",
+    "late_observation_reference",
+    "reproduction_reference",
+    "campaign_rows",
+    "capture_supersession_attempts_consumed"
+  ],
+  "properties": {
+    "record_type": {"const": "preparation_failure_no_gpu_attestation"},
+    "record_version": {"const": 2},
+    "amendment_id": {"const": "ANNEX_C_AMEND_R28_PREP070_RECON_V2"},
+    "cell": {"const": "sol_execbench__problem_070_mamba2_fused_intra_chunk_diagonal_computation"},
+    "chunk": {"const": "sol_execbench-000-bootstrap"},
+    "attestation": {
+      "const": "No GPU execution occurred in the historical problem-070 preparation attempt; the attempt terminated at pre-GPU staged-definition semantic validation."
+    },
+    "certifying_elements": {
+      "const": [
+        "annex_c_adjudication",
+        "deterministic_legacy_9b8e0e40_normalized_definition_comparator_over_sealed_bytes",
+        "journal_forensic_absence_scan"
+      ]
+    },
+    "journal_forensic_absence_scan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "forbidden_artifact_scan",
+        "journal_complete_present",
+        "prepare_stderr_sha256",
+        "prepare_stderr_empty",
+        "inventory_files",
+        "inventory_bytes",
+        "inventory_domain_sha256"
+      ],
+      "properties": {
+        "forbidden_artifact_scan": {"const": []},
+        "journal_complete_present": {"const": false},
+        "prepare_stderr_sha256": {
+          "const": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        "prepare_stderr_empty": {"const": true},
+        "inventory_files": {"const": 22},
+        "inventory_bytes": {"const": 3855797},
+        "inventory_domain_sha256": {
+          "const": "ff0ace5cc769431efd55d01eb28d7d6aef10300cb00e5722e703306e0d821a36"
+        }
+      }
+    },
+    "non_certifying_elements": {"const": ["gpu_process_observation_late"]},
+    "late_observation_reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["file", "sha256", "certifying"],
+      "properties": {
+        "file": {"const": "gpu_process_observation_late.json"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "certifying": {"const": false}
+      }
+    },
+    "reproduction_reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["file", "sha256"],
+      "properties": {
+        "file": {"const": "legacy_comparator_reproduction.json"},
+        "sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "campaign_rows": {"const": 0},
+    "capture_supersession_attempts_consumed": {"const": 0}
+  },
+  "not": {
+    "properties": {
+      "certifying_elements": {
+        "contains": {"const": "deterministic_v1_comparator_over_sealed_bytes"}
+      }
+    },
+    "required": ["certifying_elements"]
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+  }
+}

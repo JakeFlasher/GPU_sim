@@ -1,0 +1,3449 @@
+{
+ "admitted_cell_count": 44,
+ "attempted_cell_count": 63,
+ "cells": [
+  {
+   "admission_status": "attempted_excluded",
+   "arch": "sm_86",
+   "device": "RTX 3090 Ti",
+   "exclusion_typed_reason": "ncu_repeatability_fail",
+   "expected_label_path": "data/local_labels/label_admitted.json",
+   "expected_trace_path": "workloads/simbench_bw/results/l2_thrash_pointer_chase/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl.json",
+   "family_bucket": "irregular_hostile",
+   "identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "afc84c49f93945f989a8a495527ae2c2a5841c967cea91505d3cb4b2858011dd",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "7ec77182e1421074d14fd7c07c57878cc7c9dc59dbf3ccf2de5aba260fac32a4",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "l2_thrash_pointer_chase",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "shape_point": "trace_l2_accuracy_xl",
+   "slug": "l2_thrash_pointer_chase",
+   "split_assignment": "calibration"
+  },
+  {
+   "admission_status": "attempted_excluded",
+   "arch": "sm_86",
+   "device": "RTX 3090 Ti",
+   "exclusion_typed_reason": "ncu_repeatability_fail",
+   "expected_label_path": "data/local_labels/label_admitted.json",
+   "expected_trace_path": "workloads/simbench_bw/results/layernorm_fwd_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape.json",
+   "family_bucket": "dl_primitives",
+   "identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "20ec2891f1734d8801804ad908601016b0e18d2d782d69bd953811b9b00e1850",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "56c5ec6b878df3410ae20f6c30635c100eb95c97f9c65f29f4b7354273f20a29",
+    "shape_point": "timing_shape",
+    "slug": "layernorm_fwd_bf16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "shape_point": "timing_shape",
+   "slug": "layernorm_fwd_bf16_sm80",
+   "split_assignment": "calibration"
+  },
+  {
+   "admission_status": "attempted_excluded",
+   "arch": "sm_86",
+   "device": "RTX 3090 Ti",
+   "exclusion_typed_reason": "ncu_repeatability_fail",
+   "expected_label_path": "data/local_labels/label_admitted.json",
+   "expected_trace_path": "workloads/simbench_bw/results/register_spill_local_mem/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl.json",
+   "family_bucket": "irregular_hostile",
+   "identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "c1d6b8b07451c329578a86d03eed2807be3654fdc19c6ec2786bae31a718a78a",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "2764b9aae8d6098912157784a26f6b7871e9887045bf3c2a63bc453ca06bfdc9",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "register_spill_local_mem",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "shape_point": "trace_l2_accuracy_xl",
+   "slug": "register_spill_local_mem",
+   "split_assignment": "holdout"
+  },
+  {
+   "admission_status": "admitted",
+   "arch": "sm_86",
+   "device": "RTX 3090 Ti",
+   "exclusion_typed_reason": null,
+   "expected_label_path": "data/local_labels/label_admitted.json",
+   "expected_trace_path": "workloads/simbench_bw/results/rmsnorm_fwd_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape.json",
+   "family_bucket": "dl_primitives",
+   "identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "e44f714645062197b42dda23e2a41c748e105c8e674b62305c979564d35dec21",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "7848654da87ddb65a3469a248bb5572f936b4650fefbb1d22aaa25f24aa6cbe2",
+    "shape_point": "timing_shape",
+    "slug": "rmsnorm_fwd_bf16_sm80",
+    "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7"
+   },
+   "shape_point": "timing_shape",
+   "slug": "rmsnorm_fwd_bf16_sm80",
+   "split_assignment": "calibration"
+  },
+  {
+   "admission_status": "attempted_excluded",
+   "arch": "sm_86",
+   "device": "RTX 3090 Ti",
+   "exclusion_typed_reason": "ncu_repeatability_fail",
+   "expected_label_path": "data/local_labels/label_admitted.json",
+   "expected_trace_path": "workloads/simbench_bw/results/silu_fwd_bf16_sm80/rtx_3090_ti/sm_86/trace_correctness_shape.json",
+   "family_bucket": "dl_primitives",
+   "identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "7d0eeb9e1653272094170143981bb388bfc44bed5f382ffcba750a6781cd16f6",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "c8690a32cfd4cdb4e19ffde286a0758f5cb6bcb81b66bf31216465e9f4798b62",
+    "shape_point": "correctness_shape",
+    "slug": "silu_fwd_bf16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "shape_point": "correctness_shape",
+   "slug": "silu_fwd_bf16_sm80",
+   "split_assignment": "holdout"
+  },
+  {
+   "admission_status": "admitted",
+   "arch": "sm_86",
+   "device": "RTX 3090 Ti",
+   "exclusion_typed_reason": null,
+   "expected_label_path": "data/local_labels/label_admitted.json",
+   "expected_trace_path": "workloads/simbench_bw/results/silu_fwd_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape.json",
+   "family_bucket": "dl_primitives",
+   "identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "12b290606983bbecb919678c86fffb9a1df3e02bf66afe8487eeef085bfa6551",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "2681564ef5ca9026d42106bbe862a40d3e38b89b52e720a90ad39322c0ff99dc",
+    "shape_point": "timing_shape",
+    "slug": "silu_fwd_bf16_sm80",
+    "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7"
+   },
+   "shape_point": "timing_shape",
+   "slug": "silu_fwd_bf16_sm80",
+   "split_assignment": "holdout"
+  },
+  {
+   "admission_status": "admitted",
+   "arch": "sm_86",
+   "device": "RTX 3090 Ti",
+   "exclusion_typed_reason": null,
+   "expected_label_path": "data/local_labels/label_admitted.json",
+   "expected_trace_path": "workloads/simbench_bw/results/softmax_safe_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape.json",
+   "family_bucket": "dl_primitives",
+   "identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "68b07b4adc6918b8a5ef3f93e9973a7195e083d28e77465ca55680cc512c3cfd",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "dc75edc616c84481008a935794005890d51160f8eafe175a1e530098b3be3e43",
+    "shape_point": "timing_shape",
+    "slug": "softmax_safe_bf16_sm80",
+    "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7"
+   },
+   "shape_point": "timing_shape",
+   "slug": "softmax_safe_bf16_sm80",
+   "split_assignment": "validation"
+  },
+  {
+   "admission_status": "admitted",
+   "arch": "sm_86",
+   "device": "RTX 3090 Ti",
+   "exclusion_typed_reason": null,
+   "expected_label_path": "data/local_labels/label_admitted.json",
+   "expected_trace_path": "workloads/simbench_bw/results/carveout_sensitivity_probe/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl.json",
+   "family_bucket": "irregular_hostile",
+   "identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "279546697af3639e17922fe444c1352acb171d48adfba44da3260ebe3d68f11e",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "4585d912ad82ae86356fa7d64c2782fc6948e8acc97cc30947abfc4633840f6d",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "carveout_sensitivity_probe",
+    "source_commit": "38f15266ffe634507b3bc66b1f6bdef1ea1bd463"
+   },
+   "shape_point": "trace_l2_accuracy_xl",
+   "slug": "carveout_sensitivity_probe",
+   "split_assignment": "holdout"
+  },
+  {
+   "admission_status": "admitted",
+   "arch": "sm_86",
+   "device": "RTX 3090 Ti",
+   "exclusion_typed_reason": null,
+   "expected_label_path": "data/local_labels/label_admitted.json",
+   "expected_trace_path": "workloads/simbench_bw/results/working_set_capacity_sweep/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl.json",
+   "family_bucket": "irregular_hostile",
+   "identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "197379525a6e267b2e018513086fb85b3b861a696b0e14fb061d3839ac8e7dd6",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "4a89354e3a81afb6d1ee9c0aea25f10cb68d1d31779c978bd37c6ee5713622e1",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "working_set_capacity_sweep",
+    "source_commit": "38f15266ffe634507b3bc66b1f6bdef1ea1bd463"
+   },
+   "shape_point": "trace_l2_accuracy_xl",
+   "slug": "working_set_capacity_sweep",
+   "split_assignment": "calibration"
+  },
+  {
+   "admission_status": "attempted_excluded",
+   "arch": "sm_86",
+   "device": "RTX 3090 Ti",
+   "exclusion_typed_reason": "ncu_repeatability_fail",
+   "expected_label_path": "data/local_labels/label_admitted.json",
+   "expected_trace_path": "workloads/simbench_bw/results/dram_stream_stride_mix/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl.json",
+   "family_bucket": "memory_stress",
+   "identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "a775fff63a83342181e8d5b34b93679f05bba6bf5072926145d9cd1e05d6d3b1",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "46f98c2f3dc63eecd602b9d44ec6632f3d6668c0f42025d60239c036dff8bd75",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "dram_stream_stride_mix",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "shape_point": "trace_l2_accuracy_xl",
+   "slug": "dram_stream_stride_mix",
+   "split_assignment": "calibration"
+  },
+  {
+   "admission_status": "admitted",
+   "arch": "sm_86",
+   "device": "RTX 3090 Ti",
+   "exclusion_typed_reason": null,
+   "expected_label_path": "data/local_labels/label_admitted.json",
+   "expected_trace_path": "workloads/simbench_bw/results/warm_cold_pair_relaunch/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl.json",
+   "family_bucket": "memory_stress",
+   "identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "eb3ec15b1d54b498650a94c903d85e4e01881a9531311ac6e27e2d85c560a252",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "779b4acb3473bca619d87757ae102a1e0e7c50006edfa5171689e06af94e7443",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "warm_cold_pair_relaunch",
+    "source_commit": "f6b5e5d3b19fb4ac507fa3fa0229ebf11073f50f"
+   },
+   "shape_point": "trace_l2_accuracy_xl",
+   "slug": "warm_cold_pair_relaunch",
+   "split_assignment": "calibration"
+  },
+  {
+   "admission_status": "admitted",
+   "arch": "sm_86",
+   "device": "RTX 3090 Ti",
+   "exclusion_typed_reason": null,
+   "expected_label_path": "data/local_labels/label_admitted.json",
+   "expected_trace_path": "workloads/simbench_bw/results/l2_persisting_window_sweep/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl.json",
+   "family_bucket": "memory_stress",
+   "identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "e6aa9925f55f19d7ab575e27c0c1184609cc5a02f569cfed3dd8e91f9ea3d675",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "9b26911afd5effa33f41ae15bce2a7a5d606f797c873e5617db53a36f9f5f6fc",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "l2_persisting_window_sweep",
+    "source_commit": "f6b5e5d3b19fb4ac507fa3fa0229ebf11073f50f"
+   },
+   "shape_point": "trace_l2_accuracy_xl",
+   "slug": "l2_persisting_window_sweep",
+   "split_assignment": "calibration"
+  },
+  {
+   "admission_status": "admitted",
+   "arch": "sm_86",
+   "device": "RTX 3090 Ti",
+   "exclusion_typed_reason": null,
+   "expected_label_path": "data/local_labels/label_admitted.json",
+   "expected_trace_path": "workloads/simbench_bw/results/l2_prefetch_hint_sweep/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl.json",
+   "family_bucket": "memory_stress",
+   "identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "a9e72c8106c33cee877a77343c49e3d8bda32182e681063b504d04b869efefb8",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "30baaa0f6d6054d23fe69560cb76c4f54a907f9bc94fa89d9fc7fc4daf32dbc7",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "l2_prefetch_hint_sweep",
+    "source_commit": "f6b5e5d3b19fb4ac507fa3fa0229ebf11073f50f"
+   },
+   "shape_point": "trace_l2_accuracy_xl",
+   "slug": "l2_prefetch_hint_sweep",
+   "split_assignment": "calibration"
+  },
+  {
+   "admission_status": "admitted",
+   "arch": "sm_86",
+   "device": "RTX 3090 Ti",
+   "exclusion_typed_reason": null,
+   "expected_label_path": "data/local_labels/label_admitted.json",
+   "expected_trace_path": "workloads/simbench_bw/results/conv2d_implicit_gemm_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape.json",
+   "family_bucket": "attention_conv",
+   "identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "19beb03abd72bc3583ce71dcf779c7f058ac0e0cb976c0a321759535c72d5e3a",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "166c68126ca691ffffd1cf792265b04165b17f4a4d8d03860580b4eaf68e9acb",
+    "shape_point": "timing_shape",
+    "slug": "conv2d_implicit_gemm_bf16_sm80",
+    "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7"
+   },
+   "shape_point": "timing_shape",
+   "slug": "conv2d_implicit_gemm_bf16_sm80",
+   "split_assignment": "holdout"
+  },
+  {
+   "admission_status": "admitted",
+   "arch": "sm_86",
+   "device": "RTX 3090 Ti",
+   "exclusion_typed_reason": null,
+   "expected_label_path": "data/local_labels/label_admitted.json",
+   "expected_trace_path": "workloads/simbench_bw/results/cross_entropy_fwd_fp32_sm80/rtx_3090_ti/sm_86/trace_timing_shape.json",
+   "family_bucket": "dl_primitives",
+   "identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "0dfdcadd5a6400883c151539d0d5c3feabd6d08c16f894e20ccec6d8e8080087",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "317570008f9dcda3325fb71f1fdaa418d8de9a0d7b3ece65c1642f0de798eddb",
+    "shape_point": "timing_shape",
+    "slug": "cross_entropy_fwd_fp32_sm80",
+    "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7"
+   },
+   "shape_point": "timing_shape",
+   "slug": "cross_entropy_fwd_fp32_sm80",
+   "split_assignment": "validation"
+  },
+  {
+   "admission_status": "admitted",
+   "arch": "sm_86",
+   "device": "RTX 3090 Ti",
+   "exclusion_typed_reason": null,
+   "expected_label_path": "data/local_labels/label_admitted.json",
+   "expected_trace_path": "workloads/simbench_bw/results/embedding_gather_int32_sm80/rtx_3090_ti/sm_86/trace_timing_shape.json",
+   "family_bucket": "dl_primitives",
+   "identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "ce2f77933a7ec3581aa62eaf52bd3e8c07de2a78ae61546632a70b2a7a0fe48e",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "8dbf972a5fdbebe33768c592447108592664645c38e0d22514468f664795ff8b",
+    "shape_point": "timing_shape",
+    "slug": "embedding_gather_int32_sm80",
+    "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7"
+   },
+   "shape_point": "timing_shape",
+   "slug": "embedding_gather_int32_sm80",
+   "split_assignment": "calibration"
+  },
+  {
+   "admission_status": "attempted_excluded",
+   "arch": "sm_86",
+   "device": "RTX 3090 Ti",
+   "exclusion_typed_reason": "ncu_repeatability_fail",
+   "expected_label_path": "data/local_labels/label_admitted.json",
+   "expected_trace_path": "workloads/simbench_bw/results/flash_attn_bwd_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape.json",
+   "family_bucket": "attention_conv",
+   "identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "49a868ba6276fc84eb7cb820195c8dbbb36771e56a49573ff0a47ec2a5f8f518",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "efd3196a76ae04038426b6e392c90ae07a235fce22ed9f77946c2d70787dc871",
+    "shape_point": "timing_shape",
+    "slug": "flash_attn_bwd_bf16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "shape_point": "timing_shape",
+   "slug": "flash_attn_bwd_bf16_sm80",
+   "split_assignment": "calibration"
+  },
+  {
+   "admission_status": "attempted_excluded",
+   "arch": "sm_86",
+   "device": "RTX 3090 Ti",
+   "exclusion_typed_reason": "ncu_repeatability_fail",
+   "expected_label_path": "data/local_labels/label_admitted.json",
+   "expected_trace_path": "workloads/simbench_bw/results/flash_attn_fwd_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape.json",
+   "family_bucket": "attention_conv",
+   "identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "f39b17eab4f879356745baf129d2f041b5a5edacf332140176f468217313ffa6",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "3971b46d4d2eb9a475d5998f2ac661841bdbfe91499f9255499d89d5b75cf734",
+    "shape_point": "timing_shape",
+    "slug": "flash_attn_fwd_bf16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "shape_point": "timing_shape",
+   "slug": "flash_attn_fwd_bf16_sm80",
+   "split_assignment": "calibration"
+  },
+  {
+   "admission_status": "admitted",
+   "arch": "sm_86",
+   "device": "RTX 3090 Ti",
+   "exclusion_typed_reason": null,
+   "expected_label_path": "data/local_labels/label_admitted.json",
+   "expected_trace_path": "workloads/simbench_bw/results/gemm_hmma_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape.json",
+   "family_bucket": "gemm_family",
+   "identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "bab4489d033e31a50df904d3246eb37adf3b8e52fa3d8015c008a0ce3147b629",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "8d74efecaa33ede92fae0b0173b9c442199ef5314c30a039792ccb2bbac5a24d",
+    "shape_point": "timing_shape",
+    "slug": "gemm_hmma_bf16_sm80",
+    "source_commit": "5088821eb7e205bcce1678d85e6272063e212cd0"
+   },
+   "shape_point": "timing_shape",
+   "slug": "gemm_hmma_bf16_sm80",
+   "split_assignment": "calibration"
+  },
+  {
+   "admission_status": "admitted",
+   "arch": "sm_86",
+   "device": "RTX 3090 Ti",
+   "exclusion_typed_reason": null,
+   "expected_label_path": "data/local_labels/label_admitted.json",
+   "expected_trace_path": "workloads/simbench_bw/results/gemm_hmma_fp16_sm80/rtx_3090_ti/sm_86/trace_timing_shape.json",
+   "family_bucket": "gemm_family",
+   "identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "1a638194443715e18b8753bfbde32c9be79e2d59be70585b318600e12d7f6b1d",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "6c3c64d7b03efd3c0fab89868ff75dc052370434282ac050bbb6c21d3310f9b9",
+    "shape_point": "timing_shape",
+    "slug": "gemm_hmma_fp16_sm80",
+    "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7"
+   },
+   "shape_point": "timing_shape",
+   "slug": "gemm_hmma_fp16_sm80",
+   "split_assignment": "calibration"
+  },
+  {
+   "admission_status": "admitted",
+   "arch": "sm_86",
+   "device": "RTX 3090 Ti",
+   "exclusion_typed_reason": null,
+   "expected_label_path": "data/local_labels/label_admitted.json",
+   "expected_trace_path": "workloads/simbench_bw/results/gemm_imma_int8_sm80/rtx_3090_ti/sm_86/trace_timing_shape.json",
+   "family_bucket": "gemm_family",
+   "identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "6cd2cf81121ff58834c36aadf8667764e676aa1cb4fd322788a95ea283cca4f8",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "f7154498956f308d855299538f5255af01943add22c7bd17936b2b4eb8f39ce4",
+    "shape_point": "timing_shape",
+    "slug": "gemm_imma_int8_sm80",
+    "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7"
+   },
+   "shape_point": "timing_shape",
+   "slug": "gemm_imma_int8_sm80",
+   "split_assignment": "calibration"
+  },
+  {
+   "admission_status": "admitted",
+   "arch": "sm_86",
+   "device": "RTX 3090 Ti",
+   "exclusion_typed_reason": null,
+   "expected_label_path": "data/local_labels/label_admitted.json",
+   "expected_trace_path": "workloads/simbench_bw/results/gemm_sparse_2to4_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape.json",
+   "family_bucket": "gemm_family",
+   "identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "dac635cbb91e33c54424581f6527dae3be4c1cd7fddf170c32bd055296952963",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "5f2fb866479f938277d0dae62cce21626e6c56c68c8e4e447739f5919aac2f9e",
+    "shape_point": "timing_shape",
+    "slug": "gemm_sparse_2to4_bf16_sm80",
+    "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7"
+   },
+   "shape_point": "timing_shape",
+   "slug": "gemm_sparse_2to4_bf16_sm80",
+   "split_assignment": "validation"
+  },
+  {
+   "admission_status": "admitted",
+   "arch": "sm_86",
+   "device": "RTX 3090 Ti",
+   "exclusion_typed_reason": null,
+   "expected_label_path": "data/local_labels/label_admitted.json",
+   "expected_trace_path": "workloads/simbench_bw/results/rmsnorm_bwd_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape.json",
+   "family_bucket": "dl_primitives",
+   "identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "962bd89b476b10d78a59a580436c2dae18fc371da32da7518c90ddfa2b6054ce",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "a1042966e9ab38785b141c9f2e70b768575024abfa0ad97ddca145143f2b83c3",
+    "shape_point": "timing_shape",
+    "slug": "rmsnorm_bwd_bf16_sm80",
+    "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7"
+   },
+   "shape_point": "timing_shape",
+   "slug": "rmsnorm_bwd_bf16_sm80",
+   "split_assignment": "holdout"
+  },
+  {
+   "admission_status": "admitted",
+   "arch": "sm_86",
+   "device": "RTX 3090 Ti",
+   "exclusion_typed_reason": null,
+   "expected_label_path": "data/local_labels/label_admitted.json",
+   "expected_trace_path": "workloads/simbench_bw/results/swiglu_fwd_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape.json",
+   "family_bucket": "dl_primitives",
+   "identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "64ff4d88480e40732ec85c3d3ce4040fbe695735d1969fd027d4a493b8a3916c",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "6441d8ad74297007aee7e16f5c8d5360c4606b4267c8be9357d09b08e1dbb447",
+    "shape_point": "timing_shape",
+    "slug": "swiglu_fwd_bf16_sm80",
+    "source_commit": "5088821eb7e205bcce1678d85e6272063e212cd0"
+   },
+   "shape_point": "timing_shape",
+   "slug": "swiglu_fwd_bf16_sm80",
+   "split_assignment": "calibration"
+  },
+  {
+   "admission_status": "attempted_excluded",
+   "arch": "sm_86",
+   "device": "RTX 3090 Ti",
+   "exclusion_typed_reason": "ncu_repeatability_fail",
+   "expected_label_path": "data/local_labels/label_admitted.json",
+   "expected_trace_path": "workloads/simbench_bw/results/gemm_hmma_bf16_sm80/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_lg.json",
+   "family_bucket": "gemm_family",
+   "identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "2a9640ae0db61b64b2aab24fdd8134b208f3ade75622f941112069a0e302004f",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "9d6646ab084678ddf0524cb8ab03af4fa8a3d4e4d652010442a6f9f6a915e2a4",
+    "shape_point": "trace_l2_accuracy_lg",
+    "slug": "gemm_hmma_bf16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "shape_point": "trace_l2_accuracy_lg",
+   "slug": "gemm_hmma_bf16_sm80",
+   "split_assignment": "calibration"
+  },
+  {
+   "admission_status": "admitted",
+   "arch": "sm_86",
+   "device": "RTX 3090 Ti",
+   "exclusion_typed_reason": null,
+   "expected_label_path": "data/local_labels/label_admitted.json",
+   "expected_trace_path": "workloads/simbench_bw/results/gemm_hmma_bf16_sm80/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl.json",
+   "family_bucket": "gemm_family",
+   "identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "bab4489d033e31a50df904d3246eb37adf3b8e52fa3d8015c008a0ce3147b629",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "8d74efecaa33ede92fae0b0173b9c442199ef5314c30a039792ccb2bbac5a24d",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "gemm_hmma_bf16_sm80",
+    "source_commit": "5088821eb7e205bcce1678d85e6272063e212cd0"
+   },
+   "shape_point": "trace_l2_accuracy_xl",
+   "slug": "gemm_hmma_bf16_sm80",
+   "split_assignment": "calibration"
+  },
+  {
+   "admission_status": "attempted_excluded",
+   "arch": "sm_86",
+   "device": "RTX 3090 Ti",
+   "exclusion_typed_reason": "ncu_repeatability_fail",
+   "expected_label_path": "data/local_labels/label_admitted.json",
+   "expected_trace_path": "workloads/simbench_bw/results/gemm_hmma_fp16_sm80/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_lg.json",
+   "family_bucket": "gemm_family",
+   "identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "81bc1671a2858e6b20dd3c0e9928b238cfc79068a7fecc481dacfb1fb4128bb3",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "a751169dc1fed77df7b80a2bd2e30b34c416f4f8d67325033045e27c7224bea7",
+    "shape_point": "trace_l2_accuracy_lg",
+    "slug": "gemm_hmma_fp16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "shape_point": "trace_l2_accuracy_lg",
+   "slug": "gemm_hmma_fp16_sm80",
+   "split_assignment": "calibration"
+  },
+  {
+   "admission_status": "admitted",
+   "arch": "sm_86",
+   "device": "RTX 3090 Ti",
+   "exclusion_typed_reason": null,
+   "expected_label_path": "data/local_labels/label_admitted.json",
+   "expected_trace_path": "workloads/simbench_bw/results/gemm_hmma_fp16_sm80/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl.json",
+   "family_bucket": "gemm_family",
+   "identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "1a638194443715e18b8753bfbde32c9be79e2d59be70585b318600e12d7f6b1d",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "6c3c64d7b03efd3c0fab89868ff75dc052370434282ac050bbb6c21d3310f9b9",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "gemm_hmma_fp16_sm80",
+    "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7"
+   },
+   "shape_point": "trace_l2_accuracy_xl",
+   "slug": "gemm_hmma_fp16_sm80",
+   "split_assignment": "calibration"
+  },
+  {
+   "admission_status": "attempted_excluded",
+   "arch": "sm_86",
+   "device": "RTX 3090 Ti",
+   "exclusion_typed_reason": "ncu_repeatability_fail",
+   "expected_label_path": "data/local_labels/label_admitted.json",
+   "expected_trace_path": "workloads/simbench_bw/results/gemm_imma_int8_sm80/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_lg.json",
+   "family_bucket": "gemm_family",
+   "identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "3f1241c4aced4ab211ba20644457c6dc4fa27377dbb757dbded4b2e7b1a5017c",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "612476892630fc2fdc2209e7f6a93cf82c7ef460fd8ce93f0b8148b8fc192b04",
+    "shape_point": "trace_l2_accuracy_lg",
+    "slug": "gemm_imma_int8_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "shape_point": "trace_l2_accuracy_lg",
+   "slug": "gemm_imma_int8_sm80",
+   "split_assignment": "calibration"
+  },
+  {
+   "admission_status": "admitted",
+   "arch": "sm_86",
+   "device": "RTX 3090 Ti",
+   "exclusion_typed_reason": null,
+   "expected_label_path": "data/local_labels/label_admitted.json",
+   "expected_trace_path": "workloads/simbench_bw/results/gemm_imma_int8_sm80/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl.json",
+   "family_bucket": "gemm_family",
+   "identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "6cd2cf81121ff58834c36aadf8667764e676aa1cb4fd322788a95ea283cca4f8",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "f7154498956f308d855299538f5255af01943add22c7bd17936b2b4eb8f39ce4",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "gemm_imma_int8_sm80",
+    "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7"
+   },
+   "shape_point": "trace_l2_accuracy_xl",
+   "slug": "gemm_imma_int8_sm80",
+   "split_assignment": "calibration"
+  },
+  {
+   "admission_status": "attempted_excluded",
+   "arch": "sm_86",
+   "device": "RTX 3090 Ti",
+   "exclusion_typed_reason": "ncu_repeatability_fail",
+   "expected_label_path": "data/local_labels/label_admitted.json",
+   "expected_trace_path": "workloads/simbench_bw/results/flash_attn_fwd_bf16_sm80/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_lg.json",
+   "family_bucket": "attention_conv",
+   "identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "45d87043098326e9eb57459ccf88dcb92f14bb0aca92d32e596a7f4c8e4110c5",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "3971b46d4d2eb9a475d5998f2ac661841bdbfe91499f9255499d89d5b75cf734",
+    "shape_point": "trace_l2_accuracy_lg",
+    "slug": "flash_attn_fwd_bf16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "shape_point": "trace_l2_accuracy_lg",
+   "slug": "flash_attn_fwd_bf16_sm80",
+   "split_assignment": "calibration"
+  },
+  {
+   "admission_status": "attempted_excluded",
+   "arch": "sm_86",
+   "device": "RTX 3090 Ti",
+   "exclusion_typed_reason": "ncu_repeatability_fail",
+   "expected_label_path": "data/local_labels/label_admitted.json",
+   "expected_trace_path": "workloads/simbench_bw/results/flash_attn_fwd_bf16_sm80/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl.json",
+   "family_bucket": "attention_conv",
+   "identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "948807754e8e7c3ca94ea06db5e6ad1f5e4339efcf46c62eecc859eab6778da5",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "3971b46d4d2eb9a475d5998f2ac661841bdbfe91499f9255499d89d5b75cf734",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "flash_attn_fwd_bf16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "shape_point": "trace_l2_accuracy_xl",
+   "slug": "flash_attn_fwd_bf16_sm80",
+   "split_assignment": "calibration"
+  },
+  {
+   "admission_status": "attempted_excluded",
+   "arch": "sm_86",
+   "device": "RTX 3090 Ti",
+   "exclusion_typed_reason": "ncu_repeatability_fail",
+   "expected_label_path": "data/local_labels/label_admitted.json",
+   "expected_trace_path": "workloads/simbench_bw/results/flash_attn_bwd_bf16_sm80/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_lg.json",
+   "family_bucket": "attention_conv",
+   "identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "e47b31f156d98656a659640280e19876cfd9efc50018422cbc8d9129d7b2f661",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "efd3196a76ae04038426b6e392c90ae07a235fce22ed9f77946c2d70787dc871",
+    "shape_point": "trace_l2_accuracy_lg",
+    "slug": "flash_attn_bwd_bf16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "shape_point": "trace_l2_accuracy_lg",
+   "slug": "flash_attn_bwd_bf16_sm80",
+   "split_assignment": "calibration"
+  },
+  {
+   "admission_status": "attempted_excluded",
+   "arch": "sm_86",
+   "device": "RTX 3090 Ti",
+   "exclusion_typed_reason": "ncu_repeatability_fail",
+   "expected_label_path": "data/local_labels/label_admitted.json",
+   "expected_trace_path": "workloads/simbench_bw/results/flash_attn_bwd_bf16_sm80/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl.json",
+   "family_bucket": "attention_conv",
+   "identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "dcf034ddcbefdb0b1c727739d7e0b903c4483cb50b0e31f866208a835b45c25f",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "efd3196a76ae04038426b6e392c90ae07a235fce22ed9f77946c2d70787dc871",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "flash_attn_bwd_bf16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "shape_point": "trace_l2_accuracy_xl",
+   "slug": "flash_attn_bwd_bf16_sm80",
+   "split_assignment": "calibration"
+  },
+  {
+   "admission_status": "attempted_excluded",
+   "arch": "sm_86",
+   "device": "RTX 3090 Ti",
+   "exclusion_typed_reason": "ncu_repeatability_fail",
+   "expected_label_path": "data/local_labels/label_admitted.json",
+   "expected_trace_path": "workloads/simbench_bw/results/swiglu_fwd_bf16_sm80/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_lg.json",
+   "family_bucket": "dl_primitives",
+   "identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "eb9b80a6565ce36f38302169a95a171865fe6ed47c1e4a4c85b7f69b7d06b56d",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "f3486aec4ba945d91798499ceb42c06aa306b265734a08daef38cd62755dd4a5",
+    "shape_point": "trace_l2_accuracy_lg",
+    "slug": "swiglu_fwd_bf16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "shape_point": "trace_l2_accuracy_lg",
+   "slug": "swiglu_fwd_bf16_sm80",
+   "split_assignment": "calibration"
+  },
+  {
+   "admission_status": "admitted",
+   "arch": "sm_86",
+   "device": "RTX 3090 Ti",
+   "exclusion_typed_reason": null,
+   "expected_label_path": "data/local_labels/label_admitted.json",
+   "expected_trace_path": "workloads/simbench_bw/results/swiglu_fwd_bf16_sm80/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl.json",
+   "family_bucket": "dl_primitives",
+   "identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "64ff4d88480e40732ec85c3d3ce4040fbe695735d1969fd027d4a493b8a3916c",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "6441d8ad74297007aee7e16f5c8d5360c4606b4267c8be9357d09b08e1dbb447",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "swiglu_fwd_bf16_sm80",
+    "source_commit": "5088821eb7e205bcce1678d85e6272063e212cd0"
+   },
+   "shape_point": "trace_l2_accuracy_xl",
+   "slug": "swiglu_fwd_bf16_sm80",
+   "split_assignment": "calibration"
+  },
+  {
+   "admission_status": "attempted_excluded",
+   "arch": "sm_86",
+   "device": "RTX 3090 Ti",
+   "exclusion_typed_reason": "ncu_repeatability_fail",
+   "expected_label_path": "data/local_labels/label_admitted.json",
+   "expected_trace_path": "workloads/simbench_bw/results/vendor_sgemm_cublas/rtx_3090_ti/sm_86/trace_trace_00.json",
+   "family_bucket": "vendor_baselines",
+   "identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "ef1c18d83840e98f62c57f2b5831875626409066dd17c5d5918f4ca906753684",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "a2a9330ac3d65c90d8c50e230eed8fca05d3fea37a419c80d4aed114109c30d3",
+    "shape_point": "timing_shape",
+    "slug": "vendor_sgemm_cublas",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "shape_point": "timing_shape",
+   "slug": "vendor_sgemm_cublas",
+   "split_assignment": "validation"
+  },
+  {
+   "admission_status": "admitted",
+   "arch": "sm_86",
+   "device": "RTX 3090 Ti",
+   "exclusion_typed_reason": null,
+   "expected_label_path": "data/local_labels/label_admitted.json",
+   "expected_trace_path": "workloads/simbench_bw/results/bf16_hmma_gemm_traceable/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl.json",
+   "family_bucket": "gemm_family",
+   "identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "0e848c96cfd3323ca99353dc8e0208b6948ccb43289b93231a217a058a47c735",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "4f26b1113d4895a4b5df51521c1e2ddea69ddd03c446b9730bd649ff3e1c6b6b",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "bf16_hmma_gemm_traceable",
+    "source_commit": "f6b5e5d3b19fb4ac507fa3fa0229ebf11073f50f"
+   },
+   "shape_point": "trace_l2_accuracy_xl",
+   "slug": "bf16_hmma_gemm_traceable",
+   "split_assignment": "calibration"
+  },
+  {
+   "admission_status": "admitted",
+   "arch": "sm_86",
+   "device": "RTX 3090 Ti",
+   "exclusion_typed_reason": null,
+   "expected_label_path": "data/local_labels/label_admitted.json",
+   "expected_trace_path": "workloads/simbench_bw/results/dram_streaming_dot_product/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl.json",
+   "family_bucket": "memory_stress",
+   "identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "bb022917d38733a47694ea8bd63c2abb1b4e816a07fd1f5adeba707bc38dfd97",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "28bc636502da34541b1abb1b2e2f439fab06d0c2a46ba76e4ba1eb314a19346a",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "dram_streaming_dot_product",
+    "source_commit": "b71d21fa2ce2bb2a55cfc5374d9d46ddf62dcf20"
+   },
+   "shape_point": "trace_l2_accuracy_xl",
+   "slug": "dram_streaming_dot_product",
+   "split_assignment": "validation"
+  },
+  {
+   "admission_status": "admitted",
+   "arch": "sm_86",
+   "device": "RTX 3090 Ti",
+   "exclusion_typed_reason": null,
+   "expected_label_path": "data/local_labels/label_admitted.json",
+   "expected_trace_path": "workloads/simbench_bw/results/fp16_hmma_gemm_traceable/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl.json",
+   "family_bucket": "gemm_family",
+   "identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "74ad45e93ba3fb2b8c35724c6681d5c96cdfc8341de0f368edc3bde0331e63f7",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "87f9c439b130a8d25457042b165734612b65b590cd2aa2acc54b95178eb16ad9",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "fp16_hmma_gemm_traceable",
+    "source_commit": "f6b5e5d3b19fb4ac507fa3fa0229ebf11073f50f"
+   },
+   "shape_point": "trace_l2_accuracy_xl",
+   "slug": "fp16_hmma_gemm_traceable",
+   "split_assignment": "holdout"
+  },
+  {
+   "admission_status": "admitted",
+   "arch": "sm_86",
+   "device": "RTX 3090 Ti",
+   "exclusion_typed_reason": null,
+   "expected_label_path": "data/local_labels/label_admitted.json",
+   "expected_trace_path": "workloads/simbench_bw/results/fp32_fma_dep_chain/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl.json",
+   "family_bucket": "irregular_hostile",
+   "identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "55bfc93c0edebe35c6e78b16d6096bd3a21e60f25faa178a410fc59cbf21bbae",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "87f0eeb1256101173117148a10ac97d6367a9307c2b8e33c78df9d43c2f491f7",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "fp32_fma_dep_chain",
+    "source_commit": "f6b5e5d3b19fb4ac507fa3fa0229ebf11073f50f"
+   },
+   "shape_point": "trace_l2_accuracy_xl",
+   "slug": "fp32_fma_dep_chain",
+   "split_assignment": "validation"
+  },
+  {
+   "admission_status": "admitted",
+   "arch": "sm_86",
+   "device": "RTX 3090 Ti",
+   "exclusion_typed_reason": null,
+   "expected_label_path": "data/local_labels/label_admitted.json",
+   "expected_trace_path": "workloads/simbench_bw/results/global_atomic_histogram/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl.json",
+   "family_bucket": "irregular_hostile",
+   "identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "5a2939632a01db485828bc27930e98da8ad9f50eb59fe5500007793c5fbc5cf4",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "7b0d4c0ce3b924918bd9c913ee6a624b46b70462eca9b9388459e4259d333264",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "global_atomic_histogram",
+    "source_commit": "742aafa7e6bf85d33cddeae7a12f1d7c4700bdac"
+   },
+   "shape_point": "trace_l2_accuracy_xl",
+   "slug": "global_atomic_histogram",
+   "split_assignment": "validation"
+  },
+  {
+   "admission_status": "attempted_excluded",
+   "arch": "sm_86",
+   "device": "RTX 3090 Ti",
+   "exclusion_typed_reason": "ncu_repeatability_fail",
+   "expected_label_path": "data/local_labels/label_admitted.json",
+   "expected_trace_path": "workloads/simbench_bw/results/int8_imma_gemm_traceable/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl.json",
+   "family_bucket": "gemm_family",
+   "identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "48acedd5b8267c4d0bfeb6739279b0d61e859504742eb84751ce324458ce0505",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "95d0f8bfec09679edc1704ded569e87863e7910b9cd02d556e1cacf113e6ec09",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "int8_imma_gemm_traceable",
+    "source_commit": "b71d21fa2ce2bb2a55cfc5374d9d46ddf62dcf20"
+   },
+   "shape_point": "trace_l2_accuracy_xl",
+   "slug": "int8_imma_gemm_traceable",
+   "split_assignment": "calibration"
+  },
+  {
+   "admission_status": "attempted_excluded",
+   "arch": "sm_86",
+   "device": "RTX 3090 Ti",
+   "exclusion_typed_reason": "ncu_repeatability_fail",
+   "expected_label_path": "data/local_labels/label_admitted.json",
+   "expected_trace_path": "workloads/simbench_bw/results/shared_bank_conflict_stride/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl.json",
+   "family_bucket": "memory_stress",
+   "identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "3aa44a61c092634caff3df92a7223930f2d722a9fc84b4444a232f5bbed48d63",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "9ba72d7fb570e5b1d6932151fb118a0466c11be4688e040b9f90580dc2a581cc",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "shared_bank_conflict_stride",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "shape_point": "trace_l2_accuracy_xl",
+   "slug": "shared_bank_conflict_stride",
+   "split_assignment": "calibration"
+  },
+  {
+   "admission_status": "admitted",
+   "arch": "sm_86",
+   "device": "RTX 3090 Ti",
+   "exclusion_typed_reason": null,
+   "expected_label_path": "data/local_labels/label_admitted.json",
+   "expected_trace_path": "workloads/simbench_bw/results/tf32_hmma_gemm_traceable/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl.json",
+   "family_bucket": "gemm_family",
+   "identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "57d8c9f0a178b2617d4108d091178f090a037e44957508ed3b13594b661fdf65",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "4389fe984bc721ccf9bcd759d75c23d713f5d65ae7ca07ed2e4fe24f02b6d414",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "tf32_hmma_gemm_traceable",
+    "source_commit": "b71d21fa2ce2bb2a55cfc5374d9d46ddf62dcf20"
+   },
+   "shape_point": "trace_l2_accuracy_xl",
+   "slug": "tf32_hmma_gemm_traceable",
+   "split_assignment": "calibration"
+  },
+  {
+   "admission_status": "attempted_excluded",
+   "arch": "sm_86",
+   "device": "RTX 3090 Ti",
+   "exclusion_typed_reason": "ncu_repeatability_fail",
+   "expected_label_path": "data/local_labels/label_admitted.json",
+   "expected_trace_path": "workloads/simbench_bw/results/vendor_sgemm_strided_batched_cublas/rtx_3090_ti/sm_86/trace_trace_00.json",
+   "family_bucket": "vendor_baselines",
+   "identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "a9c57ad2c6d9cb3b7d8a08e053d1fa8f77427d7368a05ce7de3ede9282f959ac",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "f71fb6b2a7b17571a9f61d7cec1ae863331f36d7555a3bddd573e9feb4407f15",
+    "shape_point": "timing_shape",
+    "slug": "vendor_sgemm_strided_batched_cublas",
+    "source_commit": "e2eb80ea95acb0753e014d07858df7757155e0e3"
+   },
+   "shape_point": "timing_shape",
+   "slug": "vendor_sgemm_strided_batched_cublas",
+   "split_assignment": "holdout"
+  },
+  {
+   "admission_status": "admitted",
+   "arch": "sm_86",
+   "device": "RTX 3090 Ti",
+   "exclusion_typed_reason": null,
+   "expected_label_path": "data/local_labels/label_admitted.json",
+   "expected_trace_path": "workloads/simbench_bw/results/cp_async_shared_tile_copy/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl.json",
+   "family_bucket": "memory_stress",
+   "identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "b0b510ca0263ad138574a0295f06a2207903b780fe4763cdfa61bb90a53fdc79",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "a99c593cfe75c5246722662748ea2c5598a235cd79be8e80809a3e893ed1d354",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "cp_async_shared_tile_copy",
+    "source_commit": "f6b5e5d3b19fb4ac507fa3fa0229ebf11073f50f"
+   },
+   "shape_point": "trace_l2_accuracy_xl",
+   "slug": "cp_async_shared_tile_copy",
+   "split_assignment": "holdout"
+  },
+  {
+   "admission_status": "admitted",
+   "arch": "sm_86",
+   "device": "RTX 3090 Ti",
+   "exclusion_typed_reason": null,
+   "expected_label_path": "data/local_labels/label_admitted.json",
+   "expected_trace_path": "workloads/simbench_bw/results/rmsnorm_fwd_bf16/rtx_3090_ti/sm_86/trace_trace_00.json",
+   "family_bucket": "dl_primitives",
+   "identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "519142e2477c60471f3627af671e0229f159ee1e35375c7d24107aced64d7d99",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "874881cf5162a340bdbfdf4061ab2917e382d64eb8bcd407b00e13fbe65507e1",
+    "shape_point": "trace_00",
+    "slug": "rmsnorm_fwd_bf16",
+    "source_commit": "f6b5e5d3b19fb4ac507fa3fa0229ebf11073f50f"
+   },
+   "shape_point": "trace_00",
+   "slug": "rmsnorm_fwd_bf16",
+   "split_assignment": "validation"
+  },
+  {
+   "admission_status": "admitted",
+   "arch": "sm_86",
+   "device": "RTX 3090 Ti",
+   "exclusion_typed_reason": null,
+   "expected_label_path": "data/local_labels/label_admitted.json",
+   "expected_trace_path": "workloads/simbench_bw/results/vendor_sgemm_strided_batched_cublas/rtx_3090_ti/sm_86/trace_trace_00.json",
+   "family_bucket": "vendor_baselines",
+   "identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "0d784a20e147ea35ee22b0f881863b4f53ecf4c023128ba636774d9f4f9daff1",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "8009b80357819242aa59324689e41d345c7c27edc559c0db332e289d773adb39",
+    "shape_point": "trace_00",
+    "slug": "vendor_sgemm_strided_batched_cublas",
+    "source_commit": "f6b5e5d3b19fb4ac507fa3fa0229ebf11073f50f"
+   },
+   "shape_point": "trace_00",
+   "slug": "vendor_sgemm_strided_batched_cublas",
+   "split_assignment": "calibration"
+  },
+  {
+   "admission_status": "admitted",
+   "arch": "sm_86",
+   "device": "RTX 3090 Ti",
+   "exclusion_typed_reason": null,
+   "expected_label_path": "data/local_labels/label_admitted.json",
+   "expected_trace_path": "workloads/simbench_bw/results/register_spill_local_mem/rtx_3090_ti/sm_86/variants/register_cap_24/trace_trace_l2_accuracy_xl.json",
+   "family_bucket": "irregular_hostile",
+   "identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "7838290f844f2949968c518befc7b775acf956e92b150f097389224951cf7daa",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "bd7cde722287300592d8f1c664841cfca92c75f336960cb33b0f13ebb24050ad",
+    "register_cap": 24,
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "register_spill_local_mem",
+    "source_commit": "45ed15a61906f05217d7715362fa6de51b193439",
+    "variant_id": "register_cap_24"
+   },
+   "register_cap": 24,
+   "shape_point": "trace_l2_accuracy_xl",
+   "slug": "register_spill_local_mem",
+   "split_assignment": "calibration",
+   "variant_id": "register_cap_24"
+  },
+  {
+   "admission_status": "admitted",
+   "arch": "sm_86",
+   "device": "RTX 3090 Ti",
+   "exclusion_typed_reason": null,
+   "expected_label_path": "data/local_labels/label_admitted.json",
+   "expected_trace_path": "workloads/simbench_bw/results/register_spill_local_mem/rtx_3090_ti/sm_86/variants/register_cap_32/trace_trace_l2_accuracy_xl.json",
+   "family_bucket": "irregular_hostile",
+   "identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "0096b01ed25638202968b69ebf08ff6c7de6998448b8e61316f5ef4f24c305ea",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "bd7cde722287300592d8f1c664841cfca92c75f336960cb33b0f13ebb24050ad",
+    "register_cap": 32,
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "register_spill_local_mem",
+    "source_commit": "45ed15a61906f05217d7715362fa6de51b193439",
+    "variant_id": "register_cap_32"
+   },
+   "register_cap": 32,
+   "shape_point": "trace_l2_accuracy_xl",
+   "slug": "register_spill_local_mem",
+   "split_assignment": "calibration",
+   "variant_id": "register_cap_32"
+  },
+  {
+   "admission_status": "admitted",
+   "arch": "sm_86",
+   "device": "RTX 3090 Ti",
+   "exclusion_typed_reason": null,
+   "expected_label_path": "data/local_labels/label_admitted.json",
+   "expected_trace_path": "workloads/simbench_bw/results/register_spill_local_mem/rtx_3090_ti/sm_86/variants/register_cap_64/trace_trace_l2_accuracy_xl.json",
+   "family_bucket": "irregular_hostile",
+   "identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "3ba9bc87fd97d694a07b0e0f5a7dc4f0bac1353df92ce94e517d8d61807deaa5",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "bd7cde722287300592d8f1c664841cfca92c75f336960cb33b0f13ebb24050ad",
+    "register_cap": 64,
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "register_spill_local_mem",
+    "source_commit": "45ed15a61906f05217d7715362fa6de51b193439",
+    "variant_id": "register_cap_64"
+   },
+   "register_cap": 64,
+   "shape_point": "trace_l2_accuracy_xl",
+   "slug": "register_spill_local_mem",
+   "split_assignment": "calibration",
+   "variant_id": "register_cap_64"
+  },
+  {
+   "admission_status": "admitted",
+   "arch": "sm_86",
+   "device": "RTX 3090 Ti",
+   "exclusion_typed_reason": null,
+   "expected_label_path": "data/local_labels/label_admitted.json",
+   "expected_trace_path": "workloads/simbench_bw/results/register_spill_local_mem/rtx_3090_ti/sm_86/variants/register_cap_255/trace_trace_l2_accuracy_xl.json",
+   "family_bucket": "irregular_hostile",
+   "identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "9c355c3485531959c0ac69e853a8c5c9022e9f04b388c99277381db0b1d91a86",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "bd7cde722287300592d8f1c664841cfca92c75f336960cb33b0f13ebb24050ad",
+    "register_cap": 255,
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "register_spill_local_mem",
+    "source_commit": "45ed15a61906f05217d7715362fa6de51b193439",
+    "variant_id": "register_cap_255"
+   },
+   "register_cap": 255,
+   "shape_point": "trace_l2_accuracy_xl",
+   "slug": "register_spill_local_mem",
+   "split_assignment": "calibration",
+   "variant_id": "register_cap_255"
+  },
+  {
+   "admission_status": "admitted",
+   "arch": "sm_86",
+   "device": "RTX 3090 Ti",
+   "exclusion_typed_reason": null,
+   "expected_label_path": "data/local_labels/label_admitted.json",
+   "expected_trace_path": "workloads/simbench_bw/results/global_atomic_return_used/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl.json",
+   "family_bucket": "irregular_hostile",
+   "identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "9c43b9f7674c7a3a8c4fbfbfab44ba574f9d50f947cd8df4e05c1088e5ca9a9f",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "575ad657992d58bc685ff58e6a950429dc939463980ce6fe1524c8c7efeb9154",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "global_atomic_return_used",
+    "source_commit": "ae4664f7ee51df026d4800432ea5af6d42a4dd67"
+   },
+   "shape_point": "trace_l2_accuracy_xl",
+   "slug": "global_atomic_return_used",
+   "split_assignment": "validation"
+  },
+  {
+   "admission_status": "admitted",
+   "arch": "sm_86",
+   "device": "RTX 3090 Ti",
+   "exclusion_typed_reason": null,
+   "expected_label_path": "data/local_labels/label_admitted.json",
+   "expected_trace_path": "workloads/simbench_bw/results/global_scalar_32b_copy/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl.json",
+   "family_bucket": "memory_stress",
+   "identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "ba4350edcc19151b355ae8e6cebad3bcdd3cddae914af5b9844318170f6f1f3f",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "153672adcbdb398cba4c19499bffec0a83a820eed053478cbfb41c0889d93713",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "global_scalar_32b_copy",
+    "source_commit": "1a07bef421f556cb54d4c4fb128f8ec9cd5023d6"
+   },
+   "shape_point": "trace_l2_accuracy_xl",
+   "slug": "global_scalar_32b_copy",
+   "split_assignment": "calibration"
+  },
+  {
+   "admission_status": "admitted",
+   "arch": "sm_86",
+   "device": "RTX 3090 Ti",
+   "exclusion_typed_reason": null,
+   "expected_label_path": "data/local_labels/label_admitted.json",
+   "expected_trace_path": "workloads/simbench_bw/results/global_vectorized_128b_copy/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl.json",
+   "family_bucket": "memory_stress",
+   "identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "acb59fb5a3dcf91298e7653406a3ca6d318323f759d625e1761585685dc67e61",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "a2fb345317578d3ebbdcb0758086a22e3a656ffa392d5d7da5b56fb72bc21d8f",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "global_vectorized_128b_copy",
+    "source_commit": "1a07bef421f556cb54d4c4fb128f8ec9cd5023d6"
+   },
+   "shape_point": "trace_l2_accuracy_xl",
+   "slug": "global_vectorized_128b_copy",
+   "split_assignment": "calibration"
+  },
+  {
+   "admission_status": "admitted",
+   "arch": "sm_86",
+   "device": "RTX 3090 Ti",
+   "exclusion_typed_reason": null,
+   "expected_label_path": "data/local_labels/label_admitted.json",
+   "expected_trace_path": "workloads/simbench_bw/results/global_vectorized_64b_copy/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl.json",
+   "family_bucket": "memory_stress",
+   "identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "c0fbee25c22216a1597b42c33a2666c62fa85997f26a4ea67b29b5b8ff7c18b4",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "50e72d8dc80c5fee0d00b777f912410e94e01fe70369cf69c2dbe667eefb8427",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "global_vectorized_64b_copy",
+    "source_commit": "5088821eb7e205bcce1678d85e6272063e212cd0"
+   },
+   "shape_point": "trace_l2_accuracy_xl",
+   "slug": "global_vectorized_64b_copy",
+   "split_assignment": "calibration"
+  },
+  {
+   "admission_status": "admitted",
+   "arch": "sm_86",
+   "device": "RTX 3090 Ti",
+   "exclusion_typed_reason": null,
+   "expected_label_path": "data/local_labels/label_admitted.json",
+   "expected_trace_path": "workloads/simbench_bw/results/global_atomic_max_histogram/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl.json",
+   "family_bucket": "irregular_hostile",
+   "identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "0c31c6e924111113539d91682e0d3e9a3e5e19cbedc61a75a46c6a30337065d6",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "5ffff11014584f390320a0139c95090592adbc6673acffa23190d1792f2ca322",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "global_atomic_max_histogram",
+    "source_commit": "1c628895cd424ff733cb4eb2854cc6473a4008f5"
+   },
+   "shape_point": "trace_l2_accuracy_xl",
+   "slug": "global_atomic_max_histogram",
+   "split_assignment": "calibration"
+  },
+  {
+   "admission_status": "admitted",
+   "arch": "sm_86",
+   "device": "RTX 3090 Ti",
+   "exclusion_typed_reason": null,
+   "expected_label_path": "data/local_labels/label_admitted.json",
+   "expected_trace_path": "workloads/simbench_bw/results/global_atomic_max_return_used/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl.json",
+   "family_bucket": "irregular_hostile",
+   "identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "2c29a4e0962c36e37f5b5834fed650861667aa665fc7b285f22438e9c8a9fbe9",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "f30caf6dc50fd9516fd04d478119bc414306b0ab1e3b5b15b247b0e3a8d0219e",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "global_atomic_max_return_used",
+    "source_commit": "1c628895cd424ff733cb4eb2854cc6473a4008f5"
+   },
+   "shape_point": "trace_l2_accuracy_xl",
+   "slug": "global_atomic_max_return_used",
+   "split_assignment": "holdout"
+  },
+  {
+   "admission_status": "admitted",
+   "arch": "sm_86",
+   "device": "RTX 3090 Ti",
+   "exclusion_typed_reason": null,
+   "expected_label_path": "data/local_labels/label_admitted.json",
+   "expected_trace_path": "workloads/simbench_bw/results/global_atomic_and_histogram/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl.json",
+   "family_bucket": "irregular_hostile",
+   "identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "ed4d15e1a3dc6e2774996cb07eb5088ce456b3e47ada8ca7d84aca6839a2d0ec",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "3cb859fabb45a0e34f4f0c52c7aa84c78616b726b25162039bbd2dbd09d85840",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "global_atomic_and_histogram",
+    "source_commit": "50b3de0a3f9e87fc23f7e717fa4c0f9b7d7c375a"
+   },
+   "shape_point": "trace_l2_accuracy_xl",
+   "slug": "global_atomic_and_histogram",
+   "split_assignment": "calibration"
+  },
+  {
+   "admission_status": "admitted",
+   "arch": "sm_86",
+   "device": "RTX 3090 Ti",
+   "exclusion_typed_reason": null,
+   "expected_label_path": "data/local_labels/label_admitted.json",
+   "expected_trace_path": "workloads/simbench_bw/results/global_atomic_and_return_used/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl.json",
+   "family_bucket": "irregular_hostile",
+   "identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "03938af34f462516b82342a796d7aca7b3b09224e9696944fb1499e30c75a819",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "4fb3992cd157e8249d31c791139dfc46b92c82ec97b23aae892e6cd282d33377",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "global_atomic_and_return_used",
+    "source_commit": "50b3de0a3f9e87fc23f7e717fa4c0f9b7d7c375a"
+   },
+   "shape_point": "trace_l2_accuracy_xl",
+   "slug": "global_atomic_and_return_used",
+   "split_assignment": "holdout"
+  },
+  {
+   "admission_status": "admitted",
+   "arch": "sm_86",
+   "device": "RTX 3090 Ti",
+   "exclusion_typed_reason": null,
+   "expected_label_path": "data/local_labels/label_admitted.json",
+   "expected_trace_path": "workloads/simbench_bw/results/local_dynamic_index_array/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl.json",
+   "family_bucket": "memory_stress",
+   "identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "e2dbf45dc108f94b24da2bb8ca78ed2e51f9d668b1ea4a50a5768ee89649c2d5",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "fec8990f34e9ab9a7f271f0ad509b0b7f8db8d3f9c12eb004a09317795d12fb1",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "local_dynamic_index_array",
+    "source_commit": "9646699bbb91fcbcb6d29e8ca04e92c654df64de"
+   },
+   "shape_point": "trace_l2_accuracy_xl",
+   "slug": "local_dynamic_index_array",
+   "split_assignment": "calibration"
+  },
+  {
+   "admission_status": "admitted",
+   "arch": "sm_86",
+   "device": "RTX 3090 Ti",
+   "exclusion_typed_reason": null,
+   "expected_label_path": "data/local_labels/label_admitted.json",
+   "expected_trace_path": "workloads/simbench_bw/results/local_volatile_array/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl.json",
+   "family_bucket": "memory_stress",
+   "identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "3d8605d63e62e09eecb83e12478d31ed3c2fe74e0a0416d1d8f5502e535fbe4c",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "6a66ee83c6443ade9523726711d226c60e5c421899d11270d09cd83cf8e821f4",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "local_volatile_array",
+    "source_commit": "9646699bbb91fcbcb6d29e8ca04e92c654df64de"
+   },
+   "shape_point": "trace_l2_accuracy_xl",
+   "slug": "local_volatile_array",
+   "split_assignment": "calibration"
+  }
+ ],
+ "frozen_at_commit": "501723b03eef44e51e3552e9205107d0b9a3509e",
+ "replacement_history": [
+  {
+   "new_admission_status": "attempted_excluded",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "026c281cc1f1a6cbb56db30744df8deef9450907d2995342088c69a52114431e",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "8d52795c604c529e1902a3970df23195010cb0cf398e2cd8fef47f49be7701a3",
+    "shape_point": "timing_shape",
+    "slug": "vendor_gemm_cublas",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "attempted_excluded",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "e10e7a18b4384428735deda3eeda14b6e98376b8e2b8749dce58c2f84d5ed571",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "8f5c3700b3c89be231b42c3244ae001536912c24941c5016bae09fdc0bcd12dc",
+    "shape_point": "timing_shape",
+    "slug": "vendor_cublas_gemm_bf16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "trace_missing",
+   "sweep_id": "vendor-baseline-real-binary-swap-r15",
+   "timestamp": "2026-05-21T14:31:44Z"
+  },
+  {
+   "new_admission_status": "admitted",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "006f81788afe295736db6937debd39cac5dc4cc4df74242f1b80daf4a3b1c057",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "4f26b1113d4895a4b5df51521c1e2ddea69ddd03c446b9730bd649ff3e1c6b6b",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "bf16_hmma_gemm_traceable",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "attempted_excluded",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "006f81788afe295736db6937debd39cac5dc4cc4df74242f1b80daf4a3b1c057",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "49f5b964544515be6da5f8180fbd19aef089e778eb432c20c464931196ef2e37",
+    "shape_point": "timing_shape",
+    "slug": "bf16_hmma_gemm_traceable",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "trace_missing",
+   "sweep_id": "live-admission-cycle-r16-bf16_hmma_gemm_traceable",
+   "timestamp": "2026-05-21T14:59:47Z"
+  },
+  {
+   "new_admission_status": "admitted",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "406ee85ae96a0d9370dad03a482edc89d2792cd51ed6c1e251da7807b9d0535a",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "87f9c439b130a8d25457042b165734612b65b590cd2aa2acc54b95178eb16ad9",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "fp16_hmma_gemm_traceable",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "attempted_excluded",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "406ee85ae96a0d9370dad03a482edc89d2792cd51ed6c1e251da7807b9d0535a",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "780ac183b44a375bdb6d049e52c396ed6aa7d7c3b7d99b039292d4317b1ac8f4",
+    "shape_point": "timing_shape",
+    "slug": "fp16_hmma_gemm_traceable",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "trace_missing",
+   "sweep_id": "live-admission-cycle-r16-fp16_hmma_gemm_traceable",
+   "timestamp": "2026-05-21T14:59:47Z"
+  },
+  {
+   "new_admission_status": "admitted",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "b56f6ec1b8bc8b3e54d067bb634f5517ecf81706e437ee291eb7ed6045838dea",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "95d0f8bfec09679edc1704ded569e87863e7910b9cd02d556e1cacf113e6ec09",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "int8_imma_gemm_traceable",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "attempted_excluded",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "b56f6ec1b8bc8b3e54d067bb634f5517ecf81706e437ee291eb7ed6045838dea",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "0fe9a96a9272e3c5a83fbfd6996b086a2da1f2357650a198dad5954626cac23b",
+    "shape_point": "timing_shape",
+    "slug": "int8_imma_gemm_traceable",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "trace_missing",
+   "sweep_id": "live-admission-cycle-r16-int8_imma_gemm_traceable",
+   "timestamp": "2026-05-21T14:59:47Z"
+  },
+  {
+   "new_admission_status": "admitted",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "4e763ad3e8b3a6e4b0a9a89ebccce359049436db619e5ba23135acf1a43fb398",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "4389fe984bc721ccf9bcd759d75c23d713f5d65ae7ca07ed2e4fe24f02b6d414",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "tf32_hmma_gemm_traceable",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "attempted_excluded",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "4e763ad3e8b3a6e4b0a9a89ebccce359049436db619e5ba23135acf1a43fb398",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "cf2714aff9b777863bae63af27caca5d5a6447ea1be2f043b25b6f80f4abd8fe",
+    "shape_point": "timing_shape",
+    "slug": "tf32_hmma_gemm_traceable",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "trace_missing",
+   "sweep_id": "live-admission-cycle-r16-tf32_hmma_gemm_traceable",
+   "timestamp": "2026-05-21T14:59:47Z"
+  },
+  {
+   "new_admission_status": "admitted",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "50b3e16af2ada0c2d029917a9380d17a0548da03d9f2692191c429ec57f53ce4",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "87f0eeb1256101173117148a10ac97d6367a9307c2b8e33c78df9d43c2f491f7",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "fp32_fma_dep_chain",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "attempted_excluded",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "50b3e16af2ada0c2d029917a9380d17a0548da03d9f2692191c429ec57f53ce4",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "d7f21ebbd0edd08feaee9713d6ad67ef01a6d500f9f1920b243cb6e7345291a9",
+    "shape_point": "timing_shape",
+    "slug": "fp32_fma_dep_chain",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "trace_missing",
+   "sweep_id": "live-admission-cycle-r16-fp32_fma_dep_chain",
+   "timestamp": "2026-05-21T14:59:48Z"
+  },
+  {
+   "new_admission_status": "admitted",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "2671a2fdfd88bfab552446d5254338ceffc2408f285b9805f50812b3d8f77155",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "7b0d4c0ce3b924918bd9c913ee6a624b46b70462eca9b9388459e4259d333264",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "global_atomic_histogram",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "attempted_excluded",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "2671a2fdfd88bfab552446d5254338ceffc2408f285b9805f50812b3d8f77155",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "a0080e1957d7f02e8c0be4e096022bffc0e5bafb1266ae107ebf8c26c2c53d41",
+    "shape_point": "timing_shape",
+    "slug": "global_atomic_histogram",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "trace_missing",
+   "sweep_id": "live-admission-cycle-r16-global_atomic_histogram",
+   "timestamp": "2026-05-21T14:59:48Z"
+  },
+  {
+   "new_admission_status": "admitted",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "3aa44a61c092634caff3df92a7223930f2d722a9fc84b4444a232f5bbed48d63",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "02b553b455c35a94ae2fb93e7fa1ce87c7ee2bfc4d97f9063f6ced3dcc257511",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "shared_bank_conflict_stride",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "attempted_excluded",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "3aa44a61c092634caff3df92a7223930f2d722a9fc84b4444a232f5bbed48d63",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "0cecce5f79864327233d4951a0e095280393e5339d20d2b9a8bbe794aaf937d2",
+    "shape_point": "timing_shape",
+    "slug": "shared_bank_conflict_stride",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "trace_missing",
+   "sweep_id": "live-admission-cycle-r16-shared_bank_conflict_stride",
+   "timestamp": "2026-05-21T14:59:48Z"
+  },
+  {
+   "new_admission_status": "admitted",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "43bf1ea77e0b8d6026db52787c3fa170850b9c6fb1264fcfcabb701ceb2d7d10",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "a99c593cfe75c5246722662748ea2c5598a235cd79be8e80809a3e893ed1d354",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "cp_async_shared_tile_copy",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "attempted_excluded",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "43bf1ea77e0b8d6026db52787c3fa170850b9c6fb1264fcfcabb701ceb2d7d10",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "e95ef18f45013ad220c8261c06ad74bdb30cee0e71cfeeb8b43a3024b7491ad7",
+    "shape_point": "timing_shape",
+    "slug": "cp_async_shared_tile_copy",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "trace_missing",
+   "sweep_id": "live-admission-cycle-r16-cp_async_shared_tile_copy",
+   "timestamp": "2026-05-21T15:01:27Z"
+  },
+  {
+   "new_admission_status": "attempted_excluded",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "006f81788afe295736db6937debd39cac5dc4cc4df74242f1b80daf4a3b1c057",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "300d81b65f3d07227b7a386203ca20535a2c5584290b41e4ba8714fd24125918",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "bf16_hmma_gemm_traceable",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "admitted",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "006f81788afe295736db6937debd39cac5dc4cc4df74242f1b80daf4a3b1c057",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "4f26b1113d4895a4b5df51521c1e2ddea69ddd03c446b9730bd649ff3e1c6b6b",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "bf16_hmma_gemm_traceable",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "label_missing",
+   "sweep_id": "live-admission-reversion-r17-bf16_hmma_gemm_traceable",
+   "timestamp": "2026-05-21T15:19:23Z"
+  },
+  {
+   "new_admission_status": "attempted_excluded",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "406ee85ae96a0d9370dad03a482edc89d2792cd51ed6c1e251da7807b9d0535a",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "e7a440d5eaee7bfa811e7e95289f437f042cca98cf59a4c98a0d5d7c7c7f14bd",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "fp16_hmma_gemm_traceable",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "admitted",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "406ee85ae96a0d9370dad03a482edc89d2792cd51ed6c1e251da7807b9d0535a",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "87f9c439b130a8d25457042b165734612b65b590cd2aa2acc54b95178eb16ad9",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "fp16_hmma_gemm_traceable",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "label_missing",
+   "sweep_id": "live-admission-reversion-r17-fp16_hmma_gemm_traceable",
+   "timestamp": "2026-05-21T15:19:23Z"
+  },
+  {
+   "new_admission_status": "attempted_excluded",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "b56f6ec1b8bc8b3e54d067bb634f5517ecf81706e437ee291eb7ed6045838dea",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "ab231d900f0dcfcb7524a4d33154e33291eb6af4476aa686c574e60a29721bcc",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "int8_imma_gemm_traceable",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "admitted",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "b56f6ec1b8bc8b3e54d067bb634f5517ecf81706e437ee291eb7ed6045838dea",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "95d0f8bfec09679edc1704ded569e87863e7910b9cd02d556e1cacf113e6ec09",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "int8_imma_gemm_traceable",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "label_missing",
+   "sweep_id": "live-admission-reversion-r17-int8_imma_gemm_traceable",
+   "timestamp": "2026-05-21T15:19:23Z"
+  },
+  {
+   "new_admission_status": "attempted_excluded",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "4e763ad3e8b3a6e4b0a9a89ebccce359049436db619e5ba23135acf1a43fb398",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "f70da55b2d08bc337d534d04d76fea23b53c93d18facb56cae969c4c9873c992",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "tf32_hmma_gemm_traceable",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "admitted",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "4e763ad3e8b3a6e4b0a9a89ebccce359049436db619e5ba23135acf1a43fb398",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "4389fe984bc721ccf9bcd759d75c23d713f5d65ae7ca07ed2e4fe24f02b6d414",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "tf32_hmma_gemm_traceable",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "label_missing",
+   "sweep_id": "live-admission-reversion-r17-tf32_hmma_gemm_traceable",
+   "timestamp": "2026-05-21T15:19:23Z"
+  },
+  {
+   "new_admission_status": "attempted_excluded",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "50b3e16af2ada0c2d029917a9380d17a0548da03d9f2692191c429ec57f53ce4",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "0dc86e9187c09eaced4a9071a7dc4456065830af201c48af51af34543f4c6e29",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "fp32_fma_dep_chain",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "admitted",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "50b3e16af2ada0c2d029917a9380d17a0548da03d9f2692191c429ec57f53ce4",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "87f0eeb1256101173117148a10ac97d6367a9307c2b8e33c78df9d43c2f491f7",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "fp32_fma_dep_chain",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "label_missing",
+   "sweep_id": "live-admission-reversion-r17-fp32_fma_dep_chain",
+   "timestamp": "2026-05-21T15:19:23Z"
+  },
+  {
+   "new_admission_status": "attempted_excluded",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "2671a2fdfd88bfab552446d5254338ceffc2408f285b9805f50812b3d8f77155",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "2ef7caacc785f51ee351ddf2bf3d2c5433a380a884f130a839e96011c29e77d8",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "global_atomic_histogram",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "admitted",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "2671a2fdfd88bfab552446d5254338ceffc2408f285b9805f50812b3d8f77155",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "7b0d4c0ce3b924918bd9c913ee6a624b46b70462eca9b9388459e4259d333264",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "global_atomic_histogram",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "label_missing",
+   "sweep_id": "live-admission-reversion-r17-global_atomic_histogram",
+   "timestamp": "2026-05-21T15:19:23Z"
+  },
+  {
+   "new_admission_status": "attempted_excluded",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "43bf1ea77e0b8d6026db52787c3fa170850b9c6fb1264fcfcabb701ceb2d7d10",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "289ea530dcda081647b0fd36e74c8d48983b93ecc14ee39ba954aea40553321e",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "cp_async_shared_tile_copy",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "admitted",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "43bf1ea77e0b8d6026db52787c3fa170850b9c6fb1264fcfcabb701ceb2d7d10",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "a99c593cfe75c5246722662748ea2c5598a235cd79be8e80809a3e893ed1d354",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "cp_async_shared_tile_copy",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "label_missing",
+   "sweep_id": "live-admission-reversion-r17-cp_async_shared_tile_copy",
+   "timestamp": "2026-05-21T15:19:23Z"
+  },
+  {
+   "new_admission_status": "attempted_excluded",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "3aa44a61c092634caff3df92a7223930f2d722a9fc84b4444a232f5bbed48d63",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "9ba72d7fb570e5b1d6932151fb118a0466c11be4688e040b9f90580dc2a581cc",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "shared_bank_conflict_stride",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "admitted",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "3aa44a61c092634caff3df92a7223930f2d722a9fc84b4444a232f5bbed48d63",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "02b553b455c35a94ae2fb93e7fa1ce87c7ee2bfc4d97f9063f6ced3dcc257511",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "shared_bank_conflict_stride",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "label_missing",
+   "sweep_id": "live-admission-reversion-r17-shared_bank_conflict_stride",
+   "timestamp": "2026-05-21T15:19:23Z"
+  },
+  {
+   "new_admission_status": "admitted",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "006f81788afe295736db6937debd39cac5dc4cc4df74242f1b80daf4a3b1c057",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "4f26b1113d4895a4b5df51521c1e2ddea69ddd03c446b9730bd649ff3e1c6b6b",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "bf16_hmma_gemm_traceable",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "attempted_excluded",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "006f81788afe295736db6937debd39cac5dc4cc4df74242f1b80daf4a3b1c057",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "300d81b65f3d07227b7a386203ca20535a2c5584290b41e4ba8714fd24125918",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "bf16_hmma_gemm_traceable",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "label_missing",
+   "sweep_id": "live-label-readmission-r20-bf16_hmma_gemm_traceable",
+   "timestamp": "2026-05-21T16:08:04Z"
+  },
+  {
+   "new_admission_status": "admitted",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "406ee85ae96a0d9370dad03a482edc89d2792cd51ed6c1e251da7807b9d0535a",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "87f9c439b130a8d25457042b165734612b65b590cd2aa2acc54b95178eb16ad9",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "fp16_hmma_gemm_traceable",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "attempted_excluded",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "406ee85ae96a0d9370dad03a482edc89d2792cd51ed6c1e251da7807b9d0535a",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "e7a440d5eaee7bfa811e7e95289f437f042cca98cf59a4c98a0d5d7c7c7f14bd",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "fp16_hmma_gemm_traceable",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "label_missing",
+   "sweep_id": "live-label-readmission-r20-fp16_hmma_gemm_traceable",
+   "timestamp": "2026-05-21T16:08:04Z"
+  },
+  {
+   "new_admission_status": "admitted",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "b56f6ec1b8bc8b3e54d067bb634f5517ecf81706e437ee291eb7ed6045838dea",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "95d0f8bfec09679edc1704ded569e87863e7910b9cd02d556e1cacf113e6ec09",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "int8_imma_gemm_traceable",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "attempted_excluded",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "b56f6ec1b8bc8b3e54d067bb634f5517ecf81706e437ee291eb7ed6045838dea",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "ab231d900f0dcfcb7524a4d33154e33291eb6af4476aa686c574e60a29721bcc",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "int8_imma_gemm_traceable",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "label_missing",
+   "sweep_id": "live-label-readmission-r20-int8_imma_gemm_traceable",
+   "timestamp": "2026-05-21T16:08:04Z"
+  },
+  {
+   "new_admission_status": "admitted",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "4e763ad3e8b3a6e4b0a9a89ebccce359049436db619e5ba23135acf1a43fb398",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "4389fe984bc721ccf9bcd759d75c23d713f5d65ae7ca07ed2e4fe24f02b6d414",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "tf32_hmma_gemm_traceable",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "attempted_excluded",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "4e763ad3e8b3a6e4b0a9a89ebccce359049436db619e5ba23135acf1a43fb398",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "f70da55b2d08bc337d534d04d76fea23b53c93d18facb56cae969c4c9873c992",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "tf32_hmma_gemm_traceable",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "label_missing",
+   "sweep_id": "live-label-readmission-r20-tf32_hmma_gemm_traceable",
+   "timestamp": "2026-05-21T16:08:04Z"
+  },
+  {
+   "new_admission_status": "admitted",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "50b3e16af2ada0c2d029917a9380d17a0548da03d9f2692191c429ec57f53ce4",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "87f0eeb1256101173117148a10ac97d6367a9307c2b8e33c78df9d43c2f491f7",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "fp32_fma_dep_chain",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "attempted_excluded",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "50b3e16af2ada0c2d029917a9380d17a0548da03d9f2692191c429ec57f53ce4",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "0dc86e9187c09eaced4a9071a7dc4456065830af201c48af51af34543f4c6e29",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "fp32_fma_dep_chain",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "label_missing",
+   "sweep_id": "live-label-readmission-r20-fp32_fma_dep_chain",
+   "timestamp": "2026-05-21T16:08:04Z"
+  },
+  {
+   "new_admission_status": "admitted",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "2671a2fdfd88bfab552446d5254338ceffc2408f285b9805f50812b3d8f77155",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "7b0d4c0ce3b924918bd9c913ee6a624b46b70462eca9b9388459e4259d333264",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "global_atomic_histogram",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "attempted_excluded",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "2671a2fdfd88bfab552446d5254338ceffc2408f285b9805f50812b3d8f77155",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "2ef7caacc785f51ee351ddf2bf3d2c5433a380a884f130a839e96011c29e77d8",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "global_atomic_histogram",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "label_missing",
+   "sweep_id": "live-label-readmission-r20-global_atomic_histogram",
+   "timestamp": "2026-05-21T16:08:04Z"
+  },
+  {
+   "new_admission_status": "admitted",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "43bf1ea77e0b8d6026db52787c3fa170850b9c6fb1264fcfcabb701ceb2d7d10",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "a99c593cfe75c5246722662748ea2c5598a235cd79be8e80809a3e893ed1d354",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "cp_async_shared_tile_copy",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "attempted_excluded",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "43bf1ea77e0b8d6026db52787c3fa170850b9c6fb1264fcfcabb701ceb2d7d10",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "289ea530dcda081647b0fd36e74c8d48983b93ecc14ee39ba954aea40553321e",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "cp_async_shared_tile_copy",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "label_missing",
+   "sweep_id": "live-label-readmission-r20-cp_async_shared_tile_copy",
+   "timestamp": "2026-05-21T16:08:04Z"
+  },
+  {
+   "new_admission_status": "admitted",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "3aa44a61c092634caff3df92a7223930f2d722a9fc84b4444a232f5bbed48d63",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "02b553b455c35a94ae2fb93e7fa1ce87c7ee2bfc4d97f9063f6ced3dcc257511",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "shared_bank_conflict_stride",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "attempted_excluded",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "3aa44a61c092634caff3df92a7223930f2d722a9fc84b4444a232f5bbed48d63",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "9ba72d7fb570e5b1d6932151fb118a0466c11be4688e040b9f90580dc2a581cc",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "shared_bank_conflict_stride",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "label_missing",
+   "sweep_id": "live-label-readmission-r20-shared_bank_conflict_stride",
+   "timestamp": "2026-05-21T16:08:04Z"
+  },
+  {
+   "new_admission_status": "attempted_excluded",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "006f81788afe295736db6937debd39cac5dc4cc4df74242f1b80daf4a3b1c057",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "300d81b65f3d07227b7a386203ca20535a2c5584290b41e4ba8714fd24125918",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "bf16_hmma_gemm_traceable",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "admitted",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "006f81788afe295736db6937debd39cac5dc4cc4df74242f1b80daf4a3b1c057",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "4f26b1113d4895a4b5df51521c1e2ddea69ddd03c446b9730bd649ff3e1c6b6b",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "bf16_hmma_gemm_traceable",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "ncu_repeatability_fail",
+   "sweep_id": "live-admission-repeatability-revert-r20-bf16_hmma_gemm_traceable",
+   "timestamp": "2026-05-21T16:16:37Z"
+  },
+  {
+   "new_admission_status": "attempted_excluded",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "406ee85ae96a0d9370dad03a482edc89d2792cd51ed6c1e251da7807b9d0535a",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "e7a440d5eaee7bfa811e7e95289f437f042cca98cf59a4c98a0d5d7c7c7f14bd",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "fp16_hmma_gemm_traceable",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "admitted",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "406ee85ae96a0d9370dad03a482edc89d2792cd51ed6c1e251da7807b9d0535a",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "87f9c439b130a8d25457042b165734612b65b590cd2aa2acc54b95178eb16ad9",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "fp16_hmma_gemm_traceable",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "ncu_repeatability_fail",
+   "sweep_id": "live-admission-repeatability-revert-r20-fp16_hmma_gemm_traceable",
+   "timestamp": "2026-05-21T16:16:37Z"
+  },
+  {
+   "new_admission_status": "attempted_excluded",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "b56f6ec1b8bc8b3e54d067bb634f5517ecf81706e437ee291eb7ed6045838dea",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "ab231d900f0dcfcb7524a4d33154e33291eb6af4476aa686c574e60a29721bcc",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "int8_imma_gemm_traceable",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "admitted",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "b56f6ec1b8bc8b3e54d067bb634f5517ecf81706e437ee291eb7ed6045838dea",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "95d0f8bfec09679edc1704ded569e87863e7910b9cd02d556e1cacf113e6ec09",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "int8_imma_gemm_traceable",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "ncu_repeatability_fail",
+   "sweep_id": "live-admission-repeatability-revert-r20-int8_imma_gemm_traceable",
+   "timestamp": "2026-05-21T16:16:37Z"
+  },
+  {
+   "new_admission_status": "attempted_excluded",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "4e763ad3e8b3a6e4b0a9a89ebccce359049436db619e5ba23135acf1a43fb398",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "f70da55b2d08bc337d534d04d76fea23b53c93d18facb56cae969c4c9873c992",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "tf32_hmma_gemm_traceable",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "admitted",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "4e763ad3e8b3a6e4b0a9a89ebccce359049436db619e5ba23135acf1a43fb398",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "4389fe984bc721ccf9bcd759d75c23d713f5d65ae7ca07ed2e4fe24f02b6d414",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "tf32_hmma_gemm_traceable",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "ncu_repeatability_fail",
+   "sweep_id": "live-admission-repeatability-revert-r20-tf32_hmma_gemm_traceable",
+   "timestamp": "2026-05-21T16:16:37Z"
+  },
+  {
+   "new_admission_status": "attempted_excluded",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "50b3e16af2ada0c2d029917a9380d17a0548da03d9f2692191c429ec57f53ce4",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "0dc86e9187c09eaced4a9071a7dc4456065830af201c48af51af34543f4c6e29",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "fp32_fma_dep_chain",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "admitted",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "50b3e16af2ada0c2d029917a9380d17a0548da03d9f2692191c429ec57f53ce4",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "87f0eeb1256101173117148a10ac97d6367a9307c2b8e33c78df9d43c2f491f7",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "fp32_fma_dep_chain",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "ncu_repeatability_fail",
+   "sweep_id": "live-admission-repeatability-revert-r20-fp32_fma_dep_chain",
+   "timestamp": "2026-05-21T16:16:37Z"
+  },
+  {
+   "new_admission_status": "attempted_excluded",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "2671a2fdfd88bfab552446d5254338ceffc2408f285b9805f50812b3d8f77155",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "2ef7caacc785f51ee351ddf2bf3d2c5433a380a884f130a839e96011c29e77d8",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "global_atomic_histogram",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "admitted",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "2671a2fdfd88bfab552446d5254338ceffc2408f285b9805f50812b3d8f77155",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "7b0d4c0ce3b924918bd9c913ee6a624b46b70462eca9b9388459e4259d333264",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "global_atomic_histogram",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "ncu_repeatability_fail",
+   "sweep_id": "live-admission-repeatability-revert-r20-global_atomic_histogram",
+   "timestamp": "2026-05-21T16:16:37Z"
+  },
+  {
+   "new_admission_status": "attempted_excluded",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "43bf1ea77e0b8d6026db52787c3fa170850b9c6fb1264fcfcabb701ceb2d7d10",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "289ea530dcda081647b0fd36e74c8d48983b93ecc14ee39ba954aea40553321e",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "cp_async_shared_tile_copy",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "admitted",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "43bf1ea77e0b8d6026db52787c3fa170850b9c6fb1264fcfcabb701ceb2d7d10",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "a99c593cfe75c5246722662748ea2c5598a235cd79be8e80809a3e893ed1d354",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "cp_async_shared_tile_copy",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "ncu_repeatability_fail",
+   "sweep_id": "live-admission-repeatability-revert-r20-cp_async_shared_tile_copy",
+   "timestamp": "2026-05-21T16:16:37Z"
+  },
+  {
+   "new_admission_status": "attempted_excluded",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "3aa44a61c092634caff3df92a7223930f2d722a9fc84b4444a232f5bbed48d63",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "9ba72d7fb570e5b1d6932151fb118a0466c11be4688e040b9f90580dc2a581cc",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "shared_bank_conflict_stride",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "admitted",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "3aa44a61c092634caff3df92a7223930f2d722a9fc84b4444a232f5bbed48d63",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "02b553b455c35a94ae2fb93e7fa1ce87c7ee2bfc4d97f9063f6ced3dcc257511",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "shared_bank_conflict_stride",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "ncu_repeatability_fail",
+   "sweep_id": "live-admission-repeatability-revert-r20-shared_bank_conflict_stride",
+   "timestamp": "2026-05-21T16:16:37Z"
+  },
+  {
+   "new_admission_status": "admitted",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "006f81788afe295736db6937debd39cac5dc4cc4df74242f1b80daf4a3b1c057",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "4f26b1113d4895a4b5df51521c1e2ddea69ddd03c446b9730bd649ff3e1c6b6b",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "bf16_hmma_gemm_traceable",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "attempted_excluded",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "006f81788afe295736db6937debd39cac5dc4cc4df74242f1b80daf4a3b1c057",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "300d81b65f3d07227b7a386203ca20535a2c5584290b41e4ba8714fd24125918",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "bf16_hmma_gemm_traceable",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "ncu_repeatability_fail",
+   "sweep_id": "live-label-readmission-r21-larger-shapes-bf16_hmma_gemm_traceable",
+   "timestamp": "2026-05-21T16:54:08Z"
+  },
+  {
+   "new_admission_status": "admitted",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "406ee85ae96a0d9370dad03a482edc89d2792cd51ed6c1e251da7807b9d0535a",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "87f9c439b130a8d25457042b165734612b65b590cd2aa2acc54b95178eb16ad9",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "fp16_hmma_gemm_traceable",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "attempted_excluded",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "406ee85ae96a0d9370dad03a482edc89d2792cd51ed6c1e251da7807b9d0535a",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "e7a440d5eaee7bfa811e7e95289f437f042cca98cf59a4c98a0d5d7c7c7f14bd",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "fp16_hmma_gemm_traceable",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "ncu_repeatability_fail",
+   "sweep_id": "live-label-readmission-r21-larger-shapes-fp16_hmma_gemm_traceable",
+   "timestamp": "2026-05-21T16:54:08Z"
+  },
+  {
+   "new_admission_status": "admitted",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "b56f6ec1b8bc8b3e54d067bb634f5517ecf81706e437ee291eb7ed6045838dea",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "95d0f8bfec09679edc1704ded569e87863e7910b9cd02d556e1cacf113e6ec09",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "int8_imma_gemm_traceable",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "attempted_excluded",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "b56f6ec1b8bc8b3e54d067bb634f5517ecf81706e437ee291eb7ed6045838dea",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "ab231d900f0dcfcb7524a4d33154e33291eb6af4476aa686c574e60a29721bcc",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "int8_imma_gemm_traceable",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "ncu_repeatability_fail",
+   "sweep_id": "live-label-readmission-r21-larger-shapes-int8_imma_gemm_traceable",
+   "timestamp": "2026-05-21T16:54:08Z"
+  },
+  {
+   "new_admission_status": "admitted",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "4e763ad3e8b3a6e4b0a9a89ebccce359049436db619e5ba23135acf1a43fb398",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "4389fe984bc721ccf9bcd759d75c23d713f5d65ae7ca07ed2e4fe24f02b6d414",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "tf32_hmma_gemm_traceable",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "attempted_excluded",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "4e763ad3e8b3a6e4b0a9a89ebccce359049436db619e5ba23135acf1a43fb398",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "f70da55b2d08bc337d534d04d76fea23b53c93d18facb56cae969c4c9873c992",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "tf32_hmma_gemm_traceable",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "ncu_repeatability_fail",
+   "sweep_id": "live-label-readmission-r21-larger-shapes-tf32_hmma_gemm_traceable",
+   "timestamp": "2026-05-21T16:54:08Z"
+  },
+  {
+   "new_admission_status": "admitted",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "50b3e16af2ada0c2d029917a9380d17a0548da03d9f2692191c429ec57f53ce4",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "87f0eeb1256101173117148a10ac97d6367a9307c2b8e33c78df9d43c2f491f7",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "fp32_fma_dep_chain",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "attempted_excluded",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "50b3e16af2ada0c2d029917a9380d17a0548da03d9f2692191c429ec57f53ce4",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "0dc86e9187c09eaced4a9071a7dc4456065830af201c48af51af34543f4c6e29",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "fp32_fma_dep_chain",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "ncu_repeatability_fail",
+   "sweep_id": "live-label-readmission-r21-larger-shapes-fp32_fma_dep_chain",
+   "timestamp": "2026-05-21T16:54:08Z"
+  },
+  {
+   "new_admission_status": "admitted",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "2671a2fdfd88bfab552446d5254338ceffc2408f285b9805f50812b3d8f77155",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "7b0d4c0ce3b924918bd9c913ee6a624b46b70462eca9b9388459e4259d333264",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "global_atomic_histogram",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "attempted_excluded",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "2671a2fdfd88bfab552446d5254338ceffc2408f285b9805f50812b3d8f77155",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "2ef7caacc785f51ee351ddf2bf3d2c5433a380a884f130a839e96011c29e77d8",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "global_atomic_histogram",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "ncu_repeatability_fail",
+   "sweep_id": "live-label-readmission-r21-larger-shapes-global_atomic_histogram",
+   "timestamp": "2026-05-21T16:54:08Z"
+  },
+  {
+   "new_admission_status": "admitted",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "a775fff63a83342181e8d5b34b93679f05bba6bf5072926145d9cd1e05d6d3b1",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "46f98c2f3dc63eecd602b9d44ec6632f3d6668c0f42025d60239c036dff8bd75",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "dram_stream_stride_mix",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "attempted_excluded",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "a775fff63a83342181e8d5b34b93679f05bba6bf5072926145d9cd1e05d6d3b1",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "46f98c2f3dc63eecd602b9d44ec6632f3d6668c0f42025d60239c036dff8bd75",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "dram_stream_stride_mix",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "typed_unavailable_emit",
+   "sweep_id": "live-label-readmission-r22-memory-stress-dram_stream_stride_mix",
+   "timestamp": "2026-05-21T17:19:03Z"
+  },
+  {
+   "new_admission_status": "admitted",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "44c16fe449b01ca9e8552ba5e94481d33709693b34d48ad6005820aabc24ae20",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "062305c2d90e0e9687cf2afee1cf3a2ac4266b8db7c1be42ae1c8c04ec2c9dd9",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "l2_persisting_window_sweep",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "attempted_excluded",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "44c16fe449b01ca9e8552ba5e94481d33709693b34d48ad6005820aabc24ae20",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "062305c2d90e0e9687cf2afee1cf3a2ac4266b8db7c1be42ae1c8c04ec2c9dd9",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "l2_persisting_window_sweep",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "typed_unavailable_emit",
+   "sweep_id": "live-label-readmission-r22-memory-stress-l2_persisting_window_sweep",
+   "timestamp": "2026-05-21T17:19:03Z"
+  },
+  {
+   "new_admission_status": "admitted",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "e29102134ce221b65f9c105bb8129a33f69b05882b70a91fa64a2220754b8633",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "30baaa0f6d6054d23fe69560cb76c4f54a907f9bc94fa89d9fc7fc4daf32dbc7",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "l2_prefetch_hint_sweep",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "attempted_excluded",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "e29102134ce221b65f9c105bb8129a33f69b05882b70a91fa64a2220754b8633",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "30baaa0f6d6054d23fe69560cb76c4f54a907f9bc94fa89d9fc7fc4daf32dbc7",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "l2_prefetch_hint_sweep",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "typed_unavailable_emit",
+   "sweep_id": "live-label-readmission-r22-memory-stress-l2_prefetch_hint_sweep",
+   "timestamp": "2026-05-21T17:19:03Z"
+  },
+  {
+   "new_admission_status": "attempted_excluded",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "85cac87210328d4a2e66ce3c2054697f6c6315c30a6e77c3d6ee049026117454",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "1326805db13b3db2b1a10d141222a3bf16d43877cb72d618db5428c29a703fe8",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "warm_cold_pair_relaunch",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "attempted_excluded",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "85cac87210328d4a2e66ce3c2054697f6c6315c30a6e77c3d6ee049026117454",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "1326805db13b3db2b1a10d141222a3bf16d43877cb72d618db5428c29a703fe8",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "warm_cold_pair_relaunch",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "ncu_repeatability_fail",
+   "sweep_id": "live-label-typed-reason-repair-r23-warm-cold-pair-relaunch",
+   "timestamp": "2026-05-21T17:47:36Z"
+  },
+  {
+   "new_admission_status": "admitted",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "a82a2738378c35e5f479d2c6c3f799ba108c41de95cf56d2d25aea941d5d882b",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "0b191ed62eb7ce6390c1ea305bc59bfa2bd7a7c27606cb373240cfe2453c90b4",
+    "shape_point": "timing_shape",
+    "slug": "conv2d_implicit_gemm_bf16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "attempted_excluded",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "a82a2738378c35e5f479d2c6c3f799ba108c41de95cf56d2d25aea941d5d882b",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "84a19a8dde406bd63b740064d9a151919b893e1f7df62328eaa8266c0ede8fae",
+    "shape_point": "timing_shape",
+    "slug": "conv2d_implicit_gemm_bf16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "trace_missing",
+   "sweep_id": "live-label-attention-conv-admit-r24-conv2d_implicit_gemm_bf16_sm80",
+   "timestamp": "2026-05-21T18:13:20Z"
+  },
+  {
+   "new_admission_status": "attempted_excluded",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "f49796240a96f91781748ea2f71c19b6d0e0a042dfdeef69cc6500f79d2d9a51",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "3971b46d4d2eb9a475d5998f2ac661841bdbfe91499f9255499d89d5b75cf734",
+    "shape_point": "timing_shape",
+    "slug": "flash_attn_fwd_bf16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "attempted_excluded",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "f49796240a96f91781748ea2f71c19b6d0e0a042dfdeef69cc6500f79d2d9a51",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "022e21ad40d19bcd549fd159395618f07146aa7f2043a99aaf731754fd0e97f0",
+    "shape_point": "timing_shape",
+    "slug": "flash_attn_fwd_bf16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "ncu_repeatability_fail",
+   "sweep_id": "live-label-typed-reason-repair-r24-flash_attn_fwd_bf16_sm80",
+   "timestamp": "2026-05-21T18:16:40Z"
+  },
+  {
+   "new_admission_status": "attempted_excluded",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "b98284f214b62105bc195262ba012dfc0dc78f955ee8730c3667c47c4914d57f",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "efd3196a76ae04038426b6e392c90ae07a235fce22ed9f77946c2d70787dc871",
+    "shape_point": "timing_shape",
+    "slug": "flash_attn_bwd_bf16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "attempted_excluded",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "b98284f214b62105bc195262ba012dfc0dc78f955ee8730c3667c47c4914d57f",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "b5cc4a5e340417497a15b67fb65dfccca7d19be500d9f1c2e529548b77b5387d",
+    "shape_point": "timing_shape",
+    "slug": "flash_attn_bwd_bf16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "ncu_repeatability_fail",
+   "sweep_id": "live-label-typed-reason-repair-r24-flash_attn_bwd_bf16_sm80",
+   "timestamp": "2026-05-21T18:16:40Z"
+  },
+  {
+   "new_admission_status": "admitted",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "101e564a42f54682d02e197f6aa7fb8984b9b42c29509df6f428ab581dfb4508",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "3971b46d4d2eb9a475d5998f2ac661841bdbfe91499f9255499d89d5b75cf734",
+    "shape_point": "timing_shape",
+    "slug": "flash_attn_fwd_bf16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "attempted_excluded",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "f49796240a96f91781748ea2f71c19b6d0e0a042dfdeef69cc6500f79d2d9a51",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "3971b46d4d2eb9a475d5998f2ac661841bdbfe91499f9255499d89d5b75cf734",
+    "shape_point": "timing_shape",
+    "slug": "flash_attn_fwd_bf16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "ncu_repeatability_fail",
+   "sweep_id": "live-label-flash-attn-admit-r25-larger-shape-flash_attn_fwd_bf16_sm80",
+   "timestamp": "2026-05-21T18:50:50Z"
+  },
+  {
+   "new_admission_status": "admitted",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "5e3cd7a54afd1dabb63a86c3c49488887a49b6ec32b9575c4337cf43b1e8d1c0",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "efd3196a76ae04038426b6e392c90ae07a235fce22ed9f77946c2d70787dc871",
+    "shape_point": "timing_shape",
+    "slug": "flash_attn_bwd_bf16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "attempted_excluded",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "b98284f214b62105bc195262ba012dfc0dc78f955ee8730c3667c47c4914d57f",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "efd3196a76ae04038426b6e392c90ae07a235fce22ed9f77946c2d70787dc871",
+    "shape_point": "timing_shape",
+    "slug": "flash_attn_bwd_bf16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "ncu_repeatability_fail",
+   "sweep_id": "live-label-flash-attn-admit-r25-larger-shape-flash_attn_bwd_bf16_sm80",
+   "timestamp": "2026-05-21T18:50:50Z"
+  },
+  {
+   "new_admission_status": "admitted",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "3cfdb5ab21d864c47e9b27bc6fd6e455d77c8dd8263b474ae86c81ecf490e7e2",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "3971b46d4d2eb9a475d5998f2ac661841bdbfe91499f9255499d89d5b75cf734",
+    "shape_point": "timing_shape",
+    "slug": "flash_attn_fwd_bf16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "admitted",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "101e564a42f54682d02e197f6aa7fb8984b9b42c29509df6f428ab581dfb4508",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "3971b46d4d2eb9a475d5998f2ac661841bdbfe91499f9255499d89d5b75cf734",
+    "shape_point": "timing_shape",
+    "slug": "flash_attn_fwd_bf16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "none_admitted",
+   "sweep_id": "binary-sha-realign-r26-flash_attn_fwd_bf16_sm80",
+   "timestamp": "2026-05-21T19:20:47Z"
+  },
+  {
+   "new_admission_status": "admitted",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "b18dff2b5c210637c151c56ac861eb20640ef1ed8e50056130a5e8007f9804fb",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "efd3196a76ae04038426b6e392c90ae07a235fce22ed9f77946c2d70787dc871",
+    "shape_point": "timing_shape",
+    "slug": "flash_attn_bwd_bf16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "admitted",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "5e3cd7a54afd1dabb63a86c3c49488887a49b6ec32b9575c4337cf43b1e8d1c0",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "efd3196a76ae04038426b6e392c90ae07a235fce22ed9f77946c2d70787dc871",
+    "shape_point": "timing_shape",
+    "slug": "flash_attn_bwd_bf16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "none_admitted",
+   "sweep_id": "binary-sha-realign-r26-flash_attn_bwd_bf16_sm80",
+   "timestamp": "2026-05-21T19:20:47Z"
+  },
+  {
+   "new_admission_status": "admitted",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "f39b17eab4f879356745baf129d2f041b5a5edacf332140176f468217313ffa6",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "3971b46d4d2eb9a475d5998f2ac661841bdbfe91499f9255499d89d5b75cf734",
+    "shape_point": "timing_shape",
+    "slug": "flash_attn_fwd_bf16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "admitted",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "3cfdb5ab21d864c47e9b27bc6fd6e455d77c8dd8263b474ae86c81ecf490e7e2",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "3971b46d4d2eb9a475d5998f2ac661841bdbfe91499f9255499d89d5b75cf734",
+    "shape_point": "timing_shape",
+    "slug": "flash_attn_fwd_bf16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "none_admitted",
+   "sweep_id": "binary-sha-realign-r27-flash_attn_fwd_bf16_sm80",
+   "timestamp": "2026-05-21T19:43:06Z"
+  },
+  {
+   "new_admission_status": "admitted",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "49a868ba6276fc84eb7cb820195c8dbbb36771e56a49573ff0a47ec2a5f8f518",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "efd3196a76ae04038426b6e392c90ae07a235fce22ed9f77946c2d70787dc871",
+    "shape_point": "timing_shape",
+    "slug": "flash_attn_bwd_bf16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "admitted",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "b18dff2b5c210637c151c56ac861eb20640ef1ed8e50056130a5e8007f9804fb",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "efd3196a76ae04038426b6e392c90ae07a235fce22ed9f77946c2d70787dc871",
+    "shape_point": "timing_shape",
+    "slug": "flash_attn_bwd_bf16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "none_admitted",
+   "sweep_id": "binary-sha-realign-r27-flash_attn_bwd_bf16_sm80",
+   "timestamp": "2026-05-21T19:43:07Z"
+  },
+  {
+   "new_admission_status": "admitted",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "697cd8a78ab1d89afb3fd3644187bb110233634a2ca4be962249f9ae511f399a",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "8d6faf19ca6000cec9104d57bf118366d6d8ecffb8164aa4fe07c3a17d552a31",
+    "shape_point": "timing_shape",
+    "slug": "vendor_gemm_cublas",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "attempted_excluded",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "026c281cc1f1a6cbb56db30744df8deef9450907d2995342088c69a52114431e",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "8d52795c604c529e1902a3970df23195010cb0cf398e2cd8fef47f49be7701a3",
+    "shape_point": "timing_shape",
+    "slug": "vendor_gemm_cublas",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "trace_missing",
+   "sweep_id": "live-label-vendor-gemm-cublas-admit-r28",
+   "timestamp": "2026-05-21T20:09:43Z"
+  },
+  {
+   "new_admission_status": "admitted",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "56cd0aece70f180017f7b00a9a3046769455f8520d2064fd56714bc83287da88",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "8d6faf19ca6000cec9104d57bf118366d6d8ecffb8164aa4fe07c3a17d552a31",
+    "shape_point": "timing_shape",
+    "slug": "vendor_gemm_cublas",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "admitted",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "697cd8a78ab1d89afb3fd3644187bb110233634a2ca4be962249f9ae511f399a",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "8d6faf19ca6000cec9104d57bf118366d6d8ecffb8164aa4fe07c3a17d552a31",
+    "shape_point": "timing_shape",
+    "slug": "vendor_gemm_cublas",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "none_admitted",
+   "sweep_id": "binary-sha-realign-r28-vendor_gemm_cublas",
+   "timestamp": "2026-05-21T20:14:45Z"
+  },
+  {
+   "new_admission_status": "attempted_excluded",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "56cd0aece70f180017f7b00a9a3046769455f8520d2064fd56714bc83287da88",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "8d6faf19ca6000cec9104d57bf118366d6d8ecffb8164aa4fe07c3a17d552a31",
+    "shape_point": "timing_shape",
+    "slug": "vendor_gemm_cublas",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "admitted",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "56cd0aece70f180017f7b00a9a3046769455f8520d2064fd56714bc83287da88",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "8d6faf19ca6000cec9104d57bf118366d6d8ecffb8164aa4fe07c3a17d552a31",
+    "shape_point": "timing_shape",
+    "slug": "vendor_gemm_cublas",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "typed_unavailable_emit",
+   "sweep_id": "live-tracer-path-boundary-revert-r29",
+   "timestamp": "2026-05-22T08:00:00Z"
+  },
+  {
+   "new_admission_status": "admitted",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "ef1c18d83840e98f62c57f2b5831875626409066dd17c5d5918f4ca906753684",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "a2a9330ac3d65c90d8c50e230eed8fca05d3fea37a419c80d4aed114109c30d3",
+    "shape_point": "timing_shape",
+    "slug": "vendor_sgemm_cublas",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "attempted_excluded",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "56cd0aece70f180017f7b00a9a3046769455f8520d2064fd56714bc83287da88",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "8d6faf19ca6000cec9104d57bf118366d6d8ecffb8164aa4fe07c3a17d552a31",
+    "shape_point": "timing_shape",
+    "slug": "vendor_gemm_cublas",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "none_admitted",
+   "sweep_id": "live-label-vendor-sgemm-cublas-admit-r30",
+   "timestamp": "2026-05-22T06:51:29Z"
+  },
+  {
+   "new_admission_status": "admitted",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "110ca78f772b7840feddde766279d5441a402a03fa3bee05d5ad5b8c50d77571",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "f3486aec4ba945d91798499ceb42c06aa306b265734a08daef38cd62755dd4a5",
+    "shape_point": "timing_shape",
+    "slug": "swiglu_fwd_bf16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "attempted_excluded",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "110ca78f772b7840feddde766279d5441a402a03fa3bee05d5ad5b8c50d77571",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "0db7cac34aa5a771a50d5bd6165407f189ad3c0dfccf8f7aeb37a64ad45dfc61",
+    "shape_point": "timing_shape",
+    "slug": "swiglu_fwd_bf16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "trace_missing",
+   "sweep_id": "live-label-swiglu-fwd-bf16-admit-r33",
+   "timestamp": "2026-05-22T07:49:38Z"
+  },
+  {
+   "new_admission_status": "admitted",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "d267ee3031819fdfd6e93b0537d73c985896b01e6f582c1041d7060a834d2b76",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "9002820601c6d1724a0382d66385e6f5bbdff64a0f14fae694255aa255d2ece2",
+    "shape_point": "timing_shape",
+    "slug": "cross_entropy_fwd_fp32_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "attempted_excluded",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "d267ee3031819fdfd6e93b0537d73c985896b01e6f582c1041d7060a834d2b76",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "520aa53466c66904799818e41c6981c7ecf5ae12025b09c8fb4a1e42e1b0977f",
+    "shape_point": "timing_shape",
+    "slug": "cross_entropy_fwd_fp32_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "trace_missing",
+   "sweep_id": "live-label-cross-entropy-fwd-fp32-sm80-admit-r34",
+   "timestamp": "2026-05-22T08:10:03Z"
+  },
+  {
+   "new_admission_status": "admitted",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "2954d82e27eb72b93e1fb21fdb7e991bf06427612ef8f35cdd194adca52b08db",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "863e9fd4e7a8b34eccefe560a171b81f994328f2089568076e8ca771f8d8ee73",
+    "shape_point": "timing_shape",
+    "slug": "embedding_gather_int32_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "attempted_excluded",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "2954d82e27eb72b93e1fb21fdb7e991bf06427612ef8f35cdd194adca52b08db",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "ec3d99ae8f9d5d9d3bf69816a18b4126b70b5e4c21fdd5e2793fe74283e53ad0",
+    "shape_point": "timing_shape",
+    "slug": "embedding_gather_int32_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "trace_missing",
+   "sweep_id": "live-label-embedding-gather-int32-sm80-admit-r34",
+   "timestamp": "2026-05-22T08:10:03Z"
+  },
+  {
+   "new_admission_status": "admitted",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "209e4c3d520026cf5baa8a1a10447bea56a480ad34feb39fb32c9f9588524352",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "5bb76f97dce755520ee9f4e2fae94e9af4f26d5c0928abd3a05681888b94413c",
+    "shape_point": "timing_shape",
+    "slug": "rmsnorm_bwd_bf16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "attempted_excluded",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "209e4c3d520026cf5baa8a1a10447bea56a480ad34feb39fb32c9f9588524352",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "e1eb7df62037f394a7a799c7371a99f09db89b1f297ef69243f575d8dc01833b",
+    "shape_point": "timing_shape",
+    "slug": "rmsnorm_bwd_bf16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "trace_missing",
+   "sweep_id": "live-label-rmsnorm-bwd-bf16-sm80-admit-r34",
+   "timestamp": "2026-05-22T08:10:03Z"
+  },
+  {
+   "new_admission_status": "admitted",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "6d658a5ad31d7b92cceacb94afc7f528bcefc7fb45841624408def3ac753ac87",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "9d6646ab084678ddf0524cb8ab03af4fa8a3d4e4d652010442a6f9f6a915e2a4",
+    "shape_point": "timing_shape",
+    "slug": "gemm_hmma_bf16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "attempted_excluded",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "6d658a5ad31d7b92cceacb94afc7f528bcefc7fb45841624408def3ac753ac87",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "138abd42b810717bd2a22c3e90b990b3f665b6f6f410077c17035006a8c3cfb4",
+    "shape_point": "timing_shape",
+    "slug": "gemm_hmma_bf16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "trace_missing",
+   "sweep_id": "live-label-gemm-hmma-bf16-sm80-timing-shape-admit-r35",
+   "timestamp": "2026-05-22T08:33:21Z"
+  },
+  {
+   "new_admission_status": "attempted_excluded",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "6d658a5ad31d7b92cceacb94afc7f528bcefc7fb45841624408def3ac753ac87",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "9d6646ab084678ddf0524cb8ab03af4fa8a3d4e4d652010442a6f9f6a915e2a4",
+    "shape_point": "correctness_shape",
+    "slug": "gemm_hmma_bf16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "attempted_excluded",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "6d658a5ad31d7b92cceacb94afc7f528bcefc7fb45841624408def3ac753ac87",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "84b5a87376ecc59d2800f5474a2f2f1bdae6a7b94c581efb4ea12e59f3e9896c",
+    "shape_point": "correctness_shape",
+    "slug": "gemm_hmma_bf16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "ncu_repeatability_fail",
+   "sweep_id": "live-label-gemm-hmma-bf16-sm80-correctness-shape-exclude-r35",
+   "timestamp": "2026-05-22T08:33:21Z"
+  },
+  {
+   "new_admission_status": "admitted",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "ae5e05ccd14902c72fd110a996f23e7c0a2321c2f27792e579490865bc398207",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "a751169dc1fed77df7b80a2bd2e30b34c416f4f8d67325033045e27c7224bea7",
+    "shape_point": "timing_shape",
+    "slug": "gemm_hmma_fp16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "attempted_excluded",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "ae5e05ccd14902c72fd110a996f23e7c0a2321c2f27792e579490865bc398207",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "dfa92ae86eed656985360c5dcdb3ca5c41a957c56907f3e8ef75b8163da98ad5",
+    "shape_point": "timing_shape",
+    "slug": "gemm_hmma_fp16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "trace_missing",
+   "sweep_id": "live-label-gemm-hmma-fp16-sm80-timing-shape-admit-r35",
+   "timestamp": "2026-05-22T08:33:22Z"
+  },
+  {
+   "new_admission_status": "attempted_excluded",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "ae5e05ccd14902c72fd110a996f23e7c0a2321c2f27792e579490865bc398207",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "a751169dc1fed77df7b80a2bd2e30b34c416f4f8d67325033045e27c7224bea7",
+    "shape_point": "correctness_shape",
+    "slug": "gemm_hmma_fp16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "attempted_excluded",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "ae5e05ccd14902c72fd110a996f23e7c0a2321c2f27792e579490865bc398207",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "1fff127dbbf4835d21635fd84c3a3899930aa55b407c30bd51bbb03c7051f665",
+    "shape_point": "correctness_shape",
+    "slug": "gemm_hmma_fp16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "ncu_repeatability_fail",
+   "sweep_id": "live-label-gemm-hmma-fp16-sm80-correctness-shape-exclude-r35",
+   "timestamp": "2026-05-22T08:33:22Z"
+  },
+  {
+   "new_admission_status": "admitted",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "ab334a292a304590e3576cfb485155d6329ea92668e388c9dca6fd8b2169566f",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "612476892630fc2fdc2209e7f6a93cf82c7ef460fd8ce93f0b8148b8fc192b04",
+    "shape_point": "timing_shape",
+    "slug": "gemm_imma_int8_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "attempted_excluded",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "ab334a292a304590e3576cfb485155d6329ea92668e388c9dca6fd8b2169566f",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "3b8755558999940c88e3273d1c54ca506282f62d5dcc19cb47a3649af61924f7",
+    "shape_point": "timing_shape",
+    "slug": "gemm_imma_int8_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "trace_missing",
+   "sweep_id": "live-label-gemm-imma-int8-sm80-timing-shape-admit-r35",
+   "timestamp": "2026-05-22T08:33:22Z"
+  },
+  {
+   "new_admission_status": "attempted_excluded",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "ab334a292a304590e3576cfb485155d6329ea92668e388c9dca6fd8b2169566f",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "612476892630fc2fdc2209e7f6a93cf82c7ef460fd8ce93f0b8148b8fc192b04",
+    "shape_point": "correctness_shape",
+    "slug": "gemm_imma_int8_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "attempted_excluded",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "ab334a292a304590e3576cfb485155d6329ea92668e388c9dca6fd8b2169566f",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "2901610321df3ec98de93a920e323f5a9ed9b498b7bd3f908485f6cfa1eccfed",
+    "shape_point": "correctness_shape",
+    "slug": "gemm_imma_int8_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "ncu_repeatability_fail",
+   "sweep_id": "live-label-gemm-imma-int8-sm80-correctness-shape-exclude-r35",
+   "timestamp": "2026-05-22T08:33:22Z"
+  },
+  {
+   "new_admission_status": "admitted",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "cec377a663369fb9328bd84438b6c777d1fd38d5461685ad6a87b34f750e372e",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "5fdaa06e484b96fc79e45b24ffd4d1c63ebf0c9bd9b00b31282bb04991cac216",
+    "shape_point": "timing_shape",
+    "slug": "gemm_sparse_2to4_bf16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "attempted_excluded",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "cec377a663369fb9328bd84438b6c777d1fd38d5461685ad6a87b34f750e372e",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "a501f2cb36ee48aa6cb7d9d412e6edc661e0cdedcf456726142f62a361d9581d",
+    "shape_point": "timing_shape",
+    "slug": "gemm_sparse_2to4_bf16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "trace_missing",
+   "sweep_id": "live-label-gemm-sparse-2to4-bf16-sm80-timing-shape-admit-r36",
+   "timestamp": "2026-05-22T08:57:32Z"
+  },
+  {
+   "new_admission_status": "attempted_excluded",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "110ca78f772b7840feddde766279d5441a402a03fa3bee05d5ad5b8c50d77571",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "f3486aec4ba945d91798499ceb42c06aa306b265734a08daef38cd62755dd4a5",
+    "shape_point": "correctness_shape",
+    "slug": "swiglu_fwd_bf16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "attempted_excluded",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "110ca78f772b7840feddde766279d5441a402a03fa3bee05d5ad5b8c50d77571",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "ca1264b8020f3436113b0f0abc9ebcb29730c8b5a21939004fbd9e38c6283a5f",
+    "shape_point": "correctness_shape",
+    "slug": "swiglu_fwd_bf16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "ncu_repeatability_fail",
+   "sweep_id": "live-label-swiglu-fwd-bf16-sm80-correctness-shape-exclude-r36",
+   "timestamp": "2026-05-22T08:57:32Z"
+  },
+  {
+   "new_admission_status": "admitted",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "f591e9e3be15c58c723f1d0a4eaf853fb53a1d6778dabf6e6f85568ac89a958b",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "81bc96b09f9d2fe2c30fb9af6bcb706281ccbdb932c5520cb7ba248402932347",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "dram_streaming_dot_product",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "attempted_excluded",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "43bf1ea77e0b8d6026db52787c3fa170850b9c6fb1264fcfcabb701ceb2d7d10",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "289ea530dcda081647b0fd36e74c8d48983b93ecc14ee39ba954aea40553321e",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "cp_async_shared_tile_copy",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "ncu_repeatability_fail",
+   "sweep_id": "live-label-dram-streaming-dot-product-trace-l2-accuracy-xl-admit-r38",
+   "timestamp": "2026-05-22T10:20:53Z"
+  },
+  {
+   "new_admission_status": "admitted",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "133c0e875133556ae04cf67b7587b55fbffd08b5be67dec81529431bd1ed0b18",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "9d6646ab084678ddf0524cb8ab03af4fa8a3d4e4d652010442a6f9f6a915e2a4",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "gemm_hmma_bf16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "attempted_excluded",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "6d658a5ad31d7b92cceacb94afc7f528bcefc7fb45841624408def3ac753ac87",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "a9447a62da82009b4fe97bfdcd44e0def67789f45a28323a7173c3cfa0b21ce4",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "gemm_hmma_bf16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "trace_missing",
+   "sweep_id": "live-label-gemm-hmma-bf16-sm80-trace-l2-accuracy-xl-admit-r40",
+   "timestamp": "2026-05-22T11:22:41Z"
+  },
+  {
+   "new_admission_status": "admitted",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "18f74961f8518cd5fc53e3d4628eb3859b7bdf2b998525fccc6e74b41f9efb42",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "a751169dc1fed77df7b80a2bd2e30b34c416f4f8d67325033045e27c7224bea7",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "gemm_hmma_fp16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "attempted_excluded",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "ae5e05ccd14902c72fd110a996f23e7c0a2321c2f27792e579490865bc398207",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "6c3f17d47da1c82ee9a048fb3d2de4b3a9c2b0cb5a19b3843089d2313aa5cb4d",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "gemm_hmma_fp16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "trace_missing",
+   "sweep_id": "live-label-gemm-hmma-fp16-sm80-trace-l2-accuracy-xl-admit-r40",
+   "timestamp": "2026-05-22T11:22:41Z"
+  },
+  {
+   "new_admission_status": "admitted",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "82be1e670eb9192fab19144f68d05d26ea603772e9071b7c29f9be1290c06a18",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "612476892630fc2fdc2209e7f6a93cf82c7ef460fd8ce93f0b8148b8fc192b04",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "gemm_imma_int8_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "attempted_excluded",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "ab334a292a304590e3576cfb485155d6329ea92668e388c9dca6fd8b2169566f",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "ba7ab9b02289ddab191e6f58d40a881bd447bbf348f350bc71f58e64436bcfb8",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "gemm_imma_int8_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "trace_missing",
+   "sweep_id": "live-label-gemm-imma-int8-sm80-trace-l2-accuracy-xl-admit-r40",
+   "timestamp": "2026-05-22T11:22:41Z"
+  },
+  {
+   "new_admission_status": "admitted",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "d11abf100877013771a2a65e3c621c00710e13db19b73bd45a11f476378b045a",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "9d6646ab084678ddf0524cb8ab03af4fa8a3d4e4d652010442a6f9f6a915e2a4",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "gemm_hmma_bf16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "admitted",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "133c0e875133556ae04cf67b7587b55fbffd08b5be67dec81529431bd1ed0b18",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "9d6646ab084678ddf0524cb8ab03af4fa8a3d4e4d652010442a6f9f6a915e2a4",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "gemm_hmma_bf16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "none_admitted",
+   "sweep_id": "live-label-gemm-hmma-bf16-sm80-trace-l2-accuracy-xl-realign-r41",
+   "timestamp": "2026-05-22T11:48:09Z"
+  },
+  {
+   "new_admission_status": "admitted",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "2311a64ad233383abe34daaeabc20365a6f11420b8133691c86d6cb1d917c440",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "a751169dc1fed77df7b80a2bd2e30b34c416f4f8d67325033045e27c7224bea7",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "gemm_hmma_fp16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "admitted",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "18f74961f8518cd5fc53e3d4628eb3859b7bdf2b998525fccc6e74b41f9efb42",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "a751169dc1fed77df7b80a2bd2e30b34c416f4f8d67325033045e27c7224bea7",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "gemm_hmma_fp16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "none_admitted",
+   "sweep_id": "live-label-gemm-hmma-fp16-sm80-trace-l2-accuracy-xl-realign-r41",
+   "timestamp": "2026-05-22T11:48:09Z"
+  },
+  {
+   "new_admission_status": "admitted",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "d0b901787f54d91afa8445f2b993eb1f57d23f629bd1ac51fb7e1797309c305e",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "612476892630fc2fdc2209e7f6a93cf82c7ef460fd8ce93f0b8148b8fc192b04",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "gemm_imma_int8_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "admitted",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "82be1e670eb9192fab19144f68d05d26ea603772e9071b7c29f9be1290c06a18",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "612476892630fc2fdc2209e7f6a93cf82c7ef460fd8ce93f0b8148b8fc192b04",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "gemm_imma_int8_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "none_admitted",
+   "sweep_id": "live-label-gemm-imma-int8-sm80-trace-l2-accuracy-xl-realign-r41",
+   "timestamp": "2026-05-22T11:48:09Z"
+  },
+  {
+   "new_admission_status": "admitted",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "948807754e8e7c3ca94ea06db5e6ad1f5e4339efcf46c62eecc859eab6778da5",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "3971b46d4d2eb9a475d5998f2ac661841bdbfe91499f9255499d89d5b75cf734",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "flash_attn_fwd_bf16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "attempted_excluded",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "f49796240a96f91781748ea2f71c19b6d0e0a042dfdeef69cc6500f79d2d9a51",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "e1f03afa4e1f4e98461ccdab0ae5cbaf8f443d4891991cda12583e201b0e2a70",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "flash_attn_fwd_bf16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "trace_missing",
+   "sweep_id": "live-admission-cycle-r42-flash-attn-fwd-bf16-sm80-trace-l2-accuracy-xl",
+   "timestamp": "2026-05-22T13:53:52Z"
+  },
+  {
+   "new_admission_status": "admitted",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "dcf034ddcbefdb0b1c727739d7e0b903c4483cb50b0e31f866208a835b45c25f",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "efd3196a76ae04038426b6e392c90ae07a235fce22ed9f77946c2d70787dc871",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "flash_attn_bwd_bf16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "attempted_excluded",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "b98284f214b62105bc195262ba012dfc0dc78f955ee8730c3667c47c4914d57f",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "91df3536f16682b73460143154dab07fac2753a88c60c758e08eef66021cffb3",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "flash_attn_bwd_bf16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "trace_missing",
+   "sweep_id": "live-admission-cycle-r42-flash-attn-bwd-bf16-sm80-trace-l2-accuracy-xl",
+   "timestamp": "2026-05-22T13:53:52Z"
+  },
+  {
+   "new_admission_status": "admitted",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "c85d9dfc9803198bb5f1471c1414a82cfb05883e332f3a6c2fa450f6c9f27d59",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "f3486aec4ba945d91798499ceb42c06aa306b265734a08daef38cd62755dd4a5",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "swiglu_fwd_bf16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "attempted_excluded",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "110ca78f772b7840feddde766279d5441a402a03fa3bee05d5ad5b8c50d77571",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "fdfd35900496f3f3447ba95434c470a9a5f426bb8b01f07457ffa65972edb9ee",
+    "shape_point": "trace_l2_accuracy_xl",
+    "slug": "swiglu_fwd_bf16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "trace_missing",
+   "sweep_id": "live-admission-cycle-r42-swiglu-fwd-bf16-sm80-trace-l2-accuracy-xl",
+   "timestamp": "2026-05-22T13:53:53Z"
+  },
+  {
+   "new_admission_status": "admitted",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "2a9640ae0db61b64b2aab24fdd8134b208f3ade75622f941112069a0e302004f",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "9d6646ab084678ddf0524cb8ab03af4fa8a3d4e4d652010442a6f9f6a915e2a4",
+    "shape_point": "trace_l2_accuracy_lg",
+    "slug": "gemm_hmma_bf16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "attempted_excluded",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "6d658a5ad31d7b92cceacb94afc7f528bcefc7fb45841624408def3ac753ac87",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "9d6646ab084678ddf0524cb8ab03af4fa8a3d4e4d652010442a6f9f6a915e2a4",
+    "shape_point": "correctness_shape",
+    "slug": "gemm_hmma_bf16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "ncu_repeatability_fail",
+   "sweep_id": "live-admission-cycle-r43-gemm-hmma-bf16-sm80-trace-l2-accuracy-lg",
+   "timestamp": "2026-05-22T16:43:10Z"
+  },
+  {
+   "new_admission_status": "admitted",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "81bc1671a2858e6b20dd3c0e9928b238cfc79068a7fecc481dacfb1fb4128bb3",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "a751169dc1fed77df7b80a2bd2e30b34c416f4f8d67325033045e27c7224bea7",
+    "shape_point": "trace_l2_accuracy_lg",
+    "slug": "gemm_hmma_fp16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "attempted_excluded",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "ae5e05ccd14902c72fd110a996f23e7c0a2321c2f27792e579490865bc398207",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "a751169dc1fed77df7b80a2bd2e30b34c416f4f8d67325033045e27c7224bea7",
+    "shape_point": "correctness_shape",
+    "slug": "gemm_hmma_fp16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "ncu_repeatability_fail",
+   "sweep_id": "live-admission-cycle-r43-gemm-hmma-fp16-sm80-trace-l2-accuracy-lg",
+   "timestamp": "2026-05-22T16:43:10Z"
+  },
+  {
+   "new_admission_status": "admitted",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "3f1241c4aced4ab211ba20644457c6dc4fa27377dbb757dbded4b2e7b1a5017c",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "612476892630fc2fdc2209e7f6a93cf82c7ef460fd8ce93f0b8148b8fc192b04",
+    "shape_point": "trace_l2_accuracy_lg",
+    "slug": "gemm_imma_int8_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "attempted_excluded",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "ab334a292a304590e3576cfb485155d6329ea92668e388c9dca6fd8b2169566f",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "612476892630fc2fdc2209e7f6a93cf82c7ef460fd8ce93f0b8148b8fc192b04",
+    "shape_point": "correctness_shape",
+    "slug": "gemm_imma_int8_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "ncu_repeatability_fail",
+   "sweep_id": "live-admission-cycle-r43-gemm-imma-int8-sm80-trace-l2-accuracy-lg",
+   "timestamp": "2026-05-22T16:43:11Z"
+  },
+  {
+   "new_admission_status": "admitted",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "e47b31f156d98656a659640280e19876cfd9efc50018422cbc8d9129d7b2f661",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "efd3196a76ae04038426b6e392c90ae07a235fce22ed9f77946c2d70787dc871",
+    "shape_point": "trace_l2_accuracy_lg",
+    "slug": "flash_attn_bwd_bf16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "attempted_excluded",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "b98284f214b62105bc195262ba012dfc0dc78f955ee8730c3667c47c4914d57f",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "37661a7f88dc84c299f16f0c6717ffdffee6acd671f6688771cd68d08aef0412",
+    "shape_point": "correctness_shape",
+    "slug": "flash_attn_bwd_bf16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "trace_missing",
+   "sweep_id": "live-admission-cycle-r43-flash-attn-bwd-bf16-sm80-trace-l2-accuracy-lg",
+   "timestamp": "2026-05-22T16:43:11Z"
+  },
+  {
+   "new_admission_status": "admitted",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "eb9b80a6565ce36f38302169a95a171865fe6ed47c1e4a4c85b7f69b7d06b56d",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "f3486aec4ba945d91798499ceb42c06aa306b265734a08daef38cd62755dd4a5",
+    "shape_point": "trace_l2_accuracy_lg",
+    "slug": "swiglu_fwd_bf16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "attempted_excluded",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "110ca78f772b7840feddde766279d5441a402a03fa3bee05d5ad5b8c50d77571",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "f3486aec4ba945d91798499ceb42c06aa306b265734a08daef38cd62755dd4a5",
+    "shape_point": "correctness_shape",
+    "slug": "swiglu_fwd_bf16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "ncu_repeatability_fail",
+   "sweep_id": "live-admission-cycle-r43-swiglu-fwd-bf16-sm80-trace-l2-accuracy-lg",
+   "timestamp": "2026-05-22T16:43:11Z"
+  },
+  {
+   "new_admission_status": "admitted",
+   "new_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "45d87043098326e9eb57459ccf88dcb92f14bb0aca92d32e596a7f4c8e4110c5",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "3971b46d4d2eb9a475d5998f2ac661841bdbfe91499f9255499d89d5b75cf734",
+    "shape_point": "trace_l2_accuracy_lg",
+    "slug": "flash_attn_fwd_bf16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "old_admission_status": "attempted_excluded",
+   "old_identity_tuple": {
+    "arch": "sm_86",
+    "binary_sha256": "f49796240a96f91781748ea2f71c19b6d0e0a042dfdeef69cc6500f79d2d9a51",
+    "device": "RTX 3090 Ti",
+    "kernel_signature_sha256": "877d3c44df89d71c57ab49234ba3306df38ff4ab5d7941f4a81c722329c19644",
+    "shape_point": "correctness_shape",
+    "slug": "flash_attn_fwd_bf16_sm80",
+    "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+   },
+   "reason": "trace_missing",
+   "sweep_id": "live-admission-cycle-r43-retry-flash-attn-fwd-bf16-sm80-trace-l2-accuracy-lg",
+   "timestamp": "2026-05-22T17:46:57Z"
+  }
+ ],
+ "schema_version": 1
+}

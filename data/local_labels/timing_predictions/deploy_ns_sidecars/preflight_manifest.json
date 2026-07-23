@@ -1,0 +1,35 @@
+{
+  "schema_version": 4,
+  "timestamp": "2026-06-01T03:26:48+08:00",
+  "hostname": "cachyos-x8664",
+  "gpu": {
+    "name": "NVIDIA GeForce RTX 3090 Ti",
+    "uuid": "GPU-7cca3c43-0fc9-3d91-02a1-3c184a88363c",
+    "compute_capability": "8.6",
+    "mig_mode": "[N/A]",
+    "compute_mode": "Default",
+    "clocks_mhz": {
+      "sm_max": "2130",
+      "sm_current": "210",
+      "mem_max": "10501"
+    }
+  },
+  "toolchain": {
+    "driver_version": "595.71.05",
+    "cuda_version": "13.2",
+    "nvcc_version": "13.2",
+    "nvbit_build_hash": "67083eace7f6257ce5e33a6eb80ae0d3f240bbd667f254cdb67e1b7d20d5ed51",
+    "cutlass_version": "",
+    "flashinfer_version": ""
+  },
+  "capabilities": {
+    "cluster_attribute_nonportable_cluster_size_allowed": "available",
+    "cupti_activity_api_available": "available",
+    "cupti_activity_api_runtime": "available",
+    "cc_mode": "off",
+    "nvml_capability_matrix": "denied",
+    "mps_active": false,
+    "vgpu_active": false
+  },
+  "permissions": {"nvidia_smi_executable":true,"nvidia_dev_readable":true}
+}

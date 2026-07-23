@@ -1,0 +1,53 @@
+{
+  "by_assoc": {
+    "16": {
+      "raw_l1_hit_rate": 0.39239602748806035,
+      "raw_l2_hit_rate": 0.9927915047915048,
+      "scored": true,
+      "typed_reason": ""
+    },
+    "32": {
+      "raw_l1_hit_rate": 0.39239602748806035,
+      "raw_l2_hit_rate": 0.9927915047915048,
+      "scored": true,
+      "typed_reason": ""
+    },
+    "4": {
+      "raw_l1_hit_rate": 0.39239602748806035,
+      "raw_l2_hit_rate": 0.6508101528101529,
+      "scored": true,
+      "typed_reason": ""
+    },
+    "64": {
+      "raw_l1_hit_rate": 0.39239602748806035,
+      "raw_l2_hit_rate": 0.9927915047915048,
+      "scored": true,
+      "typed_reason": ""
+    },
+    "8": {
+      "raw_l1_hit_rate": 0.39239602748806035,
+      "raw_l2_hit_rate": 0.9927764827764828,
+      "scored": true,
+      "typed_reason": ""
+    }
+  },
+  "candidates": [
+    4,
+    8,
+    16,
+    32,
+    64
+  ],
+  "captured_at_utc": "2026-05-30T00:56:07+00:00",
+  "dense_reuse": {
+    "distinct_sectors": 13956,
+    "reuse_factor": 245.85583261679565,
+    "total_sector_accesses": 3431164,
+    "truncated": true
+  },
+  "schema_version": 2,
+  "scored": true,
+  "slug": "problem_014_gqa_paged_prefill_causal_h32_kv4_d128_ps1",
+  "tier2_sidecar_sha256": "345f62a2821db9795e4fd359f059b726d9c215329847db41d410281056a01559",
+  "typed_reason": ""
+}

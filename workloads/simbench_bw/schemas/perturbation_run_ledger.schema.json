@@ -1,0 +1,727 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "simbench_bw/schemas/perturbation_run_ledger.schema.json",
+  "title": "Perturbation Run Ledger Bundle (per-kernel-per-launch)",
+  "description": "One bundle per (slug, shape_point, binary_sha256, source_commit, kernel_signature_sha256) tuple. Implements the perturbation-harness clause: produces matched .ca/.cg/.cs cache-modifier perturbation binaries plus a working_set_sweep ladder for a target kernel, confirms each perturbation under SASS modifier audit, and records a per-mode correctness_delta against the deterministic baseline reference. Every closed branch uses additionalProperties: false. Loop-scope families on sm_120-laptop: cache_modifier_ca, cache_modifier_cg, cache_modifier_cs, working_set_sweep (R45 added cache_modifier_cs to close the microbench-suite-coverage criterion's cache-modifier-variants family). Cache-modifier admission requires sass_match_count >= sass_expected_match_count = 2 inside the target kernel SASS section; one-of-two and zero-of-two outcomes route to the modifier_optimized_away typed-unavailable arm. Per-mode correctness_delta one-of-three: abs_and_rel (FP via JSON-output), exact_match (INT via JSON-output), sha256_f32le (digest mode for large outputs). The negative invariant: an admitted perturbation record without sass_confirmation_hash, sass_artifact_path, sass_expected_match_count, or sass_match_count fails the schema validator.",
+  "schema_version": 1,
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "result_kind",
+    "manifest_pairing_index",
+    "device",
+    "perturbations",
+    "evidence"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "result_kind": {
+      "type": "string",
+      "enum": [
+        "ok"
+      ]
+    },
+    "manifest_pairing_index": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "slug",
+        "shape_point",
+        "binary_sha256",
+        "source_commit",
+        "kernel_signature_sha256"
+      ],
+      "properties": {
+        "slug": {
+          "type": "string",
+          "minLength": 1
+        },
+        "shape_point": {
+          "type": "string",
+          "minLength": 1
+        },
+        "binary_sha256": {
+          "type": "string"
+        },
+        "source_commit": {
+          "type": "string"
+        },
+        "kernel_signature_sha256": {
+          "type": "string"
+        },
+        "source_commit_override_from": {
+          "type": "string",
+          "description": "Audit annotation: the MPI source_commit value BEFORE refresh_predictor_trace_source_commit.py overwrote it. Optional; present only when the refresh utility actually rewrote the source_commit. Distinct from the bundle's top-level source_commit_override_from (which audits the trace JSON's source_commit, not the MPI's)."
+        }
+      }
+    },
+    "device": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "device_name",
+        "compute_capability_major",
+        "compute_capability_minor",
+        "sm_count",
+        "l2_cache_size_bytes"
+      ],
+      "properties": {
+        "device_name": {
+          "type": "string"
+        },
+        "compute_capability_major": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "compute_capability_minor": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sm_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "l2_cache_size_bytes": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    "perturbations": {
+      "type": "array",
+      "minItems": 10,
+      "items": {
+        "$ref": "#/$defs/perturbation_record"
+      }
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/evidence_record"
+      }
+    }
+  },
+  "$defs": {
+    "target_arch_enum": {
+      "type": "string",
+      "enum": [
+        "sm_86",
+        "sm_120-laptop"
+      ]
+    },
+    "family": {
+      "type": "string",
+      "enum": [
+        "cache_modifier_ca",
+        "cache_modifier_cg",
+        "cache_modifier_cs",
+        "working_set_sweep"
+      ]
+    },
+    "cache_modifier_family": {
+      "type": "string",
+      "enum": [
+        "cache_modifier_ca",
+        "cache_modifier_cg",
+        "cache_modifier_cs"
+      ]
+    },
+    "typed_reason": {
+      "type": "string",
+      "enum": [
+        "modifier_optimized_away",
+        "correctness_equivalence_failed",
+        "arch_feature_unavailable_l2_prefetch_64b",
+        "arch_feature_unavailable_l2_prefetch_128b",
+        "arch_feature_unavailable_l2_prefetch_256b",
+        "arch_feature_unavailable_l2_persisting",
+        "arch_feature_unavailable_eviction_buffer",
+        "arch_feature_unavailable_carveout",
+        "perturbation_compile_failed"
+      ]
+    },
+    "arch_feature_unavailable_typed_reason": {
+      "type": "string",
+      "enum": [
+        "arch_feature_unavailable_l2_prefetch_64b",
+        "arch_feature_unavailable_l2_prefetch_128b",
+        "arch_feature_unavailable_l2_prefetch_256b",
+        "arch_feature_unavailable_l2_persisting",
+        "arch_feature_unavailable_eviction_buffer",
+        "arch_feature_unavailable_carveout"
+      ]
+    },
+    "comparison_mode": {
+      "type": "string",
+      "enum": [
+        "abs_and_rel",
+        "exact_match",
+        "sha256_f32le"
+      ]
+    },
+    "dtype": {
+      "type": "string",
+      "enum": [
+        "fp32",
+        "fp16",
+        "bf16",
+        "int8",
+        "int32"
+      ]
+    },
+    "sass_status": {
+      "type": "string",
+      "enum": [
+        "pass",
+        "fail"
+      ]
+    },
+    "correctness_status": {
+      "type": "string",
+      "enum": [
+        "pass",
+        "fail"
+      ]
+    },
+    "correctness_delta": {
+      "oneOf": [
+        {
+          "title": "abs_and_rel mode (FP via JSON-output)",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "dtype",
+            "comparison_mode",
+            "abs_tol",
+            "rel_tol",
+            "max_abs_delta",
+            "max_rel_delta",
+            "mismatch_index",
+            "first_mismatch_actual_value",
+            "first_mismatch_reference_value",
+            "element_count",
+            "reference_path",
+            "actual_output_path"
+          ],
+          "properties": {
+            "dtype": {
+              "$ref": "#/$defs/dtype"
+            },
+            "comparison_mode": {
+              "const": "abs_and_rel"
+            },
+            "abs_tol": {
+              "type": "number",
+              "minimum": 0
+            },
+            "rel_tol": {
+              "type": "number",
+              "minimum": 0
+            },
+            "max_abs_delta": {
+              "type": "number",
+              "minimum": 0
+            },
+            "max_rel_delta": {
+              "type": "number",
+              "minimum": 0
+            },
+            "mismatch_index": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "first_mismatch_actual_value": {
+              "type": "number"
+            },
+            "first_mismatch_reference_value": {
+              "type": "number"
+            },
+            "element_count": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "reference_path": {
+              "type": "string",
+              "minLength": 1
+            },
+            "actual_output_path": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        {
+          "title": "exact_match mode (INT via JSON-output)",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "dtype",
+            "comparison_mode",
+            "abs_tol",
+            "max_abs_delta",
+            "mismatch_index",
+            "first_mismatch_actual_value",
+            "first_mismatch_reference_value",
+            "element_count",
+            "reference_path",
+            "actual_output_path"
+          ],
+          "properties": {
+            "dtype": {
+              "$ref": "#/$defs/dtype"
+            },
+            "comparison_mode": {
+              "const": "exact_match"
+            },
+            "abs_tol": {
+              "type": "number",
+              "const": 0
+            },
+            "max_abs_delta": {
+              "type": "number",
+              "minimum": 0
+            },
+            "mismatch_index": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "first_mismatch_actual_value": {
+              "type": "number"
+            },
+            "first_mismatch_reference_value": {
+              "type": "number"
+            },
+            "element_count": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "reference_path": {
+              "type": "string",
+              "minLength": 1
+            },
+            "actual_output_path": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        },
+        {
+          "title": "sha256_f32le mode (digest comparison for large outputs)",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "dtype",
+            "comparison_mode",
+            "abs_tol",
+            "rel_tol",
+            "actual_sha256",
+            "reference_sha256",
+            "element_count",
+            "reference_path",
+            "actual_output_path"
+          ],
+          "properties": {
+            "dtype": {
+              "$ref": "#/$defs/dtype"
+            },
+            "comparison_mode": {
+              "const": "sha256_f32le"
+            },
+            "abs_tol": {
+              "type": "number",
+              "minimum": 0
+            },
+            "rel_tol": {
+              "type": "number",
+              "minimum": 0
+            },
+            "actual_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "reference_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "element_count": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "reference_path": {
+              "type": "string",
+              "minLength": 1
+            },
+            "actual_output_path": {
+              "type": "string",
+              "minLength": 1
+            }
+          }
+        }
+      ]
+    },
+    "perturbation_record": {
+      "oneOf": [
+        {
+          "title": "Admitted perturbation record",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "result_kind",
+            "family",
+            "parameter",
+            "target_arch",
+            "binary_sha256",
+            "build_flags",
+            "source_sha256",
+            "parent_baseline_binary_sha256",
+            "sass_artifact_path",
+            "sass_confirmation_hash",
+            "sass_confirmation_status",
+            "sass_expected_match_count",
+            "sass_match_count",
+            "correctness_equivalence_status",
+            "correctness_delta"
+          ],
+          "properties": {
+            "result_kind": {
+              "const": "ok"
+            },
+            "family": {
+              "$ref": "#/$defs/family"
+            },
+            "parameter": {
+              "type": "object"
+            },
+            "target_arch": {
+              "$ref": "#/$defs/target_arch_enum"
+            },
+            "binary_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "build_flags": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1
+            },
+            "source_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "parent_baseline_binary_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "sass_artifact_path": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sass_confirmation_hash": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "sass_confirmation_status": {
+              "const": "pass"
+            },
+            "sass_expected_match_count": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "sass_match_count": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "correctness_equivalence_status": {
+              "const": "pass"
+            },
+            "correctness_delta": {
+              "$ref": "#/$defs/correctness_delta"
+            }
+          }
+        },
+        {
+          "title": "perturbation_compile_failed typed-unavailable record",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "result_kind",
+            "family",
+            "typed_reason",
+            "parameter",
+            "target_arch",
+            "build_flags",
+            "source_sha256",
+            "parent_baseline_binary_sha256",
+            "compiler_returncode",
+            "compiler_stderr_tail"
+          ],
+          "properties": {
+            "result_kind": {
+              "const": "typed_unavailable"
+            },
+            "family": {
+              "$ref": "#/$defs/family"
+            },
+            "typed_reason": {
+              "const": "perturbation_compile_failed"
+            },
+            "parameter": {
+              "type": "object"
+            },
+            "target_arch": {
+              "$ref": "#/$defs/target_arch_enum"
+            },
+            "build_flags": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1
+            },
+            "source_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "parent_baseline_binary_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "compiler_returncode": {
+              "type": "integer"
+            },
+            "compiler_stderr_tail": {
+              "type": "string",
+              "maxLength": 4096
+            }
+          }
+        },
+        {
+          "title": "modifier_optimized_away typed-unavailable record",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "result_kind",
+            "family",
+            "typed_reason",
+            "parameter",
+            "target_arch",
+            "binary_sha256",
+            "build_flags",
+            "source_sha256",
+            "parent_baseline_binary_sha256",
+            "sass_artifact_path",
+            "sass_confirmation_hash",
+            "sass_expected_match_count",
+            "sass_match_count"
+          ],
+          "properties": {
+            "result_kind": {
+              "const": "typed_unavailable"
+            },
+            "family": {
+              "$ref": "#/$defs/cache_modifier_family"
+            },
+            "typed_reason": {
+              "const": "modifier_optimized_away"
+            },
+            "parameter": {
+              "type": "object"
+            },
+            "target_arch": {
+              "$ref": "#/$defs/target_arch_enum"
+            },
+            "binary_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "build_flags": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1
+            },
+            "source_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "parent_baseline_binary_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "sass_artifact_path": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sass_confirmation_hash": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "sass_expected_match_count": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "sass_match_count": {
+              "type": "integer",
+              "minimum": 0
+            }
+          }
+        },
+        {
+          "title": "correctness_equivalence_failed typed-unavailable record",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "result_kind",
+            "family",
+            "typed_reason",
+            "parameter",
+            "target_arch",
+            "binary_sha256",
+            "build_flags",
+            "source_sha256",
+            "parent_baseline_binary_sha256",
+            "sass_artifact_path",
+            "sass_confirmation_hash",
+            "sass_confirmation_status",
+            "sass_expected_match_count",
+            "sass_match_count",
+            "correctness_delta"
+          ],
+          "properties": {
+            "result_kind": {
+              "const": "typed_unavailable"
+            },
+            "family": {
+              "$ref": "#/$defs/family"
+            },
+            "typed_reason": {
+              "const": "correctness_equivalence_failed"
+            },
+            "parameter": {
+              "type": "object"
+            },
+            "target_arch": {
+              "$ref": "#/$defs/target_arch_enum"
+            },
+            "binary_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "build_flags": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "minItems": 1
+            },
+            "source_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "parent_baseline_binary_sha256": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "sass_artifact_path": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sass_confirmation_hash": {
+              "type": "string",
+              "pattern": "^[0-9a-f]{64}$"
+            },
+            "sass_confirmation_status": {
+              "const": "pass"
+            },
+            "sass_expected_match_count": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "sass_match_count": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "correctness_delta": {
+              "$ref": "#/$defs/correctness_delta"
+            }
+          }
+        },
+        {
+          "title": "arch_feature_unavailable_* typed-unavailable record",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "result_kind",
+            "family",
+            "typed_reason",
+            "parameter",
+            "target_arch"
+          ],
+          "properties": {
+            "result_kind": {
+              "const": "typed_unavailable"
+            },
+            "family": {
+              "$ref": "#/$defs/family"
+            },
+            "typed_reason": {
+              "$ref": "#/$defs/arch_feature_unavailable_typed_reason"
+            },
+            "parameter": {
+              "type": "object"
+            },
+            "target_arch": {
+              "$ref": "#/$defs/target_arch_enum"
+            }
+          }
+        }
+      ]
+    },
+    "evidence_record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "result_kind",
+        "note_kind"
+      ],
+      "properties": {
+        "result_kind": {
+          "const": "info"
+        },
+        "note_kind": {
+          "type": "string",
+          "enum": [
+            "perturbation_run_summary"
+          ]
+        },
+        "total_perturbation_attempts": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "admitted_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "typed_unavailable_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sass_confirmation_pass_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "correctness_equivalence_pass_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    }
+  }
+}

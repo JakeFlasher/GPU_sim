@@ -1,0 +1,53 @@
+{
+  "by_assoc": {
+    "16": {
+      "raw_l1_hit_rate": 0.5009505626303136,
+      "raw_l2_hit_rate": 0.05786852643614629,
+      "scored": true,
+      "typed_reason": ""
+    },
+    "32": {
+      "raw_l1_hit_rate": 0.5009505626303136,
+      "raw_l2_hit_rate": 0.48109613685995917,
+      "scored": true,
+      "typed_reason": ""
+    },
+    "4": {
+      "raw_l1_hit_rate": 0.5009505626303136,
+      "raw_l2_hit_rate": 0.0034681015937010604,
+      "scored": true,
+      "typed_reason": ""
+    },
+    "64": {
+      "raw_l1_hit_rate": 0.5009505626303136,
+      "raw_l2_hit_rate": 0.4851332238713768,
+      "scored": true,
+      "typed_reason": ""
+    },
+    "8": {
+      "raw_l1_hit_rate": 0.5009505626303136,
+      "raw_l2_hit_rate": 0.012723597721890766,
+      "scored": true,
+      "typed_reason": ""
+    }
+  },
+  "candidates": [
+    4,
+    8,
+    16,
+    32,
+    64
+  ],
+  "captured_at_utc": "2026-05-30T01:07:43+00:00",
+  "dense_reuse": {
+    "distinct_sectors": 745054,
+    "reuse_factor": 2.5371033508980556,
+    "total_sector_accesses": 1890279,
+    "truncated": true
+  },
+  "schema_version": 2,
+  "scored": true,
+  "slug": "problem_080_adaptive_layernorm_continuous_with_modulation",
+  "tier2_sidecar_sha256": "c9f8b16967cb2ffd60e5ea9da3125d9cf2d8a6bf32daeebe9328c6d0a7aff600",
+  "typed_reason": ""
+}

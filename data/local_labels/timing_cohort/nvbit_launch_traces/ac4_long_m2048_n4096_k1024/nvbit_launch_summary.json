@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "slug": "gemm_hmma_bf16_sm80",
+  "shape_point": "ac4_long_m2048_n4096_k1024",
+  "repeat_index": 0,
+  "launch_index": 0,
+  "kernel_name": "gemm_hmma_bf16_sm80_kernel___0",
+  "kernel_signature_sha256": "94751f2ce0400cc73765a006ed7542796537816820513a91868aa99face04628",
+  "inst_count": 393216,
+  "binary_sha256": "9426d432bb8afb182ede845b65d59673a468f072141427798281e96dc9d95fa6",
+  "nvbit_trace_pb_path": "data/local_labels/timing_cohort/nvbit_launch_traces/ac4_long_m2048_n4096_k1024/dynamic_trace.pb",
+  "nvbit_trace_pb_sha256": "789e45004fb80882cee3b60a32d44c60291004e15898cffea9f86cb06230626b",
+  "nvbit_tracer_build_hash": "67083eace7f6257ce5e33a6eb80ae0d3f240bbd667f254cdb67e1b7d20d5ed51"
+}

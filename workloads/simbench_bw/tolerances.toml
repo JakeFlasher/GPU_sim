@@ -1,0 +1,460 @@
+# SimBench-BW numerical tolerance policy.
+#
+# Keyed by (dtype, reduction_kind, kernel_family) triplets. Every roster row
+# maps to exactly one entry; run_suite.py --mode correctness --verbose logs the
+# matched triplet. Adding a new kernel whose triplet is not covered here is an
+# explicit extension requirement: append an entry before the kernel lands.
+
+schema_version = 1
+
+[[entries]]
+dtype = "BF16"
+reduction_kind = "atomic_add"
+kernel_family = "attention"
+rtol = 0.025
+atol = 0.025
+max_ulp = 128
+notes = "Nondeterministic reduction; widened bands to accommodate scheduling reorder."
+[entries.atomic_nondeterminism_allowance]
+rtol = 0.0375
+atol = 0.0375
+
+[[entries]]
+dtype = "BF16"
+reduction_kind = "atomic_add"
+kernel_family = "embedding"
+rtol = 0.025
+atol = 0.025
+max_ulp = 128
+notes = "Nondeterministic reduction; widened bands to accommodate scheduling reorder."
+[entries.atomic_nondeterminism_allowance]
+rtol = 0.0375
+atol = 0.0375
+
+[[entries]]
+dtype = "BF16"
+reduction_kind = "atomic_add"
+kernel_family = "grouped_gemm"
+rtol = 0.025
+atol = 0.025
+max_ulp = 128
+notes = "Nondeterministic reduction; widened bands to accommodate scheduling reorder."
+[entries.atomic_nondeterminism_allowance]
+rtol = 0.0375
+atol = 0.0375
+
+[[entries]]
+dtype = "BF16"
+reduction_kind = "atomic_add"
+kernel_family = "norm"
+rtol = 0.025
+atol = 0.025
+max_ulp = 128
+notes = "Nondeterministic reduction; widened bands to accommodate scheduling reorder."
+[entries.atomic_nondeterminism_allowance]
+rtol = 0.0375
+atol = 0.0375
+
+[[entries]]
+dtype = "BF16"
+reduction_kind = "atomic_add"
+kernel_family = "ssm"
+rtol = 0.025
+atol = 0.025
+max_ulp = 128
+notes = "Nondeterministic reduction; widened bands to accommodate scheduling reorder."
+[entries.atomic_nondeterminism_allowance]
+rtol = 0.0375
+atol = 0.0375
+
+[[entries]]
+dtype = "BF16"
+reduction_kind = "fma_chain"
+kernel_family = "grouped_gemm"
+rtol = 0.01
+atol = 0.01
+max_ulp = 128
+notes = "Dependent FMA chain; ULP-driven tolerance dominates rtol/atol for low-precision."
+
+[[entries]]
+dtype = "BF16"
+reduction_kind = "fma_chain"
+kernel_family = "mma_microbench"
+rtol = 0.01
+atol = 0.01
+max_ulp = 128
+notes = "Dependent FMA chain; ULP-driven tolerance dominates rtol/atol for low-precision."
+
+[[entries]]
+dtype = "BF16"
+reduction_kind = "fma_chain"
+kernel_family = "rope"
+rtol = 0.01
+atol = 0.01
+max_ulp = 128
+notes = "Dependent FMA chain; ULP-driven tolerance dominates rtol/atol for low-precision."
+
+[[entries]]
+dtype = "BF16"
+reduction_kind = "fma_chain"
+kernel_family = "ssm"
+rtol = 0.01
+atol = 0.01
+max_ulp = 128
+notes = "Dependent FMA chain; ULP-driven tolerance dominates rtol/atol for low-precision."
+
+[[entries]]
+dtype = "BF16"
+reduction_kind = "none"
+kernel_family = "tma"
+rtol = 0.01
+atol = 0.01
+max_ulp = 128
+notes = "No reduction; pure-copy or elementwise comparison."
+
+[[entries]]
+dtype = "BF16"
+reduction_kind = "tree_sum"
+kernel_family = "activation"
+rtol = 0.01
+atol = 0.01
+max_ulp = 128
+notes = "Standard tree reduction; bands match dtype baseline."
+
+[[entries]]
+dtype = "BF16"
+reduction_kind = "tree_sum"
+kernel_family = "attention"
+rtol = 0.01
+atol = 0.01
+max_ulp = 128
+notes = "Standard tree reduction; bands match dtype baseline."
+
+[[entries]]
+dtype = "BF16"
+reduction_kind = "tree_sum"
+kernel_family = "audio"
+rtol = 0.01
+atol = 0.01
+max_ulp = 128
+notes = "Standard tree reduction; bands match dtype baseline."
+
+[[entries]]
+dtype = "BF16"
+reduction_kind = "tree_sum"
+kernel_family = "conv"
+rtol = 0.01
+atol = 0.01
+max_ulp = 128
+notes = "Standard tree reduction; bands match dtype baseline."
+
+[[entries]]
+dtype = "BF16"
+reduction_kind = "tree_sum"
+kernel_family = "diffusion"
+rtol = 0.01
+atol = 0.01
+max_ulp = 128
+notes = "Standard tree reduction; bands match dtype baseline."
+
+[[entries]]
+dtype = "BF16"
+reduction_kind = "tree_sum"
+kernel_family = "multimodal"
+rtol = 0.01
+atol = 0.01
+max_ulp = 128
+notes = "Standard tree reduction; bands match dtype baseline."
+
+[[entries]]
+dtype = "BF16"
+reduction_kind = "tree_sum"
+kernel_family = "norm"
+rtol = 0.01
+atol = 0.01
+max_ulp = 128
+notes = "Standard tree reduction; bands match dtype baseline."
+
+[[entries]]
+dtype = "BF16"
+reduction_kind = "tree_sum"
+kernel_family = "paged_attention"
+rtol = 0.01
+atol = 0.01
+max_ulp = 128
+notes = "Standard tree reduction; bands match dtype baseline."
+
+[[entries]]
+dtype = "BF16"
+reduction_kind = "tree_sum"
+kernel_family = "sampling"
+rtol = 0.01
+atol = 0.01
+max_ulp = 128
+notes = "Standard tree reduction; bands match dtype baseline."
+
+[[entries]]
+dtype = "BF16"
+reduction_kind = "tree_sum"
+kernel_family = "tts"
+rtol = 0.01
+atol = 0.01
+max_ulp = 128
+notes = "Standard tree reduction; bands match dtype baseline."
+
+[[entries]]
+dtype = "BF16"
+reduction_kind = "tree_sum"
+kernel_family = "vision_encoder"
+rtol = 0.01
+atol = 0.01
+max_ulp = 128
+notes = "Standard tree reduction; bands match dtype baseline."
+
+[[entries]]
+dtype = "BF16"
+reduction_kind = "warp_shuffle_sum"
+kernel_family = "cluster_dsmem"
+rtol = 0.015
+atol = 0.015
+max_ulp = 128
+notes = "Warp-shuffle reduction; slight band widening for shuffle-order variance."
+
+[[entries]]
+dtype = "BF16"
+reduction_kind = "warp_shuffle_sum"
+kernel_family = "embedding"
+rtol = 0.015
+atol = 0.015
+max_ulp = 128
+notes = "Warp-shuffle reduction; slight band widening for shuffle-order variance."
+
+[[entries]]
+dtype = "FP16"
+reduction_kind = "fma_chain"
+kernel_family = "mma_microbench"
+rtol = 0.005
+atol = 0.005
+max_ulp = 64
+notes = "Dependent FMA chain; ULP-driven tolerance dominates rtol/atol for low-precision."
+
+[[entries]]
+dtype = "FP32"
+reduction_kind = "fma_chain"
+kernel_family = "mma_microbench"
+rtol = 0.0001
+atol = 1e-05
+max_ulp = 4
+notes = "Dependent FMA chain; ULP-driven tolerance dominates rtol/atol for low-precision."
+
+[[entries]]
+dtype = "FP32"
+reduction_kind = "fma_chain"
+kernel_family = "ssm"
+rtol = 0.0001
+atol = 1e-05
+max_ulp = 4
+notes = "Dependent FMA chain; ULP-driven tolerance dominates rtol/atol for low-precision."
+
+[[entries]]
+dtype = "FP32"
+reduction_kind = "none"
+kernel_family = "tma"
+rtol = 0.0001
+atol = 1e-05
+max_ulp = 4
+notes = "No reduction; pure-copy or elementwise comparison."
+
+[[entries]]
+dtype = "FP4_E2M1"
+reduction_kind = "fma_chain"
+kernel_family = "mma_microbench"
+rtol = 0.15
+atol = 0.15
+max_ulp = 2
+notes = "Dependent FMA chain; ULP-driven tolerance dominates rtol/atol for low-precision."
+
+[[entries]]
+dtype = "FP6_E2M3"
+reduction_kind = "fma_chain"
+kernel_family = "mma_microbench"
+rtol = 0.1
+atol = 0.1
+max_ulp = 4
+notes = "Dependent FMA chain; ULP-driven tolerance dominates rtol/atol for low-precision."
+
+[[entries]]
+dtype = "FP6_E3M2"
+reduction_kind = "fma_chain"
+kernel_family = "mma_microbench"
+rtol = 0.1
+atol = 0.1
+max_ulp = 4
+notes = "Dependent FMA chain; ULP-driven tolerance dominates rtol/atol for low-precision."
+
+[[entries]]
+dtype = "FP8_E4M3"
+reduction_kind = "atomic_add"
+kernel_family = "attention"
+rtol = 0.125
+atol = 0.125
+max_ulp = 8
+notes = "Nondeterministic reduction; widened bands to accommodate scheduling reorder."
+[entries.atomic_nondeterminism_allowance]
+rtol = 0.1875
+atol = 0.1875
+
+[[entries]]
+dtype = "FP8_E4M3"
+reduction_kind = "fma_chain"
+kernel_family = "grouped_gemm"
+rtol = 0.05
+atol = 0.05
+max_ulp = 8
+notes = "Dependent FMA chain; ULP-driven tolerance dominates rtol/atol for low-precision."
+
+[[entries]]
+dtype = "FP8_E4M3"
+reduction_kind = "fma_chain"
+kernel_family = "mma_microbench"
+rtol = 0.05
+atol = 0.05
+max_ulp = 8
+notes = "Dependent FMA chain; ULP-driven tolerance dominates rtol/atol for low-precision."
+
+[[entries]]
+dtype = "FP8_E4M3"
+reduction_kind = "tree_sum"
+kernel_family = "attention"
+rtol = 0.05
+atol = 0.05
+max_ulp = 8
+notes = "Standard tree reduction; bands match dtype baseline."
+
+[[entries]]
+dtype = "FP8_E5M2"
+reduction_kind = "fma_chain"
+kernel_family = "mma_microbench"
+rtol = 0.08
+atol = 0.08
+max_ulp = 8
+notes = "Dependent FMA chain; ULP-driven tolerance dominates rtol/atol for low-precision."
+
+[[entries]]
+dtype = "INT8"
+reduction_kind = "atomic_add"
+kernel_family = "cluster_dsmem"
+rtol = 0
+atol = 2.5
+max_ulp = 0
+notes = "Nondeterministic reduction; widened bands to accommodate scheduling reorder."
+[entries.atomic_nondeterminism_allowance]
+rtol = 0
+atol = 3.75
+
+[[entries]]
+dtype = "FP32"
+reduction_kind = "atomic_add"
+kernel_family = "cluster_dsmem"
+rtol = 0.0001
+atol = 0.001
+max_ulp = 4
+notes = "FP32 cluster+DSMEM atomic reduction; tolerates atomic-ordering reassociation over small cluster sizes. Added R11 for cluster_remote_reduction row-contract alignment."
+[entries.atomic_nondeterminism_allowance]
+rtol = 0.0005
+atol = 0.01
+
+[[entries]]
+dtype = "INT8"
+reduction_kind = "atomic_add"
+kernel_family = "mma_microbench"
+rtol = 0
+atol = 2.5
+max_ulp = 0
+notes = "Nondeterministic reduction; widened bands to accommodate scheduling reorder."
+[entries.atomic_nondeterminism_allowance]
+rtol = 0
+atol = 3.75
+
+[[entries]]
+dtype = "INT8"
+reduction_kind = "fma_chain"
+kernel_family = "mma_microbench"
+rtol = 0
+atol = 1
+max_ulp = 0
+notes = "Dependent FMA chain; ULP-driven tolerance dominates rtol/atol for low-precision."
+
+[[entries]]
+dtype = "INT8"
+reduction_kind = "warp_shuffle_sum"
+kernel_family = "cluster_dsmem"
+rtol = 0
+atol = 1.5
+max_ulp = 0
+notes = "Warp-shuffle reduction; slight band widening for shuffle-order variance."
+
+[[entries]]
+dtype = "MIXED"
+reduction_kind = "atomic_add"
+kernel_family = "grouped_gemm"
+rtol = 0.125
+atol = 0.125
+max_ulp = 64
+notes = "Nondeterministic reduction; widened bands to accommodate scheduling reorder."
+[entries.atomic_nondeterminism_allowance]
+rtol = 0.1875
+atol = 0.1875
+
+[[entries]]
+dtype = "NVFP4"
+reduction_kind = "fma_chain"
+kernel_family = "grouped_gemm"
+rtol = 0.1
+atol = 0.1
+max_ulp = 4
+notes = "Dependent FMA chain; ULP-driven tolerance dominates rtol/atol for low-precision."
+
+[[entries]]
+dtype = "NVFP4"
+reduction_kind = "fma_chain"
+kernel_family = "mma_microbench"
+rtol = 0.2
+atol = 0.75
+max_ulp = 4
+notes = "NVFP4 per-16-element block-scaled MMA at K=256 accumulation. The band reflects the inherent floor observed empirically AND via a Python ideal-quantization simulation: both give max absolute error ~0.7 on random [-0.5, 0.5] inputs (R19 `nvfp4_blockscale_gemm` validation). Each element is quantized to signed 4-bit FP (step ~0.125 at unit scale); cumulative error over K=256 independent rounding events reaches ~sqrt(K) * per-element-step = sqrt(256) * 0.05 = 0.8 in the worst random tail. rtol stays tight (0.2) because the relative error for large |ref| IS per-block-FP8-tier (~20%)."
+
+[[entries]]
+dtype = "TF32"
+reduction_kind = "fma_chain"
+kernel_family = "mma_microbench"
+rtol = 0.005
+atol = 0.005
+max_ulp = 16
+notes = "TF32 m16n8k8 MMA at K up to 32 (correctness shape). TF32 has a 10-bit mantissa (eps ~= 2^-10 = 1e-3); per-element FMA error grows by sqrt(K)*eps for randomly signed errors and up to K*eps in the worst-case tail. R42 widened from rtol=5e-4/atol=1e-4 (which assumed K~1) to rtol=atol=5e-3 to fit the measured precision floor on the K=32 correctness shape (max abs diff ~1e-3 observed)."
+[[entries]]
+dtype = "FP8_E4M3"
+reduction_kind = "fma_chain"
+kernel_family = "control"
+rtol = 5e-2
+atol = 5e-2
+max_ulp = 8
+notes = "Vendor-library FP8 matmul control; same BASE band as the mma_microbench family."
+
+[[entries]]
+dtype = "BF16"
+reduction_kind = "fma_chain"
+kernel_family = "control"
+rtol = 1e-2
+atol = 1e-2
+max_ulp = 128
+notes = "Vendor-library BF16 GEMM control."
+
+[[entries]]
+dtype = "FP32"
+reduction_kind = "fma_chain"
+kernel_family = "control"
+rtol = 1e-3
+atol = 1e-3
+max_ulp = 16
+notes = "Vendor-library FP32 strided-batched SGEMM control (cublasSgemmStridedBatched under CUBLAS_PEDANTIC_MATH forces the deterministic FFMA SIMT path: no HMMA, no TF32). Band is the FP32 step of the control-family precision progression (FP8 5e-2 -> BF16 1e-2 -> FP32 1e-3): ~a decade tighter than the BF16 control floor, reflecting FP32's narrower accumulate floor while absorbing the K-accumulation-order divergence between the batched FFMA GEMM and the FP32 CPU matmul reference."

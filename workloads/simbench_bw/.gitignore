@@ -1,0 +1,15 @@
+# Per-kernel build artifacts; rebuilt on demand via each kernel's Makefile.
+l?/*/*_run
+l?/*/*.o
+l?/*/sass_archive/
+# Per-cap register-spill build-variant binaries, rebuilt on demand via
+# `make spill-variants` (named <slug>_run__cap<N>, one level below the slug
+# dir, so the *_run pattern above does not cover them). Host-local build
+# artifacts; the variant identity lives in the committed build-variant manifest.
+l?/*/spill_variants/
+results/
+
+# Round 43 compiled-helper enforcement: per-row helpers_lib.so build
+# artifact, rebuilt on demand by the compiled-helper test fixture via
+# `make -C l?/<row>/ helpers_lib`.
+l?/*/helpers_lib.so

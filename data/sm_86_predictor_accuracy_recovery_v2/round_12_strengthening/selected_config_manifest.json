@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "selected_per_cell": [
+    {
+      "arch": "sm_86",
+      "cache_control": "all",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "carveout_sensitivity_probe",
+      "source_relpath": "cell=sm_86__carveout_sensitivity_probe__trace_l2_accuracy_xl/cfg=warmup0_cache_all/_aggregator_out/label_admitted.json",
+      "source_sha256": "45e4f0fb59ab722484a3058d0152b4058abd599ac65f74c56146c2b9bef6f123",
+      "stddev_l1tex_sector": 0.0,
+      "stddev_l2_sector": 0.00710197155725085,
+      "warmup_count": 0
+    },
+    {
+      "arch": "sm_86",
+      "cache_control": "all",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "working_set_capacity_sweep",
+      "source_relpath": "cell=sm_86__working_set_capacity_sweep__trace_l2_accuracy_xl/cfg=warmup0_cache_all/_aggregator_out/label_admitted.json",
+      "source_sha256": "57c2a63c64601264e521c9cca010d14a72be102e3b7b91b018082cbbb7c75754",
+      "stddev_l1tex_sector": 0.0,
+      "stddev_l2_sector": 0.027940025053675245,
+      "warmup_count": 0
+    }
+  ],
+  "sub_sweep_relpath": "data/local_labels/sweeps/_partial_diagnostic_sweep_20260517T211301Z_d74c294c7eae"
+}

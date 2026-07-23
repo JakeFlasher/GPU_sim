@@ -1,0 +1,121 @@
+{
+  "advisory": true,
+  "advisory_thresholds": {
+    "loocv_vs_holdout_gap": {
+      "advisory_max": 0.2,
+      "value": 0.5633402278831148,
+      "within_advisory_band": false
+    },
+    "per_slug_loso_headline_change": {
+      "advisory_max": 0.25,
+      "value": 0.014138485582011584,
+      "within_advisory_band": true
+    }
+  },
+  "arches": [
+    "sm_120"
+  ],
+  "bootstrap_ci": {
+    "ci_high": 1.0801459498439638,
+    "ci_low": 0.4093576299514915,
+    "geomean": 0.6530009446392582,
+    "n_resamples": 2000,
+    "percentile": 95.0,
+    "seed": 20260527
+  },
+  "cohort_size": 30,
+  "family_bucket_counts": {
+    "activation_norm": 7,
+    "memory_stress": 7,
+    "other": 7,
+    "tensor_compute": 9
+  },
+  "gates_closure": false,
+  "loocv": {
+    "geomean_relative_error": 0.6530009446392582,
+    "median_absolute_error": 0.3723408,
+    "n": 30
+  },
+  "loso": {
+    "geomean_relative_error": 0.6671394302212698,
+    "median_absolute_error": 0.3880845833333334,
+    "n": 30
+  },
+  "n_slugs": 19,
+  "note": "Advisory robustness surface for the calibrated cache-replay predictor. It does NOT gate closure (gates_closure=false); it only characterizes how stable the calibrated headline accuracy is under held-out resampling. All thresholds are advisory bands, not pass / fail gates.",
+  "per_cell_stability": {
+    "all_cells_stable": true,
+    "grid_is_inert": true,
+    "n_cells": 30,
+    "n_unstable": 0,
+    "per_cell_stable": {
+      "carveout_sensitivity_probe/trace_l2_accuracy_xl": true,
+      "conv2d_implicit_gemm_bf16_sm80/timing_shape": true,
+      "cross_entropy_fwd_fp32_sm80/correctness_shape": true,
+      "cross_entropy_fwd_fp32_sm80/timing_shape": true,
+      "cross_entropy_fwd_fp32_sm80/trace_l2_accuracy_xl": true,
+      "embedding_gather_int32_sm80/timing_shape": true,
+      "embedding_gather_int32_sm80/trace_l2_accuracy_xl": true,
+      "flash_attn_fwd_bf16_sm80/timing_shape": true,
+      "gemm_hmma_bf16_sm80/timing_shape": true,
+      "gemm_hmma_bf16_sm80/trace_l2_accuracy_lg": true,
+      "gemm_hmma_bf16_sm80/trace_l2_accuracy_xl": true,
+      "gemm_hmma_fp16_sm80/timing_shape": true,
+      "gemm_hmma_fp16_sm80/trace_l2_accuracy_xl": true,
+      "gemm_imma_int8_sm80/timing_shape": true,
+      "gemm_imma_int8_sm80/trace_l2_accuracy_xl": true,
+      "gemm_sparse_2to4_bf16_sm80/timing_shape": true,
+      "l2_persisting_window_sweep/trace_l2_accuracy_xl": true,
+      "l2_prefetch_hint_sweep/trace_l2_accuracy_xl": true,
+      "layernorm_fwd_bf16_sm80/timing_shape": true,
+      "layernorm_fwd_bf16_sm80/trace_l2_accuracy_xl": true,
+      "rmsnorm_bwd_bf16_sm80/timing_shape": true,
+      "rmsnorm_fwd_bf16_sm80/timing_shape": true,
+      "rmsnorm_fwd_bf16_sm80/trace_l2_accuracy_xl": true,
+      "silu_fwd_bf16_sm80/timing_shape": true,
+      "softmax_safe_bf16_sm80/timing_shape": true,
+      "softmax_safe_bf16_sm80/trace_l2_accuracy_xl": true,
+      "swiglu_fwd_bf16_sm80/timing_shape": true,
+      "swiglu_fwd_bf16_sm80/trace_l2_accuracy_xl": true,
+      "warm_cold_pair_relaunch/trace_l2_accuracy_xl": true,
+      "working_set_capacity_sweep/trace_l2_accuracy_xl": true
+    },
+    "reason": "The pre-registered grid is inert on this cohort: every candidate config produces an identical mechanistic prediction on every cell (the maximum per-cell prediction spread across the entire grid is zero, because all working sets fit the modeled L2 capacity). When all configs tie on every cell, the staged cross-validated search with the simpler-within-band tie-break selects the same simplest config for any cohort subset. Removing a single cell therefore cannot change the selected config, so the selection is stable for every cell. This is asserted from grid inertness rather than by re-running the staged search once per held-out cell."
+  },
+  "schema_version": 1,
+  "seed": 20260527,
+  "selected_config": {
+    "associativity": 8,
+    "capacity_bytes": 33554432,
+    "capacity_scale": 1.0,
+    "effective_capacity_bytes": 33554432,
+    "line_bytes": 128,
+    "num_sets_per_slice": 32768,
+    "num_slices": 1,
+    "prefetch": "off",
+    "replacement_policy": "LRU",
+    "sector_bytes": 32,
+    "sectors_per_line": 4,
+    "slice_hash_id": "line_mod",
+    "total_lines": 262144
+  },
+  "source_commit": "ee7c5ab43e23ca4d9a8ecb7a730e8bd2b24ca13f",
+  "stratified_split": {
+    "calibration_cell_count": 22,
+    "holdout_cell_count": 8,
+    "holdout_cell_ids": [
+      "carveout_sensitivity_probe/trace_l2_accuracy_xl",
+      "cross_entropy_fwd_fp32_sm80/timing_shape",
+      "cross_entropy_fwd_fp32_sm80/trace_l2_accuracy_xl",
+      "embedding_gather_int32_sm80/trace_l2_accuracy_xl",
+      "gemm_hmma_fp16_sm80/timing_shape",
+      "gemm_sparse_2to4_bf16_sm80/timing_shape",
+      "rmsnorm_fwd_bf16_sm80/timing_shape",
+      "rmsnorm_fwd_bf16_sm80/trace_l2_accuracy_xl"
+    ],
+    "holdout_geomean_relative_error": 1.216341172522373,
+    "holdout_median_absolute_error": 0.34124,
+    "seed": 20260527
+  },
+  "top_level_admission_scope": "target_arch=sm_120"
+}

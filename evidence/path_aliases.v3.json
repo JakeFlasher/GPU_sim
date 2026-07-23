@@ -1,0 +1,31 @@
+{
+  "activation": "inactive_operator_acceptance_required",
+  "adr": "docs/decisions/0007-evidence-retention-and-path-aliases.md",
+  "aliases": [
+    {
+      "canonical": "evidence/round28/sol_equivalence/sol_definition_equivalence_audit_r28_v1_blocking.json",
+      "historical": "/home/jakeshea/non_root_profiler/cross_arch_gpu_profiler_suite/.humanize/rlcr/2026-07-08_11-39-13/sol_definition_equivalence_audit_r28_v1_blocking.json",
+      "match": "exact",
+      "requires_sha256_match": true
+    },
+    {
+      "canonical": "evidence/round28/preparation_failures/problem-070/prep070_reconstruction/",
+      "historical": ".humanize/rlcr/2026-07-08_11-39-13/prep070_reconstruction/",
+      "match": "prefix",
+      "requires_sha256_match": true
+    },
+    {
+      "canonical": "evidence/round28/preparation_failures/problem-070/",
+      "historical": "/home/jakeshea/non_root_profiler/cross_arch_gpu_profiler_suite/.humanize/rlcr/2026-07-08_11-39-13/",
+      "match": "prefix",
+      "requires_sha256_match": true
+    }
+  ],
+  "authority_domain": "round28_preparation_failure_adjudications",
+  "effective_date": "2026-07-21",
+  "schema_version": 3,
+  "supersedes": {
+    "path": "evidence/path_aliases.v1.json",
+    "sha256": "94446cc702ffe86ecb5b35ae125a20cb758b17a4c521bfcefd4a308618f8c737"
+  }
+}

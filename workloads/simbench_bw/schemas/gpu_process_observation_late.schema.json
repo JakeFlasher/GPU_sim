@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "gpu_process_observation_late.schema.json",
+  "title": "Round-28 problem-070 late GPU-process observation",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "record_type",
+    "amendment_id",
+    "observed_at",
+    "certifying",
+    "late",
+    "method",
+    "command",
+    "raw_output_file",
+    "raw_output_sha256",
+    "interpretation"
+  ],
+  "properties": {
+    "record_type": {"const": "gpu_process_observation_late"},
+    "amendment_id": {"const": "ANNEX_C_AMEND_R28_PREP070_RECON_V2"},
+    "observed_at": {"type": "string", "format": "date-time", "pattern": "Z$"},
+    "certifying": {"const": false},
+    "late": {"const": true},
+    "method": {"const": "nvidia-smi_readonly_query"},
+    "command": {
+      "const": "nvidia-smi --query-compute-apps=pid,process_name,used_gpu_memory --format=csv"
+    },
+    "raw_output_file": {"const": "gpu_process_observation_late.raw.txt"},
+    "raw_output_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "interpretation": {
+      "const": "Late observation only; asserts nothing about the historical 2026-07-10 attempt."
+    }
+  }
+}

@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "simbench_bw/schemas/splits.schema.json",
+  "title": "SimBench-BW calibration / validation / holdout splits",
+  "description": "Stratified split assignment: 48 calibration / 24 validation / 16 holdout across the 88 benchmark rows, stratified by (domain, level, primary_precision). Calibration grew from 40 (R44 working_set_capacity_sweep + warm_cold_pair_relaunch -> 42; R46 l2_prefetch_hint_sweep -> 43; R47 l2_persisting_window_sweep -> 44; R48 carveout_sensitivity_probe -> 45; dram_streaming_dot_product -> 46; the local-memory family local_dynamic_index_array + local_volatile_array -> 48); validation grew to 24 as the atomics ATOM-vs-RED pairs (.ADD/.MAX/.AND return_used + histogram) and the vector-width copies landed. The producer (splits.toml + verify_coverage.py) wires the counts into the coverage gates; this consumer schema is held in lockstep. Stratification_keys is frozen to exactly those three dimensions in canonical order so the split is deterministic under re-generation. Prediction models use only calibration for tuning; validation is for mid-loop checks; holdout is reserved for final evaluation.",
+  "schema_version": 1,
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "stratification_keys", "counts", "assignments"],
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "stratification_keys": {
+      "type": "array",
+      "description": "Canonical-order list of the three frozen stratification dimensions.",
+      "prefixItems": [
+        { "const": "domain" },
+        { "const": "level" },
+        { "const": "primary_precision" }
+      ],
+      "items": false,
+      "minItems": 3,
+      "maxItems": 3
+    },
+    "counts": {
+      "type": "object",
+      "description": "Exact per-split membership counts. (48, 24, 16): the atomics ATOM-vs-RED and vector-width members grew validation to 24, and the local-memory family (`local_dynamic_index_array` + `local_volatile_array`) grew calibration to 48; held in lockstep with splits.toml [counts] + verify_coverage.py.",
+      "additionalProperties": false,
+      "required": ["calibration", "validation", "holdout"],
+      "properties": {
+        "calibration": { "type": "integer", "const": 48 },
+        "validation": { "type": "integer", "const": 24 },
+        "holdout": { "type": "integer", "const": 16 }
+      }
+    },
+    "assignments": {
+      "type": "array",
+      "minItems": 88,
+      "maxItems": 88,
+      "items": { "$ref": "#/$defs/assignment" }
+    }
+  },
+  "$defs": {
+    "assignment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["slug", "split"],
+      "properties": {
+        "slug": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+        "split": {
+          "type": "string",
+          "enum": ["calibration", "validation", "holdout"]
+        }
+      }
+    }
+  }
+}

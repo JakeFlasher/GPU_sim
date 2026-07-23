@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "generator": "sm_86_predictor_accuracy_recovery/round-10",
+  "loop_session": "2026-05-17_11-26-33",
+  "round_landed": "round-10",
+  "description": "Post-AC-4 cross-cell variance trajectory for the 5-cell admitted activation cohort. Re-emitted after AC-4.1 / AC-4.2 / AC-4.3 / AC-4.4 / AC-4.5 sub-slices closed in Rounds 3-9 of this RLCR session. The cross-cell prediction stddev (ddof=1 over the 5 per-cell predicted_hit_rate values) is the load-bearing AC-6 input. The 0.10 threshold is the DEC-2 / DEC-4 floor adjudicated at loop bootstrap (Round 0); when the post-AC-4 stddev falls below this floor, the calibration head must NOT be applied per AC-6's fail-closed contract.",
+  "ncu_truth_source": "data/local_labels/label_admitted.json (cache_hit_rate_l2_sector_pct field normalized to fraction in [0, 1])",
+  "predicted_hit_rate_source": "data/sm_86_predictor_accuracy_recovery/refreshed_sweep_round_3/predictor_bundles/ (post-AC-4 refreshed sweep with the always-on AC-4.3 write-policy filter; the AC-4.1 / AC-4.2 / AC-4.4 / AC-4.5 sub-slices produced no per-cell delta on this corpus per the AC-3 ablation entries 1-5)",
+  "documented_floor_stddev": 0.10,
+  "documented_floor_stddev_source": "plans/l2_predictor_accuracy_recovery_plan.md AC-6 spec lines 63-67 + DEC-2 / DEC-4 adjudications at loop bootstrap (goal-tracker IMMUTABLE section)",
+  "post_ac4_per_cell_predictions": [
+    {
+      "slug": "layernorm_fwd_bf16_sm80",
+      "shape_point": "timing_shape",
+      "ncu_truth_fraction": 0.7531,
+      "predicted_hit_rate": 0.9771133330406533,
+      "signed_residual": 0.2240133330406533
+    },
+    {
+      "slug": "rmsnorm_fwd_bf16_sm80",
+      "shape_point": "timing_shape",
+      "ncu_truth_fraction": 0.6795,
+      "predicted_hit_rate": 0.9698870262390671,
+      "signed_residual": 0.29038702623906714
+    },
+    {
+      "slug": "silu_fwd_bf16_sm80",
+      "shape_point": "correctness_shape",
+      "ncu_truth_fraction": 0.8916,
+      "predicted_hit_rate": 0.9375,
+      "signed_residual": 0.045899999999999985
+    },
+    {
+      "slug": "silu_fwd_bf16_sm80",
+      "shape_point": "timing_shape",
+      "ncu_truth_fraction": 0.5390,
+      "predicted_hit_rate": 0.9375,
+      "signed_residual": 0.3985000000000001
+    },
+    {
+      "slug": "softmax_safe_bf16_sm80",
+      "shape_point": "timing_shape",
+      "ncu_truth_fraction": 0.5726,
+      "predicted_hit_rate": 0.9607112762371687,
+      "signed_residual": 0.3881112762371687
+    }
+  ],
+  "current_stddev": 0.01832926526212725,
+  "current_stddev_computation": "ddof=1 sample standard deviation over the 5 per-cell predicted_hit_rate values: [0.9771133330406533, 0.9698870262390671, 0.9375, 0.9375, 0.9607112762371687]. Mean = 0.9565423271033778. Sum of squared deviations from mean = 0.001343645836. Sample variance = 0.000335911459 (sum / (n-1) = sum / 4). Sample stddev = sqrt(variance) = 0.01832926526212725.",
+  "current_spread": 0.0396133330406533,
+  "current_spread_computation": "max - min over the 5 per-cell predicted_hit_rate values: 0.9771133330406533 - 0.9375 = 0.03961333304065333",
+  "precondition_status": "not_satisfied",
+  "verdict": "typed_unavailable_calibration_variance_precondition_failed",
+  "verdict_rationale": "The 5-cell admitted activation cohort exhibits cross-cell prediction stddev = 0.01833, which is more than 5x below the 0.10 floor documented in the plan's AC-6 spec. Under DEC-2 (typed_unavailable on precondition failure), the cache_predictor's variance-precondition gate (added in this round at workloads/simbench_bw/cache_predictor.py) emits result_kind='typed_unavailable' with typed_reason='calibration_variance_precondition_failed' AND headline_validity_failed_reasons=['calibration_variance_precondition_failed'] when the gate kwarg is set + falls below 0.10. The existing committed refreshed sweep at data/sm_86_predictor_accuracy_recovery/refreshed_sweep_round_3/predictor_bundles/ remains scalar (the gate was added after the sweep was emitted; the default-off behavior preserves it byte-for-byte for back-compat). Any future sweep regenerated with the gate enabled (e.g., the AC-8 final sm_86 sweep in a later round) MUST emit the fail-closed typed-unavailable bundles per this AC-6 verdict.",
+  "narrative": "The 5-cell admitted cohort consists of pointwise + per-row-reduction activation kernels whose predicted_hit_rate values cluster tightly between 0.9375 (silu correctness + silu timing — both saturating to the modeled-hit ceiling for the no-write-allocate-filtered observations) and 0.9771 (layernorm timing). This narrow spread reflects two structural properties: (a) all 5 kernels operate on tensor working sets that fit comfortably within the GA102 L2 capacity (1 MB per slice; 6 MB total) so the Maeda HRD second-layer hit decision is trivially satisfied for every per-launch access; (b) the AC-4.3 write-policy filter removes the ~6-27% shared-memory store fraction uniformly across the 3 reduction-heavy kernels (layernorm/rmsnorm/softmax) without altering the silu kernels' all-global-store output. The post-AC-4 cohort thus has insufficient cross-cell signal to fit a calibration head's per-cell residual transform without overfitting on the 5-sample cohort. The plan's AC-6 contract requires the typed_unavailable fail-closed verdict in this case; this artifact records that verdict honestly. To improve the cross-cell variance signal, the cohort would need expansion with synthetic canary cells whose working sets exceed the L2 capacity (rejected per the loop-bootstrap DEC-1 = `Formal closure` adjudication) OR with a richer real-kernel corpus including tiled GEMM / stencil / cross-launch-state-exercising kernels — both out of scope for the present loop's sm_86 activation-only research framing.",
+  "downstream_implications": {
+    "ac6_apply_path": "NOT FIRED (precondition not satisfied)",
+    "ac6_typed_unavailable_path": "FIRED (this artifact + the new cache_predictor gate)",
+    "ac7_residual_attribution": "AC-7's residual root-cause classification report (next round) must attribute the geomean rel_err = 0.319 systematic over-prediction across the named buckets: slice_geometry_residual (zero — AC-4.1 no-op on this corpus); sector_edge_residual (zero — AC-4.2 no-op); write_policy_residual (-8.4e-4 absolute geomean delta — the only mover from AC-4.3); cta_interleave_residual (zero — AC-4.4 no-op); cross_launch_state_residual (zero — AC-4.5 no-op because all cells single-launch); label_variance_floor + unsupported_corpus_shape (the dominant residual contributors)."
+  }
+}

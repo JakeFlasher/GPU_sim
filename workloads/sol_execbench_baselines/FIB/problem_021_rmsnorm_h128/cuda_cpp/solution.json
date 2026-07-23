@@ -1,0 +1,44 @@
+{
+  "name": "problem_021_rmsnorm_h128_cuda_cpp",
+  "definition": "021_rmsnorm_h128",
+  "author": "sol-baselines-codegen",
+  "description": "Plain (non-fused) RMSNorm kernel for hidden_size=128 BF16 inputs with FP32 reduction. One CTA per row, warp-shuffle reduction, one BF16x2 pair per thread, destination-passing style.",
+  "spec": {
+    "languages": [
+      "cuda_cpp"
+    ],
+    "target_hardware": [
+      "LOCAL"
+    ],
+    "entry_point": "main.cpp::run",
+    "dependencies": [],
+    "destination_passing_style": true,
+    "binding": "torch",
+    "compile_options": {
+      "cflags": [],
+      "cuda_cflags": [
+        "-O3",
+        "--use_fast_math",
+        "-gencode",
+        "arch=compute_86,code=sm_86"
+      ],
+      "ld_flags": [
+        "-lcuda"
+      ]
+    }
+  },
+  "sources": [
+    {
+      "path": "main.cpp",
+      "content": "#include <torch/extension.h>\n#include <ATen/cuda/CUDAContext.h>\n#include \"kernel.h\"\n#include <string>\n\nstatic void check_bf16_contiguous(\n    const torch::Tensor& tensor, const std::string& name) {\n    TORCH_CHECK(tensor.is_cuda(), name, \" must be a CUDA tensor\");\n    TORCH_CHECK(\n        tensor.dtype() == torch::kBFloat16,\n        name, \" must have bfloat16 dtype, got \", tensor.dtype());\n    TORCH_CHECK(tensor.is_contiguous(), name, \" must be contiguous\");\n}\n\n// Destination-passing-style entry. The definition declares:\n//   hidden_states: [batch_size, hidden_size]  bf16\n//   weight       : [hidden_size]              bf16\n//   output       : [batch_size, hidden_size]  bf16  (DPS, pre-alloc)\n//\n// hidden_size is constant at 128 per definition.json; EPS is pinned\n// at 1e-6 in the kernel body (problem definition).\nvoid run(\n    const torch::Tensor& hidden_states,\n    const torch::Tensor& weight,\n    torch::Tensor output) {\n    TORCH_CHECK(\n        hidden_states.dim() == 2,\n        \"hidden_states must be 2D [batch, hidden]; got \",\n        hidden_states.dim(), \"D\");\n    TORCH_CHECK(weight.dim() == 1, \"weight must be 1D\");\n\n    const int64_t hidden_size = hidden_states.size(1);\n    TORCH_CHECK(\n        hidden_size == 128,\n        \"hidden_size must be 128 for problem_021, got \", hidden_size);\n    TORCH_CHECK(\n        weight.size(0) == hidden_size,\n        \"weight must have size \", hidden_size, \", got \", weight.size(0));\n\n    check_bf16_contiguous(hidden_states, \"hidden_states\");\n    check_bf16_contiguous(weight, \"weight\");\n    check_bf16_contiguous(output, \"output\");\n\n    cudaStream_t stream = at::cuda::getCurrentCUDAStream();\n    problem_021_rmsnorm_h128_launcher(\n        hidden_states,\n        weight,\n        output,\n        stream);\n}\n\nPYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {\n    m.def(\n        \"run\", &run,\n        \"RMSNorm at hidden_size=128; BF16 inputs / output, FP32 \"\n        \"accumulator; EPS=1e-6 pinned by problem definition; \"\n        \"destination-passing style.\");\n}\n"
+    },
+    {
+      "path": "kernel.cu",
+      "content": "#include \"kernel.h\"\n#include <cuda_bf16.h>\n#include <cuda_runtime.h>\n\n// One CTA per row of [batch, hidden_size=128]. Threads cooperatively\n// reduce sum-of-squares of hidden_states in FP32, then rescale\n// hidden_states * inv_rms * weight and store BF16. No residual add \u2014\n// plain RMSNorm variant captured from Qwen3-30B-A3B at h=128.\n\nnamespace {\n\n__device__ inline float warp_all_reduce_sum(float val) {\n    for (int offset = 16; offset > 0; offset >>= 1) {\n        val += __shfl_xor_sync(0xFFFFFFFFu, val, offset);\n    }\n    return val;\n}\n\nconstexpr int HIDDEN_SIZE = 128;\nconstexpr int HIDDEN_SIZE_VEC = 64;     // BF16x2 pairs per row\nconstexpr int BLOCK_THREADS = 64;       // one BF16x2 pair per thread\nconstexpr int MAX_WARPS = 4;            // 64 threads = 2 warps; pad to 4\nconstexpr float EPS = 1e-6f;            // pinned by problem definition\n\n__global__ void __launch_bounds__(BLOCK_THREADS, 8)\nproblem_021_rmsnorm_h128_kernel(\n    const __nv_bfloat16* __restrict__ hidden_states,\n    const __nv_bfloat16* __restrict__ weight,\n    __nv_bfloat16* __restrict__ output,\n    int batch_size) {\n\n    const int row = blockIdx.x;\n    if (row >= batch_size) return;\n\n    const __nv_bfloat162* hs_row =\n        reinterpret_cast<const __nv_bfloat162*>(hidden_states)\n        + row * HIDDEN_SIZE_VEC;\n    const __nv_bfloat162* w_vec =\n        reinterpret_cast<const __nv_bfloat162*>(weight);\n    __nv_bfloat162* out_row =\n        reinterpret_cast<__nv_bfloat162*>(output) + row * HIDDEN_SIZE_VEC;\n\n    const int tid = threadIdx.x;\n\n    float thread_sum_sq = 0.0f;\n    // BLOCK_THREADS == HIDDEN_SIZE_VEC: one BF16x2 pair per thread.\n    if (tid < HIDDEN_SIZE_VEC) {\n        __nv_bfloat162 hv = __ldg(hs_row + tid);\n        float2 h_f2 = __bfloat1622float2(hv);\n        thread_sum_sq = h_f2.x * h_f2.x + h_f2.y * h_f2.y;\n    }\n\n    thread_sum_sq = warp_all_reduce_sum(thread_sum_sq);\n\n    __shared__ float s_warp[MAX_WARPS];\n    const int lane = tid & 31;\n    const int warp = tid >> 5;\n    const int num_warps = (BLOCK_THREADS + 31) >> 5;\n    if (lane == 0) s_warp[warp] = thread_sum_sq;\n    __syncthreads();\n\n    if (warp == 0) {\n        float partial = (lane < num_warps) ? s_warp[lane] : 0.0f;\n        partial = warp_all_reduce_sum(partial);\n        if (lane == 0) s_warp[0] = partial;\n    }\n    __syncthreads();\n    const float row_sum = s_warp[0];\n\n    const float inv_rms = rsqrtf(row_sum / static_cast<float>(HIDDEN_SIZE) + EPS);\n\n    if (tid < HIDDEN_SIZE_VEC) {\n        __nv_bfloat162 hv = __ldg(hs_row + tid);\n        __nv_bfloat162 wv = __ldg(w_vec + tid);\n        float2 h_f2 = __bfloat1622float2(hv);\n        float2 w_f2 = __bfloat1622float2(wv);\n        float y0 = h_f2.x * inv_rms * w_f2.x;\n        float y1 = h_f2.y * inv_rms * w_f2.y;\n        out_row[tid] = __float22bfloat162_rn(make_float2(y0, y1));\n    }\n}\n\n}  // namespace\n\nvoid problem_021_rmsnorm_h128_launcher(\n    const torch::Tensor& hidden_states,\n    const torch::Tensor& weight,\n    torch::Tensor& output,\n    cudaStream_t stream) {\n\n    const auto batch_size = static_cast<int>(hidden_states.size(0));\n    dim3 grid(batch_size);\n    dim3 block(BLOCK_THREADS);\n\n    problem_021_rmsnorm_h128_kernel<<<grid, block, 0, stream>>>(\n        reinterpret_cast<const __nv_bfloat16*>(hidden_states.data_ptr<at::BFloat16>()),\n        reinterpret_cast<const __nv_bfloat16*>(weight.data_ptr<at::BFloat16>()),\n        reinterpret_cast<__nv_bfloat16*>(output.data_ptr<at::BFloat16>()),\n        batch_size);\n}\n"
+    },
+    {
+      "path": "kernel.h",
+      "content": "#pragma once\n\n#include <torch/extension.h>\n#include <cuda_runtime.h>\n\n// Host launcher for the plain (non-fused) RMSNorm kernel at\n// hidden_size=128. Inputs and outputs are BF16; intermediate\n// accumulation runs in FP32 per the precision contract\n// (CLAUDE.md Rule 8). Output is pre-allocated by the eval\n// driver and written in-place (destination-passing style).\n// EPS is a compile-time constant baked into the kernel\n// (1e-6 per the problem definition).\nvoid problem_021_rmsnorm_h128_launcher(\n    const torch::Tensor& hidden_states,\n    const torch::Tensor& weight,\n    torch::Tensor& output,\n    cudaStream_t stream);\n"
+    }
+  ]
+}

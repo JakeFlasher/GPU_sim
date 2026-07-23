@@ -1,0 +1,97 @@
+# sm_120 variance characterization. Five-run NCU repeats on
+# four representative calibration cells, captured 2026-05-26.
+# Informs DEC-F (repeatability threshold) for the
+# `sm120_repeatability_relative_cv_exceeded` /
+# `sm120_repeatability_absolute_stddev_exceeded` typed reasons
+# the harvest pipeline emits.
+#
+# Protocol per run:
+#   ncu --launch-skip 5 --launch-count 1
+#       --clock-control none --replay-mode kernel
+#       --section MemoryWorkloadAnalysis
+#       --metrics <pinned 5 metric names>
+#       --csv <binary>
+#
+# Observation: on cells whose hit rate is 0 (cold cache,
+# capacity overflow, or strict bypass), the rate is byte-stable
+# across runs — no variance. On the lone non-zero cell in this
+# sample (calib_layernorm_fwd_bf16, BF16 forward LayerNorm),
+# L1 relative-CV is ~0.3 % and L2 relative-CV is ~2.2 %, both
+# WELL below the 5 % friendly-cohort gate.
+#
+# Recommendation: DEC-F threshold of 5 % relative-CV (with
+# near-zero-floor 1e-3) leaves a comfortable margin. Cells that
+# eventually push relative-CV above 5 % almost certainly carry
+# a hostile / non-deterministic flavor (TMA replay, atomic
+# contention) that warrants typed-unavailable classification
+# anyway.
+
+[meta]
+schema_version = "1.0"
+captured_at_utc = "2026-05-26T07:10:00+00:00"
+host_arch = "sm_120"
+host_descriptor_hash = "local_sm_120_rtx_5060_laptop_8gib"
+ncu_version = "Version 2026.1.1.0 (build 37634170) (public-release)"
+runs_per_cell = 5
+ncu_argv_template = "ncu --launch-skip 5 --launch-count 1 --clock-control none --replay-mode kernel --section MemoryWorkloadAnalysis --metrics <pinned> --csv <binary>"
+recommended_relative_cv_threshold = 0.05
+recommended_absolute_stddev_fallback = 0.05
+near_zero_floor = 1.0e-3
+recommended_typed_reasons = [
+    "sm120_repeatability_relative_cv_exceeded",
+    "sm120_repeatability_absolute_stddev_exceeded",
+]
+
+[[cells]]
+cell_name = "calib_coalesced_32x4B"
+note = "Predictor-friendly canonical case; 32-lane coalesced 4 B reads. Working set fits in 1 sector → cold-cache hit rate is 0 by construction."
+l1_rates = [0.0, 0.0, 0.0, 0.0, 0.0]
+l1_mean = 0.0
+l1_stddev = 0.0
+l1_relative_cv = 0.0
+l2_rates = [0.0, 0.0, 0.0, 0.0, 0.0]
+l2_mean = 0.0
+l2_stddev = 0.0
+l2_relative_cv = 0.0
+
+[[cells]]
+cell_name = "calib_cg_cache_bypass"
+note = "Predictor-hostile case; explicit ld.global.cg bypasses L1. L2 hit rate is 0 under cold-cache replay."
+l1_rates = [0.0, 0.0, 0.0, 0.0, 0.0]
+l1_mean = 0.0
+l1_stddev = 0.0
+l1_relative_cv = 0.0
+l2_rates = [0.0, 0.0, 0.0, 0.0, 0.0]
+l2_mean = 0.0
+l2_stddev = 0.0
+l2_relative_cv = 0.0
+
+[[cells]]
+cell_name = "calib_layernorm_fwd_bf16"
+note = "Forward LayerNorm BF16 microbench (M=256 × H=2048). Non-zero L1+L2 hit rates because the working set spans multiple sectors and the kernel's accumulation pattern reuses input vectors. Only cell in this sample with measurable variance."
+l1_rates = [0.66864, 0.67171, 0.66878, 0.67055, 0.67329]
+l1_mean = 0.67059
+l1_stddev = 0.00198
+l1_relative_cv = 0.0029
+l2_rates = [0.23659, 0.22980, 0.23848, 0.23397, 0.22608]
+l2_mean = 0.23298
+l2_stddev = 0.00505
+l2_relative_cv = 0.0217
+
+[[cells]]
+cell_name = "calib_smoke_capacity_overflow_loop"
+note = "8 K-sector capacity-overflow loop. Working set exceeds L1+L2 by design; hit rate is 0 by construction."
+l1_rates = [0.0, 0.0, 0.0, 0.0, 0.0]
+l1_mean = 0.0
+l1_stddev = 0.0
+l1_relative_cv = 0.0
+l2_rates = [0.0, 0.0, 0.0, 0.0, 0.0]
+l2_mean = 0.0
+l2_stddev = 0.0
+l2_relative_cv = 0.0
+
+[summary]
+max_observed_relative_cv = 0.0217
+max_observed_relative_cv_cell = "calib_layernorm_fwd_bf16"
+max_observed_relative_cv_layer = "l2"
+dec_f_threshold_proposal = "5% relative-CV with near-zero floor 1e-3; max observed (~2.2%) leaves a 2x margin"

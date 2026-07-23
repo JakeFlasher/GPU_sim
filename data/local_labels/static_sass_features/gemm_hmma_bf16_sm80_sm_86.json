@@ -1,0 +1,89 @@
+{
+  "binary_sha256": "9426d432bb8afb182ede845b65d59673a468f072141427798281e96dc9d95fa6",
+  "claim_class": "static_sanity_check_only",
+  "claim_scope": "measured_local",
+  "kernel_name": "gemm_hmma_bf16_sm80_kernel",
+  "kernel_signature_sha256": "f37cdd089002fd741fb7058bbcc5c9be74be8253b8b781beb45524a1c3d6ab61",
+  "mnemonic_histogram": {
+    "families": {
+      "atomics": {
+        "count": 0,
+        "exemplar_mnemonics": []
+      },
+      "control": {
+        "count": 7,
+        "exemplar_mnemonics": [
+          "BRA",
+          "EXIT"
+        ]
+      },
+      "floating_point": {
+        "count": 0,
+        "exemplar_mnemonics": []
+      },
+      "integer": {
+        "count": 52,
+        "exemplar_mnemonics": [
+          "IADD3",
+          "IMAD",
+          "LEA",
+          "LOP3",
+          "SHF"
+        ]
+      },
+      "load_store": {
+        "count": 14,
+        "exemplar_mnemonics": [
+          "LDGSTS",
+          "STG"
+        ]
+      },
+      "other": {
+        "count": 62,
+        "exemplar_mnemonics": [
+          "CS2R",
+          "MOV",
+          "S2R",
+          "S2UR",
+          "UIADD3",
+          "ULDC",
+          "UMOV",
+          "USHF"
+        ]
+      },
+      "predication": {
+        "count": 7,
+        "exemplar_mnemonics": [
+          "ISETP"
+        ]
+      },
+      "shared_memory_ops": {
+        "count": 45,
+        "exemplar_mnemonics": [
+          "LDS"
+        ]
+      },
+      "tensor_core": {
+        "count": 5,
+        "exemplar_mnemonics": [
+          "HMMA"
+        ]
+      }
+    },
+    "schema_version": 1,
+    "total_instruction_count": 192
+  },
+  "register_usage": {
+    "regs_per_thread": 36,
+    "spill_loads_static": 0,
+    "spill_stores_static": 0,
+    "stack_frame_bytes": 0
+  },
+  "schema_version": 1,
+  "slug": "gemm_hmma_bf16_sm80",
+  "tool_provenance": {
+    "extracted_dated_iso8601": "2026-05-30T20:23:47Z",
+    "extractor_name": "cuobjdump_dump_sass",
+    "extractor_version": "Cuda compilation tools, release 13.2, V13.2.78"
+  }
+}

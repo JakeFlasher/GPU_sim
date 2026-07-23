@@ -1,0 +1,12 @@
+{
+  "arch": "sm_86",
+  "binary_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+  "kernel_signature_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+  "kernel_signature_source": "measurement_manifest",
+  "launch_index": 0,
+  "repeat_index": 0,
+  "schema_version": 1,
+  "shape_point": "fixture_shape",
+  "slug": "fixture_cell",
+  "source_commit": "3333333333333333333333333333333333333333"
+}

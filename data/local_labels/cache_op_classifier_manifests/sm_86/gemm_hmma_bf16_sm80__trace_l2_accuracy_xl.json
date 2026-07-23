@@ -1,0 +1,190 @@
+{
+  "arch_token": "sm_86",
+  "binary_path": "workloads/portable_lcd/gemm_hmma_bf16_sm80/gemm_hmma_bf16_sm80_run",
+  "binary_source": "live_cuobjdump",
+  "kernel_mangled_name": "gemm_hmma_bf16_sm80_kernel",
+  "per_pc_instruction_cache_op": [
+    {
+      "instruction_cache_op": "LDGSTS",
+      "l1_eligible": false,
+      "pc": "0x3e0",
+      "raw_mnemonic": "LDGSTS"
+    },
+    {
+      "instruction_cache_op": "LDGSTS",
+      "l1_eligible": false,
+      "pc": "0x400",
+      "raw_mnemonic": "LDGSTS"
+    },
+    {
+      "instruction_cache_op": "LDGSTS",
+      "l1_eligible": false,
+      "pc": "0x4f0",
+      "raw_mnemonic": "LDGSTS"
+    },
+    {
+      "instruction_cache_op": "LDGSTS",
+      "l1_eligible": false,
+      "pc": "0x500",
+      "raw_mnemonic": "LDGSTS"
+    },
+    {
+      "instruction_cache_op": "LDGSTS",
+      "l1_eligible": false,
+      "pc": "0x600",
+      "raw_mnemonic": "LDGSTS"
+    },
+    {
+      "instruction_cache_op": "LDGSTS",
+      "l1_eligible": false,
+      "pc": "0x610",
+      "raw_mnemonic": "LDGSTS"
+    },
+    {
+      "instruction_cache_op": "LDGSTS",
+      "l1_eligible": false,
+      "pc": "0x710",
+      "raw_mnemonic": "LDGSTS"
+    },
+    {
+      "instruction_cache_op": "LDGSTS",
+      "l1_eligible": false,
+      "pc": "0x720",
+      "raw_mnemonic": "LDGSTS"
+    },
+    {
+      "instruction_cache_op": "LDGSTS",
+      "l1_eligible": false,
+      "pc": "0x8f0",
+      "raw_mnemonic": "LDGSTS"
+    },
+    {
+      "instruction_cache_op": "LDGSTS",
+      "l1_eligible": false,
+      "pc": "0x920",
+      "raw_mnemonic": "LDGSTS"
+    },
+    {
+      "instruction_cache_op": "LDGSTS",
+      "l1_eligible": false,
+      "pc": "0x3e0",
+      "raw_mnemonic": "LDGSTS"
+    },
+    {
+      "instruction_cache_op": "LDGSTS",
+      "l1_eligible": false,
+      "pc": "0x400",
+      "raw_mnemonic": "LDGSTS"
+    },
+    {
+      "instruction_cache_op": "LDGSTS",
+      "l1_eligible": false,
+      "pc": "0x520",
+      "raw_mnemonic": "LDGSTS"
+    },
+    {
+      "instruction_cache_op": "LDGSTS",
+      "l1_eligible": false,
+      "pc": "0x530",
+      "raw_mnemonic": "LDGSTS"
+    },
+    {
+      "instruction_cache_op": "LDGSTS",
+      "l1_eligible": false,
+      "pc": "0x630",
+      "raw_mnemonic": "LDGSTS"
+    },
+    {
+      "instruction_cache_op": "LDGSTS",
+      "l1_eligible": false,
+      "pc": "0x640",
+      "raw_mnemonic": "LDGSTS"
+    },
+    {
+      "instruction_cache_op": "LDGSTS",
+      "l1_eligible": false,
+      "pc": "0x740",
+      "raw_mnemonic": "LDGSTS"
+    },
+    {
+      "instruction_cache_op": "LDGSTS",
+      "l1_eligible": false,
+      "pc": "0x750",
+      "raw_mnemonic": "LDGSTS"
+    },
+    {
+      "instruction_cache_op": "LDGSTS",
+      "l1_eligible": false,
+      "pc": "0x9f0",
+      "raw_mnemonic": "LDGSTS"
+    },
+    {
+      "instruction_cache_op": "LDGSTS",
+      "l1_eligible": false,
+      "pc": "0xa10",
+      "raw_mnemonic": "LDGSTS"
+    },
+    {
+      "instruction_cache_op": "LDGSTS",
+      "l1_eligible": false,
+      "pc": "0x370",
+      "raw_mnemonic": "LDGSTS"
+    },
+    {
+      "instruction_cache_op": "LDGSTS",
+      "l1_eligible": false,
+      "pc": "0x3b0",
+      "raw_mnemonic": "LDGSTS"
+    },
+    {
+      "instruction_cache_op": "LDGSTS",
+      "l1_eligible": false,
+      "pc": "0x4a0",
+      "raw_mnemonic": "LDGSTS"
+    },
+    {
+      "instruction_cache_op": "LDGSTS",
+      "l1_eligible": false,
+      "pc": "0x4b0",
+      "raw_mnemonic": "LDGSTS"
+    },
+    {
+      "instruction_cache_op": "LDGSTS",
+      "l1_eligible": false,
+      "pc": "0x5b0",
+      "raw_mnemonic": "LDGSTS"
+    },
+    {
+      "instruction_cache_op": "LDGSTS",
+      "l1_eligible": false,
+      "pc": "0x5c0",
+      "raw_mnemonic": "LDGSTS"
+    },
+    {
+      "instruction_cache_op": "LDGSTS",
+      "l1_eligible": false,
+      "pc": "0x6c0",
+      "raw_mnemonic": "LDGSTS"
+    },
+    {
+      "instruction_cache_op": "LDGSTS",
+      "l1_eligible": false,
+      "pc": "0x6d0",
+      "raw_mnemonic": "LDGSTS"
+    },
+    {
+      "instruction_cache_op": "LDGSTS",
+      "l1_eligible": false,
+      "pc": "0x900",
+      "raw_mnemonic": "LDGSTS"
+    },
+    {
+      "instruction_cache_op": "LDGSTS",
+      "l1_eligible": false,
+      "pc": "0x920",
+      "raw_mnemonic": "LDGSTS"
+    }
+  ],
+  "sass_provenance_status": "matched",
+  "schema_version": 1
+}

@@ -1,0 +1,38 @@
+[project]
+name = "solbench-workspace"
+version = "0.0.0"
+description = "uv workspace root for solbench (SOL-ExecBench + SOLAR + patched torchview)."
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "sol-execbench",
+    "solar",
+    "torchview>=0.2.6",
+    "scikit-learn>=1.5,<2",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = ["sol-execbench", "SOLAR", "torchview"]
+
+[tool.uv.sources]
+sol-execbench = { workspace = true }
+solar = { workspace = true }
+torchview = { workspace = true }
+torch = [
+    { index = "pytorch-cu130", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+]
+torchvision = [
+    { index = "pytorch-cu130", marker = "sys_platform == 'linux' or sys_platform == 'win32'" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cu130"
+url = "https://download.pytorch.org/whl/cu130"
+explicit = true
+
+[dependency-groups]
+dev = [
+    "pytest-timeout>=2.4.0",
+]

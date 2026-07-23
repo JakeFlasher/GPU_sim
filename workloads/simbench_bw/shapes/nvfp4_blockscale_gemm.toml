@@ -1,0 +1,34 @@
+schema_version = 1
+slug = "nvfp4_blockscale_gemm"
+
+# Launch geometry derives from the kernel wrapper:
+#   grid  = (ceil(M/16), ceil(N/8), 1)   one warp per [16 x 8] output tile
+#   block = (32, 1, 1)                   one warp
+#
+# See nvfp4_blockscale_gemm.cu::nvfp4_blockscale_gemm_launch.  The
+# m16n8k64 warp-level MMA requires M % 16 == 0, N % 8 == 0, K % 64 == 0
+# on shape points that actually launch the kernel (correctness_00,
+# timing_00).  trace_00 is a predictor-only shape — the kernel is
+# never launched there — so its K axis stays at 32 for continuity
+# with the original scaffold even though the kernel itself cannot
+# dispatch with K=32.
+
+[[timing_shapes]]
+name = "timing_00"
+axes = { m = 1024, n = 1024, k = 4096, scale_vec = 16 }
+launch_config = { grid = [64, 128, 1], block = [32, 1, 1] }
+warm_up_iters = 5
+repeat_iters = 30
+
+[[trace_shapes]]
+name = "trace_00"
+axes = { m = 32, n = 32, k = 32, scale_vec = 16 }
+launch_config = { grid = [2, 4, 1], block = [32, 1, 1] }
+predicted_bytes = 83886080
+estimator_source = "static"
+
+[[correctness_shapes]]
+name = "correctness_00"
+axes = { m = 64, n = 64, k = 256, scale_vec = 16 }
+launch_config = { grid = [4, 8, 1], block = [32, 1, 1] }
+digest_kind = "reduction_summary"

@@ -1,0 +1,33 @@
+schema_version = 1
+slug = "sparse_2to4_bf16_gemm"
+
+# Launch geometry matches the warp-level sparse-MMA kernel wrapper in
+# l1/sparse_2to4_bf16_gemm/sparse_2to4_bf16_gemm.cu
+# (sparse_2to4_bf16_gemm_launch):
+#
+#   grid  = (ceil(M/16), ceil(N/8), 1)   one warp per [16 x 8] output tile
+#   block = (32, 1, 1)                   one warp
+#
+# The m16n8k32 BF16 sparse MMA requires M % 16 == 0, N % 8 == 0, and
+# K % 32 == 0 (one 4-group of K-positions produces 2 kept non-zero
+# values, giving the 2:4 sparsity contract).
+
+[[timing_shapes]]
+name = "timing_00"
+axes = { m = 1024, n = 1024, k = 4096 }
+launch_config = { grid = [64, 128, 1], block = [32, 1, 1] }
+warm_up_iters = 5
+repeat_iters = 30
+
+[[trace_shapes]]
+name = "trace_00"
+axes = { m = 64, n = 64, k = 128 }
+launch_config = { grid = [4, 8, 1], block = [32, 1, 1] }
+predicted_bytes = 83886080
+estimator_source = "static"
+
+[[correctness_shapes]]
+name = "correctness_00"
+axes = { m = 64, n = 64, k = 256 }
+launch_config = { grid = [4, 8, 1], block = [32, 1, 1] }
+digest_kind = "reduction_summary"

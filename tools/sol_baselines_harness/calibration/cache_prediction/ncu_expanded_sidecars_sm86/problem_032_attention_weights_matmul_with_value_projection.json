@@ -1,0 +1,105 @@
+{
+  "argv_clock_policy_flag": "",
+  "argv_provenance": [
+    [
+      "ncu",
+      "--launch-skip",
+      "5",
+      "--launch-count",
+      "1",
+      "--clock-control",
+      "none",
+      "--replay-mode",
+      "kernel",
+      "--section",
+      "MemoryWorkloadAnalysis",
+      "--metrics",
+      "l1tex__t_sector_pipe_lsu_mem_global_op_ld_hit_rate.pct,l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum,l1tex__t_sectors_pipe_lsu_mem_global_op_ld_lookup_hit.sum,lts__t_sectors_srcunit_tex_op_read.sum,lts__t_sectors_srcunit_tex_op_read_lookup_hit.sum",
+      "--csv",
+      "/home/jakeshea/3090ti_5060laptop_cross_study/3090ti_5060laptop_cross_study/solbench_baseline/nvbit_tracer/metric_extractor/tests/calibration_cohort_b/problem_032_attention_weights_matmul_with_value_projection"
+    ],
+    [
+      "ncu",
+      "--launch-skip",
+      "5",
+      "--launch-count",
+      "1",
+      "--clock-control",
+      "none",
+      "--replay-mode",
+      "kernel",
+      "--section",
+      "MemoryWorkloadAnalysis",
+      "--metrics",
+      "l1tex__t_sector_pipe_lsu_mem_global_op_ld_hit_rate.pct,l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum,l1tex__t_sectors_pipe_lsu_mem_global_op_ld_lookup_hit.sum,lts__t_sectors_srcunit_tex_op_read.sum,lts__t_sectors_srcunit_tex_op_read_lookup_hit.sum",
+      "--csv",
+      "/home/jakeshea/3090ti_5060laptop_cross_study/3090ti_5060laptop_cross_study/solbench_baseline/nvbit_tracer/metric_extractor/tests/calibration_cohort_b/problem_032_attention_weights_matmul_with_value_projection"
+    ],
+    [
+      "ncu",
+      "--launch-skip",
+      "5",
+      "--launch-count",
+      "1",
+      "--clock-control",
+      "none",
+      "--replay-mode",
+      "kernel",
+      "--section",
+      "MemoryWorkloadAnalysis",
+      "--metrics",
+      "l1tex__t_sector_pipe_lsu_mem_global_op_ld_hit_rate.pct,l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum,l1tex__t_sectors_pipe_lsu_mem_global_op_ld_lookup_hit.sum,lts__t_sectors_srcunit_tex_op_read.sum,lts__t_sectors_srcunit_tex_op_read_lookup_hit.sum",
+      "--csv",
+      "/home/jakeshea/3090ti_5060laptop_cross_study/3090ti_5060laptop_cross_study/solbench_baseline/nvbit_tracer/metric_extractor/tests/calibration_cohort_b/problem_032_attention_weights_matmul_with_value_projection"
+    ]
+  ],
+  "captured_at_utc": "2026-05-29T21:38:11+00:00",
+  "completed": true,
+  "cv_cap": 0.05,
+  "cv_quarantined": false,
+  "failure_reason": "",
+  "language": "cuda_cpp",
+  "launch_skip_count": 5,
+  "ncu_l1_hit_rate_mean": 0.0,
+  "ncu_l2_hit_rate_mean": 0.7139951705932618,
+  "ncu_metric_family": [
+    "l1tex__t_sector_pipe_lsu_mem_global_op_ld_hit_rate.pct",
+    "l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum",
+    "l1tex__t_sectors_pipe_lsu_mem_global_op_ld_lookup_hit.sum",
+    "lts__t_sectors_srcunit_tex_op_read.sum",
+    "lts__t_sectors_srcunit_tex_op_read_lookup_hit.sum"
+  ],
+  "no_read_only_traffic": false,
+  "predictor_bucket": "predictor_friendly",
+  "probe_binary_sha256": "8d928fa49c44d24dc17863cd91fa524e4e422ecfbd6dd7262a1dfb424757ecad",
+  "relative_cv_l1": 0.0,
+  "relative_cv_l2": 4.724256478639909e-06,
+  "runs": [
+    {
+      "l1_global_load_hit_rate": 0.0,
+      "l1_global_load_sectors_hit": 0,
+      "l1_global_load_sectors_total": 20971520,
+      "l2_read_hit_rate": 0.713994312286377,
+      "l2_read_sectors_hit": 14973546,
+      "l2_read_sectors_total": 20971520
+    },
+    {
+      "l1_global_load_hit_rate": 0.0,
+      "l1_global_load_sectors_hit": 0,
+      "l1_global_load_sectors_total": 20971520,
+      "l2_read_hit_rate": 0.7139988899230957,
+      "l2_read_sectors_hit": 14973642,
+      "l2_read_sectors_total": 20971520
+    },
+    {
+      "l1_global_load_hit_rate": 0.0,
+      "l1_global_load_sectors_hit": 0,
+      "l1_global_load_sectors_total": 20971520,
+      "l2_read_hit_rate": 0.7139923095703125,
+      "l2_read_sectors_hit": 14973504,
+      "l2_read_sectors_total": 20971520
+    }
+  ],
+  "schema_version": 2,
+  "slug": "problem_032_attention_weights_matmul_with_value_projection"
+}

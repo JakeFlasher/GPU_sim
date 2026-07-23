@@ -1,0 +1,2817 @@
+{
+  "candidates": [
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l1/fp32_fma_dep_chain/fp32_fma_dep_chain_run",
+      "family": "fma_dep_chain",
+      "family_bucket": "other",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l1/fp32_fma_dep_chain/results/fp32_fma_dep_chain/trace_l2_accuracy_xl/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "fp32_fma_dep_chain",
+      "source_row_level": "L1",
+      "trace_json_path": "workloads/simbench_bw/results/fp32_fma_dep_chain/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l1/bf16_hmma_gemm_traceable/bf16_hmma_gemm_traceable_run",
+      "family": "hmma_gemm",
+      "family_bucket": "tensor_compute",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l1/bf16_hmma_gemm_traceable/results/bf16_hmma_gemm_traceable/trace_l2_accuracy_xl/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "bf16_hmma_gemm_traceable",
+      "source_row_level": "L1",
+      "trace_json_path": "workloads/simbench_bw/results/bf16_hmma_gemm_traceable/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l1/tf32_hmma_gemm_traceable/tf32_hmma_gemm_traceable_run",
+      "family": "hmma_gemm",
+      "family_bucket": "tensor_compute",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l1/tf32_hmma_gemm_traceable/results/tf32_hmma_gemm_traceable/trace_l2_accuracy_xl/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "tf32_hmma_gemm_traceable",
+      "source_row_level": "L1",
+      "trace_json_path": "workloads/simbench_bw/results/tf32_hmma_gemm_traceable/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l1/fp16_hmma_gemm_traceable/fp16_hmma_gemm_traceable_run",
+      "family": "hmma_gemm",
+      "family_bucket": "tensor_compute",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l1/fp16_hmma_gemm_traceable/results/fp16_hmma_gemm_traceable/trace_l2_accuracy_xl/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "fp16_hmma_gemm_traceable",
+      "source_row_level": "L1",
+      "trace_json_path": "workloads/simbench_bw/results/fp16_hmma_gemm_traceable/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l1/int8_imma_gemm_traceable/int8_imma_gemm_traceable_run",
+      "family": "imma_gemm",
+      "family_bucket": "tensor_compute",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l1/int8_imma_gemm_traceable/results/int8_imma_gemm_traceable/trace_l2_accuracy_xl/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "int8_imma_gemm_traceable",
+      "source_row_level": "L1",
+      "trace_json_path": "workloads/simbench_bw/results/int8_imma_gemm_traceable/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l1/cp_async_shared_tile_copy/cp_async_shared_tile_copy_run",
+      "family": "cp_async",
+      "family_bucket": "tensor_compute",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l1/cp_async_shared_tile_copy/results/cp_async_shared_tile_copy/trace_l2_accuracy_xl/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "cp_async_shared_tile_copy",
+      "source_row_level": "L1",
+      "trace_json_path": "workloads/simbench_bw/results/cp_async_shared_tile_copy/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l1/shared_bank_conflict_stride/shared_bank_conflict_stride_run",
+      "family": "shared_mem",
+      "family_bucket": "memory_stress",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l1/shared_bank_conflict_stride/results/shared_bank_conflict_stride/trace_l2_accuracy_xl/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "shared_bank_conflict_stride",
+      "source_row_level": "L1",
+      "trace_json_path": "workloads/simbench_bw/results/shared_bank_conflict_stride/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l1/l2_thrash_pointer_chase/l2_thrash_pointer_chase_run",
+      "family": "cache",
+      "family_bucket": "memory_stress",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l1/l2_thrash_pointer_chase/results/l2_thrash_pointer_chase/trace_l2_accuracy_xl/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "l2_thrash_pointer_chase",
+      "source_row_level": "L1",
+      "trace_json_path": "workloads/simbench_bw/results/l2_thrash_pointer_chase/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l1/dram_stream_stride_mix/dram_stream_stride_mix_run",
+      "family": "memory",
+      "family_bucket": "memory_stress",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l1/dram_stream_stride_mix/results/dram_stream_stride_mix/trace_l2_accuracy_xl/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "dram_stream_stride_mix",
+      "source_row_level": "L1",
+      "trace_json_path": "workloads/simbench_bw/results/dram_stream_stride_mix/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l1/global_atomic_histogram/global_atomic_histogram_run",
+      "family": "atomics",
+      "family_bucket": "memory_stress",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l1/global_atomic_histogram/results/global_atomic_histogram/trace_l2_accuracy_xl/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "global_atomic_histogram",
+      "source_row_level": "L1",
+      "trace_json_path": "workloads/simbench_bw/results/global_atomic_histogram/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l1/register_spill_local_mem/register_spill_local_mem_run",
+      "family": "register",
+      "family_bucket": "other",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l1/register_spill_local_mem/results/register_spill_local_mem/trace_l2_accuracy_xl/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "register_spill_local_mem",
+      "source_row_level": "L1",
+      "trace_json_path": "workloads/simbench_bw/results/register_spill_local_mem/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/cluster_remote_reduction/cluster_remote_reduction_run",
+      "family": "cluster_reduction",
+      "family_bucket": "memory_stress",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/cluster_remote_reduction/results/cluster_remote_reduction/timing_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "timing_00",
+      "slug": "cluster_remote_reduction",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/cluster_remote_reduction/rtx_5060_laptop/sm_120/trace_timing_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/cluster_remote_reduction/cluster_remote_reduction_run",
+      "family": "cluster_reduction",
+      "family_bucket": "memory_stress",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/cluster_remote_reduction/results/cluster_remote_reduction/trace_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "trace_00",
+      "slug": "cluster_remote_reduction",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/cluster_remote_reduction/rtx_5060_laptop/sm_120/trace_trace_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/cluster_remote_reduction/cluster_remote_reduction_run",
+      "family": "cluster_reduction",
+      "family_bucket": "memory_stress",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/cluster_remote_reduction/results/cluster_remote_reduction/correctness_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "correctness_00",
+      "slug": "cluster_remote_reduction",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/cluster_remote_reduction/rtx_5060_laptop/sm_120/trace_correctness_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/sampling_topk_temperature_bf16/sampling_topk_temperature_bf16_run",
+      "family": "topk_sampling",
+      "family_bucket": "memory_stress",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/sampling_topk_temperature_bf16/results/sampling_topk_temperature_bf16/timing_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "timing_00",
+      "slug": "sampling_topk_temperature_bf16",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/sampling_topk_temperature_bf16/rtx_5060_laptop/sm_120/trace_timing_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/sampling_topk_temperature_bf16/sampling_topk_temperature_bf16_run",
+      "family": "topk_sampling",
+      "family_bucket": "memory_stress",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/sampling_topk_temperature_bf16/results/sampling_topk_temperature_bf16/trace_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "trace_00",
+      "slug": "sampling_topk_temperature_bf16",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/sampling_topk_temperature_bf16/rtx_5060_laptop/sm_120/trace_trace_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/sampling_topk_temperature_bf16/sampling_topk_temperature_bf16_run",
+      "family": "topk_sampling",
+      "family_bucket": "memory_stress",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/sampling_topk_temperature_bf16/results/sampling_topk_temperature_bf16/correctness_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "correctness_00",
+      "slug": "sampling_topk_temperature_bf16",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/sampling_topk_temperature_bf16/rtx_5060_laptop/sm_120/trace_correctness_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/embedding_gather_vocab128k/embedding_gather_vocab128k_run",
+      "family": "embedding_gather",
+      "family_bucket": "memory_stress",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/embedding_gather_vocab128k/results/embedding_gather_vocab128k/timing_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "timing_00",
+      "slug": "embedding_gather_vocab128k",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/embedding_gather_vocab128k/rtx_5060_laptop/sm_120/trace_timing_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/embedding_gather_vocab128k/embedding_gather_vocab128k_run",
+      "family": "embedding_gather",
+      "family_bucket": "memory_stress",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/embedding_gather_vocab128k/results/embedding_gather_vocab128k/timing_01/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "timing_01",
+      "slug": "embedding_gather_vocab128k",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/embedding_gather_vocab128k/rtx_5060_laptop/sm_120/trace_timing_01/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/embedding_gather_vocab128k/embedding_gather_vocab128k_run",
+      "family": "embedding_gather",
+      "family_bucket": "memory_stress",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/embedding_gather_vocab128k/results/embedding_gather_vocab128k/trace_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "trace_00",
+      "slug": "embedding_gather_vocab128k",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/embedding_gather_vocab128k/rtx_5060_laptop/sm_120/trace_trace_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/embedding_gather_vocab128k/embedding_gather_vocab128k_run",
+      "family": "embedding_gather",
+      "family_bucket": "memory_stress",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/embedding_gather_vocab128k/results/embedding_gather_vocab128k/correctness_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "correctness_00",
+      "slug": "embedding_gather_vocab128k",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/embedding_gather_vocab128k/rtx_5060_laptop/sm_120/trace_correctness_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/embedding_bag_scatter_atomic/embedding_bag_scatter_atomic_run",
+      "family": "embedding_scatter",
+      "family_bucket": "memory_stress",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/embedding_bag_scatter_atomic/results/embedding_bag_scatter_atomic/timing_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "timing_00",
+      "slug": "embedding_bag_scatter_atomic",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/embedding_bag_scatter_atomic/rtx_5060_laptop/sm_120/trace_timing_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/embedding_bag_scatter_atomic/embedding_bag_scatter_atomic_run",
+      "family": "embedding_scatter",
+      "family_bucket": "memory_stress",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/embedding_bag_scatter_atomic/results/embedding_bag_scatter_atomic/timing_01/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "timing_01",
+      "slug": "embedding_bag_scatter_atomic",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/embedding_bag_scatter_atomic/rtx_5060_laptop/sm_120/trace_timing_01/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/embedding_bag_scatter_atomic/embedding_bag_scatter_atomic_run",
+      "family": "embedding_scatter",
+      "family_bucket": "memory_stress",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/embedding_bag_scatter_atomic/results/embedding_bag_scatter_atomic/trace_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "trace_00",
+      "slug": "embedding_bag_scatter_atomic",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/embedding_bag_scatter_atomic/rtx_5060_laptop/sm_120/trace_trace_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/embedding_bag_scatter_atomic/embedding_bag_scatter_atomic_run",
+      "family": "embedding_scatter",
+      "family_bucket": "memory_stress",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/embedding_bag_scatter_atomic/results/embedding_bag_scatter_atomic/correctness_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "correctness_00",
+      "slug": "embedding_bag_scatter_atomic",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/embedding_bag_scatter_atomic/rtx_5060_laptop/sm_120/trace_correctness_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/flash_attn_fwd_bf16_causal/flash_attn_fwd_bf16_causal_run",
+      "family": "flash_attn",
+      "family_bucket": "tensor_compute",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/flash_attn_fwd_bf16_causal/results/flash_attn_fwd_bf16_causal/timing_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "timing_00",
+      "slug": "flash_attn_fwd_bf16_causal",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/flash_attn_fwd_bf16_causal/rtx_5060_laptop/sm_120/trace_timing_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/flash_attn_fwd_bf16_causal/flash_attn_fwd_bf16_causal_run",
+      "family": "flash_attn",
+      "family_bucket": "tensor_compute",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/flash_attn_fwd_bf16_causal/results/flash_attn_fwd_bf16_causal/timing_01/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "timing_01",
+      "slug": "flash_attn_fwd_bf16_causal",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/flash_attn_fwd_bf16_causal/rtx_5060_laptop/sm_120/trace_timing_01/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/flash_attn_fwd_bf16_causal/flash_attn_fwd_bf16_causal_run",
+      "family": "flash_attn",
+      "family_bucket": "tensor_compute",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/flash_attn_fwd_bf16_causal/results/flash_attn_fwd_bf16_causal/trace_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "trace_00",
+      "slug": "flash_attn_fwd_bf16_causal",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/flash_attn_fwd_bf16_causal/rtx_5060_laptop/sm_120/trace_trace_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/flash_attn_fwd_bf16_causal/flash_attn_fwd_bf16_causal_run",
+      "family": "flash_attn",
+      "family_bucket": "tensor_compute",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/flash_attn_fwd_bf16_causal/results/flash_attn_fwd_bf16_causal/correctness_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "correctness_00",
+      "slug": "flash_attn_fwd_bf16_causal",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/flash_attn_fwd_bf16_causal/rtx_5060_laptop/sm_120/trace_correctness_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/flash_attn_fwd_bf16_noncausal/flash_attn_fwd_bf16_noncausal_run",
+      "family": "flash_attn",
+      "family_bucket": "tensor_compute",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/flash_attn_fwd_bf16_noncausal/results/flash_attn_fwd_bf16_noncausal/timing_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "timing_00",
+      "slug": "flash_attn_fwd_bf16_noncausal",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/flash_attn_fwd_bf16_noncausal/rtx_5060_laptop/sm_120/trace_timing_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/flash_attn_fwd_bf16_noncausal/flash_attn_fwd_bf16_noncausal_run",
+      "family": "flash_attn",
+      "family_bucket": "tensor_compute",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/flash_attn_fwd_bf16_noncausal/results/flash_attn_fwd_bf16_noncausal/timing_01/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "timing_01",
+      "slug": "flash_attn_fwd_bf16_noncausal",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/flash_attn_fwd_bf16_noncausal/rtx_5060_laptop/sm_120/trace_timing_01/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/flash_attn_fwd_bf16_noncausal/flash_attn_fwd_bf16_noncausal_run",
+      "family": "flash_attn",
+      "family_bucket": "tensor_compute",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/flash_attn_fwd_bf16_noncausal/results/flash_attn_fwd_bf16_noncausal/trace_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "trace_00",
+      "slug": "flash_attn_fwd_bf16_noncausal",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/flash_attn_fwd_bf16_noncausal/rtx_5060_laptop/sm_120/trace_trace_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/flash_attn_fwd_bf16_noncausal/flash_attn_fwd_bf16_noncausal_run",
+      "family": "flash_attn",
+      "family_bucket": "tensor_compute",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/flash_attn_fwd_bf16_noncausal/results/flash_attn_fwd_bf16_noncausal/correctness_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "correctness_00",
+      "slug": "flash_attn_fwd_bf16_noncausal",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/flash_attn_fwd_bf16_noncausal/rtx_5060_laptop/sm_120/trace_correctness_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/flash_attn_fwd_fp8_causal/flash_attn_fwd_fp8_causal_run",
+      "family": "flash_attn",
+      "family_bucket": "tensor_compute",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/flash_attn_fwd_fp8_causal/results/flash_attn_fwd_fp8_causal/timing_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "timing_00",
+      "slug": "flash_attn_fwd_fp8_causal",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/flash_attn_fwd_fp8_causal/rtx_5060_laptop/sm_120/trace_timing_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/flash_attn_fwd_fp8_causal/flash_attn_fwd_fp8_causal_run",
+      "family": "flash_attn",
+      "family_bucket": "tensor_compute",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/flash_attn_fwd_fp8_causal/results/flash_attn_fwd_fp8_causal/trace_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "trace_00",
+      "slug": "flash_attn_fwd_fp8_causal",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/flash_attn_fwd_fp8_causal/rtx_5060_laptop/sm_120/trace_trace_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/flash_attn_fwd_fp8_causal/flash_attn_fwd_fp8_causal_run",
+      "family": "flash_attn",
+      "family_bucket": "tensor_compute",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/flash_attn_fwd_fp8_causal/results/flash_attn_fwd_fp8_causal/correctness_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "correctness_00",
+      "slug": "flash_attn_fwd_fp8_causal",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/flash_attn_fwd_fp8_causal/rtx_5060_laptop/sm_120/trace_correctness_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/flash_attn_bwd_bf16/flash_attn_bwd_bf16_run",
+      "family": "flash_attn",
+      "family_bucket": "tensor_compute",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/flash_attn_bwd_bf16/results/flash_attn_bwd_bf16/timing_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "timing_00",
+      "slug": "flash_attn_bwd_bf16",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/flash_attn_bwd_bf16/rtx_5060_laptop/sm_120/trace_timing_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/flash_attn_bwd_bf16/flash_attn_bwd_bf16_run",
+      "family": "flash_attn",
+      "family_bucket": "tensor_compute",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/flash_attn_bwd_bf16/results/flash_attn_bwd_bf16/trace_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "trace_00",
+      "slug": "flash_attn_bwd_bf16",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/flash_attn_bwd_bf16/rtx_5060_laptop/sm_120/trace_trace_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/flash_attn_bwd_bf16/flash_attn_bwd_bf16_run",
+      "family": "flash_attn",
+      "family_bucket": "tensor_compute",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/flash_attn_bwd_bf16/results/flash_attn_bwd_bf16/correctness_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "correctness_00",
+      "slug": "flash_attn_bwd_bf16",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/flash_attn_bwd_bf16/rtx_5060_laptop/sm_120/trace_correctness_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/flash_attn_bwd_fp8/flash_attn_bwd_fp8_run",
+      "family": "flash_attn",
+      "family_bucket": "tensor_compute",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/flash_attn_bwd_fp8/results/flash_attn_bwd_fp8/timing_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "timing_00",
+      "slug": "flash_attn_bwd_fp8",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/flash_attn_bwd_fp8/rtx_5060_laptop/sm_120/trace_timing_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/flash_attn_bwd_fp8/flash_attn_bwd_fp8_run",
+      "family": "flash_attn",
+      "family_bucket": "tensor_compute",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/flash_attn_bwd_fp8/results/flash_attn_bwd_fp8/timing_01/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "timing_01",
+      "slug": "flash_attn_bwd_fp8",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/flash_attn_bwd_fp8/rtx_5060_laptop/sm_120/trace_timing_01/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/flash_attn_bwd_fp8/flash_attn_bwd_fp8_run",
+      "family": "flash_attn",
+      "family_bucket": "tensor_compute",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/flash_attn_bwd_fp8/results/flash_attn_bwd_fp8/trace_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "trace_00",
+      "slug": "flash_attn_bwd_fp8",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/flash_attn_bwd_fp8/rtx_5060_laptop/sm_120/trace_trace_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/flash_attn_bwd_fp8/flash_attn_bwd_fp8_run",
+      "family": "flash_attn",
+      "family_bucket": "tensor_compute",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/flash_attn_bwd_fp8/results/flash_attn_bwd_fp8/correctness_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "correctness_00",
+      "slug": "flash_attn_bwd_fp8",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/flash_attn_bwd_fp8/rtx_5060_laptop/sm_120/trace_correctness_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/pagedkv_decode_gqa_bf16/pagedkv_decode_gqa_bf16_run",
+      "family": "paged_decode",
+      "family_bucket": "memory_stress",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/pagedkv_decode_gqa_bf16/results/pagedkv_decode_gqa_bf16/timing_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "timing_00",
+      "slug": "pagedkv_decode_gqa_bf16",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/pagedkv_decode_gqa_bf16/rtx_5060_laptop/sm_120/trace_timing_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/pagedkv_decode_gqa_bf16/pagedkv_decode_gqa_bf16_run",
+      "family": "paged_decode",
+      "family_bucket": "memory_stress",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/pagedkv_decode_gqa_bf16/results/pagedkv_decode_gqa_bf16/trace_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "trace_00",
+      "slug": "pagedkv_decode_gqa_bf16",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/pagedkv_decode_gqa_bf16/rtx_5060_laptop/sm_120/trace_trace_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/pagedkv_decode_gqa_bf16/pagedkv_decode_gqa_bf16_run",
+      "family": "paged_decode",
+      "family_bucket": "memory_stress",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/pagedkv_decode_gqa_bf16/results/pagedkv_decode_gqa_bf16/correctness_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "correctness_00",
+      "slug": "pagedkv_decode_gqa_bf16",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/pagedkv_decode_gqa_bf16/rtx_5060_laptop/sm_120/trace_correctness_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/pagedkv_decode_mqa_bf16/pagedkv_decode_mqa_bf16_run",
+      "family": "paged_decode",
+      "family_bucket": "memory_stress",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/pagedkv_decode_mqa_bf16/results/pagedkv_decode_mqa_bf16/timing_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "timing_00",
+      "slug": "pagedkv_decode_mqa_bf16",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/pagedkv_decode_mqa_bf16/rtx_5060_laptop/sm_120/trace_timing_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/pagedkv_decode_mqa_bf16/pagedkv_decode_mqa_bf16_run",
+      "family": "paged_decode",
+      "family_bucket": "memory_stress",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/pagedkv_decode_mqa_bf16/results/pagedkv_decode_mqa_bf16/trace_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "trace_00",
+      "slug": "pagedkv_decode_mqa_bf16",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/pagedkv_decode_mqa_bf16/rtx_5060_laptop/sm_120/trace_trace_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/pagedkv_decode_mqa_bf16/pagedkv_decode_mqa_bf16_run",
+      "family": "paged_decode",
+      "family_bucket": "memory_stress",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/pagedkv_decode_mqa_bf16/results/pagedkv_decode_mqa_bf16/correctness_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "correctness_00",
+      "slug": "pagedkv_decode_mqa_bf16",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/pagedkv_decode_mqa_bf16/rtx_5060_laptop/sm_120/trace_correctness_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/paged_mla_decode_bf16/paged_mla_decode_bf16_run",
+      "family": "paged_mla",
+      "family_bucket": "memory_stress",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/paged_mla_decode_bf16/results/paged_mla_decode_bf16/timing_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "timing_00",
+      "slug": "paged_mla_decode_bf16",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/paged_mla_decode_bf16/rtx_5060_laptop/sm_120/trace_timing_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/paged_mla_decode_bf16/paged_mla_decode_bf16_run",
+      "family": "paged_mla",
+      "family_bucket": "memory_stress",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/paged_mla_decode_bf16/results/paged_mla_decode_bf16/trace_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "trace_00",
+      "slug": "paged_mla_decode_bf16",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/paged_mla_decode_bf16/rtx_5060_laptop/sm_120/trace_trace_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/paged_mla_decode_bf16/paged_mla_decode_bf16_run",
+      "family": "paged_mla",
+      "family_bucket": "memory_stress",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/paged_mla_decode_bf16/results/paged_mla_decode_bf16/correctness_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "correctness_00",
+      "slug": "paged_mla_decode_bf16",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/paged_mla_decode_bf16/rtx_5060_laptop/sm_120/trace_correctness_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/ragged_attention_prefill_bf16/ragged_attention_prefill_bf16_run",
+      "family": "ragged_attn",
+      "family_bucket": "memory_stress",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/ragged_attention_prefill_bf16/results/ragged_attention_prefill_bf16/timing_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "timing_00",
+      "slug": "ragged_attention_prefill_bf16",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/ragged_attention_prefill_bf16/rtx_5060_laptop/sm_120/trace_timing_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/ragged_attention_prefill_bf16/ragged_attention_prefill_bf16_run",
+      "family": "ragged_attn",
+      "family_bucket": "memory_stress",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/ragged_attention_prefill_bf16/results/ragged_attention_prefill_bf16/trace_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "trace_00",
+      "slug": "ragged_attention_prefill_bf16",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/ragged_attention_prefill_bf16/rtx_5060_laptop/sm_120/trace_trace_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/ragged_attention_prefill_bf16/ragged_attention_prefill_bf16_run",
+      "family": "ragged_attn",
+      "family_bucket": "memory_stress",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/ragged_attention_prefill_bf16/results/ragged_attention_prefill_bf16/correctness_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "correctness_00",
+      "slug": "ragged_attention_prefill_bf16",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/ragged_attention_prefill_bf16/rtx_5060_laptop/sm_120/trace_correctness_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/kv_cache_update_rope_bf16/kv_cache_update_rope_bf16_run",
+      "family": "kv_update",
+      "family_bucket": "memory_stress",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/kv_cache_update_rope_bf16/results/kv_cache_update_rope_bf16/timing_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "timing_00",
+      "slug": "kv_cache_update_rope_bf16",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/kv_cache_update_rope_bf16/rtx_5060_laptop/sm_120/trace_timing_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/kv_cache_update_rope_bf16/kv_cache_update_rope_bf16_run",
+      "family": "kv_update",
+      "family_bucket": "memory_stress",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/kv_cache_update_rope_bf16/results/kv_cache_update_rope_bf16/trace_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "trace_00",
+      "slug": "kv_cache_update_rope_bf16",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/kv_cache_update_rope_bf16/rtx_5060_laptop/sm_120/trace_trace_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/kv_cache_update_rope_bf16/kv_cache_update_rope_bf16_run",
+      "family": "kv_update",
+      "family_bucket": "memory_stress",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/kv_cache_update_rope_bf16/results/kv_cache_update_rope_bf16/correctness_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "correctness_00",
+      "slug": "kv_cache_update_rope_bf16",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/kv_cache_update_rope_bf16/rtx_5060_laptop/sm_120/trace_correctness_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/qkv_rope_standard_bf16/qkv_rope_standard_bf16_run",
+      "family": "rope",
+      "family_bucket": "memory_stress",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/qkv_rope_standard_bf16/results/qkv_rope_standard_bf16/timing_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "timing_00",
+      "slug": "qkv_rope_standard_bf16",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/qkv_rope_standard_bf16/rtx_5060_laptop/sm_120/trace_timing_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/qkv_rope_standard_bf16/qkv_rope_standard_bf16_run",
+      "family": "rope",
+      "family_bucket": "memory_stress",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/qkv_rope_standard_bf16/results/qkv_rope_standard_bf16/trace_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "trace_00",
+      "slug": "qkv_rope_standard_bf16",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/qkv_rope_standard_bf16/rtx_5060_laptop/sm_120/trace_trace_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/qkv_rope_standard_bf16/qkv_rope_standard_bf16_run",
+      "family": "rope",
+      "family_bucket": "memory_stress",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/qkv_rope_standard_bf16/results/qkv_rope_standard_bf16/correctness_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "correctness_00",
+      "slug": "qkv_rope_standard_bf16",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/qkv_rope_standard_bf16/rtx_5060_laptop/sm_120/trace_correctness_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/qkv_rope_yarn_bf16/qkv_rope_yarn_bf16_run",
+      "family": "rope",
+      "family_bucket": "memory_stress",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/qkv_rope_yarn_bf16/results/qkv_rope_yarn_bf16/timing_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "timing_00",
+      "slug": "qkv_rope_yarn_bf16",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/qkv_rope_yarn_bf16/rtx_5060_laptop/sm_120/trace_timing_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/qkv_rope_yarn_bf16/qkv_rope_yarn_bf16_run",
+      "family": "rope",
+      "family_bucket": "memory_stress",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/qkv_rope_yarn_bf16/results/qkv_rope_yarn_bf16/trace_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "trace_00",
+      "slug": "qkv_rope_yarn_bf16",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/qkv_rope_yarn_bf16/rtx_5060_laptop/sm_120/trace_trace_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/qkv_rope_yarn_bf16/qkv_rope_yarn_bf16_run",
+      "family": "rope",
+      "family_bucket": "memory_stress",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/qkv_rope_yarn_bf16/results/qkv_rope_yarn_bf16/correctness_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "correctness_00",
+      "slug": "qkv_rope_yarn_bf16",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/qkv_rope_yarn_bf16/rtx_5060_laptop/sm_120/trace_correctness_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/rope2d_mm_qkv_bf16/rope2d_mm_qkv_bf16_run",
+      "family": "rope",
+      "family_bucket": "memory_stress",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/rope2d_mm_qkv_bf16/results/rope2d_mm_qkv_bf16/timing_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "timing_00",
+      "slug": "rope2d_mm_qkv_bf16",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/rope2d_mm_qkv_bf16/rtx_5060_laptop/sm_120/trace_timing_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/rope2d_mm_qkv_bf16/rope2d_mm_qkv_bf16_run",
+      "family": "rope",
+      "family_bucket": "memory_stress",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/rope2d_mm_qkv_bf16/results/rope2d_mm_qkv_bf16/trace_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "trace_00",
+      "slug": "rope2d_mm_qkv_bf16",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/rope2d_mm_qkv_bf16/rtx_5060_laptop/sm_120/trace_trace_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/rope2d_mm_qkv_bf16/rope2d_mm_qkv_bf16_run",
+      "family": "rope",
+      "family_bucket": "memory_stress",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/rope2d_mm_qkv_bf16/results/rope2d_mm_qkv_bf16/correctness_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "correctness_00",
+      "slug": "rope2d_mm_qkv_bf16",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/rope2d_mm_qkv_bf16/rtx_5060_laptop/sm_120/trace_correctness_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/rmsnorm_fwd_bf16/rmsnorm_fwd_bf16_run",
+      "family": "rmsnorm",
+      "family_bucket": "activation_norm",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/rmsnorm_fwd_bf16/results/rmsnorm_fwd_bf16/timing_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "timing_00",
+      "slug": "rmsnorm_fwd_bf16",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/rmsnorm_fwd_bf16/rtx_5060_laptop/sm_120/trace_timing_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/rmsnorm_fwd_bf16/rmsnorm_fwd_bf16_run",
+      "family": "rmsnorm",
+      "family_bucket": "activation_norm",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/rmsnorm_fwd_bf16/results/rmsnorm_fwd_bf16/timing_01/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "timing_01",
+      "slug": "rmsnorm_fwd_bf16",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/rmsnorm_fwd_bf16/rtx_5060_laptop/sm_120/trace_timing_01/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/rmsnorm_fwd_bf16/rmsnorm_fwd_bf16_run",
+      "family": "rmsnorm",
+      "family_bucket": "activation_norm",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/rmsnorm_fwd_bf16/results/rmsnorm_fwd_bf16/correctness_calibration/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "correctness_calibration",
+      "slug": "rmsnorm_fwd_bf16",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/rmsnorm_fwd_bf16/rtx_5060_laptop/sm_120/trace_correctness_calibration/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/rmsnorm_fwd_bf16/rmsnorm_fwd_bf16_run",
+      "family": "rmsnorm",
+      "family_bucket": "activation_norm",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/rmsnorm_fwd_bf16/results/rmsnorm_fwd_bf16/joined_ac8_evidence/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "joined_ac8_evidence",
+      "slug": "rmsnorm_fwd_bf16",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/rmsnorm_fwd_bf16/rtx_5060_laptop/sm_120/trace_joined_ac8_evidence/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/rmsnorm_fwd_bf16/rmsnorm_fwd_bf16_run",
+      "family": "rmsnorm",
+      "family_bucket": "activation_norm",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/rmsnorm_fwd_bf16/results/rmsnorm_fwd_bf16/trace_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "trace_00",
+      "slug": "rmsnorm_fwd_bf16",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/rmsnorm_fwd_bf16/rtx_5060_laptop/sm_120/trace_trace_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/rmsnorm_fwd_bf16/rmsnorm_fwd_bf16_run",
+      "family": "rmsnorm",
+      "family_bucket": "activation_norm",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/rmsnorm_fwd_bf16/results/rmsnorm_fwd_bf16/joined_ac8_evidence/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "joined_ac8_evidence",
+      "slug": "rmsnorm_fwd_bf16",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/rmsnorm_fwd_bf16/rtx_5060_laptop/sm_120/trace_joined_ac8_evidence/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/rmsnorm_fwd_bf16/rmsnorm_fwd_bf16_run",
+      "family": "rmsnorm",
+      "family_bucket": "activation_norm",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/rmsnorm_fwd_bf16/results/rmsnorm_fwd_bf16/correctness_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "correctness_00",
+      "slug": "rmsnorm_fwd_bf16",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/rmsnorm_fwd_bf16/rtx_5060_laptop/sm_120/trace_correctness_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/rmsnorm_bwd_bf16/rmsnorm_bwd_bf16_run",
+      "family": "rmsnorm",
+      "family_bucket": "activation_norm",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/rmsnorm_bwd_bf16/results/rmsnorm_bwd_bf16/timing_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "timing_00",
+      "slug": "rmsnorm_bwd_bf16",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/rmsnorm_bwd_bf16/rtx_5060_laptop/sm_120/trace_timing_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/rmsnorm_bwd_bf16/rmsnorm_bwd_bf16_run",
+      "family": "rmsnorm",
+      "family_bucket": "activation_norm",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/rmsnorm_bwd_bf16/results/rmsnorm_bwd_bf16/trace_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "trace_00",
+      "slug": "rmsnorm_bwd_bf16",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/rmsnorm_bwd_bf16/rtx_5060_laptop/sm_120/trace_trace_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/rmsnorm_bwd_bf16/rmsnorm_bwd_bf16_run",
+      "family": "rmsnorm",
+      "family_bucket": "activation_norm",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/rmsnorm_bwd_bf16/results/rmsnorm_bwd_bf16/correctness_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "correctness_00",
+      "slug": "rmsnorm_bwd_bf16",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/rmsnorm_bwd_bf16/rtx_5060_laptop/sm_120/trace_correctness_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/layernorm_fwd_bwd_bf16/layernorm_fwd_bwd_bf16_run",
+      "family": "layernorm",
+      "family_bucket": "activation_norm",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/layernorm_fwd_bwd_bf16/results/layernorm_fwd_bwd_bf16/timing_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "timing_00",
+      "slug": "layernorm_fwd_bwd_bf16",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/layernorm_fwd_bwd_bf16/rtx_5060_laptop/sm_120/trace_timing_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/layernorm_fwd_bwd_bf16/layernorm_fwd_bwd_bf16_run",
+      "family": "layernorm",
+      "family_bucket": "activation_norm",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/layernorm_fwd_bwd_bf16/results/layernorm_fwd_bwd_bf16/trace_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "trace_00",
+      "slug": "layernorm_fwd_bwd_bf16",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/layernorm_fwd_bwd_bf16/rtx_5060_laptop/sm_120/trace_trace_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/layernorm_fwd_bwd_bf16/layernorm_fwd_bwd_bf16_run",
+      "family": "layernorm",
+      "family_bucket": "activation_norm",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/layernorm_fwd_bwd_bf16/results/layernorm_fwd_bwd_bf16/correctness_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "correctness_00",
+      "slug": "layernorm_fwd_bwd_bf16",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/layernorm_fwd_bwd_bf16/rtx_5060_laptop/sm_120/trace_correctness_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/groupnorm_fwd_bwd_bf16/groupnorm_fwd_bwd_bf16_run",
+      "family": "groupnorm",
+      "family_bucket": "activation_norm",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/groupnorm_fwd_bwd_bf16/results/groupnorm_fwd_bwd_bf16/timing_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "timing_00",
+      "slug": "groupnorm_fwd_bwd_bf16",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/groupnorm_fwd_bwd_bf16/rtx_5060_laptop/sm_120/trace_timing_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/groupnorm_fwd_bwd_bf16/groupnorm_fwd_bwd_bf16_run",
+      "family": "groupnorm",
+      "family_bucket": "activation_norm",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/groupnorm_fwd_bwd_bf16/results/groupnorm_fwd_bwd_bf16/trace_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "trace_00",
+      "slug": "groupnorm_fwd_bwd_bf16",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/groupnorm_fwd_bwd_bf16/rtx_5060_laptop/sm_120/trace_trace_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/groupnorm_fwd_bwd_bf16/groupnorm_fwd_bwd_bf16_run",
+      "family": "groupnorm",
+      "family_bucket": "activation_norm",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/groupnorm_fwd_bwd_bf16/results/groupnorm_fwd_bwd_bf16/correctness_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "correctness_00",
+      "slug": "groupnorm_fwd_bwd_bf16",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/groupnorm_fwd_bwd_bf16/rtx_5060_laptop/sm_120/trace_correctness_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/swiglu_ffn_fused_bf16/swiglu_ffn_fused_bf16_run",
+      "family": "swiglu_ffn",
+      "family_bucket": "activation_norm",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/swiglu_ffn_fused_bf16/results/swiglu_ffn_fused_bf16/timing_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "timing_00",
+      "slug": "swiglu_ffn_fused_bf16",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/swiglu_ffn_fused_bf16/rtx_5060_laptop/sm_120/trace_timing_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/swiglu_ffn_fused_bf16/swiglu_ffn_fused_bf16_run",
+      "family": "swiglu_ffn",
+      "family_bucket": "activation_norm",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/swiglu_ffn_fused_bf16/results/swiglu_ffn_fused_bf16/trace_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "trace_00",
+      "slug": "swiglu_ffn_fused_bf16",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/swiglu_ffn_fused_bf16/rtx_5060_laptop/sm_120/trace_trace_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/swiglu_ffn_fused_bf16/swiglu_ffn_fused_bf16_run",
+      "family": "swiglu_ffn",
+      "family_bucket": "activation_norm",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/swiglu_ffn_fused_bf16/results/swiglu_ffn_fused_bf16/correctness_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "correctness_00",
+      "slug": "swiglu_ffn_fused_bf16",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/swiglu_ffn_fused_bf16/rtx_5060_laptop/sm_120/trace_correctness_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/geglu_ffn_fused_bf16/geglu_ffn_fused_bf16_run",
+      "family": "geglu_ffn",
+      "family_bucket": "activation_norm",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/geglu_ffn_fused_bf16/results/geglu_ffn_fused_bf16/timing_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "timing_00",
+      "slug": "geglu_ffn_fused_bf16",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/geglu_ffn_fused_bf16/rtx_5060_laptop/sm_120/trace_timing_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/geglu_ffn_fused_bf16/geglu_ffn_fused_bf16_run",
+      "family": "geglu_ffn",
+      "family_bucket": "activation_norm",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/geglu_ffn_fused_bf16/results/geglu_ffn_fused_bf16/trace_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "trace_00",
+      "slug": "geglu_ffn_fused_bf16",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/geglu_ffn_fused_bf16/rtx_5060_laptop/sm_120/trace_trace_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/geglu_ffn_fused_bf16/geglu_ffn_fused_bf16_run",
+      "family": "geglu_ffn",
+      "family_bucket": "activation_norm",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/geglu_ffn_fused_bf16/results/geglu_ffn_fused_bf16/correctness_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "correctness_00",
+      "slug": "geglu_ffn_fused_bf16",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/geglu_ffn_fused_bf16/rtx_5060_laptop/sm_120/trace_correctness_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/moe_router_topk_softmax/moe_router_topk_softmax_run",
+      "family": "moe_router",
+      "family_bucket": "memory_stress",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/moe_router_topk_softmax/results/moe_router_topk_softmax/timing_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "timing_00",
+      "slug": "moe_router_topk_softmax",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/moe_router_topk_softmax/rtx_5060_laptop/sm_120/trace_timing_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/moe_router_topk_softmax/moe_router_topk_softmax_run",
+      "family": "moe_router",
+      "family_bucket": "memory_stress",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/moe_router_topk_softmax/results/moe_router_topk_softmax/trace_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "trace_00",
+      "slug": "moe_router_topk_softmax",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/moe_router_topk_softmax/rtx_5060_laptop/sm_120/trace_trace_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/moe_router_topk_softmax/moe_router_topk_softmax_run",
+      "family": "moe_router",
+      "family_bucket": "memory_stress",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/moe_router_topk_softmax/results/moe_router_topk_softmax/correctness_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "correctness_00",
+      "slug": "moe_router_topk_softmax",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/moe_router_topk_softmax/rtx_5060_laptop/sm_120/trace_correctness_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/moe_grouped_gemm_bf16/moe_grouped_gemm_bf16_run",
+      "family": "moe_grouped_gemm",
+      "family_bucket": "tensor_compute",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/moe_grouped_gemm_bf16/results/moe_grouped_gemm_bf16/timing_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "timing_00",
+      "slug": "moe_grouped_gemm_bf16",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/moe_grouped_gemm_bf16/rtx_5060_laptop/sm_120/trace_timing_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/moe_grouped_gemm_bf16/moe_grouped_gemm_bf16_run",
+      "family": "moe_grouped_gemm",
+      "family_bucket": "tensor_compute",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/moe_grouped_gemm_bf16/results/moe_grouped_gemm_bf16/trace_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "trace_00",
+      "slug": "moe_grouped_gemm_bf16",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/moe_grouped_gemm_bf16/rtx_5060_laptop/sm_120/trace_trace_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/moe_grouped_gemm_bf16/moe_grouped_gemm_bf16_run",
+      "family": "moe_grouped_gemm",
+      "family_bucket": "tensor_compute",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/moe_grouped_gemm_bf16/results/moe_grouped_gemm_bf16/correctness_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "correctness_00",
+      "slug": "moe_grouped_gemm_bf16",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/moe_grouped_gemm_bf16/rtx_5060_laptop/sm_120/trace_correctness_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/moe_grouped_gemm_fp8/moe_grouped_gemm_fp8_run",
+      "family": "moe_grouped_gemm",
+      "family_bucket": "tensor_compute",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/moe_grouped_gemm_fp8/results/moe_grouped_gemm_fp8/timing_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "timing_00",
+      "slug": "moe_grouped_gemm_fp8",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/moe_grouped_gemm_fp8/rtx_5060_laptop/sm_120/trace_timing_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/moe_grouped_gemm_fp8/moe_grouped_gemm_fp8_run",
+      "family": "moe_grouped_gemm",
+      "family_bucket": "tensor_compute",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/moe_grouped_gemm_fp8/results/moe_grouped_gemm_fp8/trace_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "trace_00",
+      "slug": "moe_grouped_gemm_fp8",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/moe_grouped_gemm_fp8/rtx_5060_laptop/sm_120/trace_trace_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/moe_grouped_gemm_fp8/moe_grouped_gemm_fp8_run",
+      "family": "moe_grouped_gemm",
+      "family_bucket": "tensor_compute",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/moe_grouped_gemm_fp8/results/moe_grouped_gemm_fp8/correctness_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "correctness_00",
+      "slug": "moe_grouped_gemm_fp8",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/moe_grouped_gemm_fp8/rtx_5060_laptop/sm_120/trace_correctness_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/conformer_depthwise_glu_bf16/conformer_depthwise_glu_bf16_run",
+      "family": "conformer",
+      "family_bucket": "tensor_compute",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/conformer_depthwise_glu_bf16/results/conformer_depthwise_glu_bf16/timing_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "timing_00",
+      "slug": "conformer_depthwise_glu_bf16",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/conformer_depthwise_glu_bf16/rtx_5060_laptop/sm_120/trace_timing_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/conformer_depthwise_glu_bf16/conformer_depthwise_glu_bf16_run",
+      "family": "conformer",
+      "family_bucket": "tensor_compute",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/conformer_depthwise_glu_bf16/results/conformer_depthwise_glu_bf16/timing_01/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "timing_01",
+      "slug": "conformer_depthwise_glu_bf16",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/conformer_depthwise_glu_bf16/rtx_5060_laptop/sm_120/trace_timing_01/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/conformer_depthwise_glu_bf16/conformer_depthwise_glu_bf16_run",
+      "family": "conformer",
+      "family_bucket": "tensor_compute",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/conformer_depthwise_glu_bf16/results/conformer_depthwise_glu_bf16/trace_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "trace_00",
+      "slug": "conformer_depthwise_glu_bf16",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/conformer_depthwise_glu_bf16/rtx_5060_laptop/sm_120/trace_trace_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/conformer_depthwise_glu_bf16/conformer_depthwise_glu_bf16_run",
+      "family": "conformer",
+      "family_bucket": "tensor_compute",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/conformer_depthwise_glu_bf16/results/conformer_depthwise_glu_bf16/correctness_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "correctness_00",
+      "slug": "conformer_depthwise_glu_bf16",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/conformer_depthwise_glu_bf16/rtx_5060_laptop/sm_120/trace_correctness_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/cluster_rmsnorm_dsmem_bf16/cluster_rmsnorm_dsmem_bf16_run",
+      "family": "cluster_norm",
+      "family_bucket": "activation_norm",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/cluster_rmsnorm_dsmem_bf16/results/cluster_rmsnorm_dsmem_bf16/timing_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "timing_00",
+      "slug": "cluster_rmsnorm_dsmem_bf16",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/cluster_rmsnorm_dsmem_bf16/rtx_5060_laptop/sm_120/trace_timing_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/cluster_rmsnorm_dsmem_bf16/cluster_rmsnorm_dsmem_bf16_run",
+      "family": "cluster_norm",
+      "family_bucket": "activation_norm",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/cluster_rmsnorm_dsmem_bf16/results/cluster_rmsnorm_dsmem_bf16/trace_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "trace_00",
+      "slug": "cluster_rmsnorm_dsmem_bf16",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/cluster_rmsnorm_dsmem_bf16/rtx_5060_laptop/sm_120/trace_trace_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l2/cluster_rmsnorm_dsmem_bf16/cluster_rmsnorm_dsmem_bf16_run",
+      "family": "cluster_norm",
+      "family_bucket": "activation_norm",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l2/cluster_rmsnorm_dsmem_bf16/results/cluster_rmsnorm_dsmem_bf16/correctness_00/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "correctness_00",
+      "slug": "cluster_rmsnorm_dsmem_bf16",
+      "source_row_level": "L2",
+      "trace_json_path": "workloads/simbench_bw/results/cluster_rmsnorm_dsmem_bf16/rtx_5060_laptop/sm_120/trace_correctness_00/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l1/working_set_capacity_sweep/working_set_capacity_sweep_run",
+      "family": "cache",
+      "family_bucket": "memory_stress",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l1/working_set_capacity_sweep/results/working_set_capacity_sweep/trace_l2_accuracy_xl/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "working_set_capacity_sweep",
+      "source_row_level": "L1",
+      "trace_json_path": "workloads/simbench_bw/results/working_set_capacity_sweep/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l1/warm_cold_pair_relaunch/warm_cold_pair_relaunch_run",
+      "family": "cache",
+      "family_bucket": "memory_stress",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l1/warm_cold_pair_relaunch/results/warm_cold_pair_relaunch/trace_l2_accuracy_xl/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "warm_cold_pair_relaunch",
+      "source_row_level": "L1",
+      "trace_json_path": "workloads/simbench_bw/results/warm_cold_pair_relaunch/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l1/l2_prefetch_hint_sweep/l2_prefetch_hint_sweep_run",
+      "family": "cache",
+      "family_bucket": "memory_stress",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l1/l2_prefetch_hint_sweep/results/l2_prefetch_hint_sweep/trace_l2_accuracy_xl/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "l2_prefetch_hint_sweep",
+      "source_row_level": "L1",
+      "trace_json_path": "workloads/simbench_bw/results/l2_prefetch_hint_sweep/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l1/l2_persisting_window_sweep/l2_persisting_window_sweep_run",
+      "family": "cache",
+      "family_bucket": "memory_stress",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l1/l2_persisting_window_sweep/results/l2_persisting_window_sweep/trace_l2_accuracy_xl/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "l2_persisting_window_sweep",
+      "source_row_level": "L1",
+      "trace_json_path": "workloads/simbench_bw/results/l2_persisting_window_sweep/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90a",
+        "sm_120"
+      ],
+      "binary_path": "workloads/simbench_bw/l1/carveout_sensitivity_probe/carveout_sensitivity_probe_run",
+      "family": "cache",
+      "family_bucket": "memory_stress",
+      "level": "L2",
+      "manifest_path": "workloads/simbench_bw/l1/carveout_sensitivity_probe/results/carveout_sensitivity_probe/trace_l2_accuracy_xl/manifest.json",
+      "roster_source": "simbench_bw",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "carveout_sensitivity_probe",
+      "source_row_level": "L1",
+      "trace_json_path": "workloads/simbench_bw/results/carveout_sensitivity_probe/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "binary_path": "workloads/portable_lcd/gemm_hmma_bf16_sm80/gemm_hmma_bf16_sm80_run",
+      "family": "gemm_hmma",
+      "family_bucket": "tensor_compute",
+      "level": "L2",
+      "manifest_path": "workloads/portable_lcd/gemm_hmma_bf16_sm80/results/gemm_hmma_bf16_sm80/correctness_shape/manifest.json",
+      "roster_source": "portable_lcd",
+      "shape_point": "correctness_shape",
+      "slug": "gemm_hmma_bf16_sm80",
+      "source_row_level": "",
+      "trace_json_path": "workloads/portable_lcd/results/gemm_hmma_bf16_sm80/rtx_5060_laptop/sm_120/trace_correctness_shape/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "binary_path": "workloads/portable_lcd/gemm_hmma_bf16_sm80/gemm_hmma_bf16_sm80_run",
+      "family": "gemm_hmma",
+      "family_bucket": "tensor_compute",
+      "level": "L2",
+      "manifest_path": "workloads/portable_lcd/gemm_hmma_bf16_sm80/results/gemm_hmma_bf16_sm80/timing_shape/manifest.json",
+      "roster_source": "portable_lcd",
+      "shape_point": "timing_shape",
+      "slug": "gemm_hmma_bf16_sm80",
+      "source_row_level": "",
+      "trace_json_path": "workloads/portable_lcd/results/gemm_hmma_bf16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "binary_path": "workloads/portable_lcd/gemm_hmma_bf16_sm80/gemm_hmma_bf16_sm80_run",
+      "family": "gemm_hmma",
+      "family_bucket": "tensor_compute",
+      "level": "L2",
+      "manifest_path": "workloads/portable_lcd/gemm_hmma_bf16_sm80/results/gemm_hmma_bf16_sm80/trace_l2_accuracy_lg/manifest.json",
+      "roster_source": "portable_lcd",
+      "shape_point": "trace_l2_accuracy_lg",
+      "slug": "gemm_hmma_bf16_sm80",
+      "source_row_level": "",
+      "trace_json_path": "workloads/portable_lcd/results/gemm_hmma_bf16_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_lg/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "binary_path": "workloads/portable_lcd/gemm_hmma_bf16_sm80/gemm_hmma_bf16_sm80_run",
+      "family": "gemm_hmma",
+      "family_bucket": "tensor_compute",
+      "level": "L2",
+      "manifest_path": "workloads/portable_lcd/gemm_hmma_bf16_sm80/results/gemm_hmma_bf16_sm80/trace_l2_accuracy_xl/manifest.json",
+      "roster_source": "portable_lcd",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "gemm_hmma_bf16_sm80",
+      "source_row_level": "",
+      "trace_json_path": "workloads/portable_lcd/results/gemm_hmma_bf16_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "binary_path": "workloads/portable_lcd/rmsnorm_fwd_bf16_sm80/rmsnorm_fwd_bf16_sm80_run",
+      "family": "norm_fwd",
+      "family_bucket": "activation_norm",
+      "level": "L2",
+      "manifest_path": "workloads/portable_lcd/rmsnorm_fwd_bf16_sm80/results/rmsnorm_fwd_bf16_sm80/correctness_shape/manifest.json",
+      "roster_source": "portable_lcd",
+      "shape_point": "correctness_shape",
+      "slug": "rmsnorm_fwd_bf16_sm80",
+      "source_row_level": "",
+      "trace_json_path": "workloads/portable_lcd/results/rmsnorm_fwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_correctness_shape/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "binary_path": "workloads/portable_lcd/rmsnorm_fwd_bf16_sm80/rmsnorm_fwd_bf16_sm80_run",
+      "family": "norm_fwd",
+      "family_bucket": "activation_norm",
+      "level": "L2",
+      "manifest_path": "workloads/portable_lcd/rmsnorm_fwd_bf16_sm80/results/rmsnorm_fwd_bf16_sm80/timing_shape/manifest.json",
+      "roster_source": "portable_lcd",
+      "shape_point": "timing_shape",
+      "slug": "rmsnorm_fwd_bf16_sm80",
+      "source_row_level": "",
+      "trace_json_path": "workloads/portable_lcd/results/rmsnorm_fwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "binary_path": "workloads/portable_lcd/rmsnorm_fwd_bf16_sm80/rmsnorm_fwd_bf16_sm80_run",
+      "family": "norm_fwd",
+      "family_bucket": "activation_norm",
+      "level": "L2",
+      "manifest_path": "workloads/portable_lcd/rmsnorm_fwd_bf16_sm80/results/rmsnorm_fwd_bf16_sm80/trace_l2_accuracy_lg/manifest.json",
+      "roster_source": "portable_lcd",
+      "shape_point": "trace_l2_accuracy_lg",
+      "slug": "rmsnorm_fwd_bf16_sm80",
+      "source_row_level": "",
+      "trace_json_path": "workloads/portable_lcd/results/rmsnorm_fwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_lg/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "binary_path": "workloads/portable_lcd/rmsnorm_fwd_bf16_sm80/rmsnorm_fwd_bf16_sm80_run",
+      "family": "norm_fwd",
+      "family_bucket": "activation_norm",
+      "level": "L2",
+      "manifest_path": "workloads/portable_lcd/rmsnorm_fwd_bf16_sm80/results/rmsnorm_fwd_bf16_sm80/trace_l2_accuracy_xl/manifest.json",
+      "roster_source": "portable_lcd",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "rmsnorm_fwd_bf16_sm80",
+      "source_row_level": "",
+      "trace_json_path": "workloads/portable_lcd/results/rmsnorm_fwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "binary_path": "workloads/portable_lcd/softmax_safe_bf16_sm80/softmax_safe_bf16_sm80_run",
+      "family": "softmax",
+      "family_bucket": "activation_norm",
+      "level": "L2",
+      "manifest_path": "workloads/portable_lcd/softmax_safe_bf16_sm80/results/softmax_safe_bf16_sm80/correctness_shape/manifest.json",
+      "roster_source": "portable_lcd",
+      "shape_point": "correctness_shape",
+      "slug": "softmax_safe_bf16_sm80",
+      "source_row_level": "",
+      "trace_json_path": "workloads/portable_lcd/results/softmax_safe_bf16_sm80/rtx_5060_laptop/sm_120/trace_correctness_shape/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "binary_path": "workloads/portable_lcd/softmax_safe_bf16_sm80/softmax_safe_bf16_sm80_run",
+      "family": "softmax",
+      "family_bucket": "activation_norm",
+      "level": "L2",
+      "manifest_path": "workloads/portable_lcd/softmax_safe_bf16_sm80/results/softmax_safe_bf16_sm80/timing_shape/manifest.json",
+      "roster_source": "portable_lcd",
+      "shape_point": "timing_shape",
+      "slug": "softmax_safe_bf16_sm80",
+      "source_row_level": "",
+      "trace_json_path": "workloads/portable_lcd/results/softmax_safe_bf16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "binary_path": "workloads/portable_lcd/softmax_safe_bf16_sm80/softmax_safe_bf16_sm80_run",
+      "family": "softmax",
+      "family_bucket": "activation_norm",
+      "level": "L2",
+      "manifest_path": "workloads/portable_lcd/softmax_safe_bf16_sm80/results/softmax_safe_bf16_sm80/trace_l2_accuracy_lg/manifest.json",
+      "roster_source": "portable_lcd",
+      "shape_point": "trace_l2_accuracy_lg",
+      "slug": "softmax_safe_bf16_sm80",
+      "source_row_level": "",
+      "trace_json_path": "workloads/portable_lcd/results/softmax_safe_bf16_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_lg/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "binary_path": "workloads/portable_lcd/softmax_safe_bf16_sm80/softmax_safe_bf16_sm80_run",
+      "family": "softmax",
+      "family_bucket": "activation_norm",
+      "level": "L2",
+      "manifest_path": "workloads/portable_lcd/softmax_safe_bf16_sm80/results/softmax_safe_bf16_sm80/trace_l2_accuracy_xl/manifest.json",
+      "roster_source": "portable_lcd",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "softmax_safe_bf16_sm80",
+      "source_row_level": "",
+      "trace_json_path": "workloads/portable_lcd/results/softmax_safe_bf16_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "binary_path": "workloads/portable_lcd/swiglu_fwd_bf16_sm80/swiglu_fwd_bf16_sm80_run",
+      "family": "activation",
+      "family_bucket": "activation_norm",
+      "level": "L2",
+      "manifest_path": "workloads/portable_lcd/swiglu_fwd_bf16_sm80/results/swiglu_fwd_bf16_sm80/correctness_shape/manifest.json",
+      "roster_source": "portable_lcd",
+      "shape_point": "correctness_shape",
+      "slug": "swiglu_fwd_bf16_sm80",
+      "source_row_level": "",
+      "trace_json_path": "workloads/portable_lcd/results/swiglu_fwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_correctness_shape/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "binary_path": "workloads/portable_lcd/swiglu_fwd_bf16_sm80/swiglu_fwd_bf16_sm80_run",
+      "family": "activation",
+      "family_bucket": "activation_norm",
+      "level": "L2",
+      "manifest_path": "workloads/portable_lcd/swiglu_fwd_bf16_sm80/results/swiglu_fwd_bf16_sm80/timing_shape/manifest.json",
+      "roster_source": "portable_lcd",
+      "shape_point": "timing_shape",
+      "slug": "swiglu_fwd_bf16_sm80",
+      "source_row_level": "",
+      "trace_json_path": "workloads/portable_lcd/results/swiglu_fwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "binary_path": "workloads/portable_lcd/swiglu_fwd_bf16_sm80/swiglu_fwd_bf16_sm80_run",
+      "family": "activation",
+      "family_bucket": "activation_norm",
+      "level": "L2",
+      "manifest_path": "workloads/portable_lcd/swiglu_fwd_bf16_sm80/results/swiglu_fwd_bf16_sm80/trace_l2_accuracy_lg/manifest.json",
+      "roster_source": "portable_lcd",
+      "shape_point": "trace_l2_accuracy_lg",
+      "slug": "swiglu_fwd_bf16_sm80",
+      "source_row_level": "",
+      "trace_json_path": "workloads/portable_lcd/results/swiglu_fwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_lg/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "binary_path": "workloads/portable_lcd/swiglu_fwd_bf16_sm80/swiglu_fwd_bf16_sm80_run",
+      "family": "activation",
+      "family_bucket": "activation_norm",
+      "level": "L2",
+      "manifest_path": "workloads/portable_lcd/swiglu_fwd_bf16_sm80/results/swiglu_fwd_bf16_sm80/trace_l2_accuracy_xl/manifest.json",
+      "roster_source": "portable_lcd",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "swiglu_fwd_bf16_sm80",
+      "source_row_level": "",
+      "trace_json_path": "workloads/portable_lcd/results/swiglu_fwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "binary_path": "workloads/portable_lcd/embedding_gather_int32_sm80/embedding_gather_int32_sm80_run",
+      "family": "embedding",
+      "family_bucket": "memory_stress",
+      "level": "L2",
+      "manifest_path": "workloads/portable_lcd/embedding_gather_int32_sm80/results/embedding_gather_int32_sm80/correctness_shape/manifest.json",
+      "roster_source": "portable_lcd",
+      "shape_point": "correctness_shape",
+      "slug": "embedding_gather_int32_sm80",
+      "source_row_level": "",
+      "trace_json_path": "workloads/portable_lcd/results/embedding_gather_int32_sm80/rtx_5060_laptop/sm_120/trace_correctness_shape/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "binary_path": "workloads/portable_lcd/embedding_gather_int32_sm80/embedding_gather_int32_sm80_run",
+      "family": "embedding",
+      "family_bucket": "memory_stress",
+      "level": "L2",
+      "manifest_path": "workloads/portable_lcd/embedding_gather_int32_sm80/results/embedding_gather_int32_sm80/timing_shape/manifest.json",
+      "roster_source": "portable_lcd",
+      "shape_point": "timing_shape",
+      "slug": "embedding_gather_int32_sm80",
+      "source_row_level": "",
+      "trace_json_path": "workloads/portable_lcd/results/embedding_gather_int32_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "binary_path": "workloads/portable_lcd/embedding_gather_int32_sm80/embedding_gather_int32_sm80_run",
+      "family": "embedding",
+      "family_bucket": "memory_stress",
+      "level": "L2",
+      "manifest_path": "workloads/portable_lcd/embedding_gather_int32_sm80/results/embedding_gather_int32_sm80/trace_l2_accuracy_lg/manifest.json",
+      "roster_source": "portable_lcd",
+      "shape_point": "trace_l2_accuracy_lg",
+      "slug": "embedding_gather_int32_sm80",
+      "source_row_level": "",
+      "trace_json_path": "workloads/portable_lcd/results/embedding_gather_int32_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_lg/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "binary_path": "workloads/portable_lcd/embedding_gather_int32_sm80/embedding_gather_int32_sm80_run",
+      "family": "embedding",
+      "family_bucket": "memory_stress",
+      "level": "L2",
+      "manifest_path": "workloads/portable_lcd/embedding_gather_int32_sm80/results/embedding_gather_int32_sm80/trace_l2_accuracy_xl/manifest.json",
+      "roster_source": "portable_lcd",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "embedding_gather_int32_sm80",
+      "source_row_level": "",
+      "trace_json_path": "workloads/portable_lcd/results/embedding_gather_int32_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "binary_path": "workloads/portable_lcd/cross_entropy_fwd_fp32_sm80/cross_entropy_fwd_fp32_sm80_run",
+      "family": "loss",
+      "family_bucket": "memory_stress",
+      "level": "L2",
+      "manifest_path": "workloads/portable_lcd/cross_entropy_fwd_fp32_sm80/results/cross_entropy_fwd_fp32_sm80/correctness_shape/manifest.json",
+      "roster_source": "portable_lcd",
+      "shape_point": "correctness_shape",
+      "slug": "cross_entropy_fwd_fp32_sm80",
+      "source_row_level": "",
+      "trace_json_path": "workloads/portable_lcd/results/cross_entropy_fwd_fp32_sm80/rtx_5060_laptop/sm_120/trace_correctness_shape/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "binary_path": "workloads/portable_lcd/cross_entropy_fwd_fp32_sm80/cross_entropy_fwd_fp32_sm80_run",
+      "family": "loss",
+      "family_bucket": "memory_stress",
+      "level": "L2",
+      "manifest_path": "workloads/portable_lcd/cross_entropy_fwd_fp32_sm80/results/cross_entropy_fwd_fp32_sm80/timing_shape/manifest.json",
+      "roster_source": "portable_lcd",
+      "shape_point": "timing_shape",
+      "slug": "cross_entropy_fwd_fp32_sm80",
+      "source_row_level": "",
+      "trace_json_path": "workloads/portable_lcd/results/cross_entropy_fwd_fp32_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "binary_path": "workloads/portable_lcd/cross_entropy_fwd_fp32_sm80/cross_entropy_fwd_fp32_sm80_run",
+      "family": "loss",
+      "family_bucket": "memory_stress",
+      "level": "L2",
+      "manifest_path": "workloads/portable_lcd/cross_entropy_fwd_fp32_sm80/results/cross_entropy_fwd_fp32_sm80/trace_l2_accuracy_lg/manifest.json",
+      "roster_source": "portable_lcd",
+      "shape_point": "trace_l2_accuracy_lg",
+      "slug": "cross_entropy_fwd_fp32_sm80",
+      "source_row_level": "",
+      "trace_json_path": "workloads/portable_lcd/results/cross_entropy_fwd_fp32_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_lg/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "binary_path": "workloads/portable_lcd/cross_entropy_fwd_fp32_sm80/cross_entropy_fwd_fp32_sm80_run",
+      "family": "loss",
+      "family_bucket": "memory_stress",
+      "level": "L2",
+      "manifest_path": "workloads/portable_lcd/cross_entropy_fwd_fp32_sm80/results/cross_entropy_fwd_fp32_sm80/trace_l2_accuracy_xl/manifest.json",
+      "roster_source": "portable_lcd",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "cross_entropy_fwd_fp32_sm80",
+      "source_row_level": "",
+      "trace_json_path": "workloads/portable_lcd/results/cross_entropy_fwd_fp32_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "binary_path": "workloads/portable_lcd/gemm_hmma_fp16_sm80/gemm_hmma_fp16_sm80_run",
+      "family": "gemm_hmma",
+      "family_bucket": "tensor_compute",
+      "level": "L2",
+      "manifest_path": "workloads/portable_lcd/gemm_hmma_fp16_sm80/results/gemm_hmma_fp16_sm80/correctness_shape/manifest.json",
+      "roster_source": "portable_lcd",
+      "shape_point": "correctness_shape",
+      "slug": "gemm_hmma_fp16_sm80",
+      "source_row_level": "",
+      "trace_json_path": "workloads/portable_lcd/results/gemm_hmma_fp16_sm80/rtx_5060_laptop/sm_120/trace_correctness_shape/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "binary_path": "workloads/portable_lcd/gemm_hmma_fp16_sm80/gemm_hmma_fp16_sm80_run",
+      "family": "gemm_hmma",
+      "family_bucket": "tensor_compute",
+      "level": "L2",
+      "manifest_path": "workloads/portable_lcd/gemm_hmma_fp16_sm80/results/gemm_hmma_fp16_sm80/timing_shape/manifest.json",
+      "roster_source": "portable_lcd",
+      "shape_point": "timing_shape",
+      "slug": "gemm_hmma_fp16_sm80",
+      "source_row_level": "",
+      "trace_json_path": "workloads/portable_lcd/results/gemm_hmma_fp16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "binary_path": "workloads/portable_lcd/gemm_hmma_fp16_sm80/gemm_hmma_fp16_sm80_run",
+      "family": "gemm_hmma",
+      "family_bucket": "tensor_compute",
+      "level": "L2",
+      "manifest_path": "workloads/portable_lcd/gemm_hmma_fp16_sm80/results/gemm_hmma_fp16_sm80/trace_l2_accuracy_lg/manifest.json",
+      "roster_source": "portable_lcd",
+      "shape_point": "trace_l2_accuracy_lg",
+      "slug": "gemm_hmma_fp16_sm80",
+      "source_row_level": "",
+      "trace_json_path": "workloads/portable_lcd/results/gemm_hmma_fp16_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_lg/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "binary_path": "workloads/portable_lcd/gemm_hmma_fp16_sm80/gemm_hmma_fp16_sm80_run",
+      "family": "gemm_hmma",
+      "family_bucket": "tensor_compute",
+      "level": "L2",
+      "manifest_path": "workloads/portable_lcd/gemm_hmma_fp16_sm80/results/gemm_hmma_fp16_sm80/trace_l2_accuracy_xl/manifest.json",
+      "roster_source": "portable_lcd",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "gemm_hmma_fp16_sm80",
+      "source_row_level": "",
+      "trace_json_path": "workloads/portable_lcd/results/gemm_hmma_fp16_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "binary_path": "workloads/portable_lcd/gemm_imma_int8_sm80/gemm_imma_int8_sm80_run",
+      "family": "gemm_imma",
+      "family_bucket": "tensor_compute",
+      "level": "L2",
+      "manifest_path": "workloads/portable_lcd/gemm_imma_int8_sm80/results/gemm_imma_int8_sm80/correctness_shape/manifest.json",
+      "roster_source": "portable_lcd",
+      "shape_point": "correctness_shape",
+      "slug": "gemm_imma_int8_sm80",
+      "source_row_level": "",
+      "trace_json_path": "workloads/portable_lcd/results/gemm_imma_int8_sm80/rtx_5060_laptop/sm_120/trace_correctness_shape/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "binary_path": "workloads/portable_lcd/gemm_imma_int8_sm80/gemm_imma_int8_sm80_run",
+      "family": "gemm_imma",
+      "family_bucket": "tensor_compute",
+      "level": "L2",
+      "manifest_path": "workloads/portable_lcd/gemm_imma_int8_sm80/results/gemm_imma_int8_sm80/timing_shape/manifest.json",
+      "roster_source": "portable_lcd",
+      "shape_point": "timing_shape",
+      "slug": "gemm_imma_int8_sm80",
+      "source_row_level": "",
+      "trace_json_path": "workloads/portable_lcd/results/gemm_imma_int8_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "binary_path": "workloads/portable_lcd/gemm_imma_int8_sm80/gemm_imma_int8_sm80_run",
+      "family": "gemm_imma",
+      "family_bucket": "tensor_compute",
+      "level": "L2",
+      "manifest_path": "workloads/portable_lcd/gemm_imma_int8_sm80/results/gemm_imma_int8_sm80/trace_l2_accuracy_lg/manifest.json",
+      "roster_source": "portable_lcd",
+      "shape_point": "trace_l2_accuracy_lg",
+      "slug": "gemm_imma_int8_sm80",
+      "source_row_level": "",
+      "trace_json_path": "workloads/portable_lcd/results/gemm_imma_int8_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_lg/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "binary_path": "workloads/portable_lcd/gemm_imma_int8_sm80/gemm_imma_int8_sm80_run",
+      "family": "gemm_imma",
+      "family_bucket": "tensor_compute",
+      "level": "L2",
+      "manifest_path": "workloads/portable_lcd/gemm_imma_int8_sm80/results/gemm_imma_int8_sm80/trace_l2_accuracy_xl/manifest.json",
+      "roster_source": "portable_lcd",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "gemm_imma_int8_sm80",
+      "source_row_level": "",
+      "trace_json_path": "workloads/portable_lcd/results/gemm_imma_int8_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "binary_path": "workloads/portable_lcd/gemm_sparse_2to4_bf16_sm80/gemm_sparse_2to4_bf16_sm80_run",
+      "family": "gemm_sparse",
+      "family_bucket": "tensor_compute",
+      "level": "L2",
+      "manifest_path": "workloads/portable_lcd/gemm_sparse_2to4_bf16_sm80/results/gemm_sparse_2to4_bf16_sm80/correctness_shape/manifest.json",
+      "roster_source": "portable_lcd",
+      "shape_point": "correctness_shape",
+      "slug": "gemm_sparse_2to4_bf16_sm80",
+      "source_row_level": "",
+      "trace_json_path": "workloads/portable_lcd/results/gemm_sparse_2to4_bf16_sm80/rtx_5060_laptop/sm_120/trace_correctness_shape/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "binary_path": "workloads/portable_lcd/gemm_sparse_2to4_bf16_sm80/gemm_sparse_2to4_bf16_sm80_run",
+      "family": "gemm_sparse",
+      "family_bucket": "tensor_compute",
+      "level": "L2",
+      "manifest_path": "workloads/portable_lcd/gemm_sparse_2to4_bf16_sm80/results/gemm_sparse_2to4_bf16_sm80/timing_shape/manifest.json",
+      "roster_source": "portable_lcd",
+      "shape_point": "timing_shape",
+      "slug": "gemm_sparse_2to4_bf16_sm80",
+      "source_row_level": "",
+      "trace_json_path": "workloads/portable_lcd/results/gemm_sparse_2to4_bf16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "binary_path": "workloads/portable_lcd/gemm_sparse_2to4_bf16_sm80/gemm_sparse_2to4_bf16_sm80_run",
+      "family": "gemm_sparse",
+      "family_bucket": "tensor_compute",
+      "level": "L2",
+      "manifest_path": "workloads/portable_lcd/gemm_sparse_2to4_bf16_sm80/results/gemm_sparse_2to4_bf16_sm80/trace_l2_accuracy_lg/manifest.json",
+      "roster_source": "portable_lcd",
+      "shape_point": "trace_l2_accuracy_lg",
+      "slug": "gemm_sparse_2to4_bf16_sm80",
+      "source_row_level": "",
+      "trace_json_path": "workloads/portable_lcd/results/gemm_sparse_2to4_bf16_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_lg/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "binary_path": "workloads/portable_lcd/gemm_sparse_2to4_bf16_sm80/gemm_sparse_2to4_bf16_sm80_run",
+      "family": "gemm_sparse",
+      "family_bucket": "tensor_compute",
+      "level": "L2",
+      "manifest_path": "workloads/portable_lcd/gemm_sparse_2to4_bf16_sm80/results/gemm_sparse_2to4_bf16_sm80/trace_l2_accuracy_xl/manifest.json",
+      "roster_source": "portable_lcd",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "gemm_sparse_2to4_bf16_sm80",
+      "source_row_level": "",
+      "trace_json_path": "workloads/portable_lcd/results/gemm_sparse_2to4_bf16_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "binary_path": "workloads/portable_lcd/flash_attn_fwd_bf16_sm80/flash_attn_fwd_bf16_sm80_run",
+      "family": "attention",
+      "family_bucket": "tensor_compute",
+      "level": "L2",
+      "manifest_path": "workloads/portable_lcd/flash_attn_fwd_bf16_sm80/results/flash_attn_fwd_bf16_sm80/correctness_shape/manifest.json",
+      "roster_source": "portable_lcd",
+      "shape_point": "correctness_shape",
+      "slug": "flash_attn_fwd_bf16_sm80",
+      "source_row_level": "",
+      "trace_json_path": "workloads/portable_lcd/results/flash_attn_fwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_correctness_shape/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "binary_path": "workloads/portable_lcd/flash_attn_fwd_bf16_sm80/flash_attn_fwd_bf16_sm80_run",
+      "family": "attention",
+      "family_bucket": "tensor_compute",
+      "level": "L2",
+      "manifest_path": "workloads/portable_lcd/flash_attn_fwd_bf16_sm80/results/flash_attn_fwd_bf16_sm80/timing_shape/manifest.json",
+      "roster_source": "portable_lcd",
+      "shape_point": "timing_shape",
+      "slug": "flash_attn_fwd_bf16_sm80",
+      "source_row_level": "",
+      "trace_json_path": "workloads/portable_lcd/results/flash_attn_fwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "binary_path": "workloads/portable_lcd/flash_attn_fwd_bf16_sm80/flash_attn_fwd_bf16_sm80_run",
+      "family": "attention",
+      "family_bucket": "tensor_compute",
+      "level": "L2",
+      "manifest_path": "workloads/portable_lcd/flash_attn_fwd_bf16_sm80/results/flash_attn_fwd_bf16_sm80/trace_l2_accuracy_lg/manifest.json",
+      "roster_source": "portable_lcd",
+      "shape_point": "trace_l2_accuracy_lg",
+      "slug": "flash_attn_fwd_bf16_sm80",
+      "source_row_level": "",
+      "trace_json_path": "workloads/portable_lcd/results/flash_attn_fwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_lg/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "binary_path": "workloads/portable_lcd/flash_attn_fwd_bf16_sm80/flash_attn_fwd_bf16_sm80_run",
+      "family": "attention",
+      "family_bucket": "tensor_compute",
+      "level": "L2",
+      "manifest_path": "workloads/portable_lcd/flash_attn_fwd_bf16_sm80/results/flash_attn_fwd_bf16_sm80/trace_l2_accuracy_xl/manifest.json",
+      "roster_source": "portable_lcd",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "flash_attn_fwd_bf16_sm80",
+      "source_row_level": "",
+      "trace_json_path": "workloads/portable_lcd/results/flash_attn_fwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "binary_path": "workloads/portable_lcd/flash_attn_bwd_bf16_sm80/flash_attn_bwd_bf16_sm80_run",
+      "family": "attention",
+      "family_bucket": "tensor_compute",
+      "level": "L2",
+      "manifest_path": "workloads/portable_lcd/flash_attn_bwd_bf16_sm80/results/flash_attn_bwd_bf16_sm80/correctness_shape/manifest.json",
+      "roster_source": "portable_lcd",
+      "shape_point": "correctness_shape",
+      "slug": "flash_attn_bwd_bf16_sm80",
+      "source_row_level": "",
+      "trace_json_path": "workloads/portable_lcd/results/flash_attn_bwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_correctness_shape/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "binary_path": "workloads/portable_lcd/flash_attn_bwd_bf16_sm80/flash_attn_bwd_bf16_sm80_run",
+      "family": "attention",
+      "family_bucket": "tensor_compute",
+      "level": "L2",
+      "manifest_path": "workloads/portable_lcd/flash_attn_bwd_bf16_sm80/results/flash_attn_bwd_bf16_sm80/timing_shape/manifest.json",
+      "roster_source": "portable_lcd",
+      "shape_point": "timing_shape",
+      "slug": "flash_attn_bwd_bf16_sm80",
+      "source_row_level": "",
+      "trace_json_path": "workloads/portable_lcd/results/flash_attn_bwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "binary_path": "workloads/portable_lcd/flash_attn_bwd_bf16_sm80/flash_attn_bwd_bf16_sm80_run",
+      "family": "attention",
+      "family_bucket": "tensor_compute",
+      "level": "L2",
+      "manifest_path": "workloads/portable_lcd/flash_attn_bwd_bf16_sm80/results/flash_attn_bwd_bf16_sm80/trace_l2_accuracy_lg/manifest.json",
+      "roster_source": "portable_lcd",
+      "shape_point": "trace_l2_accuracy_lg",
+      "slug": "flash_attn_bwd_bf16_sm80",
+      "source_row_level": "",
+      "trace_json_path": "workloads/portable_lcd/results/flash_attn_bwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_lg/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "binary_path": "workloads/portable_lcd/flash_attn_bwd_bf16_sm80/flash_attn_bwd_bf16_sm80_run",
+      "family": "attention",
+      "family_bucket": "tensor_compute",
+      "level": "L2",
+      "manifest_path": "workloads/portable_lcd/flash_attn_bwd_bf16_sm80/results/flash_attn_bwd_bf16_sm80/trace_l2_accuracy_xl/manifest.json",
+      "roster_source": "portable_lcd",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "flash_attn_bwd_bf16_sm80",
+      "source_row_level": "",
+      "trace_json_path": "workloads/portable_lcd/results/flash_attn_bwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "binary_path": "workloads/portable_lcd/rmsnorm_bwd_bf16_sm80/rmsnorm_bwd_bf16_sm80_run",
+      "family": "norm_bwd",
+      "family_bucket": "activation_norm",
+      "level": "L2",
+      "manifest_path": "workloads/portable_lcd/rmsnorm_bwd_bf16_sm80/results/rmsnorm_bwd_bf16_sm80/correctness_shape/manifest.json",
+      "roster_source": "portable_lcd",
+      "shape_point": "correctness_shape",
+      "slug": "rmsnorm_bwd_bf16_sm80",
+      "source_row_level": "",
+      "trace_json_path": "workloads/portable_lcd/results/rmsnorm_bwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_correctness_shape/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "binary_path": "workloads/portable_lcd/rmsnorm_bwd_bf16_sm80/rmsnorm_bwd_bf16_sm80_run",
+      "family": "norm_bwd",
+      "family_bucket": "activation_norm",
+      "level": "L2",
+      "manifest_path": "workloads/portable_lcd/rmsnorm_bwd_bf16_sm80/results/rmsnorm_bwd_bf16_sm80/timing_shape/manifest.json",
+      "roster_source": "portable_lcd",
+      "shape_point": "timing_shape",
+      "slug": "rmsnorm_bwd_bf16_sm80",
+      "source_row_level": "",
+      "trace_json_path": "workloads/portable_lcd/results/rmsnorm_bwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "binary_path": "workloads/portable_lcd/rmsnorm_bwd_bf16_sm80/rmsnorm_bwd_bf16_sm80_run",
+      "family": "norm_bwd",
+      "family_bucket": "activation_norm",
+      "level": "L2",
+      "manifest_path": "workloads/portable_lcd/rmsnorm_bwd_bf16_sm80/results/rmsnorm_bwd_bf16_sm80/trace_l2_accuracy_lg/manifest.json",
+      "roster_source": "portable_lcd",
+      "shape_point": "trace_l2_accuracy_lg",
+      "slug": "rmsnorm_bwd_bf16_sm80",
+      "source_row_level": "",
+      "trace_json_path": "workloads/portable_lcd/results/rmsnorm_bwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_lg/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "binary_path": "workloads/portable_lcd/rmsnorm_bwd_bf16_sm80/rmsnorm_bwd_bf16_sm80_run",
+      "family": "norm_bwd",
+      "family_bucket": "activation_norm",
+      "level": "L2",
+      "manifest_path": "workloads/portable_lcd/rmsnorm_bwd_bf16_sm80/results/rmsnorm_bwd_bf16_sm80/trace_l2_accuracy_xl/manifest.json",
+      "roster_source": "portable_lcd",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "rmsnorm_bwd_bf16_sm80",
+      "source_row_level": "",
+      "trace_json_path": "workloads/portable_lcd/results/rmsnorm_bwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "binary_path": "workloads/portable_lcd/layernorm_fwd_bf16_sm80/layernorm_fwd_bf16_sm80_run",
+      "family": "norm_fwd",
+      "family_bucket": "activation_norm",
+      "level": "L2",
+      "manifest_path": "workloads/portable_lcd/layernorm_fwd_bf16_sm80/results/layernorm_fwd_bf16_sm80/correctness_shape/manifest.json",
+      "roster_source": "portable_lcd",
+      "shape_point": "correctness_shape",
+      "slug": "layernorm_fwd_bf16_sm80",
+      "source_row_level": "",
+      "trace_json_path": "workloads/portable_lcd/results/layernorm_fwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_correctness_shape/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "binary_path": "workloads/portable_lcd/layernorm_fwd_bf16_sm80/layernorm_fwd_bf16_sm80_run",
+      "family": "norm_fwd",
+      "family_bucket": "activation_norm",
+      "level": "L2",
+      "manifest_path": "workloads/portable_lcd/layernorm_fwd_bf16_sm80/results/layernorm_fwd_bf16_sm80/timing_shape/manifest.json",
+      "roster_source": "portable_lcd",
+      "shape_point": "timing_shape",
+      "slug": "layernorm_fwd_bf16_sm80",
+      "source_row_level": "",
+      "trace_json_path": "workloads/portable_lcd/results/layernorm_fwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "binary_path": "workloads/portable_lcd/layernorm_fwd_bf16_sm80/layernorm_fwd_bf16_sm80_run",
+      "family": "norm_fwd",
+      "family_bucket": "activation_norm",
+      "level": "L2",
+      "manifest_path": "workloads/portable_lcd/layernorm_fwd_bf16_sm80/results/layernorm_fwd_bf16_sm80/trace_l2_accuracy_lg/manifest.json",
+      "roster_source": "portable_lcd",
+      "shape_point": "trace_l2_accuracy_lg",
+      "slug": "layernorm_fwd_bf16_sm80",
+      "source_row_level": "",
+      "trace_json_path": "workloads/portable_lcd/results/layernorm_fwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_lg/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "binary_path": "workloads/portable_lcd/layernorm_fwd_bf16_sm80/layernorm_fwd_bf16_sm80_run",
+      "family": "norm_fwd",
+      "family_bucket": "activation_norm",
+      "level": "L2",
+      "manifest_path": "workloads/portable_lcd/layernorm_fwd_bf16_sm80/results/layernorm_fwd_bf16_sm80/trace_l2_accuracy_xl/manifest.json",
+      "roster_source": "portable_lcd",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "layernorm_fwd_bf16_sm80",
+      "source_row_level": "",
+      "trace_json_path": "workloads/portable_lcd/results/layernorm_fwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "binary_path": "workloads/portable_lcd/silu_fwd_bf16_sm80/silu_fwd_bf16_sm80_run",
+      "family": "activation",
+      "family_bucket": "activation_norm",
+      "level": "L2",
+      "manifest_path": "workloads/portable_lcd/silu_fwd_bf16_sm80/results/silu_fwd_bf16_sm80/correctness_shape/manifest.json",
+      "roster_source": "portable_lcd",
+      "shape_point": "correctness_shape",
+      "slug": "silu_fwd_bf16_sm80",
+      "source_row_level": "",
+      "trace_json_path": "workloads/portable_lcd/results/silu_fwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_correctness_shape/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "binary_path": "workloads/portable_lcd/silu_fwd_bf16_sm80/silu_fwd_bf16_sm80_run",
+      "family": "activation",
+      "family_bucket": "activation_norm",
+      "level": "L2",
+      "manifest_path": "workloads/portable_lcd/silu_fwd_bf16_sm80/results/silu_fwd_bf16_sm80/timing_shape/manifest.json",
+      "roster_source": "portable_lcd",
+      "shape_point": "timing_shape",
+      "slug": "silu_fwd_bf16_sm80",
+      "source_row_level": "",
+      "trace_json_path": "workloads/portable_lcd/results/silu_fwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "binary_path": "workloads/portable_lcd/silu_fwd_bf16_sm80/silu_fwd_bf16_sm80_run",
+      "family": "activation",
+      "family_bucket": "activation_norm",
+      "level": "L2",
+      "manifest_path": "workloads/portable_lcd/silu_fwd_bf16_sm80/results/silu_fwd_bf16_sm80/trace_l2_accuracy_lg/manifest.json",
+      "roster_source": "portable_lcd",
+      "shape_point": "trace_l2_accuracy_lg",
+      "slug": "silu_fwd_bf16_sm80",
+      "source_row_level": "",
+      "trace_json_path": "workloads/portable_lcd/results/silu_fwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_lg/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "binary_path": "workloads/portable_lcd/silu_fwd_bf16_sm80/silu_fwd_bf16_sm80_run",
+      "family": "activation",
+      "family_bucket": "activation_norm",
+      "level": "L2",
+      "manifest_path": "workloads/portable_lcd/silu_fwd_bf16_sm80/results/silu_fwd_bf16_sm80/trace_l2_accuracy_xl/manifest.json",
+      "roster_source": "portable_lcd",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "silu_fwd_bf16_sm80",
+      "source_row_level": "",
+      "trace_json_path": "workloads/portable_lcd/results/silu_fwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "binary_path": "workloads/portable_lcd/conv2d_implicit_gemm_bf16_sm80/conv2d_implicit_gemm_bf16_sm80_run",
+      "family": "conv2d",
+      "family_bucket": "tensor_compute",
+      "level": "L2",
+      "manifest_path": "workloads/portable_lcd/conv2d_implicit_gemm_bf16_sm80/results/conv2d_implicit_gemm_bf16_sm80/correctness_shape/manifest.json",
+      "roster_source": "portable_lcd",
+      "shape_point": "correctness_shape",
+      "slug": "conv2d_implicit_gemm_bf16_sm80",
+      "source_row_level": "",
+      "trace_json_path": "workloads/portable_lcd/results/conv2d_implicit_gemm_bf16_sm80/rtx_5060_laptop/sm_120/trace_correctness_shape/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "binary_path": "workloads/portable_lcd/conv2d_implicit_gemm_bf16_sm80/conv2d_implicit_gemm_bf16_sm80_run",
+      "family": "conv2d",
+      "family_bucket": "tensor_compute",
+      "level": "L2",
+      "manifest_path": "workloads/portable_lcd/conv2d_implicit_gemm_bf16_sm80/results/conv2d_implicit_gemm_bf16_sm80/timing_shape/manifest.json",
+      "roster_source": "portable_lcd",
+      "shape_point": "timing_shape",
+      "slug": "conv2d_implicit_gemm_bf16_sm80",
+      "source_row_level": "",
+      "trace_json_path": "workloads/portable_lcd/results/conv2d_implicit_gemm_bf16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "binary_path": "workloads/portable_lcd/conv2d_implicit_gemm_bf16_sm80/conv2d_implicit_gemm_bf16_sm80_run",
+      "family": "conv2d",
+      "family_bucket": "tensor_compute",
+      "level": "L2",
+      "manifest_path": "workloads/portable_lcd/conv2d_implicit_gemm_bf16_sm80/results/conv2d_implicit_gemm_bf16_sm80/trace_l2_accuracy_lg/manifest.json",
+      "roster_source": "portable_lcd",
+      "shape_point": "trace_l2_accuracy_lg",
+      "slug": "conv2d_implicit_gemm_bf16_sm80",
+      "source_row_level": "",
+      "trace_json_path": "workloads/portable_lcd/results/conv2d_implicit_gemm_bf16_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_lg/dynamic_trace.pb"
+    },
+    {
+      "arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "binary_path": "workloads/portable_lcd/conv2d_implicit_gemm_bf16_sm80/conv2d_implicit_gemm_bf16_sm80_run",
+      "family": "conv2d",
+      "family_bucket": "tensor_compute",
+      "level": "L2",
+      "manifest_path": "workloads/portable_lcd/conv2d_implicit_gemm_bf16_sm80/results/conv2d_implicit_gemm_bf16_sm80/trace_l2_accuracy_xl/manifest.json",
+      "roster_source": "portable_lcd",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "conv2d_implicit_gemm_bf16_sm80",
+      "source_row_level": "",
+      "trace_json_path": "workloads/portable_lcd/results/conv2d_implicit_gemm_bf16_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/dynamic_trace.pb"
+    }
+  ],
+  "candidates_per_bucket": {
+    "activation_norm": 49,
+    "memory_stress": 58,
+    "other": 2,
+    "tensor_compute": 61
+  },
+  "candidates_per_roster_source": {
+    "portable_lcd": 60,
+    "simbench_bw": 110
+  },
+  "distinct_slugs_per_bucket": {
+    "activation_norm": 13,
+    "memory_stress": 24,
+    "other": 2,
+    "tensor_compute": 20
+  },
+  "tool_version": "1.0.0",
+  "total_candidates": 170
+}

@@ -1,0 +1,192 @@
+{
+ "$schema": "https://json-schema.org/draft/2020-12/schema",
+ "$id": "predicted_l1_per_admitted_cell.schema.json",
+ "title": "Per-admitted-cell L1 prediction artifact (sm_86)",
+ "description": "Schema for the artifact emitted by tools/sm_86_predictor_accuracy_recovery_v2/compute_predicted_l1_per_admitted_cell.py. Records the per-cell output of the production L1 head so the interim diagnostic report can compute friendly_l1.geomean_rel_err from real evidence. Each cell carries the full admitted-row identity tuple (arch / binary_sha256 / source_commit / kernel_signature_sha256 / ncu_metric_version) plus real SHA-256 input_digests so the report's per-cell join is provenance-bound, not slug-keyed only.",
+ "type": "object",
+ "required": [
+  "schema_version",
+  "generator",
+  "cohort_size",
+  "cells"
+ ],
+ "additionalProperties": false,
+ "properties": {
+  "schema_version": {
+   "type": "integer",
+   "const": 2
+  },
+  "generator": {
+   "type": "string"
+  },
+  "cohort_size": {
+   "type": "integer",
+   "minimum": 1
+  },
+  "cells": {
+   "type": "array",
+   "minItems": 1,
+   "items": {
+    "type": "object",
+    "required": [
+     "slug",
+     "shape_point",
+     "arch",
+     "binary_sha256",
+     "source_commit",
+     "kernel_signature_sha256",
+     "ncu_metric_version",
+     "result_kind",
+     "cache_layer",
+     "predicted_hit_rate",
+     "typed_reason",
+     "evidence",
+     "input_digests"
+    ],
+    "additionalProperties": false,
+    "properties": {
+     "slug": {
+      "type": "string",
+      "minLength": 1
+     },
+     "shape_point": {
+      "type": "string",
+      "minLength": 1
+     },
+     "arch": {
+      "type": "string",
+      "enum": [
+       "sm_86"
+      ]
+     },
+     "binary_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+     },
+     "source_commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+     },
+     "kernel_signature_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+     },
+     "ncu_metric_version": {
+      "type": "string",
+      "minLength": 1
+     },
+     "result_kind": {
+      "type": "string",
+      "enum": [
+       "scalar",
+       "bounded",
+       "typed_unavailable"
+      ]
+     },
+     "cache_layer": {
+      "type": "string",
+      "const": "L1TEX"
+     },
+     "predicted_hit_rate": {
+      "type": [
+       "number",
+       "null"
+      ],
+      "minimum": 0.0,
+      "maximum": 1.0
+     },
+     "typed_reason": {
+      "type": [
+       "string",
+       "null"
+      ]
+     },
+     "evidence": {
+      "type": "object"
+     },
+     "input_digests": {
+      "type": "object",
+      "required": [
+       "classifier_manifest_sha256",
+       "dynamic_trace_pb_sha256",
+       "threadblock_proto_set_sha256"
+      ],
+      "additionalProperties": false,
+      "properties": {
+       "classifier_manifest_sha256": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{64}$"
+       },
+       "dynamic_trace_pb_sha256": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{64}$"
+       },
+       "threadblock_proto_set_sha256": {
+        "type": "string",
+        "pattern": "^[0-9a-f]{64}$"
+       }
+      }
+     },
+     "variant_id": {
+      "type": "string",
+      "pattern": "^register_cap_[0-9]+$",
+      "description": "Canonical build-variant id for a register-cap variant cell (absent on base cells). Added when the controlled refit folded the variants into the corpus coverage; the producer emits typed rows for them until the manifest store gains a build-variant axis."
+     },
+     "register_cap": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Numeric register cap for a build-variant cell (absent on base cells)."
+     }
+    },
+    "allOf": [
+     {
+      "description": "Scalar/bounded result MUST have a non-null predicted_hit_rate and a null typed_reason.",
+      "if": {
+       "properties": {
+        "result_kind": {
+         "enum": [
+          "scalar",
+          "bounded"
+         ]
+        }
+       }
+      },
+      "then": {
+       "properties": {
+        "predicted_hit_rate": {
+         "type": "number",
+         "minimum": 0.0,
+         "maximum": 1.0
+        },
+        "typed_reason": {
+         "type": "null"
+        }
+       }
+      }
+     },
+     {
+      "description": "typed_unavailable result MUST have a null predicted_hit_rate and a non-null typed_reason.",
+      "if": {
+       "properties": {
+        "result_kind": {
+         "const": "typed_unavailable"
+        }
+       }
+      },
+      "then": {
+       "properties": {
+        "predicted_hit_rate": {
+         "type": "null"
+        },
+        "typed_reason": {
+         "type": "string",
+         "minLength": 1
+        }
+       }
+      }
+     }
+    ]
+   }
+  }
+ }
+}

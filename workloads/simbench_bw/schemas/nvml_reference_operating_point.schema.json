@@ -1,0 +1,84 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "simbench_bw/schemas/nvml_reference_operating_point.schema.json",
+  "title": "NVML Reference Operating Point (calibration artifact)",
+  "description": "Committed artifact produced from a READ-ONLY NVML telemetry sweep on the local RTX 3090 Ti (sm_86). One schema covers BOTH regimes, distinguished by the required anchor_regime field: (a) `sustained` — produced by tools/local_labels/calibrate_nvml_reference_operating_point.py under a sustained user-space CUDA workload that holds the card at its 90C SW-thermal boost-equilibrium operating point (~1350 MHz on this card); (b) `short_burst` — produced by tools/local_labels/calibrate_nvml_short_burst_anchor.py under short compute bursts sampled while the card is cool and NOT SW-thermal-throttled, capturing the full boost clock (~1.87 GHz) a short kernel actually sees. Records the per-host reference SM clock / temperature / power / memory clock, the read-only sampling method, and the accepted vs rejected sample counts with rejection reasons. The cycles->ns conversion selects the anchor by regime (short kernels use the short_burst anchor; consuming the sustained anchor for a short-regime conversion is rejected). CLAUDE.md Rule 2: read-only NVML only (no clock-lock/persistence/power/MIG mutation). Quarantined to data/local_labels/.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_kind",
+    "anchor_regime",
+    "arch",
+    "device_name",
+    "driver_version",
+    "source_commit",
+    "sampling_method",
+    "max_sm_clock_mhz",
+    "n_samples_total",
+    "n_accepted",
+    "n_rejected",
+    "rejection_reason_counts",
+    "sw_thermal_active_fraction",
+    "reference_operating_point",
+    "accepted_sample_dispersion"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "artifact_kind": {"type": "string", "const": "nvml_reference_operating_point"},
+    "anchor_regime": {
+      "type": "string",
+      "enum": ["sustained", "short_burst"],
+      "description": "First-class regime discriminator. `sustained` = the 90C SW-thermal boost-equilibrium operating point (sustained matmul; ~1350 MHz). `short_burst` = the cool, un-throttled full-boost operating point (short compute bursts; ~1.87 GHz) a short kernel sees. The cycles->ns conversion selects the anchor by this field and refuses to consume a sustained anchor for a short-regime conversion. Required so neither artifact can omit the discipline."
+    },
+    "workload_class": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Optional human-readable workload class that produced the anchor (e.g. user_space_cuda_matmul_sustained, short_burst_compute). Descriptive provenance; the load-bearing selector is anchor_regime."
+    },
+    "arch": {"type": "string", "const": "sm_86"},
+    "device_name": {"type": "string", "minLength": 1, "description": "NVML device name; must contain 'RTX 3090 Ti'."},
+    "driver_version": {"type": "string", "minLength": 1},
+    "source_commit": {"type": "string", "minLength": 1},
+    "sampling_method": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": ["read_only_nvml", "getters", "no_clock_lock_or_persistence_or_power_mutation"],
+      "properties": {
+        "read_only_nvml": {"type": "boolean", "const": true},
+        "getters": {"type": "array", "minItems": 1, "items": {"type": "string"}},
+        "no_clock_lock_or_persistence_or_power_mutation": {"type": "boolean", "const": true},
+        "workload": {"type": "string"},
+        "matmul_dim": {"type": "integer", "minimum": 1},
+        "target_poll_hz": {"type": "number", "minimum": 1},
+        "duration_s": {"type": "number", "minimum": 0},
+        "warmup_s": {"type": "number", "minimum": 0}
+      }
+    },
+    "max_sm_clock_mhz": {"type": "integer", "minimum": 1},
+    "n_samples_total": {"type": "integer", "minimum": 1},
+    "n_accepted": {"type": "integer", "minimum": 1, "description": "Accepted (active, plausible, non-hardware-faulted) steady-state samples. >=1 required: the reference is never computed from rejected data."},
+    "n_rejected": {"type": "integer", "minimum": 0},
+    "rejection_reason_counts": {"type": "object", "additionalProperties": {"type": "integer", "minimum": 0}},
+    "sw_thermal_active_fraction": {"type": "number", "minimum": 0.0, "maximum": 1.0, "description": "Fraction of accepted samples whose throttle bitmask carried SW_THERMAL_SLOWDOWN (the normal Ampere DVFS boost-equilibrium signal, recorded for provenance — NOT a rejection)."},
+    "reference_operating_point": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["sm_clock_ref_mhz", "mem_clock_ref_mhz", "temp_ref_c", "power_ref_mw"],
+      "properties": {
+        "sm_clock_ref_mhz": {"type": "number", "exclusiveMinimum": 0, "description": "Median accepted SM clock, MHz. The cycles->ns conversion uses this."},
+        "mem_clock_ref_mhz": {"type": "number", "exclusiveMinimum": 0},
+        "temp_ref_c": {"type": "number"},
+        "power_ref_mw": {"type": "number", "exclusiveMinimum": 0}
+      }
+    },
+    "accepted_sample_dispersion": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "sm_clock_mhz_stdev": {"type": "number", "minimum": 0},
+        "power_mw_stdev": {"type": "number", "minimum": 0}
+      }
+    }
+  }
+}

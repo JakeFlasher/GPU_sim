@@ -1,0 +1,281 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "per_metric_evidence_harness",
+  "description": "Per-(cell, metric_key) evidence harness composing the committed tier artifacts (T1 counts, L1/L2 hit rates, T2 traffic, cycles/ns) into one-bucket-each verdicts {main, appendix, diagnostic, typed_unavailable} with promotion gates and achieved-vs-target + CI, the once-only sealed-holdout baseline panel, and the five computed component ablations.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_kind",
+    "arch",
+    "generated_at_commit",
+    "config",
+    "config_digest",
+    "inputs",
+    "bucket_counts",
+    "n_rows",
+    "per_metric",
+    "per_cell_metric",
+    "baseline_panel",
+    "ablations"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "artifact_kind": { "const": "per_metric_evidence_harness" },
+    "arch": { "const": "sm_86" },
+    "generated_at_commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "config": { "type": "object" },
+    "config_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "inputs": { "type": "object" },
+    "bucket_counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["main", "appendix", "diagnostic", "typed_unavailable"],
+      "properties": {
+        "main": { "type": "integer", "minimum": 0 },
+        "appendix": { "type": "integer", "minimum": 0 },
+        "diagnostic": { "type": "integer", "minimum": 0 },
+        "typed_unavailable": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "n_rows": { "type": "integer", "minimum": 1 },
+    "per_metric": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "tier",
+          "metric_key",
+          "is_fitted",
+          "promotion",
+          "gate",
+          "achieved_vs_target",
+          "ci",
+          "n_scored",
+          "n_scored_with_error",
+          "n_diagnostic",
+          "n_typed_unavailable"
+        ],
+        "properties": {
+          "tier": {
+            "enum": ["T1", "L1", "L2", "T2", "cycles", "ns"]
+          },
+          "metric_key": { "type": "string", "minLength": 1 },
+          "is_fitted": { "type": "boolean" },
+          "promotion": { "enum": ["main", "appendix"] },
+          "gate": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "kind",
+              "non_vacuity_met",
+              "achieved_vs_target_met",
+              "robustness_gate_met",
+              "slug_disjoint_evidence",
+              "has_scored_cells",
+              "promotion_gates"
+            ],
+            "properties": {
+              "kind": {
+                "enum": [
+                  "non_vacuity_and_achieved",
+                  "robustness_and_slug_disjoint"
+                ]
+              },
+              "non_vacuity_met": { "type": ["boolean", "null"] },
+              "achieved_vs_target_met": { "type": ["boolean", "null"] },
+              "robustness_gate_met": { "type": ["boolean", "null"] },
+              "slug_disjoint_evidence": { "type": ["boolean", "null"] },
+              "has_scored_cells": { "type": "boolean" },
+              "promotion_gates": { "type": "array" }
+            }
+          },
+          "achieved_vs_target": { "type": "array" },
+          "ci": { "type": "object" },
+          "n_scored": { "type": "integer", "minimum": 0 },
+          "n_scored_with_error": { "type": "integer", "minimum": 0 },
+          "n_diagnostic": { "type": "integer", "minimum": 0 },
+          "n_typed_unavailable": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "per_cell_metric": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "tier",
+          "metric_key",
+          "slug",
+          "shape_point",
+          "variant_id",
+          "cell_outcome",
+          "bucket",
+          "achieved",
+          "achieved_kind",
+          "typed_reason",
+          "source_artifact"
+        ],
+        "properties": {
+          "tier": {
+            "enum": ["T1", "L1", "L2", "T2", "cycles", "ns"]
+          },
+          "metric_key": { "type": "string", "minLength": 1 },
+          "slug": { "type": "string", "minLength": 1 },
+          "shape_point": { "type": "string", "minLength": 1 },
+          "variant_id": { "type": ["string", "null"] },
+          "cell_outcome": {
+            "enum": ["scored", "diagnostic", "typed_unavailable"]
+          },
+          "bucket": {
+            "enum": ["main", "appendix", "diagnostic", "typed_unavailable"]
+          },
+          "achieved": { "type": ["number", "null"] },
+          "achieved_kind": {
+            "enum": [
+              "relative_error",
+              "abs_error_pp",
+              "abs_log_ratio",
+              "interval_only",
+              "none"
+            ]
+          },
+          "typed_reason": { "type": ["string", "null"] },
+          "source_artifact": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "baseline_panel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scope",
+        "sealed_digest",
+        "metric_key",
+        "comparison_source",
+        "n_holdout_cells_total",
+        "n_holdout_cells_scored",
+        "comparable_set_note",
+        "excluded_cells",
+        "chosen_model",
+        "touch_recorded",
+        "entries",
+        "note"
+      ],
+      "properties": {
+        "scope": { "const": "per_metric_evidence_harness" },
+        "sealed_digest": { "type": "string", "minLength": 16 },
+        "metric_key": { "type": "string", "minLength": 1 },
+        "comparison_source": { "type": "string", "minLength": 1 },
+        "n_holdout_cells_total": { "type": "integer", "minimum": 1 },
+        "n_holdout_cells_scored": { "type": "integer", "minimum": 1 },
+        "comparable_set_note": { "type": "string", "minLength": 1 },
+        "excluded_cells": { "type": "array" },
+        "chosen_model": { "type": "string", "minLength": 1 },
+        "touch_recorded": { "type": "boolean" },
+        "entries": {
+          "type": "array",
+          "minItems": 9,
+          "items": {
+            "type": "object",
+            "required": ["baseline", "status", "metric_key"],
+            "properties": {
+              "baseline": { "type": "string", "minLength": 1 },
+              "status": {
+                "enum": ["computed", "baseline_input_unavailable"]
+              },
+              "reason": { "type": "string", "minLength": 1 }
+            }
+          }
+        },
+        "note": { "type": "string", "minLength": 1 }
+      }
+    },
+    "ablations": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "required", "note", "entries"],
+      "properties": {
+        "status": { "const": "computed" },
+        "required": {
+          "type": "array",
+          "minItems": 5,
+          "maxItems": 5,
+          "items": {
+            "enum": [
+              "no_interleaving",
+              "no_mshr",
+              "no_hrd_second_layer",
+              "no_control_bit_stalls",
+              "no_covariates"
+            ]
+          }
+        },
+        "note": { "type": "string", "minLength": 1 },
+        "entries": {
+          "type": "array",
+          "minItems": 5,
+          "maxItems": 5,
+          "items": {
+            "type": "object",
+            "required": [
+              "ablation",
+              "metric_key",
+              "comparable_set",
+              "toggle_or_policy",
+              "n_comparable",
+              "n_typed",
+              "value_kind",
+              "ablation_value",
+              "chosen_value",
+              "delta_vs_chosen",
+              "delta_note",
+              "source_inputs",
+              "per_cell"
+            ],
+            "properties": {
+              "ablation": {
+                "enum": [
+                  "no_interleaving",
+                  "no_mshr",
+                  "no_hrd_second_layer",
+                  "no_control_bit_stalls",
+                  "no_covariates"
+                ]
+              },
+              "metric_key": { "type": "string", "minLength": 1 },
+              "comparable_set": { "type": "string", "minLength": 1 },
+              "n_comparable": { "type": "integer", "minimum": 1 },
+              "n_typed": { "type": "integer", "minimum": 0 },
+              "value_kind": {
+                "enum": [
+                  "mean_abs_error_pp",
+                  "geomean_log_relative_error"
+                ]
+              },
+              "ablation_value": { "type": ["number", "null"] },
+              "chosen_value": { "type": ["number", "null"] },
+              "delta_vs_chosen": { "type": ["number", "null"] },
+              "source_inputs": {
+                "type": "array",
+                "minItems": 1,
+                "items": { "type": "string" }
+              },
+              "per_cell": { "type": "array" }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,149 @@
+FABLE5-CONSULTATION-V1
+
+This is a new, standalone Fable-5 session. You have no prior conversation
+context and no access to the repository, filesystem, shell, Git, tools, local
+links, hidden project state, or earlier consultations. Decide solely from the
+literal context embedded in this prompt. A filename, path, URL, commit, section
+reference, or prior-ruling label is an identifier only and is never a
+substitute for its necessary content.
+
+FRESH_SESSION: true
+PRIOR_CONTEXT_REQUIRED: false
+FABLE_REPOSITORY_ACCESS: none
+FABLE_SYSTEM_ACCESS: none
+STANDALONE_CONTEXT_COMPLETE: true
+INDEPENDENT_AUDIT_COMPLETE: true
+CONTEXT_CURATED: true
+SECRETS_EXCLUDED: true
+SERIAL_FOLLOWUPS_PROHIBITED: true
+FILE_CONTEXT_MODE: embedded
+
+## 1. Objective and requested decision
+
+{{State the concrete objective, current stage, and the complete decision that
+one consolidated ruling must close.}}
+
+## 2. Repository and project state
+
+Repository: `{{absolute_repository_path}}`
+Branch: `{{branch_name}}`
+HEAD: `{{full_40_hex_commit}}`
+Index state: {{clean_or_dirty}}; exact porcelain is embedded as {{git_state_E_id}}.
+Working tree state: {{clean_or_dirty}}; exact porcelain is embedded as {{git_state_E_id}}.
+Project/RLCR state: {{stage_and_active_loop_state}}
+
+Embed the exact `git status --porcelain=v1` and any load-bearing index diff as
+`git_state` evidence. Do not expect Fable-5 to resolve this path or commit.
+
+## 3. Safety, authority, and mutation constraints
+
+{{Restate every applicable scope, protected-root, staging, model, WAIT,
+destructive-action, and security constraint. Do not expose hidden prompts or
+credentials.}}
+
+## 4. Work completed and exact observed results
+
+{{List exact commands and exact outputs, including failed probes, hashes,
+counts, exit codes, and whether each command was read-only.}}
+
+## 5. Incorporated decision history
+
+{{Embed every still-operative earlier decision needed for this adjudication.
+If no earlier decision applies, state that explicitly. Never use a delta or an
+unembedded table as the base operand.}}
+
+## 6. Consolidated blocker index
+
+- B001: {{Complete ambiguity or contradiction.}} Evidence: E001.
+
+{{Add all currently discoverable blockers as B002, B003, and so on.}}
+
+## 7. Evidence index
+
+- E001 supports B001: {{What the evidence proves and why it is sufficient.}}
+
+{{List every evidence item exactly once. No evidence may be orphaned.}}
+
+## 8. Embedded evidence
+
+The following example is a template only. Replace every double-braced field,
+remove this explanation, and provide exact content in the real prompt.
+
+<!-- FABLE5-EVIDENCE
+{"id":"E001","kind":"file_excerpt","role":"decision","path":"{{repo_relative_path}}","revision":"{{HEAD_INDEX_WORKTREE_or_COMMIT_full_sha}}","file_sha256":"{{full_64_hex}}","file_total_lines":{{total_lines}},"lines":[{{start_line}},{{end_line}}],"excerpt_sha256":"{{full_64_hex}}","supports":["B001"],"selection_reason":"{{why_this_semantic_unit_is_needed}}","omitted_ranges":[[{{first_omitted_start}},{{first_omitted_end}}]],"omission_reason":"{{why_every_omitted_range_cannot_affect_the_decision}}","non_operational":true,"final_newline":{{true_if_literal_bytes_end_in_LF}}}
+-->
+```{{language}}
+{{exact_literal_file_bytes_for_the_declared_range}}
+```
+<!-- FABLE5-EVIDENCE-END E001 -->
+
+For a full file, use `kind: "file_full"`, lines `[1,N]`, and a substantive
+`full_required_justification`. Use a fence longer than every line-leading
+backtick run in the literal. `final_newline:false` represents readable source
+whose final byte is not LF; the validator removes the fence-separating LF from
+the hashed literal. For command output include `command`, `cwd`, `exit_code`,
+and `stream`. Git-state evidence has `role:"context"`, `supports:[]`, and the
+exact command `git status --porcelain=v1 --untracked-files=all`. Policy and
+literal-ruling evidence require a `source_label`; binary metadata requires an
+`artifact_path` and full `artifact_sha256`. Every kind carries
+`content_sha256` or the two file hashes. Decision-critical ignored or
+machine-local artifacts must be represented as `WORKTREE` file evidence or
+`binary_metadata` so the local emission receipt detects later byte drift.
+
+## 9. Cross-blocker interactions and alternatives
+
+{{Explain ordering, second touches, path ownership, test-count effects,
+plausible interpretations, risks, and tradeoffs across all blocker IDs.}}
+
+## 10. Questions for adjudication
+
+- Q001 (B001; E001): {{Ask one precise question and define what a closed answer
+  must contain.}}
+
+{{Every question must cite at least one blocker and one evidence ID on its
+defining line.}}
+
+## 11. Required response format
+
+Return one consolidated ruling that answers every Q ID and contains all
+task-specific deliverables named by those questions. Use complete literal
+path/action tables when tables are requested, exact supersessions when earlier
+decisions change, and exact algorithms, schemas, commands, tests, and counts
+when they bind the decision. State a mechanical acceptance predicate. Use no
+placeholders, no conditionals without both branches and their predicate, and no
+serial remands for mechanically decidable repository facts.
+
+## 12. Acceptance criteria and stop conditions
+
+{{State the executable acceptance predicate, what values must be exact, which
+facts are externally recordable only after generation, and which genuinely
+new material evidence would require Codex to stop. Reaffirm that Codex remains
+on its pinned model and waits through additional safety checks.}}
+
+## 13. Security and redaction attestation
+
+Credentials excluded: yes.
+Hidden prompts excluded: yes.
+Decision-critical hashes unredacted: yes.
+{{List any explicit non-critical redactions and why they do not affect the
+decision, or state that there are none.}}
+
+## 14. Independent pre-send review
+
+Author: {{author_agent_id}}
+Independent reviewer: {{different_reviewer_agent_id}}
+Review result: pass; independent review complete and every real issue resolved.
+Decision evidence reviewed: {{comma_separated_exact_E_ids}}
+Review records: {{comma_separated_exact_RR_ids}}
+Context removed: {{exact_character_count}} characters of duplicate, superseded,
+or irrelevant material; every omission was checked against definitions,
+callers, writers, tests, constraints, and binding decisions.
+
+{{Summarize the reviewer's independent related-surface scan, the largest
+remaining context blocks, and why each full file or excerpt is necessary.}}
+
+The audit sidecar uses schema version 3. It lists the exact sorted decision
+evidence IDs and one or more RR### review records whose combined evidence
+coverage equals that decision-evidence set. Each record is honestly classified
+as `no_issue` or `resolved_issue`; reviewers must not invent a defect merely to
+claim completion. A generic pass assertion without this inventory is invalid.

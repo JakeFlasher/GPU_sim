@@ -1,0 +1,202 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "simbench_bw/schemas/sol_trace_scale_proxy.external.v1.schema.json",
+  "title": "SOL unsampled-trace scale proxy authority v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "artifact_id", "arch", "gpu", "source_commit",
+    "target_manifest_sha256", "claim_scope", "native_predictive",
+    "proxy_count", "proxies"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "artifact_id": {"const": "sm86_sol_trace_scale_proxy_external_v1"},
+    "arch": {"const": "sm_86"},
+    "gpu": {"const": "RTX 3090 Ti"},
+    "source_commit": {"$ref": "#/$defs/gitSha"},
+    "target_manifest_sha256": {"$ref": "#/$defs/sha256"},
+    "claim_scope": {"const": "trace_scale_proxy_only"},
+    "native_predictive": {"const": false},
+    "proxy_count": {"type": "integer", "minimum": 1},
+    "proxies": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/proxy"}
+    }
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "gitSha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "path": {"type": "string", "minLength": 1},
+    "sourceFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "size"],
+      "properties": {
+        "path": {"$ref": "#/$defs/path"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "size": {"type": "integer", "minimum": 1}
+      }
+    },
+    "child": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "sha256", "size"],
+      "properties": {
+        "name": {"type": "string", "pattern": "^[^/\\\\]+$"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "size": {"type": "integer", "minimum": 1}
+      }
+    },
+    "delta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["axis", "from", "to"],
+      "properties": {
+        "axis": {"type": "string", "minLength": 1},
+        "from": {"type": "integer", "minimum": 1},
+        "to": {"type": "integer", "minimum": 1}
+      }
+    },
+    "definitionDelta": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["json_pointer", "from", "to"],
+      "properties": {
+        "json_pointer": {"type": "string", "minLength": 1},
+        "from": {},
+        "to": {}
+      }
+    },
+    "footprint": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "aggregate_tensor_bits", "peak_tensor_bits", "aggregate_elements",
+        "resolved_axes_product", "extra_scalar_axes",
+        "source_workload_index", "source_workload_uuid", "variant",
+        "key_sha256"
+      ],
+      "properties": {
+        "aggregate_tensor_bits": {"type": "integer", "minimum": 1},
+        "peak_tensor_bits": {"type": "integer", "minimum": 1},
+        "aggregate_elements": {"type": "integer", "minimum": 1},
+        "resolved_axes_product": {"type": "integer", "minimum": 1},
+        "extra_scalar_axes": {
+          "type": "array",
+          "items": {
+            "type": "array", "prefixItems": [
+              {"type": "string", "minLength": 1}, {"type": "integer"}
+            ], "minItems": 2, "maxItems": 2
+          }
+        },
+        "source_workload_index": {"type": "integer", "minimum": 0},
+        "source_workload_uuid": {"type": "string", "minLength": 1},
+        "variant": {"enum": ["native", "trace_proxy"]},
+        "key_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "validation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "method", "status", "correctness_result", "workload_sha256",
+        "definition_sha256", "solution_sha256", "evidence_sha256",
+        "execution_evidence"
+      ],
+      "properties": {
+        "method": {"const": "sol_execbench_full_correctness"},
+        "status": {"const": "runnable"},
+        "correctness_result": {"const": "passed"},
+        "workload_sha256": {"$ref": "#/$defs/sha256"},
+        "definition_sha256": {"$ref": "#/$defs/sha256"},
+        "solution_sha256": {"$ref": "#/$defs/sha256"},
+        "evidence_sha256": {"$ref": "#/$defs/sha256"},
+        "execution_evidence": {"type": "object"}
+      }
+    },
+    "proxy": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "proxy_id", "category", "slug", "language", "claim_scope",
+        "native_predictive", "source_workload_index", "source_workload_line",
+        "source_workload_uuid", "native_definition", "native_workload_file",
+        "native_workload_row", "solution", "trace_infeasibility",
+        "source_selection", "native_axes", "reduced_axes", "reduced_footprint",
+        "axes_delta", "definition_delta",
+        "reduced_definition", "reduced_workload", "validation"
+      ],
+      "properties": {
+        "proxy_id": {"$ref": "#/$defs/sha256"},
+        "category": {"type": "string", "minLength": 1},
+        "slug": {"type": "string", "minLength": 1},
+        "language": {"type": "string", "minLength": 1},
+        "claim_scope": {"const": "trace_scale_proxy_only"},
+        "native_predictive": {"const": false},
+        "source_workload_index": {"type": "integer", "minimum": 0},
+        "source_workload_line": {"type": "integer", "minimum": 1},
+        "source_workload_uuid": {"type": "string", "minLength": 1},
+        "native_definition": {"$ref": "#/$defs/sourceFile"},
+        "native_workload_file": {"$ref": "#/$defs/sourceFile"},
+        "native_workload_row": {
+          "type": "object", "additionalProperties": false,
+          "required": ["sha256", "size", "sha256_scope"],
+          "properties": {
+            "sha256": {"$ref": "#/$defs/sha256"},
+            "size": {"type": "integer", "minimum": 1},
+            "sha256_scope": {"const": "exact_json_line_bytes_excluding_lf_only"}
+          }
+        },
+        "solution": {"$ref": "#/$defs/sourceFile"},
+        "trace_infeasibility": {
+          "type": "object", "additionalProperties": false,
+          "required": [
+            "evidence_sha256", "failure_reason", "partial_trace_allowed",
+            "sampling_policy", "smallest_native_workload"
+          ],
+          "properties": {
+            "evidence_sha256": {"$ref": "#/$defs/sha256"},
+            "failure_reason": {
+              "enum": [
+                "trace_target_failed_timeout",
+                "trace_target_failed_tree_limit_exceeded",
+                "trace_volume_exceeded",
+                "nvbit_slowdown_budget_exceeded"
+              ]
+            },
+            "partial_trace_allowed": {"const": false},
+            "sampling_policy": {"const": "off"},
+            "smallest_native_workload": {"const": true}
+          }
+        },
+        "source_selection": {
+          "type": "object", "additionalProperties": false,
+          "required": ["method", "rank", "native_candidate_count", "footprint"],
+          "properties": {
+            "method": {"const": "definition_tensor_footprint_v1"},
+            "rank": {"const": 0},
+            "native_candidate_count": {"type": "integer", "minimum": 1},
+            "footprint": {"$ref": "#/$defs/footprint"}
+          }
+        },
+        "native_axes": {"type": "object"},
+        "reduced_axes": {"type": "object"},
+        "reduced_footprint": {"$ref": "#/$defs/footprint"},
+        "axes_delta": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/delta"}},
+        "definition_delta": {"type": "array", "items": {"$ref": "#/$defs/definitionDelta"}},
+        "reduced_definition": {"$ref": "#/$defs/child"},
+        "reduced_workload": {"$ref": "#/$defs/child"},
+        "validation": {"$ref": "#/$defs/validation"}
+      }
+    }
+  },
+  "allOf": [
+    {
+      "properties": {
+        "proxies": {"minItems": 1, "maxItems": 1000}
+      }
+    }
+  ]
+}

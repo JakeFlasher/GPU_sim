@@ -1,0 +1,55 @@
+# NVML covariate acceptance registry.
+#
+# The non-root measurement contract names a >=10% residual-variance reduction
+# threshold the join-layer's covariate regression must clear before
+# downstream consumers can apply the regression as a wall-clock
+# correction. Below threshold, the join layer emits a typed
+# `nvml_covariate_regression_ineffective` diagnostic with the actual
+# reduction percentage; downstream consumers MAY still apply the
+# regression but MUST surface the diagnostic in their per-host
+# provenance per the non-root measurement contract's negative-test contract.
+#
+# Per-host reference values define the regression formula's anchor:
+#
+#   T_wall_corrected = T_wall
+#                     - beta_temp  * (temp_c     - temp_ref_c)
+#                     - beta_power * (power_mw   - power_ref_mw)
+#                     - beta_clock * (sm_clock_mhz - sm_clock_ref_mhz)
+#
+# beta_* coefficients are fit per-host from the calibration record;
+# the reference values below are the per-host operating-point anchors
+# the regression centers the deviations on. They are recorded in the
+# emitted nvml_covariate sidecar so any reviewer-package replay can
+# re-evaluate the admission decision against the same anchor values.
+
+[acceptance]
+# Minimum residual-variance reduction (percent) the regression must
+# achieve on the per-host calibration record. Below this, the join
+# layer emits nvml_covariate_regression_ineffective with the actual
+# percentage. Default 10.0 per the non-root measurement contract's verbatim contract.
+min_residual_variance_reduction_pct = 10.0
+
+[reference]
+# Local steady-state operating point at the time of the per-host
+# calibration sweep. The previous values measured on the now-retired
+# RTX 5060 Laptop have been REMOVED on this branch so a future worker
+# session re-measures them on the local RTX 3090 Ti (GA102 / sm_86 /
+# Ampere) before the regression layer consumes this block.
+#
+# Why retracted (not relabeled): the 5060 (sm_120 Blackwell) and the
+# 3090 Ti (sm_86 Ampere) differ by three architectural generations and
+# by GPU class (laptop vs desktop), so 5060 measurements would mis-
+# predict 3090 Ti behavior under any DVFS regime. Cloud-die calibration
+# is also explicitly deferred per the cross-die discipline; the cloud
+# entry remains a placeholder until the cloud calibration round closes
+# that scope.
+#
+# To regenerate: run the per-host NVML telemetry sweep on the local
+# RTX 3090 Ti host and write the empirical means here as floats /
+# integers in milli-units (per the schema in `nvml_covariate.schema.json`).
+# Until then, the regression layer treats this block as null/missing and
+# emits `nvml_covariate_reference_unset` instead of consuming stale data.
+temp_ref_c = nan
+power_ref_mw = -1
+sm_clock_ref_mhz = -1
+mem_clock_ref_mhz = -1

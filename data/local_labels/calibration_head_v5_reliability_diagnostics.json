@@ -1,0 +1,48 @@
+{
+  "admitted_count": 30,
+  "binning": {
+    "bin_edges": "equal_width_on_predicted_hit_rate_0_to_1",
+    "n_bins": 10
+  },
+  "bootstrap_ci_adjunct": {
+    "ci_half_width": 0.01813236181395834,
+    "ci_high": 0.03627156881298533,
+    "ci_low": 6.845185068645301e-06,
+    "confidence": 0.95,
+    "metric": "per_cell_absolute_error",
+    "n_cells": 9,
+    "n_resamples": 2000,
+    "seed": 20260527,
+    "status": "ok"
+  },
+  "per_bucket": {
+    "sm_120/activation_norm": {
+      "calibration_intercept": 0.32812857142857144,
+      "calibration_slope": 0.0,
+      "expected_calibration_error_10_bin": 0.0,
+      "n": 7
+    },
+    "sm_120/memory_stress": {
+      "calibration_intercept": -0.224713933939359,
+      "calibration_slope": 1.3182966684625763,
+      "expected_calibration_error_10_bin": 0.03836877239374221,
+      "n": 7
+    },
+    "sm_120/other": {
+      "calibration_intercept": -0.014985741463165059,
+      "calibration_slope": 1.0574738876396603,
+      "expected_calibration_error_10_bin": 0.005452719823745329,
+      "n": 7
+    },
+    "sm_120/tensor_compute": {
+      "calibration_intercept": -2.220446049250313e-16,
+      "calibration_slope": 1.0000000000000002,
+      "expected_calibration_error_10_bin": 0.0,
+      "n": 9
+    }
+  },
+  "schema_version": 1,
+  "source_commit": "e56cd825afde2ae8748e4a9987e86d52acdf5cd9",
+  "source_v5_head_commit": "1aafa30d6c2951698e66629cbbf0a03c66b02f37",
+  "status": "ok"
+}

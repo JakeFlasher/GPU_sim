@@ -1,0 +1,41 @@
+schema_version = 1
+slug = "global_scalar_32b_copy"
+
+# 32-bit scalar member of the vector-width request/sector-formation pair. A
+# grid-strided scalar float copy (out[i] = in[i]) whose per-thread accesses are
+# stride-`lanes` apart, so each is a single 32-bit request (SASS LDG.E / STG.E,
+# never fused to .128). Paired with global_vectorized_128b_copy (LDG.E.128 /
+# STG.E.128) — the ONLY difference is the per-access request width. Identity
+# round-trip (out = in) on the seeded buffer.
+#
+# launch_config is AUTHORITATIVE: the binary's launcher hardcodes grid=(1,1,1) /
+# block=(32,1,1) and grid-strides the buffer over the 32-lane block, so every
+# shape records grid (1,1,1) / block (32,1,1). predicted_bytes validates via
+# trace_size_estimator --validate (axis_product * 160 at this geometry).
+
+[[timing_shapes]]
+name = "timing_00"
+axes = { samples = 1048576, bins = 1024 }
+launch_config = { grid = [1, 1, 1], block = [32, 1, 1] }
+warm_up_iters = 5
+repeat_iters = 30
+
+[[trace_shapes]]
+name = "trace_00"
+axes = { samples = 1024, bins = 64 }
+launch_config = { grid = [1, 1, 1], block = [32, 1, 1] }
+predicted_bytes = 10485760
+estimator_source = "static"
+
+[[trace_shapes]]
+name = "trace_l2_accuracy_xl"
+axes = { samples = 1024, bins = 32 }
+launch_config = { grid = [1, 1, 1], block = [32, 1, 1] }
+predicted_bytes = 5242880
+estimator_source = "static"
+
+[[correctness_shapes]]
+name = "correctness_00"
+axes = { samples = 32, bins = 8 }
+launch_config = { grid = [1, 1, 1], block = [32, 1, 1] }
+digest_kind = "hash"

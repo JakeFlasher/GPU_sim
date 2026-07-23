@@ -1,0 +1,995 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "simbench_bw/schemas/sm86_capture_matrix.schema.json",
+  "title": "sm_86 deterministic full-roster capture matrix",
+  "description": "Emitted by tools/local_labels/build_sm86_capture_matrix.py. Structural validation is paired with the producer's semantic re-derivation, which enforces tuple uniqueness, exact authority coverage, and exact one-time runnable chunk membership.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "matrix_id", "arch", "sku", "source_commit",
+    "authority", "input_pins", "metric_registry", "counts", "chunking",
+    "chunks", "cells", "matrix_seal_sha256"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "matrix_id": {"type": "string", "const": "sm86_reference_capture_matrix_v1"},
+    "arch": {"type": "string", "const": "sm_86"},
+    "sku": {"type": "string", "const": "rtx_3090_ti"},
+    "source_commit": {"$ref": "#/$defs/gitSha"},
+    "authority": {"$ref": "#/$defs/authority"},
+    "input_pins": {"$ref": "#/$defs/inputPins"},
+    "metric_registry": {"$ref": "#/$defs/metricRegistry"},
+    "counts": {"$ref": "#/$defs/counts"},
+    "chunking": {"$ref": "#/$defs/chunking"},
+    "chunks": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/chunk"}
+    },
+    "cells": {
+      "type": "array",
+      "minItems": 344,
+      "maxItems": 344,
+      "items": {"$ref": "#/$defs/cell"}
+    },
+    "matrix_seal_sha256": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "gitSha": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "path": {"type": "string", "minLength": 1, "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$)).+$"},
+    "stringArray": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"type": "string"}
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["roster_source", "slug"],
+      "properties": {
+        "roster_source": {
+          "type": "string",
+          "enum": ["portable_lcd", "simbench_bw", "sol_execbench"]
+        },
+        "slug": {"type": "string", "minLength": 1}
+      }
+    },
+    "authority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "roster_id"],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Repo-relative for committed matrices; absolute for a clean live-session authority generated outside the worktree."
+        },
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "roster_id": {"type": "string", "const": "sm86_capture_roster_authority_v1"}
+      }
+    },
+    "filePin": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {"$ref": "#/$defs/path"},
+        "sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "inputPins": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "protocol_pins", "aggregate_retention_budget",
+        "per_cell_trace_budgets", "metric_registry", "sol_shrink_provenance",
+        "sol_runnability", "sol_native_env_fingerprint"
+      ],
+      "properties": {
+        "protocol_pins": {
+          "allOf": [
+            {"$ref": "#/$defs/filePin"},
+            {"properties": {"path": {"const": "tools/local_labels/campaign_protocol_pins.json"}}}
+          ]
+        },
+        "aggregate_retention_budget": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "path", "sha256", "retention_budget_gib", "metadata_margin_gib",
+            "raw_staging_margin_gib", "declared_runnable_max_trace_bytes",
+            "retention_ceiling_bytes", "metadata_margin_bytes",
+            "retained_headroom_bytes", "raw_staging_margin_bytes",
+            "preflight_required_free_bytes"
+          ],
+          "properties": {
+            "path": {"const": "data/local_labels/campaign/trace_retention_budget.json"},
+            "sha256": {"$ref": "#/$defs/sha256"},
+            "retention_budget_gib": {"type": "integer", "minimum": 1},
+            "metadata_margin_gib": {"type": "integer", "minimum": 1},
+            "raw_staging_margin_gib": {"type": "integer", "minimum": 1},
+            "declared_runnable_max_trace_bytes": {"type": "integer", "minimum": 1},
+            "retention_ceiling_bytes": {"type": "integer", "minimum": 1},
+            "metadata_margin_bytes": {"type": "integer", "minimum": 1},
+            "retained_headroom_bytes": {"type": "integer", "minimum": 0},
+            "raw_staging_margin_bytes": {"type": "integer", "minimum": 1},
+            "preflight_required_free_bytes": {"type": "integer", "minimum": 1}
+          }
+        },
+        "per_cell_trace_budgets": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "sha256", "defaults_are_enforcement"],
+          "properties": {
+            "path": {"const": "workloads/simbench_bw/trace_budgets.toml"},
+            "sha256": {"$ref": "#/$defs/sha256"},
+            "defaults_are_enforcement": {"type": "boolean", "const": false}
+          }
+        },
+        "metric_registry": {
+          "allOf": [
+            {"$ref": "#/$defs/filePin"},
+            {"properties": {"path": {"const": "tools/local_labels/metric_registry.json"}}}
+          ]
+        },
+        "sol_shrink_provenance": {
+          "allOf": [
+            {"$ref": "#/$defs/filePin"},
+            {"properties": {"path": {"const": "data/local_labels/campaign/sol_shrink_provenance_sm86.json"}}}
+          ]
+        },
+        "sol_runnability": {
+          "allOf": [
+            {"$ref": "#/$defs/filePin"},
+            {"properties": {"path": {"const": "data/local_labels/campaign/sol_runnability_sm86.json"}}}
+          ]
+        },
+        "sol_native_env_fingerprint": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "sha256", "native_env_hash"],
+          "properties": {
+            "path": {"const": "data/local_labels/campaign/sol_native_env_fingerprint_sm86.json"},
+            "sha256": {"$ref": "#/$defs/sha256"},
+            "native_env_hash": {"$ref": "#/$defs/sha256"}
+          }
+        }
+      }
+    },
+    "metricIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "key", "ncu_metric", "unit", "carrier", "availability",
+        "sm86_availability", "capture_status"
+      ],
+      "properties": {
+        "key": {"type": "string", "minLength": 1},
+        "ncu_metric": {"type": "string", "minLength": 1},
+        "unit": {"type": "string", "enum": ["pct", "count", "ns", "cycles"]},
+        "carrier": {"type": "string", "enum": ["flat_field", "unit_tagged_metric"]},
+        "availability": {"type": "string", "minLength": 1},
+        "sm86_availability": {"type": "string", "minLength": 1},
+        "capture_status": {
+          "type": "string",
+          "enum": [
+            "selected", "requires_runtime_carveout", "unavailable_on_sm86",
+            "static_derived_not_ncu_collected"
+          ]
+        }
+      }
+    },
+    "notCollectedMetric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["key", "reason"],
+      "properties": {
+        "key": {"type": "string", "minLength": 1},
+        "reason": {
+          "type": "string",
+          "enum": [
+            "requires_runtime_carveout", "unavailable_on_sm86",
+            "static_derived_not_ncu_collected"
+          ]
+        }
+      }
+    },
+    "metricRegistry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "registry_version", "label_schema_version", "metric_count",
+        "metric_identity_sha256", "metrics", "collection"
+      ],
+      "properties": {
+        "registry_version": {"type": "integer", "minimum": 1},
+        "label_schema_version": {"type": "integer", "minimum": 1},
+        "metric_count": {"type": "integer", "const": 61},
+        "metric_identity_sha256": {"$ref": "#/$defs/sha256"},
+        "metrics": {
+          "type": "array", "minItems": 61, "maxItems": 61,
+          "items": {"$ref": "#/$defs/metricIdentity"}
+        },
+        "collection": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "selected_registry_metric_count", "selected_flat_metrics",
+            "selected_unit_metrics", "supporting_raw_metrics",
+            "not_collected_registry_metrics"
+          ],
+          "properties": {
+            "selected_registry_metric_count": {"type": "integer", "minimum": 1, "maximum": 61},
+            "selected_flat_metrics": {"$ref": "#/$defs/stringArray"},
+            "selected_unit_metrics": {"$ref": "#/$defs/stringArray"},
+            "supporting_raw_metrics": {"$ref": "#/$defs/stringArray"},
+            "not_collected_registry_metrics": {
+              "type": "array", "items": {"$ref": "#/$defs/notCollectedMetric"}
+            }
+          }
+        }
+      }
+    },
+    "sourceCount": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["universe", "runnable", "excluded", "capture_ready"],
+      "properties": {
+        "universe": {"type": "integer", "minimum": 1},
+        "runnable": {"type": "integer", "minimum": 0},
+        "excluded": {"type": "integer", "minimum": 0},
+        "capture_ready": {"type": "integer", "minimum": 0}
+      }
+    },
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "universe", "runnable", "excluded", "capture_ready", "capture_blocked",
+        "budget_declared", "budget_missing", "chunks", "by_source"
+      ],
+      "properties": {
+        "universe": {"type": "integer", "const": 344},
+        "runnable": {"type": "integer", "const": 122},
+        "excluded": {"type": "integer", "const": 222},
+        "capture_ready": {"type": "integer", "minimum": 0, "maximum": 122},
+        "capture_blocked": {"type": "integer", "minimum": 0, "maximum": 122},
+        "budget_declared": {"type": "integer", "minimum": 0, "maximum": 122},
+        "budget_missing": {"type": "integer", "minimum": 0, "maximum": 122},
+        "chunks": {"type": "integer", "minimum": 1},
+        "by_source": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["portable_lcd", "simbench_bw", "sol_execbench"],
+          "properties": {
+            "portable_lcd": {"$ref": "#/$defs/sourceCount"},
+            "simbench_bw": {"$ref": "#/$defs/sourceCount"},
+            "sol_execbench": {"$ref": "#/$defs/sourceCount"}
+          }
+        }
+      }
+    },
+    "chunking": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_order", "ordering", "max_cells_per_regular_chunk",
+        "bootstrap_identity", "sol_bootstrap_identity",
+        "runnable_membership_sha256"
+      ],
+      "properties": {
+        "source_order": {
+          "type": "array",
+          "prefixItems": [
+            {"const": "portable_lcd"}, {"const": "simbench_bw"}, {"const": "sol_execbench"}
+          ],
+          "items": false,
+          "minItems": 3,
+          "maxItems": 3
+        },
+        "ordering": {"const": "pinned_portable_bootstrap_then_source_order_with_sol_bootstrap_before_regular_sol_slug_lexicographic"},
+        "max_cells_per_regular_chunk": {"type": "integer", "const": 8},
+        "bootstrap_identity": {
+          "allOf": [
+            {"$ref": "#/$defs/identity"},
+            {"properties": {
+              "roster_source": {"const": "portable_lcd"},
+              "slug": {"const": "silu_fwd_bf16_sm80"}
+            }}
+          ]
+        },
+        "sol_bootstrap_identity": {
+          "allOf": [
+            {"$ref": "#/$defs/identity"},
+            {"properties": {
+              "roster_source": {"const": "sol_execbench"},
+              "slug": {"const": "problem_070_mamba2_fused_intra_chunk_diagonal_computation"}
+            }}
+          ]
+        },
+        "runnable_membership_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "chunk": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "chunk_id", "roster_source", "ordinal", "membership_sha256", "cells"
+      ],
+      "properties": {
+        "chunk_id": {"type": "string", "minLength": 1},
+        "roster_source": {
+          "type": "string", "enum": ["portable_lcd", "simbench_bw", "sol_execbench"]
+        },
+        "ordinal": {"type": "integer", "minimum": 0},
+        "membership_sha256": {"$ref": "#/$defs/sha256"},
+        "cells": {
+          "type": "array", "minItems": 1, "maxItems": 8,
+          "items": {"$ref": "#/$defs/identity"}
+        }
+      }
+    },
+    "readiness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "blocking_reasons"],
+      "properties": {
+        "status": {"type": "string", "enum": ["ready", "blocked", "not_applicable"]},
+        "blocking_reasons": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "trace_budget_missing", "legacy_sampling_policy_not_authorized"
+            ]
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"status": {"const": "ready"}}},
+          "then": {"properties": {"blocking_reasons": {"maxItems": 0}}}
+        },
+        {
+          "if": {"properties": {"status": {"const": "blocked"}}},
+          "then": {"properties": {"blocking_reasons": {"minItems": 1}}}
+        },
+        {
+          "if": {"properties": {"status": {"const": "not_applicable"}}},
+          "then": {"properties": {"blocking_reasons": {"maxItems": 0}}}
+        }
+      ]
+    },
+    "traceBudget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_path", "source_sha256", "status"],
+      "properties": {
+        "source_path": {"const": "workloads/simbench_bw/trace_budgets.toml"},
+        "source_sha256": {"$ref": "#/$defs/sha256"},
+        "status": {"type": "string", "enum": ["declared", "missing"]},
+        "reason": {"type": "string", "const": "trace_budget_missing"},
+        "max_trace_bytes": {"type": "integer", "minimum": 1},
+        "max_wall_time_s": {"type": "integer", "minimum": 1},
+        "sampling_policy": {
+          "type": "string",
+          "pattern": "^(off|threadblock_stride_[1-9][0-9]*|kernel_limit_[1-9][0-9]*)$"
+        }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"status": {"const": "declared"}}},
+          "then": {"required": ["max_trace_bytes", "max_wall_time_s", "sampling_policy"]},
+          "else": {"required": ["reason"]}
+        }
+      ]
+    },
+    "reducedWorkloadProvenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_path", "source_sha256", "row_sha256", "classification",
+        "native_shape_ref", "reduced_workload_ref", "reduced_run_status",
+        "correctness_result", "native_runnability_source_path",
+        "native_runnability_source_sha256", "native_runnability_row_sha256",
+        "native_run_status", "native_returncode"
+      ],
+      "properties": {
+        "source_path": {"const": "data/local_labels/campaign/sol_shrink_provenance_sm86.json"},
+        "source_sha256": {"$ref": "#/$defs/sha256"},
+        "row_sha256": {"$ref": "#/$defs/sha256"},
+        "classification": {"const": "reduced_representative"},
+        "native_shape_ref": {"$ref": "#/$defs/path"},
+        "reduced_workload_ref": {"$ref": "#/$defs/path"},
+        "reduced_run_status": {"const": "runnable"},
+        "correctness_result": {"const": "passed"},
+        "native_runnability_source_path": {"const": "data/local_labels/campaign/sol_runnability_sm86.json"},
+        "native_runnability_source_sha256": {"$ref": "#/$defs/sha256"},
+        "native_runnability_row_sha256": {"$ref": "#/$defs/sha256"},
+        "native_run_status": {"const": "host_capacity_oom"},
+        "native_returncode": {"const": 1}
+      }
+    },
+    "solEvaluationEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_kind", "source_path", "source_sha256", "row_sha256",
+        "native_env_hash", "status", "returncode", "expected_workloads",
+        "detail"
+      ],
+      "properties": {
+        "source_kind": {"enum": ["native_runnability", "reduced_shrink_evaluation"]},
+        "source_path": {"$ref": "#/$defs/path"},
+        "source_sha256": {"$ref": "#/$defs/sha256"},
+        "row_sha256": {"$ref": "#/$defs/sha256"},
+        "native_env_hash": {"$ref": "#/$defs/sha256"},
+        "status": {"const": "runnable"},
+        "returncode": {"const": 0},
+        "expected_workloads": {"type": "integer", "minimum": 1},
+        "detail": {"type": "string", "pattern": "^[1-9][0-9]*/[1-9][0-9]* workloads passed$"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"source_kind": {"const": "native_runnability"}}},
+          "then": {"properties": {"source_path": {"const": "data/local_labels/campaign/sol_runnability_sm86.json"}}},
+          "else": {"properties": {"source_path": {"const": "data/local_labels/campaign/sol_shrink_provenance_sm86.json"}}}
+        }
+      ]
+    },
+    "logicalWorkload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "value"],
+      "properties": {
+        "kind": {"type": "string", "enum": ["shape_point", "sol_execbench_workload_set"]},
+        "value": {"type": "string", "minLength": 1},
+        "workload_scope": {
+          "type": "string", "enum": ["native", "reduced_representative"]
+        },
+        "benchmark_definition": {"type": "string", "minLength": 1},
+        "definition_file": {"$ref": "#/$defs/path"},
+        "definition_file_sha256": {"$ref": "#/$defs/sha256"},
+        "benchmark_dir": {"$ref": "#/$defs/path"},
+        "benchmark_tree_sha256": {"$ref": "#/$defs/sha256"},
+        "workload_file": {"$ref": "#/$defs/path"},
+        "workload_file_sha256": {"$ref": "#/$defs/sha256"},
+        "expected_workloads": {"type": "integer", "minimum": 1},
+        "evaluation_evidence": {"$ref": "#/$defs/solEvaluationEvidence"},
+        "reduced_workload_provenance": {
+          "$ref": "#/$defs/reducedWorkloadProvenance"
+        }
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"kind": {"const": "sol_execbench_workload_set"}}},
+          "then": {
+            "required": [
+              "workload_scope", "benchmark_definition", "definition_file",
+              "definition_file_sha256", "benchmark_dir", "benchmark_tree_sha256",
+              "workload_file", "workload_file_sha256", "expected_workloads",
+              "evaluation_evidence"
+            ],
+            "oneOf": [
+              {
+                "properties": {
+                  "value": {"const": "workloads"},
+                  "workload_scope": {"const": "native"}
+                },
+                "not": {"required": ["reduced_workload_provenance"]}
+              },
+              {
+                "required": ["reduced_workload_provenance"],
+                "properties": {
+                  "value": {"const": "reduced_representative"},
+                  "workload_scope": {"const": "reduced_representative"}
+                }
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "adapterContract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contract_version", "forwarded_argv", "environment", "native_env_hash",
+        "shape_forwarded_to_target", "label_driver_bridge_status",
+        "label_driver_bridge_rule", "persistent_stage_status",
+        "capture_request_environment"
+      ],
+      "properties": {
+        "contract_version": {"type": "integer", "const": 3},
+        "forwarded_argv": {"$ref": "#/$defs/stringArray"},
+        "environment": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["CUTLASS_DIR", "PATH_prepend", "NVCC_CCBIN"],
+          "properties": {
+            "CUTLASS_DIR": {"const": "third_party/cutlass"},
+            "PATH_prepend": {"const": "tools/sol_execbench/.venv/bin"},
+            "NVCC_CCBIN": {"const": "g++-14"}
+          }
+        },
+        "native_env_hash": {"$ref": "#/$defs/sha256"},
+        "shape_forwarded_to_target": {"type": "boolean", "const": false},
+        "label_driver_bridge_status": {"const": "implemented"},
+        "label_driver_bridge_rule": {"type": "string", "minLength": 1},
+        "persistent_stage_status": {"const": "implemented"},
+        "capture_request_environment": {"const": "SOL_EXECBENCH_CAPTURE_REQUEST"}
+      }
+    },
+    "traceLaunchSequenceRow": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "device_id", "stream_id", "kernel_id", "kernel_name",
+        "grid_dim", "block_dim", "role"
+      ],
+      "properties": {
+        "device_id": {"type": "integer", "minimum": 0},
+        "stream_id": {"type": "integer", "minimum": 0},
+        "kernel_id": {"type": "integer", "minimum": 1},
+        "kernel_name": {"type": "string", "minLength": 1},
+        "grid_dim": {
+          "type": "array", "minItems": 3, "maxItems": 3,
+          "items": {"type": "integer", "minimum": 1}
+        },
+        "block_dim": {
+          "type": "array", "minItems": 3, "maxItems": 3,
+          "items": {"type": "integer", "minimum": 1}
+        },
+        "role": {"enum": ["cold", "evict", "warm"]}
+      }
+    },
+    "captureLaunchContract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version", "label_driver_warmup_count",
+        "label_effective_warmup_count", "label_launch_index",
+        "label_measured_reps", "trace_launch_count",
+        "label_trace_launch_index"
+      ],
+      "properties": {
+        "schema_version": {"type": "integer", "const": 1},
+        "label_driver_warmup_count": {"type": "integer", "minimum": 0},
+        "label_effective_warmup_count": {"type": "integer", "minimum": 0},
+        "label_launch_index": {"type": "integer", "minimum": 0},
+        "label_measured_reps": {"type": "integer", "const": 1},
+        "trace_launch_count": {"type": "integer", "enum": [1, 3]},
+        "label_trace_launch_index": {"type": "integer", "minimum": 0},
+        "trace_launch_sequence": {
+          "type": "array", "minItems": 3, "maxItems": 3,
+          "items": {"$ref": "#/$defs/traceLaunchSequenceRow"}
+        }
+      }
+    },
+    "matrixCaptureOverride": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version", "reason", "authority_cell_sha256",
+        "authority_shape_point", "authority_app_args_sha256",
+        "capture_shape_point", "label_app_args_sha256",
+        "trace_app_args_sha256", "shape_file_path", "shape_file_sha256"
+      ],
+      "properties": {
+        "schema_version": {"type": "integer", "const": 1},
+        "reason": {
+          "enum": [
+            "authority_shape_dynamic_shared_memory_unlaunchable",
+            "authority_args_multi_launch_default",
+            "authority_shape_selects_h3_tracer_incompatible_movm_kernel",
+            "label_driver_implicit_warmup_changes_launch_identity",
+            "authority_workload_requires_cold_evict_warm_sequence"
+          ]
+        },
+        "authority_cell_sha256": {"$ref": "#/$defs/sha256"},
+        "authority_shape_point": {"type": "string", "minLength": 1},
+        "authority_app_args_sha256": {"$ref": "#/$defs/sha256"},
+        "capture_shape_point": {"type": "string", "minLength": 1},
+        "label_app_args_sha256": {"$ref": "#/$defs/sha256"},
+        "trace_app_args_sha256": {"$ref": "#/$defs/sha256"},
+        "shape_file_path": {"$ref": "#/$defs/path"},
+        "shape_file_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "captureTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_workload_index", "staged_workload_index",
+        "candidate_user_fn_calls", "candidate_kernel_ordinal",
+        "capture_launches", "profiler_range", "setup_outside_profiler_range",
+        "timing_methodology"
+      ],
+      "properties": {
+        "source_workload_index": {"const": 0},
+        "staged_workload_index": {"const": 0},
+        "candidate_user_fn_calls": {"const": 1},
+        "candidate_kernel_ordinal": {"const": 0},
+        "capture_launches": {"const": 1},
+        "profiler_range": {"const": "cudaProfilerStartStop"},
+        "setup_outside_profiler_range": {"const": true},
+        "timing_methodology": {"const": "cuda_events"}
+      }
+    },
+    "invocation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "adapter_kind", "authority_reference_path", "authority_reference_sha256",
+        "executable_path", "executable_sha256", "label_app_args", "trace_app_args",
+        "trace_cardinality_contract", "capture_launch_contract",
+        "logical_workload", "shape_delivery", "target_processes"
+      ],
+      "properties": {
+        "adapter_kind": {"type": "string", "enum": ["direct_binary", "sol_execbench"]},
+        "authority_reference_path": {"$ref": "#/$defs/path"},
+        "authority_reference_sha256": {"$ref": "#/$defs/sha256"},
+        "executable_path": {"$ref": "#/$defs/path"},
+        "executable_sha256": {"$ref": "#/$defs/sha256"},
+        "label_app_args": {"$ref": "#/$defs/stringArray"},
+        "trace_app_args": {"$ref": "#/$defs/stringArray"},
+        "trace_cardinality_contract": {
+          "type": "string",
+          "enum": [
+            "authority_args_exact", "runner_common_single_launch_v1",
+            "matrix_capture_args_override_v1",
+            "warm_cold_pair_three_launch_v1",
+            "one_pinned_candidate_kernel_launch_exact"
+          ]
+        },
+        "capture_launch_contract": {"$ref": "#/$defs/captureLaunchContract"},
+        "matrix_capture_override": {"$ref": "#/$defs/matrixCaptureOverride"},
+        "evaluation_cardinality_contract": {
+          "const": "all_effective_workloads_passed_exact"
+        },
+        "capture_target": {"$ref": "#/$defs/captureTarget"},
+        "logical_workload": {"$ref": "#/$defs/logicalWorkload"},
+        "shape_delivery": {
+          "type": "string", "enum": ["application_args", "adapter_consumes_logical_shape"]
+        },
+        "target_processes": {"type": "string", "enum": ["application_only", "all"]},
+        "adapter_contract": {"$ref": "#/$defs/adapterContract"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"adapter_kind": {"const": "sol_execbench"}}},
+          "then": {
+            "required": [
+              "adapter_contract", "evaluation_cardinality_contract",
+              "capture_target"
+            ],
+            "properties": {
+              "shape_delivery": {"const": "adapter_consumes_logical_shape"},
+              "target_processes": {"const": "all"},
+              "trace_cardinality_contract": {"const": "one_pinned_candidate_kernel_launch_exact"},
+              "logical_workload": {
+                "properties": {"kind": {"const": "sol_execbench_workload_set"}}
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "shape_delivery": {"const": "application_args"},
+              "target_processes": {"const": "all"},
+              "logical_workload": {
+                "properties": {"kind": {"const": "shape_point"}}
+              }
+            },
+            "not": {"required": ["adapter_contract"]}
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "trace_cardinality_contract": {
+                "enum": [
+                  "matrix_capture_args_override_v1",
+                  "warm_cold_pair_three_launch_v1"
+                ]
+              }
+            }
+          },
+          "then": {"required": ["matrix_capture_override"]},
+          "else": {"not": {"required": ["matrix_capture_override"]}}
+        },
+        {
+          "if": {
+            "properties": {
+              "trace_cardinality_contract": {
+                "const": "warm_cold_pair_three_launch_v1"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "capture_launch_contract": {
+                "required": ["trace_launch_sequence"],
+                "properties": {
+                  "trace_launch_count": {"const": 3},
+                  "label_launch_index": {"const": 0},
+                  "label_trace_launch_index": {"const": 0}
+                }
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "capture_launch_contract": {
+                "not": {"required": ["trace_launch_sequence"]},
+                "properties": {"trace_launch_count": {"const": 1}}
+              }
+            }
+          }
+        }
+      ]
+    },
+    "controlBits": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["policy", "input_path", "input_sha256"],
+          "properties": {
+            "policy": {"const": "direct_executable"},
+            "input_path": {"$ref": "#/$defs/path"},
+            "input_sha256": {"$ref": "#/$defs/sha256"}
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "policy", "module_discovery", "required_outcomes", "static_rebind"
+          ],
+          "properties": {
+            "policy": {"const": "post_trace_module_or_typed"},
+            "module_discovery": {"const": "nvbit_runtime_module_inventory"},
+            "required_outcomes": {
+              "type": "array",
+              "prefixItems": [
+                {
+                  "const": "exact_accepted_launch_runtime_binary_controls_emitted"
+                },
+                {
+                  "const": "exact_accepted_launch_static_rebind_controls_emitted"
+                },
+                {"const": "typed_unavailable_no_stable_static_module"}
+              ],
+              "items": false,
+              "minItems": 3,
+              "maxItems": 3
+            },
+            "static_rebind": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "policy", "allowed_code_arches", "ncu_report_binding",
+                "toolkit_version", "nvcc_path", "nvcc_sha256",
+                "cuobjdump_path", "cuobjdump_sha256"
+              ],
+              "properties": {
+                "policy": {"const": "preserved_module_exact_function"},
+                "allowed_code_arches": {
+                  "type": "array",
+                  "prefixItems": [
+                    {"const": "sm_80"},
+                    {"const": "sm_86"}
+                  ],
+                  "items": false,
+                  "minItems": 2,
+                  "maxItems": 2
+                },
+                "ncu_report_binding": {
+                  "const": "raw_text_section_exactly_once"
+                },
+                "toolkit_version": {"const": "V13.2"},
+                "nvcc_path": {
+                  "const": "/usr/local/cuda-13.2/bin/nvcc"
+                },
+                "nvcc_sha256": {
+                  "const": "1b32c567e18698a94d78f18e571d7a213cfb461a7422505120e88748d5150136"
+                },
+                "cuobjdump_path": {
+                  "const": "/usr/local/cuda-13.2/bin/cuobjdump"
+                },
+                "cuobjdump_sha256": {
+                  "const": "903c5e1324669c1222b13ede0fc7226f48f7db355669f2912f0236031c56e1bf"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "policy", "module_discovery", "selection_contract",
+            "runtime_kernel", "function_name", "execution_arch", "code_arch",
+            "inventory_binding", "expected_outcome", "expected_inventory_status",
+            "expected_inventory_reason", "module_path_at_capture",
+            "module_basename", "module_sha256", "text_section_index",
+            "text_section_name", "raw_text_size_bytes", "raw_text_sha256",
+            "static_instruction_count", "static_pcs_sha256",
+            "ncu_report_binding", "toolkit_version", "nvcc_path",
+            "nvcc_sha256", "cuobjdump_path", "cuobjdump_sha256"
+          ],
+          "properties": {
+            "policy": {"const": "post_trace_vendor_module"},
+            "module_discovery": {"const": "nvbit_runtime_module_inventory"},
+            "selection_contract": {"const": "active_from_start_single_launch_exact"},
+            "runtime_kernel": {
+              "type": "string",
+              "pattern": "^[A-Za-z_][A-Za-z0-9_]*___0$"
+            },
+            "function_name": {
+              "type": "string",
+              "pattern": "^[A-Za-z_][A-Za-z0-9_]*$"
+            },
+            "execution_arch": {"const": "sm_86"},
+            "code_arch": {"enum": ["sm_80", "sm_86"]},
+            "inventory_binding": {
+              "enum": [
+                "nvbit_stable_static_module",
+                "ncu_report_exact_text_section"
+              ]
+            },
+            "expected_outcome": {
+              "enum": [
+                "runtime_controls_emitted",
+                "matrix_pinned_runtime_module_controls_emitted"
+              ]
+            },
+            "expected_inventory_status": {
+              "enum": ["stable_static_module", "no_stable_static_module"]
+            },
+            "expected_inventory_reason": {"type": "string", "minLength": 1},
+            "module_path_at_capture": {
+              "type": "string", "pattern": "^/[^\\u0000]+$"
+            },
+            "module_basename": {
+              "type": "string", "pattern": "^[A-Za-z0-9_.-]+$"
+            },
+            "module_sha256": {"$ref": "#/$defs/sha256"},
+            "text_section_index": {"type": "integer", "minimum": 1},
+            "text_section_name": {
+              "type": "string",
+              "pattern": "^x-[A-Za-z_][A-Za-z0-9_]*\\.sm_[0-9]+[a-z]?\\.elf\\.bin$"
+            },
+            "raw_text_size_bytes": {
+              "type": "integer", "minimum": 16, "multipleOf": 16
+            },
+            "raw_text_sha256": {"$ref": "#/$defs/sha256"},
+            "static_instruction_count": {"type": "integer", "minimum": 1},
+            "static_pcs_sha256": {"$ref": "#/$defs/sha256"},
+            "ncu_report_binding": {"const": "raw_text_section_exactly_once"},
+            "toolkit_version": {"const": "V13.2"},
+            "nvcc_path": {"type": "string", "pattern": "^/[^\\u0000]+/nvcc$"},
+            "nvcc_sha256": {"$ref": "#/$defs/sha256"},
+            "cuobjdump_path": {
+              "type": "string", "pattern": "^/[^\\u0000]+/cuobjdump$"
+            },
+            "cuobjdump_sha256": {"$ref": "#/$defs/sha256"}
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "inventory_binding": {"const": "nvbit_stable_static_module"}
+                }
+              },
+              "then": {
+                "properties": {
+                  "expected_inventory_status": {"const": "stable_static_module"},
+                  "expected_inventory_reason": {"const": "resolved_file"},
+                  "expected_outcome": {"const": "runtime_controls_emitted"}
+                }
+              },
+              "else": {
+                "properties": {
+                  "expected_inventory_status": {"const": "no_stable_static_module"},
+                  "expected_inventory_reason": {"const": "origin_unresolved"},
+                  "expected_outcome": {
+                    "const": "matrix_pinned_runtime_module_controls_emitted"
+                  }
+                }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    "exclusion": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["reason", "detail"],
+      "properties": {
+        "reason": {"type": "string", "minLength": 1},
+        "detail": {"type": "string", "minLength": 1}
+      }
+    },
+    "cell": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "identity", "authority_cell_sha256", "disposition", "capture_readiness"
+      ],
+      "properties": {
+        "identity": {"$ref": "#/$defs/identity"},
+        "authority_cell_sha256": {"$ref": "#/$defs/sha256"},
+        "disposition": {"type": "string", "enum": ["runnable", "excluded"]},
+        "capture_readiness": {"$ref": "#/$defs/readiness"},
+        "trace_budget": {"$ref": "#/$defs/traceBudget"},
+        "invocation": {"$ref": "#/$defs/invocation"},
+        "control_bits": {"$ref": "#/$defs/controlBits"},
+        "exclusion": {"$ref": "#/$defs/exclusion"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"disposition": {"const": "runnable"}}},
+          "then": {
+            "required": ["trace_budget", "invocation", "control_bits"],
+            "not": {"required": ["exclusion"]}
+          },
+          "else": {
+            "required": ["exclusion"],
+            "properties": {
+              "capture_readiness": {"properties": {"status": {"const": "not_applicable"}}}
+            },
+            "not": {
+              "anyOf": [
+                {"required": ["trace_budget"]}, {"required": ["invocation"]},
+                {"required": ["control_bits"]}
+              ]
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "identity": {"properties": {"roster_source": {"const": "sol_execbench"}}},
+              "disposition": {"const": "runnable"}
+            }
+          },
+          "then": {
+            "properties": {
+              "invocation": {"properties": {"adapter_kind": {"const": "sol_execbench"}}},
+              "control_bits": {"properties": {"policy": {"const": "post_trace_module_or_typed"}}}
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "identity": {
+                "properties": {
+                  "roster_source": {"const": "simbench_bw"},
+                  "slug": {
+                    "enum": [
+                      "vendor_gemm_cublas",
+                      "vendor_sgemm_cublas",
+                      "vendor_sgemm_strided_batched_cublas"
+                    ]
+                  }
+                }
+              },
+              "disposition": {"const": "runnable"}
+            }
+          },
+          "then": {
+            "properties": {
+              "control_bits": {
+                "properties": {"policy": {"const": "post_trace_vendor_module"}}
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,20 @@
+# Quarantine for Nsight Compute report artifacts produced on local devices
+# (RTX 3090 Ti sm_86 and RTX 5060 laptop sm_120). The CLAUDE.md Rule 1
+# exception permits these report files to be written here, but they are
+# not committed to the repository — only the per-launch JSON sidecars
+# produced by tools/local_labels/import_label.py are tracked.
+
+# Block every Nsight Compute report artifact and its rename variants.
+# The trailing `*` matches `.ncu-rep`, `.ncu-repz`, `.ncu-rep.copy`,
+# `.ncu-rep-backup`, `.ncu-rep_old`, `.ncu-repz.bak`, `.ncu-repdata`, etc.
+*.ncu-rep*
+
+# Sample tooling state that the driver may produce alongside the report.
+*.tmp
+*.log
+
+# Non-committed scratch outputs. Default output paths of consumer-side
+# drivers (e.g. tools/local_labels/run_v5_active_path_comparison.py)
+# resolve here so a default invocation can never rewrite a committed
+# artifact. Nothing under uncommitted/ is ever tracked.
+uncommitted/

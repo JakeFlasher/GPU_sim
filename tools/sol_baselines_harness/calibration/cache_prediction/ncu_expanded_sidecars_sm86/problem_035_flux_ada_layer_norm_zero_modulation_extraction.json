@@ -1,0 +1,105 @@
+{
+  "argv_clock_policy_flag": "",
+  "argv_provenance": [
+    [
+      "ncu",
+      "--launch-skip",
+      "5",
+      "--launch-count",
+      "1",
+      "--clock-control",
+      "none",
+      "--replay-mode",
+      "kernel",
+      "--section",
+      "MemoryWorkloadAnalysis",
+      "--metrics",
+      "l1tex__t_sector_pipe_lsu_mem_global_op_ld_hit_rate.pct,l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum,l1tex__t_sectors_pipe_lsu_mem_global_op_ld_lookup_hit.sum,lts__t_sectors_srcunit_tex_op_read.sum,lts__t_sectors_srcunit_tex_op_read_lookup_hit.sum",
+      "--csv",
+      "/home/jakeshea/3090ti_5060laptop_cross_study/3090ti_5060laptop_cross_study/solbench_baseline/nvbit_tracer/metric_extractor/tests/calibration_cohort_b/problem_035_flux_ada_layer_norm_zero_modulation_extraction"
+    ],
+    [
+      "ncu",
+      "--launch-skip",
+      "5",
+      "--launch-count",
+      "1",
+      "--clock-control",
+      "none",
+      "--replay-mode",
+      "kernel",
+      "--section",
+      "MemoryWorkloadAnalysis",
+      "--metrics",
+      "l1tex__t_sector_pipe_lsu_mem_global_op_ld_hit_rate.pct,l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum,l1tex__t_sectors_pipe_lsu_mem_global_op_ld_lookup_hit.sum,lts__t_sectors_srcunit_tex_op_read.sum,lts__t_sectors_srcunit_tex_op_read_lookup_hit.sum",
+      "--csv",
+      "/home/jakeshea/3090ti_5060laptop_cross_study/3090ti_5060laptop_cross_study/solbench_baseline/nvbit_tracer/metric_extractor/tests/calibration_cohort_b/problem_035_flux_ada_layer_norm_zero_modulation_extraction"
+    ],
+    [
+      "ncu",
+      "--launch-skip",
+      "5",
+      "--launch-count",
+      "1",
+      "--clock-control",
+      "none",
+      "--replay-mode",
+      "kernel",
+      "--section",
+      "MemoryWorkloadAnalysis",
+      "--metrics",
+      "l1tex__t_sector_pipe_lsu_mem_global_op_ld_hit_rate.pct,l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum,l1tex__t_sectors_pipe_lsu_mem_global_op_ld_lookup_hit.sum,lts__t_sectors_srcunit_tex_op_read.sum,lts__t_sectors_srcunit_tex_op_read_lookup_hit.sum",
+      "--csv",
+      "/home/jakeshea/3090ti_5060laptop_cross_study/3090ti_5060laptop_cross_study/solbench_baseline/nvbit_tracer/metric_extractor/tests/calibration_cohort_b/problem_035_flux_ada_layer_norm_zero_modulation_extraction"
+    ]
+  ],
+  "captured_at_utc": "2026-05-29T21:38:23+00:00",
+  "completed": true,
+  "cv_cap": 0.05,
+  "cv_quarantined": false,
+  "failure_reason": "",
+  "language": "cuda_cpp",
+  "launch_skip_count": 5,
+  "ncu_l1_hit_rate_mean": 0.03623333333333333,
+  "ncu_l2_hit_rate_mean": 0.8909223637082624,
+  "ncu_metric_family": [
+    "l1tex__t_sector_pipe_lsu_mem_global_op_ld_hit_rate.pct",
+    "l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum",
+    "l1tex__t_sectors_pipe_lsu_mem_global_op_ld_lookup_hit.sum",
+    "lts__t_sectors_srcunit_tex_op_read.sum",
+    "lts__t_sectors_srcunit_tex_op_read_lookup_hit.sum"
+  ],
+  "no_read_only_traffic": false,
+  "predictor_bucket": "predictor_friendly",
+  "probe_binary_sha256": "eb71c559f71fea0e8edf6e34a1bdecd3689315fe78206ade07bc445f8d53266d",
+  "relative_cv_l1": 0.009692413756074263,
+  "relative_cv_l2": 0.0012089145047169912,
+  "runs": [
+    {
+      "l1_global_load_hit_rate": 0.0366,
+      "l1_global_load_sectors_hit": 108968943,
+      "l1_global_load_sectors_total": 2976933888,
+      "l2_read_hit_rate": 0.8897874726390694,
+      "l2_read_sectors_hit": 2555914581,
+      "l2_read_sectors_total": 2872500074
+    },
+    {
+      "l1_global_load_hit_rate": 0.0359,
+      "l1_global_load_sectors_hit": 106750157,
+      "l1_global_load_sectors_total": 2976933888,
+      "l2_read_hit_rate": 0.8919303216438268,
+      "l2_read_sectors_hit": 2563999294,
+      "l2_read_sectors_total": 2874663224
+    },
+    {
+      "l1_global_load_hit_rate": 0.0362,
+      "l1_global_load_sectors_hit": 107692265,
+      "l1_global_load_sectors_total": 2976933888,
+      "l2_read_hit_rate": 0.8910492968418912,
+      "l2_read_sectors_hit": 2560643330,
+      "l2_read_sectors_total": 2873739241
+    }
+  ],
+  "schema_version": 2,
+  "slug": "problem_035_flux_ada_layer_norm_zero_modulation_extraction"
+}

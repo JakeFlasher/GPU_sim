@@ -1,0 +1,131 @@
+{
+  "chosen_factor_provenance": "ceil_to_2dp(residual_ratio_truth_over_pred) per slug; HARD-3 sim confirms post-correction stddev 0.263 < 0.30 ceiling.",
+  "chosen_factors": {
+    "l2_thrash_pointer_chase": 0.54,
+    "register_spill_local_mem": 0.26
+  },
+  "combination_method": "per_slug_factor_dict",
+  "combination_rationale": "A single scalar fails closure: spill truth/pred=0.255 vs ptr_chase truth/pred=0.532. Per-slug factors driven by the 4-criterion structural-signature predicate (DEC-12 Option A resolution).",
+  "correction_factor_status": "diagnostic_truth_fitted_demoted",
+  "correction_factor_status_note": "DEMOTED to diagnostic-only by the truth-fitted correction-factor gate: these per-slug factors were derived from the SAME cells' NCU truth, so they must not multiply a deployable prediction. The cache_predictor apply helpers no-op on the deployable value for this family and record the would-be corrected value under diagnostics with this status token. A future slug-disjoint re-derivation (calibration-split slugs disjoint from every scored cell) may flip the status to slug_disjoint_calibrated in code+fixture lockstep.",
+  "generator": "manual_python_computation_R48_R1",
+  "hard_3_constraint_analysis": {
+    "baseline_post_r47_stddev": 0.1497,
+    "constraint": "0.10 <= cross_cell_stddev <= 0.30 (DEC-13 R48 widening from R47's 0.15 ceiling)",
+    "in_band": true,
+    "production_stddev_formula": "statistics.stdev(predicted_l2_hit_rate values across admitted L2-scalar cells)",
+    "stddev_at_chosen_factors": 0.2625
+  },
+  "input_bundles": [
+    {
+      "bundle_path": "data/local_labels/sweeps/sweep_20260514T165947Z_a1closure_ebe60dd/predictor_bundles/sm_86__register_spill_local_mem__trace_l2_accuracy_xl.json",
+      "bundle_sha256": "f277a59e321fddafc367eeed2fa455870f845d1282b197e524ea66f88d4d3250",
+      "point_pre_class_l2": 0.9980619636969943,
+      "predictor_design_coverage_bucket": "predictor_hostile",
+      "rel_err_before_correction": 2.918,
+      "residual_ratio_truth_over_pred": 0.25519457635330284,
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "register_spill_local_mem",
+      "truth_l2": 0.2547
+    },
+    {
+      "bundle_path": "data/local_labels/sweeps/sweep_20260514T165947Z_a1closure_ebe60dd/predictor_bundles/sm_86__l2_thrash_pointer_chase__trace_l2_accuracy_xl.json",
+      "bundle_sha256": "7f5375adc4864ead593c4ebd0674559e62634484c224d84dfb5468a7cda386a1",
+      "point_pre_class_l2": 0.99804706124107,
+      "predictor_design_coverage_bucket": "predictor_friendly",
+      "rel_err_before_correction": 0.879,
+      "residual_ratio_truth_over_pred": 0.5322394310138578,
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "l2_thrash_pointer_chase",
+      "truth_l2": 0.5312
+    }
+  ],
+  "negative_controls": [
+    "working_set_capacity_sweep",
+    "carveout_sensitivity_probe"
+  ],
+  "post_correction_simulation": {
+    "l2_thrash_pointer_chase": {
+      "delta_vs_pre_r48": -0.8644190265998158,
+      "predicted_post": 0.5389454130701778,
+      "rel_err_after": 0.01458097340018419
+    },
+    "register_spill_local_mem": {
+      "delta_vs_pre_r48": -2.8991695698420945,
+      "predicted_post": 0.2594961105612185,
+      "rel_err_after": 0.01883043015790552
+    }
+  },
+  "purpose": "Calibration provenance for _L2_HIGH_FOOTPRINT_LOW_REUSE_CORRECTION_FACTORS in workloads/simbench_bw/cache_predictor.py.",
+  "schema_version": 1,
+  "source_commit": "e56cd825afde2ae8748e4a9987e86d52acdf5cd9",
+  "source_commit_override_from": "13777154bbd7f041b68e743f293baabc99ad8c9d",
+  "source_sweep": {
+    "bundles_directory": "data/local_labels/sweeps/sweep_20260514T165947Z_a1closure_ebe60dd/predictor_bundles",
+    "sweep_id": "sweep_20260514T165947Z_a1closure_ebe60dd"
+  },
+  "structural_signature_predicate": {
+    "criteria": [
+      "total_observations >= 10_000_000",
+      "intra_lane_reuse_fraction < 0.01",
+      "memory_op_class GLOBAL share >= 0.95",
+      "HRD sector-layer mass at rd >= 4096 sectors >= 0.10"
+    ],
+    "criteria_provenance": "Criterion 4 was originally specified as 'HRD bin-0 mass >= 0.90' in the plan; empirical calibration against sweep_20260514T165947Z_a1closure_ebe60dd showed bin-0 mass is ~0.87 for ALL 4 cells (both admitted slugs AND both negative controls) and therefore does not discriminate the high-footprint signature. The R48 R2 refinement reformulates criterion 4 as 'HRD sector-layer long-rd-tail mass at rd >= 4096 sectors >= 0.10' which DOES discriminate: both admitted slugs show ~12% mass at rd >= 4096 (working set spills beyond L2 cache capacity, forcing long-reuse-distance reuse) while both negative controls show 0% mass at rd >= 4096 (their working sets fit in L2 or smaller). This is the 'low-reuse' half of the 'high-footprint-low-reuse' signature: the absolute reuse-distance tail is the discriminating structural fingerprint, not the bin-0 cold-miss mass. This deviation from the original plan-file criterion (d) for the structural-signature predicate (bin-0 mass >= 0.90) is user-sanctioned via the goal-tracker MUTABLE Plan Evolution Log at .humanize/rlcr/2026-05-20_11-05-10/goal-tracker.md (user-confirmed via in-session AskUserQuestion). The plan file itself stays frozen per BL-20260510-plan-file-frozen-during-active-rlcr-session.",
+    "measured_evidence": {
+      "carveout_sensitivity_probe": {
+        "global_share": 0.9083386378103119,
+        "hrd_long_rd_tail_mass": 0.0,
+        "intra_lane_reuse_fraction": 0.011597704620960434,
+        "passes_all_four_criteria": false,
+        "per_criterion": {
+          "crit_1_total_observations_ge_10M": false,
+          "crit_2_intra_lane_reuse_lt_0_01": false,
+          "crit_3_global_share_ge_0_95": false,
+          "crit_4_hrd_long_rd_tail_mass_ge_0_10_at_rd_ge_4096": false
+        },
+        "total_observations": 3215424
+      },
+      "l2_thrash_pointer_chase": {
+        "global_share": 1.0,
+        "hrd_long_rd_tail_mass": 0.1232758920802775,
+        "intra_lane_reuse_fraction": 0.00012206984684048905,
+        "passes_all_four_criteria": true,
+        "per_criterion": {
+          "crit_1_total_observations_ge_10M": true,
+          "crit_2_intra_lane_reuse_lt_0_01": true,
+          "crit_3_global_share_ge_0_95": true,
+          "crit_4_hrd_long_rd_tail_mass_ge_0_10_at_rd_ge_4096": true
+        },
+        "total_observations": 16779328
+      },
+      "register_spill_local_mem": {
+        "global_share": 1.0,
+        "hrd_long_rd_tail_mass": 0.1223333736084851,
+        "intra_lane_reuse_fraction": 0.001067248062754186,
+        "passes_all_four_criteria": true,
+        "per_criterion": {
+          "crit_1_total_observations_ge_10M": true,
+          "crit_2_intra_lane_reuse_lt_0_01": true,
+          "crit_3_global_share_ge_0_95": true,
+          "crit_4_hrd_long_rd_tail_mass_ge_0_10_at_rd_ge_4096": true
+        },
+        "total_observations": 16908352
+      },
+      "working_set_capacity_sweep": {
+        "global_share": 1.0,
+        "hrd_long_rd_tail_mass": 0.0,
+        "intra_lane_reuse_fraction": 0.0,
+        "passes_all_four_criteria": false,
+        "per_criterion": {
+          "crit_1_total_observations_ge_10M": false,
+          "crit_2_intra_lane_reuse_lt_0_01": true,
+          "crit_3_global_share_ge_0_95": true,
+          "crit_4_hrd_long_rd_tail_mass_ge_0_10_at_rd_ge_4096": false
+        },
+        "total_observations": 2658368
+      }
+    },
+    "predicate_admission_proof": "Paired-control test (workloads/simbench_bw/tests/test_l2_high_footprint_correction.py) verifies the 2 allowlist slugs satisfy all 4 criteria AND that working_set_capacity_sweep + carveout_sensitivity_probe each fail at least one criterion. Per-cell measured values recorded in the `measured_evidence` block of this fixture."
+  }
+}

@@ -1,0 +1,86 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "count_feasibility_analysis",
+  "description": "Per-target count-feasibility falsification evidence: whether an NVBit-trace-derived count is comparable to the NCU counter, or closes by engineering_closure_refuted due to an aggregation-domain mismatch. The named L2 sector hit-rate family (a fraction) is NOT a count target and is excluded; it is the task11 predictor path.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "registry_version",
+    "source_commit",
+    "codex_consult_reference",
+    "analysis_basis",
+    "targets",
+    "summary"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "registry_version": {"type": "string"},
+    "source_commit": {"type": "string", "pattern": "^[0-9a-f]{7,40}$"},
+    "codex_consult_reference": {
+      "type": "string",
+      "description": "Repo-relative path to the saved /humanize:ask-codex count-feasibility consult output."
+    },
+    "analysis_basis": {"type": "string"},
+    "targets": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "key",
+          "kind",
+          "ncu_tokens",
+          "verdict",
+          "domain_mismatch_reason",
+          "trace_to_ncu_mapping",
+          "aggregation_domain_mismatch",
+          "coalescing_replay_write_allocation_note",
+          "comparison_geometry"
+        ],
+        "properties": {
+          "key": {"type": "string"},
+          "kind": {"type": "string", "enum": ["count", "ratio"]},
+          "ncu_tokens": {
+            "type": "array",
+            "minItems": 1,
+            "items": {"type": "string"}
+          },
+          "verdict": {
+            "type": "string",
+            "enum": ["trace_count_comparable", "engineering_closure_refuted"]
+          },
+          "domain_mismatch_reason": {
+            "type": "string",
+            "enum": [
+              "none",
+              "post_coalescing_request_aggregation",
+              "replay_aggregation_domain",
+              "write_allocation_sector_fill",
+              "post_l1_filter_xbar_traffic",
+              "post_l2_filter_dram_traffic",
+              "per_pipe_vs_total_aggregation",
+              "atomic_reduction_routing",
+              "derived_inherits_component_refutation"
+            ]
+          },
+          "trace_to_ncu_mapping": {"type": "string", "minLength": 1},
+          "aggregation_domain_mismatch": {"type": "string", "minLength": 1},
+          "coalescing_replay_write_allocation_note": {"type": "string", "minLength": 1},
+          "comparison_geometry": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["n_targets", "n_comparable", "n_refuted"],
+      "properties": {
+        "n_targets": {"type": "integer", "minimum": 1},
+        "n_comparable": {"type": "integer", "minimum": 0},
+        "n_refuted": {"type": "integer", "minimum": 0}
+      }
+    }
+  }
+}

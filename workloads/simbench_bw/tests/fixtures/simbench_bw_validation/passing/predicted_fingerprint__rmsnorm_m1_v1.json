@@ -1,0 +1,84 @@
+{
+  "schema_version": 1,
+  "slug": "rmsnorm_fwd_bf16",
+  "bug_id": "m1",
+  "variant_id": "predicted_fingerprint_V1",
+  "data_provenance": "synthetic",
+  "claim_scope": "measured_local",
+  "predicted_fingerprint_axes": {
+    "kernel_feature_vector_predicted": {
+      "axes": {
+        "dynamic_divergence_profile": {
+          "claim_class": "dynamic_load_bearing",
+          "active_mask_histogram": {
+            "bucket_size": 1,
+            "buckets": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 100.0]
+          },
+          "divergence_depth": {
+            "max_depth": 0,
+            "mean_depth": 0.0
+          }
+        },
+        "memory_access_stride_distribution": {
+          "claim_class": "dynamic_load_bearing",
+          "stride_buckets_bytes": [1, 2, 4, 8, 16, 32, 64, 128],
+          "stride_counts": [0, 0, 0, 0, 0, 0, 0, 100.0]
+        },
+        "per_thread_instruction_count_distribution": {
+          "claim_class": "dynamic_load_bearing",
+          "min_count": 256,
+          "max_count": 256,
+          "mean_count": 256.0,
+          "stddev_count": 0.0
+        },
+        "static_sass_mnemonic_histogram": {
+          "claim_class": "static_sanity_check_only",
+          "static_sass_features_ref": "results/static_sass__rmsnorm_fwd_bf16.json"
+        },
+        "register_usage_and_predication_density": {
+          "claim_class": "mixed_static_dynamic",
+          "register_usage": {
+            "claim_class": "static_sanity_check_only",
+            "regs_per_thread": 32
+          },
+          "predication_density": {
+            "claim_class": "dynamic_load_bearing",
+            "predicated_instruction_fraction": 0.05
+          }
+        },
+        "smid_migration_count": {
+          "claim_class": "optional_if_supported",
+          "supported_by_predictor": true,
+          "migration_count": 0
+        }
+      }
+    },
+    "phase_cycle_ledger_predicted": {
+      "per_phase_cycle_records": [
+        {"phase_id": 0, "sm_id": 0, "warpid_tb": 0, "cycles": 1024},
+        {"phase_id": 1, "sm_id": 0, "warpid_tb": 0, "cycles": 4096}
+      ]
+    },
+    "roofline_coordinate_predicted": {
+      "operational_intensity_flop_per_byte": 0.25,
+      "achieved_bandwidth_gbps": 600.0
+    },
+    "theta_vector_predicted": {
+      "theta_compute": 1.0,
+      "theta_hbm_bw": 1.0,
+      "theta_l2_bw": 1.0,
+      "theta_l1_bw": 1.0,
+      "theta_latency_floor": 256.0
+    }
+  },
+  "mechanism_citation": {
+    "per_bug_mechanism": "mshr_coalescing_depth",
+    "primary_source": "Huerta MICRO 2025: Modeling MSHR coalescing in modern GPU cores",
+    "secondary_source": "Jarmusch 2025: Dissecting the NVIDIA Blackwell architecture with microbenchmarks"
+  },
+  "synthetic_predictor_provenance": {
+    "predictor_name": "synthetic_predictor",
+    "predictor_version": "0.1.0",
+    "frozen_seed_ref": "workloads/simbench_bw/pre_registration_seeds.toml"
+  }
+}

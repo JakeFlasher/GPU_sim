@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "artifact_kind": "static_occupancy_agreement",
+  "arch": "sm_86",
+  "kernel": "silu_fwd_bf16_sm80_kernel",
+  "launch_index": 0,
+  "ncu_rep": "data/local_labels/sm_86/silu_fwd_bf16_sm80/timing_shape/run_0_0.ncu-rep",
+  "overall_agree": true,
+  "comparable_gated_count": 3,
+  "gated_metrics": [
+    "launch__occupancy_limit_warps",
+    "launch__occupancy_limit_blocks",
+    "launch__occupancy_limit_registers",
+    "launch__occupancy_limit_shared_mem"
+  ],
+  "per_metric": [
+    {
+      "ncu_metric": "launch__occupancy_limit_warps",
+      "predicted_value": 6,
+      "predicted_status": "available",
+      "ncu_value": 6,
+      "gated": true,
+      "agree": true,
+      "reason": null
+    },
+    {
+      "ncu_metric": "launch__occupancy_limit_blocks",
+      "predicted_value": 16,
+      "predicted_status": "available",
+      "ncu_value": 16,
+      "gated": true,
+      "agree": true,
+      "reason": null
+    },
+    {
+      "ncu_metric": "launch__occupancy_limit_registers",
+      "predicted_value": 10,
+      "predicted_status": "available",
+      "ncu_value": 10,
+      "gated": true,
+      "agree": true,
+      "reason": null
+    },
+    {
+      "ncu_metric": "launch__occupancy_limit_shared_mem",
+      "predicted_value": null,
+      "predicted_status": "typed_unavailable",
+      "ncu_value": 8,
+      "gated": true,
+      "agree": null,
+      "reason": "requires_runtime_shared_mem_carveout"
+    }
+  ],
+  "slug": "silu_fwd_bf16_sm80",
+  "shape_point": "timing_shape"
+}

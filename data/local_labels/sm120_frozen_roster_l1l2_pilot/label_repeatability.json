@@ -1,0 +1,323 @@
+{
+  "cells": [
+    {
+      "admission": {
+        "admitted": false,
+        "detail": "cell ('sm_120', 'bf16_hmma_gemm_traceable', 'trace_l2_accuracy_xl') L2 stddev 0.16055991093669683 exceeds threshold 0.03.",
+        "typed_reason": "label_repeatability_failed"
+      },
+      "binary_sha256_consistent": true,
+      "binary_sha256s": [
+        "9c699026645eb429f708da4de8ec79d0eaefdbd4c60a98ba704990eca889b9ae"
+      ],
+      "device": "sm_120",
+      "mean_l1tex_sector": 0.5,
+      "mean_l2_sector": 0.7375999999999999,
+      "n_l1tex_repeats": 5,
+      "n_repeats": 5,
+      "n_sidecars": 5,
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "bf16_hmma_gemm_traceable",
+      "stddev_l1tex_sector": 0.0,
+      "stddev_l2_sector": 0.16055991093669683
+    },
+    {
+      "admission": {
+        "admitted": false,
+        "detail": "cell ('sm_120', 'conv2d_implicit_gemm_bf16_sm80', 'correctness_shape') L2 stddev 0.13853108676394624 exceeds threshold 0.03.",
+        "typed_reason": "label_repeatability_failed"
+      },
+      "binary_sha256_consistent": true,
+      "binary_sha256s": [
+        "5e3b7358f69bd55c374939fafbb947c208278dc4e923c024540de0a8ea539053"
+      ],
+      "device": "sm_120",
+      "mean_l1tex_sector": 0.6069,
+      "mean_l2_sector": 0.5687800000000001,
+      "n_l1tex_repeats": 5,
+      "n_repeats": 5,
+      "n_sidecars": 5,
+      "shape_point": "correctness_shape",
+      "slug": "conv2d_implicit_gemm_bf16_sm80",
+      "stddev_l1tex_sector": 0.0,
+      "stddev_l2_sector": 0.13853108676394624
+    },
+    {
+      "admission": {
+        "admitted": true,
+        "detail": "",
+        "typed_reason": ""
+      },
+      "binary_sha256_consistent": true,
+      "binary_sha256s": [
+        "5e3b7358f69bd55c374939fafbb947c208278dc4e923c024540de0a8ea539053"
+      ],
+      "device": "sm_120",
+      "mean_l1tex_sector": 0.5006,
+      "mean_l2_sector": 0.6961999999999999,
+      "n_l1tex_repeats": 5,
+      "n_repeats": 5,
+      "n_sidecars": 5,
+      "shape_point": "trace_l2_accuracy_lg",
+      "slug": "conv2d_implicit_gemm_bf16_sm80",
+      "stddev_l1tex_sector": 0.0,
+      "stddev_l2_sector": 0.022275771591574536
+    },
+    {
+      "admission": {
+        "admitted": false,
+        "detail": "cell ('sm_120', 'conv2d_implicit_gemm_bf16_sm80', 'trace_l2_accuracy_xl') L2 stddev 0.0966009057928548 exceeds threshold 0.03.",
+        "typed_reason": "label_repeatability_failed"
+      },
+      "binary_sha256_consistent": true,
+      "binary_sha256s": [
+        "5e3b7358f69bd55c374939fafbb947c208278dc4e923c024540de0a8ea539053"
+      ],
+      "device": "sm_120",
+      "mean_l1tex_sector": 0.5006,
+      "mean_l2_sector": 0.7388,
+      "n_l1tex_repeats": 5,
+      "n_repeats": 5,
+      "n_sidecars": 5,
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "conv2d_implicit_gemm_bf16_sm80",
+      "stddev_l1tex_sector": 0.0,
+      "stddev_l2_sector": 0.0966009057928548
+    },
+    {
+      "admission": {
+        "admitted": false,
+        "detail": "cell ('sm_120', 'cp_async_shared_tile_copy', 'trace_l2_accuracy_xl') L2 stddev 0.24957585620408074 exceeds threshold 0.03.",
+        "typed_reason": "label_repeatability_failed"
+      },
+      "binary_sha256_consistent": true,
+      "binary_sha256s": [
+        "7e38267df4383adf46e3895d06e3292c10d28f06e540b04864320d941bd40bde"
+      ],
+      "device": "sm_120",
+      "mean_l1tex_sector": 0.0,
+      "mean_l2_sector": 0.40706,
+      "n_l1tex_repeats": 5,
+      "n_repeats": 5,
+      "n_sidecars": 5,
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "cp_async_shared_tile_copy",
+      "stddev_l1tex_sector": 0.0,
+      "stddev_l2_sector": 0.24957585620408074
+    },
+    {
+      "admission": {
+        "admitted": true,
+        "detail": "",
+        "typed_reason": ""
+      },
+      "binary_sha256_consistent": true,
+      "binary_sha256s": [
+        "924a6b3e919ad8658099f245f40ac3c1749939441e77a20b0c3d452c01ceb469"
+      ],
+      "device": "sm_120",
+      "mean_l1tex_sector": 0.4997,
+      "mean_l2_sector": 0.03422,
+      "n_l1tex_repeats": 5,
+      "n_repeats": 5,
+      "n_sidecars": 5,
+      "shape_point": "trace_l2_accuracy_lg",
+      "slug": "cross_entropy_fwd_fp32_sm80",
+      "stddev_l1tex_sector": 0.0,
+      "stddev_l2_sector": 0.015719319323685744
+    },
+    {
+      "admission": {
+        "admitted": false,
+        "detail": "cell ('sm_120', 'dram_stream_stride_mix', 'trace_l2_accuracy_xl') L2 stddev 0.32132650811723595 exceeds threshold 0.03.",
+        "typed_reason": "label_repeatability_failed"
+      },
+      "binary_sha256_consistent": true,
+      "binary_sha256s": [
+        "a1d7c2c9f9fdcdfff30b9f8536d90db72bc5d9264cd7b8d70edf4007c686744a"
+      ],
+      "device": "sm_120",
+      "mean_l1tex_sector": 0.9972,
+      "mean_l2_sector": 0.6337404151864982,
+      "n_l1tex_repeats": 5,
+      "n_repeats": 5,
+      "n_sidecars": 5,
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "dram_stream_stride_mix",
+      "stddev_l1tex_sector": 0.0,
+      "stddev_l2_sector": 0.32132650811723595
+    },
+    {
+      "admission": {
+        "admitted": false,
+        "detail": "cell ('sm_120', 'embedding_gather_int32_sm80', 'correctness_shape') L2 stddev 0.2096701639011681 exceeds threshold 0.03.",
+        "typed_reason": "label_repeatability_failed"
+      },
+      "binary_sha256_consistent": true,
+      "binary_sha256s": [
+        "dcb271c1c12b862a132394c073b7a356848d565f42d6833a7065427edbd371da"
+      ],
+      "device": "sm_120",
+      "mean_l1tex_sector": 0.2481,
+      "mean_l2_sector": 0.6358184503260452,
+      "n_l1tex_repeats": 5,
+      "n_repeats": 5,
+      "n_sidecars": 5,
+      "shape_point": "correctness_shape",
+      "slug": "embedding_gather_int32_sm80",
+      "stddev_l1tex_sector": 0.0,
+      "stddev_l2_sector": 0.2096701639011681
+    },
+    {
+      "admission": {
+        "admitted": true,
+        "detail": "",
+        "typed_reason": ""
+      },
+      "binary_sha256_consistent": true,
+      "binary_sha256s": [
+        "dcb271c1c12b862a132394c073b7a356848d565f42d6833a7065427edbd371da"
+      ],
+      "device": "sm_120",
+      "mean_l1tex_sector": 0.24894000000000002,
+      "mean_l2_sector": 0.21302000000000004,
+      "n_l1tex_repeats": 5,
+      "n_repeats": 5,
+      "n_sidecars": 5,
+      "shape_point": "trace_l2_accuracy_lg",
+      "slug": "embedding_gather_int32_sm80",
+      "stddev_l1tex_sector": 0.0003646916505762046,
+      "stddev_l2_sector": 0.01512190464194243
+    },
+    {
+      "admission": {
+        "admitted": false,
+        "detail": "cell ('sm_120', 'flash_attn_bwd_bf16_sm80', 'correctness_shape') L2 stddev 0.15259620899616086 exceeds threshold 0.03.",
+        "typed_reason": "label_repeatability_failed"
+      },
+      "binary_sha256_consistent": true,
+      "binary_sha256s": [
+        "ad0e461da36f450b1225e246637cb0afa3e46d90f5dfad2643c36d05468c4d0d"
+      ],
+      "device": "sm_120",
+      "mean_l1tex_sector": 0.3611,
+      "mean_l2_sector": 0.57324,
+      "n_l1tex_repeats": 5,
+      "n_repeats": 5,
+      "n_sidecars": 5,
+      "shape_point": "correctness_shape",
+      "slug": "flash_attn_bwd_bf16_sm80",
+      "stddev_l1tex_sector": 0.0,
+      "stddev_l2_sector": 0.15259620899616086
+    },
+    {
+      "admission": {
+        "admitted": false,
+        "detail": "cell ('sm_120', 'flash_attn_bwd_bf16_sm80', 'timing_shape') L2 stddev 0.15449760733819298 exceeds threshold 0.03.",
+        "typed_reason": "label_repeatability_failed"
+      },
+      "binary_sha256_consistent": true,
+      "binary_sha256s": [
+        "ad0e461da36f450b1225e246637cb0afa3e46d90f5dfad2643c36d05468c4d0d"
+      ],
+      "device": "sm_120",
+      "mean_l1tex_sector": 0.34130000000000005,
+      "mean_l2_sector": 0.7132746319462173,
+      "n_l1tex_repeats": 5,
+      "n_repeats": 5,
+      "n_sidecars": 5,
+      "shape_point": "timing_shape",
+      "slug": "flash_attn_bwd_bf16_sm80",
+      "stddev_l1tex_sector": 0.0,
+      "stddev_l2_sector": 0.15449760733819298
+    },
+    {
+      "admission": {
+        "admitted": false,
+        "detail": "cell ('sm_120', 'flash_attn_bwd_bf16_sm80', 'trace_l2_accuracy_lg') L2 stddev 0.2541196790286854 exceeds threshold 0.03.",
+        "typed_reason": "label_repeatability_failed"
+      },
+      "binary_sha256_consistent": true,
+      "binary_sha256s": [
+        "ad0e461da36f450b1225e246637cb0afa3e46d90f5dfad2643c36d05468c4d0d"
+      ],
+      "device": "sm_120",
+      "mean_l1tex_sector": 0.34130000000000005,
+      "mean_l2_sector": 0.5950641018740278,
+      "n_l1tex_repeats": 5,
+      "n_repeats": 5,
+      "n_sidecars": 5,
+      "shape_point": "trace_l2_accuracy_lg",
+      "slug": "flash_attn_bwd_bf16_sm80",
+      "stddev_l1tex_sector": 0.0,
+      "stddev_l2_sector": 0.2541196790286854
+    },
+    {
+      "admission": {
+        "admitted": false,
+        "detail": "cell ('sm_120', 'flash_attn_bwd_bf16_sm80', 'trace_l2_accuracy_xl') L2 stddev 0.2213987172501232 exceeds threshold 0.03.",
+        "typed_reason": "label_repeatability_failed"
+      },
+      "binary_sha256_consistent": true,
+      "binary_sha256s": [
+        "ad0e461da36f450b1225e246637cb0afa3e46d90f5dfad2643c36d05468c4d0d"
+      ],
+      "device": "sm_120",
+      "mean_l1tex_sector": 0.34130000000000005,
+      "mean_l2_sector": 0.53298,
+      "n_l1tex_repeats": 5,
+      "n_repeats": 5,
+      "n_sidecars": 5,
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "flash_attn_bwd_bf16_sm80",
+      "stddev_l1tex_sector": 0.0,
+      "stddev_l2_sector": 0.2213987172501232
+    },
+    {
+      "admission": {
+        "admitted": false,
+        "detail": "cell ('sm_120', 'layernorm_fwd_bf16_sm80', 'correctness_shape') L2 stddev 0.22989186153493993 exceeds threshold 0.03.",
+        "typed_reason": "label_repeatability_failed"
+      },
+      "binary_sha256_consistent": true,
+      "binary_sha256s": [
+        "cb2ec7a8ae5763fbc47ff5deb9f4aab970ebf1239468067b51737ce655348b5d"
+      ],
+      "device": "sm_120",
+      "mean_l1tex_sector": 0.3,
+      "mean_l2_sector": 0.50466,
+      "n_l1tex_repeats": 5,
+      "n_repeats": 5,
+      "n_sidecars": 5,
+      "shape_point": "correctness_shape",
+      "slug": "layernorm_fwd_bf16_sm80",
+      "stddev_l1tex_sector": 0.0,
+      "stddev_l2_sector": 0.22989186153493993
+    },
+    {
+      "admission": {
+        "admitted": false,
+        "detail": "cell ('sm_120', 'layernorm_fwd_bf16_sm80', 'trace_l2_accuracy_lg') L2 stddev 0.047713436262755184 exceeds threshold 0.03.",
+        "typed_reason": "label_repeatability_failed"
+      },
+      "binary_sha256_consistent": true,
+      "binary_sha256s": [
+        "cb2ec7a8ae5763fbc47ff5deb9f4aab970ebf1239468067b51737ce655348b5d"
+      ],
+      "device": "sm_120",
+      "mean_l1tex_sector": 0.53548,
+      "mean_l2_sector": 0.40692000000000006,
+      "n_l1tex_repeats": 5,
+      "n_repeats": 5,
+      "n_sidecars": 5,
+      "shape_point": "trace_l2_accuracy_lg",
+      "slug": "layernorm_fwd_bf16_sm80",
+      "stddev_l1tex_sector": 0.0001788854381999821,
+      "stddev_l2_sector": 0.047713436262755184
+    }
+  ],
+  "rejected_sidecars": [],
+  "repeats_required": 5,
+  "schema_version": 1,
+  "stddev_threshold": 0.03
+}

@@ -1,0 +1,395 @@
+# Codex-vetted sm_86 expansion selection brief (cross-arch
+# plan task16, AC-11).  R26 repair after Codex R25 review
+# caught an M4 Phase A exclusion violation: the original
+# R25 brief admitted problem_020_nvfp4_linear_layer as a
+# mandatory hostile expansion cell, but plan line 444
+# explicitly excludes NVFP4 / TCGen05 / wgmma kernels from
+# the task16 selection.  The exclusion is not theoretical:
+# the kernel at baselines/Quant/problem_020/cuda_cpp/kernel.cu
+# instantiates cutlass::arch::Sm120 with OpClassBlockScaledTensorOp
+# and the solution.json pins -gencode=compute_120a,sm_120a,
+# making the kernel currently sm_120-only.
+#
+# Removing the cell leaves 3 sm_86-portable hostile
+# candidates in the corpus.  Under DEC-G stratified 60/40
+# split: 3 hostile -> 2 cal + 1 val, failing AC-13's
+# hostile validation minima of >= 2.  This brief therefore
+# emits a plan_compliance_status = BLOCKED marker and an
+# explicit plan_evolution_request rather than a green
+# admission.  task17 MUST NOT begin until the request is
+# resolved.
+#
+# Schema version bumped to 2 because the per-cell shape
+# changed (sm86_portability_status, exclusion_check_*,
+# canonical_bucket_source, solution_gencode_evidence) and
+# new top-level tables were added (plan_compliance_*,
+# plan_evolution_request, hostile_admission_excluded,
+# codex_brief_correction_note_r26).
+
+[meta]
+schema_version = 3
+captured_at_utc = "2026-05-29T01:30:00+00:00"
+task = "task16"
+target_ac = "AC-11"
+codex_model = "gpt-5.5:xhigh"
+plan_reference = "AC-11 lines 177-191; task16 plan line 513; AC-13 cohort minima lines 198-204; M4 Phase A selection criteria + exclusions plan line 444"
+plan_path = ".humanize/plans/crossarch-predictor-validity-restore-sm86-primary-20260528-052258.md"
+codex_response_local_cache_path = ".humanize/skill/2026-05-29_00-07-32-941893-3ec2c522/output.md"
+
+# R26 plan-compliance marker.  Closed vocabulary:
+#   READY_FOR_TASK17 | BLOCKED_AC13_HOSTILE_MINIMA_UNSATISFIABLE_POST_EXCLUSION
+plan_compliance_status = "BLOCKED_AC13_HOSTILE_MINIMA_UNSATISFIABLE_POST_EXCLUSION"
+task17_ready = false
+
+# R27 operator directive (inline mid-loop, recorded 2026-05-29):
+# operator explicitly declined Option A (port problem_020 to a
+# non-NVFP4 sm_86 variant) on the grounds that NVFP4 is sm_100-
+# only hardware and a software fallback would not produce
+# NVFP4-representative profiling data. Cloud sm_100 testing is
+# Phase 2 work, gated on completing sm_86 + sm_120 calibration
+# first. Closed vocabulary:
+#   pending |
+#   option_a_declined_phase2_deferral |
+#   option_b_selected | option_c_selected |
+#   option_d_selected | option_e_selected
+plan_evolution_operator_directive_r27 = "option_a_declined_phase2_deferral"
+
+pilot_cell_count = 5
+expansion_cell_count = 9      # was 10 (R25); -1 for problem_020 exclusion
+joint_admitted_count = 14     # was 15 (R25)
+ac11_lower_bound = 11
+ac11_upper_bound = 15
+
+
+[corpus_inventory]
+total_corpus_size = 92
+pilot_excluded_count = 5
+non_pilot_candidate_count = 87
+non_pilot_friendly_count = 82
+non_pilot_hostile_count = 4
+
+
+[plan_compliance_constraints]
+m4_phase_a_exclusions = ["NVFP4", "TCGen05", "wgmma"]
+m4_phase_a_exclusion_plan_reference = "plan line 444"
+ac13_friendly_validation_minima = 4
+ac13_hostile_validation_minima = 2
+split_fraction_validation = 0.4
+split_policy_reference = "DEC-G stratified 60/40 calibration/validation; mirror of the pilot's 3+2 split"
+ac11_admitted_band_lower = 11
+ac11_admitted_band_upper = 15
+
+
+[plan_compliance_conflict]
+conflict_id = "AC13_HOSTILE_MINIMA_VS_M4_PHASE_A_NVFP4_EXCLUSION"
+conflict_summary = "M4 Phase A (plan line 444) excludes NVFP4; the corpus's only NVFP4 hostile candidate is problem_020_nvfp4_linear_layer, whose current solution.json/kernel are sm_120-only. Excluding it leaves 3 sm_86-portable hostile candidates. Under DEC-G stratified 60/40 split, 3 hostile yields 2 cal + 1 val, failing AC-13's >= 2 hostile val minima."
+corpus_hostile_total = 4
+hostile_excluded_count = 1
+hostile_excluded_slugs = ["problem_020_nvfp4_linear_layer"]
+post_exclusion_hostile_admittable = 3
+hostile_validation_under_60_40_split = 1
+ac13_hostile_minima_required = 2
+hostile_floor_passes = false
+blocking_status = true
+task17_blocked_pending_resolution = true
+
+
+[plan_evolution_request]
+required_for = "AC-11 task16 completion"
+options = [
+    "Option A: Port problem_020_nvfp4_linear_layer to a sm_86-compatible variant (e.g. FP16/BF16 GEMM fallback when NVFP4 is unsupported); after the sm_86 port lands with compile+correctness evidence, task16 re-runs and re-admits the cell. Most direct; preserves AC-13 and DEC-G as written. R27 OPERATOR STATUS: DECLINED — see plan_evolution_operator_directive_r27.",
+    "Option B: Plan-level relaxation of AC-13 hostile minima for the sm_86 expansion (>= 1 hostile val instead of >= 2). Requires explicit plan edit + sm_120 plan re-read for symmetry (the sm_120 plan AC-8 also pins >= 2 hostile minima).",
+    "Option C: Change DEC-G split fraction for the hostile cohort only (e.g. 33/67 cal/val for hostile cells). With 3 hostile -> 1 cal + 2 val under that policy, AC-13 minima would be met but DEC-G's single-policy invariant breaks.",
+    "Option D: Identify additional sm_86-portable hostile candidates in the corpus by extending the lookup_predictor_design_coverage map. Requires a separate review pass before task16 retries; success is uncertain (the predictor design coverage was empirically tuned to mark only the 4 current slugs as hostile).",
+    "Option E (R27): Defer problem_020 admission to Phase 2 (B200 sm_100a) where NVFP4 is natively supported by 5th-gen tensor cores. The operator authorized this path inline mid-loop on 2026-05-29: the cloud sm_100 testing is gated on completing sm_86 + sm_120 with NCU ground truth first, and a software FP4-decode fallback on sm_86/sm_120 would not produce NVFP4-representative profiling data. Selecting Option E still requires the operator to subsequently select Option B / C / D to unblock AC-13 on the current sm_86 + sm_120 hosts.",
+]
+recommended_option = "Option E selected by operator directive (problem_020 deferred to Phase 2 sm_100a). The operator must still pick among Options B / C / D to unblock AC-13 on the local hosts before task17 begins; this brief stays plan_compliance_status=BLOCKED until that secondary selection lands."
+r27_operator_directive_summary = "NVFP4 fallback rejected: NVFP4 is sm_100-only hardware. Cloud sm_100 testing comes after sm_86 + sm_120 NCU ground truth validation is finished. problem_020 stays deferred to Phase 2."
+
+
+# ---------------------------------------------------------------
+# Hostile admissions — 3 (was 4 in R25), with problem_020
+# excluded per M4 Phase A.  Each cell carries the R26
+# per-cell portability + exclusion fields the validator
+# enforces.
+# ---------------------------------------------------------------
+
+[hostile_admission]
+admitted_count = 3
+admitted_under_plan_compliance_block = true
+admission_gated_on = "plan_evolution_request resolution"
+m4_phase_a_exclusion_applied_to = ["problem_020_nvfp4_linear_layer"]
+rationale = "Post-M4-Phase-A-exclusion the corpus admits only 3 hostile candidates. AC-13 hostile validation minima (>= 2) is UNSATISFIABLE under DEC-G 60/40 split with 3 hostile cells. Brief emits plan_compliance_status BLOCKED + plan_evolution_request; task17 deferred until resolution."
+
+[[hostile_admission.cells]]
+slug = "problem_011_gemm_n28672_k4096"
+solution_path = "baselines/FIB/problem_011_gemm_n28672_k4096/cutlass/solution.json"
+kernel_source_paths = ["baselines/FIB/problem_011_gemm_n28672_k4096/cutlass/kernel.cu", "baselines/FIB/problem_011_gemm_n28672_k4096/cutlass/kernel.h", "baselines/FIB/problem_011_gemm_n28672_k4096/cutlass/main.cpp"]
+predictor_bucket = "predictor_hostile"
+canonical_bucket_source = "lookup_predictor_design_coverage"
+sm86_portability_status = "portable"
+exclusion_check_nvfp4_tcgen05_wgmma = "passes"
+solution_gencode_evidence = "target_hardware=[LOCAL]; cutlass::arch::Sm80; cutlass::arch::OpClassTensorOp"
+codex_rationale = "mandatory hostile admission because it is the only large GEMM capacity-stress representative and exercises memory/Tier-2 budget pressure beyond friendly GEMM shapes."
+
+[[hostile_admission.cells]]
+slug = "problem_018_fused_rope_with_qk_norm_and_kv_cache_update"
+solution_path = "baselines/L1/problem_018_fused_rope_with_qk_norm_and_kv_cache_update/cuda_cpp/solution.json"
+kernel_source_paths = ["baselines/L1/problem_018_fused_rope_with_qk_norm_and_kv_cache_update/cuda_cpp/kernel.cu", "baselines/L1/problem_018_fused_rope_with_qk_norm_and_kv_cache_update/cuda_cpp/kernel.h", "baselines/L1/problem_018_fused_rope_with_qk_norm_and_kv_cache_update/cuda_cpp/main.cpp"]
+predictor_bucket = "predictor_hostile"
+canonical_bucket_source = "lookup_predictor_design_coverage"
+sm86_portability_status = "portable"
+exclusion_check_nvfp4_tcgen05_wgmma = "passes"
+solution_gencode_evidence = "target_hardware=[LOCAL]; no sm_120-only / blocked-precision markers in kernel source per R26 audit"
+codex_rationale = "mandatory hostile admission because fused RoPE + QK norm + KV-cache update stresses irregular cache-update access patterns absent from friendly norm/GEMM coverage."
+
+[[hostile_admission.cells]]
+slug = "problem_071_kv_cache_update_with_rope"
+solution_path = "baselines/L1/problem_071_kv_cache_update_with_rope/cuda_cpp/solution.json"
+kernel_source_paths = ["baselines/L1/problem_071_kv_cache_update_with_rope/cuda_cpp/kernel.cu", "baselines/L1/problem_071_kv_cache_update_with_rope/cuda_cpp/kernel.h", "baselines/L1/problem_071_kv_cache_update_with_rope/cuda_cpp/main.cpp"]
+predictor_bucket = "predictor_hostile"
+canonical_bucket_source = "lookup_predictor_design_coverage"
+sm86_portability_status = "portable"
+exclusion_check_nvfp4_tcgen05_wgmma = "passes"
+solution_gencode_evidence = "target_hardware=[LOCAL]; no sm_120-only / blocked-precision markers in kernel source per R26 audit"
+codex_rationale = "mandatory hostile admission because it isolates the KV-cache-with-RoPE hostile pattern and provides a second validation handle on cache-write behavior."
+
+
+# ---------------------------------------------------------------
+# Hostile cells excluded by M4 Phase A — recorded with full
+# evidence so the audit trail names the exclusion reason.
+# ---------------------------------------------------------------
+
+[hostile_admission_excluded]
+excluded_count = 1
+
+[[hostile_admission_excluded.cells]]
+slug = "problem_020_nvfp4_linear_layer"
+solution_path = "baselines/Quant/problem_020_nvfp4_linear_layer/cuda_cpp/solution.json"
+kernel_source_paths = ["baselines/Quant/problem_020_nvfp4_linear_layer/cuda_cpp/kernel.cu", "baselines/Quant/problem_020_nvfp4_linear_layer/cuda_cpp/kernel.h", "baselines/Quant/problem_020_nvfp4_linear_layer/cuda_cpp/main.cpp"]
+predictor_bucket = "predictor_hostile"
+canonical_bucket_source = "lookup_predictor_design_coverage"
+sm86_portability_status = "non_portable"
+exclusion_check_nvfp4_tcgen05_wgmma = "FAILS - NVFP4 detected"
+solution_gencode_evidence = "-gencode=arch=compute_120a,code=sm_120a in baselines/Quant/problem_020_nvfp4_linear_layer/cuda_cpp/solution.json"
+kernel_source_evidence = "cutlass::arch::Sm120 with OpClassBlockScaledTensorOp in baselines/Quant/problem_020_nvfp4_linear_layer/cuda_cpp/kernel.cu; NVFP4 linear-layer kernel"
+exclusion_reason = "m4_phase_a_nvfp4_excluded"
+admission_blocked_pending = "Port to sm_86-compatible variant per [plan_evolution_request] Option A; task17 sub-task to be authorized only after operator concurrence."
+
+
+# ---------------------------------------------------------------
+# Friendly admissions — 6 Codex-picked cells, each
+# carrying R26 per-cell portability + exclusion fields.
+# ---------------------------------------------------------------
+
+[friendly_admission]
+admitted_count = 6
+selection_source = "codex_curated_from_shortlist"
+
+[[friendly_admission.cells]]
+slug = "problem_002_fused_add_rmsnorm_h4096"
+solution_path = "baselines/FIB/problem_002_fused_add_rmsnorm_h4096/cuda_cpp/solution.json"
+kernel_source_paths = ["baselines/FIB/problem_002_fused_add_rmsnorm_h4096/cuda_cpp/kernel.cu", "baselines/FIB/problem_002_fused_add_rmsnorm_h4096/cuda_cpp/kernel.h", "baselines/FIB/problem_002_fused_add_rmsnorm_h4096/cuda_cpp/main.cpp"]
+predictor_bucket = "predictor_friendly"
+canonical_bucket_source = "lookup_predictor_design_coverage"
+sm86_portability_status = "portable"
+exclusion_check_nvfp4_tcgen05_wgmma = "passes"
+solution_gencode_evidence = "target_hardware=[LOCAL]; no blocked codegen / precision markers in kernel source per R26 audit"
+codex_rationale = "admit as the mature RMSNorm anchor because it already served as the R22 smoke pilot and has a landed Tier-2 bundle."
+
+[[friendly_admission.cells]]
+slug = "problem_021_rmsnorm_h128"
+solution_path = "baselines/FIB/problem_021_rmsnorm_h128/cuda_cpp/solution.json"
+kernel_source_paths = ["baselines/FIB/problem_021_rmsnorm_h128/cuda_cpp/kernel.cu", "baselines/FIB/problem_021_rmsnorm_h128/cuda_cpp/kernel.h", "baselines/FIB/problem_021_rmsnorm_h128/cuda_cpp/main.cpp"]
+predictor_bucket = "predictor_friendly"
+canonical_bucket_source = "lookup_predictor_design_coverage"
+sm86_portability_status = "portable"
+exclusion_check_nvfp4_tcgen05_wgmma = "passes"
+solution_gencode_evidence = "target_hardware=[LOCAL]; no blocked codegen / precision markers in kernel source per R26 audit"
+codex_rationale = "admit to cover the very-small, latency-bound normalization regime that the current R18 pilot set does not exercise."
+
+[[friendly_admission.cells]]
+slug = "problem_004_gemm_n128_k2048"
+solution_path = "baselines/FIB/problem_004_gemm_n128_k2048/cutlass/solution.json"
+kernel_source_paths = ["baselines/FIB/problem_004_gemm_n128_k2048/cutlass/kernel.cu", "baselines/FIB/problem_004_gemm_n128_k2048/cutlass/kernel.h", "baselines/FIB/problem_004_gemm_n128_k2048/cutlass/main.cpp"]
+predictor_bucket = "predictor_friendly"
+canonical_bucket_source = "lookup_predictor_design_coverage"
+sm86_portability_status = "portable"
+exclusion_check_nvfp4_tcgen05_wgmma = "passes"
+solution_gencode_evidence = "target_hardware=[LOCAL]; cutlass::arch::Sm80"
+codex_rationale = "admit as the small-GEMM friendly baseline to contrast against the hostile large-GEMM capacity case without duplicating its stress profile."
+
+[[friendly_admission.cells]]
+slug = "problem_007_gemm_n4096_k4096"
+solution_path = "baselines/FIB/problem_007_gemm_n4096_k4096/cutlass/solution.json"
+kernel_source_paths = ["baselines/FIB/problem_007_gemm_n4096_k4096/cutlass/kernel.cu", "baselines/FIB/problem_007_gemm_n4096_k4096/cutlass/kernel.h", "baselines/FIB/problem_007_gemm_n4096_k4096/cutlass/main.cpp"]
+predictor_bucket = "predictor_friendly"
+canonical_bucket_source = "lookup_predictor_design_coverage"
+sm86_portability_status = "portable"
+exclusion_check_nvfp4_tcgen05_wgmma = "passes"
+solution_gencode_evidence = "target_hardware=[LOCAL]; cutlass::arch::Sm80"
+codex_rationale = "admit as the medium-large square GEMM representative, giving capacity coverage below the mandatory `problem_011` extreme."
+
+[[friendly_admission.cells]]
+slug = "problem_037_flux_feedforward_gelu_approximate"
+solution_path = "baselines/L1/problem_037_flux_feedforward_gelu_approximate/cutlass/solution.json"
+kernel_source_paths = ["baselines/L1/problem_037_flux_feedforward_gelu_approximate/cutlass/kernel.cu", "baselines/L1/problem_037_flux_feedforward_gelu_approximate/cutlass/kernel.h", "baselines/L1/problem_037_flux_feedforward_gelu_approximate/cutlass/main.cpp"]
+predictor_bucket = "predictor_friendly"
+canonical_bucket_source = "lookup_predictor_design_coverage"
+sm86_portability_status = "portable"
+exclusion_check_nvfp4_tcgen05_wgmma = "passes"
+solution_gencode_evidence = "target_hardware=[LOCAL]; cutlass::arch::Sm80"
+codex_rationale = "admit for predictable activation/fused arithmetic-intensity coverage with a transformer-MLP flavor distinct from pure norm and GEMM cells."
+
+[[friendly_admission.cells]]
+slug = "problem_085_geglu_activation"
+solution_path = "baselines/L1/problem_085_geglu_activation/cuda_cpp/solution.json"
+kernel_source_paths = ["baselines/L1/problem_085_geglu_activation/cuda_cpp/kernel.cu", "baselines/L1/problem_085_geglu_activation/cuda_cpp/kernel.h", "baselines/L1/problem_085_geglu_activation/cuda_cpp/main.cpp"]
+predictor_bucket = "predictor_friendly"
+canonical_bucket_source = "lookup_predictor_design_coverage"
+sm86_portability_status = "portable"
+exclusion_check_nvfp4_tcgen05_wgmma = "passes"
+solution_gencode_evidence = "target_hardware=[LOCAL]; no blocked codegen / precision markers in kernel source per R26 audit"
+codex_rationale = "admit as a second activation-family point because GEGLU stresses gated elementwise fusion and broadens predictor signal without adding attention/KV-cache hostility."
+
+
+# ---------------------------------------------------------------
+# Pilot cells (R18 admitted; not re-decided here, recorded
+# for completeness of the joint admitted set).  The 5
+# pilot cells already passed AC-7/AC-8 on sm_86; their
+# portability is established by landed evidence.
+# ---------------------------------------------------------------
+
+[pilot_admission]
+admitted_count = 5
+source_ledger = "scripts/baselines_harness/calibration/cache_prediction/label_ledger_v1_sm86_pilot_v1.toml"
+
+[[pilot_admission.cells]]
+slug = "problem_006_hyena_depthwise_conv1d_split_gate"
+solution_path = "baselines/L1/problem_006_hyena_depthwise_conv1d_split_gate/cuda_cpp/solution.json"
+kernel_source_paths = ["baselines/L1/problem_006_hyena_depthwise_conv1d_split_gate/cuda_cpp/kernel.cu", "baselines/L1/problem_006_hyena_depthwise_conv1d_split_gate/cuda_cpp/kernel.h", "baselines/L1/problem_006_hyena_depthwise_conv1d_split_gate/cuda_cpp/main.cpp"]
+predictor_bucket = "predictor_friendly"
+canonical_bucket_source = "lookup_predictor_design_coverage"
+sm86_portability_status = "portable"
+exclusion_check_nvfp4_tcgen05_wgmma = "passes"
+solution_gencode_evidence = "R12 task8 correctness + R17 task10 Tier-2 on sm_86 (pilot ledger evidence)"
+
+[[pilot_admission.cells]]
+slug = "problem_040_conv2d_residual_block"
+solution_path = "baselines/L1/problem_040_conv2d_residual_block/cuda_cpp/solution.json"
+kernel_source_paths = ["baselines/L1/problem_040_conv2d_residual_block/cuda_cpp/kernel.cu", "baselines/L1/problem_040_conv2d_residual_block/cuda_cpp/kernel.h", "baselines/L1/problem_040_conv2d_residual_block/cuda_cpp/main.cpp"]
+predictor_bucket = "predictor_friendly"
+canonical_bucket_source = "lookup_predictor_design_coverage"
+sm86_portability_status = "portable"
+exclusion_check_nvfp4_tcgen05_wgmma = "passes"
+solution_gencode_evidence = "R12 task8 + R17 task10 evidence (pilot ledger)"
+
+[[pilot_admission.cells]]
+slug = "problem_066_resnet_block_with_time_embedding"
+solution_path = "baselines/L2/problem_066_resnet_block_with_time_embedding/cuda_cpp/solution.json"
+kernel_source_paths = ["baselines/L2/problem_066_resnet_block_with_time_embedding/cuda_cpp/kernel.cu", "baselines/L2/problem_066_resnet_block_with_time_embedding/cuda_cpp/kernel.h", "baselines/L2/problem_066_resnet_block_with_time_embedding/cuda_cpp/main.cpp"]
+predictor_bucket = "predictor_friendly"
+canonical_bucket_source = "lookup_predictor_design_coverage"
+sm86_portability_status = "portable"
+exclusion_check_nvfp4_tcgen05_wgmma = "passes"
+solution_gencode_evidence = "R12 task8 + R17 task10 evidence (pilot ledger)"
+
+[[pilot_admission.cells]]
+slug = "problem_073_fused_encoder_final_norm_to_decoder_cross_attention_kv_projection"
+solution_path = "baselines/L1/problem_073_fused_encoder_final_norm_to_decoder_cross_attention_kv_projection/cuda_cpp/solution.json"
+kernel_source_paths = ["baselines/L1/problem_073_fused_encoder_final_norm_to_decoder_cross_attention_kv_projection/cuda_cpp/kernel.cu", "baselines/L1/problem_073_fused_encoder_final_norm_to_decoder_cross_attention_kv_projection/cuda_cpp/kernel.h", "baselines/L1/problem_073_fused_encoder_final_norm_to_decoder_cross_attention_kv_projection/cuda_cpp/main.cpp"]
+predictor_bucket = "predictor_friendly"
+canonical_bucket_source = "lookup_predictor_design_coverage"
+sm86_portability_status = "portable"
+exclusion_check_nvfp4_tcgen05_wgmma = "passes"
+solution_gencode_evidence = "R12 task8 + R17 task10 evidence (pilot ledger)"
+
+[[pilot_admission.cells]]
+slug = "problem_087_embedding_with_initial_layernorm_backward"
+solution_path = "baselines/L1/problem_087_embedding_with_initial_layernorm_backward/cuda_cpp/solution.json"
+kernel_source_paths = ["baselines/L1/problem_087_embedding_with_initial_layernorm_backward/cuda_cpp/kernel.cu", "baselines/L1/problem_087_embedding_with_initial_layernorm_backward/cuda_cpp/kernel.h", "baselines/L1/problem_087_embedding_with_initial_layernorm_backward/cuda_cpp/main.cpp"]
+predictor_bucket = "predictor_friendly"
+canonical_bucket_source = "lookup_predictor_design_coverage"
+sm86_portability_status = "portable"
+exclusion_check_nvfp4_tcgen05_wgmma = "passes"
+solution_gencode_evidence = "R12 task8 + R17 task10 evidence (pilot ledger)"
+
+
+# ---------------------------------------------------------------
+# AC-13 cohort arithmetic — recorded with the actual
+# numbers AND the unsatisfied hostile minima made
+# explicit.
+# ---------------------------------------------------------------
+
+[ac13_cohort_arithmetic]
+n_friendly_admitted = 11
+n_hostile_admitted = 3
+total_admitted = 14
+fraction_validation = 0.4
+# floor(0.4 * 11) = 4 ; >= 4 friendly minima -> PASS
+friendly_validation_floor = 4
+friendly_validation_minima = 4
+friendly_floor_passes = true
+# floor(0.4 * 3) = 1 ; < 2 hostile minima -> FAIL
+hostile_validation_floor = 1
+hostile_validation_minima = 2
+hostile_floor_passes = false
+total_in_ac11_band = true
+ac11_total_at_lower_bound = 11
+ac11_total_at_upper_bound = 15
+notes = "R26: AC-13 hostile validation minima is unsatisfiable post-M4-Phase-A exclusion. The brief emits plan_compliance_status=BLOCKED; resolution per [plan_evolution_request] is required before task17 begins."
+
+
+[risks_and_landmines]
+items = [
+    "problem_020_nvfp4_linear_layer is currently sm_120-only and excluded per M4 Phase A; admission requires a sm_86 fallback port that does NOT use NVFP4. The most likely fallback is FP16/BF16 GEMM with the same arithmetic shape; this is a multi-day port and is task17 sub-task work, not task16.",
+    "problem_011_gemm_n28672_k4096 is the largest GEMM in the corpus and may exceed Tier-2 256 MiB budget; sequence it before finalizing the ledger to avoid discovering a budget violation late.",
+    "If Option B (relax AC-13 hostile minima) is chosen, the sm_120 plan's AC-8 hostile minima would diverge from the sm_86 plan's AC-13 minima; cross-arch validation parity at AC-13 (b) becomes harder to defend.",
+]
+
+
+[codex_brief]
+# Original Codex R25 response captured verbatim. The R26
+# correction is in [codex_brief_correction_note_r26] below.
+body = """
+1. ADMISSION_DECISION_SUMMARY — Admit 15 total cells: 5 R18 pilot + 4 mandatory hostile + 6 friendly expansion cells, maximizing AC-11's allowed window while preserving family diversity and AC-13 validation minima.
+
+2. HOSTILE_ADMISSION — `problem_011_gemm_n28672_k4096`: mandatory hostile admission because it is the only large GEMM capacity-stress representative and exercises memory/Tier-2 budget pressure beyond friendly GEMM shapes.
+`problem_018_fused_rope_with_qk_norm_and_kv_cache_update`: mandatory hostile admission because fused RoPE + QK norm + KV-cache update stresses irregular cache-update access patterns absent from friendly norm/GEMM coverage.
+`problem_071_kv_cache_update_with_rope`: mandatory hostile admission because it isolates the KV-cache-with-RoPE hostile pattern and provides a second validation handle on cache-write behavior.
+`problem_020_nvfp4_linear_layer`: mandatory hostile admission because NVFP4 block scaling is unverified on sm_86 and is the only corpus cell probing that precision/layout risk.
+
+3. FRIENDLY_ADMISSION — `problem_002_fused_add_rmsnorm_h4096`: admit as the mature RMSNorm anchor because it already served as the R22 smoke pilot and has a landed Tier-2 bundle.
+`problem_021_rmsnorm_h128`: admit to cover the very-small, latency-bound normalization regime that the current R18 pilot set does not exercise.
+`problem_004_gemm_n128_k2048`: admit as the small-GEMM friendly baseline to contrast against the hostile large-GEMM capacity case without duplicating its stress profile.
+`problem_007_gemm_n4096_k4096`: admit as the medium-large square GEMM representative, giving capacity coverage below the mandatory `problem_011` extreme.
+`problem_037_flux_feedforward_gelu_approximate`: admit for predictable activation/fused arithmetic-intensity coverage with a transformer-MLP flavor distinct from pure norm and GEMM cells.
+`problem_085_geglu_activation`: admit as a second activation-family point because GEGLU stresses gated elementwise fusion and broadens predictor signal without adding attention/KV-cache hostility.
+
+4. COHORT_ARITHMETIC — N_friendly_admitted = 11 = 5 R18 pilot + 6 friendly expansion picks.
+N_hostile_admitted = 4.
+Total admitted = 15.
+Friendly validation floor: floor(0.4 * 11) = 4 >= 4 ✓.
+Hostile validation floor: ceil(0.4 * 4) = 2 >= 2 ✓.
+Total in [11, 15]: 15 ✓.
+
+5. RISKS_AND_LANDMINES — `problem_020_nvfp4_linear_layer` may require explicit sm_86 support verification before it can be treated as a clean hostile admission rather than an infrastructure failure.
+`problem_011_gemm_n28672_k4096` is the most likely admission to exceed Tier-2 256 MiB constraints, so sequence it before finalizing the ledger to avoid discovering a budget violation after the friendly split arithmetic is locked.
+"""
+
+
+[codex_brief_correction_note_r26]
+# Codex R25 review (in the R26 stop hook) caught the M4
+# Phase A NVFP4 exclusion violation that the original R25
+# Codex-vetted body missed. The original body warned that
+# problem_020 "may require explicit sm_86 support
+# verification" but admitted it anyway. R26 mechanically
+# applies the exclusion per the R25 review's required-
+# implementation directive.
+correction_source = "Codex R25 review (cross-arch loop stop hook)"
+correction_summary = "Drop problem_020_nvfp4_linear_layer per M4 Phase A NVFP4 exclusion at plan line 444. Record full exclusion evidence in [hostile_admission_excluded]. Emit plan_compliance_status=BLOCKED + [plan_compliance_conflict] + [plan_evolution_request] because removing problem_020 makes AC-13 hostile minima unsatisfiable under DEC-G 60/40 split (3 hostile -> 1 val < 2 minima)."
+r25_brief_admitted_count = 15
+r26_brief_admitted_count = 14
+schema_version_prev = 1
+schema_version_post = 2
+r26_repair_round_reference = ".humanize/rlcr/2026-05-28_14-00-22/round-26-contract.md"

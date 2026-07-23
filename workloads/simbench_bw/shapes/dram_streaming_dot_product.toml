@@ -1,0 +1,37 @@
+schema_version = 1
+slug = "dram_streaming_dot_product"
+
+# DRAM streaming dot-product microbench: two-buffer reduction over
+# `n` floats with `passes` re-traversals, dispatched across
+# `blocks` x `threads` threads producing per-block partial sums.
+# The binary's host driver (`main.cu`) exposes CLI flags --n,
+# --passes, --blocks, --threads matching the kernel-launch
+# parameters; these shapes set those flags directly via the
+# axes block.
+
+[[timing_shapes]]
+name = "timing_00"
+axes = { n = 131072, passes = 4, blocks = 128, threads = 256 }
+launch_config = { grid = [128, 1, 1], block = [256, 1, 1] }
+warm_up_iters = 5
+repeat_iters = 30
+
+[[trace_shapes]]
+name = "trace_00"
+axes = { n = 64, passes = 1, blocks = 4, threads = 32 }
+launch_config = { grid = [4, 1, 1], block = [32, 1, 1] }
+predicted_bytes = 1310720
+estimator_source = "static"
+
+[[trace_shapes]]
+name = "trace_l2_accuracy_xl"
+axes = { n = 256, passes = 1, blocks = 8, threads = 64 }
+launch_config = { grid = [8, 1, 1], block = [64, 1, 1] }
+predicted_bytes = 20971520
+estimator_source = "static"
+
+[[correctness_shapes]]
+name = "correctness_00"
+axes = { n = 4096, passes = 1, blocks = 16, threads = 64 }
+launch_config = { grid = [16, 1, 1], block = [64, 1, 1] }
+digest_kind = "hash"

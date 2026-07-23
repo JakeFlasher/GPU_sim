@@ -1,0 +1,53 @@
+{
+  "by_assoc": {
+    "16": {
+      "raw_l1_hit_rate": 0.08176126849721606,
+      "raw_l2_hit_rate": 0.5054775823583209,
+      "scored": true,
+      "typed_reason": ""
+    },
+    "32": {
+      "raw_l1_hit_rate": 0.08176126849721606,
+      "raw_l2_hit_rate": 0.6966754600789276,
+      "scored": true,
+      "typed_reason": ""
+    },
+    "4": {
+      "raw_l1_hit_rate": 0.08176126849721606,
+      "raw_l2_hit_rate": 0.18865529360638314,
+      "scored": true,
+      "typed_reason": ""
+    },
+    "64": {
+      "raw_l1_hit_rate": 0.08176126849721606,
+      "raw_l2_hit_rate": 0.7019950575278188,
+      "scored": true,
+      "typed_reason": ""
+    },
+    "8": {
+      "raw_l1_hit_rate": 0.08176126849721606,
+      "raw_l2_hit_rate": 0.3104611954778325,
+      "scored": true,
+      "typed_reason": ""
+    }
+  },
+  "candidates": [
+    4,
+    8,
+    16,
+    32,
+    64
+  ],
+  "captured_at_utc": "2026-05-30T01:06:51+00:00",
+  "dense_reuse": {
+    "distinct_sectors": 344642,
+    "reuse_factor": 20.743652833955235,
+    "total_sector_accesses": 7149134,
+    "truncated": true
+  },
+  "schema_version": 2,
+  "scored": true,
+  "slug": "problem_077_whisper_decoder_output_projection",
+  "tier2_sidecar_sha256": "0fcc27587db7eb601beb68537273c22fdad8379ce64dd3e19bfa4ca07eb127c8",
+  "typed_reason": ""
+}

@@ -1,0 +1,430 @@
+*Thinking...*
+
+> I'm looking at a GPU simulator project task that requires me to evaluate a set of questions about blockers using specific evidence. The response needs to follow a strict format where I answer each question ID in numeric order with specific dispositions like ACCEPT.
+> 
+> But I'm noticing a conflict — the prompt specifies one question order in section 10, while section 11 says to answer in numeric order, and these don't align. I need to clarify which ordering takes precedence before proceeding with the evaluation.
+> 
+> This is a substantial undertaking involving a Rust GPU simulator project. The canonical authority consists of 344 cells with 122 runnable and 222 excluded, and there's a separate supplemental launch-set v3 that's currently disabled pending canary testing. The publication metric centers on `gpc__cycles_elapsed.max`.
+> 
+> I'm working through the performance thresholds—answers targeting ≤10% MAPE pass, 10-15% is acceptable but below target, and >15% fails. There are two key architectural decisions: ADR 0001 for preserving pinned continuations and ADR 0002 for cycles-only binding. This consultation is advisory with no authority over mutations or hardware handoffs.
+> 
+> Several blockers need resolution: separating canonical from supplemental cohorts, ensuring canonical captures lock down all relevant parameters like process scope and cache settings, handling cross-run launch joins between NVBit and NCU executions with complete ordered inventories, and completing the DONE construction verification pipeline with proper root derivation before and after renaming.
+> 
+> Additional constraints around schema drift between dispatch versions, preflight binding requirements, fail-closed orchestration, hardware canary gates, canonical run selection by invocation and ordinal with independent join verification, supplemental v3 being hard-disabled due to missing trace caller infrastructure, exporter verification gaps from incomplete preflight binding, and tracking 18 NCU-reachable files across the system.
+> 
+> Now I'm looking at the remaining issues: the canonical path resolution bypasses without a resolved NCU path and SHA-256 verification, device provenance under-binding, CUDA version role distinctions across canonical and supplemental builds requiring role-tagged hashes, observational limits around clock sampling and injection verification, and seven active contradictions in the retired quarantine rationale that need category-specific fixes.
+> 
+> For each question, I need to assign a disposition—ACCEPT, AMEND, REJECT, or STOP—based on whether the proposed contract is already supported by evidence or needs modification. The evidence shows genuine gaps in several areas, so most questions will likely need amendments to define new contract requirements, though some may be acceptable where the evidence already covers the ground. Starting with Q801 on the cohort and authority table, the supporting evidence appears sufficient to construct it, so that looks like an accept.
+> 
+> Moving through the remaining questions: Q802 covers the canonical label-driver and preflight launch contract, which is already implemented in the evidence, so I can accept that as-is. Q803 addresses the supplemental v3 cross-run launch join with ordered inventory and normalization logic already in place, making that acceptable with some clarifications on duplicate handling. Q804 deals with publication and dispatch logic that's implemented across multiple evidence files, so that's also acceptable. Q805 requires defining readiness state predicates to distinguish between different operational states, which appears to need amendment since the definitions aren't fully specified yet. vidence supports offline green (E817), sole hardware-marked test (E826), absent live outputs (E846: GENERATED_OUTPUT exists_in_current_worktree false). Disposition: AMEND or ACCEPT — I'd say AMEND because the predicates need to be defined as distinct (they're not yet explicit as predicates), but the underlying facts are there. Actually the question says "Define ... as distinct predicates" — it's asking me to define them. Disposition ACCEPT could work if the definition is straightforwardly supported. Hmm.
+> 
+> The disposition semantics are becoming clearer: ACCEPT means the current contract is sound as proposed, AMEND means changes are needed, REJECT means it's fundamentally unsound, and STOP means I need external input. Since B807 establishes that offline green doesn't guarantee hardware readiness, the readiness predicates have to be defined without hardware facts present — that's the core definition task. I'd lean toward ACCEPT if the embedded evidence already satisfies the contract requirements. The current state shows readiness is conflated—the plan indicates M4 is in progress, but the live-v1 authority hasn't been generated yet, as E846 confirms the operator_clean_S_live_v1 output doesn't exist. Since the question asks for distinct predicate definitions binding the frozen/durable/live authority transition and identifying which tests satisfy each, I'll provide those definitions; the disposition is ACCEPT because nothing in the evidence contradicts this and it's fundamentally a definitional ruling.
+> 
+> For the dispositions themselves, I'm treating them as somewhat flexible as long as they're justified. I'll apply ACCEPT when a contract exists in evidence and is sound, AMEND when specified changes are needed to close a gap, REJECT when an approach is unsound and shouldn't be used, and STOP only for genuinely user-owned choices. Looking at Q801 on the cohort/namespace/authority table, the evidence is comprehensive—E846 provides exact hashes and counts for frozen v1 and durable v2, E830 covers the live-v1 producer, E806 has the successor matrix, and E837/E833 supply supplemental matrices—so the answer is ACCEPT with the table. , then moving on to Q803 where I'm validating the launch inventory document structure with ordered inventories on both sides, checking for uniqueness across kernel name, block dimensions, and grid dimensions, and reporting equivalence classes for process ID, context, and stream using the first-occurrence policy.
+> 
+> For Q804, I'm handling the DONE construction by placing the publication under a staged directory with a hash-based path, building and verifying it against the publication root, sealing with restricted permissions, and using atomic rename operations to move it to the final location while re-verifying the manifest.
+> 
+> Q805 involves managing schema versions—version 2 treats the manifest hash as frozen historical authority, while version 3 sources blobs from git commits, with unknown versions flagged separately. For rederivations, I'm reprocessing the trace data, module inventory, and metrics to rebuild controls and validate against schema drift, rejecting any tampered reseals. Now I'm defining four distinct readiness predicates, though the current evidence only satisfies the first one. Looking at Q808, B808 identifies a gap in how canonical launches are selected—they're chosen by intended invocation and ordinal rather than through a complete independent join. The canonical path validates a single launch observation with kernel metadata, and the capture chunk validates kernel-name joins for warm/cold sequences, but the direct canonical path relies on launch_skip ordinal plus that single observation. I need to define what canonical launch-identity join actually means given this structure.
+> 
+> The core issue is whether the canonical contract sufficiently cross-checks NCU observation identity (Kernel Name, Grid Size, Block Size, Device) against NVBit trace identity. E807 checks grid CTA counts against trace geometry, E809 provides the NCU-side identity, and canonical capture_label validates observation against retained report, but there's a question about whether the join between NCU observation and trace identity is actually enforced in the single-launch canonical case—it works for warm_cold sequences on the trace side, but the general canonical path needs explicit amendment to require that cross-check.
+> 
+> The second issue is that the canonical-to-supplemental caller/argv bridge is broken: B809 shows there's no active all-launch trace caller, and the capture path expects specific label-driver options that the shell interface doesn't provide. E821 shows the expected command structure for launch-set label capture includes parameters like target-processes, filter-mode, replay-mode, and launch-count, but the label_driver implementation doesn't align with these expectations.
+> 
+> Additionally, capture_cell raises an error when workload_row_binding is present, indicating a missing interface extension that needs to be defined as a deliberate gate rather than just a missing caller. Then there's the exporter authority closure issue where E812 shows ncu_exporter_command and sha256 are both None, revealing another explicit gap.
+> 
+> The campaign_preflight schema only authenticates the NCU version but doesn't record the resolved exporter path or executable SHA-256, so I need to amend it to capture and thread these values transitively. There's also a contradiction in the NCU invoker registry where label_driver claims to be the only path that may invoke ncu, yet 18 files are reachable and capture_count_labels can execute NCU through dry-run, plus private helpers are importable—I need to adopt the registry, classify these paths, require resolved path and hash receipts, and close those bypass routes. The canonical device-provenance identity graph is currently based on gpu_uuid_s.
+> 
+> For device provenance, the GPU_UUID_SHA256 is computed via nvidia-smi query and captured in the sidecar, the schema has the field, NCU observations include a Device column, but preflight clock samples don't explicitly record the UUID binding, and traces use device_id as a report-local ordinal—so I need to define the full provenance graph and the mismatch predicates to close this gap. Role-tagged CUDA identities are pinned to nvcc 13.3 in the canonical evidence, though there's a note conflating this. Clock sampling uses three pre-capture samples and one post-capture sample via wait_for_clock_state, with the sidecar taking a single additional sample after capture; the schema already documents that mid-capture excursions won't be visible, so I'm accepting this as meeting the explicit-limits requirement. Q816 needs wording repairs for category-specific text but no behavioral changes. Moving on to Q818 which involves supplemental representation across multiple evidence items. The device provenance closure needs to incorporate the device_id from the normalized NCU Device, trace the runtime module and executable SHA equality, and account for stream classes — but the v3 identity is missing stable physical UUID binding, though the sidecar does capture gpu_uuid_sha256. I need to amend this to define a closure that adds UUID binding and environment visibility. Then I'm noticing that questions Q89001 through Q89012 are all asking for the same complete section-11 local blocker ledger with all 15 blockers, not individual ones — they each want the full set since "each blocker embedded in this consultation" refers to the entire B801 range. Q89008 through Q89012 cover the remaining blockers, with the union spanning B801 through B815. Rather than repeating the ledger twelve times, I'll emit it once in the blocker ledger section and have each Q8900x disposition reference only its scoped rows from that consolidated ledger.
+> 
+> Now I'm classifying each blocker by its resolution status and evidence. B801 involves cohort separation, which is already resolved and enforced through existing artifacts—the evidence confirms key-set equality across frozen, durable, and matrix states, and the schemas enforce the invariants offline. This one closes as a contract affirmation with no outstanding hardware claims.
+> 
+> B802 covers canonical capture sealing, also closed by contract through the implementation and matrix sealing logic. The key insight is that the parser enforces a single-launch identity cardinality, which acts as an insertion sentinel—for v3 it expects +1, but for canonical single-launch paths, the parser rejects any CSV with more than one identity in the details, so that cardinality constraint serves as the sentinel rather than relying on launch-count alone.
+> 
+> B803 is the v3 join, closed by the v3 contract through the inventory binding, verification, and schema enforcement—though this only holds offline; the live behavior remains unproven pending hardware validation.
+> 
+> B804 dispatch is done and closed through the implementation. B805 preflight binding is mostly closed offline, binding driver/NCU/CUDA/NVBit versions, process, clock, disk, trace canary, and source stability—but there's a gap: the NCU executable hash itself isn't retained, only the version, which overlaps with B810/B811, so B805 is partially open on that typed gap. B806 SOL orchestration fail-closed is closed through typed refusals and owner namespace closure. B807 affirms that offline green doesn't gate hardware—it's open-pending-external facts like hardware canaries and owner evidence, and I can't infer beyond that. B808 canonical launch identity join is an open typed gap that needs a contract amendment.
+> 
+> B809 is open on two distinct facts: deliberate gate plus missing caller/argv bridge—I need to amend to implement that bridge before the canary could even be evaluated. B810 exporter authority is an open typed gap explicitly noted in E812, so I need to amend the preflight schema v2 to record resolved path and SHA-256. B811 invoker registry is a policy defect—I need to adopt the registry from E842 and close dry-run and private-helper bypasses with a single-resolved-executable receipt. B812 device provenance is an open typed gap; I need to bind UUID across surfaces, though canonical is partially bound via gpu_uuid_sha256 in the sidecar and report-local ordinals never cross-process identity. B813 CUDA roles is closed through role-tagged pins and defined equality edges. B814 observational limits is affirmed as explicit.
+> 
+> B815 is a documentation defect with stale policy wording—I need to amend with category-specific repairs for seven contradictions listed in E842 policy records. The completion fields show response is complete, but offline implementation isn't ready because the open evidence-closure and typed gaps haven't been implemented in the embedded bytes yet—B805, B808, B809, B810, B811, B812, and B815 amendments are still pending.
+> 
+> Now I'm planning the response structure: this will be substantial given 29 questions plus 15 ledger rows, each requiring disposition, rationale, complete contract, invariants, evidence IDs, failure states, implementation order, deliverables with tests, and mechanical acceptance predicates. I need to balance thoroughness with length discipline, using structured prose with headings rather than bullets since the adjudication format itself demands specific structured layouts. The second entry is a durable v2 projection stored separately, also keyed to the same roster but with a host-independent schema and a reference pin back to the frozen v1 authority's hash for historical tracking. The canonical frozen capture matrix includes metadata like the SHA256 hash, matrix identifier, source commit, seal, and universe/runnable counts. The current v1 authority registry is active at HEAD, with E841 indicating the future matrix will bind to this registry and diverge from the frozen version. I'm tracking the supplemental workload matrix artifact (v2 schema) produced by E837, which emits into the external plan-owner namespace but is currently absent—its counts need to satisfy the whole matrix closure validation. There's also a supplemental representative execution matrix (v1) being defined. Looking at the capture-defect archive constraints and the forbidden cross-edge rules that prevent supplemental matrices from mixing with canonical ones, along with the restrictions on NCU value handling and path aliasing. The supplemental rows can't execute through the canonical path because they're blocked at the capture_cell level, and the M7 freeze denominator only counts exclusions from the canonical ledger itself. Every row carries a frozen hash that must match across the durable and matrix states, with zero new supplemental outputs allowed—any artifact violating the forbidden edges gets rejected by its producer or validator. For Q802, I'm checking the canonical label-driver against the preflight launch requirements.
+> 
+> Now I'm working through the contract fields that govern process ownership, replay modes, and launch parameters. The process hygiene involves taking a /proc snapshot with race condition checks, filtering globally across all target processes, and verifying ancestor chains only. For replay and caching, I'm setting kernel-mode replay with all cache controls enabled but no clock manipulation, plus host lock persistence with exactly three P0 samples before and after. The profile range depends on whether we're binding application arguments or using a logical workload adapter, and the launch cardinality is bounded to a signed 32-bit range with kernel names matched exactly in mangled form only.
+> 
+> Now I'm checking the insertion sentinel requirements—the parser must extract exactly one launch identity from the CSV, rejecting any cardinality mismatch or cross-launch rows. The run manifest and sidecar seal the skip and count values, and multi-launch sequences must derive from the original capture arguments. Shape binding requires an unambiguous token match, and I'm verifying warmup consistency between the forwarded driver and the actual warmup. For hashes, I'm computing BINARY_SHA256 checksums before and after labels, traces, and controls, plus the tracer shared object hash and kernel signature from the measurement manifest. The preflight binds check that git HEAD is clean, the NCU version matches the 2026.1.0 component boundary, and the driver is exactly version 610.43.02.
+> 
+> I'm also validating the VCC release through structured parsing, confirming NVBit 1.8 headers, and running injection smoke tests—checking that ldd resolves all dependencies, the real injection succeeds, the trace is non-vacuous with full coverage and at least one non-empty threadblock, and disk budget is sufficient. The environment must pass SOL certification within a 900-second freshness window with a 2-second future skew tolerance. The only hardware-marked test is the environment probes check in the test campaign preflight suite. Operator-only commands like nvidia-smi power management and clock settings are presented in the codex but never executed. I'm enumerating all fail-closed observations—dirty tree, version mismatch, process conflicts, clock drift, missing ldd dependencies, silent untraced runs, empty traces, sampling mismatches, budget shortfalls, SOL refusals, and storage marker exits—and negative tests exist to validate these verdicts.
+> 
+> The acceptance predicate requires all blocking checks to pass and injection smoke plus post-smoke re-checks to succeed; any single failure blocks before roster cells run. For the cross-run join, I'm ordering inventory fields from the NVBit side by accepted launch index with device, stream, trace launch, and kernel metadata, and from the NCU side with identity columns including process ID, context, stream, device, kernel name, block and grid sizes. The join key normalizes on mangled kernel name and block/grid dimension tuples per device ordinal. Report-local values serve as provenance, retained in identity as normalized ordinals plus the policy string rather than being compared as raw cross-process UUIDs.  The cross-execution occurrence selector that binds unique NCU launch identity has been retired, which means that edge case is rejected. For Q804, I'm working through the construction root using a pending publication directory that incorporates a canonical hash of the identity including the chunk. Finalizing the artifact with atomic rename operations, verifying identity at the destination with strict location requirements, then revalidating the entire artifact set by re-hashing at the boundary and reparsing the root trace to confirm module inventory and controls. Validating git manifest integrity with pinned tools and environment sanitization, checking for tampering in inventory rows and timestamps, then confirming the acceptance predicate returns successfully.
+> 
+> Now I'm defining the offline-source-ready predicate: the worktree must be at the source commit with a clean state, pass default verification suites like cargo fmt/test and pytest, and have the focused capture suite passing with only the hardware probe deselected, plus frozen key-set equality across producers and validators.
+> 
+> P2 requires the operator to establish a clean HEAD at S and run the live capture authority tool to emit the initial input, then rebuild the matrix from it with the active registry and verify test consistency — but these outputs don't exist yet.
+> 
+> P3 extends P2 with on-host hardware validation: the environment probes must pass live, the preflight manifest must confirm capture admission with a fresh window, and the injection smoke test must validate the contract on the device.
+> 
+> P4 adds campaign lock availability, storage receipts, budget headroom, and the pinned live canary (which doesn't exist yet, blocking supplemental launch) plus closure of the B809/B810 amendments.
+> 
+> The authority transition flows through frozen v1 as immutable, then durable v2 as a host-independent projection that verifies v1, then live v1 which re-verifies all 122 binaries against the frozen identity and stamps S, finally emitting to the successor matrix.
+> 
+> Operator-only commands like nvidia-smi are being reproduced without authorization. Hardware facts are still missing — live probe pass, preflight manifest, injection smoke test, clock lock state, and any capture beyond the historical 1/122 credit. I need to amend the documentation and tests to encode these as explicit named predicates and gate definitions.
+> 
+> For Q806, I'm auditing the SOL runtime for typing, namespaces, and closure issues. The rejection behavior handles import and runtime faults where the chunk module is import-only and refuses supplemental internal operations during campaign.
+> 
+> Runtime failures wrap refusals with error codes, adapter and environment construction failures are typed with SOL_ENV_* codes, and package identity is pinned via SHA256. Unknown architectures like the RTX 3090 Ti matrices trigger an architecture capability gate that exits with code 2 before binary execution. Missing rows in the workload chunk and partition closures create coverage inventory mismatches. Owner namespace contracts have identity mismatches and marker mismatches that generate specific error codes.
+> 
+> Storage faults on separate filesystems are also tracked. For shape-adjusted provenance, the reduced proxy cohort uses a reduced_proxy_bundle_only claim scope with native_predictive set to false, and cross-cohort aggregation is forbidden by policy. Whole-campaign closure validation requires exact partition matching with hash-linked event chains, where completed events must match the DONE-derived payload exactly, and offline checkpoint verification rederives the frontier with atomic snapshot operations. The sealed workload-matrix input interface uses exact serialized bytes with canonical SHA256 sealing, and the runtime never rebuilds authority from observations—validation only regenerates supplemental matrices for equality checking.
+> 
+> For Q808 amendments, I need to validate the canonical launch-identity join with mandatory observations including NCU details-page identity (non-empty ID, mangled kernel name, grid and block sizes, device), NVBit trace records with kernel name, grid/block dimensions, device and stream IDs, and executable identity tracked via binary SHA256 before and after each phase. Module identity is pinned where runtime modules are used, and process scope covers all target processes with global filtering.
+> 
+> The gap B808 requires that normalized NCU fields (kernel name, block, grid, device) match the trace-derived values with the kernel name suffix removed, block and grid dimensions aligned, and device ordinal class normalized for the selected launch index. Multi-launch cells join per contract sequence, and kernel-name selectors are mandatory when the trace inventory shows duplicate names. Within-report uniqueness is already enforced, but cross-surface equality is now required.
+> 
+> For parser cardinality-1 (single-launch), the sealed sequence must derive from arguments and match the trace; NCU remains per-ordinal with single-launch selections and per-ordinal identity joins. The in-range label_trace_launch_index alone is insufficient because it's an ordinal within one execution, but NCU replay in a separate execution can shift due to insertion or deletion of launches (like extra warmups or library-internal calls), so equal ordinals don't guarantee the same kernel, geometry, or device—only observed identity equality does.
+> 
+> I need to extend capture_label to require launch observation identity matching trace identity, with negative tests for mismatched grid/name/device raising a label_contract_mismatch refusal, while positive tests verify current cells pass. For Q809, I'm bridging the inventory by setting the exact all-launch tracer entry point: capture_trace with all_profiler_roi_launches=True disables ACTIVE_FROM_START and removes MAX_ACCEPTED_ACTIVE_LAUNCHES, requiring extra_info and traced_kernel_modules.json inventory, with capture_cell as the only gated caller passing this flag.
+> 
+> Now I'm examining the label-driver interface agreement: the expected command in E812 v3 verification specifies target-processes, filter-mode, replay-mode, profile-from-start, launch-skip, and launch-count parameters, but E808's CLI exposes none of these—they're hardcoded internally, with --launch mapping to skip and count fixed at 1, while profile-from-start derives from shape-binding.
+> 
+> This creates a typed readiness failure: the live gate (explicit refusal codes E810 and E811) is removable only by pinned canary decision, but the missing caller and argv options are engineering gaps that need implementation and offline testing before the canary can even be scheduled. The bridge's postconditions require a certified supplemental environment with CUDA 13.2 enforced and the capture manifest command properly equated.
+> 
+> The fix is to implement the driver options in launch-set mode while keeping the gate in place. For the exporter closure, the current state only records versions through E814/E815, with the preflight probe checking via PATH, but the canonical executable identity remains unclosed and E812 still retains the explicit gap.
+> 
+> The solution requires the preflight schema v2 to add resolved_path verification (absolute, no-follow checked regular file), executable_sha256, and version line; these get threaded into capture provenance. The label_driver records which ncu binary was invoked in the run manifest, and parse_ncu_metrics already exports the ncu_tool metadata—but the verifier must use the preflight-derived authority rather than trusting the receipt itself. If there's drift between collection and import phases, it fails closed with a refusal; if the authority is absent, it triggers supplemental_done_ncu.
+> 
+> Symlinked or unstable executables get refused outright, and source-generation mismatches (when preflight bytes weren't retained for the selected attempt) trigger supplemental_done_tool_authority_invalid. The version prefix must match the pinned version on the component boundary. For the registry policy, I'm adopting E842 as authoritative with 18 tracked entries—12 direct and 6 transitive-only—and the canonical admission chain flows through campaign_preflight for version probing, label_driver.sh as the shared collector, parse_ncu_metrics.py for import/export helpers, and sm86_capture_chunk.
+> 
+> py as the controller with private re-imports. Calibration relies on the repeatability matrix runner and headline cohort sweep, while the golden-cell capture script needs reclassification to either route through label_driver or add a resolved path and SHA receipt since it currently bypasses the canonical preflight.
+> 
+> There's a defect in the dry-run logic for admission-relevant collectors like capture_count_labels and capture_t2_stream — they're still executing NCU when they shouldn't, so I need to amend that. Every admission-relevant invocation must track the resolved executable path, SHA-256, version, normalized arguments, report identity, and the complete launch-control tuple to maintain proper evidence retention and prevent hazards from unlinked prior reports.
+> 
+> For the canonical device graph, I'm working through how to handle environment visibility and GPU selection — the LABEL_DRIVER_GPU_INDEX defaults to 0, but CUDA_VISIBLE_DEVICES isn't currently sealed which is a gap. I need to establish stable physical UUIDs from nvidia-smi, map them to the report's Device column with the NCU report-local name and ordinal, and ensure trace device_id uses the report-local ordinal. Clock samples should bind to the nvidia-smi default device with the -i index flag, and I'm checking the preflight requirements.
+> 
+> The key constraints are that the sidecar's gpu_uuid_sha256 must match the preflight-recorded UUID hash for every cell in a chunk, NCU Device ordinals and trace device_ids are only joinable within a single report or trace (never across processes), multi-GPU scenarios require explicit refusal if visible device count exceeds 1 or any ordinal doesn't match the selected index, and clock probes must query with the -i index matching the capture device. The canonical fields end at the sidecar/preflight/report boundary, with supplemental closure handled separately, and any supplemental artifact appearing in canonical namespaces gets rejected as unclassified.
+> 
+> For Q813, I'm establishing role definitions: Role C1 handles canonical workload execution using nvcc release 13.3 (pinned via the SOL contract's CUDA_HOME-derived nvcc or PATH fallback), while Role S manages supplemental SOL environment and build configuration with nvcc 13.2 exact, requiring CUDA_HOME=/usr/local/cuda-13.2.
+> 
+> Role T handles tracer and NVBit builds with nvcc 13.2, g++-14, and protoc/protobuf 34.1.0 under the toolchain directory, refusing worktree builds and using pinned protobuf library paths for runtime injection. The sidecar cuda_version must match the role pin for its cohort (canonical 13.3 or supplemental 13.2), with NCU version prefix 2026.1.0 and driver 610.43.02 shared across roles, while certain differences are authorized.
+> 
+> The 13.3 versus 13.2 split across roles is intentional with no fallback option, and collapsing to a single CUDA equality would be unsound. I'm preventing this through distinct pins files, structured major/minor comparisons only, single-token banner parsing, role-specific runbook wording, and manifests recording structured releases. For Q815, I'm accepting the build-chain and clock contract with bound identities including the tracer .so sha, protobuf runtime path pin, NVBit version header 1.8, and pinned build environment verifier with nvcc 13.2, g++ major 14, protoc 34.1, and protobuf 34.1.0 at the prefix location, plus Makefile guards enforcing worktree refusal.
+> 
+> There's residual uncertainty that must stay typed in manifests: the output .so hash alone doesn't prove the full compilation chain that produced it, so manifests need to carry build provenance attested by pinned environment checks rather than reproduction; and for clock state, I'm using three exact pre-smoke samples with full re-gating post-smoke, guards between phases, and a sidecar single post-capture sample, though mid-capture excursions that clear before emission remain invisible to the schema.
+> 
+> Now I'm looking at how metrics serve as in-capture evidence and manifests must record lock state evidence through repeated exact readback proxies without claiming DVFS stability, with lock/restore commands operating at the operator boundary. I'm also reviewing wording repairs across seven files where repository-wide ban or exclusivity claims need to be replaced with campaign-scoped statements, starting with the label_driver.sh file around lines 8-10 where the cloud/server contract restrictions need clarification. I need to update the rationale wording across several orchestrator and validation files—fixing NCU attribution in probe availability checks, scoping the headline cohort sweep to its own orchestrator, correcting Rule-1 attribution in the activation trace module, and handling the validator's legacy pattern enforcement by annotating messages as historical policy rather than changing behavior. I need to update namespace-gate comments across seven files to reference the current campaign guards instead of the old "Rule-1 quarantine" label. Then for fourteen files with stale rule attributions, I'll keep the behavior descriptions intact but reword the citations to point to "targets-never-features (CLAUDE.md Rule 1)" since that's the current numbering. The retirement prose in capture_timing files should stay as-is since they're already accurate, though I need to verify the private helpers also enforce the same refusal pattern that overlaps with the behavioral requirements.
+> 
+> For the cloud-specific capability statements in container_bootstrap.sh and preflight_manifest.py, I'm keeping the accurate claims that NCU is unavailable in cloud containers and MIG environments, but removing any language that implies a repository-wide ban. I need to make sure I'm not reviving retired restrictions or weakening the core guards around targets-never-features, namespaces, retirement, and host gates. The E841 invariance scanner should stay green, and I'll add a linting check to confirm those seven files no longer match the old repository-wide-ban pattern while still containing the proper namespace guards.
+> 
+> Now I'm moving into the Q818 audit on supplemental matrix construction, which covers the source authority from the frozen e387 exhaustive 3,420-row matrix as immutable input with a representative selection of 216 rows pinned by SHA. Execution receipts track membership and cohort-pure interleaved waves across chunks, with coverage and launch contracts defining profiler ROI exhaustiveness versus representative sampling constraints. Source-generation transitions require the live producer commit to match runnability and shrink commits at HEAD, while canonical non-membership prevents rows keyed by slug/uuid/variant from becoming canonical cells under a none-additive claim policy. There's also a set of rejection predicates with specific refusal codes to evaluate against.
+> 
+> Now I'm mapping out the supplemental plumbing infrastructure—checking the campaign gate that deliberately refuses collection, verifying the chunk caller is internal-only, confirming the environment certification with CUDA 13.2, validating representative execution authority at clean HEAD, and identifying that the exporter is missing the required authority, which means I need to amend the preflight v2 process. The canary artifact needs to be pinned and verified before the gate sites can be modified by operator decision. For Q820, I'm checking the device identity bindings—comparing normalized NCU device IDs, runtime module hashes, trace executables, and stream classes—but there's a gap where the sidecar includes gpu_uuid_sha256 while the v3 identity doesn't, and I need to reconcile the clock state from the pins.
+> 
+> Now I'm amending the requirements: the preflight must record a stable UUID hash and visible-device set, each sidecar's gpu_uuid_sha256 must match across the launch and the recorded attempt, device_id must equal the selected ordinal unless there's a sealed multi-device contract, and I'm enforcing that report-local ordinals never equate across processes. The closure is proven only from supplemental retained artifacts, not from canonical inheritance. For Q89001–Q89012, each query returns its scoped rows from the consolidated ledger.
+> 
+> I'm now mapping out the dependencies for each query scope: Q89001 has B801 closed but B805 open on exporter identity and B807 pending external hardware; Q89002 involves B805 and B815 as independent blockers with B814 constraining manifest fields; Q89003 depends on E809/E810 primitives already embedded; Q89004 has B812 open on the canonical side; and Q89005's full verification is blocked because B810 exporter authority is needed for receipt validation completion. The implementation isn't ready offline yet.
+> 
+> Now I'm building out the consolidated blocker ledger with status, evidence, and dependencies for each item—B801 and B802 are both closed with their respective evidence chains and constraints documented. B804 is closed with supporting evidence across multiple entries. B805 remains open due to a gap in the NCU exporter/collector path binding during preflight validation, requiring a schema amendment and dependent on B810 and B811. B806 is also closed, while B807 is pending external dependencies related to hardware canaries.
+> 
+> B808 needs an independent identity join on the canonical side, B809 has both a deliberate gate preventing action until canary decision and a missing caller/argv bridge that requires implementation, with the gate remaining in place pending external operator input.
+> 
+> B810 is an explicit typed gap requiring amendment, B811 involves policy and closure defects around PATH resolution without identity receipt and false dry-run behavior, B812 shows under-binding across both cohorts, B813 is closed, and B814 is closed with typed limits that must remain declared.
+> 
+> B815 needs wording repairs. B805's trace canary and source stability are bound through injection smoke and pre/post HEAD equality checks.
+> 
+> The completion status shows the response is complete but offline implementation isn't ready since several amendments (B805, B808, B809, B810, B811, B812, B815) haven't been embedded yet, hardware work is incomplete, and handoff authorization hasn't been granted. Moving through the dispositions now, starting with Q801 marked as accept.
+> 
+> Q802 through Q820 are mostly accepted with amendments needed for Q805, Q808, Q809, Q810, Q811, Q812, Q816, Q819, and Q820. The ledger rows Q89001–Q89012 are accepted and scoped. No stops encountered so far, though user-owned items like canary authorization and operator commands remain unresolved.
+> 
+> Now I need to establish the mechanical acceptance predicate explicitly—both a global one and specific predicates for each question block. I'll keep each Q block tight with compact fields covering disposition, rationale, contract, invariants, evidence, and deliverables. For the Q8900x questions, I'll stay brief and reference the ledger. The key constraint is answering every Q ID exactly once in numeric order. Generating markdown table... Compiling the full hash values for the canonical matrix and representative pins with their associated seals and source commits. I'm deciding how to present the hashes in the table—using truncated forms for most entries to keep things readable, but keeping the full hashes for the five most critical ones like the frozen v1 schema and canonical matrix seal. Since this is all sourced from the user's document rather than web search, I don't need citation tags.
+> 
+> Now checking Q805 on which tests satisfy each predicate: E817 with its 685 passed tests covers P1, while E802 lists the default suites though they weren't executed here. E826's hardware-marked tests only satisfy P3 when actually run live, not just collected. There's also the complication that the current worktree is dirty, so P1's clean-tree component isn't fully established for any specific state—I'm treating P1 as focused on suite green and artifact integrity, with the clean-state requirement deferred to P2.
+> 
+> Now I need to map Q815 to B814 (being careful not to mix it up with B815, which corresponds to Q816), then draft the full response with headers, rulings, blocker ledger, completion fields, and the global predicate. I'll keep it economical while ensuring it's complete, and any new refusal or typed codes I introduce in the AMEND contracts will be clearly marked as new.
+> 
+> For each Q block, I'll follow the structure: disposition, rationale, contract, invariants, evidence, failure/pending status, implementation order, deliverables and tests, and acceptance predicate. The Q8900x blocks I'll compress to just disposition (ACCEPT), rationale tied to the consolidated ledger, dependencies, evidence, and predicate.
+> 
+> The blocker ledger will be a table with columns for blocker, status, classification, controlling constraints, local dependencies, and evidence. Then I'll wrap up with completion fields. Aiming for around 4500–6000 words to cover everything properly.
+
+# Consolidated Ruling — Campaign Preflight, Label Driver, Canonical Capture, and SOL Launch-Contract Authority
+
+Scope note: this is one consolidated adjudication from the embedded evidence only (E802–E847). It grants no mutation, capture, hardware, API, or handoff authority. All hardware-dependent facts remain typed pending. Global mechanical acceptance predicate is stated in §Completion.
+
+---
+
+## Q801 — ACCEPT
+
+**Rationale.** Cohort/authority separation is fully implemented and independently derivable from embedded bytes: key-set equality across frozen-v1 / durable-v2 / canonical matrix is proven (E846 `KEY_SET_EQUALITY … true`), schemas pin every count and hash (E828, E831, E834, E838), and no live or supplemental generated output currently exists (E846 `GENERATED_OUTPUT … exists_in_current_worktree:false` ×3).
+
+**Cohort/namespace/authority table.**
+
+| # | Artifact / cohort | Identity | Pins | Counts | Producer → I/O | Status |
+|---|---|---|---|---|---|---|
+| 1 | Frozen canonical v1 authority | `data/local_labels/campaign/capture_roster_authority_sm86.json`, roster_id `sm86_capture_roster_authority_v1` | file sha `d02c817091b0a9f06c2106c0987c59a481910afcc3b78ab1de7a7d5bd5a6b4b4`; source_commit `124ce358733f97ba6e0af808d10ab69ffe4d5a78` | 344/122/222; portable 17r, simbench 31r/61e, sol 74r/161e | historical; input to E827/E830 | frozen, immutable (E831, E846) |
+| 2 | Durable v2 projection | `tools/local_labels/authorities/capture_roster_authority_sm86.durable.v2.json`, roster_id `…durable_v2` | file sha `27dc3c7eb6ef67791282b4ffaba9ce169c316eec3d3da4fd65f2e50c0bd0baba`; source_commit `c4b76c0ae3b49378f6e3d4cabf7830dbe3eaa432`; historical pin = row-1 sha | identical 344/122/222 | E827 → canonical out path only; protected roots refused | committed == regenerated (E828, E829, E846) |
+| 3 | Future clean-S live v1 | exact path `/home/jakeshea/sm86_reference_capture_r27/inputs/r28_<head8>/capture_roster_authority_sm86.json` | `--expected-head` == HEAD, clean tree; re-verifies all 122 runnable binaries vs frozen identity | 344/122/222 required | E830; exclusive write, no overwrite, non-symlink ancestors | absent today (E830, E832, E846) |
+| 4 | Canonical frozen capture matrix v1 | `data/local_labels/campaign/sm86_reference_capture_matrix.json`, matrix_id `sm86_reference_capture_matrix_v1` | file sha `af29d72e955cf42e281036190f2d55d72af0af92a632c78c8d159073a072fb0e`; seal `6376da9721c75bb9299e84a9d11bf607bc21f4cbaa30da25b672c86f6757a5e1`; commit `124ce358…`; registry pin old `be1f7893…` | 344/122/222; SOL exactly 73 native + 1 reduced (`problem_028…`) | E806; `--out` refuses canonical path | frozen (E806, E841, E846) |
+| 5 | Canonical successor matrix (future) | noncanonical external `--out` only | built from row 3 at current HEAD; binds active registry `95d90f8c…` | rederived | E806 `require_head_match=True` | absent (E806, E841) |
+| 6 | Supplemental workload matrix live v2 | artifact_id `sm86_sol_workload_capture_matrix_live_v2`, schema_version 2 | live source_commit == runnability == shrink == HEAD; owner marker `.sol-live-coverage-plan-owner-v1.json` | closure-checked rows/variants/chunks | E837 → external plan-owner namespace only | absent (E837, E838, E839, E846) |
+| 7 | Supplemental representative execution matrix live v1 | artifact_id `sm86_sol_representative_execution_matrix_live_v1`, profile `representative_trace_ncu_control_typed_v1` | authority commit `e38788ca0a4457570bd562ea1389b07b3f855e22`; source-matrix sha `8441ac3c…`, seal `e6d213b6…`; selection sha `1df582f3…`, seal `93524515…`, identity `4a3e5575…` | 201 problems / 216 rows / 15 chunks (178/15/23); 34 arch-inapplicable problems / 537 rows | E833 → fresh external non-worktree file | absent (E833, E834, E835, E846) |
+| 8 | Historical zero-credit cohorts | 49-row revision; Task7/H3 capture-defect archive (chunk `sol_execbench-000-bootstrap`, session `88f01256-…`, preflight `b9185312…`); interrupted 53/201 SOL attempt | ADR 0001 `CONTINUE_PRESERVE_PINNED` inventory-domain hashes | 0 credit | archives only | frozen, reuse-forbidden (E802, E803, E805) |
+
+**Forbidden cross-edges.** Supplemental→canonical credit/counts (E838 `canonical_344_cell_matrix_impact: none_additive_supplement_only`); supplemental row keys `(slug, uuid, variant_id)` never in canonical chunk membership (E806 `chunk_runnable_set_equality`); canonical matrix regeneration/replacement during cleanup (E805, E806 frozen-v1 dispatch); supplemental roots aliasing the canonical campaign root (E812 `PROTECTED_CANONICAL_CAMPAIGN_ROOTS`, `supplemental_output_root_aliases_canonical`); cross-cohort aggregation without stratification (E838); NCU values as same-cell inputs (E802 Rule 1); `shape_adjusted` as an exclusion (E805 AC-8); historical bytes as new credit (E803).
+
+**M4/M7 zero-supplemental-credit proof.** Canonical `run_chunk` admits only cells resolved from the frozen matrix via `select_chunk` (membership sha + `authority_cell_sha256` join to the frozen 344-cell authority, E810, E806); supplemental rows can only enter via `workload_row_binding`, which canonical `capture_cell` hard-refuses (`sol_supplemental_launch_set_v3_live_canary_required`, E810), and their DONE lives under `sol_workload_chunks/` with a distinct schema (E813) in a separately owner-marked root; M7's denominator identity `denominator == universe − Σ typed exclusions` is computed over the canonical ledger only (E805 AC-8).
+
+**Invariants.** Frozen bytes immutable; universe 344 = 122 + 222 everywhere; identity sets equal across rows 1–4; exactly one reduced SOL representative in the canonical matrix.
+**Evidence.** E802–E806, E827–E839, E841, E843, E846.
+**Failure/pending.** Rows 3, 5, 6, 7 absent → clean-S and supplemental work pending (typed, Q805).
+**Order.** None (affirmation).
+**Tests.** Positive: E829/E832/E835/E839 suites; E846 derivation. Negative: null-identity runnable rejected (E829); canonical `--out` refused (E806); wrong plan filename refused (E839).
+**Predicate.** Every table hash re-derives from the named file; `KEY_SET_EQUALITY` true; all three generated outputs remain absent until their producers run under their own gates.
+
+---
+
+## Q802 — ACCEPT
+
+**Rationale.** The canonical launch contract is implemented literally in E807/E808/E809 and sealed by E806.
+
+**Contract.** NCU controls, always explicit: `--target-processes all --filter-mode global --replay-mode kernel --cache-control all --clock-control none`; `--profile-from-start on` for application-args binding, `off` for logical-workload adapter binding; selection `--launch-skip <i> --launch-count 1` bounded to signed 32-bit (skip ≤ 2147483646 with count 1); kernel name only as exact mangled with `--kernel-name-base mangled`, `regex:` forbidden, ASCII required (E808). Process ownership: race-checked `/proc` snapshot, `/proc/<pid>/exe` identity, verified-ancestor-only ignore, conflicting-script set; guards pre-smoke/post-smoke (E807) and prepare/pre/between/post per cell (E810). Clock: pins 1350/10501/persistence Enabled; three exact P0 samples pre and full re-gate post (`wait_for_clock_state`, ≤31 attempts). Insertion sentinel: the details-CSV parser rejects any second launch identity even with equal values (`ncu_csv_duplicate_metric_rows`; single-launch observation requires cardinality 1 with non-empty `ID`) — launch-count is never trusted alone (E809). Multi-launch cells: sealed `trace_launch_sequence` must derive from capture args (E806). Hashes: binary sha before/after label/trace/control; tracer `.so` sha before/after trace; kernel-signature from measurement manifest or `fallback_legacy`; exclusive outputs (`LABEL_OUTPUT_ALREADY_EXISTS`). Preflight binds clean S (HEAD + porcelain), pins sha, NCU 2026.1.0 prefix on component boundary, driver 610.43.02 exact, structured nvcc release, NVBit 1.8 header, real injection smoke (ldd + nonzero contract-valid trace + non-vacuous threadblocks + exact full coverage), disk vs retention+staging budget, SOL environment certification; freshness 900 s / +2 s skew (E807, E810).
+**Sole hardware-marked test.** `test_campaign_preflight.py::test_environment_probes_ok_on_reference_host` — the single default-deselected test (E826, E817).
+**Operator-only commands (reproduced, not authorized).** `sudo nvidia-smi -pm 1`, `-lgc 1350`, `-lmc 10501`; restore `-rgc`, `-rmc`; Codex presents, never executes (E844).
+**Fail-closed observations.** Dirty tree; version mismatch; process conflict; clock drift/settle exhaustion; unresolved `.so` dep (silent dlopen); untraced run; empty/vacuous/sampled trace; budget shortfall; SOL env refusals; storage markers (exit 3).
+**Invariants.** No NCU metric value is ever a preflight input (Rule 1).
+**Evidence.** E805–E809, E826, E844.
+**Failure/pending.** Live pass of the hardware-marked probe is absent (typed pending, B807).
+**Order.** None. **Tests.** E817 green; pure verdict helpers unit-tested without GPU (E807 docstrings). **Predicate.** `capture_admitted == true` iff all `_BLOCKING_CHECKS` ok including post-smoke re-checks; any single failure blocks before any roster cell.
+
+---
+
+## Q803 — ACCEPT
+
+**Rationale.** The v3 join is implemented as an ordered dual-inventory equality with explicit ambiguity rejection (E810 `bind_ncu_launch_inventory_v3`; E809 v3 inventory validator; E812/E813 verification and schema).
+
+**Contract.** Ordered inventories: NVBit side — per accepted launch, `accepted_launch_index == ordinal`, `device_id`, `stream_id`, `trace_launch_id`, mangled `kernel_name` (trace root carries `+___0`), and module identity (`sha256` or typed no-stable-module); NCU side — v3 details inventory with required columns `{ID, Process ID, Context, Stream, Device, Kernel Name, Block Size, Grid Size}`, non-empty `ID` per launch, ordinals 0..N−1, `report_sha256` bound. Sentinel: request `expected+1`, observe exactly `expected` (`request_expected_plus_one_reject_any_extra`). Per-ordinal join key: `(mangled kernel_name, block_dim, grid_dim, normalized device)`. Normalization limits: dims parsed only from exact `(x, y, z)`/`x, y, z` with balanced parens, positive ints; Device only decimal or `name (N)`; PID/Context/Stream reduced to first-occurrence equivalence classes (`report_local_first_occurrence_equivalence_v1`), never raw cross-process values. Uniqueness: duplicate key on either side → `sol_dynamic_launch_ncu_identity_ambiguous` (order alone is not identity). Insertion/deletion → cardinality mismatch; reorder → sequence mismatch (`observed_keys != trace_keys`); lane drift → `sol_dynamic_launch_ncu_lane_drift` (process/context classes must be constantly 0; stream classes must equal trace stream classes). The retired cross-execution occurrence selector is a hard refusal (`sol_dynamic_launch_ncu_occurrence_binding_retired`).
+**Invariants.** Same-name ordinal in one execution never proves the corresponding launch in another; only observed identity equality plus sentinel does.
+**Evidence.** E808, E809, E810, E812, E813, E833.
+**Failure/pending.** Live validation absent; end-to-end DONE admission additionally requires B810 exporter closure (see Q810).
+**Order.** None to the join itself. **Tests.** E836 representative/exhaustive completeness fixtures; negative: v2 launch carrying v3 identity rejected; typed-control-as-complete rejected (E836). **Predicate.** `bind_ncu_launch_inventory_v3` output equals retained identities byte-exactly at verification (E812) or refuses with a listed code.
+
+---
+
+## Q804 — ACCEPT
+
+**Rationale.** Pending→final publication and versioned DONE dispatch are implemented with the required orderings and negative controls (E812, E840, E845, E847).
+
+**Contract.** Construction root: `stage_root/publications/publication-<canonical-hash(identity incl. chunk, commit, both matrix sha+seals)>`; cells hardlink-projected same-filesystem with per-file sha equality and resumable strict-prefix completion; DONE built and verified against the pending root (`require_final_location=False`), tree sealed 0444/0555 with per-file fsync then directory fsync, `renameat2(RENAME_NOREPLACE)` (EEXIST → `…destination_exists`; EXDEV → `…cross_device`), parent fsync, then full re-verify at the final root with `require_final_location`. Rederivation from retained bytes: one-boundary `VerifiedArtifactSet` (race-checked descriptor hash + lexical re-open identity); trace root reparsed; module inventory revalidated; details CSV → inventory and per-launch metrics recomputed; unsigned export receipt revalidated (`trust_scope capture_process_integrity_only_unsigned`); sidecars validated against retained schema v5 / registry v2 (never active vNext — only the version sentinel is adapted); controls rebuilt; identities rebuilt via the v3 join and compared. Dispatch: `schema_version 2` → frozen historical namespace (exactly 3 entries; manifest sha `702ef1c2…`; v2 schema sha `5e9bbb94…`; LF, sorted, size-capped); `3` → source-bound blob at `manifest.source_commit` via pinned `/usr/bin/git`, sanitized env, `--no-replace-objects`, 1 MiB cap, exact size; missing/boolean/unknown → `supplemental_done_schema_version_unknown`. Timestamps must be calendar-valid RFC 3339.
+**Invariants.** No same-version semantic drift: v2 bytes are hash-frozen (E840, E847); v3 semantics come from the evidence's own commit, not ambient worktree bytes (E845).
+**Evidence.** E809, E811, E812, E813, E840, E845, E847.
+**Failure/pending.** None offline. **Order.** None. **Tests.** Positive: real committed v3 blob loader (E845); frozen-manifest verification. Negative: manifest byte drift, resealed rows/variants/proofs, injected extra child, marker replacement, matrix replacement during check (E835, E839, E845). **Predicate.** `verify_done_manifest` completes at the final root under `require_current_state` (clean HEAD == `source_commit`) or refuses with a typed code; superficial reseal never verifies.
+
+---
+
+## Q805 — AMEND
+
+**Rationale.** The facts exist but are not yet encoded as four distinct, named predicates; readiness language must be restructured so offline green can never be read as hardware readiness (B807).
+
+**Replacement contract — four disjoint predicates.**
+- **P1 offline-source-ready(bytes):** default suites (E802) plus the focused capture battery green with exactly one deselection (E817: 685 passed, 1 deselected), and that deselection is exactly the hardware probe (E826); frozen/durable/matrix identity closure holds (E846). *Satisfied by embedded evidence.* Caveat: the reviewed worktree is dirty (E842 `current_dirty_worktree_static_source_review`), so P1 attaches to bytes, not to a commit.
+- **P2 clean-S-ready(S):** operator establishes clean HEAD S; E830 emits live-v1 to the exact `inputs/r28_<S8>` path (verifying all 122 binaries against frozen identity, start/authority/final HEAD equal); E806 successor matrix built from it at S with the active registry `95d90f8c…` (E841). *Not satisfied: all three outputs absent (E846).*
+- **P3 live-canary-ready(host,S):** P2 plus live facts: hardware-marked probe passes on the device (E826 collection alone is not a pass); a fresh admitted preflight manifest (E807; 900 s window); injection smoke contract-valid on hardware; three-sample P0 lock evidence. *Absent — typed pending external.*
+- **P4 campaign-ready:** P3 plus campaign lock free, no storage-fault receipt, budget headroom; for supplemental additionally the pinned live canary (gate codes in E810/E811) and closure of the B809/B810 amendments. *Absent; supplemental prohibited until canary.*
+**Authority transition binding.** frozen v1 (immutable) → durable v2 (host-independent, verifies v1 sha) → clean-S live v1 (re-verifies 122 artifacts, stamps S) → successor matrix (head-match emission, noncanonical path only) — frozen bytes never mutate (E827–E832, E806).
+**Operator boundary (reproduced, not authorized).** E844 sudo clock lock/restore commands are operator-run only.
+**Hardware facts still absent.** Live probe pass; admitted preflight; on-device smoke; lock state; any credit beyond historical 1/122; supplemental canary.
+**Evidence.** E805–E807, E817, E826–E832, E841, E844, E846. **Failure/pending.** P2–P4 pending. **Order.** Document predicates in the plan/runbook (wording-only) before any clean-S session. **Tests.** Positive: P1 recomputable offline. Negative: any claim of P3/P4 without the live artifacts is a typed violation. **Predicate.** Each Pn is a conjunction of the listed checkable facts; Pn true never implies Pn+1.
+
+---
+
+## Q806 — ACCEPT
+
+**Rationale.** SOL runtime orchestration is fail-closed end-to-end in E811/E812 with owner-namespace and closure proofs.
+
+**Contract (rejection behavior).** Import/runtime faults: chunk module is import-only (`supplemental_chunk_internal_only`); environment refusals typed `SOL_ENV_*` (E818); package identity pinned (`sol_execbench_package_sha256`). Unknown architecture: schema consts `sm_86`/`rtx_3090_ti`; label-driver arch gate exits pre-binary (E808). Missing rows: `supplemental_chunk_member_absent`, `campaign_chunk_partition_invalid`, coverage `…row_closure_mismatch`. Owner drift: namespace contract closure/extra/hash-mismatch codes; retained-identity mismatch; plan-owner marker contract mismatch (E837); storage-fault receipts on the separate runtime filesystem (E811). Shape-adjusted provenance: `reduced_proxy` is a cohort with `claim_scope reduced_proxy_bundle_only`, `native_predictive false` — never an exclusion; cross-cohort aggregation forbidden; canonical impact none (E838). Whole-campaign closure/resume: `validate_whole_matrix_closure` exact partition; sealed hash-linked event chain; DONE-derived completion events exact-match; offline checkpoint byte-rederives the unique frontier; snapshots atomic pending→replace with content verification.
+**Sealed matrix input interface.** Exact `serialize_matrix` bytes + `matrix_seal_sha256` + schema (E838/E834) + closed plan-owner namespace; runtime never rebuilds matrix authority from observations — regeneration is used only as an equality check (E812 `validate_supplemental_matrix`), representative validated against retained upstream bytes (E833).
+**Evidence.** E805, E811, E812, E813, E836. **Failure/pending.** Live execution gated (B809). **Order.** None. **Tests.** E836 dispatch-without-3420-rebuild; representative budget 224 GiB requirement; timeout→typed measured-infeasibility (E836). **Predicate.** Every canonical row of the chunk closes as admitted or typed; any unlisted state refuses.
+
+---
+
+## Q808 — AMEND
+
+**Rationale.** Canonical selection today is intended-invocation + ordinal with a single-launch observation; a cross-surface identity join is required (B808).
+
+**Replacement contract.** Mandatory independent observations per selected launch: NCU details identity (non-empty `ID`, mangled `Kernel Name`, `Block Size`, `Grid Size`, `Device`) — already produced (E809); NVBit trace record (`kernel_name+___0`, `grid_dim`, `block_dim`, `device_id`, `stream_id`, `kernel_id`) — already produced (E807/E810); executable sha before/after each phase; module identity where runtime modules apply (E806 vendor contracts). **Amendment:** `capture_label`/chunk validation must additionally require normalized-equality `(NCU name, block, grid, device) == (trace name−`___0`, block_dim, grid_dim, device class)` for the labeled launch; for multi-launch contracts, per-ordinal; kernel-name selector becomes mandatory whenever the trace inventory shows same-name multiplicity. Uniqueness: within-report single identity (existing); cross-surface equality (new). Sentinel unchanged (parser cardinality; sealed sequences derive from args).
+**Why in-range `label_trace_launch_index` is insufficient.** It is an ordinal of an intended invocation in one execution; NCU replays in a separate execution where insertions/deletions shift ordinals, and equal ordinals do not witness kernel/geometry/device identity — exactly the launch-filter-regression class the parser documents (E809), and the cross-execution ordinal principle already rejected for v3 (E810).
+**Evidence.** E806, E809, E810, E820, E821. **Failure/pending.** New refusal `label_launch_identity_join_mismatch` (new). **Order.** Implement join in `capture_label` → extend `label_contract_mismatch` checks → tests. **Tests.** Positive: current cells pass. Negative: mismatched grid/name/device, and same-name multiplicity without `--kernel-name`, refuse. **Predicate.** A canonical label is admissible only with the equality join satisfied.
+
+---
+
+## Q809 — AMEND
+
+**Rationale.** Two distinct facts (B809): a deliberate live gate, and a missing/incompatible bridge.
+
+**Bridge inventory.** All-launch tracer entry: `capture_trace(all_profiler_roi_launches=True)` sets `ACTIVE_FROM_START=0`, drops `MAX_ACCEPTED_ACTIVE_LAUNCHES`, requires the module-inventory sidecar (E810); its only path is gated — `capture_cell` refuses `sol_supplemental_launch_set_v3_live_canary_required` before reaching it; no other active caller exists (E821 confirms). Label-driver agreement: v3 DONE expects `label_driver.sh --target-processes all --filter-mode global --replay-mode kernel --cache-control all --clock-control none --profile-from-start off --launch-skip 0 --launch-count N+1 …` (E812/E821), but the shell CLI exposes none of those six options (hardcoded; `--launch` maps to skip with count fixed 1; profile-from-start derived) (E808) — typed readiness failure `supplemental_label_driver_interface_gap` (new).
+**Ruling.** The gate is deliberate and stays (removable only by pinned-canary operator decision); the missing caller and argv options are engineering absences to implement and offline-test first. Postconditions the bridge must satisfy: certified seven-key CUDA-13.2 environment (E818); capture-manifest `command == expected_command` exactly; launch-set artifacts `run_0_launch_set.*`; per-ordinal sidecars `label_0_<i>.json` sealing `ncu_launch_skip 0` / `ncu_launch_count N+1` (schema E820 admits these).
+**Evidence.** E808, E810, E811, E821. **Failure/pending.** Interface gap (typed); canary pending operator + hardware. **Order.** driver launch-set options → active caller behind the unchanged gate → fixture tests → (separately, operator) canary. **Tests.** Positive: fixture equality of expected_command; per-ordinal sidecar seals. Negative: any missing option → interface-gap refusal; gate still refuses live. **Predicate.** Bridge complete when offline fixtures produce a v3 result that `validate_result_launch_completeness` accepts except for the deliberate gate.
+
+---
+
+## Q810 — AMEND
+
+**Rationale.** The exporter-authority gap is explicit in retained code: preflight v1 authenticates only NCU version; DONE refuses with `supplemental_done_ncu_exporter_authority_gap` (E812); E842 records `CANONICAL_EXECUTABLE_IDENTITY_CLOSED False`.
+
+**Replacement contract.** Preflight schema v2 adds `checks.ncu.resolved_path` (absolute, no-follow regular file) + `executable_sha256` + version line; chunk admission threads that identity into capture provenance; `label_driver.sh` records the invoked ncu path+sha in the run manifest; DONE verification supplies `expected_ncu_bin/sha/version` to `validate_ncu_details_export_receipt` from retained preflight-derived authority — never from the receipt itself (no self-attestation; receipt remains `capture_process_integrity_only_unsigned`, E809). Version must match pins prefix `2026.1.0` on component boundary (E816).
+**Fail-closed.** Drift between collection and import identities → refusal; absence → existing gap code stays; symlink/unstable executable → refusal; source-generation mismatch (selected attempt's preflight bytes not retained) → `supplemental_done_tool_authority_invalid`.
+**Evidence.** E807, E812, E815, E816, E818, E821. **Order.** schema v2 → preflight probe → driver/run-manifest fields → chunk threading → DONE expectation wiring → tests. **Tests.** Positive: closed receipt validates. Negative: hash drift, PATH-substituted binary, absent field. **Predicate.** Every admission-relevant NCU invocation carries exactly one resolved path+sha+version receipt transitively bound from preflight to DONE.
+
+---
+
+## Q811 — AMEND
+
+**Rationale.** The reviewed registry (E842) is authoritative: 18 tracked NCU-reachable files (12 direct, 6 transitive, 0 untracked), with concrete bypasses.
+
+**Policy ruling.** Classify: canonical admission chain — `campaign_preflight.py` (version probe, diagnostic), `label_driver.sh` (shared collector), `parse_ncu_metrics.py` (shared importer/exporter helpers), `sm86_capture_chunk.py` (controller + private re-import); calibration/repeatability — `sweep_repeatability_matrix.py`, `repeatability_matrix_runner.py`, `run_headline_cohort_sweep.py`; golden-cell — `capture_golden_cells.sh` (direct bare-PATH `ncu`, staging-confined, E819) must gain a resolved path+sha receipt or route via the driver; diagnostics (non-admission) — `probe_ncu_metric_availability.py`, `validate_static_occupancy_agreement.py`, harvester version helper; historical — `orchestrate_sm86_label_recapture.py` + sweep wrapper bypass canonical preflight and unlink a prior report (evidence-retention hazard): forbid for campaign evidence; retired private helpers `_ncu_capture_once` in `capture_timing_labels.py`/`capture_long_timing_cohort.py` remain importable although the public producers refuse (E841): make the private helpers raise the same typed retirement before any side effect. **False dry-run defect:** `capture_count_labels.py`/`capture_t2_stream_labels.py` dry-run still executes NCU — dry-run must not execute.
+**Rule.** Only the campaign entry points mint admissible evidence; ad hoc NCU output import is forbidden (E844); admission-relevant invocations require the P/X/V/A/R/B/C receipt set (E842 legend), minimally path+sha+version+normalized argv+report identity+launch-control tuple.
+**Evidence.** E808, E814, E816, E819, E842. **Order.** dry-run fix → private-helper refusals → golden-cell receipt → registry lint (list frozen to E842's 18 files). **Tests.** Negative: dry-run spawning ncu fails; private-helper call fails before subprocess; new untracked invoker fails lint. **Predicate.** Registry closure holds and every admission path carries its receipt.
+
+---
+
+## Q812 — AMEND
+
+**Rationale.** Canonical device provenance is partially bound (sidecar `gpu_uuid_sha256`, E808/E820) but preflight records no UUID and index binding is implicit (B812).
+
+**Contract (canonical identity graph).** Nodes: selection/visibility (`LABEL_DRIVER_GPU_INDEX`, default 0; visible-device set), stable physical UUID (hash only), NCU report `Device` (report-local), trace `device_id` (report-local), clock samples, preflight record. Amendments: (a) preflight records the selected index, visible-device count, and UUID hash; (b) every sidecar `gpu_uuid_sha256` in a chunk must equal the preflight value; (c) clock probes must query `-i <selected index>`; (d) multi-GPU rejection: visible count > 1 without a sealed device contract, or any surface ordinal ≠ selected index, refuses; (e) report-local ordinals join only as within-report classes, never as cross-process identity (consistent with E810 policy). Supplemental evidence stays in its cohort; canonical-side boundary: unknown supplemental artifacts in canonical namespaces refuse (`artifact_kind_unclassified`, owner refusals, E810/E812) with no claim of supplemental closure here.
+**Evidence.** E807, E808, E809, E810, E816, E820. **Order.** preflight fields → chunk cross-check → clock `-i` binding → tests. **Tests.** Negative: sidecar-vs-preflight UUID hash mismatch; two visible devices; ordinal drift. **Predicate.** Chunk admits only with uniform UUID hash and index-consistent surfaces.
+
+---
+
+## Q813 — ACCEPT
+
+**Rationale.** Role separation is already pinned and structurally enforced (E814, E815, E816, E822, E818).
+
+**Role table.** C1 canonical workload execution: nvcc **release 13.3** (pin, with the explicit note distinguishing compiler release from the `/usr/local/cuda-13.2` toolkit path, E814). S supplemental SOL environment/build: nvcc **release 13.2 exact**, `CUDA_HOME=/usr/local/cuda-13.2`, g++-14 host chain (E815, E816 `require_sol_cuda_release`, E818 seven-key contract). T tracer/NVBit build: nvcc **13.2** + g++-14 + protoc 34.1 + protobuf 34.1.0 at the pinned prefix (E822, E823). Shared across roles: NCU prefix 2026.1.0; driver 610.43.02.
+**Required equality edges.** Sidecar `cuda_version` == its cohort's pin (canonical via E810 checks; supplemental via E812 v3 authorities); structured `{major,minor}` comparison only — substring matching forbidden (E816). **Authorized differences.** 13.3 vs 13.2 across roles is deliberate and has no fallback (E805); collapsing to one CUDA equality is unsound.
+**Prevention.** Distinct pins files; single-token banner parsing; runbook role wording (E844); per-capture structured release recorded in manifests.
+**Evidence.** E805, E807, E814–E816, E818, E844. **Failure/pending.** None. **Tests.** E816-driven mismatch codes (`NVCC_RELEASE_MISMATCH`, `SOL_ENV_NVCC_RELEASE_MISMATCH`). **Predicate.** Any cross-role substitution produces a typed mismatch before capture.
+
+---
+
+## Q815 — ACCEPT
+
+**Rationale.** The retained contract and its observational limits are already explicit; the ruling fixes them as mandatory manifest content (B814).
+
+**Contract.** Bound identities: tracer `.so` sha at preflight and before/after trace; pb runtime path; NVBit 1.8 header; pinned build-env verification (nvcc 13.2, g++ major 14, protoc 34.1, protobuf 34.1.0 at `PB_PREFIX`, lock sha `d522b3ee…`, E822/E823/E824); worktree build refusal + `NVBIT_TEMPCOPY_BUILD_OK` (E823/E824); proto/pin lockstep; target binary sha; load-time `LD_LIBRARY_PATH`/`CUDA_INJECTION64_PATH` sealed; docs/smoke pin the expected tracer sha `de47b3af…` (E825).
+**Mandatory retained uncertainty.** (1) Build chain: successful injection plus tracer/binary hashes do **not** prove the complete nvcc/host-compiler/protobuf-generator/NVBit-release/linked-runtime chain; manifests must carry `build_provenance: attested_by_pinned_env_checks_not_reproduced`. (2) Clocks: cadence is 3 exact P0 samples pre-smoke, full re-gate post, per-phase guards, single post-capture sidecar sample; excursion limit — a mid-capture excursion clearing before emission is invisible (E820 schema text); manifests keep `lock_state_evidence: repeated_exact_readback_proxy` and never claim DVFS-stability (E805; enforced by the invariance-claims scanner, E841).
+**Operator boundary.** E844 commands operator-run only.
+**Evidence.** E807, E808, E814, E816, E822–E825, E844. **Failure/pending.** These limits are permanent typed limits, not closable offline. **Tests.** E825 build-contract suite; E841 invariance scanner. **Predicate.** Every capture manifest carries both uncertainty fields verbatim.
+
+---
+
+## Q816 — AMEND
+
+**Rationale.** Seven definite active contradictions plus categorized stale prose survive (E842 POLICY rows); repairs are wording-only.
+
+**Category-specific repairs.**
+1. **Definite contradictions (7):** `label_driver.sh` "only path… may invoke ncu"/cloud-ban prose → "the historical repository-wide NCU ban is retired; canonical label admission routes through this driver and its campaign wrappers; other invokers are diagnostic/calibration and never mint campaign evidence." `capture_count_labels.py` Rules 1–3 quarantine/no-driver-root headers → targets-never-features + evidence-namespace phrasing (path checks unchanged). `probe_ncu_metric_availability.py`, `run_headline_cohort_sweep.py`, `activation_trace_orchestrator.py` → same attribution fix, factual behavior statements kept. `sol_baselines_scaffold/validate.py` → reword its error text to cite scaffold-local policy, not CLAUDE.md; the scan patterns themselves are behavior and may only change under a separately sanctioned edit. `generate_ac_compliance_report.py` → mark the no-root/ncu guard row as historical-compliance description.
+2. **Stale namespace-gate attributions (7 files, E842 list):** replace "Rule-1 quarantine" with the current evidence-namespace guard names.
+3. **Factual-offline-behavior with stale Rule attribution (14 files):** keep behavior sentences; re-cite targets-never-features.
+4. **Correctly historical retirement prose (`capture_timing_labels.py`, `capture_long_timing_cohort.py`):** keep verbatim (the behavioral private-helper fix belongs to Q811/B811, not wording).
+5. **Context-specific cloud capability (`container_bootstrap.sh`, `preflight_manifest.py`):** reconcile, don't delete — NCU denial in cloud containers/MIG is a genuine host capability gate; strip only repo-wide-ban implications.
+**Forbidden.** Reviving the retired ban; weakening targets-never-features, namespaces, retirement guards, or host gates; behavior changes.
+**Evidence.** E802, E808, E842. **Tests.** Positive: E841 stays green. Negative: a wording lint asserting the seven files no longer match the repo-wide-ban phrases while their guards remain. **Predicate.** Zero `definite_active_contradiction` matches after repair with unchanged behavior hashes for guard logic.
+
+---
+
+## Q818 — ACCEPT
+
+**Rationale.** The complete supplemental construction chain is implemented and self-verifying independent of runtime collection (E833, E837 + schemas E834/E838 + tests E835/E839/E836).
+
+**Audit (binding summary).** Source authority: frozen exhaustive matrix (immutable input, pinned commit `e38788ca…`, sha+seal) and 216-row selection (sha+seal+selection identity). Clean execution authority: HEAD==`source_commit`, clean tree; carry-forward proof — semantic inputs byte-identical across authority/execution commits via git blobs; execution tools closed set/prefix with explicit repin dispositions; external runtime input closure. Cohorts: native 178 / partial 15 / reduced 23 with structurally distinct claim scopes; reduced requires axes-delta or exact RFC-6901 leaf definition-delta and producer `variant_id` recomputation (equal-workload-without-definition-change is not a proxy, E839). Owner roots: marker-sealed, dirfd-bound immutable children. Seals: variant/cell/row/execution receipts and membership hashes; chunks cohort-pure, ≤16 rows, interleaved waves; first three chunks cross-cohort. Coverage/launch: `all_in_profiler_roi`; exhaustive vs representative contracts; representative budgets `min(source, 900 s)` / 1 GiB, sampling off, partial forbidden. Source-generation transitions: live producer commit must equal runnability and shrink commits and HEAD; the canonical matrix's historical commit is provenance only. Canonical non-membership: row keys never canonical cells; claim policy `none_additive_supplement_only`. Rejection predicates: the refusal codes enumerated across E833/E837 (drift, seal mismatch, bijection, owner, namespace, publication races) with negative tests in E835/E839/E836.
+**Evidence.** E805, E833–E839, E843, E846. **Failure/pending.** Generated matrices absent (Q801 rows 6–7). **Predicate.** Emitted bytes byte-equal producer regeneration; every tamper fixture refuses.
+
+---
+
+## Q819 — AMEND
+
+**Rationale.** The supplemental side of "disabled-but-operable" has three missing/incompatible edges (B809/B810 coupling).
+
+**Edge map.** (1) Campaign gate `_require_disabled_collect_gate` → always refuses (present, deliberate; E811). (2) Chunk caller internal-only via campaign (present; E812). (3) Certified environment (present; E818). (4) Representative execution authority validated at clean HEAD against retained upstream bytes (present; E833). (5) Exporter authority — **absent** (`ncu_exporter_gap`; refusal `supplemental_done_ncu_exporter_authority_gap`; E812) → Q810 amendment. (6) Label-driver launch-set argv — **incompatible** (expected options unsupported by E808 CLI; E821) → Q809 amendment. (7) Active all-launch caller — **absent by gate design** (E810). 
+**Canary predicate (defines readiness to *request* the operator decision; never authorizes it).** Edges 5–7 implemented and offline-green (fixture equality of `expected_command`; exporter receipt closure; per-ordinal sidecars); P2 clean-S-ready true; then one pinned single-row live canary chunk whose DONE passes `verify_done_manifest` with zero gaps becomes the pinned canary artifact; only afterward may the two gate sites change, by explicit operator decision.
+**Evidence.** E811, E812, E818, E821, E833. **Failure/pending.** Edges 5–7 typed gaps; canary pending external/operator. **Order.** Q810 → Q809 → fixtures → (operator) canary. **Tests.** as in Q809/Q810. **Predicate.** All edges present/compatible offline with both gates still refusing.
+
+---
+
+## Q820 — AMEND
+
+**Rationale.** Supplemental v3 binds device/stream/module/executable identity per ordinal but lacks stable-UUID and visibility closure (B812).
+
+**Contract.** Present and retained: per-ordinal `device_id` equality (normalized NCU `Device` == trace `device_id`), `runtime_module_sha256`, `trace_executable_sha256 == ncu_executable_sha256`, stream first-occurrence class equality, process/context classes constantly 0, report/CSV/inventory/execution-identity file hashes, selector command hash (E810 identity fields; E812 verification; E813 schema). **Amendments:** (a) supplemental preflight/attempt records visible-device set and stable UUID hash; (b) every per-ordinal sidecar's `gpu_uuid_sha256` (E820) must be uniform across the launch set and equal the attempt record; (c) `device_id` must equal the single selected ordinal absent a sealed multi-device contract; (d) report-local device/process/context/stream ordinals are never cross-process identity (existing policy retained); (e) owner and source-generation mismatches keep their typed codes (E812/E818). No inheritance from canonical proof: closure is demonstrated from supplemental retained artifacts only.
+**Evidence.** E812, E816, E818, E820, E821. **Order.** after Q810/Q809; fields additive. **Tests.** Negative: UUID-hash divergence across ordinals; second visible device; ordinal drift. **Predicate.** Launch-set admission requires uniform UUID binding plus all existing per-ordinal equalities.
+
+---
+
+## Q89001 — ACCEPT
+Scoped ledger rows B801, B805, B807 are in the consolidated ledger below; local dependencies: B805→B810 (shared exporter identity), B807 gates on B805/B810/B811 closure for P4. Only literally named artifacts are listed; no unembedded dependency is invented; the open rows keep `offline_implementation_ready:false`. Evidence: E802–E807, E817, E826–E846 (as scoped). Predicate: rows match §Ledger exactly.
+
+## Q89002 — ACCEPT
+Rows B802, B805, B813, B814, B815 per §Ledger; dependencies: B805→B810/B811; B814 constrains B802 manifest fields; B815 independent wording. Evidence: E802, E805–E809, E814–E816, E818, E822–E826, E842, E844. Predicate: as above.
+
+## Q89003 — ACCEPT
+Row B808 per §Ledger; no local dependencies beyond the E809/E810 primitives already embedded. Evidence: E806, E809, E810, E820, E821.
+
+## Q89004 — ACCEPT
+Row B812 (canonical side) per §Ledger; depends on B805 preflight-field extension. Evidence: E807–E810, E816, E820.
+
+## Q89005 — ACCEPT
+Rows B803, B810 per §Ledger; dependency: B803 end-to-end DONE admission is blocked at receipt validation by B810 (explicit gap code in E812). Evidence: E807–E809, E812, E813, E815, E816, E818, E821, E833.
+
+## Q89006 — ACCEPT
+Row B806 per §Ledger; no open dependencies. Evidence: E805, E811–E813, E836.
+
+## Q89007 — ACCEPT
+Row B809 per §Ledger; depends on B810; gate is prohibited-action-until-operator-decision, bridge is a typed implementation gap. Evidence: E808, E810, E811, E821.
+
+## Q89008 — ACCEPT
+Row B809 unchanged (same single ledger row; this template confirms the supplemental-side dependency set: environment E818, authority E833, exporter E812/E821, argv E808/E821). No second row is emitted.
+
+## Q89009 — ACCEPT
+Rows B801, B803, B806, B809 per §Ledger; matrix-construction scope closed (B801/B806, and B803's contract) with B809 the sole open row. Evidence: E805, E833–E839, E843, E846.
+
+## Q89010 — ACCEPT
+Row B804 per §Ledger; closed. Evidence: E809, E811–E813, E840, E845, E847.
+
+## Q89011 — ACCEPT
+Row B811 per §Ledger; depends on B810 for the receipt fields it mandates. Evidence: E808, E814, E816, E819, E842.
+
+## Q89012 — ACCEPT
+Row B812 (supplemental side) — same single B812 ledger row, supplemental closure captured by Q820 amendments. Evidence: E812, E816, E818, E820, E821.
+
+---
+
+## Consolidated Blocker Ledger (one row per blocker)
+
+| Blocker | Status | Classification | Controlling constraint (ruling) | Local deps | Evidence |
+|---|---|---|---|---|---|
+| B801 | CLOSED | none outstanding | Q801 table + forbidden edges; zero supplemental credit proven structurally | — | E802–E806, E827–E839, E841, E843, E846 |
+| B802 | CLOSED | none outstanding | Q802 contract as implemented | B814 (limits fields) | E805–E809, E826, E844 |
+| B803 | CLOSED-OFFLINE | typed pending (live) | Q803 join; occurrence-selector stays retired | B810 (DONE receipt) | E808–E810, E812, E813, E833 |
+| B804 | CLOSED | none outstanding | Q804 pending→final + v2/v3 dispatch | — | E809, E811–E813, E840, E845, E847 |
+| B805 | OPEN | evidence-closure defect (contract field) | AMEND: preflight v2 resolved-NCU path+sha (Q810) — all other bindings closed | B810, B811 | E805–E807, E826–E832, E841, E844, E846 |
+| B806 | CLOSED | none outstanding | Q806 fail-closed orchestration | — | E805, E811–E813, E836 |
+| B807 | OPEN | pending external (hardware) | Q805 predicates; inference prohibited | B805, B809–B811 for P4 | E805, E817, E826, E844 |
+| B808 | OPEN | typed gap | AMEND: canonical identity join (Q808) | — | E806, E809, E810, E820, E821 |
+| B809 | OPEN | typed gap + prohibited action | AMEND bridge (Q809/Q819); gate stays until pinned canary (operator-owned, typed pending) | B810 | E808, E810, E811, E821 |
+| B810 | OPEN | typed gap (explicit in retained code) | AMEND exporter closure (Q810) | — | E807, E812, E815, E816, E818, E821 |
+| B811 | OPEN | policy/closure defect | AMEND registry policy, dry-run, private helpers, golden-cell receipt (Q811) | B810 | E808, E814, E816, E819, E842 |
+| B812 | OPEN | typed gap (both cohorts) | AMEND device graph (Q812) + supplemental closure (Q820) | B805 | E807–E810, E812, E816, E818, E820, E821 |
+| B813 | CLOSED | none outstanding | Q813 role table; no cross-role collapse | — | E805, E807, E814–E816, E818, E844 |
+| B814 | CLOSED-AS-TYPED-LIMITS | permanent typed limits | Q815 mandatory uncertainty fields; no stronger claim permitted | — | E807, E808, E814, E816, E822–E825, E844 |
+| B815 | OPEN | documentation defect | AMEND category wording repairs (Q816); behavior unchanged | — | E802, E808, E842 |
+
+**Implementation order (global).** 1) Q816 wording (no behavior). 2) Q810 exporter closure. 3) Q811 registry/dry-run/private-helper/golden-cell. 4) Q808 canonical identity join. 5) Q812 canonical device fields. 6) Q809 driver launch-set options + caller (gate untouched). 7) Q820 supplemental device fields. 8) Q805 predicate documentation. Operator-owned thereafter: clean-S session (P2), live probe (P3), pinned supplemental canary decision.
+
+---
+
+## Completion
+
+**Global mechanical acceptance predicate.** Every Q ID above has exactly one disposition; every blocker has exactly one ledger row; every cited predicate resolves to a literal artifact, code path, hash, or refusal code embedded in E802–E847; every AMEND contract is implementable and testable from those bytes alone; no ruling asserts a hardware, API, or live fact not literally present.
+
+- `response_complete`: **true**
+- `offline_implementation_ready`: **false** (open amendments B805/B808/B809/B810/B811/B812/B815 are not yet present in the embedded bytes)
+- `hardware_done`: **false** (no admitted hardware evidence is embedded; canonical credit remains 1/122 historical)
+- `authorized_for_handoff`: **false**

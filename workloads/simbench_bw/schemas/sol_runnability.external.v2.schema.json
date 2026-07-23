@@ -1,0 +1,828 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "simbench_bw/schemas/sol_runnability.external.v2.schema.json",
+  "title": "sm_86 SOL-ExecBench external full-correctness runnability authority v2",
+  "description": "Fresh live authority emitted only into an owner-controlled external namespace from a clean source commit. Portable evidence stores source-commit and owner-relative names; machine-local root path/device/inode data is never authority-bearing.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_id",
+    "arch",
+    "sku",
+    "native_env_hash",
+    "native_env_degraded",
+    "publication_state",
+    "probe_protocol_id",
+    "probe_protocol_sha256",
+    "probe_config_path",
+    "probe_config_sha256",
+    "cli_timeout_seconds",
+    "outer_timeout_seconds",
+    "sol_execbench_package_sha256",
+    "sol_execbench_package_file_count",
+    "sol_execbench_module_path",
+    "sol_execbench_module_sha256",
+    "installed_distribution_manifest_sha256",
+    "installed_distribution_count",
+    "installed_distribution_file_count",
+    "installed_distribution_record_verified",
+    "uv_lock_sha256",
+    "uv_binary_sha256",
+    "uv_version",
+    "data_annex_manifest_sha256",
+    "flashinfer_corpus_manifest_sha256",
+    "flashinfer_corpus_file_count",
+    "flashinfer_corpus_blob_count",
+    "flashinfer_corpus_verified",
+    "flashinfer_corpus_error",
+    "probe_target_count",
+    "probe_target_set_sha256",
+    "source_commit",
+    "source_worktree_state",
+    "source_worktree_state_sha256",
+    "probe_source_closure",
+    "probe_source_closure_file_count",
+    "probe_source_closure_target_count",
+    "probe_source_closure_sha256",
+    "external_campaign_owner",
+    "external_output_name",
+    "external_checkpoint_name",
+    "resume_identity_sha256",
+    "in_scope_total",
+    "probed",
+    "pending",
+    "summary",
+    "status_to_typed_reason",
+    "cells"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 2
+    },
+    "artifact_id": {
+      "type": "string",
+      "const": "sm86_sol_runnability_external_v2"
+    },
+    "arch": {
+      "type": "string",
+      "const": "sm_86"
+    },
+    "sku": {
+      "type": "string",
+      "const": "rtx_3090_ti"
+    },
+    "native_env_hash": {
+      "$ref": "#/$defs/sha256"
+    },
+    "native_env_degraded": {
+      "type": "boolean"
+    },
+    "publication_state": {
+      "const": "complete"
+    },
+    "probe_protocol_id": {
+      "type": "string",
+      "const": "sol_full_correctness_v1"
+    },
+    "probe_protocol_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "probe_config_path": {
+      "type": "string",
+      "const": "tools/local_labels/sol_full_correctness_config.v1.json"
+    },
+    "probe_config_sha256": {
+      "type": "string",
+      "const": "9ddc69a74e8ce11b4867fd1cd9afe310771e7af7a986bc1d8439dc1390ded6bf"
+    },
+    "cli_timeout_seconds": {
+      "type": "integer",
+      "const": 1500
+    },
+    "outer_timeout_seconds": {
+      "type": "number",
+      "minimum": 2000
+    },
+    "sol_execbench_package_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "sol_execbench_package_file_count": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "sol_execbench_module_path": {
+      "const": "tools/sol_execbench/src/sol_execbench/__init__.py"
+    },
+    "sol_execbench_module_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "installed_distribution_manifest_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "installed_distribution_count": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "installed_distribution_file_count": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "installed_distribution_record_verified": {
+      "const": true
+    },
+    "uv_lock_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "uv_binary_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "uv_version": {
+      "type": "string",
+      "minLength": 1
+    },
+    "data_annex_manifest_sha256": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "flashinfer_corpus_manifest_sha256": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "flashinfer_corpus_file_count": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "flashinfer_corpus_blob_count": {
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "flashinfer_corpus_verified": {
+      "const": true
+    },
+    "flashinfer_corpus_error": {
+      "type": "null"
+    },
+    "probe_target_count": {
+      "const": 201
+    },
+    "probe_target_set_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "source_commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "source_worktree_state": {
+      "type": "array",
+      "maxItems": 0
+    },
+    "source_worktree_state_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "probe_source_closure_file_count": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "probe_source_closure_target_count": {
+      "const": 201
+    },
+    "probe_source_closure_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "external_campaign_owner": {
+      "$ref": "#/$defs/ownerMarker"
+    },
+    "resume_identity_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "in_scope_total": {
+      "const": 201
+    },
+    "probed": {
+      "const": 201
+    },
+    "pending": {
+      "const": 0
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "total",
+        "runnable",
+        "by_status"
+      ],
+      "properties": {
+        "total": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "runnable": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "by_status": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "minimum": 0
+          }
+        }
+      }
+    },
+    "status_to_typed_reason": {
+      "type": "object",
+      "additionalProperties": {
+        "type": "string"
+      }
+    },
+    "cells": {
+      "type": "array",
+      "minItems": 201,
+      "maxItems": 201,
+      "items": {
+        "$ref": "#/$defs/cell"
+      }
+    },
+    "external_output_name": {
+      "type": "string",
+      "pattern": "^[^/\\\\]+$",
+      "not": {
+        "enum": [
+          ".",
+          ".."
+        ]
+      }
+    },
+    "external_checkpoint_name": {
+      "type": "string",
+      "pattern": "^[^/\\\\]+$",
+      "not": {
+        "enum": [
+          ".",
+          ".."
+        ]
+      }
+    },
+    "probe_source_closure": {
+      "$ref": "#/$defs/sourceClosure"
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "flashinfer_corpus_verified": {
+            "const": true
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "data_annex_manifest_sha256": {
+            "type": "string"
+          },
+          "flashinfer_corpus_manifest_sha256": {
+            "type": "string"
+          },
+          "flashinfer_corpus_file_count": {
+            "const": 5244
+          },
+          "flashinfer_corpus_blob_count": {
+            "const": 2611
+          },
+          "flashinfer_corpus_error": {
+            "type": "null"
+          }
+        }
+      },
+      "else": {
+        "properties": {
+          "data_annex_manifest_sha256": {
+            "type": "null"
+          },
+          "flashinfer_corpus_manifest_sha256": {
+            "type": "null"
+          },
+          "flashinfer_corpus_file_count": {
+            "type": "null"
+          },
+          "flashinfer_corpus_blob_count": {
+            "type": "null"
+          },
+          "flashinfer_corpus_error": {
+            "type": "string",
+            "minLength": 1
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "ownerMarker": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "sha256",
+        "owner_seal_sha256"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[^/\\\\]+$",
+          "not": {
+            "enum": [
+              ".",
+              ".."
+            ]
+          }
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "owner_seal_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "runnable",
+        "compile_failed",
+        "correctness_failed",
+        "host_capacity_oom",
+        "eval_incomplete",
+        "eval_error",
+        "resolve_error",
+        "environment_invalid",
+        "prerequisite_missing",
+        "eval_timeout"
+      ]
+    },
+    "workload_diagnostic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "workload_index",
+        "source_line",
+        "uuid",
+        "axes",
+        "workload_sha256",
+        "workload_sha256_scope",
+        "diagnostic_present",
+        "trace_index",
+        "status",
+        "trace"
+      ],
+      "properties": {
+        "workload_index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "source_line": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "uuid": {
+          "type": "string",
+          "minLength": 1
+        },
+        "axes": {
+          "type": "object"
+        },
+        "workload_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "workload_sha256_scope": {
+          "const": "exact_json_line_bytes_excluding_lf_only"
+        },
+        "diagnostic_present": {
+          "type": "boolean"
+        },
+        "trace_index": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "status": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "trace": {
+          "type": [
+            "object",
+            "null"
+          ]
+        }
+      }
+    },
+    "unexpected_diagnostic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "trace_index",
+        "observed_uuid",
+        "status",
+        "trace",
+        "problem"
+      ],
+      "properties": {
+        "trace_index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "observed_uuid": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "trace": {
+          "type": "object"
+        },
+        "problem": {
+          "type": "string",
+          "enum": [
+            "trace_missing_workload_uuid",
+            "duplicate_trace_uuid",
+            "unexpected_trace_uuid"
+          ]
+        }
+      }
+    },
+    "cell": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "slug",
+        "category",
+        "language",
+        "prior_done",
+        "prior_deferred_correctness",
+        "status",
+        "detail",
+        "expected_workloads",
+        "returned_workloads",
+        "passed_workloads",
+        "diagnostics_complete",
+        "workload_diagnostics",
+        "unexpected_workload_diagnostics",
+        "command",
+        "returncode",
+        "cli_timeout_seconds",
+        "outer_timeout_seconds",
+        "stdout",
+        "stderr",
+        "stdout_sha256",
+        "stderr_sha256",
+        "stderr_tail",
+        "execution_kind",
+        "definition_input",
+        "workload_input",
+        "solution_input",
+        "execution_contract_sha256",
+        "execution_input_state",
+        "execution_input_state_sha256"
+      ],
+      "properties": {
+        "slug": {
+          "type": "string",
+          "minLength": 1
+        },
+        "category": {
+          "type": "string",
+          "enum": [
+            "L1",
+            "L2",
+            "FIB",
+            "Quant"
+          ]
+        },
+        "language": {
+          "type": "string",
+          "minLength": 1
+        },
+        "prior_done": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "prior_deferred_correctness": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "status": {
+          "$ref": "#/$defs/status"
+        },
+        "detail": {
+          "type": "string"
+        },
+        "expected_workloads": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "returned_workloads": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "passed_workloads": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "diagnostics_complete": {
+          "type": "boolean"
+        },
+        "workload_diagnostics": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/workload_diagnostic"
+          }
+        },
+        "unexpected_workload_diagnostics": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/unexpected_diagnostic"
+          }
+        },
+        "command": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "returncode": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "cli_timeout_seconds": {
+          "type": "integer",
+          "const": 1500
+        },
+        "outer_timeout_seconds": {
+          "type": "number",
+          "minimum": 2000
+        },
+        "stdout": {
+          "type": "string"
+        },
+        "stderr": {
+          "type": "string"
+        },
+        "stdout_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "stderr_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "stderr_tail": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "execution_kind": {
+          "enum": [
+            "native",
+            "proxy"
+          ]
+        },
+        "definition_input": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/fileIdentity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "workload_input": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/fileIdentity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "solution_input": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/fileIdentity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "execution_contract_sha256": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "execution_input_state": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "definition",
+            "workload",
+            "solution"
+          ],
+          "properties": {
+            "definition": {
+              "$ref": "#/$defs/inputState"
+            },
+            "workload": {
+              "$ref": "#/$defs/inputState"
+            },
+            "solution": {
+              "$ref": "#/$defs/inputState"
+            }
+          }
+        },
+        "execution_input_state_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "inputState": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "state",
+        "sha256",
+        "detail"
+      ],
+      "properties": {
+        "path": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "state": {
+          "enum": [
+            "present",
+            "missing",
+            "invalid",
+            "unresolved"
+          ]
+        },
+        "sha256": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "detail": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "fileIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "sha256"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "sourceFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "sha256"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "sourceTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "category",
+        "slug",
+        "language",
+        "execution_input_state"
+      ],
+      "properties": {
+        "category": {
+          "enum": [
+            "L1",
+            "L2",
+            "FIB",
+            "Quant"
+          ]
+        },
+        "slug": {
+          "type": "string",
+          "minLength": 1
+        },
+        "language": {
+          "type": "string",
+          "minLength": 1
+        },
+        "execution_input_state": {
+          "type": "object"
+        }
+      }
+    },
+    "sourceClosure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "fixed_files",
+        "targets"
+      ],
+      "properties": {
+        "fixed_files": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/sourceFile"
+          }
+        },
+        "targets": {
+          "type": "array",
+          "minItems": 201,
+          "maxItems": 201,
+          "items": {
+            "$ref": "#/$defs/sourceTarget"
+          }
+        }
+      }
+    }
+  }
+}

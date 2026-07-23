@@ -1,0 +1,23 @@
+---
+title: "13.2. Branch Predication"
+section: "13.2"
+source: "https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/#branch-predication"
+---
+
+## [13.2. Branch Predication](https://docs.nvidia.com/cuda/cuda-c-best-practices-guide#branch-predication)[](https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/#branch-predication "Permalink to this headline")
+
+> **Note**
+>
+> **Low Priority:** Make it easy for the compiler to use branch predication in lieu of loops or control statements.
+
+Sometimes, the compiler may unroll loops or optimize out `if` or `switch` statements by using branch predication instead. In these cases, no warp can ever diverge. The programmer can also control loop unrolling using
+
+```c++
+#pragma unroll
+```
+
+For more information on this pragma, refer to the CUDA C++ Programming Guide.
+
+When using branch predication, none of the instructions whose execution depends on the controlling condition is skipped. Instead, each such instruction is associated with a per-thread condition code or predicate that is set to true or false according to the controlling condition. Although each of these instructions is scheduled for execution, only the instructions with a true predicate are actually executed. Instructions with a false predicate do not write results, and they also do not evaluate addresses or read operands.
+
+The compiler replaces a branch instruction with predicated instructions only if the number of instructions controlled by the branch condition is less than or equal to a certain threshold.

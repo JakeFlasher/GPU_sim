@@ -1,0 +1,62 @@
+{
+  "algorithm_version": "smith_eklund_lru_v1",
+  "bootstrap_resamples": 2000,
+  "bootstrap_seed": 0,
+  "cache_layer": "L2",
+  "cache_model_capacity_bytes": 33554432,
+  "cache_model_cross_launch_state_carryover": false,
+  "cache_model_cta_interleave_enabled": false,
+  "cache_model_hrd_second_layer_enabled": false,
+  "cache_model_num_l2_slices": 1,
+  "cache_model_num_l2_slices_source": "constant",
+  "canonical_pre_calibration_features": {
+    "footprint_ratio": 2.874998092651367,
+    "global_share": 0.0,
+    "gridDim_density": 0.0,
+    "intra_lane_reuse": 0.007751937984496124,
+    "long_rd_tail_mass": 0.0,
+    "raw_prediction": 0.9375
+  },
+  "ci_confidence": 0.95,
+  "ci_half_width": 0.0,
+  "ci_high": 0.9375,
+  "ci_low": 0.9375,
+  "device": "NVIDIA GeForce RTX 5060 Laptop GPU",
+  "epsilon": 0.01,
+  "evidence": {
+    "cross_launch_state_carryover_applied_launch_count": 0,
+    "grid_dim_correction_alpha": 0.0,
+    "grid_dim_correction_penalty": 0.0,
+    "grid_dim_input": null,
+    "launch_count": 1,
+    "per_launch_hit_rates": [
+      0.9375
+    ],
+    "populated_launch_count": 1,
+    "predicted_hit_rate_uncorrected": 0.9375,
+    "total_observations": 3145728
+  },
+  "grid_dim_alpha_source": "sm120_uncalibrated",
+  "input_sidecar_digests": {
+    "dynamic_trace_pb": {
+      "path": "workloads/portable_lcd/results/embedding_gather_int32_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/dynamic_trace.pb",
+      "sha256": "3d2918fbc8518c615f032849ff42f4ff9f0e46503fcc2537262a6b096a8ce25a"
+    },
+    "sector_stream": {
+      "path": "workloads/portable_lcd/results/embedding_gather_int32_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/sector_stream/sector_stream.jsonl",
+      "sha256": "5a9948cc9fb0d595f3baad31b70db8fccfe59e797e61e4217a1f7e14ec0eed3e"
+    }
+  },
+  "manifest_pairing_index": {
+    "arch": "sm_120",
+    "binary_sha256": "dcb271c1c12b862a132394c073b7a356848d565f42d6833a7065427edbd371da",
+    "kernel_signature_sha256": "863e9fd4e7a8b34eccefe560a171b81f994328f2089568076e8ca771f8d8ee73",
+    "shape_point": "timing_shape",
+    "slug": "embedding_gather_int32_sm80",
+    "source_commit": "7d5a3979ae26add1a09ff5cc7085e8674610d108"
+  },
+  "predicted_hit_rate": 0.9375,
+  "result_kind": "scalar",
+  "schema_version": 1,
+  "sector_size_bytes": 32
+}

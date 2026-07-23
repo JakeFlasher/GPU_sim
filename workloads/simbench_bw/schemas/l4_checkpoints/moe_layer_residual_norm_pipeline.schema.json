@@ -1,0 +1,103 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "simbench_bw/schemas/l4_checkpoints/moe_layer_residual_norm_pipeline.schema.json",
+  "title": "L4 checkpoint: moe_layer_residual_norm_pipeline",
+  "description": "Canonical serialized intermediate-state schema captured at the routed-token-layout boundary between the router and the grouped-GEMM expert dispatch. Emitted by run_suite.py --mode correctness --component-strict for the moe_layer_residual_norm_pipeline row.",
+  "schema_version": 1,
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "slug",
+    "checkpoint_name",
+    "expert_ids_per_token",
+    "permuted_tokens",
+    "expert_offsets",
+    "routing_weights"
+  ],
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "slug": { "type": "string", "const": "moe_layer_residual_norm_pipeline" },
+    "checkpoint_name": { "type": "string", "const": "router_to_grouped_gemm_boundary" },
+    "expert_ids_per_token": {
+      "type": "object",
+      "description": "Top-k expert IDs selected per token by the router.",
+      "additionalProperties": false,
+      "required": ["shape", "dtype", "digest"],
+      "properties": {
+        "shape": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 1 },
+          "minItems": 2,
+          "maxItems": 2,
+          "description": "[num_tokens, top_k]"
+        },
+        "dtype": { "type": "string", "enum": ["int32", "int64"] },
+        "digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "permuted_tokens": {
+      "type": "object",
+      "description": "Token activations after router permutation, laid out contiguously by destination expert.",
+      "additionalProperties": false,
+      "required": ["shape", "dtype", "digest"],
+      "properties": {
+        "shape": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 1 },
+          "minItems": 2,
+          "maxItems": 2,
+          "description": "[num_tokens * top_k, hidden_dim]"
+        },
+        "dtype": { "type": "string", "enum": ["bfloat16", "float16", "float8_e4m3"] },
+        "digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    },
+    "expert_offsets": {
+      "type": "object",
+      "description": "Per-expert starting index into permuted_tokens. A prefix-sum-style vector with one trailing sentinel equal to num_tokens * top_k.",
+      "additionalProperties": false,
+      "required": ["shape", "dtype", "values"],
+      "properties": {
+        "shape": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 1 },
+          "minItems": 1,
+          "maxItems": 1,
+          "description": "[num_experts + 1]"
+        },
+        "dtype": { "type": "string", "enum": ["int32", "int64"] },
+        "values": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 0 }
+        }
+      }
+    },
+    "routing_weights": {
+      "type": "object",
+      "description": "Normalized routing-weight values used at combine time for each (token, top_k_slot) pair.",
+      "additionalProperties": false,
+      "required": ["shape", "dtype", "digest"],
+      "properties": {
+        "shape": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 1 },
+          "minItems": 2,
+          "maxItems": 2,
+          "description": "[num_tokens, top_k]"
+        },
+        "dtype": { "type": "string", "enum": ["bfloat16", "float16", "float32"] },
+        "digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    }
+  }
+}

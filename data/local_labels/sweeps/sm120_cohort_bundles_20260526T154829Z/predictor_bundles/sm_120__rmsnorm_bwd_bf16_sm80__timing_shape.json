@@ -1,0 +1,62 @@
+{
+  "algorithm_version": "smith_eklund_lru_v1",
+  "bootstrap_resamples": 2000,
+  "bootstrap_seed": 0,
+  "cache_layer": "L2",
+  "cache_model_capacity_bytes": 33554432,
+  "cache_model_cross_launch_state_carryover": false,
+  "cache_model_cta_interleave_enabled": false,
+  "cache_model_hrd_second_layer_enabled": false,
+  "cache_model_num_l2_slices": 1,
+  "cache_model_num_l2_slices_source": "constant",
+  "canonical_pre_calibration_features": {
+    "footprint_ratio": 1.85870361328125,
+    "global_share": 1.0,
+    "gridDim_density": 0.0,
+    "intra_lane_reuse": 0.7012522361359571,
+    "long_rd_tail_mass": 0.0,
+    "raw_prediction": 0.9730747767857143
+  },
+  "ci_confidence": 0.95,
+  "ci_half_width": 0.0,
+  "ci_high": 0.9730747767857143,
+  "ci_low": 0.9730747767857143,
+  "device": "NVIDIA GeForce RTX 5060 Laptop GPU",
+  "epsilon": 0.01,
+  "evidence": {
+    "cross_launch_state_carryover_applied_launch_count": 0,
+    "grid_dim_correction_alpha": 0.0,
+    "grid_dim_correction_penalty": 0.0,
+    "grid_dim_input": null,
+    "launch_count": 1,
+    "per_launch_hit_rates": [
+      0.9730747767857143
+    ],
+    "populated_launch_count": 1,
+    "predicted_hit_rate_uncorrected": 0.9730747767857143,
+    "total_observations": 1998464
+  },
+  "grid_dim_alpha_source": "sm120_uncalibrated",
+  "input_sidecar_digests": {
+    "dynamic_trace_pb": {
+      "path": "workloads/portable_lcd/results/rmsnorm_bwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/dynamic_trace.pb",
+      "sha256": "0b3e9597c5f8c1487e311b3ce11a093601fa2f2cc5a90722b6895280830072ec"
+    },
+    "sector_stream": {
+      "path": "workloads/portable_lcd/results/rmsnorm_bwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/sector_stream/sector_stream.jsonl",
+      "sha256": "dfdecf54f74e498662199f332d22eadca7c632d15a55c885ec7b32b0dd09f2f5"
+    }
+  },
+  "manifest_pairing_index": {
+    "arch": "sm_120",
+    "binary_sha256": "bc1182e6b697a2d47811f8786f453d2daba5f427ae5a96fcb9113b5537720a56",
+    "kernel_signature_sha256": "5bb76f97dce755520ee9f4e2fae94e9af4f26d5c0928abd3a05681888b94413c",
+    "shape_point": "timing_shape",
+    "slug": "rmsnorm_bwd_bf16_sm80",
+    "source_commit": "d8785e3aadacfbd7b4fc50ba2848ba100a57f018"
+  },
+  "predicted_hit_rate": 0.9730747767857143,
+  "result_kind": "scalar",
+  "schema_version": 1,
+  "sector_size_bytes": 32
+}

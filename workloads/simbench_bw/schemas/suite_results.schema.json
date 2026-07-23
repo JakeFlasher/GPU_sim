@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "simbench_bw/schemas/suite_results.schema.json",
+  "title": "SimBench-BW suite results",
+  "description": "Aggregate per-row result record produced by run_suite.py. Every row written here has a sibling measurement_manifest.json; rows carry a status field whose value is one of unsupported / build_failed / correctness_failed / sampled / native. Vendor-control rows appear under vendor_control_only and do not count toward subsystem coverage.",
+  "schema_version": 1,
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "git_commit",
+    "suite_tag_candidate",
+    "cuda_version",
+    "driver_version",
+    "trace_budgets_sha256",
+    "rows",
+    "vendor_control_only"
+  ],
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "git_commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{7,40}$",
+      "description": "Repo git commit the run was produced from. Frozen for release-tag reproducibility."
+    },
+    "suite_tag_candidate": {
+      "oneOf": [
+        { "type": "null" },
+        { "type": "string", "enum": ["v0.1", "v0.5", "v1.0.0"] }
+      ]
+    },
+    "cuda_version": { "type": "string" },
+    "driver_version": { "type": "string" },
+    "trace_budgets_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "SHA-256 of workloads/simbench_bw/trace_budgets.toml."
+    },
+    "rows": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/row_result" }
+    },
+    "vendor_control_only": {
+      "type": "array",
+      "description": "Vendor-library control rows reported separately and excluded from headline scoring and subsystem-coverage counts.",
+      "items": { "$ref": "#/$defs/row_result" }
+    }
+  },
+  "$defs": {
+    "row_result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["slug", "status", "platform"],
+      "properties": {
+        "slug": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+        "platform": {
+          "type": "string",
+          "enum": ["h100", "rtx_pro_6000_blackwell", "rtx_5060_laptop", "rtx_3090_ti", "dry_run_cpu"],
+          "description": "Release-gating platform or `dry_run_cpu` for artifacts emitted by `run_suite.py --dry-run-cpu`. The latter is never promoted to scored status on a reporting platform; it exists so AC32 non-hardware harness plumbing can emit a schema-valid suite_results.json under --component-strict even on hosts without a real GPU probe."
+        },
+        "status": {
+          "type": "string",
+          "enum": ["unsupported", "build_failed", "correctness_failed", "sampled", "native"],
+          "description": "Execution-outcome status. scaffold is a roster-lifecycle state and does not appear in execution results; a row in scaffold state is simply omitted from suite_results.json."
+        },
+        "timing_ms": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "median": { "type": "number", "exclusiveMinimum": 0 },
+            "cv_pct": { "type": "number", "minimum": 0 },
+            "warm_up_iters": { "type": "integer", "minimum": 0 },
+            "repeat_iters": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "component_health": {
+          "type": "array",
+          "description": "L4 pipeline rows: per-component pass/fail and checkpoint-artifact references. Absent for non-L4 rows.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["component", "passed"],
+            "properties": {
+              "component": { "type": "string" },
+              "passed": { "type": "boolean" },
+              "checkpoint_artifact": { "type": "string" }
+            }
+          }
+        },
+        "measurement_manifest_path": {
+          "type": "string",
+          "description": "Relative path to the sibling measurement_manifest.json."
+        },
+        "reason": {
+          "type": "string",
+          "description": "For non-native statuses, a short machine-readable cause (e.g. sm_120a_only, nvcc_error, tolerance_exceeded, trace_shape_overbudget)."
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "status": { "const": "native" } } },
+          "then": { "required": ["timing_ms", "measurement_manifest_path"] }
+        },
+        {
+          "if": { "properties": { "status": { "const": "sampled" } } },
+          "then": { "required": ["timing_ms", "measurement_manifest_path"] }
+        },
+        {
+          "if": { "properties": { "status": { "const": "correctness_failed" } } },
+          "then": { "not": { "required": ["timing_ms"] } }
+        }
+      ]
+    }
+  }
+}

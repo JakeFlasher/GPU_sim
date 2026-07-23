@@ -1,0 +1,43 @@
+{
+  "name": "problem_046_attention_softmax_with_softcapping_and_dropout_cuda_cpp",
+  "definition": "046_attention_softmax_with_softcapping_and_dropout",
+  "author": "sol-baselines-codegen",
+  "spec": {
+    "languages": [
+      "cuda_cpp"
+    ],
+    "target_hardware": [
+      "LOCAL"
+    ],
+    "entry_point": "main.cpp::run",
+    "dependencies": [],
+    "destination_passing_style": true,
+    "binding": "torch",
+    "compile_options": {
+      "cflags": [],
+      "cuda_cflags": [
+        "-O3",
+        "--use_fast_math",
+        "-gencode",
+        "arch=compute_86,code=sm_86"
+      ],
+      "ld_flags": [
+        "-lcuda"
+      ]
+    }
+  },
+  "sources": [
+    {
+      "path": "main.cpp",
+      "content": "#include <torch/extension.h>\n#include <ATen/cuda/CUDAContext.h>\n#include \"kernel.h\"\n#include <string>\n\nstatic void check_bf16_contiguous_cuda(\n    const torch::Tensor& tensor, const std::string& name) {\n    TORCH_CHECK(tensor.is_cuda(), name, \" must be a CUDA tensor\");\n    TORCH_CHECK(\n        tensor.dtype() == torch::kBFloat16,\n        name, \" must have bfloat16 dtype, got \", tensor.dtype());\n    TORCH_CHECK(tensor.is_contiguous(), name, \" must be contiguous\");\n}\n\n// Destination-passing-style entry. definition.json declares:\n//   attn_weights : [batch_size, num_heads, seq_len_q, seq_len_k]  bf16\n//   output       : [batch_size, num_heads, seq_len_q, seq_len_k]  bf16 (DPS)\n//\n// num_heads is constant at 8 per definition.json. softcap=30 is\n// pinned. Algorithm:\n//   softcapped = tanh(attn_weights / 30) * 30\n//   output     = softmax(softcapped, dim=-1, fp32 upcast)\nvoid run(\n    const torch::Tensor& attn_weights,\n    torch::Tensor output\n) {\n    TORCH_CHECK(attn_weights.dim() == 4,\n                \"attn_weights must be 4D [B, H, Q, K]; got \",\n                attn_weights.dim(), \"D\");\n    TORCH_CHECK(output.dim() == 4, \"output must be 4D\");\n    TORCH_CHECK(attn_weights.sizes() == output.sizes(),\n                \"output shape must match attn_weights\");\n\n    const int64_t num_heads = attn_weights.size(1);\n    TORCH_CHECK(num_heads == 8,\n                \"num_heads must be 8 for problem_046, got \", num_heads);\n\n    check_bf16_contiguous_cuda(attn_weights, \"attn_weights\");\n    check_bf16_contiguous_cuda(output, \"output\");\n\n    cudaStream_t stream = at::cuda::getCurrentCUDAStream();\n    problem_046_attention_softmax_softcap_launcher(\n        attn_weights, output, stream);\n}\n\nPYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {\n    m.def(\n        \"run\", &run,\n        \"BF16 attention softmax with Gemma3 logit softcapping \"\n        \"(tanh-based \u00b130 clamp) and fp32-upcast numerical-stability \"\n        \"softmax over the last (K) axis. One CTA per (B, H, Q) row. \"\n        \"Destination-passing style.\");\n}\n"
+    },
+    {
+      "path": "kernel.cu",
+      "content": "#include \"kernel.h\"\n#include <cuda_bf16.h>\n#include <cuda_runtime.h>\n\n// BF16 attention softmax with Gemma3 logit softcapping.\n//\n// Per the problem definition, the reference does:\n//   softcapped = tanh(attn_weights / 30) * 30   # element-wise softcap\n//   output     = softmax(softcapped, dim=-1, dtype=fp32).to(bf16)\n//\n// One CTA per row (B*H*Q rows). Threads cooperatively:\n//   pass 1: load x, apply softcap, reduce row max in fp32\n//   pass 2: load x, apply softcap, reduce sum of exp(softcap - max)\n//   pass 3: load x, apply softcap, write exp(softcap - max) / sum as bf16\n//\n// The softcap (tanh + 2 muls) is recomputed in each pass rather\n// than cached in shared memory; for typical seq_len_k (the\n// workload sweep covers seq_len_k up to ~1024) the recompute\n// cost is dominated by the bf16 global load, and avoiding the\n// shared-memory cache keeps occupancy high.\n\nnamespace {\n\nconstexpr float kSoftcap = 30.0f;\nconstexpr float kInvSoftcap = 1.0f / kSoftcap;  // 1/30\n\n__device__ __forceinline__ float softcap_f(float x) {\n    return tanhf(x * kInvSoftcap) * kSoftcap;\n}\n\n__device__ inline float warp_all_reduce_max(float val) {\n    for (int offset = 16; offset > 0; offset >>= 1) {\n        val = fmaxf(val, __shfl_xor_sync(0xFFFFFFFFu, val, offset));\n    }\n    return val;\n}\n\n__device__ inline float warp_all_reduce_sum(float val) {\n    for (int offset = 16; offset > 0; offset >>= 1) {\n        val += __shfl_xor_sync(0xFFFFFFFFu, val, offset);\n    }\n    return val;\n}\n\nconstexpr int kBlockThreads = 256;\nconstexpr int kMaxWarps = 32;\n\n__global__ void __launch_bounds__(kBlockThreads, 4)\nproblem_046_attention_softmax_softcap_kernel(\n    const __nv_bfloat16* __restrict__ attn_weights,\n    __nv_bfloat16* __restrict__ output,\n    int seq_len_k) {\n\n    const int row = blockIdx.x;\n    const __nv_bfloat16* xr = attn_weights + (size_t)row * seq_len_k;\n    __nv_bfloat16* yr = output + (size_t)row * seq_len_k;\n    const int tid = threadIdx.x;\n\n    // Pass 1: find row max of softcap(x).\n    float thread_max = -1e30f;\n    #pragma unroll 1\n    for (int k = tid; k < seq_len_k; k += kBlockThreads) {\n        float x = __bfloat162float(__ldg(xr + k));\n        thread_max = fmaxf(thread_max, softcap_f(x));\n    }\n\n    thread_max = warp_all_reduce_max(thread_max);\n\n    __shared__ float s_warp[kMaxWarps];\n    const int lane = tid & 31;\n    const int warp = tid >> 5;\n    const int num_warps = (kBlockThreads + 31) >> 5;\n    if (lane == 0) s_warp[warp] = thread_max;\n    __syncthreads();\n\n    if (warp == 0) {\n        float partial = (lane < num_warps) ? s_warp[lane] : -1e30f;\n        partial = warp_all_reduce_max(partial);\n        if (lane == 0) s_warp[0] = partial;\n    }\n    __syncthreads();\n    const float row_max = s_warp[0];\n\n    // Pass 2: sum of exp(softcap(x) - row_max).\n    float thread_sum = 0.0f;\n    #pragma unroll 1\n    for (int k = tid; k < seq_len_k; k += kBlockThreads) {\n        float x = __bfloat162float(__ldg(xr + k));\n        thread_sum += __expf(softcap_f(x) - row_max);\n    }\n\n    thread_sum = warp_all_reduce_sum(thread_sum);\n    if (lane == 0) s_warp[warp] = thread_sum;\n    __syncthreads();\n\n    if (warp == 0) {\n        float partial = (lane < num_warps) ? s_warp[lane] : 0.0f;\n        partial = warp_all_reduce_sum(partial);\n        if (lane == 0) s_warp[0] = partial;\n    }\n    __syncthreads();\n    const float row_sum = s_warp[0];\n    const float inv_row_sum = 1.0f / row_sum;\n\n    // Pass 3: write exp(softcap(x) - row_max) / row_sum as bf16.\n    #pragma unroll 1\n    for (int k = tid; k < seq_len_k; k += kBlockThreads) {\n        float x = __bfloat162float(__ldg(xr + k));\n        float y = __expf(softcap_f(x) - row_max) * inv_row_sum;\n        yr[k] = __float2bfloat16(y);\n    }\n}\n\n}  // namespace\n\nvoid problem_046_attention_softmax_softcap_launcher(\n    const torch::Tensor& attn_weights,\n    torch::Tensor& output,\n    cudaStream_t stream) {\n\n    // attn_weights is [B, H, Q, K] bf16; one CTA per row over B*H*Q.\n    const int seq_len_k = static_cast<int>(attn_weights.size(3));\n    const int n_rows = static_cast<int>(\n        attn_weights.size(0) * attn_weights.size(1) * attn_weights.size(2));\n\n    dim3 grid(n_rows);\n    dim3 block(kBlockThreads);\n\n    problem_046_attention_softmax_softcap_kernel<<<grid, block, 0, stream>>>(\n        reinterpret_cast<const __nv_bfloat16*>(attn_weights.data_ptr<at::BFloat16>()),\n        reinterpret_cast<__nv_bfloat16*>(output.data_ptr<at::BFloat16>()),\n        seq_len_k);\n}\n"
+    },
+    {
+      "path": "kernel.h",
+      "content": "#pragma once\n\n#ifndef PROBLEM_046_ATTENTION_SOFTMAX_SOFTCAP_KERNEL_H\n#define PROBLEM_046_ATTENTION_SOFTMAX_SOFTCAP_KERNEL_H\n\n#include <cuda_runtime.h>\n#include <torch/extension.h>\n\n// Host launcher for the BF16 attention-softmax-with-softcapping kernel.\n//\n// Input `attn_weights` is [batch_size, num_heads, seq_len_q,\n// seq_len_k] BF16 contiguous; `output` is pre-allocated with the\n// same shape (destination-passing style). Algorithm:\n//\n//   softcapped = tanh(attn_weights / 30) * 30\n//   output = softmax(softcapped, dim=-1, fp32 upcast)\n//\n// One CTA per row over batch_size * num_heads * seq_len_q rows;\n// each row spans seq_len_k columns. The reduction (max, then sum)\n// runs in fp32 for numerical stability and downcasts to BF16 on\n// store. num_heads=8 is pinned; softcap=30 is pinned.\nvoid problem_046_attention_softmax_softcap_launcher(\n    const torch::Tensor& attn_weights,\n    torch::Tensor& output,\n    cudaStream_t stream);\n\n#endif  // PROBLEM_046_ATTENTION_SOFTMAX_SOFTCAP_KERNEL_H\n"
+    }
+  ]
+}

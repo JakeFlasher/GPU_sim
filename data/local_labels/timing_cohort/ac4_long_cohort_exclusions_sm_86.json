@@ -1,0 +1,7 @@
+{
+  "arch": "sm_86",
+  "artifact_kind": "ac4_long_cohort_exclusions",
+  "exclusions": [],
+  "schema_version": 1,
+  "source_commit": "d8a5b887093263debcd3a9931644e315a56735f3"
+}

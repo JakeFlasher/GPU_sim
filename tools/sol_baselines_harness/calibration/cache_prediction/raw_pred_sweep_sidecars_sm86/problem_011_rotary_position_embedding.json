@@ -1,0 +1,53 @@
+{
+  "by_assoc": {
+    "16": {
+      "raw_l1_hit_rate": 0.9748046875,
+      "raw_l2_hit_rate": 0.0,
+      "scored": true,
+      "typed_reason": ""
+    },
+    "32": {
+      "raw_l1_hit_rate": 0.9748046875,
+      "raw_l2_hit_rate": 0.0,
+      "scored": true,
+      "typed_reason": ""
+    },
+    "4": {
+      "raw_l1_hit_rate": 0.9748046875,
+      "raw_l2_hit_rate": 0.0,
+      "scored": true,
+      "typed_reason": ""
+    },
+    "64": {
+      "raw_l1_hit_rate": 0.9748046875,
+      "raw_l2_hit_rate": 0.0,
+      "scored": true,
+      "typed_reason": ""
+    },
+    "8": {
+      "raw_l1_hit_rate": 0.9748046875,
+      "raw_l2_hit_rate": 0.0,
+      "scored": true,
+      "typed_reason": ""
+    }
+  },
+  "candidates": [
+    4,
+    8,
+    16,
+    32,
+    64
+  ],
+  "captured_at_utc": "2026-05-30T00:55:21+00:00",
+  "dense_reuse": {
+    "distinct_sectors": 66576,
+    "reuse_factor": 3.691420331651045,
+    "total_sector_accesses": 245760,
+    "truncated": false
+  },
+  "schema_version": 2,
+  "scored": true,
+  "slug": "problem_011_rotary_position_embedding",
+  "tier2_sidecar_sha256": "d75a85ab9a35eff7a6cf0b5b457446f4acd430ae79299091b1627d3e4310ea8c",
+  "typed_reason": ""
+}

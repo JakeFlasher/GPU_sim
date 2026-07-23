@@ -1,0 +1,293 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "replay_count_emissions",
+  "description": "Per-cell replay-count producer emissions reconstructed from unsampled NVBit traces under the observation contract. Every cell is either emitted (per-metric scored/typed map + coverage denominators) or cell-level typed; every emission carries the closed identity tuple. Consumed by the lockstep validator via closed-identity join only.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_kind",
+    "arch",
+    "n_cells",
+    "n_emitted",
+    "n_typed",
+    "cells"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "artifact_kind": {
+      "const": "replay_count_emissions"
+    },
+    "arch": {
+      "type": "string",
+      "minLength": 1
+    },
+    "contract_build_binary_sha256": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "n_cells": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "n_emitted": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "n_typed": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "cells": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "identity",
+          "cell_status"
+        ],
+        "properties": {
+          "identity": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "arch",
+              "slug",
+              "shape_point",
+              "binary_sha256",
+              "kernel_signature_sha256"
+            ],
+            "properties": {
+              "arch": {
+                "type": "string"
+              },
+              "slug": {
+                "type": "string",
+                "minLength": 1
+              },
+              "shape_point": {
+                "type": "string",
+                "minLength": 1
+              },
+              "variant_id": {
+                "type": "string"
+              },
+              "binary_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "kernel_signature_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "source_commit": {
+                "type": "string"
+              }
+            }
+          },
+          "cell_status": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "status": {
+                "enum": [
+                  "emitted",
+                  "typed"
+                ]
+              },
+              "typed_reason": {
+                "enum": [
+                  "trace_absent",
+                  "trace_sidecar_absent",
+                  "trace_binary_stale",
+                  "kernel_signature_mismatch",
+                  "trace_support_insufficient"
+                ]
+              },
+              "detail": {
+                "type": "string"
+              }
+            }
+          },
+          "metrics": {
+            "type": "object",
+            "minProperties": 1,
+            "additionalProperties": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "status"
+              ],
+              "properties": {
+                "status": {
+                  "enum": [
+                    "scored",
+                    "typed"
+                  ]
+                },
+                "value": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "typed_reason": {
+                  "enum": [
+                    "contract_entry_missing",
+                    "contract_mismatch",
+                    "contract_underdetermined",
+                    "no_expressible_fixture",
+                    "atom_red_sass_unresolved",
+                    "surface_kind_wire_unresolved",
+                    "sector_scope_misaligned_footprint",
+                    "lane_reconstruction_failed",
+                    "rollup_unsupported",
+                    "async_copy_unfixtured"
+                  ]
+                },
+                "detail": {
+                  "type": "string"
+                }
+              },
+              "allOf": [
+                {
+                  "if": {
+                    "properties": {
+                      "status": {
+                        "const": "scored"
+                      }
+                    }
+                  },
+                  "then": {
+                    "required": [
+                      "value"
+                    ]
+                  }
+                },
+                {
+                  "if": {
+                    "properties": {
+                      "status": {
+                        "const": "typed"
+                      }
+                    }
+                  },
+                  "then": {
+                    "required": [
+                      "typed_reason"
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          "coverage": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "modeled_warp_instructions",
+              "excluded_warp_instructions_by_class",
+              "unspecified_warp_instructions",
+              "reconstruction_failures"
+            ],
+            "properties": {
+              "modeled_warp_instructions": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "excluded_warp_instructions_by_class": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "integer",
+                  "minimum": 0
+                }
+              },
+              "unspecified_warp_instructions": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "reconstruction_failures": {
+                "type": "integer",
+                "minimum": 0
+              }
+            }
+          },
+          "trace_provenance": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "trace_dir": {
+                "type": "string"
+              },
+              "threadblock_files": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "trace_pb_sha256": {
+                "type": [
+                  "string",
+                  "null"
+                ]
+              }
+            }
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "cell_status": {
+                  "properties": {
+                    "status": {
+                      "const": "emitted"
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ]
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "metrics",
+                "coverage",
+                "trace_provenance"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "cell_status": {
+                  "properties": {
+                    "status": {
+                      "const": "typed"
+                    }
+                  },
+                  "required": [
+                    "status"
+                  ]
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "cell_status": {
+                  "required": [
+                    "typed_reason"
+                  ]
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  }
+}

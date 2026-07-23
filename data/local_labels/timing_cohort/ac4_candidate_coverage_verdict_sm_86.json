@@ -1,0 +1,21 @@
+{
+  "arch": "sm_86",
+  "artifact_kind": "timing_candidate_coverage_verdict",
+  "coverage_limits_artifact": {
+    "path": "data/local_labels/timing_cohort/ac4_candidate_coverage_limits_sm_86.json",
+    "sha256": "09ca821098baf916ea5d610430bb73a6bfa326c170a3052092b62b570de3d60f"
+  },
+  "detail": "The admitted long-duration timing cohort contains same-binary, label-complete, feature-complete cells for every required task5 candidate family.",
+  "prevents_overall_research_success": false,
+  "required_family_buckets": [
+    "gemm_family",
+    "conv",
+    "attention",
+    "memory_stress"
+  ],
+  "schema_version": 1,
+  "source_commit": "d8a5b887093263debcd3a9931644e315a56735f3",
+  "terminal_state": "research_success",
+  "typed_reason": null,
+  "uncovered_required_families": []
+}

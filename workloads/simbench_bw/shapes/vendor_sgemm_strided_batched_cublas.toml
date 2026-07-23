@@ -1,0 +1,43 @@
+schema_version = 1
+slug = "vendor_sgemm_strided_batched_cublas"
+
+# Vendor-library control row: cuBLAS FP32 strided-batched GEMM
+# C_i = A_i @ B_i (i in [0, batch_count)) via cublasSgemmStridedBatched
+# under CUBLAS_PEDANTIC_MATH. The pedantic math-mode lock forbids
+# TF32 / HMMA / tensor-core dispatch, forcing the FP32 FFMA SIMT
+# kernel ampere_sgemm_128x128_nn so the trace stays clean under the
+# canonical NVBit tracer's HMMA opcode parser.
+# tier = control -> excluded from headline scoring per AC34.
+# trace_budget_mib = 64.
+# batch_count IS load-bearing for the strided-batched API and
+# appears in every shape's axes (the kernel grid's Z dimension
+# equals batch_count).
+
+[[timing_shapes]]
+name = "timing_00"
+axes = { m = 1024, n = 1024, k = 1024, batch_count = 4 }
+launch_config = { grid = [8, 8, 4], block = [256, 1, 1] }
+warm_up_iters = 1
+repeat_iters = 3
+
+[[trace_shapes]]
+name = "trace_00"
+axes = { m = 32, n = 32, k = 32, batch_count = 4 }
+launch_config = { grid = [1, 1, 4], block = [256, 1, 1] }
+# 20971520 = 4 (batch_count) * 5242880 (single-batch baseline that
+# the static estimator at workloads/simbench_bw/trace_size_estimator.py
+# uses for vendor cuBLAS GEMM at M=N=K=32). The initial catalog
+# entry incorrectly copied the single-batch 5242880 from the
+# vendor_gemm_cublas template without scaling by batch_count;
+# the estimator flagged it at trace_prediction_stale. The
+# follow-up repair set the correct factor-4 value, and the
+# catalog-lockstep test now calls the estimator's validate_slug()
+# to prevent recurrence.
+predicted_bytes = 20971520
+estimator_source = "static"
+
+[[correctness_shapes]]
+name = "correctness_00"
+axes = { m = 8, n = 8, k = 8, batch_count = 2 }
+launch_config = { grid = [1, 1, 2], block = [32, 1, 1] }
+digest_kind = "full_tensor"

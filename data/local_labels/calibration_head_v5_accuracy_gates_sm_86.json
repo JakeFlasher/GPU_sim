@@ -1,0 +1,154 @@
+{
+  "admitted_count": 40,
+  "deferred_cross_arch": {
+    "ledger_citation": {
+      "ledger_path": "data/local_labels/sm86_cohort_regen_ledger.json",
+      "note": "the sm_86 lane carries live sm_86 evidence (see ledger); the cross-architecture transfer legs and the joint same-74 falsification verdict require the matching sm_120-session live witness and are deferred -- no finite cross-architecture number is asserted here",
+      "sm_86_admitted_count": 40,
+      "sm_86_live_evidence_status": [
+        "Verified-live-sm_86"
+      ]
+    },
+    "slices": [
+      "same_74",
+      "same_30_under_same74_head",
+      "sm_120_only",
+      "holdout_same_74"
+    ],
+    "status": "deferred_cross_arch_requires_sm120_session"
+  },
+  "gates": {
+    "full_cohort_geomean_relative_error": 0.06420432161340295,
+    "full_cohort_median_absolute_error": 0.05922904761904757,
+    "holdout_geomean_relative_error": 0.055243148694820644,
+    "holdout_status": "ok",
+    "per_bucket_p90_absolute_error": {
+      "sm_86/activation_norm": {
+        "gate_status": "advisory_n_below_threshold",
+        "n": 3,
+        "p90_absolute_error": 0.247156
+      },
+      "sm_86/memory_stress": {
+        "gate_status": "fail",
+        "n": 9,
+        "p90_absolute_error": 0.23457000000000006
+      },
+      "sm_86/other": {
+        "gate_status": "fail",
+        "n": 15,
+        "p90_absolute_error": 0.35872500000000007
+      },
+      "sm_86/tensor_compute": {
+        "gate_status": "advisory_n_below_threshold",
+        "n": 7,
+        "p90_absolute_error": 0.015572571428571498
+      }
+    },
+    "weighted_advisory_status": "deferred_observations_count_not_in_head"
+  },
+  "per_slice": {
+    "same_30_frozen_b1646ef7": {
+      "committed_artifact_available": true,
+      "committed_metrics": {
+        "full_cohort_geomean_relative_error": 0.06896409793527734,
+        "full_cohort_median_absolute_error": 0.075494347770317,
+        "holdout_geomean_relative_error": 0.3010478394945453,
+        "per_bucket_p90/sm_120/activation_norm": 0.14849257142857145,
+        "per_bucket_p90/sm_120/memory_stress": 0.4344849083445244,
+        "per_bucket_p90/sm_120/other": 0.305811483979437,
+        "per_bucket_p90/sm_120/tensor_compute": 0.07070100000000001
+      },
+      "compared_metric_keys": [
+        "full_cohort_geomean_relative_error",
+        "full_cohort_median_absolute_error",
+        "holdout_geomean_relative_error",
+        "per_bucket_p90/sm_120/activation_norm",
+        "per_bucket_p90/sm_120/memory_stress",
+        "per_bucket_p90/sm_120/other",
+        "per_bucket_p90/sm_120/tensor_compute"
+      ],
+      "frozen_b1646ef7_drift": false,
+      "frozen_ref": "b1646ef7",
+      "max_abs_diff": 0.0,
+      "metrics_only_in_committed": [],
+      "metrics_only_in_replay": [],
+      "per_metric_abs_diff": {
+        "full_cohort_geomean_relative_error": 0.0,
+        "full_cohort_median_absolute_error": 0.0,
+        "holdout_geomean_relative_error": 0.0,
+        "per_bucket_p90/sm_120/activation_norm": 0.0,
+        "per_bucket_p90/sm_120/memory_stress": 0.0,
+        "per_bucket_p90/sm_120/other": 0.0,
+        "per_bucket_p90/sm_120/tensor_compute": 0.0
+      },
+      "replay_metrics": {
+        "full_cohort_geomean_relative_error": 0.06896409793527734,
+        "full_cohort_median_absolute_error": 0.075494347770317,
+        "holdout_geomean_relative_error": 0.3010478394945453,
+        "per_bucket_p90/sm_120/activation_norm": 0.14849257142857145,
+        "per_bucket_p90/sm_120/memory_stress": 0.4344849083445244,
+        "per_bucket_p90/sm_120/other": 0.305811483979437,
+        "per_bucket_p90/sm_120/tensor_compute": 0.07070100000000001
+      },
+      "replay_status": "ok",
+      "tolerance": 1e-09,
+      "within_tolerance": true
+    },
+    "sm_86_only": {
+      "admitted_count": 40,
+      "gates": {
+        "full_cohort_geomean_relative_error": 0.06420432161340295,
+        "full_cohort_median_absolute_error": 0.05922904761904757,
+        "holdout_geomean_relative_error": 0.055243148694820644,
+        "holdout_status": "ok",
+        "per_bucket_p90_absolute_error": {
+          "sm_86/activation_norm": {
+            "gate_status": "advisory_n_below_threshold",
+            "n": 3,
+            "p90_absolute_error": 0.247156
+          },
+          "sm_86/memory_stress": {
+            "gate_status": "fail",
+            "n": 9,
+            "p90_absolute_error": 0.23457000000000006
+          },
+          "sm_86/other": {
+            "gate_status": "fail",
+            "n": 15,
+            "p90_absolute_error": 0.35872500000000007
+          },
+          "sm_86/tensor_compute": {
+            "gate_status": "advisory_n_below_threshold",
+            "n": 7,
+            "p90_absolute_error": 0.015572571428571498
+          }
+        },
+        "weighted_advisory_status": "deferred_observations_count_not_in_head"
+      },
+      "status": "ok",
+      "verdict": {
+        "ac_3_1_full_cohort_median_abs": "pass",
+        "ac_3_2_full_cohort_geomean_rel": "pass",
+        "ac_3_3_holdout_geomean_rel": "pass",
+        "ac_3_4_per_bucket_p90": "see_per_bucket_p90_absolute_error"
+      }
+    }
+  },
+  "schema_version": 1,
+  "scope": "sm_86_only",
+  "source_commit": "e56cd825afde2ae8748e4a9987e86d52acdf5cd9",
+  "source_v5_head_commit": "e56cd825afde2ae8748e4a9987e86d52acdf5cd9",
+  "status": "ok",
+  "thresholds": {
+    "full_cohort_geomean_relative_error_max": 0.15,
+    "full_cohort_median_absolute_error_max": 0.06,
+    "holdout_geomean_relative_error_max": 0.25,
+    "per_bucket_p90_absolute_error_max": 0.15
+  },
+  "verdict": {
+    "ac_3_1_full_cohort_median_abs": "pass",
+    "ac_3_2_full_cohort_geomean_rel": "pass",
+    "ac_3_3_holdout_geomean_rel": "pass",
+    "ac_3_4_per_bucket_p90": "see_per_bucket_p90_absolute_error"
+  }
+}

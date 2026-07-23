@@ -1,0 +1,528 @@
+{
+  "schema_version": 1,
+  "registry_id": "sm120_multi_claim_closure_registry_v1",
+  "arch": "sm_120",
+  "registry_version": "cache_memory_registry_v1",
+  "cross_arch_precondition": false,
+  "source_artifact_paths": {
+    "duration_predictor_report": "data/local_labels/duration_predictor_report.json",
+    "duration_leg_closure": "data/local_labels/sm120_tri_label_engineering_closure.json",
+    "l1l2_frozen_grain_closure": "data/local_labels/sm120_l1l2_frozen_grain_engineering_closure.json",
+    "cache_metric_closure": "data/local_labels/sm120_cache_metric_closure.json"
+  },
+  "records": [
+    {
+      "target_id": "duration_ns",
+      "kind": "duration",
+      "ac_coverage": [
+        "wall_clock_duration_prediction"
+      ],
+      "verdict": "engineering_closure_refuted",
+      "evidence_artifact_paths": [
+        "data/local_labels/duration_predictor_report.json",
+        "data/local_labels/sm120_tri_label_engineering_closure.json"
+      ],
+      "verified_live_sm120_proof": {
+        "gpu": "NVIDIA GeForce RTX 5060 Laptop GPU",
+        "compute_capability": "sm_120",
+        "driver": "595.71.05",
+        "cuda": "13.2",
+        "nvbit": "nvbit dynamic trace via tools/nvbit_tracer (tracer_tool.so, sm_120 build)",
+        "observed_clocks": "clock-control none (clocks not locked; boost clocks observed)",
+        "label_source": "cupti dual-source duration_ns (CUPTI Activity reconciled against cudaEventElapsedTime); the wall-clock label is never NCU-derived"
+      },
+      "success_or_falsification_details": "wall-clock duration predictor closure: engineering_closure_refuted; the held-out predictor does not beat the strongest baseline (shape_size_only, held-out SMAPE 0.8909669279230985)",
+      "cross_arch_precondition": false
+    },
+    {
+      "target_id": "dram_read_sectors",
+      "kind": "count",
+      "ac_coverage": [
+        "counter_free_cache_metric_prediction"
+      ],
+      "verdict": "engineering_closure_refuted",
+      "evidence_artifact_paths": [
+        "data/local_labels/sm120_cache_metric_closure.json"
+      ],
+      "verified_live_sm120_proof": {
+        "gpu": "NVIDIA GeForce RTX 5060 Laptop GPU",
+        "compute_capability": "sm_120",
+        "driver": "595.71.05",
+        "cuda": "13.2",
+        "nvbit": "nvbit dynamic trace via tools/nvbit_tracer (tracer_tool.so, sm_120 build)",
+        "observed_clocks": "clock-control none (clocks not locked; boost clocks observed)",
+        "label_source": "ncu local-quarantine sector hit-rate labels (data/local_labels/) compared to a deterministic L1-miss-filtered replay over live NVBit traces (ncu 2026.1.1.0)"
+      },
+      "success_or_falsification_details": "cache-metric closure basis: aggregation_domain_mismatch",
+      "cross_arch_precondition": false
+    },
+    {
+      "target_id": "dram_total_sectors",
+      "kind": "count",
+      "ac_coverage": [
+        "counter_free_cache_metric_prediction"
+      ],
+      "verdict": "engineering_closure_refuted",
+      "evidence_artifact_paths": [
+        "data/local_labels/sm120_cache_metric_closure.json"
+      ],
+      "verified_live_sm120_proof": {
+        "gpu": "NVIDIA GeForce RTX 5060 Laptop GPU",
+        "compute_capability": "sm_120",
+        "driver": "595.71.05",
+        "cuda": "13.2",
+        "nvbit": "nvbit dynamic trace via tools/nvbit_tracer (tracer_tool.so, sm_120 build)",
+        "observed_clocks": "clock-control none (clocks not locked; boost clocks observed)",
+        "label_source": "ncu local-quarantine sector hit-rate labels (data/local_labels/) compared to a deterministic L1-miss-filtered replay over live NVBit traces (ncu 2026.1.1.0)"
+      },
+      "success_or_falsification_details": "cache-metric closure basis: aggregation_domain_mismatch",
+      "cross_arch_precondition": false
+    },
+    {
+      "target_id": "dram_write_sectors",
+      "kind": "count",
+      "ac_coverage": [
+        "counter_free_cache_metric_prediction"
+      ],
+      "verdict": "engineering_closure_refuted",
+      "evidence_artifact_paths": [
+        "data/local_labels/sm120_cache_metric_closure.json"
+      ],
+      "verified_live_sm120_proof": {
+        "gpu": "NVIDIA GeForce RTX 5060 Laptop GPU",
+        "compute_capability": "sm_120",
+        "driver": "595.71.05",
+        "cuda": "13.2",
+        "nvbit": "nvbit dynamic trace via tools/nvbit_tracer (tracer_tool.so, sm_120 build)",
+        "observed_clocks": "clock-control none (clocks not locked; boost clocks observed)",
+        "label_source": "ncu local-quarantine sector hit-rate labels (data/local_labels/) compared to a deterministic L1-miss-filtered replay over live NVBit traces (ncu 2026.1.1.0)"
+      },
+      "success_or_falsification_details": "cache-metric closure basis: aggregation_domain_mismatch",
+      "cross_arch_precondition": false
+    },
+    {
+      "target_id": "gmem_atom_red_requests",
+      "kind": "count",
+      "ac_coverage": [
+        "counter_free_cache_metric_prediction"
+      ],
+      "verdict": "engineering_closure_refuted",
+      "evidence_artifact_paths": [
+        "data/local_labels/sm120_cache_metric_closure.json"
+      ],
+      "verified_live_sm120_proof": {
+        "gpu": "NVIDIA GeForce RTX 5060 Laptop GPU",
+        "compute_capability": "sm_120",
+        "driver": "595.71.05",
+        "cuda": "13.2",
+        "nvbit": "nvbit dynamic trace via tools/nvbit_tracer (tracer_tool.so, sm_120 build)",
+        "observed_clocks": "clock-control none (clocks not locked; boost clocks observed)",
+        "label_source": "ncu local-quarantine sector hit-rate labels (data/local_labels/) compared to a deterministic L1-miss-filtered replay over live NVBit traces (ncu 2026.1.1.0)"
+      },
+      "success_or_falsification_details": "cache-metric closure basis: comparable_mapping_no_label_cohort",
+      "cross_arch_precondition": false
+    },
+    {
+      "target_id": "gmem_ld_sectors_per_request",
+      "kind": "ratio",
+      "ac_coverage": [
+        "counter_free_cache_metric_prediction"
+      ],
+      "verdict": "engineering_closure_refuted",
+      "evidence_artifact_paths": [
+        "data/local_labels/sm120_cache_metric_closure.json"
+      ],
+      "verified_live_sm120_proof": {
+        "gpu": "NVIDIA GeForce RTX 5060 Laptop GPU",
+        "compute_capability": "sm_120",
+        "driver": "595.71.05",
+        "cuda": "13.2",
+        "nvbit": "nvbit dynamic trace via tools/nvbit_tracer (tracer_tool.so, sm_120 build)",
+        "observed_clocks": "clock-control none (clocks not locked; boost clocks observed)",
+        "label_source": "ncu local-quarantine sector hit-rate labels (data/local_labels/) compared to a deterministic L1-miss-filtered replay over live NVBit traces (ncu 2026.1.1.0)"
+      },
+      "success_or_falsification_details": "cache-metric closure basis: comparable_mapping_no_label_cohort",
+      "cross_arch_precondition": false
+    },
+    {
+      "target_id": "gmem_st_sectors_per_request",
+      "kind": "ratio",
+      "ac_coverage": [
+        "counter_free_cache_metric_prediction"
+      ],
+      "verdict": "engineering_closure_refuted",
+      "evidence_artifact_paths": [
+        "data/local_labels/sm120_cache_metric_closure.json"
+      ],
+      "verified_live_sm120_proof": {
+        "gpu": "NVIDIA GeForce RTX 5060 Laptop GPU",
+        "compute_capability": "sm_120",
+        "driver": "595.71.05",
+        "cuda": "13.2",
+        "nvbit": "nvbit dynamic trace via tools/nvbit_tracer (tracer_tool.so, sm_120 build)",
+        "observed_clocks": "clock-control none (clocks not locked; boost clocks observed)",
+        "label_source": "ncu local-quarantine sector hit-rate labels (data/local_labels/) compared to a deterministic L1-miss-filtered replay over live NVBit traces (ncu 2026.1.1.0)"
+      },
+      "success_or_falsification_details": "cache-metric closure basis: comparable_mapping_no_label_cohort",
+      "cross_arch_precondition": false
+    },
+    {
+      "target_id": "gmem_total_requests",
+      "kind": "count",
+      "ac_coverage": [
+        "counter_free_cache_metric_prediction"
+      ],
+      "verdict": "engineering_closure_refuted",
+      "evidence_artifact_paths": [
+        "data/local_labels/sm120_cache_metric_closure.json"
+      ],
+      "verified_live_sm120_proof": {
+        "gpu": "NVIDIA GeForce RTX 5060 Laptop GPU",
+        "compute_capability": "sm_120",
+        "driver": "595.71.05",
+        "cuda": "13.2",
+        "nvbit": "nvbit dynamic trace via tools/nvbit_tracer (tracer_tool.so, sm_120 build)",
+        "observed_clocks": "clock-control none (clocks not locked; boost clocks observed)",
+        "label_source": "ncu local-quarantine sector hit-rate labels (data/local_labels/) compared to a deterministic L1-miss-filtered replay over live NVBit traces (ncu 2026.1.1.0)"
+      },
+      "success_or_falsification_details": "cache-metric closure basis: comparable_mapping_no_label_cohort",
+      "cross_arch_precondition": false
+    },
+    {
+      "target_id": "gmem_total_sectors",
+      "kind": "count",
+      "ac_coverage": [
+        "counter_free_cache_metric_prediction"
+      ],
+      "verdict": "engineering_closure_refuted",
+      "evidence_artifact_paths": [
+        "data/local_labels/sm120_cache_metric_closure.json"
+      ],
+      "verified_live_sm120_proof": {
+        "gpu": "NVIDIA GeForce RTX 5060 Laptop GPU",
+        "compute_capability": "sm_120",
+        "driver": "595.71.05",
+        "cuda": "13.2",
+        "nvbit": "nvbit dynamic trace via tools/nvbit_tracer (tracer_tool.so, sm_120 build)",
+        "observed_clocks": "clock-control none (clocks not locked; boost clocks observed)",
+        "label_source": "ncu local-quarantine sector hit-rate labels (data/local_labels/) compared to a deterministic L1-miss-filtered replay over live NVBit traces (ncu 2026.1.1.0)"
+      },
+      "success_or_falsification_details": "cache-metric closure basis: comparable_mapping_no_label_cohort",
+      "cross_arch_precondition": false
+    },
+    {
+      "target_id": "l1tex_global_op_atom_requests",
+      "kind": "count",
+      "ac_coverage": [
+        "counter_free_cache_metric_prediction"
+      ],
+      "verdict": "engineering_closure_refuted",
+      "evidence_artifact_paths": [
+        "data/local_labels/sm120_cache_metric_closure.json"
+      ],
+      "verified_live_sm120_proof": {
+        "gpu": "NVIDIA GeForce RTX 5060 Laptop GPU",
+        "compute_capability": "sm_120",
+        "driver": "595.71.05",
+        "cuda": "13.2",
+        "nvbit": "nvbit dynamic trace via tools/nvbit_tracer (tracer_tool.so, sm_120 build)",
+        "observed_clocks": "clock-control none (clocks not locked; boost clocks observed)",
+        "label_source": "ncu local-quarantine sector hit-rate labels (data/local_labels/) compared to a deterministic L1-miss-filtered replay over live NVBit traces (ncu 2026.1.1.0)"
+      },
+      "success_or_falsification_details": "cache-metric closure basis: comparable_mapping_no_label_cohort",
+      "cross_arch_precondition": false
+    },
+    {
+      "target_id": "l1tex_global_op_ld_requests",
+      "kind": "count",
+      "ac_coverage": [
+        "counter_free_cache_metric_prediction"
+      ],
+      "verdict": "engineering_closure_refuted",
+      "evidence_artifact_paths": [
+        "data/local_labels/sm120_cache_metric_closure.json"
+      ],
+      "verified_live_sm120_proof": {
+        "gpu": "NVIDIA GeForce RTX 5060 Laptop GPU",
+        "compute_capability": "sm_120",
+        "driver": "595.71.05",
+        "cuda": "13.2",
+        "nvbit": "nvbit dynamic trace via tools/nvbit_tracer (tracer_tool.so, sm_120 build)",
+        "observed_clocks": "clock-control none (clocks not locked; boost clocks observed)",
+        "label_source": "ncu local-quarantine sector hit-rate labels (data/local_labels/) compared to a deterministic L1-miss-filtered replay over live NVBit traces (ncu 2026.1.1.0)"
+      },
+      "success_or_falsification_details": "cache-metric closure basis: comparable_mapping_no_label_cohort",
+      "cross_arch_precondition": false
+    },
+    {
+      "target_id": "l1tex_global_op_ld_sector_hit_rate",
+      "kind": "fraction",
+      "ac_coverage": [
+        "counter_free_cache_metric_prediction"
+      ],
+      "verdict": "engineering_closure_refuted",
+      "evidence_artifact_paths": [
+        "data/local_labels/sm120_cache_metric_closure.json"
+      ],
+      "verified_live_sm120_proof": {
+        "gpu": "NVIDIA GeForce RTX 5060 Laptop GPU",
+        "compute_capability": "sm_120",
+        "driver": "595.71.05",
+        "cuda": "13.2",
+        "nvbit": "nvbit dynamic trace via tools/nvbit_tracer (tracer_tool.so, sm_120 build)",
+        "observed_clocks": "clock-control none (clocks not locked; boost clocks observed)",
+        "label_source": "ncu local-quarantine sector hit-rate labels (data/local_labels/) compared to a deterministic L1-miss-filtered replay over live NVBit traces (ncu 2026.1.1.0)"
+      },
+      "success_or_falsification_details": "cache-metric closure basis: no_committed_global_op_ld_l1_label_cohort",
+      "cross_arch_precondition": false
+    },
+    {
+      "target_id": "l1tex_global_op_ld_sectors",
+      "kind": "count",
+      "ac_coverage": [
+        "counter_free_cache_metric_prediction"
+      ],
+      "verdict": "engineering_closure_refuted",
+      "evidence_artifact_paths": [
+        "data/local_labels/sm120_cache_metric_closure.json"
+      ],
+      "verified_live_sm120_proof": {
+        "gpu": "NVIDIA GeForce RTX 5060 Laptop GPU",
+        "compute_capability": "sm_120",
+        "driver": "595.71.05",
+        "cuda": "13.2",
+        "nvbit": "nvbit dynamic trace via tools/nvbit_tracer (tracer_tool.so, sm_120 build)",
+        "observed_clocks": "clock-control none (clocks not locked; boost clocks observed)",
+        "label_source": "ncu local-quarantine sector hit-rate labels (data/local_labels/) compared to a deterministic L1-miss-filtered replay over live NVBit traces (ncu 2026.1.1.0)"
+      },
+      "success_or_falsification_details": "cache-metric closure basis: comparable_mapping_no_label_cohort",
+      "cross_arch_precondition": false
+    },
+    {
+      "target_id": "l1tex_global_op_red_requests",
+      "kind": "count",
+      "ac_coverage": [
+        "counter_free_cache_metric_prediction"
+      ],
+      "verdict": "engineering_closure_refuted",
+      "evidence_artifact_paths": [
+        "data/local_labels/sm120_cache_metric_closure.json"
+      ],
+      "verified_live_sm120_proof": {
+        "gpu": "NVIDIA GeForce RTX 5060 Laptop GPU",
+        "compute_capability": "sm_120",
+        "driver": "595.71.05",
+        "cuda": "13.2",
+        "nvbit": "nvbit dynamic trace via tools/nvbit_tracer (tracer_tool.so, sm_120 build)",
+        "observed_clocks": "clock-control none (clocks not locked; boost clocks observed)",
+        "label_source": "ncu local-quarantine sector hit-rate labels (data/local_labels/) compared to a deterministic L1-miss-filtered replay over live NVBit traces (ncu 2026.1.1.0)"
+      },
+      "success_or_falsification_details": "cache-metric closure basis: comparable_mapping_no_label_cohort",
+      "cross_arch_precondition": false
+    },
+    {
+      "target_id": "l1tex_global_op_st_requests",
+      "kind": "count",
+      "ac_coverage": [
+        "counter_free_cache_metric_prediction"
+      ],
+      "verdict": "engineering_closure_refuted",
+      "evidence_artifact_paths": [
+        "data/local_labels/sm120_cache_metric_closure.json"
+      ],
+      "verified_live_sm120_proof": {
+        "gpu": "NVIDIA GeForce RTX 5060 Laptop GPU",
+        "compute_capability": "sm_120",
+        "driver": "595.71.05",
+        "cuda": "13.2",
+        "nvbit": "nvbit dynamic trace via tools/nvbit_tracer (tracer_tool.so, sm_120 build)",
+        "observed_clocks": "clock-control none (clocks not locked; boost clocks observed)",
+        "label_source": "ncu local-quarantine sector hit-rate labels (data/local_labels/) compared to a deterministic L1-miss-filtered replay over live NVBit traces (ncu 2026.1.1.0)"
+      },
+      "success_or_falsification_details": "cache-metric closure basis: comparable_mapping_no_label_cohort",
+      "cross_arch_precondition": false
+    },
+    {
+      "target_id": "l1tex_global_op_st_sectors",
+      "kind": "count",
+      "ac_coverage": [
+        "counter_free_cache_metric_prediction"
+      ],
+      "verdict": "engineering_closure_refuted",
+      "evidence_artifact_paths": [
+        "data/local_labels/sm120_cache_metric_closure.json"
+      ],
+      "verified_live_sm120_proof": {
+        "gpu": "NVIDIA GeForce RTX 5060 Laptop GPU",
+        "compute_capability": "sm_120",
+        "driver": "595.71.05",
+        "cuda": "13.2",
+        "nvbit": "nvbit dynamic trace via tools/nvbit_tracer (tracer_tool.so, sm_120 build)",
+        "observed_clocks": "clock-control none (clocks not locked; boost clocks observed)",
+        "label_source": "ncu local-quarantine sector hit-rate labels (data/local_labels/) compared to a deterministic L1-miss-filtered replay over live NVBit traces (ncu 2026.1.1.0)"
+      },
+      "success_or_falsification_details": "cache-metric closure basis: comparable_mapping_no_label_cohort",
+      "cross_arch_precondition": false
+    },
+    {
+      "target_id": "l1tex_sector_hit_rate",
+      "kind": "fraction",
+      "ac_coverage": [
+        "counter_free_cache_metric_prediction"
+      ],
+      "verdict": "engineering_closure_refuted",
+      "evidence_artifact_paths": [
+        "data/local_labels/sm120_cache_metric_closure.json"
+      ],
+      "verified_live_sm120_proof": {
+        "gpu": "NVIDIA GeForce RTX 5060 Laptop GPU",
+        "compute_capability": "sm_120",
+        "driver": "595.71.05",
+        "cuda": "13.2",
+        "nvbit": "nvbit dynamic trace via tools/nvbit_tracer (tracer_tool.so, sm_120 build)",
+        "observed_clocks": "clock-control none (clocks not locked; boost clocks observed)",
+        "label_source": "ncu local-quarantine sector hit-rate labels (data/local_labels/) compared to a deterministic L1-miss-filtered replay over live NVBit traces (ncu 2026.1.1.0)"
+      },
+      "success_or_falsification_details": "cache-metric closure basis: l1_filtered_replay_l1_sector_hit_rate_refuted_l1_classification_inert",
+      "cross_arch_precondition": false
+    },
+    {
+      "target_id": "l1tex_total_requests",
+      "kind": "count",
+      "ac_coverage": [
+        "counter_free_cache_metric_prediction"
+      ],
+      "verdict": "engineering_closure_refuted",
+      "evidence_artifact_paths": [
+        "data/local_labels/sm120_cache_metric_closure.json"
+      ],
+      "verified_live_sm120_proof": {
+        "gpu": "NVIDIA GeForce RTX 5060 Laptop GPU",
+        "compute_capability": "sm_120",
+        "driver": "595.71.05",
+        "cuda": "13.2",
+        "nvbit": "nvbit dynamic trace via tools/nvbit_tracer (tracer_tool.so, sm_120 build)",
+        "observed_clocks": "clock-control none (clocks not locked; boost clocks observed)",
+        "label_source": "ncu local-quarantine sector hit-rate labels (data/local_labels/) compared to a deterministic L1-miss-filtered replay over live NVBit traces (ncu 2026.1.1.0)"
+      },
+      "success_or_falsification_details": "cache-metric closure basis: aggregation_domain_mismatch",
+      "cross_arch_precondition": false
+    },
+    {
+      "target_id": "l2_read_sectors_lg_op_ld",
+      "kind": "count",
+      "ac_coverage": [
+        "counter_free_cache_metric_prediction"
+      ],
+      "verdict": "engineering_closure_refuted",
+      "evidence_artifact_paths": [
+        "data/local_labels/sm120_cache_metric_closure.json"
+      ],
+      "verified_live_sm120_proof": {
+        "gpu": "NVIDIA GeForce RTX 5060 Laptop GPU",
+        "compute_capability": "sm_120",
+        "driver": "595.71.05",
+        "cuda": "13.2",
+        "nvbit": "nvbit dynamic trace via tools/nvbit_tracer (tracer_tool.so, sm_120 build)",
+        "observed_clocks": "clock-control none (clocks not locked; boost clocks observed)",
+        "label_source": "ncu local-quarantine sector hit-rate labels (data/local_labels/) compared to a deterministic L1-miss-filtered replay over live NVBit traces (ncu 2026.1.1.0)"
+      },
+      "success_or_falsification_details": "cache-metric closure basis: comparable_mapping_no_label_cohort",
+      "cross_arch_precondition": false
+    },
+    {
+      "target_id": "l2_total_sectors",
+      "kind": "count",
+      "ac_coverage": [
+        "counter_free_cache_metric_prediction"
+      ],
+      "verdict": "engineering_closure_refuted",
+      "evidence_artifact_paths": [
+        "data/local_labels/sm120_cache_metric_closure.json"
+      ],
+      "verified_live_sm120_proof": {
+        "gpu": "NVIDIA GeForce RTX 5060 Laptop GPU",
+        "compute_capability": "sm_120",
+        "driver": "595.71.05",
+        "cuda": "13.2",
+        "nvbit": "nvbit dynamic trace via tools/nvbit_tracer (tracer_tool.so, sm_120 build)",
+        "observed_clocks": "clock-control none (clocks not locked; boost clocks observed)",
+        "label_source": "ncu local-quarantine sector hit-rate labels (data/local_labels/) compared to a deterministic L1-miss-filtered replay over live NVBit traces (ncu 2026.1.1.0)"
+      },
+      "success_or_falsification_details": "cache-metric closure basis: comparable_mapping_no_label_cohort",
+      "cross_arch_precondition": false
+    },
+    {
+      "target_id": "l2_write_sectors_lg_op_st",
+      "kind": "count",
+      "ac_coverage": [
+        "counter_free_cache_metric_prediction"
+      ],
+      "verdict": "engineering_closure_refuted",
+      "evidence_artifact_paths": [
+        "data/local_labels/sm120_cache_metric_closure.json"
+      ],
+      "verified_live_sm120_proof": {
+        "gpu": "NVIDIA GeForce RTX 5060 Laptop GPU",
+        "compute_capability": "sm_120",
+        "driver": "595.71.05",
+        "cuda": "13.2",
+        "nvbit": "nvbit dynamic trace via tools/nvbit_tracer (tracer_tool.so, sm_120 build)",
+        "observed_clocks": "clock-control none (clocks not locked; boost clocks observed)",
+        "label_source": "ncu local-quarantine sector hit-rate labels (data/local_labels/) compared to a deterministic L1-miss-filtered replay over live NVBit traces (ncu 2026.1.1.0)"
+      },
+      "success_or_falsification_details": "cache-metric closure basis: comparable_mapping_no_label_cohort",
+      "cross_arch_precondition": false
+    },
+    {
+      "target_id": "lts_sector_hit_rate",
+      "kind": "fraction",
+      "ac_coverage": [
+        "counter_free_cache_metric_prediction"
+      ],
+      "verdict": "engineering_closure_refuted",
+      "evidence_artifact_paths": [
+        "data/local_labels/sm120_cache_metric_closure.json"
+      ],
+      "verified_live_sm120_proof": {
+        "gpu": "NVIDIA GeForce RTX 5060 Laptop GPU",
+        "compute_capability": "sm_120",
+        "driver": "595.71.05",
+        "cuda": "13.2",
+        "nvbit": "nvbit dynamic trace via tools/nvbit_tracer (tracer_tool.so, sm_120 build)",
+        "observed_clocks": "clock-control none (clocks not locked; boost clocks observed)",
+        "label_source": "ncu local-quarantine sector hit-rate labels (data/local_labels/) compared to a deterministic L1-miss-filtered replay over live NVBit traces (ncu 2026.1.1.0)"
+      },
+      "success_or_falsification_details": "cache-metric closure basis: l1_filtered_replay_accuracy_gate_failed_l1_classification_inert",
+      "cross_arch_precondition": false
+    },
+    {
+      "target_id": "lts_srcunit_tex_requests",
+      "kind": "count",
+      "ac_coverage": [
+        "counter_free_cache_metric_prediction"
+      ],
+      "verdict": "engineering_closure_refuted",
+      "evidence_artifact_paths": [
+        "data/local_labels/sm120_cache_metric_closure.json"
+      ],
+      "verified_live_sm120_proof": {
+        "gpu": "NVIDIA GeForce RTX 5060 Laptop GPU",
+        "compute_capability": "sm_120",
+        "driver": "595.71.05",
+        "cuda": "13.2",
+        "nvbit": "nvbit dynamic trace via tools/nvbit_tracer (tracer_tool.so, sm_120 build)",
+        "observed_clocks": "clock-control none (clocks not locked; boost clocks observed)",
+        "label_source": "ncu local-quarantine sector hit-rate labels (data/local_labels/) compared to a deterministic L1-miss-filtered replay over live NVBit traces (ncu 2026.1.1.0)"
+      },
+      "success_or_falsification_details": "cache-metric closure basis: aggregation_domain_mismatch",
+      "cross_arch_precondition": false
+    }
+  ],
+  "record_counts": {
+    "total": 23,
+    "research_success": 0,
+    "engineering_closure_refuted": 23
+  },
+  "source_commit": "a03ce527aea7c513f0468eed5cf546358d85c53e"
+}

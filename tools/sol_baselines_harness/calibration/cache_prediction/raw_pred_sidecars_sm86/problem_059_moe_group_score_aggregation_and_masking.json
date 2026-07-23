@@ -1,0 +1,14 @@
+{
+  "associativity_l2": 16,
+  "captured_at_utc": "2026-05-29T22:35:23+00:00",
+  "geometry_source": "sm86_pilot_static_device_card_v1",
+  "language": "cuda_cpp",
+  "num_l2_slices": 6,
+  "raw_l1_hit_rate": 0.0,
+  "raw_l2_hit_rate": 0.0,
+  "schema_version": 1,
+  "scored": true,
+  "slug": "problem_059_moe_group_score_aggregation_and_masking",
+  "tier2_sidecar_sha256": "1ee35304bd51bbc780887d4340c158ebc87b17c4f2198eb386e1d6ff8c25dcd0",
+  "typed_reason": ""
+}

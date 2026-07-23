@@ -1,0 +1,79 @@
+{
+  "arch": "sm_86",
+  "artifact_kind": "stale_binary_readmission_manifest",
+  "capture_unstable_cells": {
+    "bf16_hmma_gemm_traceable@trace_l2_accuracy_xl": {
+      "binary_sha256_on_disk": "7b9a853a95d8789a4d9fcf99826b2bbe7d093a60e061a06b67dab377fce47d4e",
+      "gate_threshold": 0.03,
+      "l2_stddev_campaign_1_warmup_1": 0.19209788390297278,
+      "l2_stddev_campaign_2_warmup_3": 0.19404113481,
+      "typed_reason": "label_repeatability_failed"
+    },
+    "fp16_hmma_gemm_traceable@trace_l2_accuracy_xl": {
+      "binary_sha256_on_disk": "4a61487e2e7cf44a4b609bdf16a677ebde56fe2bf964ade65963d014098434d3",
+      "gate_threshold": 0.03,
+      "l2_stddev_campaign_1_warmup_1": 0.08018001621351795,
+      "l2_stddev_campaign_2_warmup_3": 0.10168040617,
+      "typed_reason": "label_repeatability_failed"
+    },
+    "softmax_safe_bf16_sm80@timing_shape": {
+      "binary_sha256_on_disk": "18897fbd8ffbb9131df22484c2c1811c86b27a39e43458e3ab1158255757f44b",
+      "campaign_evidence": {
+        "matrix_sweep_dir": "data/local_labels/sweeps/sweep_20260604T135257Z_d04ce439b643",
+        "warmup_1_campaign_1_stddev_l2": 0.0004381780460041442,
+        "warmup_1_campaign_3_orchestrate_stddev_l2": 0.009249216183007048,
+        "warmup_1_campaign_4_matrix_verdict": "no_admitting_config_found",
+        "warmup_5_campaign_2_stddev_l2": 0.03161909233358855
+      },
+      "gate_threshold": 0.03,
+      "note": "Boundary-bimodal L2 repeatability at the rebuilt binary: two campaigns pass and two fail the 0.03 gate; the canonical config-selection harness (sweep_repeatability_matrix) returned no_admitting_config_found. Admission on a lucky campaign would be cherry-picking; the cell stays at its historical identity with count labels typed-unavailable.",
+      "typed_reason": "label_repeatability_failed"
+    }
+  },
+  "note": "Governed re-admission of the stale-binary admitted cells: fresh NCU label capture via orchestrate_sm86_label_recapture (5 repeats + warmup) aggregated through the standard repeatability gate (stddev <= 0.03) and transplanted as whole aggregator-produced rows (no hand-edited pins). The two capture-unstable cells remain admitted at their historical identity: their current on-disk binaries fail the standing L2 repeatability gate across two independent capture campaigns (warmup 1 and 3), so no trustworthy fresh labels exist at any available binary; their replay-count labels are typed-unavailable with this capture evidence. Consumers (the frozen-baseline value cross-check, the count accounting test) treat the readmitted_cells below as era-scoped: their L2/L1 values legitimately moved off the migration-era baseline.",
+  "predictor_bundle_note": "The re-admitted cells' committed predictor bundles still embed the pre-re-admission binary identity (their NVBit traces target the old binaries). A fresh fitter run drops them at the closed-identity bundle join; the ledger rows stay admitted (the LABELS are admitted). The re-trace + bundle rebuild belongs to the walker re-score lane, which re-derives every bundle against the rebuilt walker anyway.",
+  "readmission_head": "5088821eb7e205bcce1678d85e6272063e212cd0",
+  "readmitted_cells": {
+    "gemm_hmma_bf16_sm80@timing_shape": {
+      "evidence": "aggregated via repeatability_aggregator from data/local_labels/sm_86 sidecars, 5 repeats",
+      "new_binary_sha256": "bab4489d033e31a50df904d3246eb37adf3b8e52fa3d8015c008a0ce3147b629",
+      "new_source_commit": "5088821eb7e205bcce1678d85e6272063e212cd0",
+      "old_binary_sha256": "678e939bd0842056cb6e3c3fc585f372f8ec71333c362b05134421ff365397aa",
+      "old_source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7",
+      "predictor_bundle_status": "stale_pre_readmission_identity_pending_retrace"
+    },
+    "gemm_hmma_bf16_sm80@trace_l2_accuracy_xl": {
+      "evidence": "aggregated via repeatability_aggregator from data/local_labels/sm_86 sidecars, 5 repeats",
+      "new_binary_sha256": "bab4489d033e31a50df904d3246eb37adf3b8e52fa3d8015c008a0ce3147b629",
+      "new_source_commit": "5088821eb7e205bcce1678d85e6272063e212cd0",
+      "old_binary_sha256": "678e939bd0842056cb6e3c3fc585f372f8ec71333c362b05134421ff365397aa",
+      "old_source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7",
+      "predictor_bundle_status": "stale_pre_readmission_identity_pending_retrace"
+    },
+    "global_vectorized_64b_copy@trace_l2_accuracy_xl": {
+      "evidence": "aggregated via repeatability_aggregator from data/local_labels/sm_86 sidecars, 5 repeats",
+      "new_binary_sha256": "c0fbee25c22216a1597b42c33a2666c62fa85997f26a4ea67b29b5b8ff7c18b4",
+      "new_source_commit": "5088821eb7e205bcce1678d85e6272063e212cd0",
+      "old_binary_sha256": "d4ea864bfa3e71815cc4773fc84b3796d87861052e40204d408fe7dedd00e0fb",
+      "old_source_commit": "171473f5bfa0ba094543b57f73c619e991b5aa16",
+      "predictor_bundle_status": "stale_pre_readmission_identity_pending_retrace"
+    },
+    "swiglu_fwd_bf16_sm80@timing_shape": {
+      "evidence": "aggregated via repeatability_aggregator from data/local_labels/sm_86 sidecars, 5 repeats",
+      "new_binary_sha256": "64ff4d88480e40732ec85c3d3ce4040fbe695735d1969fd027d4a493b8a3916c",
+      "new_source_commit": "5088821eb7e205bcce1678d85e6272063e212cd0",
+      "old_binary_sha256": "ef9df6be093061fcdeff373b79601b6090c6a50434af7e53503240a683e6b9d9",
+      "old_source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7",
+      "predictor_bundle_status": "stale_pre_readmission_identity_pending_retrace"
+    },
+    "swiglu_fwd_bf16_sm80@trace_l2_accuracy_xl": {
+      "evidence": "aggregated via repeatability_aggregator from data/local_labels/sm_86 sidecars, 5 repeats",
+      "new_binary_sha256": "64ff4d88480e40732ec85c3d3ce4040fbe695735d1969fd027d4a493b8a3916c",
+      "new_source_commit": "5088821eb7e205bcce1678d85e6272063e212cd0",
+      "old_binary_sha256": "ef9df6be093061fcdeff373b79601b6090c6a50434af7e53503240a683e6b9d9",
+      "old_source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7",
+      "predictor_bundle_status": "stale_pre_readmission_identity_pending_retrace"
+    }
+  },
+  "schema_version": 1
+}

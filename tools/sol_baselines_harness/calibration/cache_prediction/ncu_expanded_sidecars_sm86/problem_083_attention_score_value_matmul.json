@@ -1,0 +1,105 @@
+{
+  "argv_clock_policy_flag": "",
+  "argv_provenance": [
+    [
+      "ncu",
+      "--launch-skip",
+      "5",
+      "--launch-count",
+      "1",
+      "--clock-control",
+      "none",
+      "--replay-mode",
+      "kernel",
+      "--section",
+      "MemoryWorkloadAnalysis",
+      "--metrics",
+      "l1tex__t_sector_pipe_lsu_mem_global_op_ld_hit_rate.pct,l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum,l1tex__t_sectors_pipe_lsu_mem_global_op_ld_lookup_hit.sum,lts__t_sectors_srcunit_tex_op_read.sum,lts__t_sectors_srcunit_tex_op_read_lookup_hit.sum",
+      "--csv",
+      "/home/jakeshea/3090ti_5060laptop_cross_study/3090ti_5060laptop_cross_study/solbench_baseline/nvbit_tracer/metric_extractor/tests/calibration_cohort_b/problem_083_attention_score_value_matmul"
+    ],
+    [
+      "ncu",
+      "--launch-skip",
+      "5",
+      "--launch-count",
+      "1",
+      "--clock-control",
+      "none",
+      "--replay-mode",
+      "kernel",
+      "--section",
+      "MemoryWorkloadAnalysis",
+      "--metrics",
+      "l1tex__t_sector_pipe_lsu_mem_global_op_ld_hit_rate.pct,l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum,l1tex__t_sectors_pipe_lsu_mem_global_op_ld_lookup_hit.sum,lts__t_sectors_srcunit_tex_op_read.sum,lts__t_sectors_srcunit_tex_op_read_lookup_hit.sum",
+      "--csv",
+      "/home/jakeshea/3090ti_5060laptop_cross_study/3090ti_5060laptop_cross_study/solbench_baseline/nvbit_tracer/metric_extractor/tests/calibration_cohort_b/problem_083_attention_score_value_matmul"
+    ],
+    [
+      "ncu",
+      "--launch-skip",
+      "5",
+      "--launch-count",
+      "1",
+      "--clock-control",
+      "none",
+      "--replay-mode",
+      "kernel",
+      "--section",
+      "MemoryWorkloadAnalysis",
+      "--metrics",
+      "l1tex__t_sector_pipe_lsu_mem_global_op_ld_hit_rate.pct,l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum,l1tex__t_sectors_pipe_lsu_mem_global_op_ld_lookup_hit.sum,lts__t_sectors_srcunit_tex_op_read.sum,lts__t_sectors_srcunit_tex_op_read_lookup_hit.sum",
+      "--csv",
+      "/home/jakeshea/3090ti_5060laptop_cross_study/3090ti_5060laptop_cross_study/solbench_baseline/nvbit_tracer/metric_extractor/tests/calibration_cohort_b/problem_083_attention_score_value_matmul"
+    ]
+  ],
+  "captured_at_utc": "2026-05-29T21:39:51+00:00",
+  "completed": true,
+  "cv_cap": 0.05,
+  "cv_quarantined": false,
+  "failure_reason": "",
+  "language": "cuda_cpp",
+  "launch_skip_count": 5,
+  "ncu_l1_hit_rate_mean": 0.8503333333333334,
+  "ncu_l2_hit_rate_mean": 0.6317704656544421,
+  "ncu_metric_family": [
+    "l1tex__t_sector_pipe_lsu_mem_global_op_ld_hit_rate.pct",
+    "l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum",
+    "l1tex__t_sectors_pipe_lsu_mem_global_op_ld_lookup_hit.sum",
+    "lts__t_sectors_srcunit_tex_op_read.sum",
+    "lts__t_sectors_srcunit_tex_op_read_lookup_hit.sum"
+  ],
+  "no_read_only_traffic": false,
+  "predictor_bucket": "predictor_friendly",
+  "probe_binary_sha256": "3d990879f0a9d5ac058ba53c5d7bf74406002c93094d119e021153e03f6eeb10",
+  "relative_cv_l1": 0.00017963840434946968,
+  "relative_cv_l2": 0.008969382679458768,
+  "runs": [
+    {
+      "l1_global_load_hit_rate": 0.8502,
+      "l1_global_load_sectors_hit": 127670267,
+      "l1_global_load_sectors_total": 150166320,
+      "l2_read_hit_rate": 0.628370191076503,
+      "l2_read_sectors_hit": 14155590,
+      "l2_read_sectors_total": 22527469
+    },
+    {
+      "l1_global_load_hit_rate": 0.8504999999999999,
+      "l1_global_load_sectors_hit": 127714863,
+      "l1_global_load_sectors_total": 150166057,
+      "l2_read_hit_rate": 0.6383119719619463,
+      "l2_read_sectors_hit": 14351087,
+      "l2_read_sectors_total": 22482873
+    },
+    {
+      "l1_global_load_hit_rate": 0.8503000000000001,
+      "l1_global_load_sectors_hit": 127683756,
+      "l1_global_load_sectors_total": 150166767,
+      "l2_read_hit_rate": 0.6286292339248769,
+      "l2_read_sectors_hit": 14152946,
+      "l2_read_sectors_total": 22513980
+    }
+  ],
+  "schema_version": 2,
+  "slug": "problem_083_attention_score_value_matmul"
+}

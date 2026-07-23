@@ -1,0 +1,54 @@
+# sm_86 5-cell pilot isotonic calibrator params (cross-arch plan task13, AC-9).
+# Fitted on the 5 R18/R19 admitted pilot cells (all predictor_friendly per
+# lookup_predictor_design_coverage). The historical 3+2 calibration/validation split
+# is recorded as meta (its SHA goes below); the fit input itself marks all 5 as
+# calibration_only because the 5-cell pilot is at the coverage smoke floor, and AC-9
+# fits on the full pilot.  Cohort-stratified validation lands at the expanded ledger
+# (AC-11 / AC-13).
+
+[meta]
+schema_version = "1.0"
+arch = "sm_86"
+captured_at_utc = "2026-05-28T23:30:00+00:00"
+ledger_sha256 = "9bc5e96dbb7ad82b2a04b9f654e536cd10ed66de4276a756233f9fd1efb30c96"
+validation_split_sha256 = "270a1f31054afe0b6f7b302acab04d4ffde5086e88a88d7b4148f6c717472377"
+historical_label_split_sha256 = "270a1f31054afe0b6f7b302acab04d4ffde5086e88a88d7b4148f6c717472377"
+fit_record_count = 5
+admitted_cell_count = 5
+calibration_only_cell_names = ["problem_006_hyena_depthwise_conv1d_split_gate", "problem_066_resnet_block_with_time_embedding", "problem_087_embedding_with_initial_layernorm_backward"]
+validation_only_cell_names = ["problem_040_conv2d_residual_block", "problem_073_fused_encoder_final_norm_to_decoder_cross_attention_kv_projection"]
+ncu_version = "Version 2026.1.1.0 (build 37634170) (public-release)"
+driver_version = "595.71.05"
+calibrator_class_name = "IsotonicRegression"
+out_of_bounds = "clip"
+accepted_metric_selectors = ["l1tex__t_sector_pipe_lsu_mem_global_op_ld_hit_rate.pct", "l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum", "l1tex__t_sectors_pipe_lsu_mem_global_op_ld_lookup_hit.sum", "lts__t_sectors_srcunit_tex_op_read.sum", "lts__t_sectors_srcunit_tex_op_read_lookup_hit.sum"]
+calibrator_status = "fitted"
+fit_input_geometry_associativity_l2 = 16
+fit_input_geometry_l2_capacity_bytes_simulator_effective = 6291456
+fit_input_geometry_num_l2_slices = 6
+fit_input_geometry_source = "sm86_pilot_static_device_card_v1"
+ncu_label_aggregation = "median_of_3_runs"
+identity_fit_rejection_epsilon = 1e-09
+
+[meta.per_cell_tier2_sidecar_sha256]
+problem_006_hyena_depthwise_conv1d_split_gate = "3abc868661ac5d8c6c387b6bb8429f82754d46a9653c461163f9ee97b5daa307"
+problem_040_conv2d_residual_block = "0212fd2721de28237f31bf41421c2408efcfb80d54a6ee151a438b4685ba7ec3"
+problem_066_resnet_block_with_time_embedding = "327dc22bfaee3087c8eb8f1091229dca2b56ceca18118e69de847486a1a0243e"
+problem_073_fused_encoder_final_norm_to_decoder_cross_attention_kv_projection = "bcb54372ceb65716d1f8b4d58865984152a633efc8949b29b7a2e8412fddd5d8"
+problem_087_embedding_with_initial_layernorm_backward = "5df7c12a13c5a2ee8f18618d195329f0a3c7b58da7520f520d3adb28f11671d8"
+
+[reproducibility]
+python_version = "3.12.13"
+numpy_version = "2.4.4"
+scipy_version = "1.17.1"
+sklearn_version = "1.8.0"
+fitter_sort_key = "slug_lexicographic"
+float_format = "%r (Python repr)"
+
+[l1_head]
+x_thresholds = [0.21631599913087565, 0.4724609375, 0.5315387237662909, 0.769408326048951, 0.9948309762893643]
+y_thresholds = [0.0748, 0.595, 0.6426000000000001, 0.7651, 0.8427]
+
+[l2_head]
+x_thresholds = [0.0017767488499652274, 0.07507059247925763, 0.11554109031733116]
+y_thresholds = [0.08433478433949515, 0.08433478433949515, 0.9845174344415961]

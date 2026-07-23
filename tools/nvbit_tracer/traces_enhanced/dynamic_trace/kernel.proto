@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+package dynamic_trace;
+
+import "dim3d.proto";
+
+message kernel {
+  int32 id = 1;
+  string name = 2;
+  int32 function_unique_id = 3;
+  int32 size_shared_memory = 4;
+  int32 number_of_registers = 5;
+  int64 shared_memory_base_address = 6;
+  int64 local_memory_base_address = 7;
+  dim3d grid_dim = 8;
+  dim3d block_dim = 9;
+  // Cluster dimension, captured from cudaLaunchAttributeClusterDimension /
+  // CU_LAUNCH_ATTRIBUTE_CLUSTER_DIMENSION when the launch uses
+  // cuLaunchKernelEx. For launches that do not set the cluster attribute
+  // (plain cuLaunchKernel, or cuLaunchKernelEx without the cluster attr),
+  // this field is written as (1,1,1) so a non-cluster launch is
+  // observationally distinct from a stream-less default (which proto3
+  // renders as omitted / (0,0,0)). Downstream readers should treat an
+  // absent or (0,0,0) value as "non-cluster launch" (equivalent to
+  // (1,1,1) cluster of one block).
+  dim3d cluster_dim = 10;
+}

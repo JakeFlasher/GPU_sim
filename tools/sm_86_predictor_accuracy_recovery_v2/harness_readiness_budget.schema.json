@@ -1,0 +1,191 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "harness_readiness_budget",
+  "description": "Harness-derived readiness verdict + per-tier typed-unavailable budget accounting, regenerated deterministically from the per-(cell, metric_key) evidence harness: T1 = zero silent gaps (hard), T2 = typed share vs the <=10% budget (honest MET/MISS), T3 = an explicit diagnostic budget; plus the claim-map binding and the per-metric readiness rows.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_kind",
+    "arch",
+    "generated_at_commit",
+    "harness_source",
+    "harness_config_digest",
+    "claim_map_path",
+    "claim_map_sha256",
+    "tier_budgets",
+    "readiness"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "artifact_kind": { "const": "harness_readiness_budget" },
+    "arch": { "const": "sm_86" },
+    "generated_at_commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "harness_source": { "type": "string", "minLength": 1 },
+    "harness_config_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "claim_map_path": { "type": "string", "minLength": 1 },
+    "claim_map_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "tier_budgets": {
+      "type": "array",
+      "minItems": 3,
+      "maxItems": 3,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "tier",
+          "budget_kind",
+          "budget",
+          "harness_tiers",
+          "n_total",
+          "n_scored",
+          "n_diagnostic",
+          "n_typed_unavailable",
+          "n_silent_gaps",
+          "typed_unavailable_share",
+          "met"
+        ],
+        "properties": {
+          "tier": { "enum": ["T1", "T2", "T3"] },
+          "budget_kind": {
+            "enum": [
+              "zero_silent_gaps",
+              "max_typed_share",
+              "explicit_diagnostic_budget"
+            ]
+          },
+          "budget": { "type": "number" },
+          "harness_tiers": {
+            "type": "array",
+            "minItems": 1,
+            "items": { "type": "string" }
+          },
+          "n_total": { "type": "integer", "minimum": 1 },
+          "n_scored": { "type": "integer", "minimum": 0 },
+          "n_diagnostic": { "type": "integer", "minimum": 0 },
+          "n_typed_unavailable": { "type": "integer", "minimum": 0 },
+          "n_silent_gaps": { "type": "integer", "minimum": 0 },
+          "typed_unavailable_share": {
+            "type": "number",
+            "minimum": 0,
+            "maximum": 1
+          },
+          "met": { "type": "boolean" }
+        }
+      }
+    },
+    "readiness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "overall_status",
+        "n_main_metrics",
+        "per_metric"
+      ],
+      "properties": {
+        "overall_status": {
+          "enum": [
+            "not_submission_grade",
+            "submission_grade_candidate"
+          ]
+        },
+        "n_main_metrics": { "type": "integer", "minimum": 0 },
+        "per_metric": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "tier",
+              "metric_key",
+              "ac_tier",
+              "promotion",
+              "is_fitted",
+              "n_scored",
+              "n_scored_with_error",
+              "n_diagnostic",
+              "n_typed_unavailable",
+              "bucket_tally",
+              "achieved_vs_target",
+              "ci",
+              "strongest_allowed_claim",
+              "promotion_blocker"
+            ],
+            "properties": {
+              "tier": {
+                "enum": ["T1", "L1", "L2", "T2", "cycles", "ns"]
+              },
+              "metric_key": { "type": "string", "minLength": 1 },
+              "ac_tier": { "enum": ["T1", "T2", "T3"] },
+              "promotion": { "enum": ["main", "appendix"] },
+              "is_fitted": { "type": "boolean" },
+              "n_scored": { "type": "integer", "minimum": 0 },
+              "n_scored_with_error": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "n_diagnostic": { "type": "integer", "minimum": 0 },
+              "n_typed_unavailable": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "bucket_tally": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": [
+                  "main",
+                  "appendix",
+                  "diagnostic",
+                  "typed_unavailable"
+                ],
+                "properties": {
+                  "main": { "type": "integer", "minimum": 0 },
+                  "appendix": { "type": "integer", "minimum": 0 },
+                  "diagnostic": { "type": "integer", "minimum": 0 },
+                  "typed_unavailable": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                }
+              },
+              "achieved_vs_target": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "gate",
+                    "achieved",
+                    "target",
+                    "met"
+                  ],
+                  "properties": {
+                    "gate": { "type": "string", "minLength": 1 },
+                    "achieved": { "type": ["number", "null"] },
+                    "target": { "type": ["number", "null"] },
+                    "met": { "type": ["boolean", "null"] }
+                  }
+                }
+              },
+              "ci": { "type": "object" },
+              "strongest_allowed_claim": {
+                "type": "string",
+                "minLength": 1
+              },
+              "promotion_blocker": { "type": ["string", "null"] }
+            }
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,122 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "sm120_l1l2_frozen_grain_engineering_closure",
+  "description": "Engineering-closure of the >=50-cell sm_120 frozen-roster cache-label cohort: infeasible at the frozen (slug, shape_point) grain (duration leg closed + L1/L2 leg repeatability-limited). Every roster cell was live-collected across the two frozen-roster pilots and falls in exactly one of two typed dispositions (admitted_l1l2 vs repeatability_excluded).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "closure_id",
+    "arch",
+    "verdict",
+    "closed_leg",
+    "claims_four_source_roster_satisfied",
+    "roster_total_cells",
+    "required_min_cells",
+    "frozen_roster_l1l2_admitted_count",
+    "repeatability_config",
+    "evidence_artifact_paths",
+    "cell_disposition",
+    "disposition_counts",
+    "rationale",
+    "verified_live_sm120_proof",
+    "source_commit"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "closure_id": {"type": "string", "const": "sm120_l1l2_frozen_grain_engineering_closure_v1"},
+    "arch": {"type": "string", "const": "sm_120"},
+    "verdict": {"type": "string", "const": "engineering_closure_refuted"},
+    "closed_leg": {"type": "string", "const": "l1_l2_frozen_grain"},
+    "claims_four_source_roster_satisfied": {"type": "boolean", "const": false},
+    "roster_total_cells": {"type": "integer", "minimum": 1},
+    "required_min_cells": {"type": "integer", "const": 50},
+    "frozen_roster_l1l2_admitted_count": {"type": "integer", "minimum": 0},
+    "repeatability_config": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["warmup_count", "cache_control", "stddev_threshold", "min_repeats", "note"],
+      "properties": {
+        "warmup_count": {"type": "integer"},
+        "cache_control": {"type": "string"},
+        "stddev_threshold": {"type": "number"},
+        "min_repeats": {"type": "integer"},
+        "note": {"type": "string"}
+      }
+    },
+    "evidence_artifact_paths": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["roster", "canonical_admitted_labels", "pilot_known_admitted_labels", "pilot_known_excluded_labels", "pilot_00_admitted_labels", "pilot_00_excluded_labels", "pilot_known_repeatability", "pilot_00_repeatability", "duration_leg_closure"],
+      "properties": {
+        "roster": {"type": "string", "const": "data/local_labels/sm120_tri_label_roster.json"},
+        "canonical_admitted_labels": {"type": "string", "const": "data/local_labels/label_admitted.json"},
+        "pilot_known_admitted_labels": {"type": "string", "const": "data/local_labels/sm120_frozen_roster_l1l2_pilot/label_admitted.json"},
+        "pilot_known_excluded_labels": {"type": "string", "const": "data/local_labels/sm120_frozen_roster_l1l2_pilot/label_excluded.json"},
+        "pilot_00_admitted_labels": {"type": "string", "const": "data/local_labels/sm120_frozen_roster_l1l2_pilot_00/label_admitted.json"},
+        "pilot_00_excluded_labels": {"type": "string", "const": "data/local_labels/sm120_frozen_roster_l1l2_pilot_00/label_excluded.json"},
+        "pilot_known_repeatability": {"type": "string", "const": "data/local_labels/sm120_frozen_roster_l1l2_pilot/label_repeatability.json"},
+        "pilot_00_repeatability": {"type": "string", "const": "data/local_labels/sm120_frozen_roster_l1l2_pilot_00/label_repeatability.json"},
+        "duration_leg_closure": {"type": "string", "const": "data/local_labels/sm120_tri_label_engineering_closure.json"}
+      }
+    },
+    "cell_disposition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["admitted_l1l2", "repeatability_excluded"],
+      "properties": {
+        "admitted_l1l2": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["slug", "shape_point"],
+            "properties": {
+              "slug": {"type": "string"},
+              "shape_point": {"type": "string"}
+            }
+          }
+        },
+        "repeatability_excluded": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["slug", "shape_point", "typed_reason", "stddev_l2_sector"],
+            "properties": {
+              "slug": {"type": "string"},
+              "shape_point": {"type": "string"},
+              "typed_reason": {"type": "string", "const": "label_repeatability_failed"},
+              "stddev_l2_sector": {"type": "number", "exclusiveMinimum": 0}
+            }
+          }
+        }
+      }
+    },
+    "disposition_counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["admitted_l1l2", "repeatability_excluded", "total"],
+      "properties": {
+        "admitted_l1l2": {"type": "integer", "minimum": 0},
+        "repeatability_excluded": {"type": "integer", "minimum": 0},
+        "total": {"type": "integer", "minimum": 1}
+      }
+    },
+    "rationale": {"type": "string", "minLength": 1},
+    "verified_live_sm120_proof": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["gpu", "compute_capability", "driver", "cuda", "ncu", "clock_control"],
+      "properties": {
+        "gpu": {"type": "string"},
+        "compute_capability": {"type": "string", "const": "sm_120"},
+        "driver": {"type": "string"},
+        "cuda": {"type": "string"},
+        "ncu": {"type": "string"},
+        "clock_control": {"type": "string", "const": "none"}
+      }
+    },
+    "source_commit": {"type": "string", "pattern": "^[0-9a-f]{7,40}$"}
+  }
+}

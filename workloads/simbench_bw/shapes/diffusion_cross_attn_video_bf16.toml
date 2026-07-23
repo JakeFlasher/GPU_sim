@@ -1,0 +1,35 @@
+schema_version = 1
+slug = "diffusion_cross_attn_video_bf16"
+
+# Text-conditioned video cross attention. Q from video tokens
+# [batch, heads, seq_video, head_dim]; K / V from text
+# [batch, heads, seq_text, head_dim]. Output is
+# [batch, heads, seq_video, head_dim] under row-wise softmax over the
+# text sequence. Trace budget = 768 MiB.
+
+[[timing_shapes]]
+name = "timing_00"
+axes = { batch = 4, heads = 16, seq_video = 256, seq_text = 77, head_dim = 64 }
+launch_config = { grid = [4, 16, 1], block = [128, 1, 1] }
+warm_up_iters = 5
+repeat_iters = 30
+
+[[timing_shapes]]
+name = "timing_01"
+axes = { batch = 2, heads = 24, seq_video = 1024, seq_text = 77, head_dim = 64 }
+launch_config = { grid = [2, 24, 1], block = [128, 1, 1] }
+warm_up_iters = 5
+repeat_iters = 30
+
+[[trace_shapes]]
+name = "trace_00"
+axes = { batch = 2, heads = 4, seq_video = 8, seq_text = 8, head_dim = 16 }
+launch_config = { grid = [2, 4, 1], block = [64, 1, 1] }
+predicted_bytes = 1310720
+estimator_source = "static"
+
+[[correctness_shapes]]
+name = "correctness_00"
+axes = { batch = 1, heads = 2, seq_video = 4, seq_text = 4, head_dim = 8 }
+launch_config = { grid = [1, 2, 1], block = [32, 1, 1] }
+digest_kind = "full_tensor"

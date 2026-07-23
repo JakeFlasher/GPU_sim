@@ -1,0 +1,44 @@
+{
+  "name": "problem_041_strided_conv2d_downsampling_cuda_cpp_scaffold",
+  "definition": "041_strided_conv2d_downsampling",
+  "author": "scaffold",
+  "spec": {
+    "languages": [
+      "cuda_cpp"
+    ],
+    "target_hardware": [
+      "LOCAL"
+    ],
+    "entry_point": "main.cpp::run",
+    "dependencies": [],
+    "destination_passing_style": true,
+    "binding": "torch",
+    "compile_options": {
+      "cflags": [],
+      "cuda_cflags": [
+        "-O3",
+        "--use_fast_math",
+        "-gencode",
+        "arch=compute_86,code=sm_86"
+      ],
+      "ld_flags": [
+        "-lcuda"
+      ]
+    }
+  },
+  "sources": [
+    {
+      "path": "main.cpp",
+      "content": "#include <torch/extension.h>\n#include <ATen/cuda/CUDAContext.h>\n#include <c10/cuda/CUDAGuard.h>\n#include <string>\n\n// Strided 2D convolution for spatial downsampling (NAFNet encoder path).\n//\n// Reference (problem_041_strided_conv2d_downsampling):\n//     stride = 2\n//     padding = 1\n//     output = F.conv2d(x, weight, bias, stride=stride, padding=padding)\n//\n// Per definition.json (insertion order):\n//   x      : [batch_size, in_channels, height, width]                 fp32\n//   weight : [out_channels, in_channels, kernel_size, kernel_size]    fp32\n//   bias   : [out_channels]                                           fp32\n//   output : [batch_size, out_channels, out_height, out_width]        fp32  (DPS, pre-alloc)\n//\n// stride / padding are fixed constants in the reference run() (the workload\n// table's stride/padding columns describe this fixed configuration), so they\n// are baked in here rather than passed as inputs.\n//\n// Implementation: pure ATen / cuDNN dispatch -- NO custom CUDA kernels. The\n// single at::conv2d call routes through cuDNN with the same fp32 precision\n// profile the reference's F.conv2d uses. Output is written in place into the\n// pre-allocated destination (destination-passing style).\n\nstatic void check_fp32_cuda(const torch::Tensor& t, const std::string& name) {\n    TORCH_CHECK(t.is_cuda(), name, \" must be a CUDA tensor\");\n    TORCH_CHECK(t.dtype() == torch::kFloat32, name, \" must be float32, got \", t.dtype());\n}\n\nvoid run(\n    const torch::Tensor& x,\n    const torch::Tensor& weight,\n    const torch::Tensor& bias,\n    torch::Tensor output\n) {\n    check_fp32_cuda(x, \"x\");\n    check_fp32_cuda(weight, \"weight\");\n    check_fp32_cuda(bias, \"bias\");\n    check_fp32_cuda(output, \"output\");\n    TORCH_CHECK(x.dim() == 4, \"x must be 4D [N, C, H, W], got \", x.dim(), \"D\");\n    TORCH_CHECK(weight.dim() == 4, \"weight must be 4D [Co, Ci, kh, kw], got \", weight.dim(), \"D\");\n    TORCH_CHECK(bias.dim() == 1, \"bias must be 1D [Co], got \", bias.dim(), \"D\");\n\n    const c10::cuda::CUDAGuard device_guard(x.device());\n\n    constexpr int64_t kStride = 2;\n    constexpr int64_t kPadding = 1;\n\n    // at::conv2d(input, weight, bias, stride, padding) -- the same cuDNN\n    // dispatch F.conv2d(x, weight, bias, stride=2, padding=1) issues.\n    torch::Tensor result = at::conv2d(\n        x, weight, bias,\n        /*stride=*/{kStride, kStride},\n        /*padding=*/{kPadding, kPadding});\n\n    TORCH_CHECK(result.sizes() == output.sizes(),\n                \"conv2d output shape \", result.sizes(),\n                \" does not match pre-allocated output \", output.sizes());\n    output.copy_(result);\n}\n\nPYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {\n    m.def(\"run\", &run,\n          \"Strided (stride=2, pad=1) 2D conv downsampling via at::conv2d (cuDNN); \"\n          \"fp32; destination-passing style.\");\n}\n"
+    },
+    {
+      "path": "kernel.cu",
+      "content": "// Stub translation unit.\n//\n// This port delegates all compute to ATen / cuDNN from main.cpp (no custom\n// __global__ kernels). A bare .cu source is still required so torch's\n// cpp_extension builds the baseline as a CUDA extension (adding the CUDA\n// include paths); a .cpp-only extension omits them and main.cpp's\n// <ATen/cuda/CUDAContext.h> include fails with\n// \"cuda_runtime_api.h: No such file or directory\".\n#include <cuda_runtime.h>\n"
+    },
+    {
+      "path": "kernel.h",
+      "content": "#pragma once\n// Intentionally empty: this ATen-delegated port has no custom kernel launcher.\n// Retained so pack.py's prior-source list stays consistent.\n"
+    }
+  ],
+  "description": "Scaffolded baseline for problem_041_strided_conv2d_downsampling (language=cuda_cpp); hand-edit the copied exemplar to implement the target problem before harness-running. Destination-passing-style is set true; outputs appear after inputs in definition.json insertion order."
+}

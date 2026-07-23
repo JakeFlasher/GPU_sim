@@ -1,0 +1,336 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "simbench_bw/schemas/timing_prediction_contract.schema.json",
+  "title": "Execution-time prediction contract (cycles headline; nanoseconds gated)",
+  "description": "Closed-object contract emitted by tools/local_labels/emit_timing_prediction_contract.py into data/local_labels/timing_prediction_contract_sm_86.json. It fixes the execution-time prediction publication discipline for the local RTX 3090 Ti (sm_86, GA102 / Ampere): the DVFS-stable cycle count gpc__cycles_elapsed.max is the sole publication headline target; the derived wall-clock nanosecond leg is a clock-uncertainty interval that may not close the success terminal state on its own and is gated behind a CUPTI-Activity-vs-NCU agreement (crosswalk) artifact plus a cohort long enough to clear the measured dual-source noise floor. The contract pins the exact cycle-error definition, the publication and smoke coverage tiers, the deploy-nanosecond prerequisites and floor-relative cohort thresholds, the terminal-state vocabulary, and the single-architecture evidence statuses. additionalProperties is false at every level; literal thresholds are pinned with const so any drift fails closed at validation time.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_kind",
+    "arch",
+    "source_commit",
+    "generated_at_utc",
+    "headline",
+    "cycle_error_definition",
+    "publication_gate",
+    "smoke_tier",
+    "deploy_ns_leg",
+    "terminal_states",
+    "evidence_statuses"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Schema format version. Bumped only when fields are added, removed, or change semantics."
+    },
+    "artifact_kind": {
+      "type": "string",
+      "const": "timing_prediction_contract",
+      "description": "Fixed discriminator identifying this artifact kind."
+    },
+    "arch": {
+      "type": "string",
+      "const": "sm_86",
+      "description": "Single-architecture scope. This contract is authored and witnessed only on the local RTX 3090 Ti (sm_86); the Blackwell laptop arch is out of scope for this artifact."
+    },
+    "source_commit": {
+      "type": "string",
+      "pattern": "^(unknown|[0-9a-f]{40})$",
+      "description": "Commit the contract was emitted from, or the literal 'unknown' when git is unavailable at emit time."
+    },
+    "generated_at_utc": {
+      "type": "string",
+      "format": "date-time",
+      "description": "UTC emission timestamp."
+    },
+    "headline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "publication_target_metric_id",
+        "publication_target_registry_key",
+        "target_unit",
+        "is_sole_publication_headline",
+        "rationale"
+      ],
+      "properties": {
+        "publication_target_metric_id": {
+          "type": "string",
+          "const": "gpc__cycles_elapsed.max",
+          "description": "The sole publication headline target is the DVFS-stable elapsed cycle count. Pinning this as a const means a contract that names the nanosecond metric (or any other metric) as the headline fails validation."
+        },
+        "publication_target_registry_key": {
+          "type": "string",
+          "const": "exec_cycles_gpc_max",
+          "description": "Metric-registry key for the headline target."
+        },
+        "target_unit": {
+          "type": "string",
+          "const": "cycles",
+          "description": "Unit of the headline target."
+        },
+        "is_sole_publication_headline": {
+          "type": "boolean",
+          "const": true,
+          "description": "The cycle count is the only publication headline. No co-equal nanosecond headline is admitted."
+        },
+        "rationale": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Why cycles is load-bearing: it is DVFS-stable, whereas the nanosecond value is the cycle count multiplied by a clock conversion that double-counts the cycle error and carries clock-regime uncertainty."
+        }
+      }
+    },
+    "cycle_error_definition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "per_cell_residual_formula",
+        "geomean_relative_error_formula",
+        "median_abs_log_relative_error_formula",
+        "bootstrap_statistic",
+        "epsilon_floor_applied",
+        "requires_strictly_positive_inputs",
+        "forbidden_bounded_fraction_formula"
+      ],
+      "properties": {
+        "per_cell_residual_formula": {
+          "type": "string",
+          "const": "ln(p_i / t_i)",
+          "description": "Per-cell signed log-ratio of predicted cycles p_i to true cycles t_i."
+        },
+        "geomean_relative_error_formula": {
+          "type": "string",
+          "const": "exp(mean_i(abs(r_i))) - 1",
+          "description": "Log-space geomean relative error built from the absolute per-cell log-ratios."
+        },
+        "median_abs_log_relative_error_formula": {
+          "type": "string",
+          "const": "median_i(abs(r_i))",
+          "description": "Median absolute log-relative error over scored cells."
+        },
+        "bootstrap_statistic": {
+          "type": "string",
+          "const": "geomean_relative_error",
+          "description": "The statistic resampled to form the bootstrap upper bound is the log-space geomean relative error."
+        },
+        "epsilon_floor_applied": {
+          "type": "boolean",
+          "const": false,
+          "description": "No epsilon floor is applied. Cycle predictions and labels are strictly positive (cycle counts in the thousands), unlike the bounded-fraction cache runner."
+        },
+        "requires_strictly_positive_inputs": {
+          "type": "boolean",
+          "const": true,
+          "description": "Both predicted and true cycle counts must be strictly positive; a non-positive input is rejected rather than floored."
+        },
+        "forbidden_bounded_fraction_formula": {
+          "type": "string",
+          "const": "abs(pred - true) / max(true, epsilon)",
+          "description": "The bounded-fraction cache formula is explicitly recorded as forbidden for the cycle target. A runner that scores cycles with this formula instead of the pinned log-ratio formula is non-conformant."
+        }
+      }
+    },
+    "publication_gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "min_scored_cells",
+        "geomean_relative_error_max",
+        "median_abs_log_relative_error_max",
+        "bootstrap_geomean_upper_bound_max",
+        "bootstrap_resamples",
+        "bootstrap_ci_confidence",
+        "closes_research_success"
+      ],
+      "properties": {
+        "min_scored_cells": {
+          "type": "integer",
+          "const": 10,
+          "description": "Publication-grade per-architecture coverage floor."
+        },
+        "geomean_relative_error_max": {
+          "type": "number",
+          "const": 0.15,
+          "description": "Maximum admissible log-space geomean relative error."
+        },
+        "median_abs_log_relative_error_max": {
+          "type": "number",
+          "const": 0.1,
+          "description": "Maximum admissible median absolute log-relative error."
+        },
+        "bootstrap_geomean_upper_bound_max": {
+          "type": "number",
+          "const": 0.25,
+          "description": "Maximum admissible 95 percent bootstrap upper bound on the geomean relative error."
+        },
+        "bootstrap_resamples": {
+          "type": "integer",
+          "const": 2000,
+          "description": "Bootstrap resample count, matching the pinned cache-runner bootstrap."
+        },
+        "bootstrap_ci_confidence": {
+          "type": "number",
+          "const": 0.95,
+          "description": "Bootstrap confidence level, matching the pinned cache-runner bootstrap."
+        },
+        "closes_research_success": {
+          "type": "boolean",
+          "const": true,
+          "description": "Passing the cycle publication gate is what closes the success terminal state. The cycle headline is the only leg permitted to do so."
+        }
+      }
+    },
+    "smoke_tier": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "min_scored_cells",
+        "reports_only",
+        "closes_research_success"
+      ],
+      "properties": {
+        "min_scored_cells": {
+          "type": "integer",
+          "const": 5,
+          "description": "Smoke per-architecture coverage floor."
+        },
+        "reports_only": {
+          "type": "boolean",
+          "const": true,
+          "description": "The smoke tier reports the three metrics but is non-publication."
+        },
+        "closes_research_success": {
+          "type": "boolean",
+          "const": false,
+          "description": "A smoke-tier run can never close the success terminal state; only the publication gate can."
+        }
+      }
+    },
+    "deploy_ns_leg": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "role",
+        "closes_research_success_alone",
+        "requires_crosswalk_artifact",
+        "crosswalk_reference_metric_id",
+        "crosswalk_deploy_observable",
+        "dual_source_noise_floor_ns",
+        "floor_relative_bound_default",
+        "min_cohort_duration_ns_for_default_bound",
+        "tighter_bound",
+        "min_cohort_duration_ns_for_tighter_bound",
+        "clock_plausibility_band_mhz"
+      ],
+      "properties": {
+        "role": {
+          "type": "string",
+          "const": "derived_clock_uncertainty_interval",
+          "description": "The nanosecond leg is a derived clock-uncertainty interval, never a co-equal headline. Pinning this as a const means a contract that promotes the nanosecond leg to a headline role fails validation."
+        },
+        "closes_research_success_alone": {
+          "type": "boolean",
+          "const": false,
+          "description": "The nanosecond leg may not close the success terminal state on its own. A contract that permits a sub-floor nanosecond result to close success fails validation."
+        },
+        "requires_crosswalk_artifact": {
+          "type": "boolean",
+          "const": true,
+          "description": "A same-binary, same-shape agreement (crosswalk) artifact between the deploy observable and the NCU reference duration must exist before any deploy-nanosecond claim."
+        },
+        "crosswalk_reference_metric_id": {
+          "type": "string",
+          "const": "gpu__time_duration.sum",
+          "description": "The NCU reference duration the crosswalk compares against."
+        },
+        "crosswalk_deploy_observable": {
+          "type": "string",
+          "const": "cupti_activity_plus_cuda_event",
+          "description": "The deploy-legal dual-source observable (CUPTI Activity plus CUDA event) the crosswalk validates against the NCU reference."
+        },
+        "dual_source_noise_floor_ns": {
+          "type": "integer",
+          "const": 110352,
+          "description": "Provenanced p99 dual-source reconciliation noise floor in nanoseconds for this host. Any deploy-nanosecond claim must clear it floor-relative."
+        },
+        "floor_relative_bound_default": {
+          "type": "number",
+          "const": 0.2,
+          "description": "Default floor-relative nanosecond bound: the noise floor must be at most this fraction of the cohort kernel duration."
+        },
+        "min_cohort_duration_ns_for_default_bound": {
+          "type": "integer",
+          "const": 551760,
+          "description": "Minimum cohort kernel duration (noise floor divided by the default bound) for the default floor-relative nanosecond claim to be possible."
+        },
+        "tighter_bound": {
+          "type": "number",
+          "const": 0.1,
+          "description": "Tighter floor-relative nanosecond bound available once longer kernels are authored."
+        },
+        "min_cohort_duration_ns_for_tighter_bound": {
+          "type": "integer",
+          "const": 1103520,
+          "description": "Minimum cohort kernel duration (noise floor divided by the tighter bound) for the tighter floor-relative nanosecond claim to be possible."
+        },
+        "clock_plausibility_band_mhz": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["min", "max"],
+          "properties": {
+            "min": {
+              "type": "number",
+              "const": 300,
+              "description": "Lower bound of the plausible SM-clock band for the cycles-to-nanoseconds conversion; outside the band the conversion fails closed."
+            },
+            "max": {
+              "type": "number",
+              "const": 3000,
+              "description": "Upper bound of the plausible SM-clock band for the cycles-to-nanoseconds conversion; outside the band the conversion fails closed."
+            }
+          }
+        }
+      }
+    },
+    "terminal_states": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "research_success",
+        "verdict_falsification",
+        "deferred_cross_arch_requires_sm120_session"
+      ],
+      "properties": {
+        "research_success": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Terminal state recorded when the cycle publication gate passes."
+        },
+        "verdict_falsification": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Terminal state recorded when a leg is honestly refuted below its floor; a first-class outcome, never a silent or reported-only result."
+        },
+        "deferred_cross_arch_requires_sm120_session": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Sentinel recorded for any cross-architecture leg this single-architecture session cannot witness."
+        }
+      }
+    },
+    "evidence_statuses": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 2,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "enum": ["Verified-live-sm_86", "Offline-verified"]
+      },
+      "description": "The only evidence statuses this single-architecture host may record. Cross-architecture and Blackwell-laptop statuses are excluded by the closed item enum."
+    }
+  }
+}

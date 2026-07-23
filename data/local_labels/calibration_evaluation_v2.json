@@ -1,0 +1,93 @@
+{
+  "amendment_provenance": {
+    "amendment_plan": "plans/silu_correctness_sm120_admission_cohort_amendment_plan.md",
+    "from_calibration_head": "calibration_head_v1.json",
+    "from_calibration_head_sha256": "2bd743b59eba68ed6a11c50ef7fc53a28e7838b44792d37e3ae5e116e99094ce",
+    "queued_addition_for_follow_on_round": {
+      "arch": "sm_86",
+      "follow_on_requires": "sm_86 predictor bundle generation (NVBit trace on RTX 3090 Ti host); cross-arch follow-on round.",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "swiglu_fwd_bf16_sm80"
+    },
+    "retired_cell": {
+      "arch": "sm_86",
+      "rationale": "Retired from sm_120 admission cohort per amendment plan AC-A1; also dropped from calibrator training distribution to avoid silent calibration drift (Codex recommendation).",
+      "shape_point": "correctness_shape",
+      "slug": "silu_fwd_bf16_sm80"
+    },
+    "skipped_heads": [
+      {
+        "head": "IsotonicCalibrator",
+        "reason": "scikit-learn is not installed on this host; the head selection one-SE rule's simplicity ordering puts IsotonicCalibrator strictly between PlattCalibrator (2 params) and BetaCalibrator (3 params), so its absence does not flip the chosen head when the residual distribution is comparable. v1 chose PlattCalibrator with the full three-head candidate set, so v2 dropping Isotonic from consideration is conservative."
+      }
+    ],
+    "training_pair_count_intent_from_plan": 5,
+    "training_pair_count_realized_this_round": 4
+  },
+  "chosen_head": "PlattCalibrator",
+  "comparison_contract_sha256": "7bb5eb9d9e3ca4f517f1c3290e5a688e59674a614ff019fad7d6ebb45f864dcf",
+  "loocv_table": {
+    "BetaCalibrator": {
+      "p50": 0.28369000000000005,
+      "p90": 0.395336,
+      "p99": 0.42419359999999995,
+      "per_fold_residuals": [
+        0.24686000000000008,
+        0.32052,
+        0.24369142354762957,
+        0.4274
+      ],
+      "se_p90": 0.054528181643483276
+    },
+    "PlattCalibrator": {
+      "p50": 0.08224530357328208,
+      "p90": 0.19658193347514763,
+      "p99": 0.23947015089193016,
+      "per_fold_residuals": [
+        0.07910034845566771,
+        0.0026019548115772118,
+        0.24423550838268382,
+        0.08539025869089645
+      ],
+      "se_p90": 0.06435794172925988
+    }
+  },
+  "schema_version": 2,
+  "selection_rule": "simplicity_one_se_rule",
+  "source_commit": "0b11b613a11c8f65ef92970f992e0f1b6aab0021",
+  "target_arch": "sm_86_only",
+  "training_cells": [
+    {
+      "arch": "sm_86",
+      "shape_point": "timing_shape",
+      "slug": "layernorm_fwd_bf16_sm80"
+    },
+    {
+      "arch": "sm_86",
+      "shape_point": "timing_shape",
+      "slug": "rmsnorm_fwd_bf16_sm80"
+    },
+    {
+      "arch": "sm_86",
+      "shape_point": "timing_shape",
+      "slug": "silu_fwd_bf16_sm80"
+    },
+    {
+      "arch": "sm_86",
+      "shape_point": "timing_shape",
+      "slug": "softmax_safe_bf16_sm80"
+    }
+  ],
+  "training_timestamp": "2026-05-25T00:54:51Z",
+  "uncalibrated_baseline_table": {
+    "p50": 0.3392591512381179,
+    "p90": 0.3953553828711506,
+    "p99": 0.39814953828711497,
+    "per_cell_residuals": [
+      0.22397333304065337,
+      0.2904070262390671,
+      0.3984599999999999,
+      0.3881112762371687
+    ]
+  }
+}

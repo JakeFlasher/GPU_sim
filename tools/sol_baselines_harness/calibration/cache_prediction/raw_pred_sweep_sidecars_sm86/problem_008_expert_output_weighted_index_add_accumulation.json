@@ -1,0 +1,53 @@
+{
+  "by_assoc": {
+    "16": {
+      "raw_l1_hit_rate": 0.38828908880812457,
+      "raw_l2_hit_rate": 0.6743279147963922,
+      "scored": true,
+      "typed_reason": ""
+    },
+    "32": {
+      "raw_l1_hit_rate": 0.38828908880812457,
+      "raw_l2_hit_rate": 0.675004288012013,
+      "scored": true,
+      "typed_reason": ""
+    },
+    "4": {
+      "raw_l1_hit_rate": 0.38828908880812457,
+      "raw_l2_hit_rate": 0.6716855285257977,
+      "scored": true,
+      "typed_reason": ""
+    },
+    "64": {
+      "raw_l1_hit_rate": 0.38828908880812457,
+      "raw_l2_hit_rate": 0.6755366487487096,
+      "scored": true,
+      "typed_reason": ""
+    },
+    "8": {
+      "raw_l1_hit_rate": 0.38828908880812457,
+      "raw_l2_hit_rate": 0.6741936110239125,
+      "scored": true,
+      "typed_reason": ""
+    }
+  },
+  "candidates": [
+    4,
+    8,
+    16,
+    32,
+    64
+  ],
+  "captured_at_utc": "2026-05-30T00:51:23+00:00",
+  "dense_reuse": {
+    "distinct_sectors": 200319,
+    "reuse_factor": 4.479674918504984,
+    "total_sector_accesses": 897364,
+    "truncated": true
+  },
+  "schema_version": 2,
+  "scored": true,
+  "slug": "problem_008_expert_output_weighted_index_add_accumulation",
+  "tier2_sidecar_sha256": "62e78c80da000e6d66a2e7baf8eddc767ad41f094372b08eca5a742381e56f32",
+  "typed_reason": ""
+}

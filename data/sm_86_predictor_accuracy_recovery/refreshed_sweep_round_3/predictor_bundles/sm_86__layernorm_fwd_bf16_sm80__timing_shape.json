@@ -1,0 +1,53 @@
+{
+  "algorithm_version": "smith_eklund_lru_v1",
+  "bootstrap_resamples": 2000,
+  "bootstrap_seed": 0,
+  "cache_model_capacity_bytes": 6291456,
+  "cache_model_cta_interleave_enabled": true,
+  "cache_model_geometry_provenance": {
+    "arch": "sm_86",
+    "cuda_toolkit_version": "13.2",
+    "driver_version": "595.71.05",
+    "manifest_sha256": "ba7ff98ad18f3d68a12de8f07b8b79ff7d1b2150680466f859ebd413ddc6eec1",
+    "nvbit_build": "1.8",
+    "sku": "rtx_3090_ti"
+  },
+  "cache_model_hrd_second_layer_enabled": true,
+  "cache_model_num_l2_slices": 6,
+  "cache_model_num_l2_slices_source": "device_properties_manifest",
+  "ci_confidence": 0.95,
+  "ci_half_width": 0.0,
+  "ci_high": 0.9771133330406533,
+  "ci_low": 0.9771133330406533,
+  "device": "NVIDIA GeForce RTX 3090 Ti",
+  "epsilon": 0.01,
+  "evidence": {
+    "launch_count": 1,
+    "per_launch_hit_rates": [
+      0.9771133330406533
+    ],
+    "populated_launch_count": 1,
+    "total_observations": 1555904
+  },
+  "input_sidecar_digests": {
+    "dynamic_trace_pb": {
+      "path": "workloads/simbench_bw/results/layernorm_fwd_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/dynamic_trace.pb",
+      "sha256": "0971189f2d56d4f8495c8f6b4f79a7b68d51a8c40d3ea0bd7505dd35b1b7417b"
+    },
+    "sector_stream": {
+      "path": "workloads/simbench_bw/results/layernorm_fwd_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/sector_stream/sector_stream.jsonl",
+      "sha256": "b5c5726d3e0ee9b4d160795e1a8fa76cdc015452978f4e280da4afff68d39ab1"
+    }
+  },
+  "manifest_pairing_index": {
+    "binary_sha256": "20ec2891f1734d8801804ad908601016b0e18d2d782d69bd953811b9b00e1850",
+    "kernel_signature_sha256": "56c5ec6b878df3410ae20f6c30635c100eb95c97f9c65f29f4b7354273f20a29",
+    "shape_point": "timing_shape",
+    "slug": "layernorm_fwd_bf16_sm80",
+    "source_commit": "4e4d7b46add34e7a9f01c34715a409c41d2be285"
+  },
+  "predicted_hit_rate": 0.9771133330406533,
+  "result_kind": "scalar",
+  "schema_version": 1,
+  "sector_size_bytes": 32
+}

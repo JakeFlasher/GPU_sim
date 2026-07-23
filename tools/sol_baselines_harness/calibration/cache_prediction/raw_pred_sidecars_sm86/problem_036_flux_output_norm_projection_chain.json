@@ -1,0 +1,14 @@
+{
+  "associativity_l2": 16,
+  "captured_at_utc": "2026-05-29T22:26:21+00:00",
+  "geometry_source": "sm86_pilot_static_device_card_v1",
+  "language": "cuda_cpp",
+  "num_l2_slices": 6,
+  "raw_l1_hit_rate": 0.48588026125390316,
+  "raw_l2_hit_rate": 0.027808710399150005,
+  "schema_version": 1,
+  "scored": true,
+  "slug": "problem_036_flux_output_norm_projection_chain",
+  "tier2_sidecar_sha256": "68b70ed0fb41a7b3bf4ab6c666b8b0c6f4b9275af909db3049e3bbdc16a28894",
+  "typed_reason": ""
+}

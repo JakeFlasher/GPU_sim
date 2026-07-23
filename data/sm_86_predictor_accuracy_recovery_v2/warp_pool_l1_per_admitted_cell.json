@@ -1,0 +1,1801 @@
+{
+  "arch": "sm_86",
+  "artifact_kind": "warp_pool_l1_per_admitted_cell",
+  "cells": [
+    {
+      "arch": "sm_86",
+      "binary_sha256": "279546697af3639e17922fe444c1352acb171d48adfba44da3260ebe3d68f11e",
+      "cache_layer": "L1TEX",
+      "evidence": {
+        "active_sm_count": 64,
+        "co_resident_warps": 16,
+        "counters": {
+          "bypass_count": 0,
+          "hit_count": 512,
+          "line_alloc_miss_count": 99264,
+          "line_fill_count": 99264,
+          "miss_count": 397056,
+          "mshr_merge_count": 0,
+          "mshr_stall_events": 0,
+          "sector_miss_resident_line_count": 297792
+        },
+        "geometry": {
+          "capacity_bytes": 81920,
+          "capacity_property": "l1_capacity_carveout_25_pct_bytes",
+          "carveout_percent": 25,
+          "hit_latency": 33.0016,
+          "line_capacity": 640,
+          "miss_latency": 250.0092,
+          "mshr_count": 32,
+          "mshr_source": "documented_default",
+          "replacement_modeled": "lru",
+          "replacement_source": "documented_approximation",
+          "set_mapping_modeled": "fully_associative",
+          "set_mapping_source": "documented_approximation"
+        },
+        "total_eligible_accesses": 397568,
+        "walker": "warp_pool_two_layer_finite_mshr",
+        "warps_per_block": 1
+      },
+      "input_digests": {
+        "classifier_manifest_sha256": "583daa783d4591cb5ebf189aabf7d2549c7a3ef17fce2ad98d6f46d3ecb70f59",
+        "dynamic_trace_pb_sha256": "0ea56721a16c72055cecf4678f95e16859aedf0d4627272776268343e30d5f08",
+        "threadblock_proto_set_sha256": "7dc59159b4ca75fb7d29457111e0c22f93b057a38dc06d9d0f9d325c8411f5dd"
+      },
+      "kernel_signature_sha256": "4585d912ad82ae86356fa7d64c2782fc6948e8acc97cc30947abfc4633840f6d",
+      "ncu_metric_version": "ncu_2026.1.x",
+      "predicted_hit_rate": 0.00128783000643915,
+      "result_kind": "scalar",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "carveout_sensitivity_probe",
+      "source_commit": "9fa7fcff99c08a3eeb4df916908bf4e0c1322213",
+      "typed_reason": null
+    },
+    {
+      "arch": "sm_86",
+      "binary_sha256": "e6aa9925f55f19d7ab575e27c0c1184609cc5a02f569cfed3dd8e91f9ea3d675",
+      "cache_layer": "L1TEX",
+      "evidence": {
+        "active_sm_count": 84,
+        "co_resident_warps": 16,
+        "counters": {
+          "bypass_count": 0,
+          "hit_count": 0,
+          "line_alloc_miss_count": 22784,
+          "line_fill_count": 22784,
+          "miss_count": 267264,
+          "mshr_merge_count": 176128,
+          "mshr_stall_events": 0,
+          "sector_miss_resident_line_count": 68352
+        },
+        "geometry": {
+          "capacity_bytes": 98304,
+          "capacity_property": "l1_capacity_bytes",
+          "carveout_percent": null,
+          "hit_latency": 33.0016,
+          "line_capacity": 768,
+          "miss_latency": 250.0092,
+          "mshr_count": 32,
+          "mshr_source": "documented_default",
+          "replacement_modeled": "lru",
+          "replacement_source": "documented_approximation",
+          "set_mapping_modeled": "fully_associative",
+          "set_mapping_source": "documented_approximation"
+        },
+        "total_eligible_accesses": 267264,
+        "walker": "warp_pool_two_layer_finite_mshr",
+        "warps_per_block": 1
+      },
+      "input_digests": {
+        "classifier_manifest_sha256": "d75ee25f0503be0dba08474a5b3497bc05ce7ba75edc47dd5483d7349d5cf1c5",
+        "dynamic_trace_pb_sha256": "62d1b4dae3f61771fd45d6a68854c8f382fdffe7ad000162daecbc494ad6c5bb",
+        "threadblock_proto_set_sha256": "3b43b4214b5b17f53455c40b645bd2762905b174063e6f9f8bbba0c1605f9331"
+      },
+      "kernel_signature_sha256": "9b26911afd5effa33f41ae15bce2a7a5d606f797c873e5617db53a36f9f5f6fc",
+      "ncu_metric_version": "ncu_2026.1.x",
+      "predicted_hit_rate": 0.0,
+      "result_kind": "scalar",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "l2_persisting_window_sweep",
+      "source_commit": "f6b5e5d3b19fb4ac507fa3fa0229ebf11073f50f",
+      "typed_reason": null
+    },
+    {
+      "arch": "sm_86",
+      "binary_sha256": "a9e72c8106c33cee877a77343c49e3d8bda32182e681063b504d04b869efefb8",
+      "cache_layer": "L1TEX",
+      "evidence": {
+        "active_sm_count": 64,
+        "co_resident_warps": 16,
+        "counters": {
+          "bypass_count": 0,
+          "hit_count": 622848,
+          "line_alloc_miss_count": 8128,
+          "line_fill_count": 8128,
+          "miss_count": 32512,
+          "mshr_merge_count": 0,
+          "mshr_stall_events": 0,
+          "sector_miss_resident_line_count": 24384
+        },
+        "geometry": {
+          "capacity_bytes": 98304,
+          "capacity_property": "l1_capacity_bytes",
+          "carveout_percent": null,
+          "hit_latency": 33.0016,
+          "line_capacity": 768,
+          "miss_latency": 250.0092,
+          "mshr_count": 32,
+          "mshr_source": "documented_default",
+          "replacement_modeled": "lru",
+          "replacement_source": "documented_approximation",
+          "set_mapping_modeled": "fully_associative",
+          "set_mapping_source": "documented_approximation"
+        },
+        "total_eligible_accesses": 655360,
+        "walker": "warp_pool_two_layer_finite_mshr",
+        "warps_per_block": 1
+      },
+      "input_digests": {
+        "classifier_manifest_sha256": "50fd869660a343aaf7b1a8992f4311705afd7f98297248eb0c9e2cdbe08675e1",
+        "dynamic_trace_pb_sha256": "59cdbe07e63f8d92a1ff7d9f9ff40a3c47bded3c4e86c83dfaa50486cc45afa5",
+        "threadblock_proto_set_sha256": "9c6a6f8126f37e8981f09c4c70568b86df0160d1970220b3b723e81475315409"
+      },
+      "kernel_signature_sha256": "30baaa0f6d6054d23fe69560cb76c4f54a907f9bc94fa89d9fc7fc4daf32dbc7",
+      "ncu_metric_version": "ncu_2026.1.x",
+      "predicted_hit_rate": 0.950390625,
+      "result_kind": "scalar",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "l2_prefetch_hint_sweep",
+      "source_commit": "f6b5e5d3b19fb4ac507fa3fa0229ebf11073f50f",
+      "typed_reason": null
+    },
+    {
+      "arch": "sm_86",
+      "binary_sha256": "7838290f844f2949968c518befc7b775acf956e92b150f097389224951cf7daa",
+      "cache_layer": "L1TEX",
+      "evidence": {
+        "diagnostic": "register-cap build variant: the cache-op classifier manifest store has no build-variant axis, so no per-cap SASS provenance manifest exists for this binary"
+      },
+      "input_digests": {
+        "classifier_manifest_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "dynamic_trace_pb_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "threadblock_proto_set_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "kernel_signature_sha256": "bd7cde722287300592d8f1c664841cfca92c75f336960cb33b0f13ebb24050ad",
+      "ncu_metric_version": "ncu_2026.1.x",
+      "predicted_hit_rate": null,
+      "register_cap": 24,
+      "result_kind": "typed_unavailable",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "register_spill_local_mem",
+      "source_commit": "45ed15a61906f05217d7715362fa6de51b193439",
+      "typed_reason": "predictor_l1_sass_provenance_missing",
+      "variant_id": "register_cap_24"
+    },
+    {
+      "arch": "sm_86",
+      "binary_sha256": "0096b01ed25638202968b69ebf08ff6c7de6998448b8e61316f5ef4f24c305ea",
+      "cache_layer": "L1TEX",
+      "evidence": {
+        "diagnostic": "register-cap build variant: the cache-op classifier manifest store has no build-variant axis, so no per-cap SASS provenance manifest exists for this binary"
+      },
+      "input_digests": {
+        "classifier_manifest_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "dynamic_trace_pb_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "threadblock_proto_set_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "kernel_signature_sha256": "bd7cde722287300592d8f1c664841cfca92c75f336960cb33b0f13ebb24050ad",
+      "ncu_metric_version": "ncu_2026.1.x",
+      "predicted_hit_rate": null,
+      "register_cap": 32,
+      "result_kind": "typed_unavailable",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "register_spill_local_mem",
+      "source_commit": "45ed15a61906f05217d7715362fa6de51b193439",
+      "typed_reason": "predictor_l1_sass_provenance_missing",
+      "variant_id": "register_cap_32"
+    },
+    {
+      "arch": "sm_86",
+      "binary_sha256": "3ba9bc87fd97d694a07b0e0f5a7dc4f0bac1353df92ce94e517d8d61807deaa5",
+      "cache_layer": "L1TEX",
+      "evidence": {
+        "diagnostic": "register-cap build variant: the cache-op classifier manifest store has no build-variant axis, so no per-cap SASS provenance manifest exists for this binary"
+      },
+      "input_digests": {
+        "classifier_manifest_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "dynamic_trace_pb_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "threadblock_proto_set_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "kernel_signature_sha256": "bd7cde722287300592d8f1c664841cfca92c75f336960cb33b0f13ebb24050ad",
+      "ncu_metric_version": "ncu_2026.1.x",
+      "predicted_hit_rate": null,
+      "register_cap": 64,
+      "result_kind": "typed_unavailable",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "register_spill_local_mem",
+      "source_commit": "45ed15a61906f05217d7715362fa6de51b193439",
+      "typed_reason": "predictor_l1_sass_provenance_missing",
+      "variant_id": "register_cap_64"
+    },
+    {
+      "arch": "sm_86",
+      "binary_sha256": "9c355c3485531959c0ac69e853a8c5c9022e9f04b388c99277381db0b1d91a86",
+      "cache_layer": "L1TEX",
+      "evidence": {
+        "diagnostic": "register-cap build variant: the cache-op classifier manifest store has no build-variant axis, so no per-cap SASS provenance manifest exists for this binary"
+      },
+      "input_digests": {
+        "classifier_manifest_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "dynamic_trace_pb_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "threadblock_proto_set_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "kernel_signature_sha256": "bd7cde722287300592d8f1c664841cfca92c75f336960cb33b0f13ebb24050ad",
+      "ncu_metric_version": "ncu_2026.1.x",
+      "predicted_hit_rate": null,
+      "register_cap": 255,
+      "result_kind": "typed_unavailable",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "register_spill_local_mem",
+      "source_commit": "45ed15a61906f05217d7715362fa6de51b193439",
+      "typed_reason": "predictor_l1_sass_provenance_missing",
+      "variant_id": "register_cap_255"
+    },
+    {
+      "arch": "sm_86",
+      "binary_sha256": "e44f714645062197b42dda23e2a41c748e105c8e674b62305c979564d35dec21",
+      "cache_layer": "L1TEX",
+      "evidence": {
+        "active_sm_count": 64,
+        "co_resident_warps": 48,
+        "counters": {
+          "bypass_count": 0,
+          "hit_count": 16384,
+          "line_alloc_miss_count": 12288,
+          "line_fill_count": 12288,
+          "miss_count": 49152,
+          "mshr_merge_count": 12288,
+          "mshr_stall_events": 0,
+          "sector_miss_resident_line_count": 24576
+        },
+        "geometry": {
+          "capacity_bytes": 98304,
+          "capacity_property": "l1_capacity_bytes",
+          "carveout_percent": null,
+          "hit_latency": 33.0016,
+          "line_capacity": 768,
+          "miss_latency": 250.0092,
+          "mshr_count": 32,
+          "mshr_source": "documented_default",
+          "replacement_modeled": "lru",
+          "replacement_source": "documented_approximation",
+          "set_mapping_modeled": "fully_associative",
+          "set_mapping_source": "documented_approximation"
+        },
+        "total_eligible_accesses": 65536,
+        "walker": "warp_pool_two_layer_finite_mshr",
+        "warps_per_block": 8
+      },
+      "input_digests": {
+        "classifier_manifest_sha256": "38e48850a0de370ffd1e5b9b8d0ab64dc25d71fc4d3231fb2f7e2cbb2fae751f",
+        "dynamic_trace_pb_sha256": "c7a8cb63518c3c0136b5d99cd3e81c095b981ac595e7673c810ec8cc3be433db",
+        "threadblock_proto_set_sha256": "7a04b4f2eb8501446ebb4088e474d0d23d36c6dfb8429f87f323410c3145aa9b"
+      },
+      "kernel_signature_sha256": "7848654da87ddb65a3469a248bb5572f936b4650fefbb1d22aaa25f24aa6cbe2",
+      "ncu_metric_version": "ncu_2026.1.x",
+      "predicted_hit_rate": 0.25,
+      "result_kind": "scalar",
+      "shape_point": "timing_shape",
+      "slug": "rmsnorm_fwd_bf16_sm80",
+      "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7",
+      "typed_reason": null
+    },
+    {
+      "arch": "sm_86",
+      "binary_sha256": "12b290606983bbecb919678c86fffb9a1df3e02bf66afe8487eeef085bfa6551",
+      "cache_layer": "L1TEX",
+      "evidence": {
+        "active_sm_count": 84,
+        "co_resident_warps": 48,
+        "counters": {
+          "bypass_count": 0,
+          "hit_count": 0,
+          "line_alloc_miss_count": 4096,
+          "line_fill_count": 4096,
+          "miss_count": 16384,
+          "mshr_merge_count": 4096,
+          "mshr_stall_events": 2688,
+          "sector_miss_resident_line_count": 8192
+        },
+        "geometry": {
+          "capacity_bytes": 98304,
+          "capacity_property": "l1_capacity_bytes",
+          "carveout_percent": null,
+          "hit_latency": 33.0016,
+          "line_capacity": 768,
+          "miss_latency": 250.0092,
+          "mshr_count": 32,
+          "mshr_source": "documented_default",
+          "replacement_modeled": "lru",
+          "replacement_source": "documented_approximation",
+          "set_mapping_modeled": "fully_associative",
+          "set_mapping_source": "documented_approximation"
+        },
+        "total_eligible_accesses": 16384,
+        "walker": "warp_pool_two_layer_finite_mshr",
+        "warps_per_block": 8
+      },
+      "input_digests": {
+        "classifier_manifest_sha256": "1517c09016666ddbb1eb8e1cc9c5c1ccd6ea447582f58b0ad2d6a7cd3bec37a3",
+        "dynamic_trace_pb_sha256": "c249cfa7c0d74a14b24b904d4201df8df21e1e5a51b49ec6886c4e40c5b9199c",
+        "threadblock_proto_set_sha256": "702470f501c170abe4ca42948b3675fcc417bbd4aaed63416907dc31b42e4755"
+      },
+      "kernel_signature_sha256": "2681564ef5ca9026d42106bbe862a40d3e38b89b52e720a90ad39322c0ff99dc",
+      "ncu_metric_version": "ncu_2026.1.x",
+      "predicted_hit_rate": 0.0,
+      "result_kind": "scalar",
+      "shape_point": "timing_shape",
+      "slug": "silu_fwd_bf16_sm80",
+      "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7",
+      "typed_reason": null
+    },
+    {
+      "arch": "sm_86",
+      "binary_sha256": "68b07b4adc6918b8a5ef3f93e9973a7195e083d28e77465ca55680cc512c3cfd",
+      "cache_layer": "L1TEX",
+      "evidence": {
+        "active_sm_count": 64,
+        "co_resident_warps": 48,
+        "counters": {
+          "bypass_count": 0,
+          "hit_count": 16384,
+          "line_alloc_miss_count": 4096,
+          "line_fill_count": 4096,
+          "miss_count": 16384,
+          "mshr_merge_count": 4096,
+          "mshr_stall_events": 0,
+          "sector_miss_resident_line_count": 8192
+        },
+        "geometry": {
+          "capacity_bytes": 98304,
+          "capacity_property": "l1_capacity_bytes",
+          "carveout_percent": null,
+          "hit_latency": 33.0016,
+          "line_capacity": 768,
+          "miss_latency": 250.0092,
+          "mshr_count": 32,
+          "mshr_source": "documented_default",
+          "replacement_modeled": "lru",
+          "replacement_source": "documented_approximation",
+          "set_mapping_modeled": "fully_associative",
+          "set_mapping_source": "documented_approximation"
+        },
+        "total_eligible_accesses": 32768,
+        "walker": "warp_pool_two_layer_finite_mshr",
+        "warps_per_block": 8
+      },
+      "input_digests": {
+        "classifier_manifest_sha256": "2d58caecfb7fd38fbcacec35e4a36fc503c6200f735c98e5a9beec01c430c620",
+        "dynamic_trace_pb_sha256": "a8e5fc3dc891b78cb52690678c642ee4233c9e15eec35f4c869e0a7dcbe86585",
+        "threadblock_proto_set_sha256": "3780f0e1cf73ef29077ca54c245d9c3d5ba475c8eee290e7ef49dc6d289a921b"
+      },
+      "kernel_signature_sha256": "dc75edc616c84481008a935794005890d51160f8eafe175a1e530098b3be3e43",
+      "ncu_metric_version": "ncu_2026.1.x",
+      "predicted_hit_rate": 0.5,
+      "result_kind": "scalar",
+      "shape_point": "timing_shape",
+      "slug": "softmax_safe_bf16_sm80",
+      "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7",
+      "typed_reason": null
+    },
+    {
+      "arch": "sm_86",
+      "binary_sha256": "eb3ec15b1d54b498650a94c903d85e4e01881a9531311ac6e27e2d85c560a252",
+      "cache_layer": "L1TEX",
+      "evidence": {
+        "diagnostic": "classifier manifest not found at data/local_labels/cache_op_classifier_manifests/sm_86/warm_cold_pair_relaunch__trace_l2_accuracy_xl.json"
+      },
+      "input_digests": {
+        "classifier_manifest_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "dynamic_trace_pb_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "threadblock_proto_set_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "kernel_signature_sha256": "779b4acb3473bca619d87757ae102a1e0e7c50006edfa5171689e06af94e7443",
+      "ncu_metric_version": "ncu_2026.1.x",
+      "predicted_hit_rate": null,
+      "result_kind": "typed_unavailable",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "warm_cold_pair_relaunch",
+      "source_commit": "f6b5e5d3b19fb4ac507fa3fa0229ebf11073f50f",
+      "typed_reason": "predictor_l1_sass_provenance_missing"
+    },
+    {
+      "arch": "sm_86",
+      "binary_sha256": "197379525a6e267b2e018513086fb85b3b861a696b0e14fb061d3839ac8e7dd6",
+      "cache_layer": "L1TEX",
+      "evidence": {
+        "active_sm_count": 64,
+        "co_resident_warps": 16,
+        "counters": {
+          "bypass_count": 0,
+          "hit_count": 0,
+          "line_alloc_miss_count": 83008,
+          "line_fill_count": 83008,
+          "miss_count": 332032,
+          "mshr_merge_count": 0,
+          "mshr_stall_events": 0,
+          "sector_miss_resident_line_count": 249024
+        },
+        "geometry": {
+          "capacity_bytes": 98304,
+          "capacity_property": "l1_capacity_bytes",
+          "carveout_percent": null,
+          "hit_latency": 33.0016,
+          "line_capacity": 768,
+          "miss_latency": 250.0092,
+          "mshr_count": 32,
+          "mshr_source": "documented_default",
+          "replacement_modeled": "lru",
+          "replacement_source": "documented_approximation",
+          "set_mapping_modeled": "fully_associative",
+          "set_mapping_source": "documented_approximation"
+        },
+        "total_eligible_accesses": 332032,
+        "walker": "warp_pool_two_layer_finite_mshr",
+        "warps_per_block": 1
+      },
+      "input_digests": {
+        "classifier_manifest_sha256": "a285f3cf8cf634f667d5f2198d6d6e3b76f41e2918c05a7d925794807e09e60c",
+        "dynamic_trace_pb_sha256": "e487d13fd1149c48a759a03db7ebb180a80b2b85fbf153a46ecccfec57f6f967",
+        "threadblock_proto_set_sha256": "8e14cf450cfbbde20e20b7190c8334840392263d941cdcee0c158ed3bbdae82b"
+      },
+      "kernel_signature_sha256": "4a89354e3a81afb6d1ee9c0aea25f10cb68d1d31779c978bd37c6ee5713622e1",
+      "ncu_metric_version": "ncu_2026.1.x",
+      "predicted_hit_rate": 0.0,
+      "result_kind": "scalar",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "working_set_capacity_sweep",
+      "source_commit": "9fa7fcff99c08a3eeb4df916908bf4e0c1322213",
+      "typed_reason": null
+    },
+    {
+      "arch": "sm_86",
+      "binary_sha256": "0e848c96cfd3323ca99353dc8e0208b6948ccb43289b93231a217a058a47c735",
+      "cache_layer": "L1TEX",
+      "evidence": {
+        "active_sm_count": 4,
+        "co_resident_warps": 16,
+        "counters": {
+          "bypass_count": 0,
+          "hit_count": 1600,
+          "line_alloc_miss_count": 416,
+          "line_fill_count": 416,
+          "miss_count": 1600,
+          "mshr_merge_count": 0,
+          "mshr_stall_events": 0,
+          "sector_miss_resident_line_count": 1184
+        },
+        "geometry": {
+          "capacity_bytes": 98304,
+          "capacity_property": "l1_capacity_bytes",
+          "carveout_percent": null,
+          "hit_latency": 33.0016,
+          "line_capacity": 768,
+          "miss_latency": 250.0092,
+          "mshr_count": 32,
+          "mshr_source": "documented_default",
+          "replacement_modeled": "lru",
+          "replacement_source": "documented_approximation",
+          "set_mapping_modeled": "fully_associative",
+          "set_mapping_source": "documented_approximation"
+        },
+        "total_eligible_accesses": 3200,
+        "walker": "warp_pool_two_layer_finite_mshr",
+        "warps_per_block": 1
+      },
+      "input_digests": {
+        "classifier_manifest_sha256": "03a12204ee0ffd2f6b70bec927cb1a11468815d024e62b8d89bbaf12097f401f",
+        "dynamic_trace_pb_sha256": "2fd044a13061386ed657ede3d0a7d69e0e4db7f5ebaad9e110d8b1472466149d",
+        "threadblock_proto_set_sha256": "b45f1b22a535ae1ff5f66df38d86a7e6b6990af7604af24a7d6108a486334939"
+      },
+      "kernel_signature_sha256": "4f26b1113d4895a4b5df51521c1e2ddea69ddd03c446b9730bd649ff3e1c6b6b",
+      "ncu_metric_version": "ncu_2026.1.x",
+      "predicted_hit_rate": 0.5,
+      "result_kind": "scalar",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "bf16_hmma_gemm_traceable",
+      "source_commit": "f6b5e5d3b19fb4ac507fa3fa0229ebf11073f50f",
+      "typed_reason": null
+    },
+    {
+      "arch": "sm_86",
+      "binary_sha256": "19beb03abd72bc3583ce71dcf779c7f058ac0e0cb976c0a321759535c72d5e3a",
+      "cache_layer": "L1TEX",
+      "evidence": {
+        "active_sm_count": 32,
+        "co_resident_warps": 48,
+        "counters": {
+          "bypass_count": 18432,
+          "hit_count": 0,
+          "line_alloc_miss_count": 256,
+          "line_fill_count": 256,
+          "miss_count": 1024,
+          "mshr_merge_count": 0,
+          "mshr_stall_events": 0,
+          "sector_miss_resident_line_count": 768
+        },
+        "geometry": {
+          "capacity_bytes": 98304,
+          "capacity_property": "l1_capacity_bytes",
+          "carveout_percent": null,
+          "hit_latency": 33.0016,
+          "line_capacity": 768,
+          "miss_latency": 250.0092,
+          "mshr_count": 32,
+          "mshr_source": "documented_default",
+          "replacement_modeled": "lru",
+          "replacement_source": "documented_approximation",
+          "set_mapping_modeled": "fully_associative",
+          "set_mapping_source": "documented_approximation"
+        },
+        "total_eligible_accesses": 1024,
+        "walker": "warp_pool_two_layer_finite_mshr",
+        "warps_per_block": 4
+      },
+      "input_digests": {
+        "classifier_manifest_sha256": "62668c62ef4ca13e882d810903beb3c257f6bd948599e11c740c27ef04199a4e",
+        "dynamic_trace_pb_sha256": "63e07cbe24a0d3d7cd7276e436af9d3cfdcd6adb9879646dd83134637d2f61cc",
+        "threadblock_proto_set_sha256": "882fca9275eb2d4f046a949d76bf07a2d5d9c8ecb2b54902ae99a665565ff019"
+      },
+      "kernel_signature_sha256": "166c68126ca691ffffd1cf792265b04165b17f4a4d8d03860580b4eaf68e9acb",
+      "ncu_metric_version": "ncu_2026.1.x",
+      "predicted_hit_rate": 0.0,
+      "result_kind": "scalar",
+      "shape_point": "timing_shape",
+      "slug": "conv2d_implicit_gemm_bf16_sm80",
+      "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7",
+      "typed_reason": null
+    },
+    {
+      "arch": "sm_86",
+      "binary_sha256": "b0b510ca0263ad138574a0295f06a2207903b780fe4763cdfa61bb90a53fdc79",
+      "cache_layer": "L1TEX",
+      "evidence": {
+        "diagnostic": "matched manifest and walked trace produced zero l1-eligible sector accesses"
+      },
+      "input_digests": {
+        "classifier_manifest_sha256": "4bb955db91b26788c24f8c5f0902080e914b05ec377a78924188287fa68cf992",
+        "dynamic_trace_pb_sha256": "11411c4f408154832787a6b240ca836ee7267a8430b9194dec6fe906cbccb8d7",
+        "threadblock_proto_set_sha256": "38d3af4e67ae33c957b466c67b3cb28249b190c16fb93a0806c802481b1d2838"
+      },
+      "kernel_signature_sha256": "a99c593cfe75c5246722662748ea2c5598a235cd79be8e80809a3e893ed1d354",
+      "ncu_metric_version": "ncu_2026.1.x",
+      "predicted_hit_rate": null,
+      "result_kind": "typed_unavailable",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "cp_async_shared_tile_copy",
+      "source_commit": "f6b5e5d3b19fb4ac507fa3fa0229ebf11073f50f",
+      "typed_reason": "predictor_l1_no_modeled_l1_eligible_accesses"
+    },
+    {
+      "arch": "sm_86",
+      "binary_sha256": "0dfdcadd5a6400883c151539d0d5c3feabd6d08c16f894e20ccec6d8e8080087",
+      "cache_layer": "L1TEX",
+      "evidence": {
+        "active_sm_count": 64,
+        "co_resident_warps": 48,
+        "counters": {
+          "bypass_count": 0,
+          "hit_count": 32832,
+          "line_alloc_miss_count": 8320,
+          "line_fill_count": 8320,
+          "miss_count": 32896,
+          "mshr_merge_count": 0,
+          "mshr_stall_events": 0,
+          "sector_miss_resident_line_count": 24576
+        },
+        "geometry": {
+          "capacity_bytes": 98304,
+          "capacity_property": "l1_capacity_bytes",
+          "carveout_percent": null,
+          "hit_latency": 33.0016,
+          "line_capacity": 768,
+          "miss_latency": 250.0092,
+          "mshr_count": 32,
+          "mshr_source": "documented_default",
+          "replacement_modeled": "lru",
+          "replacement_source": "documented_approximation",
+          "set_mapping_modeled": "fully_associative",
+          "set_mapping_source": "documented_approximation"
+        },
+        "total_eligible_accesses": 65728,
+        "walker": "warp_pool_two_layer_finite_mshr",
+        "warps_per_block": 8
+      },
+      "input_digests": {
+        "classifier_manifest_sha256": "c436911c371dcac7e4ff3486111ff628e45e2742fbe293a9d9b293957bd6342e",
+        "dynamic_trace_pb_sha256": "29bc435bc2228179ab47b00c4c872af2f73b8035ff0f34378edc7f5c67888284",
+        "threadblock_proto_set_sha256": "dbfc24fb39f6c682c600fc2b74a6f4f311d0f09037e76d410096328c5af75924"
+      },
+      "kernel_signature_sha256": "317570008f9dcda3325fb71f1fdaa418d8de9a0d7b3ece65c1642f0de798eddb",
+      "ncu_metric_version": "ncu_2026.1.x",
+      "predicted_hit_rate": 0.49951314508276534,
+      "result_kind": "scalar",
+      "shape_point": "timing_shape",
+      "slug": "cross_entropy_fwd_fp32_sm80",
+      "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7",
+      "typed_reason": null
+    },
+    {
+      "arch": "sm_86",
+      "binary_sha256": "bb022917d38733a47694ea8bd63c2abb1b4e816a07fd1f5adeba707bc38dfd97",
+      "cache_layer": "L1TEX",
+      "evidence": {
+        "active_sm_count": 4,
+        "co_resident_warps": 32,
+        "counters": {
+          "bypass_count": 0,
+          "hit_count": 0,
+          "line_alloc_miss_count": 16,
+          "line_fill_count": 16,
+          "miss_count": 64,
+          "mshr_merge_count": 0,
+          "mshr_stall_events": 0,
+          "sector_miss_resident_line_count": 48
+        },
+        "geometry": {
+          "capacity_bytes": 98304,
+          "capacity_property": "l1_capacity_bytes",
+          "carveout_percent": null,
+          "hit_latency": 33.0016,
+          "line_capacity": 768,
+          "miss_latency": 250.0092,
+          "mshr_count": 32,
+          "mshr_source": "documented_default",
+          "replacement_modeled": "lru",
+          "replacement_source": "documented_approximation",
+          "set_mapping_modeled": "fully_associative",
+          "set_mapping_source": "documented_approximation"
+        },
+        "total_eligible_accesses": 64,
+        "walker": "warp_pool_two_layer_finite_mshr",
+        "warps_per_block": 2
+      },
+      "input_digests": {
+        "classifier_manifest_sha256": "5cacec7ac475d727147da52c7a919b9ef8fd3f123bd2a2f9a079b99d674b78f4",
+        "dynamic_trace_pb_sha256": "749572eb9e04a14294210f24d19e59021853a84148b70795f2073dfa3e670fe6",
+        "threadblock_proto_set_sha256": "7c13db8013225bf72b6e3e600c41c7382df9429986c9b7236e1793b752f4cb4b"
+      },
+      "kernel_signature_sha256": "28bc636502da34541b1abb1b2e2f439fab06d0c2a46ba76e4ba1eb314a19346a",
+      "ncu_metric_version": "ncu_2026.1.x",
+      "predicted_hit_rate": 0.0,
+      "result_kind": "scalar",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "dram_streaming_dot_product",
+      "source_commit": "b71d21fa2ce2bb2a55cfc5374d9d46ddf62dcf20",
+      "typed_reason": null
+    },
+    {
+      "arch": "sm_86",
+      "binary_sha256": "ce2f77933a7ec3581aa62eaf52bd3e8c07de2a78ae61546632a70b2a7a0fe48e",
+      "cache_layer": "L1TEX",
+      "evidence": {
+        "active_sm_count": 32,
+        "co_resident_warps": 48,
+        "counters": {
+          "bypass_count": 0,
+          "hit_count": 0,
+          "line_alloc_miss_count": 16384,
+          "line_fill_count": 16384,
+          "miss_count": 65536,
+          "mshr_merge_count": 16384,
+          "mshr_stall_events": 0,
+          "sector_miss_resident_line_count": 32768
+        },
+        "geometry": {
+          "capacity_bytes": 98304,
+          "capacity_property": "l1_capacity_bytes",
+          "carveout_percent": null,
+          "hit_latency": 33.0016,
+          "line_capacity": 768,
+          "miss_latency": 250.0092,
+          "mshr_count": 32,
+          "mshr_source": "documented_default",
+          "replacement_modeled": "lru",
+          "replacement_source": "documented_approximation",
+          "set_mapping_modeled": "fully_associative",
+          "set_mapping_source": "documented_approximation"
+        },
+        "total_eligible_accesses": 65536,
+        "walker": "warp_pool_two_layer_finite_mshr",
+        "warps_per_block": 8
+      },
+      "input_digests": {
+        "classifier_manifest_sha256": "105362dd0f5002d4126fdd4299a30000cf5467607897428f6cb2fb733b59902b",
+        "dynamic_trace_pb_sha256": "822706a36bb3d40399dcccee14aeeb24a19c7b00fc7e663f82e7cb2cbe349deb",
+        "threadblock_proto_set_sha256": "dd90b5611803af2b43695f59352b84d519983aa692728e422542faa7d065633e"
+      },
+      "kernel_signature_sha256": "8dbf972a5fdbebe33768c592447108592664645c38e0d22514468f664795ff8b",
+      "ncu_metric_version": "ncu_2026.1.x",
+      "predicted_hit_rate": 0.0,
+      "result_kind": "scalar",
+      "shape_point": "timing_shape",
+      "slug": "embedding_gather_int32_sm80",
+      "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7",
+      "typed_reason": null
+    },
+    {
+      "arch": "sm_86",
+      "binary_sha256": "74ad45e93ba3fb2b8c35724c6681d5c96cdfc8341de0f368edc3bde0331e63f7",
+      "cache_layer": "L1TEX",
+      "evidence": {
+        "active_sm_count": 4,
+        "co_resident_warps": 16,
+        "counters": {
+          "bypass_count": 0,
+          "hit_count": 1600,
+          "line_alloc_miss_count": 416,
+          "line_fill_count": 416,
+          "miss_count": 1600,
+          "mshr_merge_count": 0,
+          "mshr_stall_events": 0,
+          "sector_miss_resident_line_count": 1184
+        },
+        "geometry": {
+          "capacity_bytes": 98304,
+          "capacity_property": "l1_capacity_bytes",
+          "carveout_percent": null,
+          "hit_latency": 33.0016,
+          "line_capacity": 768,
+          "miss_latency": 250.0092,
+          "mshr_count": 32,
+          "mshr_source": "documented_default",
+          "replacement_modeled": "lru",
+          "replacement_source": "documented_approximation",
+          "set_mapping_modeled": "fully_associative",
+          "set_mapping_source": "documented_approximation"
+        },
+        "total_eligible_accesses": 3200,
+        "walker": "warp_pool_two_layer_finite_mshr",
+        "warps_per_block": 1
+      },
+      "input_digests": {
+        "classifier_manifest_sha256": "3aba60e197d9155b87ae8365ef4a3c014ac0bbbdb23f2f2cb3bb0318773d12c6",
+        "dynamic_trace_pb_sha256": "1b6bf3bfacc51c90fd33436c9516644808e524294f4f8132c5793bae45046676",
+        "threadblock_proto_set_sha256": "9ed970ab2572319d8b87756c7ef72033a826bb3d3def26009e0bca48e4375318"
+      },
+      "kernel_signature_sha256": "87f9c439b130a8d25457042b165734612b65b590cd2aa2acc54b95178eb16ad9",
+      "ncu_metric_version": "ncu_2026.1.x",
+      "predicted_hit_rate": 0.5,
+      "result_kind": "scalar",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "fp16_hmma_gemm_traceable",
+      "source_commit": "f6b5e5d3b19fb4ac507fa3fa0229ebf11073f50f",
+      "typed_reason": null
+    },
+    {
+      "arch": "sm_86",
+      "binary_sha256": "55bfc93c0edebe35c6e78b16d6096bd3a21e60f25faa178a410fc59cbf21bbae",
+      "cache_layer": "L1TEX",
+      "evidence": {
+        "active_sm_count": 16,
+        "co_resident_warps": 16,
+        "counters": {
+          "bypass_count": 0,
+          "hit_count": 43008,
+          "line_alloc_miss_count": 2304,
+          "line_fill_count": 2304,
+          "miss_count": 7680,
+          "mshr_merge_count": 0,
+          "mshr_stall_events": 0,
+          "sector_miss_resident_line_count": 5376
+        },
+        "geometry": {
+          "capacity_bytes": 98304,
+          "capacity_property": "l1_capacity_bytes",
+          "carveout_percent": null,
+          "hit_latency": 33.0016,
+          "line_capacity": 768,
+          "miss_latency": 250.0092,
+          "mshr_count": 32,
+          "mshr_source": "documented_default",
+          "replacement_modeled": "lru",
+          "replacement_source": "documented_approximation",
+          "set_mapping_modeled": "fully_associative",
+          "set_mapping_source": "documented_approximation"
+        },
+        "total_eligible_accesses": 50688,
+        "walker": "warp_pool_two_layer_finite_mshr",
+        "warps_per_block": 1
+      },
+      "input_digests": {
+        "classifier_manifest_sha256": "426ed27c8766cea77869931d0ade2f8bf3e65c38ec3fa213bf5dd5ce8c55249d",
+        "dynamic_trace_pb_sha256": "6cf366c2c3707d2af0c01e29f04ddf5b118fc679c217c3ebc8b4d13141ffa2ae",
+        "threadblock_proto_set_sha256": "14344e6236ff035e2e1af21d1be4c9bca5c01a33e39ff9cfaed684842239e3e4"
+      },
+      "kernel_signature_sha256": "87f0eeb1256101173117148a10ac97d6367a9307c2b8e33c78df9d43c2f491f7",
+      "ncu_metric_version": "ncu_2026.1.x",
+      "predicted_hit_rate": 0.8484848484848485,
+      "result_kind": "scalar",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "fp32_fma_dep_chain",
+      "source_commit": "f6b5e5d3b19fb4ac507fa3fa0229ebf11073f50f",
+      "typed_reason": null
+    },
+    {
+      "arch": "sm_86",
+      "binary_sha256": "bab4489d033e31a50df904d3246eb37adf3b8e52fa3d8015c008a0ce3147b629",
+      "cache_layer": "L1TEX",
+      "evidence": {
+        "diagnostic": "matched manifest and walked trace produced zero l1-eligible sector accesses"
+      },
+      "input_digests": {
+        "classifier_manifest_sha256": "af8dda3c60095e24b4012c3a948cb201c3b2a9f4c19286ae3243b07b06f8030a",
+        "dynamic_trace_pb_sha256": "d1ff47bb4e32e9929f80ad178e1393cbdc547ae136111a4a9955f964d64c4c32",
+        "threadblock_proto_set_sha256": "2b04ce6378cf9a6cbfa7b88eada7b0fb2daee944eb19bfedf69741eb86795a4d"
+      },
+      "kernel_signature_sha256": "8d74efecaa33ede92fae0b0173b9c442199ef5314c30a039792ccb2bbac5a24d",
+      "ncu_metric_version": "ncu_2026.1.x",
+      "predicted_hit_rate": null,
+      "result_kind": "typed_unavailable",
+      "shape_point": "timing_shape",
+      "slug": "gemm_hmma_bf16_sm80",
+      "source_commit": "5088821eb7e205bcce1678d85e6272063e212cd0",
+      "typed_reason": "predictor_l1_no_modeled_l1_eligible_accesses"
+    },
+    {
+      "arch": "sm_86",
+      "binary_sha256": "bab4489d033e31a50df904d3246eb37adf3b8e52fa3d8015c008a0ce3147b629",
+      "cache_layer": "L1TEX",
+      "evidence": {
+        "diagnostic": "matched manifest and walked trace produced zero l1-eligible sector accesses"
+      },
+      "input_digests": {
+        "classifier_manifest_sha256": "af8dda3c60095e24b4012c3a948cb201c3b2a9f4c19286ae3243b07b06f8030a",
+        "dynamic_trace_pb_sha256": "e9e63e1a8ee72f0250f79eac42f3e698e3f38d003674049a39e109211f27a96a",
+        "threadblock_proto_set_sha256": "33dbaee9f007dba05d5bf3febcf2622de9a0856bfd539e3e4cf4e10ed3a9d4c0"
+      },
+      "kernel_signature_sha256": "8d74efecaa33ede92fae0b0173b9c442199ef5314c30a039792ccb2bbac5a24d",
+      "ncu_metric_version": "ncu_2026.1.x",
+      "predicted_hit_rate": null,
+      "result_kind": "typed_unavailable",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "gemm_hmma_bf16_sm80",
+      "source_commit": "5088821eb7e205bcce1678d85e6272063e212cd0",
+      "typed_reason": "predictor_l1_no_modeled_l1_eligible_accesses"
+    },
+    {
+      "arch": "sm_86",
+      "binary_sha256": "1a638194443715e18b8753bfbde32c9be79e2d59be70585b318600e12d7f6b1d",
+      "cache_layer": "L1TEX",
+      "evidence": {
+        "diagnostic": "matched manifest and walked trace produced zero l1-eligible sector accesses"
+      },
+      "input_digests": {
+        "classifier_manifest_sha256": "c1cba89485d50a8e246e7355bcb9923e95664dd9bb3fd1ce3449d2b179d74af6",
+        "dynamic_trace_pb_sha256": "fcb84c3153854301498c6764292e11730cd55fe26c7be0c8db44cf49717d22a2",
+        "threadblock_proto_set_sha256": "9a42d8d095d30c82c419f1d8785c41983e20a1efc89a7e11671431024fa7b98d"
+      },
+      "kernel_signature_sha256": "6c3c64d7b03efd3c0fab89868ff75dc052370434282ac050bbb6c21d3310f9b9",
+      "ncu_metric_version": "ncu_2026.1.x",
+      "predicted_hit_rate": null,
+      "result_kind": "typed_unavailable",
+      "shape_point": "timing_shape",
+      "slug": "gemm_hmma_fp16_sm80",
+      "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7",
+      "typed_reason": "predictor_l1_no_modeled_l1_eligible_accesses"
+    },
+    {
+      "arch": "sm_86",
+      "binary_sha256": "1a638194443715e18b8753bfbde32c9be79e2d59be70585b318600e12d7f6b1d",
+      "cache_layer": "L1TEX",
+      "evidence": {
+        "diagnostic": "matched manifest and walked trace produced zero l1-eligible sector accesses"
+      },
+      "input_digests": {
+        "classifier_manifest_sha256": "c1cba89485d50a8e246e7355bcb9923e95664dd9bb3fd1ce3449d2b179d74af6",
+        "dynamic_trace_pb_sha256": "372c477f78d47fb177a0b9f1214ba674fedba4c1db7f33c1bc6c0e4afc22476f",
+        "threadblock_proto_set_sha256": "11e625927087ce55cdd5472e1295c1fd792797a94d9e0f09724991f96730826a"
+      },
+      "kernel_signature_sha256": "6c3c64d7b03efd3c0fab89868ff75dc052370434282ac050bbb6c21d3310f9b9",
+      "ncu_metric_version": "ncu_2026.1.x",
+      "predicted_hit_rate": null,
+      "result_kind": "typed_unavailable",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "gemm_hmma_fp16_sm80",
+      "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7",
+      "typed_reason": "predictor_l1_no_modeled_l1_eligible_accesses"
+    },
+    {
+      "arch": "sm_86",
+      "binary_sha256": "6cd2cf81121ff58834c36aadf8667764e676aa1cb4fd322788a95ea283cca4f8",
+      "cache_layer": "L1TEX",
+      "evidence": {
+        "diagnostic": "matched manifest and walked trace produced zero l1-eligible sector accesses"
+      },
+      "input_digests": {
+        "classifier_manifest_sha256": "b257e0853cf7880aaa7e3bc47a8291741b20bca46cda7a86808132285451164c",
+        "dynamic_trace_pb_sha256": "f1b7ed0d7e796c6c35f65b7881aa197d6fd417a7262d6d6d7f8ddd50b3c51151",
+        "threadblock_proto_set_sha256": "ef616f15a9c03ba5e0b9b88b4cae1678ae4a05d9261120c170c022e8abc9c2b4"
+      },
+      "kernel_signature_sha256": "f7154498956f308d855299538f5255af01943add22c7bd17936b2b4eb8f39ce4",
+      "ncu_metric_version": "ncu_2026.1.x",
+      "predicted_hit_rate": null,
+      "result_kind": "typed_unavailable",
+      "shape_point": "timing_shape",
+      "slug": "gemm_imma_int8_sm80",
+      "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7",
+      "typed_reason": "predictor_l1_no_modeled_l1_eligible_accesses"
+    },
+    {
+      "arch": "sm_86",
+      "binary_sha256": "6cd2cf81121ff58834c36aadf8667764e676aa1cb4fd322788a95ea283cca4f8",
+      "cache_layer": "L1TEX",
+      "evidence": {
+        "diagnostic": "matched manifest and walked trace produced zero l1-eligible sector accesses"
+      },
+      "input_digests": {
+        "classifier_manifest_sha256": "b257e0853cf7880aaa7e3bc47a8291741b20bca46cda7a86808132285451164c",
+        "dynamic_trace_pb_sha256": "f791071bdd40e10fa62b32b8ea70177d39fe18ecbbdb1e3cc484d7cd6e9c6dcc",
+        "threadblock_proto_set_sha256": "fee60dca20aa8494bd82f3623fd0efc7e5d9ec60276d6ad303551fb20987a727"
+      },
+      "kernel_signature_sha256": "f7154498956f308d855299538f5255af01943add22c7bd17936b2b4eb8f39ce4",
+      "ncu_metric_version": "ncu_2026.1.x",
+      "predicted_hit_rate": null,
+      "result_kind": "typed_unavailable",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "gemm_imma_int8_sm80",
+      "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7",
+      "typed_reason": "predictor_l1_no_modeled_l1_eligible_accesses"
+    },
+    {
+      "arch": "sm_86",
+      "binary_sha256": "dac635cbb91e33c54424581f6527dae3be4c1cd7fddf170c32bd055296952963",
+      "cache_layer": "L1TEX",
+      "evidence": {
+        "diagnostic": "matched manifest and walked trace produced zero l1-eligible sector accesses"
+      },
+      "input_digests": {
+        "classifier_manifest_sha256": "2830e12f1c78aa3443cdca83f621347ae4a369920d63b6f3666bee0e8f44043b",
+        "dynamic_trace_pb_sha256": "714d423a0b32aa21a07e4c6a4b1a7e50f77cfe33f36993f3de0775527444448a",
+        "threadblock_proto_set_sha256": "6dacef8b2275f17ebfc766468888f3a620c5f4f440c879130735937b0a46ec68"
+      },
+      "kernel_signature_sha256": "5f2fb866479f938277d0dae62cce21626e6c56c68c8e4e447739f5919aac2f9e",
+      "ncu_metric_version": "ncu_2026.1.x",
+      "predicted_hit_rate": null,
+      "result_kind": "typed_unavailable",
+      "shape_point": "timing_shape",
+      "slug": "gemm_sparse_2to4_bf16_sm80",
+      "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7",
+      "typed_reason": "predictor_l1_no_modeled_l1_eligible_accesses"
+    },
+    {
+      "arch": "sm_86",
+      "binary_sha256": "ed4d15e1a3dc6e2774996cb07eb5088ce456b3e47ada8ca7d84aca6839a2d0ec",
+      "cache_layer": "L1TEX",
+      "evidence": {
+        "active_sm_count": 1,
+        "co_resident_warps": 16,
+        "counters": {
+          "bypass_count": 0,
+          "hit_count": 0,
+          "line_alloc_miss_count": 1024,
+          "line_fill_count": 1024,
+          "miss_count": 4096,
+          "mshr_merge_count": 0,
+          "mshr_stall_events": 0,
+          "sector_miss_resident_line_count": 3072
+        },
+        "geometry": {
+          "capacity_bytes": 98304,
+          "capacity_property": "l1_capacity_bytes",
+          "carveout_percent": null,
+          "hit_latency": 33.0016,
+          "line_capacity": 768,
+          "miss_latency": 250.0092,
+          "mshr_count": 32,
+          "mshr_source": "documented_default",
+          "replacement_modeled": "lru",
+          "replacement_source": "documented_approximation",
+          "set_mapping_modeled": "fully_associative",
+          "set_mapping_source": "documented_approximation"
+        },
+        "total_eligible_accesses": 4096,
+        "walker": "warp_pool_two_layer_finite_mshr",
+        "warps_per_block": 1
+      },
+      "input_digests": {
+        "classifier_manifest_sha256": "620f1c312bc969d7349332025d6275e9f15bcf82bbb6431f0fe9df0c88f8ae9a",
+        "dynamic_trace_pb_sha256": "449128338d32d5077afd22d14313b5392717dfdfb00b5178bab057f93d57eed2",
+        "threadblock_proto_set_sha256": "2df9b751f7f5624feeb2c08e8056bc4f3440dd52105dae2c8e247202588edcfe"
+      },
+      "kernel_signature_sha256": "3cb859fabb45a0e34f4f0c52c7aa84c78616b726b25162039bbd2dbd09d85840",
+      "ncu_metric_version": "ncu_2026.1.x",
+      "predicted_hit_rate": 0.0,
+      "result_kind": "scalar",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "global_atomic_and_histogram",
+      "source_commit": "50b3de0a3f9e87fc23f7e717fa4c0f9b7d7c375a",
+      "typed_reason": null
+    },
+    {
+      "arch": "sm_86",
+      "binary_sha256": "03938af34f462516b82342a796d7aca7b3b09224e9696944fb1499e30c75a819",
+      "cache_layer": "L1TEX",
+      "evidence": {
+        "active_sm_count": 1,
+        "co_resident_warps": 16,
+        "counters": {
+          "bypass_count": 1024,
+          "hit_count": 0,
+          "line_alloc_miss_count": 1024,
+          "line_fill_count": 1024,
+          "miss_count": 4096,
+          "mshr_merge_count": 0,
+          "mshr_stall_events": 0,
+          "sector_miss_resident_line_count": 3072
+        },
+        "geometry": {
+          "capacity_bytes": 98304,
+          "capacity_property": "l1_capacity_bytes",
+          "carveout_percent": null,
+          "hit_latency": 33.0016,
+          "line_capacity": 768,
+          "miss_latency": 250.0092,
+          "mshr_count": 32,
+          "mshr_source": "documented_default",
+          "replacement_modeled": "lru",
+          "replacement_source": "documented_approximation",
+          "set_mapping_modeled": "fully_associative",
+          "set_mapping_source": "documented_approximation"
+        },
+        "total_eligible_accesses": 4096,
+        "walker": "warp_pool_two_layer_finite_mshr",
+        "warps_per_block": 1
+      },
+      "input_digests": {
+        "classifier_manifest_sha256": "a978acd41bb95a8e3de990ecad389fce68c8ea649e1a2e724837fb2e64e9fc9e",
+        "dynamic_trace_pb_sha256": "510ed88b9ae86429ef90e06b14fbe738e8be3d714a3a9640d9ca632dabd471e0",
+        "threadblock_proto_set_sha256": "356286fa648b7f4ee44a3455b01694f0364c26fd36b457293d296086b41a4a6d"
+      },
+      "kernel_signature_sha256": "4fb3992cd157e8249d31c791139dfc46b92c82ec97b23aae892e6cd282d33377",
+      "ncu_metric_version": "ncu_2026.1.x",
+      "predicted_hit_rate": 0.0,
+      "result_kind": "scalar",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "global_atomic_and_return_used",
+      "source_commit": "50b3de0a3f9e87fc23f7e717fa4c0f9b7d7c375a",
+      "typed_reason": null
+    },
+    {
+      "arch": "sm_86",
+      "binary_sha256": "5a2939632a01db485828bc27930e98da8ad9f50eb59fe5500007793c5fbc5cf4",
+      "cache_layer": "L1TEX",
+      "evidence": {
+        "active_sm_count": 1,
+        "co_resident_warps": 16,
+        "counters": {
+          "bypass_count": 0,
+          "hit_count": 0,
+          "line_alloc_miss_count": 1024,
+          "line_fill_count": 1024,
+          "miss_count": 4096,
+          "mshr_merge_count": 0,
+          "mshr_stall_events": 0,
+          "sector_miss_resident_line_count": 3072
+        },
+        "geometry": {
+          "capacity_bytes": 98304,
+          "capacity_property": "l1_capacity_bytes",
+          "carveout_percent": null,
+          "hit_latency": 33.0016,
+          "line_capacity": 768,
+          "miss_latency": 250.0092,
+          "mshr_count": 32,
+          "mshr_source": "documented_default",
+          "replacement_modeled": "lru",
+          "replacement_source": "documented_approximation",
+          "set_mapping_modeled": "fully_associative",
+          "set_mapping_source": "documented_approximation"
+        },
+        "total_eligible_accesses": 4096,
+        "walker": "warp_pool_two_layer_finite_mshr",
+        "warps_per_block": 1
+      },
+      "input_digests": {
+        "classifier_manifest_sha256": "ab305ea07a5b9a709d998518bc9240034a8d7225c25b1eb5e5d1942dfa26ac83",
+        "dynamic_trace_pb_sha256": "b99bbf37d729f8ad9d914a13860e309631cd60a264e023a63766840b969a207c",
+        "threadblock_proto_set_sha256": "d847421dc406b0da2d7663338f26bbea593960b350793589e6b8629e6ecb0151"
+      },
+      "kernel_signature_sha256": "7b0d4c0ce3b924918bd9c913ee6a624b46b70462eca9b9388459e4259d333264",
+      "ncu_metric_version": "ncu_2026.1.x",
+      "predicted_hit_rate": 0.0,
+      "result_kind": "scalar",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "global_atomic_histogram",
+      "source_commit": "742aafa7e6bf85d33cddeae7a12f1d7c4700bdac",
+      "typed_reason": null
+    },
+    {
+      "arch": "sm_86",
+      "binary_sha256": "0c31c6e924111113539d91682e0d3e9a3e5e19cbedc61a75a46c6a30337065d6",
+      "cache_layer": "L1TEX",
+      "evidence": {
+        "active_sm_count": 1,
+        "co_resident_warps": 16,
+        "counters": {
+          "bypass_count": 0,
+          "hit_count": 0,
+          "line_alloc_miss_count": 1024,
+          "line_fill_count": 1024,
+          "miss_count": 4096,
+          "mshr_merge_count": 0,
+          "mshr_stall_events": 0,
+          "sector_miss_resident_line_count": 3072
+        },
+        "geometry": {
+          "capacity_bytes": 98304,
+          "capacity_property": "l1_capacity_bytes",
+          "carveout_percent": null,
+          "hit_latency": 33.0016,
+          "line_capacity": 768,
+          "miss_latency": 250.0092,
+          "mshr_count": 32,
+          "mshr_source": "documented_default",
+          "replacement_modeled": "lru",
+          "replacement_source": "documented_approximation",
+          "set_mapping_modeled": "fully_associative",
+          "set_mapping_source": "documented_approximation"
+        },
+        "total_eligible_accesses": 4096,
+        "walker": "warp_pool_two_layer_finite_mshr",
+        "warps_per_block": 1
+      },
+      "input_digests": {
+        "classifier_manifest_sha256": "94e64bc9734495e94de9243edc64f74eb0e4c9cd153c17ea942dd7c9b636d009",
+        "dynamic_trace_pb_sha256": "912049cfa2d59bb487e0cf9cb210f693beb3b4445f5b1072de9a77786b0cd6b3",
+        "threadblock_proto_set_sha256": "94aa73656731143c254d020297418d939c44df6aa674ef8874fe32cd8e9981ad"
+      },
+      "kernel_signature_sha256": "5ffff11014584f390320a0139c95090592adbc6673acffa23190d1792f2ca322",
+      "ncu_metric_version": "ncu_2026.1.x",
+      "predicted_hit_rate": 0.0,
+      "result_kind": "scalar",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "global_atomic_max_histogram",
+      "source_commit": "1c628895cd424ff733cb4eb2854cc6473a4008f5",
+      "typed_reason": null
+    },
+    {
+      "arch": "sm_86",
+      "binary_sha256": "2c29a4e0962c36e37f5b5834fed650861667aa665fc7b285f22438e9c8a9fbe9",
+      "cache_layer": "L1TEX",
+      "evidence": {
+        "active_sm_count": 1,
+        "co_resident_warps": 16,
+        "counters": {
+          "bypass_count": 1024,
+          "hit_count": 0,
+          "line_alloc_miss_count": 1024,
+          "line_fill_count": 1024,
+          "miss_count": 4096,
+          "mshr_merge_count": 0,
+          "mshr_stall_events": 0,
+          "sector_miss_resident_line_count": 3072
+        },
+        "geometry": {
+          "capacity_bytes": 98304,
+          "capacity_property": "l1_capacity_bytes",
+          "carveout_percent": null,
+          "hit_latency": 33.0016,
+          "line_capacity": 768,
+          "miss_latency": 250.0092,
+          "mshr_count": 32,
+          "mshr_source": "documented_default",
+          "replacement_modeled": "lru",
+          "replacement_source": "documented_approximation",
+          "set_mapping_modeled": "fully_associative",
+          "set_mapping_source": "documented_approximation"
+        },
+        "total_eligible_accesses": 4096,
+        "walker": "warp_pool_two_layer_finite_mshr",
+        "warps_per_block": 1
+      },
+      "input_digests": {
+        "classifier_manifest_sha256": "28b5989cb0a6aeba8cd6a25355661f210ebebc7604bfc87d8fd6902c5ed1acfd",
+        "dynamic_trace_pb_sha256": "c879288900b298f48a8c2f46d5a98f2c9b01f519cf6eee244e8985e45480e5b3",
+        "threadblock_proto_set_sha256": "8ed2d26894da851d09c2ad02bf47692e43d1d4493d47ea27ed80fbbb5479810e"
+      },
+      "kernel_signature_sha256": "f30caf6dc50fd9516fd04d478119bc414306b0ab1e3b5b15b247b0e3a8d0219e",
+      "ncu_metric_version": "ncu_2026.1.x",
+      "predicted_hit_rate": 0.0,
+      "result_kind": "scalar",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "global_atomic_max_return_used",
+      "source_commit": "1c628895cd424ff733cb4eb2854cc6473a4008f5",
+      "typed_reason": null
+    },
+    {
+      "arch": "sm_86",
+      "binary_sha256": "9c43b9f7674c7a3a8c4fbfbfab44ba574f9d50f947cd8df4e05c1088e5ca9a9f",
+      "cache_layer": "L1TEX",
+      "evidence": {
+        "active_sm_count": 1,
+        "co_resident_warps": 16,
+        "counters": {
+          "bypass_count": 0,
+          "hit_count": 0,
+          "line_alloc_miss_count": 1024,
+          "line_fill_count": 1024,
+          "miss_count": 4096,
+          "mshr_merge_count": 0,
+          "mshr_stall_events": 0,
+          "sector_miss_resident_line_count": 3072
+        },
+        "geometry": {
+          "capacity_bytes": 98304,
+          "capacity_property": "l1_capacity_bytes",
+          "carveout_percent": null,
+          "hit_latency": 33.0016,
+          "line_capacity": 768,
+          "miss_latency": 250.0092,
+          "mshr_count": 32,
+          "mshr_source": "documented_default",
+          "replacement_modeled": "lru",
+          "replacement_source": "documented_approximation",
+          "set_mapping_modeled": "fully_associative",
+          "set_mapping_source": "documented_approximation"
+        },
+        "total_eligible_accesses": 4096,
+        "walker": "warp_pool_two_layer_finite_mshr",
+        "warps_per_block": 1
+      },
+      "input_digests": {
+        "classifier_manifest_sha256": "239584acf95668d12a48e656d994326ecd3f82bbe51f935e0a67006f2fcadcba",
+        "dynamic_trace_pb_sha256": "fbf80ed64a344ef911ae28196ed84a85e191479b379668eaa36ff3248aa46f6c",
+        "threadblock_proto_set_sha256": "af4335019414b0b5fb0d3d8f5d8fba0ed9036b7af0c946b6d8a9a9a4eb385621"
+      },
+      "kernel_signature_sha256": "575ad657992d58bc685ff58e6a950429dc939463980ce6fe1524c8c7efeb9154",
+      "ncu_metric_version": "ncu_2026.1.x",
+      "predicted_hit_rate": 0.0,
+      "result_kind": "scalar",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "global_atomic_return_used",
+      "source_commit": "ae4664f7ee51df026d4800432ea5af6d42a4dd67",
+      "typed_reason": null
+    },
+    {
+      "arch": "sm_86",
+      "binary_sha256": "ba4350edcc19151b355ae8e6cebad3bcdd3cddae914af5b9844318170f6f1f3f",
+      "cache_layer": "L1TEX",
+      "evidence": {
+        "active_sm_count": 1,
+        "co_resident_warps": 16,
+        "counters": {
+          "bypass_count": 0,
+          "hit_count": 0,
+          "line_alloc_miss_count": 1536,
+          "line_fill_count": 1536,
+          "miss_count": 6144,
+          "mshr_merge_count": 0,
+          "mshr_stall_events": 0,
+          "sector_miss_resident_line_count": 4608
+        },
+        "geometry": {
+          "capacity_bytes": 98304,
+          "capacity_property": "l1_capacity_bytes",
+          "carveout_percent": null,
+          "hit_latency": 33.0016,
+          "line_capacity": 768,
+          "miss_latency": 250.0092,
+          "mshr_count": 32,
+          "mshr_source": "documented_default",
+          "replacement_modeled": "lru",
+          "replacement_source": "documented_approximation",
+          "set_mapping_modeled": "fully_associative",
+          "set_mapping_source": "documented_approximation"
+        },
+        "total_eligible_accesses": 6144,
+        "walker": "warp_pool_two_layer_finite_mshr",
+        "warps_per_block": 1
+      },
+      "input_digests": {
+        "classifier_manifest_sha256": "bee7b70474691d79d165dfd96e5481b15f26d950a94cccf1b6eeb53e9fa3dbf8",
+        "dynamic_trace_pb_sha256": "aeefcdf9eade7dd16239f02ab754216b9e8048d9126cf6a04d95fba2fe9bf127",
+        "threadblock_proto_set_sha256": "1d4a949694739e0037cb08851a183c061df3a9dc59fc45f5e1a924d260a1510e"
+      },
+      "kernel_signature_sha256": "153672adcbdb398cba4c19499bffec0a83a820eed053478cbfb41c0889d93713",
+      "ncu_metric_version": "ncu_2026.1.x",
+      "predicted_hit_rate": 0.0,
+      "result_kind": "scalar",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "global_scalar_32b_copy",
+      "source_commit": "1a07bef421f556cb54d4c4fb128f8ec9cd5023d6",
+      "typed_reason": null
+    },
+    {
+      "arch": "sm_86",
+      "binary_sha256": "acb59fb5a3dcf91298e7653406a3ca6d318323f759d625e1761585685dc67e61",
+      "cache_layer": "L1TEX",
+      "evidence": {
+        "active_sm_count": 1,
+        "co_resident_warps": 16,
+        "counters": {
+          "bypass_count": 0,
+          "hit_count": 0,
+          "line_alloc_miss_count": 1536,
+          "line_fill_count": 1536,
+          "miss_count": 6144,
+          "mshr_merge_count": 0,
+          "mshr_stall_events": 0,
+          "sector_miss_resident_line_count": 4608
+        },
+        "geometry": {
+          "capacity_bytes": 98304,
+          "capacity_property": "l1_capacity_bytes",
+          "carveout_percent": null,
+          "hit_latency": 33.0016,
+          "line_capacity": 768,
+          "miss_latency": 250.0092,
+          "mshr_count": 32,
+          "mshr_source": "documented_default",
+          "replacement_modeled": "lru",
+          "replacement_source": "documented_approximation",
+          "set_mapping_modeled": "fully_associative",
+          "set_mapping_source": "documented_approximation"
+        },
+        "total_eligible_accesses": 6144,
+        "walker": "warp_pool_two_layer_finite_mshr",
+        "warps_per_block": 1
+      },
+      "input_digests": {
+        "classifier_manifest_sha256": "0b467c4d094398e0f0801ef559bef014697916098a94af37aacaffeaa31548a7",
+        "dynamic_trace_pb_sha256": "fa8a451004aeb038a4a4d47742fa7b1fbf0141be72f9afd777087b5aa6f6c8ca",
+        "threadblock_proto_set_sha256": "aac8c8c2a879f992efc1e5082e680cd7e293771d665216efd1c280a5f42e6e24"
+      },
+      "kernel_signature_sha256": "a2fb345317578d3ebbdcb0758086a22e3a656ffa392d5d7da5b56fb72bc21d8f",
+      "ncu_metric_version": "ncu_2026.1.x",
+      "predicted_hit_rate": 0.0,
+      "result_kind": "scalar",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "global_vectorized_128b_copy",
+      "source_commit": "1a07bef421f556cb54d4c4fb128f8ec9cd5023d6",
+      "typed_reason": null
+    },
+    {
+      "arch": "sm_86",
+      "binary_sha256": "c0fbee25c22216a1597b42c33a2666c62fa85997f26a4ea67b29b5b8ff7c18b4",
+      "cache_layer": "L1TEX",
+      "evidence": {
+        "active_sm_count": 1,
+        "co_resident_warps": 16,
+        "counters": {
+          "bypass_count": 0,
+          "hit_count": 0,
+          "line_alloc_miss_count": 1536,
+          "line_fill_count": 1536,
+          "miss_count": 6144,
+          "mshr_merge_count": 0,
+          "mshr_stall_events": 0,
+          "sector_miss_resident_line_count": 4608
+        },
+        "geometry": {
+          "capacity_bytes": 98304,
+          "capacity_property": "l1_capacity_bytes",
+          "carveout_percent": null,
+          "hit_latency": 33.0016,
+          "line_capacity": 768,
+          "miss_latency": 250.0092,
+          "mshr_count": 32,
+          "mshr_source": "documented_default",
+          "replacement_modeled": "lru",
+          "replacement_source": "documented_approximation",
+          "set_mapping_modeled": "fully_associative",
+          "set_mapping_source": "documented_approximation"
+        },
+        "total_eligible_accesses": 6144,
+        "walker": "warp_pool_two_layer_finite_mshr",
+        "warps_per_block": 1
+      },
+      "input_digests": {
+        "classifier_manifest_sha256": "e31d657a64e7aa4e83e7721711a68958d02a21fe74715394bbaa349e47de5736",
+        "dynamic_trace_pb_sha256": "9b98e59c86ce57362f7a027aa3f7a82f89d9a4d54c0c86fbe1b2510a39198a2d",
+        "threadblock_proto_set_sha256": "2c60f7d4dc01c3cca202d45db7470754224d5ba67630f9af9d758fe29368c685"
+      },
+      "kernel_signature_sha256": "50e72d8dc80c5fee0d00b777f912410e94e01fe70369cf69c2dbe667eefb8427",
+      "ncu_metric_version": "ncu_2026.1.x",
+      "predicted_hit_rate": 0.0,
+      "result_kind": "scalar",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "global_vectorized_64b_copy",
+      "source_commit": "5088821eb7e205bcce1678d85e6272063e212cd0",
+      "typed_reason": null
+    },
+    {
+      "arch": "sm_86",
+      "binary_sha256": "e2dbf45dc108f94b24da2bb8ca78ed2e51f9d668b1ea4a50a5768ee89649c2d5",
+      "cache_layer": "L1TEX",
+      "evidence": {
+        "active_sm_count": 1,
+        "co_resident_warps": 16,
+        "counters": {
+          "bypass_count": 0,
+          "hit_count": 38221,
+          "line_alloc_miss_count": 2307,
+          "line_fill_count": 2307,
+          "miss_count": 9224,
+          "mshr_merge_count": 0,
+          "mshr_stall_events": 0,
+          "sector_miss_resident_line_count": 6917
+        },
+        "geometry": {
+          "capacity_bytes": 98304,
+          "capacity_property": "l1_capacity_bytes",
+          "carveout_percent": null,
+          "hit_latency": 33.0016,
+          "line_capacity": 768,
+          "miss_latency": 250.0092,
+          "mshr_count": 32,
+          "mshr_source": "documented_default",
+          "replacement_modeled": "lru",
+          "replacement_source": "documented_approximation",
+          "set_mapping_modeled": "fully_associative",
+          "set_mapping_source": "documented_approximation"
+        },
+        "total_eligible_accesses": 47445,
+        "walker": "warp_pool_two_layer_finite_mshr",
+        "warps_per_block": 1
+      },
+      "input_digests": {
+        "classifier_manifest_sha256": "d28dae003967f1e6858707a1341544435acec3a22860cbd234b05007e171064c",
+        "dynamic_trace_pb_sha256": "3d0dadf189a2ed3ff932e30e3c4cb813a804d2bef258b1bd9994b0c86029b197",
+        "threadblock_proto_set_sha256": "9fe367295ddc9e7f56345e7c1eca7e677d1f23e9fa4b26f5cf3662e845342e1e"
+      },
+      "kernel_signature_sha256": "fec8990f34e9ab9a7f271f0ad509b0b7f8db8d3f9c12eb004a09317795d12fb1",
+      "ncu_metric_version": "ncu_2026.1.x",
+      "predicted_hit_rate": 0.8055854146906944,
+      "result_kind": "scalar",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "local_dynamic_index_array",
+      "source_commit": "9646699bbb91fcbcb6d29e8ca04e92c654df64de",
+      "typed_reason": null
+    },
+    {
+      "arch": "sm_86",
+      "binary_sha256": "3d8605d63e62e09eecb83e12478d31ed3c2fe74e0a0416d1d8f5502e535fbe4c",
+      "cache_layer": "L1TEX",
+      "evidence": {
+        "active_sm_count": 1,
+        "co_resident_warps": 16,
+        "counters": {
+          "bypass_count": 0,
+          "hit_count": 8064,
+          "line_alloc_miss_count": 1539,
+          "line_fill_count": 1539,
+          "miss_count": 6152,
+          "mshr_merge_count": 0,
+          "mshr_stall_events": 0,
+          "sector_miss_resident_line_count": 4613
+        },
+        "geometry": {
+          "capacity_bytes": 98304,
+          "capacity_property": "l1_capacity_bytes",
+          "carveout_percent": null,
+          "hit_latency": 33.0016,
+          "line_capacity": 768,
+          "miss_latency": 250.0092,
+          "mshr_count": 32,
+          "mshr_source": "documented_default",
+          "replacement_modeled": "lru",
+          "replacement_source": "documented_approximation",
+          "set_mapping_modeled": "fully_associative",
+          "set_mapping_source": "documented_approximation"
+        },
+        "total_eligible_accesses": 14216,
+        "walker": "warp_pool_two_layer_finite_mshr",
+        "warps_per_block": 1
+      },
+      "input_digests": {
+        "classifier_manifest_sha256": "8e72ed9fa0ccec9e820553a78e70da56bb6d66be94099d4b4e0b99b2a3043ce7",
+        "dynamic_trace_pb_sha256": "5daca95ec2606cbd8cdc931eb07e92e63cc5ff2ca6903ecd492ca05bda853918",
+        "threadblock_proto_set_sha256": "94537d241551ca1feaf3b1db067328979372bcae5e68b0297b7cc3e294081e9b"
+      },
+      "kernel_signature_sha256": "6a66ee83c6443ade9523726711d226c60e5c421899d11270d09cd83cf8e821f4",
+      "ncu_metric_version": "ncu_2026.1.x",
+      "predicted_hit_rate": 0.5672481710748453,
+      "result_kind": "scalar",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "local_volatile_array",
+      "source_commit": "9646699bbb91fcbcb6d29e8ca04e92c654df64de",
+      "typed_reason": null
+    },
+    {
+      "arch": "sm_86",
+      "binary_sha256": "962bd89b476b10d78a59a580436c2dae18fc371da32da7518c90ddfa2b6054ce",
+      "cache_layer": "L1TEX",
+      "evidence": {
+        "active_sm_count": 64,
+        "co_resident_warps": 48,
+        "counters": {
+          "bypass_count": 0,
+          "hit_count": 49152,
+          "line_alloc_miss_count": 16384,
+          "line_fill_count": 16384,
+          "miss_count": 65536,
+          "mshr_merge_count": 16384,
+          "mshr_stall_events": 0,
+          "sector_miss_resident_line_count": 32768
+        },
+        "geometry": {
+          "capacity_bytes": 98304,
+          "capacity_property": "l1_capacity_bytes",
+          "carveout_percent": null,
+          "hit_latency": 33.0016,
+          "line_capacity": 768,
+          "miss_latency": 250.0092,
+          "mshr_count": 32,
+          "mshr_source": "documented_default",
+          "replacement_modeled": "lru",
+          "replacement_source": "documented_approximation",
+          "set_mapping_modeled": "fully_associative",
+          "set_mapping_source": "documented_approximation"
+        },
+        "total_eligible_accesses": 114688,
+        "walker": "warp_pool_two_layer_finite_mshr",
+        "warps_per_block": 8
+      },
+      "input_digests": {
+        "classifier_manifest_sha256": "7ae2e9e505dcab2823fc4509b64cefbbc6157b5f730050f98072b161061c75f5",
+        "dynamic_trace_pb_sha256": "69f137c4960b06bbb0abb83e01a024b756fbf9ecc2843097dc05d4210c999447",
+        "threadblock_proto_set_sha256": "d91269b769819671894ce97449dd5735aaa6ebb2f43fd00decaacfefb3c2d614"
+      },
+      "kernel_signature_sha256": "a1042966e9ab38785b141c9f2e70b768575024abfa0ad97ddca145143f2b83c3",
+      "ncu_metric_version": "ncu_2026.1.x",
+      "predicted_hit_rate": 0.42857142857142855,
+      "result_kind": "scalar",
+      "shape_point": "timing_shape",
+      "slug": "rmsnorm_bwd_bf16_sm80",
+      "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7",
+      "typed_reason": null
+    },
+    {
+      "arch": "sm_86",
+      "binary_sha256": "519142e2477c60471f3627af671e0229f159ee1e35375c7d24107aced64d7d99",
+      "cache_layer": "L1TEX",
+      "evidence": {
+        "active_sm_count": 84,
+        "co_resident_warps": 48,
+        "counters": {
+          "bypass_count": 0,
+          "hit_count": 16384,
+          "line_alloc_miss_count": 9536,
+          "line_fill_count": 9536,
+          "miss_count": 49152,
+          "mshr_merge_count": 20544,
+          "mshr_stall_events": 0,
+          "sector_miss_resident_line_count": 19072
+        },
+        "geometry": {
+          "capacity_bytes": 98304,
+          "capacity_property": "l1_capacity_bytes",
+          "carveout_percent": null,
+          "hit_latency": 33.0016,
+          "line_capacity": 768,
+          "miss_latency": 250.0092,
+          "mshr_count": 32,
+          "mshr_source": "documented_default",
+          "replacement_modeled": "lru",
+          "replacement_source": "documented_approximation",
+          "set_mapping_modeled": "fully_associative",
+          "set_mapping_source": "documented_approximation"
+        },
+        "total_eligible_accesses": 65536,
+        "walker": "warp_pool_two_layer_finite_mshr",
+        "warps_per_block": 8
+      },
+      "input_digests": {
+        "classifier_manifest_sha256": "94c8830e71fe9ba253724a65e9ab93fe7e64a44e825e4eba939f758698410f75",
+        "dynamic_trace_pb_sha256": "a00a957fbca18819f09f8c0ef19f9d90e3e6e277e131f7f315dc358f262270b5",
+        "threadblock_proto_set_sha256": "c127fd5ff355f3cc1e7485cca9c075f561b7b473997f1e66970478cd389331ef"
+      },
+      "kernel_signature_sha256": "874881cf5162a340bdbfdf4061ab2917e382d64eb8bcd407b00e13fbe65507e1",
+      "ncu_metric_version": "ncu_2026.1.x",
+      "predicted_hit_rate": 0.25,
+      "result_kind": "scalar",
+      "shape_point": "trace_00",
+      "slug": "rmsnorm_fwd_bf16",
+      "source_commit": "f6b5e5d3b19fb4ac507fa3fa0229ebf11073f50f",
+      "typed_reason": null
+    },
+    {
+      "arch": "sm_86",
+      "binary_sha256": "64ff4d88480e40732ec85c3d3ce4040fbe695735d1969fd027d4a493b8a3916c",
+      "cache_layer": "L1TEX",
+      "evidence": {
+        "active_sm_count": 84,
+        "co_resident_warps": 48,
+        "counters": {
+          "bypass_count": 0,
+          "hit_count": 0,
+          "line_alloc_miss_count": 8192,
+          "line_fill_count": 8192,
+          "miss_count": 32768,
+          "mshr_merge_count": 8192,
+          "mshr_stall_events": 4704,
+          "sector_miss_resident_line_count": 16384
+        },
+        "geometry": {
+          "capacity_bytes": 98304,
+          "capacity_property": "l1_capacity_bytes",
+          "carveout_percent": null,
+          "hit_latency": 33.0016,
+          "line_capacity": 768,
+          "miss_latency": 250.0092,
+          "mshr_count": 32,
+          "mshr_source": "documented_default",
+          "replacement_modeled": "lru",
+          "replacement_source": "documented_approximation",
+          "set_mapping_modeled": "fully_associative",
+          "set_mapping_source": "documented_approximation"
+        },
+        "total_eligible_accesses": 32768,
+        "walker": "warp_pool_two_layer_finite_mshr",
+        "warps_per_block": 8
+      },
+      "input_digests": {
+        "classifier_manifest_sha256": "10223e2d608e59867b355ded84bbdd9abcc49eb27bd45da814d34c98c3d95f1d",
+        "dynamic_trace_pb_sha256": "bc1c92a0f4bb3ac4af3dafb6908cfed4c90b6d0baccf8741c7244d1461cfc46e",
+        "threadblock_proto_set_sha256": "01571d77e85af0df1345dd526233a95268a0aa03f024f30ad9e54f637f87d5d4"
+      },
+      "kernel_signature_sha256": "6441d8ad74297007aee7e16f5c8d5360c4606b4267c8be9357d09b08e1dbb447",
+      "ncu_metric_version": "ncu_2026.1.x",
+      "predicted_hit_rate": 0.0,
+      "result_kind": "scalar",
+      "shape_point": "timing_shape",
+      "slug": "swiglu_fwd_bf16_sm80",
+      "source_commit": "5088821eb7e205bcce1678d85e6272063e212cd0",
+      "typed_reason": null
+    },
+    {
+      "arch": "sm_86",
+      "binary_sha256": "64ff4d88480e40732ec85c3d3ce4040fbe695735d1969fd027d4a493b8a3916c",
+      "cache_layer": "L1TEX",
+      "evidence": {
+        "active_sm_count": 84,
+        "co_resident_warps": 48,
+        "counters": {
+          "bypass_count": 0,
+          "hit_count": 0,
+          "line_alloc_miss_count": 8192,
+          "line_fill_count": 8192,
+          "miss_count": 32768,
+          "mshr_merge_count": 8192,
+          "mshr_stall_events": 4704,
+          "sector_miss_resident_line_count": 16384
+        },
+        "geometry": {
+          "capacity_bytes": 98304,
+          "capacity_property": "l1_capacity_bytes",
+          "carveout_percent": null,
+          "hit_latency": 33.0016,
+          "line_capacity": 768,
+          "miss_latency": 250.0092,
+          "mshr_count": 32,
+          "mshr_source": "documented_default",
+          "replacement_modeled": "lru",
+          "replacement_source": "documented_approximation",
+          "set_mapping_modeled": "fully_associative",
+          "set_mapping_source": "documented_approximation"
+        },
+        "total_eligible_accesses": 32768,
+        "walker": "warp_pool_two_layer_finite_mshr",
+        "warps_per_block": 8
+      },
+      "input_digests": {
+        "classifier_manifest_sha256": "10223e2d608e59867b355ded84bbdd9abcc49eb27bd45da814d34c98c3d95f1d",
+        "dynamic_trace_pb_sha256": "27262ca3407bd79f31fde2eb734d6e7f13cb0661d9a8aa2910b1cc1a91fd57d3",
+        "threadblock_proto_set_sha256": "d8cf0d597c577b07679f9e8d46d7402bb7656a136eb555b7eb18fdb9ca7b2333"
+      },
+      "kernel_signature_sha256": "6441d8ad74297007aee7e16f5c8d5360c4606b4267c8be9357d09b08e1dbb447",
+      "ncu_metric_version": "ncu_2026.1.x",
+      "predicted_hit_rate": 0.0,
+      "result_kind": "scalar",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "swiglu_fwd_bf16_sm80",
+      "source_commit": "5088821eb7e205bcce1678d85e6272063e212cd0",
+      "typed_reason": null
+    },
+    {
+      "arch": "sm_86",
+      "binary_sha256": "57d8c9f0a178b2617d4108d091178f090a037e44957508ed3b13594b661fdf65",
+      "cache_layer": "L1TEX",
+      "evidence": {
+        "active_sm_count": 4,
+        "co_resident_warps": 16,
+        "counters": {
+          "bypass_count": 0,
+          "hit_count": 3136,
+          "line_alloc_miss_count": 800,
+          "line_fill_count": 800,
+          "miss_count": 3136,
+          "mshr_merge_count": 0,
+          "mshr_stall_events": 0,
+          "sector_miss_resident_line_count": 2336
+        },
+        "geometry": {
+          "capacity_bytes": 98304,
+          "capacity_property": "l1_capacity_bytes",
+          "carveout_percent": null,
+          "hit_latency": 33.0016,
+          "line_capacity": 768,
+          "miss_latency": 250.0092,
+          "mshr_count": 32,
+          "mshr_source": "documented_default",
+          "replacement_modeled": "lru",
+          "replacement_source": "documented_approximation",
+          "set_mapping_modeled": "fully_associative",
+          "set_mapping_source": "documented_approximation"
+        },
+        "total_eligible_accesses": 6272,
+        "walker": "warp_pool_two_layer_finite_mshr",
+        "warps_per_block": 1
+      },
+      "input_digests": {
+        "classifier_manifest_sha256": "71228cd456597341570c0c17ad966edf82951ed337f5fcc0595cccd1e85eed39",
+        "dynamic_trace_pb_sha256": "87b67c07d1fa965dcf2bb0e07867c7b941ed1114527ee2458075e103af61e34d",
+        "threadblock_proto_set_sha256": "4da2d9724bb988639e789c96566fdf28ffc32f16e1c3d519f1afc4f105f9d531"
+      },
+      "kernel_signature_sha256": "4389fe984bc721ccf9bcd759d75c23d713f5d65ae7ca07ed2e4fe24f02b6d414",
+      "ncu_metric_version": "ncu_2026.1.x",
+      "predicted_hit_rate": 0.5,
+      "result_kind": "scalar",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "tf32_hmma_gemm_traceable",
+      "source_commit": "b71d21fa2ce2bb2a55cfc5374d9d46ddf62dcf20",
+      "typed_reason": null
+    },
+    {
+      "arch": "sm_86",
+      "binary_sha256": "0d784a20e147ea35ee22b0f881863b4f53ecf4c023128ba636774d9f4f9daff1",
+      "cache_layer": "L1TEX",
+      "evidence": {
+        "diagnostic": "classifier manifest not found at data/local_labels/cache_op_classifier_manifests/sm_86/vendor_sgemm_strided_batched_cublas__trace_00.json"
+      },
+      "input_digests": {
+        "classifier_manifest_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "dynamic_trace_pb_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "threadblock_proto_set_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+      },
+      "kernel_signature_sha256": "8009b80357819242aa59324689e41d345c7c27edc559c0db332e289d773adb39",
+      "ncu_metric_version": "ncu_2026.1.x",
+      "predicted_hit_rate": null,
+      "result_kind": "typed_unavailable",
+      "shape_point": "trace_00",
+      "slug": "vendor_sgemm_strided_batched_cublas",
+      "source_commit": "f6b5e5d3b19fb4ac507fa3fa0229ebf11073f50f",
+      "typed_reason": "predictor_l1_sass_provenance_missing"
+    }
+  ],
+  "cohort_size": 44,
+  "config": {
+    "card_path": "data/pchase/sm_86_static_card.json",
+    "carveout_percent_by_cell": {
+      "carveout_sensitivity_probe/trace_l2_accuracy_xl": 25
+    },
+    "cta_to_sm_schedule_policy": "round_robin_homogeneous",
+    "label_fitted_parameters": [],
+    "max_blocks_per_sm": 16,
+    "model": "warp_pool_two_layer_finite_mshr",
+    "occupancy_warp_limit_per_sm": 48,
+    "scheduling_mode": "warp_pool",
+    "sector_accounting": "two_layer",
+    "shared_memory_occupancy_reduction_modeled": false,
+    "sm_count": 84,
+    "warmup_launches": 0
+  },
+  "config_digest": "c86d40a7468457912c01602731e1c097365fd422c7504abcc2cf4ac56de0664a",
+  "generated_at_commit": "a55c199f80ac838e0a67032575901230bbc34c32",
+  "generator": "tools/sm_86_predictor_accuracy_recovery_v2/compute_warp_pool_l1_per_admitted_cell.py",
+  "n_scalar": 30,
+  "n_typed": 14,
+  "schema_version": 1
+}

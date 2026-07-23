@@ -1,0 +1,44 @@
+{
+  "name": "problem_039_adaptive_instance_normalization_2d_backward_cuda_cpp_scaffold",
+  "definition": "039_adaptive_instance_normalization_2d_backward",
+  "author": "scaffold",
+  "spec": {
+    "languages": [
+      "cuda_cpp"
+    ],
+    "target_hardware": [
+      "LOCAL"
+    ],
+    "entry_point": "main.cpp::run",
+    "dependencies": [],
+    "destination_passing_style": true,
+    "binding": "torch",
+    "compile_options": {
+      "cflags": [],
+      "cuda_cflags": [
+        "-O3",
+        "--use_fast_math",
+        "-gencode",
+        "arch=compute_86,code=sm_86"
+      ],
+      "ld_flags": [
+        "-lcuda"
+      ]
+    }
+  },
+  "sources": [
+    {
+      "path": "main.cpp",
+      "content": "#include <torch/extension.h>\n#include <ATen/cuda/CUDAContext.h>\n#include <c10/cuda/CUDAGuard.h>\n#include \"kernel.h\"\n#include <string>\n\n// Backward pass for Adaptive Instance Normalization 2D.\n//\n// Reference (problem_039_adaptive_instance_normalization_2d_backward):\n//   Per-channel (instance) normalization backward across spatial dims.\n//   The forward normalization is y = gamma * (x - mean) / std + beta, where\n//   mean/std are per (N, C) over the spatial (H, W) plane. The reference\n//   supplies the forward `std` directly (NOT var); every formula below uses\n//   `std` and `torch.pow(std, -3)` exactly as the reference writes it -- no\n//   var/eps reconstruction is performed.\n//\n//   N, C, H, W = x.shape\n//   spatial_size = H * W\n//\n//   x_centered   = x - mean\n//   x_normalized = x_centered / std\n//\n//   grad_bias   = grad_output.sum(dim=(0, 2, 3))                          # (C,)\n//   grad_weight = (grad_output * x_normalized).sum(dim=(0, 2, 3))         # (C,)\n//\n//   weight_reshaped    = weight.view(1, C, 1, 1)\n//   grad_output_scaled = grad_output * weight_reshaped\n//\n//   grad_var  = (grad_output_scaled * x_centered).sum(dim=(2,3), keepdim=True)\n//                 * (-0.5) * torch.pow(std, -3)                           # (N,C,1,1)\n//\n//   grad_mean = (grad_output_scaled / (-std)).sum(dim=(2,3), keepdim=True)\n//   grad_mean = grad_mean\n//                 + grad_var * (-2.0 * x_centered).sum(dim=(2,3), keepdim=True)\n//                   / spatial_size                                        # (N,C,1,1)\n//\n//   grad_input = grad_output_scaled / std\n//   grad_input = grad_input + grad_var * 2.0 * x_centered / spatial_size\n//   grad_input = grad_input + grad_mean / spatial_size                   # (N,C,H,W)\n//\n// Per definition.json (insertion order):\n//   grad_output : [N, C, H, W]   fp32\n//   x           : [N, C, H, W]   fp32\n//   weight      : [C]            fp32\n//   mean        : [N, C, 1, 1]   fp32\n//   std         : [N, C, 1, 1]   fp32\n//   grad_input  : [N, C, H, W]   fp32  (DPS, pre-alloc)\n//   grad_weight : [C]            fp32  (DPS, pre-alloc)\n//   grad_bias   : [C]            fp32  (DPS, pre-alloc)\n//\n// Implementation: pure ATen tensor algebra -- NO custom CUDA kernels and NO\n// autograd. The expression is transcribed op-for-op from the reference run()\n// so the fp32 precision profile and the exact reduction dims / keepdim\n// semantics match. Outputs are written in place into the pre-allocated\n// destinations (destination-passing style). The reduction broadcast shapes\n// (grad_var / grad_mean are (N,C,1,1) and broadcast against the (N,C,H,W)\n// tensors) are preserved exactly as the reference relies on.\n\nstatic void check_fp32_cuda(const torch::Tensor& t, const std::string& name) {\n    TORCH_CHECK(t.is_cuda(), name, \" must be a CUDA tensor\");\n    TORCH_CHECK(t.dtype() == torch::kFloat32, name, \" must be float32, got \", t.dtype());\n}\n\nvoid run(\n    const torch::Tensor& grad_output,\n    const torch::Tensor& x,\n    const torch::Tensor& weight,\n    const torch::Tensor& mean,\n    const torch::Tensor& std,\n    torch::Tensor grad_input,\n    torch::Tensor grad_weight,\n    torch::Tensor grad_bias\n) {\n    check_fp32_cuda(grad_output, \"grad_output\");\n    check_fp32_cuda(x, \"x\");\n    check_fp32_cuda(weight, \"weight\");\n    check_fp32_cuda(mean, \"mean\");\n    check_fp32_cuda(std, \"std\");\n    check_fp32_cuda(grad_input, \"grad_input\");\n    check_fp32_cuda(grad_weight, \"grad_weight\");\n    check_fp32_cuda(grad_bias, \"grad_bias\");\n\n    TORCH_CHECK(x.dim() == 4, \"x must be 4D [N, C, H, W], got \", x.dim(), \"D\");\n    TORCH_CHECK(grad_output.dim() == 4,\n                \"grad_output must be 4D [N, C, H, W], got \", grad_output.dim(), \"D\");\n    TORCH_CHECK(weight.dim() == 1, \"weight must be 1D [C], got \", weight.dim(), \"D\");\n\n    const c10::cuda::CUDAGuard device_guard(x.device());\n\n    const int64_t C = x.size(1);\n    const int64_t H = x.size(2);\n    const int64_t W = x.size(3);\n    const double spatial_size = static_cast<double>(H * W);\n\n    // x_centered = x - mean ; x_normalized = x_centered / std\n    torch::Tensor x_centered = x - mean;\n    torch::Tensor x_normalized = x_centered / std;\n\n    // grad_bias = grad_output.sum(dim=(0, 2, 3))\n    torch::Tensor gb = grad_output.sum(/*dim=*/{0, 2, 3});\n\n    // grad_weight = (grad_output * x_normalized).sum(dim=(0, 2, 3))\n    torch::Tensor gw = (grad_output * x_normalized).sum(/*dim=*/{0, 2, 3});\n\n    // grad_output_scaled = grad_output * weight.view(1, C, 1, 1)\n    torch::Tensor weight_reshaped = weight.view({1, C, 1, 1});\n    torch::Tensor grad_output_scaled = grad_output * weight_reshaped;\n\n    // grad_var = (grad_output_scaled * x_centered).sum(dim=(2,3), keepdim=True)\n    //              * (-0.5) * torch.pow(std, -3)\n    torch::Tensor grad_var =\n        (grad_output_scaled * x_centered).sum(/*dim=*/{2, 3}, /*keepdim=*/true)\n        * (-0.5) * torch::pow(std, -3);\n\n    // grad_mean = (grad_output_scaled / (-std)).sum(dim=(2,3), keepdim=True)\n    //             + grad_var * (-2.0 * x_centered).sum(dim=(2,3), keepdim=True)\n    //               / spatial_size\n    torch::Tensor grad_mean =\n        (grad_output_scaled / (-std)).sum(/*dim=*/{2, 3}, /*keepdim=*/true);\n    grad_mean = grad_mean\n        + grad_var * (-2.0 * x_centered).sum(/*dim=*/{2, 3}, /*keepdim=*/true) / spatial_size;\n\n    // grad_input = grad_output_scaled / std\n    //            + grad_var * 2.0 * x_centered / spatial_size\n    //            + grad_mean / spatial_size\n    torch::Tensor gi = grad_output_scaled / std;\n    gi = gi + grad_var * 2.0 * x_centered / spatial_size;\n    gi = gi + grad_mean / spatial_size;\n\n    TORCH_CHECK(gi.sizes() == grad_input.sizes(),\n                \"grad_input shape \", gi.sizes(),\n                \" does not match pre-allocated output \", grad_input.sizes());\n    TORCH_CHECK(gw.sizes() == grad_weight.sizes(),\n                \"grad_weight shape \", gw.sizes(),\n                \" does not match pre-allocated output \", grad_weight.sizes());\n    TORCH_CHECK(gb.sizes() == grad_bias.sizes(),\n                \"grad_bias shape \", gb.sizes(),\n                \" does not match pre-allocated output \", grad_bias.sizes());\n\n    grad_input.copy_(gi);\n    grad_weight.copy_(gw);\n    grad_bias.copy_(gb);\n}\n\nPYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {\n    m.def(\"run\", &run,\n          \"Adaptive InstanceNorm2d backward via ATen tensor algebra (no autograd, \"\n          \"no custom CUDA kernels); fp32; destination-passing style.\");\n}\n"
+    },
+    {
+      "path": "kernel.cu",
+      "content": "// Stub translation unit: this ATen-delegated port has no custom __global__\n// kernels. A bare .cu is still needed so torch's cpp_extension builds a CUDA\n// extension (adding CUDA include paths); a .cpp-only extension fails with\n// \"cuda_runtime_api.h: No such file or directory\".\n#include <cuda_runtime.h>\n"
+    },
+    {
+      "path": "kernel.h",
+      "content": "#pragma once\n// Intentionally empty: ATen-delegated port, no custom kernel launcher.\n"
+    }
+  ],
+  "description": "Scaffolded baseline for problem_039_adaptive_instance_normalization_2d_backward (language=cuda_cpp); hand-edit the copied exemplar to implement the target problem before harness-running. Destination-passing-style is set true; outputs appear after inputs in definition.json insertion order."
+}

@@ -1,0 +1,2 @@
+device_id, stream_id, kernel id, kernel mangled name, grid_dimX, grid_dimY, grid_dimZ, #blocks, block_dimX, block_dimY, block_dimZ, #threads, total_insts, total_reported_insts
+0, 0, kernel-1.trace, gemm_hmma_bf16_sm80_kernel, 128, 512, 1, 65536, 32, 1, 1, 32, 983040,983040

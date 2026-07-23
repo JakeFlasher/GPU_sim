@@ -1,0 +1,224 @@
+# Relevance gate evaluation suites — INDEPENDENT of skill routing.
+#
+# Each entry has a `prompt` and `expect: true|false`. The test harness
+# (scripts/kb/run_relevance_evals.py) classifies the prompt with
+# is_kb_relevant() from _relevance.py and reports pass/fail per category.
+#
+# Goal: prove the Group A / Group B+C / CODENAME_FP gate behaves
+# correctly across realistic prompt distributions, including the long
+# tail of false-positive collisions and false-negative misses that the
+# skill-routing eval (run_evals.py) cannot exercise (because run_evals.py
+# only tests prompts that PASS the gate).
+
+# ---------------------------------------------------------------------------
+# Positive suite — prompts that SHOULD pass the gate (KB-relevant).
+# Failure indicates a false negative in the gate (real GPU/CUDA prompts
+# the agent would silently miss).
+# ---------------------------------------------------------------------------
+positive:
+  # Group A — single-token mnemonics, fires alone
+  - prompt: "wgmma instruction encoding"
+    expect: true
+  - prompt: "cp.async semantics for cluster shared memory"
+    expect: true
+  - prompt: "tcgen05.mma latency on Blackwell"
+    expect: true
+  - prompt: "shfl.sync semantics for non-power-of-2 thread groups"
+    expect: true
+  - prompt: "atomicCAS with memory_order_release in CUDA"
+    expect: true
+  - prompt: "ERR_NVGPUCTRPERM in cloud container"
+    expect: true
+  - prompt: "ldmatrix and stmatrix layout"
+    expect: true
+  - prompt: "FP4 block-scaled MMA on sm_120a"
+    expect: true
+  - prompt: "decode UTCCP in this SASS dump"
+    expect: true
+  - prompt: "wall-clock-primary measurement contract"
+    expect: true
+
+  # Group B+C — codename + GPU context
+  - prompt: "Hopper architecture warp scheduler details"
+    expect: true
+  - prompt: "what changed in Pascal compared to Maxwell on the GPU side"
+    expect: true
+  - prompt: "Volta rewrite split the matrix path"
+    expect: true
+  - prompt: "Ampere tensor core differences from Turing"
+    expect: true
+  - prompt: "Blackwell GPU feature surface vs Hopper"
+    expect: true
+
+  # Compound technical prompts
+  - prompt: "compare cp.async vs ldmatrix vs tcgen05.cp for tensor-core data supply"
+    expect: true
+  - prompt: "shared memory bank conflict in my warp-cooperative reduction"
+    expect: true
+  - prompt: "cluster.sync placement before DSMEM peer reads"
+    expect: true
+  - prompt: "what does cuobjdump --dump-sass output for sm_120"
+    expect: true
+  - prompt: "register pressure debugging via -Xptxas -v"
+    expect: true
+
+  # Meta-router intents
+  - prompt: "list the available specialty skills in this repo"
+    expect: true
+  - prompt: "give me an overview of the project knowledge base structure"
+    expect: true
+  - prompt: "which card explains tcgen05 ownership"
+    expect: true
+  - prompt: "I have a specific question and want the shortest path to the right card"
+    expect: true
+
+  # Architectural-history prompts
+  - prompt: "explain the three-rewrites thesis"
+    expect: true
+  - prompt: "did Microsoft or Intel patent something similar to TMEM"
+    expect: true
+  - prompt: "how did NVLink evolve from Volta to Hopper"
+    expect: true
+
+  # Simulator design
+  - prompt: "design event-driven SM timing model in Rust"
+    expect: true
+  - prompt: "what objects must I model in a Blackwell simulator"
+    expect: true
+
+  # Compilation
+  - prompt: "write a -gencode flag for sm_120 with PTX fallback"
+    expect: true
+  - prompt: "extract PTX from a fatbin"
+    expect: true
+
+  # SOL-ExecBench and SOLAR routing anchors
+  - prompt: "I want to start problem_004_gemm_n128_k2048"
+    expect: true
+  - prompt: "GEMM N=128 K=2048 baseline for B200"
+    expect: true
+  - prompt: "RoPE attention with KV sharing"
+    expect: true
+  - prompt: "FP8 MoE dispatch backward"
+    expect: true
+  - prompt: "block-scaled FP8 quantization for B200"
+    expect: true
+  - prompt: "fused add and RMSNorm for hidden_size 2048"
+    expect: true
+  - prompt: "GQA paged decode kernel for FlashInfer"
+    expect: true
+  - prompt: "implement an NVFP4 expert linear projection"
+    expect: true
+  - prompt: "what does SOLAR derive for B200?"
+    expect: true
+  - prompt: "SOLAR T_SOL deriver einsum pipeline"
+    expect: true
+  - prompt: "Orojenesis refinement in SOLAR analysis"
+    expect: true
+  - prompt: "the SOL-ExecBench eval-harness command line"
+    expect: true
+
+# ---------------------------------------------------------------------------
+# Negative suite — prompts that SHOULD NOT pass the gate.
+# Failure indicates a false positive: the router will fire on an
+# off-topic prompt, paying ~70 tokens and distracting the agent.
+# ---------------------------------------------------------------------------
+negative:
+  # Codename-as-person collisions (math/history/biography)
+  - prompt: "Ada Lovelace was a mathematician and the first programmer"
+    expect: false
+  - prompt: "the Fermi paradox and the Drake equation"
+    expect: false
+  - prompt: "Pascal's wager about belief in God"
+    expect: false
+  - prompt: "Kepler's third law of planetary motion"
+    expect: false
+  - prompt: "Maxwell's equations in classical electromagnetism"
+    expect: false
+  - prompt: "Turing test for machine intelligence"
+    expect: false
+  - prompt: "Grace Hopper invented the compiler"
+    expect: false
+
+  # Codename-as-product collisions
+  - prompt: "Tesla model S charging speed"
+    expect: false
+  - prompt: "Tesla model X autopilot mode"
+    expect: false
+  - prompt: "Tesla cybertruck specs"
+    expect: false
+  - prompt: "Nikola Tesla coil experiment"
+    expect: false
+
+  # Codename + GPU-context-collision phrases
+  - prompt: "Pascal triangle in a math class"
+    expect: false
+  - prompt: "Tesla model X has a cluster of seats"
+    expect: false
+  - prompt: "ada is a programming language used in defense systems"
+    expect: false
+  - prompt: "Volta is a content streamer on YouTube"
+    expect: false
+
+  # Common English-collision GPU-vocabulary
+  - prompt: "register a new domain name with my registrar"
+    expect: false
+  - prompt: "the kernel of an idea is its core principle"
+    expect: false
+  - prompt: "stream of consciousness writing technique"
+    expect: false
+  - prompt: "block scheduling for a gym class"
+    expect: false
+  - prompt: "warp drive on the starship Enterprise"
+    expect: false
+  - prompt: "thread the needle through the eye"
+    expect: false
+  - prompt: "flight simulator on PlayStation 5"
+    expect: false
+  - prompt: "compiling music playlists for the gym"
+    expect: false
+
+  # Banking/finance terms that look like GPU
+  - prompt: "bank conflict in finance and accounting law"
+    expect: false
+
+  # Specialty skill phrasings that aren't asking about KB
+  - prompt: "my specialty skill is CSS animations"
+    expect: false
+  - prompt: "this candidate has specialty skills in marketing"
+    expect: false
+
+  # SOL-ExecBench and SOLAR false-positive controls
+  - prompt: "I'm doing my linear algebra homework problem 4"
+    expect: false
+  - prompt: "what is the structure of the writing problem in chapter 12"
+    expect: false
+  - prompt: "compose a poem about the moon and stars"
+    expect: false
+  - prompt: "write a Triton kernel for attention"
+    expect: false
+  - prompt: "solar panel installation guide"
+    expect: false
+  - prompt: "solar system planets"
+    expect: false
+  - prompt: "tsol arbitrary string"
+    expect: false
+  - prompt: "orogenesis tectonic plates"
+    expect: false
+  - prompt: "solar model of the sun"
+    expect: false
+  - prompt: "solar graph for a home battery"
+    expect: false
+  - prompt: "solar configuration for panels"
+    expect: false
+
+# cases the gate handles deliberately. Failure here is not a regression;
+# the test harness reports them as "known".
+# ---------------------------------------------------------------------------
+known_edge:
+  # `\bsass\b` in Group A is an accepted trade-off (recall on "decode this
+  # sass" wins over the rare FP). This entry documents it so the test
+  # harness can flag it without scoring as failure.
+  - prompt: "sass talk to your boss"
+    expect: false  # reported as KNOWN-FP, not FAIL
+    note: "accepted Group-A trade-off; recall on 'decode this sass' beats this rare FP"

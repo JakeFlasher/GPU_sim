@@ -1,0 +1,420 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "simbench_bw/schemas/timing_cache_hit_prediction_bundle.schema.json",
+  "title": "Timing cache-hit prediction bundle",
+  "description": "Per-cell L1/L2 sector-hit inputs for the long-duration timing predictor. Rows are produced by scoring the same-cell observed NVBit sector summary through the committed calibration heads; donor transfer constants and observed-reuse shortcuts are intentionally not admitted.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_kind",
+    "arch",
+    "source_commit",
+    "producer",
+    "prediction_scope",
+    "cohort_artifact",
+    "head_artifacts",
+    "n_cells",
+    "cells"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "artifact_kind": {"type": "string", "const": "timing_cache_hit_prediction_bundle"},
+    "arch": {"type": "string", "const": "sm_86"},
+    "source_commit": {"type": "string", "minLength": 1},
+    "producer": {
+      "type": "string",
+      "const": "timing_per_cell_cache_head_prediction_v2"
+    },
+    "prediction_scope": {"type": "string", "const": "long_duration_timing_cohort"},
+    "cohort_artifact": {"type": "string", "minLength": 1},
+    "head_artifacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["l1_head_artifact", "l2_head_artifact"],
+      "properties": {
+        "l1_head_artifact": {"$ref": "#/$defs/head_artifact_ref"},
+        "l2_head_artifact": {"$ref": "#/$defs/head_artifact_ref"}
+      }
+    },
+    "n_cells": {"type": "integer", "minimum": 1},
+    "cells": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/cell"}
+    }
+  },
+  "$defs": {
+    "artifact_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "feature_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "artifact_kind"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "artifact_kind": {"type": "string", "minLength": 1}
+      }
+    },
+    "head_artifact_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "sha256",
+        "artifact_status",
+        "typed_unavailable_reason"
+      ],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "sha256": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "artifact_status": {
+          "type": "string",
+          "enum": ["available", "unavailable"]
+        },
+        "typed_unavailable_reason": {"type": ["string", "null"]}
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"artifact_status": {"const": "available"}},
+            "required": ["artifact_status"]
+          },
+          "then": {
+            "properties": {
+              "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+              "typed_unavailable_reason": {"type": "null"}
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {"artifact_status": {"const": "unavailable"}},
+            "required": ["artifact_status"]
+          },
+          "then": {
+            "properties": {
+              "sha256": {"type": "null"},
+              "typed_unavailable_reason": {"type": "string", "minLength": 1}
+            }
+          }
+        }
+      ]
+    },
+    "selected_class": {
+      "type": ["object", "null"],
+      "additionalProperties": true,
+      "required": ["name"],
+      "properties": {
+        "name": {
+          "type": "string",
+          "const": "isotonic_regression_on_frozen_projection"
+        }
+      }
+    },
+    "route": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": [
+        "bucket_key",
+        "bucket_in_head_scope",
+        "kind",
+        "n_train",
+        "pooled_fallback_present"
+      ],
+      "properties": {
+        "bucket_key": {"type": "string", "pattern": "^sm_86/.+"},
+        "bucket_in_head_scope": {"type": "boolean"},
+        "kind": {
+          "type": "string",
+          "enum": [
+            "per_bucket",
+            "pooled_fallback",
+            "pooled_fallback_unseen_bucket_zero_offset"
+          ]
+        },
+        "n_train": {"type": ["integer", "null"], "minimum": 0},
+        "pooled_fallback_present": {"type": "boolean"}
+      }
+    },
+    "input_features": {
+      "type": ["object", "null"],
+      "additionalProperties": false,
+      "required": [
+        "raw_prediction",
+        "footprint_ratio",
+        "long_rd_tail_mass",
+        "intra_lane_reuse",
+        "global_share",
+        "gridDim_density"
+      ],
+      "properties": {
+        "raw_prediction": {"type": "number", "minimum": 0, "maximum": 1},
+        "footprint_ratio": {"type": "number", "minimum": 0, "maximum": 100},
+        "long_rd_tail_mass": {"type": "number", "minimum": 0, "maximum": 1},
+        "intra_lane_reuse": {"type": "number", "minimum": 0, "maximum": 1},
+        "global_share": {"type": "number", "minimum": 0, "maximum": 1},
+        "gridDim_density": {"type": "number", "minimum": 0}
+      }
+    },
+    "layer_prediction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cache_layer",
+        "result_kind",
+        "predicted_sector_hit_rate",
+        "typed_unavailable_reason",
+        "head_artifact",
+        "head_kind",
+        "head_scope",
+        "head_source_commit",
+        "fit_status",
+        "selected_class",
+        "family_bucket",
+        "route",
+        "input_features",
+        "input_feature_sha256",
+        "feature_schema_sha256",
+        "scorer_name"
+      ],
+      "properties": {
+        "cache_layer": {"type": "string", "enum": ["L1TEX", "L2"]},
+        "result_kind": {"type": "string", "enum": ["scalar", "typed_unavailable"]},
+        "predicted_sector_hit_rate": {
+          "type": ["number", "null"],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "typed_unavailable_reason": {"type": ["string", "null"]},
+        "head_artifact": {"$ref": "#/$defs/head_artifact_ref"},
+        "head_kind": {"type": ["string", "null"]},
+        "head_scope": {"type": ["string", "null"], "minLength": 1},
+        "head_source_commit": {"type": ["string", "null"], "minLength": 1},
+        "fit_status": {"type": ["string", "null"], "minLength": 1},
+        "selected_class": {"$ref": "#/$defs/selected_class"},
+        "family_bucket": {"type": ["string", "null"], "minLength": 1},
+        "route": {"$ref": "#/$defs/route"},
+        "input_features": {"$ref": "#/$defs/input_features"},
+        "input_feature_sha256": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "feature_schema_sha256": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "scorer_name": {
+          "type": "string",
+          "const": "PerBucketCalibratorEnsemble.predict"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"result_kind": {"const": "scalar"}},
+            "required": ["result_kind"]
+          },
+          "then": {
+            "properties": {
+              "predicted_sector_hit_rate": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1
+              },
+              "typed_unavailable_reason": {"type": "null"},
+              "selected_class": {"type": "object"},
+              "family_bucket": {"type": "string", "minLength": 1},
+              "route": {"type": "object"},
+              "input_features": {"type": "object"},
+              "input_feature_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "feature_schema_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "head_artifact": {
+                "type": "object",
+                "properties": {
+                  "artifact_status": {"const": "available"},
+                  "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {"result_kind": {"const": "typed_unavailable"}},
+            "required": ["result_kind"]
+          },
+          "then": {
+            "properties": {
+              "predicted_sector_hit_rate": {"type": "null"},
+              "typed_unavailable_reason": {"type": "string", "minLength": 1}
+            }
+          }
+        }
+      ]
+    },
+    "head_provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "observed_sector_summary",
+        "l1_prediction",
+        "l2_prediction",
+        "prediction_method",
+        "producer"
+      ],
+      "properties": {
+        "observed_sector_summary": {"$ref": "#/$defs/feature_ref"},
+        "l1_prediction": {"$ref": "#/$defs/layer_prediction"},
+        "l2_prediction": {"$ref": "#/$defs/layer_prediction"},
+        "prediction_method": {
+          "type": "string",
+          "const": "per_cell_l1_l2_monotonic_calibration_head_v5"
+        },
+        "producer": {
+          "type": "string",
+          "const": "timing_per_cell_cache_head_prediction_v2"
+        }
+      }
+    },
+    "cell": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "slug",
+        "shape_point",
+        "arch",
+        "binary_sha256",
+        "kernel_signature_sha256",
+        "source_commit",
+        "result_kind",
+        "l1_sector_hit_rate",
+        "l2_sector_hit_rate",
+        "typed_unavailable_reason",
+        "input_feature_refs",
+        "head_provenance"
+      ],
+      "properties": {
+        "slug": {"type": "string", "minLength": 1},
+        "shape_point": {"type": "string", "minLength": 1},
+        "arch": {"type": "string", "const": "sm_86"},
+        "binary_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "kernel_signature_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "source_commit": {"type": "string", "minLength": 1},
+        "result_kind": {"type": "string", "enum": ["scalar", "typed_unavailable"]},
+        "l1_sector_hit_rate": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "l2_sector_hit_rate": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "typed_unavailable_reason": {"type": ["string", "null"]},
+        "input_feature_refs": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "nvbit_sector_summary",
+            "observed_sector_summary",
+            "static_sass_features",
+            "static_work"
+          ],
+          "properties": {
+            "nvbit_sector_summary": {"$ref": "#/$defs/feature_ref"},
+            "observed_sector_summary": {"$ref": "#/$defs/feature_ref"},
+            "static_sass_features": {"$ref": "#/$defs/feature_ref"},
+            "static_work": {"$ref": "#/$defs/feature_ref"}
+          }
+        },
+        "head_provenance": {"$ref": "#/$defs/head_provenance"}
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"result_kind": {"const": "scalar"}},
+            "required": ["result_kind"]
+          },
+          "then": {
+            "properties": {
+              "l1_sector_hit_rate": {"type": "number", "minimum": 0, "maximum": 1},
+              "l2_sector_hit_rate": {"type": "number", "minimum": 0, "maximum": 1},
+              "typed_unavailable_reason": {"type": "null"},
+              "head_provenance": {
+                "type": "object",
+                "properties": {
+                  "l1_prediction": {
+                    "type": "object",
+                    "properties": {"result_kind": {"const": "scalar"}}
+                  },
+                  "l2_prediction": {
+                    "type": "object",
+                    "properties": {"result_kind": {"const": "scalar"}}
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {"result_kind": {"const": "typed_unavailable"}},
+            "required": ["result_kind"]
+          },
+          "then": {
+            "properties": {
+              "l1_sector_hit_rate": {"type": "null"},
+              "l2_sector_hit_rate": {"type": "null"},
+              "typed_unavailable_reason": {"type": "string", "minLength": 1}
+            },
+            "anyOf": [
+              {
+                "properties": {
+                  "head_provenance": {
+                    "type": "object",
+                    "properties": {
+                      "l1_prediction": {
+                        "type": "object",
+                        "properties": {
+                          "result_kind": {"const": "typed_unavailable"}
+                        },
+                        "required": ["result_kind"]
+                      }
+                    }
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "head_provenance": {
+                    "type": "object",
+                    "properties": {
+                      "l2_prediction": {
+                        "type": "object",
+                        "properties": {
+                          "result_kind": {"const": "typed_unavailable"}
+                        },
+                        "required": ["result_kind"]
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

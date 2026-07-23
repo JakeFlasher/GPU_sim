@@ -1,0 +1,77 @@
+schema_version = 1
+slug = "rmsnorm_fwd_bf16"
+
+[[timing_shapes]]
+name = "timing_00"
+axes = { rows = 1024, hidden = 4096 }
+launch_config = { grid = [32, 1, 1], block = [128, 1, 1] }
+warm_up_iters = 5
+repeat_iters = 30
+
+[[timing_shapes]]
+name = "timing_01"
+axes = { rows = 16, hidden = 8192 }
+launch_config = { grid = [32, 1, 1], block = [128, 1, 1] }
+warm_up_iters = 5
+repeat_iters = 30
+
+[[trace_shapes]]
+name = "trace_00"
+axes = { rows = 256, hidden = 1024 }
+launch_config = { grid = [32, 1, 1], block = [128, 1, 1] }
+predicted_bytes = 41943040
+estimator_source = "static"
+
+# Calibration-evidence shape: per-launch CUPTI sidecars matching the
+# correctness-shape axes (rows = 32, hidden = 512) for the dual-source
+# tolerance calibration step. Operator invokes via
+# `run_suite.py --mode timing --shape-point correctness_calibration` to
+# emit `cupti_activity_<repeat>.json` sidecars whose shape size matches
+# the correctness-shape positive-test contract; the calibration helper
+# then derives the absolute-floor tolerance from the per-launch
+# |gap_ns| distribution. This is the timing-mode mirror of the
+# `correctness_00` shape (which is correctness-mode only and does not
+# emit CUPTI sidecars).
+[[timing_shapes]]
+name = "correctness_calibration"
+axes = { rows = 32, hidden = 512 }
+launch_config = { grid = [32, 1, 1], block = [128, 1, 1] }
+# Larger sample size than the standard timing shapes so the calibrated
+# tolerance captures the laptop's DVFS-induced timing tail. The
+# correctness_calibration shape is consumed only by the calibration
+# helper (single-side, not a join input), so the larger repeat_iters
+# is calibration-recipe-internal and does not affect the offline-join
+# producer-pair contract or the timing-shape positive-test contract.
+warm_up_iters = 10
+repeat_iters = 100
+
+# Shared join-evidence shape consumed by the offline two-run join
+# command (`merge_evidence.py join-cupti-nvbit`). Both --mode timing
+# AND --mode trace must be invoked against this same
+# `joined_ac8_evidence` name via run_suite.py
+# `--shape-point joined_ac8_evidence` so the resulting CUPTI sidecars
+# and NVBit summaries share the same `shape_point` field — which the
+# join key in merge_evidence.py requires for matching natural keys.
+# The axes + launch_config MUST match the corresponding trace_shapes
+# entry below byte-for-byte; the test
+# `test_shared_ac8_join_evidence_shape_is_present_in_both_timing_and_trace`
+# enforces that invariant.
+[[timing_shapes]]
+name = "joined_ac8_evidence"
+axes = { rows = 256, hidden = 1024 }
+launch_config = { grid = [32, 1, 1], block = [128, 1, 1] }
+warm_up_iters = 5
+repeat_iters = 30
+
+[[trace_shapes]]
+name = "joined_ac8_evidence"
+axes = { rows = 256, hidden = 1024 }
+launch_config = { grid = [32, 1, 1], block = [128, 1, 1] }
+predicted_bytes = 41943040
+estimator_source = "static"
+
+[[correctness_shapes]]
+name = "correctness_00"
+axes = { rows = 32, hidden = 512 }
+launch_config = { grid = [32, 1, 1], block = [128, 1, 1] }
+digest_kind = "full_tensor"

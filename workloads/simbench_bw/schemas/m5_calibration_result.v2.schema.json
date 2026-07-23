@@ -1,0 +1,1900 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gpu-simulator.invalid/schemas/m5_calibration_result.v2.schema.json",
+  "title": "M5 calibration immutable RESULT manifest v2",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_kind",
+    "run_model_seal_sha256",
+    "source_commit",
+    "family_execution_order",
+    "family_scientific_rank",
+    "quantity_results",
+    "authenticity",
+    "components",
+    "counts",
+    "model_seal_sha256"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 2
+    },
+    "artifact_kind": {
+      "const": "M5_RESULT"
+    },
+    "run_model_seal_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "source_commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "family_execution_order": {
+      "$ref": "#/$defs/execution_order"
+    },
+    "family_scientific_rank": {
+      "$ref": "#/$defs/scientific_rank"
+    },
+    "quantity_results": {
+      "type": "array",
+      "minItems": 31,
+      "maxItems": 31,
+      "items": {
+        "$ref": "#/$defs/quantity_result"
+      }
+    },
+    "authenticity": {
+      "$ref": "#/$defs/authenticity"
+    },
+    "components": {
+      "$ref": "#/$defs/components"
+    },
+    "counts": {
+      "$ref": "#/$defs/counts"
+    },
+    "model_seal_sha256": {
+      "$ref": "#/$defs/sha256"
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "safe_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9_.-]{0,127}$"
+    },
+    "nonnegative_integer": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
+    "positive_integer": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "relative_path": {
+      "type": "string",
+      "pattern": "^(?!\\.{1,2}(?:/|$))(?!.*\\/\\.{1,2}(?:/|$))[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*$"
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact_id",
+        "relative_path",
+        "sha256",
+        "size_bytes",
+        "media_type"
+      ],
+      "properties": {
+        "artifact_id": {
+          "$ref": "#/$defs/safe_id"
+        },
+        "relative_path": {
+          "$ref": "#/$defs/relative_path"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "size_bytes": {
+          "$ref": "#/$defs/nonnegative_integer"
+        },
+        "media_type": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      }
+    },
+    "execution_order": {
+      "type": "array",
+      "prefixItems": [
+        {
+          "const": "b"
+        },
+        {
+          "const": "a"
+        },
+        {
+          "const": "d"
+        },
+        {
+          "const": "f"
+        },
+        {
+          "const": "c"
+        },
+        {
+          "const": "e"
+        }
+      ],
+      "items": false,
+      "minItems": 6,
+      "maxItems": 6
+    },
+    "scientific_rank": {
+      "type": "array",
+      "prefixItems": [
+        {
+          "const": "b"
+        },
+        {
+          "const": "f"
+        },
+        {
+          "const": "a"
+        },
+        {
+          "const": "d"
+        },
+        {
+          "const": "c"
+        },
+        {
+          "const": "e"
+        }
+      ],
+      "items": false,
+      "minItems": 6,
+      "maxItems": 6
+    },
+    "probe_producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "family_id"
+      ],
+      "properties": {
+        "kind": {
+          "const": "PROBE_FAMILY"
+        },
+        "family_id": {
+          "enum": [
+            "a",
+            "b",
+            "c",
+            "d",
+            "e",
+            "f"
+          ]
+        }
+      }
+    },
+    "pchase_producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "component_id"
+      ],
+      "properties": {
+        "kind": {
+          "const": "PCHASE"
+        },
+        "component_id": {
+          "const": "pchase"
+        }
+      }
+    },
+    "conditioning": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "residency",
+        "access_class",
+        "scope",
+        "variant"
+      ],
+      "properties": {
+        "residency": {
+          "enum": [
+            "L1",
+            "L2",
+            "DRAM",
+            "MIXED",
+            "NOT_APPLICABLE"
+          ]
+        },
+        "access_class": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "scope": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "variant": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "modifier": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 1024
+        }
+      }
+    },
+    "nonempty_artifacts": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 64,
+      "items": {
+        "$ref": "#/$defs/artifact"
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "curve",
+        "control",
+        "confound",
+        "composition"
+      ],
+      "properties": {
+        "curve": {
+          "$ref": "#/$defs/nonempty_artifacts"
+        },
+        "control": {
+          "$ref": "#/$defs/nonempty_artifacts"
+        },
+        "confound": {
+          "$ref": "#/$defs/nonempty_artifacts"
+        },
+        "composition": {
+          "$ref": "#/$defs/nonempty_artifacts"
+        }
+      }
+    },
+    "cross_check": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cross_check_id",
+        "instrument",
+        "artifact",
+        "verdict_artifact",
+        "verdict",
+        "fitted",
+        "candidate_model_seal_sha256",
+        "derived",
+        "selected",
+        "tuned",
+        "transcribed"
+      ],
+      "properties": {
+        "cross_check_id": {
+          "$ref": "#/$defs/safe_id"
+        },
+        "instrument": {
+          "const": "NCU"
+        },
+        "artifact": {
+          "$ref": "#/$defs/artifact"
+        },
+        "verdict_artifact": {
+          "$ref": "#/$defs/artifact"
+        },
+        "verdict": {
+          "enum": [
+            "CONSISTENT",
+            "INCONSISTENT",
+            "INCONCLUSIVE",
+            "NOT_APPLICABLE"
+          ]
+        },
+        "fitted": {
+          "const": false
+        },
+        "derived": {
+          "const": false
+        },
+        "selected": {
+          "const": false
+        },
+        "tuned": {
+          "const": false
+        },
+        "transcribed": {
+          "const": false
+        },
+        "candidate_model_seal_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "readout": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "readout_id",
+        "method_class",
+        "instrument",
+        "readout_role",
+        "derivation_identity_id",
+        "derivation_operation",
+        "value",
+        "unit",
+        "sample_count",
+        "sample_values",
+        "repetition_ids",
+        "launch_ids",
+        "dependency_contract",
+        "upstream_decision_sha256s",
+        "capture_started_unix_us",
+        "capture_session_id",
+        "observed_unix_us",
+        "source_lineage_id",
+        "evidence_artifact_ids",
+        "raw_sample_artifact",
+        "producer_artifact",
+        "ncu_used",
+        "simulator_used"
+      ],
+      "properties": {
+        "readout_id": {
+          "$ref": "#/$defs/safe_id"
+        },
+        "method_class": {
+          "enum": [
+            "CLOCK64_DEPENDENCY_CHAIN",
+            "CLOCK64_ELAPSED_WINDOW",
+            "CLOCK64_HIT_MISS_CLASSIFIER",
+            "THROUGHPUT_PLATEAU",
+            "THROUGHPUT_KNEE",
+            "RTT_CONTRAST",
+            "LITTLE_LAW_TRIANGULATION",
+            "PERSISTENCE_DELTA_CONTRAST",
+            "COMPOSITION_IDENTITY",
+            "BURST_SLOPE_BREAK",
+            "WAIT_BAR_CONTRAST",
+            "HYBRID_CONTENTION_CONTRAST"
+          ]
+        },
+        "instrument": {
+          "enum": [
+            "CLOCK64",
+            "THROUGHPUT"
+          ]
+        },
+        "readout_role": {
+          "enum": [
+            "VALUE",
+            "BOUND",
+            "STRUCTURE"
+          ]
+        },
+        "derivation_identity_id": {
+          "$ref": "#/$defs/safe_id"
+        },
+        "derivation_operation": {
+          "enum": [
+            "MEDIAN",
+            "MEAN"
+          ]
+        },
+        "value": {
+          "type": "number"
+        },
+        "unit": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "sample_count": {
+          "type": "integer",
+          "minimum": 3,
+          "maximum": 4096
+        },
+        "sample_values": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 4096,
+          "items": {
+            "type": "number"
+          }
+        },
+        "repetition_ids": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 4096,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/safe_id"
+          }
+        },
+        "launch_ids": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 4096,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/safe_id"
+          }
+        },
+        "source_lineage_id": {
+          "$ref": "#/$defs/safe_id"
+        },
+        "evidence_artifact_ids": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/safe_id"
+          }
+        },
+        "raw_sample_artifact": {
+          "$ref": "#/$defs/artifact"
+        },
+        "producer_artifact": {
+          "$ref": "#/$defs/artifact"
+        },
+        "ncu_used": {
+          "const": false
+        },
+        "simulator_used": {
+          "const": false
+        },
+        "observed_unix_us": {
+          "type": "array",
+          "minItems": 3,
+          "maxItems": 4096,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "capture_session_id": {
+          "$ref": "#/$defs/safe_id"
+        },
+        "capture_started_unix_us": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "upstream_decision_sha256s": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/sha256"
+          }
+        },
+        "dependency_contract": {
+          "type": "string",
+          "enum": [
+            "NONE",
+            "LITTLE_LAW_B_TO_D",
+            "B_D_VERDICTS_TO_F"
+          ]
+        }
+      }
+    },
+    "agreement": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "explicit",
+        "methodologically_independent",
+        "basis",
+        "tolerance_fraction",
+        "observed_max_relative_delta",
+        "passed",
+        "readout_ids",
+        "independence_witness"
+      ],
+      "properties": {
+        "explicit": {
+          "const": true
+        },
+        "methodologically_independent": {
+          "const": true
+        },
+        "basis": {
+          "const": "MAX_RELATIVE_DELTA"
+        },
+        "tolerance_fraction": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "observed_max_relative_delta": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "passed": {
+          "const": true
+        },
+        "readout_ids": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 16,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/safe_id"
+          }
+        },
+        "independence_witness": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "witness_version",
+            "readout_ids",
+            "raw_ancestry_disjoint",
+            "estimator_forms_distinct",
+            "mechanisms_distinct",
+            "confounder_sets_disjoint",
+            "falsification_rule"
+          ],
+          "properties": {
+            "witness_version": {
+              "const": 1
+            },
+            "readout_ids": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 16,
+              "uniqueItems": true,
+              "items": {
+                "$ref": "#/$defs/safe_id"
+              }
+            },
+            "raw_ancestry_disjoint": {
+              "const": true
+            },
+            "estimator_forms_distinct": {
+              "const": true
+            },
+            "mechanisms_distinct": {
+              "const": true
+            },
+            "confounder_sets_disjoint": {
+              "const": true
+            },
+            "falsification_rule": {
+              "const": "MAX_RELATIVE_DELTA_WITHIN_AGREEMENT_LIMIT"
+            }
+          }
+        }
+      }
+    },
+    "measured": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "value",
+        "agreement"
+      ],
+      "properties": {
+        "kind": {
+          "const": "MEASURED"
+        },
+        "value": {
+          "type": "number"
+        },
+        "agreement": {
+          "$ref": "#/$defs/agreement"
+        }
+      }
+    },
+    "range_gap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "lower",
+        "upper",
+        "basis",
+        "disagreement_statistics",
+        "gap_trigger",
+        "contradiction_evidence"
+      ],
+      "properties": {
+        "kind": {
+          "const": "RANGE"
+        },
+        "lower": {
+          "type": "number"
+        },
+        "upper": {
+          "type": "number"
+        },
+        "basis": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "disagreement_statistics": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "basis",
+            "observed_max_relative_delta",
+            "tolerance_fraction",
+            "readout_ids"
+          ],
+          "properties": {
+            "basis": {
+              "const": "MAX_RELATIVE_DELTA"
+            },
+            "observed_max_relative_delta": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "tolerance_fraction": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "readout_ids": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 16,
+              "uniqueItems": true,
+              "items": {
+                "$ref": "#/$defs/safe_id"
+              }
+            }
+          }
+        },
+        "gap_trigger": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "contradiction_evidence": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/safe_id"
+          }
+        }
+      }
+    },
+    "censored_gap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "direction",
+        "bound",
+        "mechanism",
+        "binder",
+        "disagreement_statistics",
+        "gap_trigger",
+        "contradiction_evidence"
+      ],
+      "properties": {
+        "kind": {
+          "const": "CENSORED"
+        },
+        "direction": {
+          "enum": [
+            "LOWER",
+            "UPPER"
+          ]
+        },
+        "bound": {
+          "type": "number"
+        },
+        "mechanism": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "binder": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "disagreement_statistics": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "basis",
+            "observed_max_relative_delta",
+            "tolerance_fraction",
+            "readout_ids"
+          ],
+          "properties": {
+            "basis": {
+              "const": "MAX_RELATIVE_DELTA"
+            },
+            "observed_max_relative_delta": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "tolerance_fraction": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "readout_ids": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 16,
+              "uniqueItems": true,
+              "items": {
+                "$ref": "#/$defs/safe_id"
+              }
+            }
+          }
+        },
+        "gap_trigger": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "contradiction_evidence": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/safe_id"
+          }
+        }
+      }
+    },
+    "mixture_component": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "label",
+        "value_lower",
+        "value_upper",
+        "weight_lower",
+        "weight_upper"
+      ],
+      "properties": {
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "value_lower": {
+          "type": "number"
+        },
+        "value_upper": {
+          "type": "number"
+        },
+        "weight_lower": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "weight_upper": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        }
+      }
+    },
+    "mixture_gap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "components",
+        "identifiability",
+        "disagreement_statistics",
+        "gap_trigger",
+        "contradiction_evidence"
+      ],
+      "properties": {
+        "kind": {
+          "const": "MIXTURE"
+        },
+        "components": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 64,
+          "items": {
+            "$ref": "#/$defs/mixture_component"
+          }
+        },
+        "identifiability": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "disagreement_statistics": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "basis",
+            "observed_max_relative_delta",
+            "tolerance_fraction",
+            "readout_ids"
+          ],
+          "properties": {
+            "basis": {
+              "const": "MAX_RELATIVE_DELTA"
+            },
+            "observed_max_relative_delta": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "tolerance_fraction": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "readout_ids": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 16,
+              "uniqueItems": true,
+              "items": {
+                "$ref": "#/$defs/safe_id"
+              }
+            }
+          }
+        },
+        "gap_trigger": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "contradiction_evidence": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/safe_id"
+          }
+        }
+      }
+    },
+    "candidate_structure": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "candidate_id",
+        "parameterization",
+        "bound"
+      ],
+      "properties": {
+        "candidate_id": {
+          "$ref": "#/$defs/safe_id"
+        },
+        "parameterization": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "bound": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        }
+      }
+    },
+    "contradiction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contradiction_id",
+        "description",
+        "confound_details",
+        "composition_details",
+        "artifact_ids"
+      ],
+      "properties": {
+        "contradiction_id": {
+          "$ref": "#/$defs/safe_id"
+        },
+        "description": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "confound_details": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "composition_details": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "artifact_ids": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 256,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/safe_id"
+          }
+        }
+      }
+    },
+    "unresolved_structure_gap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "resolved_domain",
+        "candidates",
+        "contradictions",
+        "consumer_conservative_rule",
+        "disagreement_statistics",
+        "gap_trigger",
+        "contradiction_evidence"
+      ],
+      "properties": {
+        "kind": {
+          "const": "UNRESOLVED_STRUCTURE"
+        },
+        "resolved_domain": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "candidates": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 64,
+          "items": {
+            "$ref": "#/$defs/candidate_structure"
+          }
+        },
+        "contradictions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": {
+            "$ref": "#/$defs/contradiction"
+          }
+        },
+        "consumer_conservative_rule": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "disagreement_statistics": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "basis",
+            "observed_max_relative_delta",
+            "tolerance_fraction",
+            "readout_ids"
+          ],
+          "properties": {
+            "basis": {
+              "const": "MAX_RELATIVE_DELTA"
+            },
+            "observed_max_relative_delta": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "tolerance_fraction": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "readout_ids": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 16,
+              "uniqueItems": true,
+              "items": {
+                "$ref": "#/$defs/safe_id"
+              }
+            }
+          }
+        },
+        "gap_trigger": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "contradiction_evidence": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/safe_id"
+          }
+        }
+      }
+    },
+    "surface_dimension": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "domain"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "domain": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        }
+      }
+    },
+    "surface_gap": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "dimensions",
+        "binder_verdict",
+        "model_mismatch",
+        "disagreement_statistics",
+        "gap_trigger",
+        "contradiction_evidence"
+      ],
+      "properties": {
+        "kind": {
+          "const": "SURFACE_GAP"
+        },
+        "dimensions": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 64,
+          "items": {
+            "$ref": "#/$defs/surface_dimension"
+          }
+        },
+        "binder_verdict": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "model_mismatch": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "disagreement_statistics": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "basis",
+            "observed_max_relative_delta",
+            "tolerance_fraction",
+            "readout_ids"
+          ],
+          "properties": {
+            "basis": {
+              "const": "MAX_RELATIVE_DELTA"
+            },
+            "observed_max_relative_delta": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "tolerance_fraction": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "readout_ids": {
+              "type": "array",
+              "minItems": 2,
+              "maxItems": 16,
+              "uniqueItems": true,
+              "items": {
+                "$ref": "#/$defs/safe_id"
+              }
+            }
+          }
+        },
+        "gap_trigger": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "contradiction_evidence": {
+          "type": "array",
+          "maxItems": 64,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/safe_id"
+          }
+        }
+      }
+    },
+    "quantity_result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "quantity_id",
+        "quantity_group",
+        "meaning",
+        "producer",
+        "consumer_binding",
+        "conditioning",
+        "unit",
+        "readouts",
+        "outcome",
+        "decision_artifact",
+        "evidence",
+        "cross_checks"
+      ],
+      "properties": {
+        "quantity_id": {
+          "$ref": "#/$defs/safe_id"
+        },
+        "quantity_group": {
+          "$ref": "#/$defs/safe_id"
+        },
+        "meaning": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "producer": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/probe_producer"
+            },
+            {
+              "$ref": "#/$defs/pchase_producer"
+            }
+          ]
+        },
+        "consumer_binding": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "conditioning": {
+          "$ref": "#/$defs/conditioning"
+        },
+        "unit": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "readouts": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "$ref": "#/$defs/readout"
+          }
+        },
+        "outcome": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/measured"
+            },
+            {
+              "$ref": "#/$defs/range_gap"
+            },
+            {
+              "$ref": "#/$defs/censored_gap"
+            },
+            {
+              "$ref": "#/$defs/mixture_gap"
+            },
+            {
+              "$ref": "#/$defs/unresolved_structure_gap"
+            },
+            {
+              "$ref": "#/$defs/surface_gap"
+            }
+          ]
+        },
+        "decision_artifact": {
+          "$ref": "#/$defs/artifact"
+        },
+        "evidence": {
+          "$ref": "#/$defs/evidence"
+        },
+        "cross_checks": {
+          "type": "array",
+          "maxItems": 64,
+          "items": {
+            "$ref": "#/$defs/cross_check"
+          }
+        }
+      }
+    },
+    "authenticity_entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact",
+        "artifact_role",
+        "context_id",
+        "receipt"
+      ],
+      "properties": {
+        "artifact": {
+          "$ref": "#/$defs/artifact"
+        },
+        "artifact_role": {
+          "enum": [
+            "EVIDENCE_CURVE",
+            "EVIDENCE_CONTROL",
+            "EVIDENCE_CONFOUND",
+            "EVIDENCE_COMPOSITION",
+            "RAW_SAMPLE_SERIES",
+            "READOUT_PRODUCER",
+            "QUANTITY_DECISION",
+            "NCU_RAW",
+            "NCU_VERDICT",
+            "PROTOCOL_STATE_WITNESS",
+            "CONTROL_PC_JOIN_WITNESS",
+            "CONTROL_SIDECAR"
+          ]
+        },
+        "context_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 512
+        },
+        "receipt": {
+          "$ref": "#/$defs/artifact"
+        }
+      }
+    },
+    "authenticity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "authority_identity_id",
+        "public_key_sha256",
+        "receipt_domain",
+        "entries"
+      ],
+      "properties": {
+        "authority_identity_id": {
+          "const": "m5-analysis-authority"
+        },
+        "public_key_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "receipt_domain": {
+          "const": "M5_AUTHORITY_RECEIPT_V1"
+        },
+        "entries": {
+          "type": "array",
+          "minItems": 405,
+          "maxItems": 20000,
+          "items": {
+            "$ref": "#/$defs/authenticity_entry"
+          }
+        }
+      }
+    },
+    "protocol_state": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "component_id",
+        "protocol_identity_id",
+        "witness_artifact",
+        "m0_observation_count",
+        "global_pre_observation_count",
+        "global_post_observation_count",
+        "repetition_count",
+        "per_repetition_pre_count",
+        "per_repetition_post_count",
+        "all_state_joins_passed",
+        "clock_pair",
+        "persistence_mode",
+        "cache_control",
+        "driver_version",
+        "throttle_reasons",
+        "nvcc_release",
+        "ncu_version",
+        "ncu_replay_mode",
+        "device_uuid_sha256",
+        "chronology_closed"
+      ],
+      "properties": {
+        "component_id": {
+          "const": "protocol_state"
+        },
+        "protocol_identity_id": {
+          "const": "m5-campaign-protocol"
+        },
+        "witness_artifact": {
+          "$ref": "#/$defs/artifact"
+        },
+        "m0_observation_count": {
+          "const": 1
+        },
+        "global_pre_observation_count": {
+          "const": 1
+        },
+        "global_post_observation_count": {
+          "const": 1
+        },
+        "repetition_count": {
+          "$ref": "#/$defs/positive_integer"
+        },
+        "per_repetition_pre_count": {
+          "$ref": "#/$defs/positive_integer"
+        },
+        "per_repetition_post_count": {
+          "$ref": "#/$defs/positive_integer"
+        },
+        "all_state_joins_passed": {
+          "const": true
+        },
+        "clock_pair": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "sm_clock_mhz",
+            "memory_clock_mhz"
+          ],
+          "properties": {
+            "sm_clock_mhz": {
+              "const": 1350
+            },
+            "memory_clock_mhz": {
+              "const": 10501
+            }
+          }
+        },
+        "persistence_mode": {
+          "const": true
+        },
+        "cache_control": {
+          "const": "all"
+        },
+        "driver_version": {
+          "const": "610.43.02"
+        },
+        "throttle_reasons": {
+          "type": "array",
+          "maxItems": 0
+        },
+        "nvcc_release": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "ncu_version": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
+        },
+        "ncu_replay_mode": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 32
+        },
+        "device_uuid_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "chronology_closed": {
+          "const": true
+        }
+      }
+    },
+    "pchase_component": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "component_id",
+        "quantity_ids",
+        "evidence_artifact_ids",
+        "fresh_card_artifact",
+        "property_count",
+        "historical_card_identity_id",
+        "architecture_card_transcription"
+      ],
+      "properties": {
+        "component_id": {
+          "const": "pchase"
+        },
+        "quantity_ids": {
+          "type": "array",
+          "minItems": 14,
+          "maxItems": 14,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/safe_id"
+          }
+        },
+        "evidence_artifact_ids": {
+          "type": "array",
+          "minItems": 56,
+          "maxItems": 3584,
+          "uniqueItems": true,
+          "items": {
+            "$ref": "#/$defs/safe_id"
+          }
+        },
+        "fresh_card_artifact": {
+          "$ref": "#/$defs/artifact"
+        },
+        "property_count": {
+          "const": 14
+        },
+        "historical_card_identity_id": {
+          "const": "m5-pchase-v1-card"
+        },
+        "architecture_card_transcription": {
+          "const": false
+        }
+      }
+    },
+    "parser_contract": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "supported_toolkit_versions",
+        "supported_arches",
+        "control_layout"
+      ],
+      "properties": {
+        "supported_toolkit_versions": {
+          "type": "array",
+          "prefixItems": [
+            {
+              "const": "V13.2"
+            }
+          ],
+          "items": false,
+          "minItems": 1,
+          "maxItems": 1
+        },
+        "supported_arches": {
+          "type": "array",
+          "prefixItems": [
+            {
+              "const": "sm_80"
+            },
+            {
+              "const": "sm_86"
+            }
+          ],
+          "items": false,
+          "minItems": 2,
+          "maxItems": 2
+        },
+        "control_layout": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "source",
+            "stall",
+            "yield_flag",
+            "write_barrier",
+            "read_barrier",
+            "wait_mask",
+            "reuse",
+            "reserved_must_be_zero"
+          ],
+          "properties": {
+            "source": {
+              "const": "high_word >> 41 (23 bits)"
+            },
+            "stall": {
+              "const": "bits 0:3"
+            },
+            "yield_flag": {
+              "const": "bit 4"
+            },
+            "write_barrier": {
+              "const": "bits 5:7 (7 = none)"
+            },
+            "read_barrier": {
+              "const": "bits 8:10 (7 = none)"
+            },
+            "wait_mask": {
+              "const": "bits 11:16"
+            },
+            "reuse": {
+              "const": "bits 17:20"
+            },
+            "reserved_must_be_zero": {
+              "const": "bits 21:22"
+            }
+          }
+        }
+      }
+    },
+    "control_complete": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "coverage_class",
+        "cell_id",
+        "binary_sha256",
+        "expected_sidecar_id",
+        "status",
+        "decoded_instruction_count",
+        "unknown_encoding_count",
+        "pc_join_passed",
+        "function_join_passed",
+        "parser_contract",
+        "sidecar",
+        "pc_join_witness"
+      ],
+      "properties": {
+        "coverage_class": {
+          "enum": [
+            "CANONICAL_ROSTER",
+            "CALIBRATION_BINARIES"
+          ]
+        },
+        "cell_id": {
+          "$ref": "#/$defs/safe_id"
+        },
+        "binary_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "expected_sidecar_id": {
+          "$ref": "#/$defs/safe_id"
+        },
+        "status": {
+          "const": "COMPLETE"
+        },
+        "decoded_instruction_count": {
+          "$ref": "#/$defs/positive_integer"
+        },
+        "unknown_encoding_count": {
+          "const": 0
+        },
+        "pc_join_passed": {
+          "const": true
+        },
+        "function_join_passed": {
+          "const": true
+        },
+        "parser_contract": {
+          "$ref": "#/$defs/parser_contract"
+        },
+        "sidecar": {
+          "$ref": "#/$defs/artifact"
+        },
+        "pc_join_witness": {
+          "$ref": "#/$defs/artifact"
+        }
+      }
+    },
+    "control_typed": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "coverage_class",
+        "cell_id",
+        "binary_sha256",
+        "expected_sidecar_id",
+        "status",
+        "decoded_instruction_count",
+        "unknown_encoding_count",
+        "pc_join_passed",
+        "function_join_passed",
+        "parser_contract",
+        "sidecar",
+        "pc_join_witness",
+        "typed_reasons"
+      ],
+      "properties": {
+        "coverage_class": {
+          "enum": [
+            "CANONICAL_ROSTER",
+            "CALIBRATION_BINARIES"
+          ]
+        },
+        "cell_id": {
+          "$ref": "#/$defs/safe_id"
+        },
+        "binary_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "expected_sidecar_id": {
+          "$ref": "#/$defs/safe_id"
+        },
+        "status": {
+          "const": "TYPED"
+        },
+        "decoded_instruction_count": {
+          "$ref": "#/$defs/nonnegative_integer"
+        },
+        "unknown_encoding_count": {
+          "$ref": "#/$defs/nonnegative_integer"
+        },
+        "pc_join_passed": {
+          "type": "boolean"
+        },
+        "function_join_passed": {
+          "type": "boolean"
+        },
+        "parser_contract": {
+          "$ref": "#/$defs/parser_contract"
+        },
+        "sidecar": {
+          "$ref": "#/$defs/artifact"
+        },
+        "pc_join_witness": {
+          "$ref": "#/$defs/artifact"
+        },
+        "typed_reasons": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 8,
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "binary_or_trace_unresolved",
+              "kernel_sass_not_in_cell_binary",
+              "kernel_function_match_ambiguous",
+              "no_decoded_instructions",
+              "unknown_encoding",
+              "pc_join_incomplete"
+            ]
+          }
+        }
+      }
+    },
+    "control_component": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "component_id",
+        "parser_contract",
+        "inventory_artifact",
+        "canonical_pc_join_witness",
+        "calibration_pc_join_witness",
+        "expected_canonical_cell_count",
+        "observed_canonical_cell_count",
+        "expected_calibration_binary_count",
+        "observed_calibration_binary_count",
+        "entries"
+      ],
+      "properties": {
+        "component_id": {
+          "const": "roster_control_sidecars"
+        },
+        "parser_contract": {
+          "$ref": "#/$defs/parser_contract"
+        },
+        "inventory_artifact": {
+          "$ref": "#/$defs/artifact"
+        },
+        "canonical_pc_join_witness": {
+          "$ref": "#/$defs/artifact"
+        },
+        "calibration_pc_join_witness": {
+          "$ref": "#/$defs/artifact"
+        },
+        "expected_canonical_cell_count": {
+          "const": 122
+        },
+        "observed_canonical_cell_count": {
+          "const": 122
+        },
+        "expected_calibration_binary_count": {
+          "$ref": "#/$defs/positive_integer"
+        },
+        "observed_calibration_binary_count": {
+          "$ref": "#/$defs/positive_integer"
+        },
+        "entries": {
+          "type": "array",
+          "minItems": 123,
+          "maxItems": 4218,
+          "items": {
+            "oneOf": [
+              {
+                "$ref": "#/$defs/control_complete"
+              },
+              {
+                "$ref": "#/$defs/control_typed"
+              }
+            ]
+          }
+        }
+      }
+    },
+    "pre_ncu_candidate_component": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "component_id",
+        "artifact",
+        "candidate_model_seal_sha256",
+        "feature_authenticated_artifact_count",
+        "ncu_attachment_phase",
+        "candidate_publication"
+      ],
+      "properties": {
+        "component_id": {
+          "const": "pre_ncu_candidate"
+        },
+        "artifact": {
+          "$ref": "#/$defs/artifact"
+        },
+        "candidate_model_seal_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "feature_authenticated_artifact_count": {
+          "type": "integer",
+          "minimum": 405,
+          "maximum": 20000
+        },
+        "ncu_attachment_phase": {
+          "const": "AFTER_IMMUTABLE_CANDIDATE_FREEZE"
+        },
+        "candidate_publication": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "publication_identity_id",
+            "artifact",
+            "publication_name",
+            "verified",
+            "verification_method",
+            "published_sha256",
+            "published_size_bytes"
+          ],
+          "properties": {
+            "publication_identity_id": {
+              "$ref": "#/$defs/safe_id"
+            },
+            "artifact": {
+              "$ref": "#/$defs/artifact"
+            },
+            "publication_name": {
+              "$ref": "#/$defs/safe_id"
+            },
+            "verified": {
+              "const": true
+            },
+            "verification_method": {
+              "const": "REHASHED_PUBLISHED_BYTES"
+            },
+            "published_sha256": {
+              "$ref": "#/$defs/sha256"
+            },
+            "published_size_bytes": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        }
+      }
+    },
+    "components": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pre_ncu_candidate",
+        "protocol_state",
+        "pchase",
+        "roster_control_sidecars"
+      ],
+      "properties": {
+        "pre_ncu_candidate": {
+          "$ref": "#/$defs/pre_ncu_candidate_component"
+        },
+        "protocol_state": {
+          "$ref": "#/$defs/protocol_state"
+        },
+        "pchase": {
+          "$ref": "#/$defs/pchase_component"
+        },
+        "roster_control_sidecars": {
+          "$ref": "#/$defs/control_component"
+        }
+      }
+    },
+    "counts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "required_quantity_count",
+        "result_quantity_count",
+        "measured_quantity_count",
+        "typed_gap_quantity_count",
+        "evidence_artifact_reference_count",
+        "raw_sample_series_count",
+        "pre_ncu_authenticated_artifact_count",
+        "authenticated_artifact_count",
+        "authority_receipt_count",
+        "protocol_repetition_count",
+        "canonical_control_sidecar_count",
+        "calibration_control_sidecar_count"
+      ],
+      "properties": {
+        "required_quantity_count": {
+          "const": 31
+        },
+        "result_quantity_count": {
+          "const": 31
+        },
+        "measured_quantity_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 31
+        },
+        "typed_gap_quantity_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 31
+        },
+        "evidence_artifact_reference_count": {
+          "type": "integer",
+          "minimum": 124,
+          "maximum": 7936
+        },
+        "raw_sample_series_count": {
+          "const": 62
+        },
+        "pre_ncu_authenticated_artifact_count": {
+          "type": "integer",
+          "minimum": 405,
+          "maximum": 20000
+        },
+        "authenticated_artifact_count": {
+          "type": "integer",
+          "minimum": 405,
+          "maximum": 20000
+        },
+        "authority_receipt_count": {
+          "type": "integer",
+          "minimum": 405,
+          "maximum": 20000
+        },
+        "protocol_repetition_count": {
+          "$ref": "#/$defs/positive_integer"
+        },
+        "canonical_control_sidecar_count": {
+          "const": 122
+        },
+        "calibration_control_sidecar_count": {
+          "$ref": "#/$defs/positive_integer"
+        }
+      }
+    }
+  }
+}

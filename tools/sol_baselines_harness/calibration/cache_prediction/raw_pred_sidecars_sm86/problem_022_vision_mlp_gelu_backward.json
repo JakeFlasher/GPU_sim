@@ -1,0 +1,14 @@
+{
+  "associativity_l2": 16,
+  "captured_at_utc": "2026-05-29T22:20:19+00:00",
+  "geometry_source": "sm86_pilot_static_device_card_v1",
+  "language": "cuda_cpp",
+  "num_l2_slices": 6,
+  "raw_l1_hit_rate": 0.036858044603281424,
+  "raw_l2_hit_rate": 0.3305021956376385,
+  "schema_version": 1,
+  "scored": true,
+  "slug": "problem_022_vision_mlp_gelu_backward",
+  "tier2_sidecar_sha256": "aa08ca06eb3998cb187b9d9fee6bd4bada7cb38eccb4f09701c71a07e86cf0f8",
+  "typed_reason": ""
+}

@@ -1,0 +1,100 @@
+{
+  "arch_token": "sm_86",
+  "binary_path": "workloads/simbench_bw/l1/global_atomic_and_histogram/global_atomic_and_histogram_run",
+  "binary_source": "live_cuobjdump",
+  "kernel_mangled_name": "global_atomic_and_histogram_kernel",
+  "per_pc_instruction_cache_op": [
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x540",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x610",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x630",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x650",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x660",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x550",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x610",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x630",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x650",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x660",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0xfa0",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x1070",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x10a0",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x10c0",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x10d0",
+      "raw_mnemonic": "LDG.E"
+    }
+  ],
+  "sass_provenance_status": "matched",
+  "schema_version": 1
+}

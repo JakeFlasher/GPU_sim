@@ -1,0 +1,257 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "simbench_bw/schemas/roster.schema.json",
+  "title": "SimBench-BW roster",
+  "description": "Canonical roster of benchmark rows for SimBench-BW. Exactly 72 benchmark rows when populated. Each row carries machine-readable metadata that downstream tools such as run_suite.py, verify_coverage.py, and validate.py read.",
+  "schema_version": 1,
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "rows"],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Bumped whenever the row schema adds, removes, or renames a field."
+    },
+    "rows": {
+      "type": "array",
+      "description": "All benchmark rows. Ordering is stable per the reference roster enumeration (draft §5); downstream tools index by slug, not by position.",
+      "items": { "$ref": "#/$defs/row" }
+    }
+  },
+  "$defs": {
+    "row": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "slug",
+        "level",
+        "domain",
+        "family",
+        "primary_precision",
+        "primary_subsystems",
+        "secondary_subsystems",
+        "arch_gate",
+        "tier",
+        "trace_budget_mib",
+        "walltime_target_ms",
+        "sm_meaningful",
+        "deterministic",
+        "reference_family",
+        "reference_type",
+        "seed_policy",
+        "citation",
+        "probe_dependencies",
+        "status",
+        "wave",
+        "split"
+      ],
+      "properties": {
+        "slug": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "description": "Stable identifier used as the source filename stem and the key across all per-row artifacts."
+        },
+        "level": {
+          "type": "string",
+          "enum": ["L1", "L2", "L3", "L4"],
+          "description": "Complexity level per draft §4e. L1 microbench, L2 fused-operator, L3 mini-block, L4 pipeline."
+        },
+        "domain": {
+          "type": "string",
+          "enum": [
+            "micro",
+            "llm_attention",
+            "llm_moe",
+            "llm_norm_ffn",
+            "llm_rope_kv",
+            "llm_sampling",
+            "ssm",
+            "diffusion",
+            "vision",
+            "audio",
+            "tts",
+            "multimodal",
+            "embedding",
+            "cluster",
+            "control"
+          ]
+        },
+        "family": {
+          "type": "string",
+          "description": "Fine-grained family within a domain (e.g. flash_attn, paged_attention, moe_grouped_gemm, rmsnorm, mamba_selective_scan)."
+        },
+        "primary_precision": {
+          "type": "string",
+          "enum": ["FP32", "TF32", "FP16", "BF16", "FP8_E4M3", "FP8_E5M2", "FP6_E3M2", "FP6_E2M3", "FP4_E2M1", "NVFP4", "INT8", "MIXED"]
+        },
+        "primary_subsystems": {
+          "type": "array",
+          "description": "Subsystems (S1–S20) that this row primary-stresses per the subsystem coverage matrix (draft §4b). Each row must primary-stress at least one subsystem; each subsystem must be primary-stressed by at least 3 non-control rows.",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/subsystem_id" }
+        },
+        "secondary_subsystems": {
+          "type": "array",
+          "description": "Subsystems secondary-stressed by this row (non-load-bearing but measurable).",
+          "uniqueItems": true,
+          "items": { "$ref": "#/$defs/subsystem_id" }
+        },
+        "arch_gate": {
+          "type": "array",
+          "description": "Architecture targets for which this row's .cu is expected to compile. Use the common.mk ARCH_GATE vocabulary.",
+          "minItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": ["portable", "sm_86", "sm_90a", "sm_120", "sm_120f", "sm_120a"]
+          }
+        },
+        "tier": {
+          "type": "string",
+          "enum": ["P", "P-strict", "H", "B", "control", "unsupported"],
+          "description": "Portability tier. P allows arch-branched sources; P-strict is the optional branchless subset; H is Hopper-only; B is Blackwell-only; control is a vendor-library non-anchor kernel; unsupported is reserved for rows that cannot be built on any target platform."
+        },
+        "trace_budget_mib": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Declared NVBit trace budget in MiB per single-shape invocation. Semantics are enforced through workloads/simbench_bw/trace_budgets.toml."
+        },
+        "walltime_target_ms": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Target native wall-clock per invocation in milliseconds on the primary target hardware. See draft §4c level-bucket targets (2 / 5 / 20 / 50 ms for L1 / L2 / L3 / L4)."
+        },
+        "sm_meaningful": {
+          "type": "string",
+          "enum": ["Y", "P", "N"],
+          "description": "Y: single-SM invocation is a meaningful measurement. P: partially meaningful (e.g. an L3 block with an outer multi-SM loop). N: requires multi-SM execution."
+        },
+        "deterministic": {
+          "type": "string",
+          "enum": ["D", "ND"],
+          "description": "D: run-to-run deterministic under a fixed seed. ND: uses atomics / non-deterministic reduction; results compared under a wider tolerance per tolerances.toml."
+        },
+        "reference_family": {
+          "type": "string",
+          "enum": [
+            "attention",
+            "paged_attention",
+            "grouped_gemm",
+            "norm",
+            "rope",
+            "activation",
+            "mma_microbench",
+            "cluster_dsmem",
+            "ssm",
+            "conv",
+            "sampling",
+            "embedding",
+            "tma",
+            "diffusion",
+            "vision_encoder",
+            "audio",
+            "tts",
+            "multimodal",
+            "control"
+          ],
+          "description": "Reference-family module (under workloads/simbench_bw/references/<family>.py) that parametrically covers this row's correctness check. The suite caps at 20 families."
+        },
+        "reference_type": {
+          "type": "string",
+          "enum": ["cpu", "fp32_gpu", "analytic"],
+          "description": "How the correctness reference is produced. cpu: pure Python / NumPy / PyTorch on CPU. fp32_gpu: a higher-precision GPU reference path. analytic: closed-form result (e.g. identity for TMA copy)."
+        },
+        "seed_policy": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["kind"],
+          "properties": {
+            "kind": { "type": "string", "enum": ["fixed", "sweep"] },
+            "seeds": {
+              "type": "array",
+              "items": { "type": "integer", "minimum": 0 },
+              "description": "When kind=sweep, explicit seed list documenting coverage."
+            },
+            "seed": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "When kind=fixed, the single canonical seed."
+            }
+          },
+          "allOf": [
+            {
+              "if": { "properties": { "kind": { "const": "fixed" } } },
+              "then": { "required": ["seed"] }
+            },
+            {
+              "if": { "properties": { "kind": { "const": "sweep" } } },
+              "then": { "required": ["seeds"] }
+            }
+          ]
+        },
+        "citation": {
+          "type": "string",
+          "description": "Citable source for the kernel's workload semantics (arXiv identifier, vendor doc URL, or local KB card path)."
+        },
+        "probe_dependencies": {
+          "type": "array",
+          "description": "Feature keys whose probe outcome gates this row's tier. Empty list is only legal when tier is P-strict and the row has no arch-conditional dependency.",
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "enum": [
+              "nvfp4_blockscaled",
+              "fp4_dense_mma",
+              "fp6_e3m2_mma",
+              "fp6_e2m3_mma",
+              "sparse_2to4_bf16",
+              "sparse_2to4_fp8",
+              "sparse_2to4_int8",
+              "sparse_mxf4",
+              "tma_bulk_tensor",
+              "tma_multicast",
+              "cluster_mbarrier",
+              "dsmem_remote",
+              "wgmma",
+              "setmaxnreg"
+            ]
+          }
+        },
+        "status": {
+          "type": "string",
+          "enum": ["scaffold", "scored", "build_failed", "correctness_failed", "unsupported"],
+          "description": "Lifecycle state. scaffold: metadata only, no .cu yet. scored: passed compile+run+correctness on every declared platform. build_failed / correctness_failed / unsupported: terminal non-scored states."
+        },
+        "wave": {
+          "type": "string",
+          "enum": ["1", "2", "3", "4", "5", "6", "7"],
+          "description": "Release-wave label; first-wave (MVS-20) rows carry wave=1. Union over all values equals the 72-row roster."
+        },
+        "split": {
+          "type": "string",
+          "enum": ["calibration", "validation", "holdout"],
+          "description": "Stratified split membership per splits.toml (40 / 16 / 16)."
+        },
+        "cross_gen_comparability_note": {
+          "oneOf": [
+            { "type": "null" },
+            { "$ref": "cross_gen_note.schema.json" }
+          ],
+          "description": "Hopper-vs-Blackwell behavioral comparability note. null is allowed only for rows that do not use TMA, clusters, DSMEM, or cluster-scoped mbarrier."
+        },
+        "platform_matrix_override": {
+          "type": "string",
+          "enum": ["h100", "rtx_pro_6000_blackwell", "both", "either"],
+          "description": "Optional per-row override of platform_matrix.toml entry. When absent, the canonical platform_matrix.toml value is used; when present, verify_coverage.py flags any mismatch."
+        }
+      }
+    },
+    "subsystem_id": {
+      "type": "string",
+      "pattern": "^S(?:[1-9]|1[0-9]|20)$",
+      "description": "One of S1–S20 per draft §4b."
+    }
+  }
+}

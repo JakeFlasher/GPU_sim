@@ -1,0 +1,180 @@
+{
+  "accuracy_report": "data/local_labels/timing_predictions/timing_accuracy_report_sm_86.json",
+  "arch": "sm_86",
+  "artifact_kind": "timing_closure",
+  "candidate_coverage": {
+    "prevents_overall_research_success": false,
+    "terminal_state": "research_success",
+    "typed_reason": null,
+    "uncovered_required_families": []
+  },
+  "candidate_coverage_artifact": "data/local_labels/timing_cohort/ac4_candidate_coverage_verdict_sm_86.json",
+  "crosswalk_artifact": "data/local_labels/timing_predictions/deploy_ns_crosswalk_sm_86.json",
+  "cycle_accuracy": {
+    "publication_gate": {
+      "bootstrap_geomean_upper_bound_met": false,
+      "geomean_relative_error_met": false,
+      "median_abs_log_relative_error_met": true,
+      "min_scored_cells_met": true,
+      "passes": false
+    },
+    "result_kind": "typed_unavailable",
+    "scored_channel": "deployable_ridge_on_roofline_no_same_slug_substitution",
+    "scores": {
+      "bootstrap_geomean_upper_bound": 0.3099216431466123,
+      "geomean_relative_error": 0.15831478973942748,
+      "median_abs_log_relative_error": 0.04138351487066982,
+      "n_cells": 13
+    }
+  },
+  "cycle_terminal_state": "verdict_falsification",
+  "deploy_ns": {
+    "anchor_regime": "short_burst",
+    "anchor_source": "calibration_artifact:nvml_short_burst_anchor_sm_86.json",
+    "claim_kind": "deploy_ns_pass",
+    "clock_uncertainty_fraction": 0.06,
+    "crosswalk_claim_allowed": true,
+    "point_result_claimed": false,
+    "sm_clock_ref_mhz": 1890.0,
+    "typed_reason": null
+  },
+  "deploy_ns_point_claimed": false,
+  "deploy_ns_terminal_state": "research_success",
+  "evidence_status": "Offline-verified",
+  "ns_intervals": [
+    {
+      "center_ns": 4209160.127366001,
+      "lower_ns": 3956610.5197240403,
+      "observed_ncu_ns_diagnostic": 4094336.0,
+      "predicted_cycles": 7955312.640721741,
+      "regime": "long",
+      "shape_point": "ac4_mixed_conv_b20_h56_w56_c32_f32_rep2_blk2240",
+      "slug": "conv2d_implicit_gemm_bf16_sm80",
+      "upper_ns": 4461709.735007961
+    },
+    {
+      "center_ns": 3714297.4172424804,
+      "lower_ns": 3491439.5722079314,
+      "observed_ncu_ns_diagnostic": 3623456.0,
+      "predicted_cycles": 7020022.118588288,
+      "regime": "long",
+      "shape_point": "ac4_mixed_conv_b24_h48_w48_c32_f32_rep2_blk2048",
+      "slug": "conv2d_implicit_gemm_bf16_sm80",
+      "upper_ns": 3937155.2622770295
+    },
+    {
+      "center_ns": 3717750.8674627417,
+      "lower_ns": 3494685.815414977,
+      "observed_ncu_ns_diagnostic": 3613472.0,
+      "predicted_cycles": 7026549.139504582,
+      "regime": "long",
+      "shape_point": "ac4_mixed_conv_b24_h48_w48_c32_f32_rep2_blk2304",
+      "slug": "conv2d_implicit_gemm_bf16_sm80",
+      "upper_ns": 3940815.9195105066
+    },
+    {
+      "center_ns": 3727841.3936676253,
+      "lower_ns": 3504170.9100475674,
+      "observed_ncu_ns_diagnostic": 3581056.0,
+      "predicted_cycles": 7045620.234031811,
+      "regime": "long",
+      "shape_point": "ac4_mixed_conv_b24_h48_w48_c32_f32_rep2_blk2560",
+      "slug": "conv2d_implicit_gemm_bf16_sm80",
+      "upper_ns": 3951511.877287683
+    },
+    {
+      "center_ns": 6422403.709142928,
+      "lower_ns": 6037059.486594352,
+      "observed_ncu_ns_diagnostic": 3367264.0,
+      "predicted_cycles": 12138343.010280134,
+      "regime": "long",
+      "shape_point": "ac4_mixed_dot_n16777216_p24",
+      "slug": "dram_streaming_dot_product",
+      "upper_ns": 6807747.931691504
+    },
+    {
+      "center_ns": 2083782.073886255,
+      "lower_ns": 1958755.1494530796,
+      "observed_ncu_ns_diagnostic": 3481984.0,
+      "predicted_cycles": 3938348.119645022,
+      "regime": "long",
+      "shape_point": "ac4_mixed_dot_n8388608_p48",
+      "slug": "dram_streaming_dot_product",
+      "upper_ns": 2208808.9983194303
+    },
+    {
+      "center_ns": 3489411.7954885904,
+      "lower_ns": 3280047.087759275,
+      "observed_ncu_ns_diagnostic": 3057696.0,
+      "predicted_cycles": 6594988.293473436,
+      "regime": "long",
+      "shape_point": "ac4_mixed_flash_bh16_sq512_sk512_d16_rep48_blk2304",
+      "slug": "flash_attn_fwd_bf16_sm80",
+      "upper_ns": 3698776.5032179058
+    },
+    {
+      "center_ns": 3049421.969064793,
+      "lower_ns": 2866456.650920905,
+      "observed_ncu_ns_diagnostic": 4050528.0,
+      "predicted_cycles": 5763407.521532459,
+      "regime": "long",
+      "shape_point": "ac4_mixed_flash_bh16_sq512_sk512_d16_rep64",
+      "slug": "flash_attn_fwd_bf16_sm80",
+      "upper_ns": 3232387.287208681
+    },
+    {
+      "center_ns": 3440025.3048118353,
+      "lower_ns": 3233623.786523125,
+      "observed_ncu_ns_diagnostic": 3199840.0,
+      "predicted_cycles": 6501647.826094369,
+      "regime": "long",
+      "shape_point": "ac4_mixed_gemm_m2048_n2048_k4096",
+      "slug": "gemm_hmma_bf16_sm80",
+      "upper_ns": 3646426.8231005454
+    },
+    {
+      "center_ns": 3298704.724025278,
+      "lower_ns": 3100782.440583761,
+      "observed_ncu_ns_diagnostic": 3167040.0,
+      "predicted_cycles": 6234551.928407775,
+      "regime": "long",
+      "shape_point": "ac4_mixed_gemm_m2048_n4096_k2048",
+      "slug": "gemm_hmma_bf16_sm80",
+      "upper_ns": 3496627.007466795
+    },
+    {
+      "center_ns": 4183137.156876598,
+      "lower_ns": 3932148.927464002,
+      "observed_ncu_ns_diagnostic": 4121376.0,
+      "predicted_cycles": 7906129.22649677,
+      "regime": "long",
+      "shape_point": "ac4_mixed_gemm_m3072_n2048_k3072",
+      "slug": "gemm_hmma_bf16_sm80",
+      "upper_ns": 4434125.386289194
+    },
+    {
+      "center_ns": 3839211.484515735,
+      "lower_ns": 3608858.7954447907,
+      "observed_ncu_ns_diagnostic": 4097216.0,
+      "predicted_cycles": 7256109.705734739,
+      "regime": "long",
+      "shape_point": "ac4_mixed_gemm_m4096_n2048_k2048",
+      "slug": "gemm_hmma_bf16_sm80",
+      "upper_ns": 4069564.173586679
+    },
+    {
+      "center_ns": 3839146.342627801,
+      "lower_ns": 3608797.5620701327,
+      "observed_ncu_ns_diagnostic": 3919904.0,
+      "predicted_cycles": 7255986.587566543,
+      "regime": "long",
+      "shape_point": "ac4_mixed_gemm_m4096_n4096_k1024",
+      "slug": "gemm_hmma_bf16_sm80",
+      "upper_ns": 4069495.1231854693
+    }
+  ],
+  "overall_terminal_state": "verdict_falsification",
+  "prediction_bundle": "data/local_labels/timing_predictions/timing_cycle_predictions_sm_86.json",
+  "schema_version": 1,
+  "source_commit": "98209c834cb3015051a9fd9d226f2d00cdcc8f80"
+}

@@ -1,0 +1,44 @@
+{
+  "name": "problem_064_latent_kv_expansion_with_split_cuda_cpp_scaffold",
+  "definition": "064_latent_kv_expansion_with_split",
+  "author": "scaffold",
+  "spec": {
+    "languages": [
+      "cuda_cpp"
+    ],
+    "target_hardware": [
+      "LOCAL"
+    ],
+    "entry_point": "main.cpp::run",
+    "dependencies": [],
+    "destination_passing_style": true,
+    "binding": "torch",
+    "compile_options": {
+      "cflags": [],
+      "cuda_cflags": [
+        "-O3",
+        "--use_fast_math",
+        "-gencode",
+        "arch=compute_86,code=sm_86"
+      ],
+      "ld_flags": [
+        "-lcuda"
+      ]
+    }
+  },
+  "sources": [
+    {
+      "path": "main.cpp",
+      "content": "#include <torch/extension.h>\n#include <ATen/cuda/CUDAContext.h>\n#include <c10/cuda/CUDAGuard.h>\n#include <string>\n\n// DeepSeek-V3 latent KV expansion with split.\n//\n// Reference (problem_064_latent_kv_expansion_with_split):\n//     num_heads = 128; qk_nope_head_dim = 128; v_head_dim = 128\n//     bsz, seq_len, _ = compressed_kv.shape\n//     # Stage 1: RMSNorm (float32 reduction, weight applied in f32, cast back to bf16)\n//     hidden_states = compressed_kv.to(f32)\n//     variance = hidden_states.pow(2).mean(-1, keepdim=True)\n//     hidden_states = hidden_states * rsqrt(variance + eps)\n//     normalized_kv = (kv_a_layernorm_weight.f32 * hidden_states).to(bf16)\n//     # Stage 2: Linear projection (bf16 matmul; weight transposed)\n//     expanded_kv = matmul(normalized_kv, kv_b_proj_weight.t())   # [B, S, 32768] bf16\n//     # Stage 3: reshape + transpose\n//     kv = expanded_kv.view(bsz, seq_len, 128, 256).transpose(1, 2)  # [B, 128, S, 256]\n//     # Stage 4: split along last dim\n//     k_nope       = kv[:, :, :, :128].contiguous()                  # [B, 128, S, 128]\n//     value_states = kv[:, :, :, 128:].contiguous()                  # [B, 128, S, 128]\n//\n// Per definition.json (insertion order):\n//   compressed_kv          : [batch_size, seq_len, kv_lora_rank=512]              bf16\n//   kv_a_layernorm_weight  : [kv_lora_rank=512]                                   bf16\n//   kv_b_proj_weight       : [kv_expanded_dim=32768, kv_lora_rank=512]            bf16\n//   eps                    : scalar                                              f32\n//   k_nope                 : [batch_size, num_heads=128, seq_len, qk_nope_head_dim=128]  bf16 (DPS)\n//   value_states           : [batch_size, num_heads=128, seq_len, v_head_dim=128]        bf16 (DPS)\n//\n// eps is a scalar (shape == null in definition.json) so it binds as a C++\n// double, NOT a tensor.\n//\n// Precision contract (CLAUDE.md Rule 8): RMSNorm runs the variance reduction\n// and rsqrt in float32, multiplies by the float32-cast weight, and casts the\n// normalized result back to bfloat16 BEFORE the projection matmul -- exactly\n// the reference cast points. The projection is therefore a bf16 matmul\n// (normalized_kv bf16 @ kv_b_proj_weight.t() bf16), routing through the same\n// cuBLAS GEMM (transB = T from the explicit .t()) the reference's torch.matmul\n// uses. No precision downgrade.\n//\n// Implementation: pure ATen / cuBLAS dispatch -- NO custom CUDA kernels. The\n// reshape/transpose/split chain unwinds the projected layout into the\n// per-head K_nope / value tensors; the two .contiguous() copies match the\n// reference's explicit .contiguous() calls. Outputs written in place into the\n// pre-allocated destinations (destination-passing style).\n\nstatic void check_bf16_cuda(const torch::Tensor& t, const std::string& name) {\n    TORCH_CHECK(t.is_cuda(), name, \" must be a CUDA tensor\");\n    TORCH_CHECK(t.dtype() == torch::kBFloat16, name, \" must be bfloat16, got \", t.dtype());\n}\n\nvoid run(\n    const torch::Tensor& compressed_kv,\n    const torch::Tensor& kv_a_layernorm_weight,\n    const torch::Tensor& kv_b_proj_weight,\n    double eps,\n    torch::Tensor k_nope,\n    torch::Tensor value_states\n) {\n    check_bf16_cuda(compressed_kv, \"compressed_kv\");\n    check_bf16_cuda(kv_a_layernorm_weight, \"kv_a_layernorm_weight\");\n    check_bf16_cuda(kv_b_proj_weight, \"kv_b_proj_weight\");\n    check_bf16_cuda(k_nope, \"k_nope\");\n    check_bf16_cuda(value_states, \"value_states\");\n    TORCH_CHECK(compressed_kv.dim() == 3,\n                \"compressed_kv must be 3D [B, S, kv_lora_rank], got \",\n                compressed_kv.dim(), \"D\");\n    TORCH_CHECK(kv_a_layernorm_weight.dim() == 1,\n                \"kv_a_layernorm_weight must be 1D [kv_lora_rank]\");\n    TORCH_CHECK(kv_b_proj_weight.dim() == 2,\n                \"kv_b_proj_weight must be 2D [kv_expanded_dim, kv_lora_rank]\");\n\n    const c10::cuda::CUDAGuard device_guard(compressed_kv.device());\n\n    constexpr int64_t kNumHeads = 128;\n    constexpr int64_t kQkNopeHeadDim = 128;\n    constexpr int64_t kVHeadDim = 128;\n    constexpr int64_t kPerHead = kQkNopeHeadDim + kVHeadDim;  // 256\n\n    const int64_t bsz = compressed_kv.size(0);\n    const int64_t seq_len = compressed_kv.size(1);\n\n    const auto f32 = torch::kFloat32;\n\n    // Stage 1: RMSNorm in float32; weight applied in float32; cast back to bf16.\n    auto hidden_states = compressed_kv.to(f32);                    // [B, S, 512] f32\n    auto variance = hidden_states.pow(2).mean(-1, /*keepdim=*/true);\n    hidden_states = hidden_states * at::rsqrt(variance + eps);     // eps -> double, broadcasts\n    auto normalized_kv =\n        (kv_a_layernorm_weight.to(f32) * hidden_states).to(torch::kBFloat16);  // [B, S, 512] bf16\n\n    // Stage 2: bf16 projection. Explicit .t() -> cuBLAS transB = T.\n    auto expanded_kv = at::matmul(normalized_kv, kv_b_proj_weight.t());  // [B, S, 32768] bf16\n\n    // Stage 3: reshape to [B, S, 128, 256] then transpose heads/seq -> [B, 128, S, 256].\n    auto kv = expanded_kv.view({bsz, seq_len, kNumHeads, kPerHead})\n                  .transpose(1, 2);                               // non-contiguous view\n\n    // Stage 4: split along the last dim; each branch gets its own contiguous copy.\n    auto k_nope_result =\n        kv.narrow(/*dim=*/3, /*start=*/0, /*length=*/kQkNopeHeadDim).contiguous();\n    auto value_result =\n        kv.narrow(/*dim=*/3, /*start=*/kQkNopeHeadDim, /*length=*/kVHeadDim).contiguous();\n\n    TORCH_CHECK(k_nope_result.sizes() == k_nope.sizes(),\n                \"computed k_nope shape \", k_nope_result.sizes(),\n                \" does not match pre-allocated k_nope \", k_nope.sizes());\n    TORCH_CHECK(value_result.sizes() == value_states.sizes(),\n                \"computed value_states shape \", value_result.sizes(),\n                \" does not match pre-allocated value_states \", value_states.sizes());\n\n    k_nope.copy_(k_nope_result);\n    value_states.copy_(value_result);\n}\n\nPYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {\n    m.def(\"run\", &run,\n          \"DeepSeek-V3 latent KV expansion with split. Pure ATen/cuBLAS \"\n          \"dispatch: float32 RMSNorm cast back to bf16, one bf16 projection \"\n          \"matmul (normalized_kv @ kv_b_proj_weight.t()), view+transpose to \"\n          \"[B, num_heads=128, S, 256], then split into k_nope / value_states \"\n          \"via narrow+contiguous. Destination-passing style.\");\n}\n"
+    },
+    {
+      "path": "kernel.cu",
+      "content": "// Stub translation unit: this ATen-delegated port has no custom __global__\n// kernels. A bare .cu is still needed so torch's cpp_extension builds a CUDA\n// extension (adding CUDA include paths); a .cpp-only extension fails with\n// \"cuda_runtime_api.h: No such file or directory\".\n#include <cuda_runtime.h>\n"
+    },
+    {
+      "path": "kernel.h",
+      "content": "#pragma once\n// Intentionally empty: ATen-delegated port, no custom kernel launcher.\n"
+    }
+  ],
+  "description": "Scaffolded baseline for problem_064_latent_kv_expansion_with_split (language=cuda_cpp); hand-edit the copied exemplar to implement the target problem before harness-running. Destination-passing-style is set true; outputs appear after inputs in definition.json insertion order."
+}

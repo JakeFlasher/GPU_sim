@@ -1,0 +1,1055 @@
+{
+  "arch": "sm_86",
+  "artifact_kind": "harness_readiness_budget",
+  "claim_map_path": "data/sm_86_predictor_accuracy_recovery_v2/claim_to_evidence_map.md",
+  "claim_map_sha256": "dc47935f13a7d5adc3ffe047d95191196788383c4f08af6728019573c823f45b",
+  "generated_at_commit": "3551ec4eb5eb291babffa0d0c678e2986138813f",
+  "harness_config_digest": "4418e8472b663a86d623734d4bac9018685bd734c92ab581043f0eed422a094b",
+  "harness_source": "data/sm_86_predictor_accuracy_recovery_v2/per_metric_evidence_harness_sm_86.json",
+  "readiness": {
+    "n_main_metrics": 16,
+    "overall_status": "not_submission_grade",
+    "per_metric": [
+      {
+        "ac_tier": "T1",
+        "achieved_vs_target": [
+          {
+            "achieved": 0.0,
+            "gate": "t1_pooled_p50",
+            "met": true,
+            "target": 0.01
+          },
+          {
+            "achieved": 0.0,
+            "gate": "t1_pooled_p90",
+            "met": true,
+            "target": 0.03
+          },
+          {
+            "achieved": 0.0,
+            "gate": "t1_pooled_max",
+            "met": true,
+            "target": 0.05
+          }
+        ],
+        "bucket_tally": {
+          "appendix": 0,
+          "diagnostic": 0,
+          "main": 23,
+          "typed_unavailable": 21
+        },
+        "ci": {
+          "hi": 0.0,
+          "lo": 0.0,
+          "mean": 0.0,
+          "n": 23,
+          "statistic": "mean_per_cell_error",
+          "status": "computed"
+        },
+        "is_fitted": false,
+        "metric_key": "l1tex__t_requests.sum",
+        "n_diagnostic": 0,
+        "n_scored": 23,
+        "n_scored_with_error": 23,
+        "n_typed_unavailable": 21,
+        "promotion": "main",
+        "promotion_blocker": null,
+        "strongest_allowed_claim": "headline / replacement-grade (main bucket)",
+        "tier": "T1"
+      },
+      {
+        "ac_tier": "T1",
+        "achieved_vs_target": [
+          {
+            "achieved": 0.0,
+            "gate": "t1_pooled_p50",
+            "met": true,
+            "target": 0.01
+          },
+          {
+            "achieved": 0.0,
+            "gate": "t1_pooled_p90",
+            "met": true,
+            "target": 0.03
+          },
+          {
+            "achieved": 0.0,
+            "gate": "t1_pooled_max",
+            "met": true,
+            "target": 0.05
+          }
+        ],
+        "bucket_tally": {
+          "appendix": 0,
+          "diagnostic": 0,
+          "main": 25,
+          "typed_unavailable": 19
+        },
+        "ci": {
+          "hi": 0.0,
+          "lo": 0.0,
+          "mean": 0.0,
+          "n": 25,
+          "statistic": "mean_per_cell_error",
+          "status": "computed"
+        },
+        "is_fitted": false,
+        "metric_key": "l1tex__t_requests_pipe_lsu_mem_global_op_atom.sum",
+        "n_diagnostic": 0,
+        "n_scored": 25,
+        "n_scored_with_error": 25,
+        "n_typed_unavailable": 19,
+        "promotion": "main",
+        "promotion_blocker": null,
+        "strongest_allowed_claim": "headline / replacement-grade (main bucket)",
+        "tier": "T1"
+      },
+      {
+        "ac_tier": "T1",
+        "achieved_vs_target": [
+          {
+            "achieved": 0.0,
+            "gate": "t1_pooled_p50",
+            "met": true,
+            "target": 0.01
+          },
+          {
+            "achieved": 0.0,
+            "gate": "t1_pooled_p90",
+            "met": true,
+            "target": 0.03
+          },
+          {
+            "achieved": 0.0,
+            "gate": "t1_pooled_max",
+            "met": true,
+            "target": 0.05
+          }
+        ],
+        "bucket_tally": {
+          "appendix": 0,
+          "diagnostic": 0,
+          "main": 24,
+          "typed_unavailable": 20
+        },
+        "ci": {
+          "hi": 0.0,
+          "lo": 0.0,
+          "mean": 0.0,
+          "n": 24,
+          "statistic": "mean_per_cell_error",
+          "status": "computed"
+        },
+        "is_fitted": false,
+        "metric_key": "l1tex__t_requests_pipe_lsu_mem_global_op_ld.sum",
+        "n_diagnostic": 0,
+        "n_scored": 24,
+        "n_scored_with_error": 24,
+        "n_typed_unavailable": 20,
+        "promotion": "main",
+        "promotion_blocker": null,
+        "strongest_allowed_claim": "headline / replacement-grade (main bucket)",
+        "tier": "T1"
+      },
+      {
+        "ac_tier": "T1",
+        "achieved_vs_target": [
+          {
+            "achieved": 0.0,
+            "gate": "t1_pooled_p50",
+            "met": true,
+            "target": 0.01
+          },
+          {
+            "achieved": 0.0,
+            "gate": "t1_pooled_p90",
+            "met": true,
+            "target": 0.03
+          },
+          {
+            "achieved": 0.0,
+            "gate": "t1_pooled_max",
+            "met": true,
+            "target": 0.05
+          }
+        ],
+        "bucket_tally": {
+          "appendix": 0,
+          "diagnostic": 0,
+          "main": 25,
+          "typed_unavailable": 19
+        },
+        "ci": {
+          "hi": 0.0,
+          "lo": 0.0,
+          "mean": 0.0,
+          "n": 25,
+          "statistic": "mean_per_cell_error",
+          "status": "computed"
+        },
+        "is_fitted": false,
+        "metric_key": "l1tex__t_requests_pipe_lsu_mem_global_op_red.sum",
+        "n_diagnostic": 0,
+        "n_scored": 25,
+        "n_scored_with_error": 25,
+        "n_typed_unavailable": 19,
+        "promotion": "main",
+        "promotion_blocker": null,
+        "strongest_allowed_claim": "headline / replacement-grade (main bucket)",
+        "tier": "T1"
+      },
+      {
+        "ac_tier": "T1",
+        "achieved_vs_target": [
+          {
+            "achieved": 0.0,
+            "gate": "t1_pooled_p50",
+            "met": true,
+            "target": 0.01
+          },
+          {
+            "achieved": 0.0,
+            "gate": "t1_pooled_p90",
+            "met": true,
+            "target": 0.03
+          },
+          {
+            "achieved": 0.0,
+            "gate": "t1_pooled_max",
+            "met": true,
+            "target": 0.05
+          }
+        ],
+        "bucket_tally": {
+          "appendix": 0,
+          "diagnostic": 0,
+          "main": 25,
+          "typed_unavailable": 19
+        },
+        "ci": {
+          "hi": 0.0,
+          "lo": 0.0,
+          "mean": 0.0,
+          "n": 25,
+          "statistic": "mean_per_cell_error",
+          "status": "computed"
+        },
+        "is_fitted": false,
+        "metric_key": "l1tex__t_requests_pipe_lsu_mem_global_op_st.sum",
+        "n_diagnostic": 0,
+        "n_scored": 25,
+        "n_scored_with_error": 25,
+        "n_typed_unavailable": 19,
+        "promotion": "main",
+        "promotion_blocker": null,
+        "strongest_allowed_claim": "headline / replacement-grade (main bucket)",
+        "tier": "T1"
+      },
+      {
+        "ac_tier": "T1",
+        "achieved_vs_target": [
+          {
+            "achieved": 0.0,
+            "gate": "t1_pooled_p50",
+            "met": true,
+            "target": 0.01
+          },
+          {
+            "achieved": 0.0,
+            "gate": "t1_pooled_p90",
+            "met": true,
+            "target": 0.03
+          },
+          {
+            "achieved": 0.0,
+            "gate": "t1_pooled_max",
+            "met": true,
+            "target": 0.05
+          }
+        ],
+        "bucket_tally": {
+          "appendix": 0,
+          "diagnostic": 0,
+          "main": 25,
+          "typed_unavailable": 19
+        },
+        "ci": {
+          "hi": 0.0,
+          "lo": 0.0,
+          "mean": 0.0,
+          "n": 25,
+          "statistic": "mean_per_cell_error",
+          "status": "computed"
+        },
+        "is_fitted": false,
+        "metric_key": "l1tex__t_requests_pipe_lsu_mem_local_op_ld.sum",
+        "n_diagnostic": 0,
+        "n_scored": 25,
+        "n_scored_with_error": 25,
+        "n_typed_unavailable": 19,
+        "promotion": "main",
+        "promotion_blocker": null,
+        "strongest_allowed_claim": "headline / replacement-grade (main bucket)",
+        "tier": "T1"
+      },
+      {
+        "ac_tier": "T1",
+        "achieved_vs_target": [
+          {
+            "achieved": 0.0,
+            "gate": "t1_pooled_p50",
+            "met": true,
+            "target": 0.01
+          },
+          {
+            "achieved": 0.0,
+            "gate": "t1_pooled_p90",
+            "met": true,
+            "target": 0.03
+          },
+          {
+            "achieved": 0.0,
+            "gate": "t1_pooled_max",
+            "met": true,
+            "target": 0.05
+          }
+        ],
+        "bucket_tally": {
+          "appendix": 0,
+          "diagnostic": 0,
+          "main": 25,
+          "typed_unavailable": 19
+        },
+        "ci": {
+          "hi": 0.0,
+          "lo": 0.0,
+          "mean": 0.0,
+          "n": 25,
+          "statistic": "mean_per_cell_error",
+          "status": "computed"
+        },
+        "is_fitted": false,
+        "metric_key": "l1tex__t_requests_pipe_lsu_mem_local_op_st.sum",
+        "n_diagnostic": 0,
+        "n_scored": 25,
+        "n_scored_with_error": 25,
+        "n_typed_unavailable": 19,
+        "promotion": "main",
+        "promotion_blocker": null,
+        "strongest_allowed_claim": "headline / replacement-grade (main bucket)",
+        "tier": "T1"
+      },
+      {
+        "ac_tier": "T1",
+        "achieved_vs_target": [
+          {
+            "achieved": 0.0,
+            "gate": "t1_pooled_p50",
+            "met": true,
+            "target": 0.01
+          },
+          {
+            "achieved": 0.0,
+            "gate": "t1_pooled_p90",
+            "met": true,
+            "target": 0.03
+          },
+          {
+            "achieved": 0.0,
+            "gate": "t1_pooled_max",
+            "met": true,
+            "target": 0.05
+          }
+        ],
+        "bucket_tally": {
+          "appendix": 0,
+          "diagnostic": 0,
+          "main": 0,
+          "typed_unavailable": 44
+        },
+        "ci": {
+          "n": 0,
+          "reason": "insufficient_scored_cells",
+          "status": "ci_unavailable"
+        },
+        "is_fitted": false,
+        "metric_key": "l1tex__t_requests_pipe_tex_mem_surface_op_atom.sum",
+        "n_diagnostic": 0,
+        "n_scored": 0,
+        "n_scored_with_error": 0,
+        "n_typed_unavailable": 44,
+        "promotion": "appendix",
+        "promotion_blocker": "no scored cells (all rows typed-unavailable)",
+        "strongest_allowed_claim": "diagnostic / appendix scalar-subset result",
+        "tier": "T1"
+      },
+      {
+        "ac_tier": "T1",
+        "achieved_vs_target": [
+          {
+            "achieved": 0.0,
+            "gate": "t1_pooled_p50",
+            "met": true,
+            "target": 0.01
+          },
+          {
+            "achieved": 0.0,
+            "gate": "t1_pooled_p90",
+            "met": true,
+            "target": 0.03
+          },
+          {
+            "achieved": 0.0,
+            "gate": "t1_pooled_max",
+            "met": true,
+            "target": 0.05
+          }
+        ],
+        "bucket_tally": {
+          "appendix": 0,
+          "diagnostic": 0,
+          "main": 25,
+          "typed_unavailable": 19
+        },
+        "ci": {
+          "hi": 0.0,
+          "lo": 0.0,
+          "mean": 0.0,
+          "n": 25,
+          "statistic": "mean_per_cell_error",
+          "status": "computed"
+        },
+        "is_fitted": false,
+        "metric_key": "l1tex__t_requests_pipe_tex_mem_surface_op_ld.sum",
+        "n_diagnostic": 0,
+        "n_scored": 25,
+        "n_scored_with_error": 25,
+        "n_typed_unavailable": 19,
+        "promotion": "main",
+        "promotion_blocker": null,
+        "strongest_allowed_claim": "headline / replacement-grade (main bucket)",
+        "tier": "T1"
+      },
+      {
+        "ac_tier": "T1",
+        "achieved_vs_target": [
+          {
+            "achieved": 0.0,
+            "gate": "t1_pooled_p50",
+            "met": true,
+            "target": 0.01
+          },
+          {
+            "achieved": 0.0,
+            "gate": "t1_pooled_p90",
+            "met": true,
+            "target": 0.03
+          },
+          {
+            "achieved": 0.0,
+            "gate": "t1_pooled_max",
+            "met": true,
+            "target": 0.05
+          }
+        ],
+        "bucket_tally": {
+          "appendix": 0,
+          "diagnostic": 0,
+          "main": 0,
+          "typed_unavailable": 44
+        },
+        "ci": {
+          "n": 0,
+          "reason": "insufficient_scored_cells",
+          "status": "ci_unavailable"
+        },
+        "is_fitted": false,
+        "metric_key": "l1tex__t_requests_pipe_tex_mem_surface_op_red.sum",
+        "n_diagnostic": 0,
+        "n_scored": 0,
+        "n_scored_with_error": 0,
+        "n_typed_unavailable": 44,
+        "promotion": "appendix",
+        "promotion_blocker": "no scored cells (all rows typed-unavailable)",
+        "strongest_allowed_claim": "diagnostic / appendix scalar-subset result",
+        "tier": "T1"
+      },
+      {
+        "ac_tier": "T1",
+        "achieved_vs_target": [
+          {
+            "achieved": 0.0,
+            "gate": "t1_pooled_p50",
+            "met": true,
+            "target": 0.01
+          },
+          {
+            "achieved": 0.0,
+            "gate": "t1_pooled_p90",
+            "met": true,
+            "target": 0.03
+          },
+          {
+            "achieved": 0.0,
+            "gate": "t1_pooled_max",
+            "met": true,
+            "target": 0.05
+          }
+        ],
+        "bucket_tally": {
+          "appendix": 0,
+          "diagnostic": 0,
+          "main": 25,
+          "typed_unavailable": 19
+        },
+        "ci": {
+          "hi": 0.0,
+          "lo": 0.0,
+          "mean": 0.0,
+          "n": 25,
+          "statistic": "mean_per_cell_error",
+          "status": "computed"
+        },
+        "is_fitted": false,
+        "metric_key": "l1tex__t_requests_pipe_tex_mem_surface_op_st.sum",
+        "n_diagnostic": 0,
+        "n_scored": 25,
+        "n_scored_with_error": 25,
+        "n_typed_unavailable": 19,
+        "promotion": "main",
+        "promotion_blocker": null,
+        "strongest_allowed_claim": "headline / replacement-grade (main bucket)",
+        "tier": "T1"
+      },
+      {
+        "ac_tier": "T1",
+        "achieved_vs_target": [
+          {
+            "achieved": 0.0,
+            "gate": "t1_pooled_p50",
+            "met": true,
+            "target": 0.01
+          },
+          {
+            "achieved": 0.0,
+            "gate": "t1_pooled_p90",
+            "met": true,
+            "target": 0.03
+          },
+          {
+            "achieved": 0.0,
+            "gate": "t1_pooled_max",
+            "met": true,
+            "target": 0.05
+          }
+        ],
+        "bucket_tally": {
+          "appendix": 0,
+          "diagnostic": 0,
+          "main": 25,
+          "typed_unavailable": 19
+        },
+        "ci": {
+          "hi": 0.0,
+          "lo": 0.0,
+          "mean": 0.0,
+          "n": 25,
+          "statistic": "mean_per_cell_error",
+          "status": "computed"
+        },
+        "is_fitted": false,
+        "metric_key": "l1tex__t_requests_pipe_tex_mem_texture.sum",
+        "n_diagnostic": 0,
+        "n_scored": 25,
+        "n_scored_with_error": 25,
+        "n_typed_unavailable": 19,
+        "promotion": "main",
+        "promotion_blocker": null,
+        "strongest_allowed_claim": "headline / replacement-grade (main bucket)",
+        "tier": "T1"
+      },
+      {
+        "ac_tier": "T1",
+        "achieved_vs_target": [
+          {
+            "achieved": 0.0,
+            "gate": "t1_pooled_p50",
+            "met": true,
+            "target": 0.01
+          },
+          {
+            "achieved": 0.0,
+            "gate": "t1_pooled_p90",
+            "met": true,
+            "target": 0.03
+          },
+          {
+            "achieved": 0.0,
+            "gate": "t1_pooled_max",
+            "met": true,
+            "target": 0.05
+          }
+        ],
+        "bucket_tally": {
+          "appendix": 0,
+          "diagnostic": 0,
+          "main": 15,
+          "typed_unavailable": 29
+        },
+        "ci": {
+          "hi": 0.0,
+          "lo": 0.0,
+          "mean": 0.0,
+          "n": 15,
+          "statistic": "mean_per_cell_error",
+          "status": "computed"
+        },
+        "is_fitted": false,
+        "metric_key": "l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum",
+        "n_diagnostic": 0,
+        "n_scored": 15,
+        "n_scored_with_error": 15,
+        "n_typed_unavailable": 29,
+        "promotion": "main",
+        "promotion_blocker": null,
+        "strongest_allowed_claim": "headline / replacement-grade (main bucket)",
+        "tier": "T1"
+      },
+      {
+        "ac_tier": "T1",
+        "achieved_vs_target": [
+          {
+            "achieved": 0.0,
+            "gate": "t1_pooled_p50",
+            "met": true,
+            "target": 0.01
+          },
+          {
+            "achieved": 0.0,
+            "gate": "t1_pooled_p90",
+            "met": true,
+            "target": 0.03
+          },
+          {
+            "achieved": 0.0,
+            "gate": "t1_pooled_max",
+            "met": true,
+            "target": 0.05
+          }
+        ],
+        "bucket_tally": {
+          "appendix": 0,
+          "diagnostic": 0,
+          "main": 25,
+          "typed_unavailable": 19
+        },
+        "ci": {
+          "hi": 0.0,
+          "lo": 0.0,
+          "mean": 0.0,
+          "n": 25,
+          "statistic": "mean_per_cell_error",
+          "status": "computed"
+        },
+        "is_fitted": false,
+        "metric_key": "l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum",
+        "n_diagnostic": 0,
+        "n_scored": 25,
+        "n_scored_with_error": 25,
+        "n_typed_unavailable": 19,
+        "promotion": "main",
+        "promotion_blocker": null,
+        "strongest_allowed_claim": "headline / replacement-grade (main bucket)",
+        "tier": "T1"
+      },
+      {
+        "ac_tier": "T1",
+        "achieved_vs_target": [
+          {
+            "achieved": 0.0,
+            "gate": "t1_pooled_p50",
+            "met": true,
+            "target": 0.01
+          },
+          {
+            "achieved": 0.0,
+            "gate": "t1_pooled_p90",
+            "met": true,
+            "target": 0.03
+          },
+          {
+            "achieved": 0.0,
+            "gate": "t1_pooled_max",
+            "met": true,
+            "target": 0.05
+          }
+        ],
+        "bucket_tally": {
+          "appendix": 0,
+          "diagnostic": 0,
+          "main": 25,
+          "typed_unavailable": 19
+        },
+        "ci": {
+          "hi": 0.0,
+          "lo": 0.0,
+          "mean": 0.0,
+          "n": 25,
+          "statistic": "mean_per_cell_error",
+          "status": "computed"
+        },
+        "is_fitted": false,
+        "metric_key": "smsp__inst_executed.sum",
+        "n_diagnostic": 0,
+        "n_scored": 25,
+        "n_scored_with_error": 25,
+        "n_typed_unavailable": 19,
+        "promotion": "main",
+        "promotion_blocker": null,
+        "strongest_allowed_claim": "headline / replacement-grade (main bucket)",
+        "tier": "T1"
+      },
+      {
+        "ac_tier": "T2",
+        "achieved_vs_target": [
+          {
+            "achieved": 1.1885255782466375,
+            "gate": "loocv_holdout_relative_gap",
+            "met": false,
+            "target": 0.2
+          },
+          {
+            "achieved": 0.5170904911709446,
+            "gate": "loso_max_relative_change",
+            "met": false,
+            "target": 0.25
+          }
+        ],
+        "bucket_tally": {
+          "appendix": 30,
+          "diagnostic": 0,
+          "main": 0,
+          "typed_unavailable": 14
+        },
+        "ci": {
+          "hi": 16.711676467191285,
+          "lo": 4.334028694303424,
+          "mean": 10.522852580747355,
+          "n": 30,
+          "statistic": "mean_per_cell_error",
+          "status": "computed"
+        },
+        "is_fitted": true,
+        "metric_key": "cache_hit_rate_l1tex_sector",
+        "n_diagnostic": 0,
+        "n_scored": 30,
+        "n_scored_with_error": 30,
+        "n_typed_unavailable": 14,
+        "promotion": "appendix",
+        "promotion_blocker": "gate loocv_holdout_relative_gap: achieved 1.1885255782466375 vs target 0.2 (MISS)",
+        "strongest_allowed_claim": "diagnostic / appendix scalar-subset result",
+        "tier": "L1"
+      },
+      {
+        "ac_tier": "T2",
+        "achieved_vs_target": [
+          {
+            "achieved": 0.0877058283740508,
+            "gate": "l2_mean_cv_geomean_relative_error",
+            "met": true,
+            "target": 0.2
+          }
+        ],
+        "bucket_tally": {
+          "appendix": 0,
+          "diagnostic": 0,
+          "main": 40,
+          "typed_unavailable": 4
+        },
+        "ci": {
+          "hi": 0.8759306832141223,
+          "lo": 0.08751352908083859,
+          "mean": 0.4817221061474804,
+          "n": 40,
+          "statistic": "mean_per_cell_error",
+          "status": "computed"
+        },
+        "is_fitted": true,
+        "metric_key": "cache_hit_rate_l2_sector",
+        "n_diagnostic": 0,
+        "n_scored": 40,
+        "n_scored_with_error": 40,
+        "n_typed_unavailable": 4,
+        "promotion": "main",
+        "promotion_blocker": null,
+        "strongest_allowed_claim": "headline / replacement-grade (main bucket)",
+        "tier": "L2"
+      },
+      {
+        "ac_tier": "T2",
+        "achieved_vs_target": [
+          {
+            "achieved": 0.0,
+            "gate": "l2_requests_p50_rel_error",
+            "met": true,
+            "target": 0.1
+          },
+          {
+            "achieved": 0.2421283866243593,
+            "gate": "l2_requests_p90_rel_error",
+            "met": true,
+            "target": 0.25
+          }
+        ],
+        "bucket_tally": {
+          "appendix": 0,
+          "diagnostic": 14,
+          "main": 12,
+          "typed_unavailable": 18
+        },
+        "ci": {
+          "hi": 0.5155168203585528,
+          "lo": -0.10068021246996942,
+          "mean": 0.2074183039442917,
+          "n": 12,
+          "statistic": "mean_per_cell_error",
+          "status": "computed"
+        },
+        "is_fitted": false,
+        "metric_key": "t2_l2_requests",
+        "n_diagnostic": 14,
+        "n_scored": 12,
+        "n_scored_with_error": 12,
+        "n_typed_unavailable": 18,
+        "promotion": "main",
+        "promotion_blocker": null,
+        "strongest_allowed_claim": "headline / replacement-grade (main bucket)",
+        "tier": "T2"
+      },
+      {
+        "ac_tier": "T2",
+        "achieved_vs_target": [
+          {
+            "achieved": 0.0,
+            "gate": "read_sectors_p50_rel_error",
+            "met": true,
+            "target": 0.1
+          },
+          {
+            "achieved": 0.5058823529411764,
+            "gate": "read_sectors_p90_rel_error",
+            "met": false,
+            "target": 0.25
+          }
+        ],
+        "bucket_tally": {
+          "appendix": 13,
+          "diagnostic": 27,
+          "main": 0,
+          "typed_unavailable": 4
+        },
+        "ci": {
+          "hi": 0.4825529409310244,
+          "lo": -0.10740422976116315,
+          "mean": 0.18757435558493063,
+          "n": 13,
+          "statistic": "mean_per_cell_error",
+          "status": "computed"
+        },
+        "is_fitted": false,
+        "metric_key": "t2_read_sectors",
+        "n_diagnostic": 27,
+        "n_scored": 13,
+        "n_scored_with_error": 13,
+        "n_typed_unavailable": 4,
+        "promotion": "appendix",
+        "promotion_blocker": "gate read_sectors_p90_rel_error: achieved 0.5058823529411764 vs target 0.25 (MISS)",
+        "strongest_allowed_claim": "diagnostic / appendix scalar-subset result",
+        "tier": "T2"
+      },
+      {
+        "ac_tier": "T2",
+        "achieved_vs_target": [
+          {
+            "achieved": 0.0,
+            "gate": "write_sectors_p50_rel_error",
+            "met": true,
+            "target": 0.1
+          },
+          {
+            "achieved": 0.0,
+            "gate": "write_sectors_p90_rel_error",
+            "met": true,
+            "target": 0.25
+          }
+        ],
+        "bucket_tally": {
+          "appendix": 0,
+          "diagnostic": 15,
+          "main": 20,
+          "typed_unavailable": 9
+        },
+        "ci": {
+          "hi": 0.148,
+          "lo": -0.04799999999999999,
+          "mean": 0.05,
+          "n": 20,
+          "statistic": "mean_per_cell_error",
+          "status": "computed"
+        },
+        "is_fitted": false,
+        "metric_key": "t2_write_sectors",
+        "n_diagnostic": 15,
+        "n_scored": 20,
+        "n_scored_with_error": 20,
+        "n_typed_unavailable": 9,
+        "promotion": "main",
+        "promotion_blocker": null,
+        "strongest_allowed_claim": "headline / replacement-grade (main bucket)",
+        "tier": "T2"
+      },
+      {
+        "ac_tier": "T3",
+        "achieved_vs_target": [
+          {
+            "achieved": 1.0071691718885347,
+            "gate": "loso_geomean_log_relative_error",
+            "met": false,
+            "target": 0.2
+          },
+          {
+            "achieved": 1.0071691718885347,
+            "gate": "loso_geomean_log_relative_error_stretch",
+            "met": false,
+            "target": 0.15
+          },
+          {
+            "achieved": 1.0071691718885347,
+            "gate": "loocv_geomean_log_relative_error",
+            "met": false,
+            "target": 0.2
+          }
+        ],
+        "bucket_tally": {
+          "appendix": 7,
+          "diagnostic": 0,
+          "main": 0,
+          "typed_unavailable": 14
+        },
+        "ci": {
+          "hi": 1.1306141182601146,
+          "lo": 0.2628365961157792,
+          "mean": 0.6967253571879469,
+          "n": 6,
+          "statistic": "mean_per_cell_error",
+          "status": "computed"
+        },
+        "is_fitted": true,
+        "metric_key": "gpc__cycles_elapsed.max",
+        "n_diagnostic": 0,
+        "n_scored": 7,
+        "n_scored_with_error": 6,
+        "n_typed_unavailable": 14,
+        "promotion": "appendix",
+        "promotion_blocker": "gate loso_geomean_log_relative_error: achieved 1.0071691718885347 vs target 0.2 (MISS)",
+        "strongest_allowed_claim": "diagnostic / appendix scalar-subset result",
+        "tier": "cycles"
+      },
+      {
+        "ac_tier": "T3",
+        "achieved_vs_target": [
+          {
+            "achieved": 1.0071691718885347,
+            "gate": "loso_geomean_log_relative_error",
+            "met": false,
+            "target": 0.2
+          },
+          {
+            "achieved": 1.0071691718885347,
+            "gate": "loso_geomean_log_relative_error_stretch",
+            "met": false,
+            "target": 0.15
+          },
+          {
+            "achieved": 1.0071691718885347,
+            "gate": "loocv_geomean_log_relative_error",
+            "met": false,
+            "target": 0.2
+          }
+        ],
+        "bucket_tally": {
+          "appendix": 7,
+          "diagnostic": 0,
+          "main": 0,
+          "typed_unavailable": 14
+        },
+        "ci": {
+          "n": 7,
+          "reason": "interval_only_no_point_error",
+          "status": "ci_unavailable"
+        },
+        "is_fitted": true,
+        "metric_key": "gpu__time_duration.sum",
+        "n_diagnostic": 0,
+        "n_scored": 7,
+        "n_scored_with_error": 0,
+        "n_typed_unavailable": 14,
+        "promotion": "appendix",
+        "promotion_blocker": "gate loso_geomean_log_relative_error: achieved 1.0071691718885347 vs target 0.2 (MISS)",
+        "strongest_allowed_claim": "diagnostic / appendix scalar-subset result",
+        "tier": "ns"
+      }
+    ]
+  },
+  "schema_version": 1,
+  "tier_budgets": [
+    {
+      "budget": 0,
+      "budget_kind": "zero_silent_gaps",
+      "harness_tiers": [
+        "T1"
+      ],
+      "met": true,
+      "n_diagnostic": 0,
+      "n_scored": 312,
+      "n_silent_gaps": 0,
+      "n_total": 660,
+      "n_typed_unavailable": 348,
+      "tier": "T1",
+      "typed_unavailable_share": 0.5272727272727272
+    },
+    {
+      "budget": 0.1,
+      "budget_kind": "max_typed_share",
+      "harness_tiers": [
+        "L1",
+        "L2",
+        "T2"
+      ],
+      "met": false,
+      "n_diagnostic": 56,
+      "n_scored": 115,
+      "n_silent_gaps": 0,
+      "n_total": 220,
+      "n_typed_unavailable": 49,
+      "tier": "T2",
+      "typed_unavailable_share": 0.22272727272727272
+    },
+    {
+      "budget": 28,
+      "budget_kind": "explicit_diagnostic_budget",
+      "harness_tiers": [
+        "cycles",
+        "ns"
+      ],
+      "met": true,
+      "n_diagnostic": 0,
+      "n_scored": 14,
+      "n_silent_gaps": 0,
+      "n_total": 42,
+      "n_typed_unavailable": 28,
+      "tier": "T3",
+      "typed_unavailable_share": 0.6666666666666666
+    }
+  ]
+}

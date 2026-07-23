@@ -1,0 +1,533 @@
+{
+  "arch": "sm_86",
+  "device": "NVIDIA GeForce RTX 3090 Ti",
+  "get_L1_Total_Requests_resolved_to": "l1tex__t_requests.sum",
+  "gpu__time_duration_sum_confirmed": true,
+  "metrics": [
+    {
+      "available": true,
+      "ncu_metric": "dram__bytes.sum.per_second",
+      "ncu_type": "Counter",
+      "ncu_unit": "byte/s",
+      "registry_key": "dram_bytes_per_second",
+      "rollup": "sum.per_second",
+      "sources": [
+        "registry"
+      ]
+    },
+    {
+      "available": true,
+      "ncu_metric": "dram__cycles_elapsed.avg.per_second",
+      "ncu_type": "Counter",
+      "ncu_unit": "hz",
+      "registry_key": "mem_clock_hz_covariate",
+      "rollup": "avg.per_second",
+      "sources": [
+        "registry"
+      ]
+    },
+    {
+      "available": false,
+      "base_metric": "dram__sectors_op_read",
+      "excluded_reason": "metric_not_in_ncu_catalog_on_device",
+      "ncu_metric": "dram__sectors_op_read.sum",
+      "registry_key": "traffic_dram_sectors_op_read",
+      "sources": [
+        "registry"
+      ]
+    },
+    {
+      "available": false,
+      "base_metric": "dram__sectors_op_write",
+      "excluded_reason": "metric_not_in_ncu_catalog_on_device",
+      "ncu_metric": "dram__sectors_op_write.sum",
+      "registry_key": "traffic_dram_sectors_op_write",
+      "sources": [
+        "registry"
+      ]
+    },
+    {
+      "available": true,
+      "ncu_metric": "dram__sectors_read.sum",
+      "ncu_type": "Counter",
+      "ncu_unit": "sector",
+      "read_ncu_report_get_function": "get_dram__sectors_read_sum",
+      "registry_key": "traffic_dram_read_sectors",
+      "rollup": "sum",
+      "sources": [
+        "read_ncu_report",
+        "registry"
+      ]
+    },
+    {
+      "available": true,
+      "ncu_metric": "dram__sectors_write.sum",
+      "ncu_type": "Counter",
+      "ncu_unit": "sector",
+      "read_ncu_report_get_function": "get_dram__sectors_write_sum",
+      "registry_key": "traffic_dram_write_sectors",
+      "rollup": "sum",
+      "sources": [
+        "read_ncu_report",
+        "registry"
+      ]
+    },
+    {
+      "available": true,
+      "ncu_metric": "gpc__cycles_elapsed.avg.per_second",
+      "ncu_type": "Counter",
+      "ncu_unit": "hz",
+      "read_ncu_report_get_function": "get_gpc__cycles_elapsed_avg_per_second",
+      "registry_key": "sm_clock_hz_covariate",
+      "rollup": "avg.per_second",
+      "sources": [
+        "read_ncu_report",
+        "registry"
+      ]
+    },
+    {
+      "available": true,
+      "ncu_metric": "gpc__cycles_elapsed.max",
+      "ncu_type": "Counter",
+      "ncu_unit": "cycle",
+      "read_ncu_report_get_function": "get_gpc__cycles_elapsed_max",
+      "registry_key": "exec_cycles_gpc_max",
+      "rollup": "max",
+      "sources": [
+        "read_ncu_report",
+        "registry"
+      ]
+    },
+    {
+      "available": true,
+      "ncu_metric": "gpu__compute_memory_access_throughput.avg.pct_of_peak_sustained_elapsed",
+      "ncu_type": "Throughput",
+      "ncu_unit": "%",
+      "registry_key": "throughput_compute_mem_access_pct_peak",
+      "rollup": "avg.pct_of_peak_sustained_elapsed",
+      "sources": [
+        "registry"
+      ]
+    },
+    {
+      "available": true,
+      "ncu_metric": "gpu__compute_memory_request_throughput.avg.pct_of_peak_sustained_elapsed",
+      "ncu_type": "Throughput",
+      "ncu_unit": "%",
+      "registry_key": "throughput_compute_mem_request_pct_peak",
+      "rollup": "avg.pct_of_peak_sustained_elapsed",
+      "sources": [
+        "registry"
+      ]
+    },
+    {
+      "available": true,
+      "ncu_metric": "gpu__time_duration.sum",
+      "ncu_type": "Counter",
+      "ncu_unit": "ns",
+      "read_ncu_report_get_function": "get_gpu__time_duration_sum",
+      "registry_key": "exec_duration_ns",
+      "rollup": "sum",
+      "sources": [
+        "read_ncu_report",
+        "registry"
+      ]
+    },
+    {
+      "available": true,
+      "ncu_metric": "l1tex__m_l1tex2xbar_write_sectors_mem_lg_op_st.sum",
+      "ncu_type": "Counter",
+      "ncu_unit": "sector",
+      "read_ncu_report_get_function": "get_l1tex__m_l1tex2xbar_write_sectors_mem_lg_op_st_sum",
+      "registry_key": "traffic_l1_write_sectors_to_l2",
+      "rollup": "sum",
+      "sources": [
+        "read_ncu_report",
+        "registry"
+      ]
+    },
+    {
+      "available": true,
+      "ncu_metric": "l1tex__m_xbar2l1tex_read_sectors_mem_lg_op_ld.sum",
+      "ncu_type": "Counter",
+      "ncu_unit": "sector",
+      "read_ncu_report_get_function": "get_l1tex__m_xbar2l1tex_read_sectors_mem_lg_op_ld_sum",
+      "registry_key": "traffic_l2_read_sectors_from_l1",
+      "rollup": "sum",
+      "sources": [
+        "read_ncu_report",
+        "registry"
+      ]
+    },
+    {
+      "available": true,
+      "ncu_metric": "l1tex__t_requests.sum",
+      "ncu_type": "Counter",
+      "ncu_unit": "",
+      "read_ncu_report_get_function": "get_L1_Total_Requests",
+      "registry_key": "traffic_l1_total_requests",
+      "rollup": "sum",
+      "sources": [
+        "read_ncu_report",
+        "registry"
+      ]
+    },
+    {
+      "available": true,
+      "ncu_metric": "l1tex__t_requests_pipe_lsu_mem_global_op_atom.sum",
+      "ncu_type": "Counter",
+      "ncu_unit": "",
+      "read_ncu_report_get_function": "get_l1tex__t_requests_pipe_lsu_mem_global_op_atom_sum",
+      "registry_key": "traffic_gmem_atom_requests",
+      "rollup": "sum",
+      "sources": [
+        "read_ncu_report",
+        "registry"
+      ]
+    },
+    {
+      "available": true,
+      "ncu_metric": "l1tex__t_requests_pipe_lsu_mem_global_op_ld.sum",
+      "ncu_type": "Counter",
+      "ncu_unit": "",
+      "read_ncu_report_get_function": "get_l1tex__t_requests_pipe_lsu_mem_global_op_ld_sum",
+      "registry_key": "traffic_gmem_ld_requests",
+      "rollup": "sum",
+      "sources": [
+        "read_ncu_report",
+        "registry"
+      ]
+    },
+    {
+      "available": true,
+      "ncu_metric": "l1tex__t_requests_pipe_lsu_mem_global_op_red.sum",
+      "ncu_type": "Counter",
+      "ncu_unit": "",
+      "read_ncu_report_get_function": "get_l1tex__t_requests_pipe_lsu_mem_global_op_red_sum",
+      "registry_key": "traffic_gmem_red_requests",
+      "rollup": "sum",
+      "sources": [
+        "read_ncu_report",
+        "registry"
+      ]
+    },
+    {
+      "available": true,
+      "ncu_metric": "l1tex__t_requests_pipe_lsu_mem_global_op_st.sum",
+      "ncu_type": "Counter",
+      "ncu_unit": "",
+      "read_ncu_report_get_function": "get_l1tex__t_requests_pipe_lsu_mem_global_op_st_sum",
+      "registry_key": "traffic_gmem_st_requests",
+      "rollup": "sum",
+      "sources": [
+        "read_ncu_report",
+        "registry"
+      ]
+    },
+    {
+      "available": true,
+      "ncu_metric": "l1tex__t_requests_pipe_lsu_mem_local_op_ld.sum",
+      "ncu_type": "Counter",
+      "ncu_unit": "",
+      "registry_key": "traffic_local_ld_requests",
+      "rollup": "sum",
+      "sources": [
+        "registry"
+      ]
+    },
+    {
+      "available": true,
+      "ncu_metric": "l1tex__t_requests_pipe_lsu_mem_local_op_st.sum",
+      "ncu_type": "Counter",
+      "ncu_unit": "",
+      "registry_key": "traffic_local_st_requests",
+      "rollup": "sum",
+      "sources": [
+        "registry"
+      ]
+    },
+    {
+      "available": true,
+      "ncu_metric": "l1tex__t_requests_pipe_tex_mem_surface_op_atom.sum",
+      "ncu_type": "Counter",
+      "ncu_unit": "",
+      "registry_key": "traffic_surface_atom_requests",
+      "rollup": "sum",
+      "sources": [
+        "registry"
+      ]
+    },
+    {
+      "available": true,
+      "ncu_metric": "l1tex__t_requests_pipe_tex_mem_surface_op_ld.sum",
+      "ncu_type": "Counter",
+      "ncu_unit": "",
+      "registry_key": "traffic_surface_ld_requests",
+      "rollup": "sum",
+      "sources": [
+        "registry"
+      ]
+    },
+    {
+      "available": true,
+      "ncu_metric": "l1tex__t_requests_pipe_tex_mem_surface_op_red.sum",
+      "ncu_type": "Counter",
+      "ncu_unit": "",
+      "registry_key": "traffic_surface_red_requests",
+      "rollup": "sum",
+      "sources": [
+        "registry"
+      ]
+    },
+    {
+      "available": true,
+      "ncu_metric": "l1tex__t_requests_pipe_tex_mem_surface_op_st.sum",
+      "ncu_type": "Counter",
+      "ncu_unit": "",
+      "registry_key": "traffic_surface_st_requests",
+      "rollup": "sum",
+      "sources": [
+        "registry"
+      ]
+    },
+    {
+      "available": true,
+      "ncu_metric": "l1tex__t_requests_pipe_tex_mem_texture.sum",
+      "ncu_type": "Counter",
+      "ncu_unit": "",
+      "registry_key": "traffic_tex_requests",
+      "rollup": "sum",
+      "sources": [
+        "registry"
+      ]
+    },
+    {
+      "available": true,
+      "ncu_metric": "l1tex__t_sector_hit_rate.pct",
+      "ncu_type": "Ratio",
+      "ncu_unit": "%",
+      "read_ncu_report_get_function": "get_l1tex__t_sector_hit_rate_pct",
+      "registry_key": "cache_hit_rate_l1tex_sector",
+      "rollup": "pct",
+      "sources": [
+        "read_ncu_report",
+        "registry"
+      ]
+    },
+    {
+      "available": true,
+      "ncu_metric": "l1tex__t_sector_pipe_lsu_mem_global_op_ld_hit_rate.pct",
+      "ncu_type": "Ratio",
+      "ncu_unit": "%",
+      "read_ncu_report_get_function": "get_l1tex__t_sector_pipe_lsu_mem_global_op_ld_hit_rate_pct",
+      "registry_key": "cache_hit_rate_l1tex_read_sector",
+      "rollup": "pct",
+      "sources": [
+        "read_ncu_report",
+        "registry"
+      ]
+    },
+    {
+      "available": true,
+      "ncu_metric": "l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum",
+      "ncu_type": "Counter",
+      "ncu_unit": "sector",
+      "read_ncu_report_get_function": "get_l1tex__t_sectors_pipe_lsu_mem_global_op_ld_sum",
+      "registry_key": "traffic_gmem_ld_sectors",
+      "rollup": "sum",
+      "sources": [
+        "read_ncu_report",
+        "registry"
+      ]
+    },
+    {
+      "available": true,
+      "ncu_metric": "l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum",
+      "ncu_type": "Counter",
+      "ncu_unit": "sector",
+      "read_ncu_report_get_function": "get_l1tex__t_sectors_pipe_lsu_mem_global_op_st_sum",
+      "registry_key": "traffic_gmem_st_sectors",
+      "rollup": "sum",
+      "sources": [
+        "read_ncu_report",
+        "registry"
+      ]
+    },
+    {
+      "available": false,
+      "base_metric": "launch__occupancy_limit_blocks",
+      "excluded_reason": "launch_config_metric_not_in_counter_catalog",
+      "ncu_metric": "launch__occupancy_limit_blocks",
+      "read_ncu_report_get_function": "get_launch__occupancy_limit_blocks",
+      "registry_key": "occupancy_limit_blocks_theoretical",
+      "sources": [
+        "read_ncu_report",
+        "registry"
+      ]
+    },
+    {
+      "available": false,
+      "base_metric": "launch__occupancy_limit_registers",
+      "excluded_reason": "launch_config_metric_not_in_counter_catalog",
+      "ncu_metric": "launch__occupancy_limit_registers",
+      "read_ncu_report_get_function": "get_launch__occupancy_limit_registers",
+      "registry_key": "occupancy_limit_registers_theoretical",
+      "sources": [
+        "read_ncu_report",
+        "registry"
+      ]
+    },
+    {
+      "available": false,
+      "base_metric": "launch__occupancy_limit_shared_mem",
+      "excluded_reason": "launch_config_metric_not_in_counter_catalog",
+      "ncu_metric": "launch__occupancy_limit_shared_mem",
+      "read_ncu_report_get_function": "get_launch__occupancy_limit_shared_mem",
+      "registry_key": "occupancy_limit_shared_mem_theoretical",
+      "sources": [
+        "read_ncu_report",
+        "registry"
+      ]
+    },
+    {
+      "available": false,
+      "base_metric": "launch__occupancy_limit_warps",
+      "excluded_reason": "launch_config_metric_not_in_counter_catalog",
+      "ncu_metric": "launch__occupancy_limit_warps",
+      "read_ncu_report_get_function": "get_launch__occupancy_limit_warps",
+      "registry_key": "occupancy_limit_warps_theoretical",
+      "sources": [
+        "read_ncu_report",
+        "registry"
+      ]
+    },
+    {
+      "available": true,
+      "ncu_metric": "lts__t_requests_srcunit_tex.sum",
+      "ncu_type": "Counter",
+      "ncu_unit": "request",
+      "read_ncu_report_get_function": "get_lts__t_requests_srcunit_tex_sum",
+      "registry_key": "traffic_l2_total_requests_from_tex",
+      "rollup": "sum",
+      "sources": [
+        "read_ncu_report",
+        "registry"
+      ]
+    },
+    {
+      "available": true,
+      "ncu_metric": "lts__t_sector_hit_rate.pct",
+      "ncu_type": "Ratio",
+      "ncu_unit": "%",
+      "read_ncu_report_get_function": "get_lts__t_sector_hit_rate_pct",
+      "registry_key": "cache_hit_rate_l2_sector",
+      "rollup": "pct",
+      "sources": [
+        "read_ncu_report",
+        "registry"
+      ]
+    },
+    {
+      "available": true,
+      "ncu_metric": "sm__cycles_active.avg",
+      "ncu_type": "Counter",
+      "ncu_unit": "cycle",
+      "read_ncu_report_get_function": "get_sm__cycles_active_avg",
+      "registry_key": "exec_cycles_sm_active_avg",
+      "rollup": "avg",
+      "sources": [
+        "read_ncu_report",
+        "registry"
+      ]
+    },
+    {
+      "available": true,
+      "ncu_metric": "sm__inst_executed.avg.per_cycle_elapsed",
+      "ncu_type": "Counter",
+      "ncu_unit": "inst/cycle",
+      "read_ncu_report_get_function": "get_sm__inst_executed_avg_per_cycle_elapsed",
+      "registry_key": "ipc_inst_per_cycle",
+      "rollup": "avg.per_cycle_elapsed",
+      "sources": [
+        "read_ncu_report",
+        "registry"
+      ]
+    },
+    {
+      "available": false,
+      "base_metric": "sm__maximum_warps_avg_per_active_cycle",
+      "excluded_reason": "occupancy_calculator_metric_not_in_counter_catalog",
+      "ncu_metric": "sm__maximum_warps_avg_per_active_cycle",
+      "read_ncu_report_get_function": "get_sm__maximum_warps_avg_per_active_cycle",
+      "sources": [
+        "read_ncu_report"
+      ]
+    },
+    {
+      "available": false,
+      "base_metric": "sm__maximum_warps_per_active_cycle_pct",
+      "excluded_reason": "occupancy_calculator_metric_not_in_counter_catalog",
+      "ncu_metric": "sm__maximum_warps_per_active_cycle_pct",
+      "read_ncu_report_get_function": "get_sm__maximum_warps_per_active_cycle_pct",
+      "sources": [
+        "read_ncu_report"
+      ]
+    },
+    {
+      "available": true,
+      "ncu_metric": "sm__memory_throughput.avg.pct_of_peak_sustained_elapsed",
+      "ncu_type": "Throughput",
+      "ncu_unit": "%",
+      "registry_key": "throughput_sm_memory_pct_peak",
+      "rollup": "avg.pct_of_peak_sustained_elapsed",
+      "sources": [
+        "registry"
+      ]
+    },
+    {
+      "available": true,
+      "ncu_metric": "sm__warps_active.avg.pct_of_peak_sustained_active",
+      "ncu_type": "Counter",
+      "ncu_unit": "%",
+      "read_ncu_report_get_function": "get_sm__warps_active_avg_pct_of_peak_sustained_active",
+      "registry_key": "occupancy_achieved_warps_pct",
+      "rollup": "avg.pct_of_peak_sustained_active",
+      "sources": [
+        "read_ncu_report",
+        "registry"
+      ]
+    },
+    {
+      "available": true,
+      "ncu_metric": "sm__warps_active.avg.per_cycle_active",
+      "ncu_type": "Counter",
+      "ncu_unit": "warp",
+      "read_ncu_report_get_function": "get_sm__warps_active_avg_per_cycle_active",
+      "registry_key": "warps_active_per_cycle_active_avg",
+      "rollup": "avg.per_cycle_active",
+      "sources": [
+        "read_ncu_report",
+        "registry"
+      ]
+    },
+    {
+      "available": true,
+      "ncu_metric": "smsp__inst_executed.sum",
+      "ncu_type": "Counter",
+      "ncu_unit": "inst",
+      "read_ncu_report_get_function": "get_smsp__inst_executed_sum",
+      "registry_key": "smsp_inst_executed_sum",
+      "rollup": "sum",
+      "sources": [
+        "read_ncu_report",
+        "registry"
+      ]
+    }
+  ],
+  "n_available": 35,
+  "n_excluded": 8,
+  "n_targets": 43,
+  "ncu_metric_version": "ncu_2026.1.x",
+  "query_command": "ncu --query-metrics-mode suffix --metrics <bases> --csv",
+  "schema_version": 1
+}

@@ -1,0 +1,33 @@
+{
+  "aggregation": "kernel",
+  "binary_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+  "cache_hit_rate_l1tex_sector": 0.85,
+  "cache_hit_rate_l2_sector": 0.75,
+  "confidence_interval_l1tex_sector": {
+    "aggregation": "kernel",
+    "confidence_level": 0.95,
+    "lower": 0.85,
+    "units": "sector_hit_rate_fraction",
+    "upper": 0.85
+  },
+  "confidence_interval_l2_sector": {
+    "aggregation": "kernel",
+    "confidence_level": 0.95,
+    "lower": 0.75,
+    "units": "sector_hit_rate_fraction",
+    "upper": 0.75
+  },
+  "cuda_version": "13.0",
+  "device": "sm_86",
+  "driver_version": "560.35.03",
+  "gpu_uuid_sha256": "4444444444444444444444444444444444444444444444444444444444444444",
+  "launch_index": 0,
+  "profiler_family": "nsight_compute",
+  "profiler_version": "Version 2026.1.1.0 (build 37634170) (public-release)",
+  "repeat_index": 2,
+  "replay_mode": "kernel",
+  "schema_version": 5,
+  "shape_point": "fixture_shape",
+  "slug": "fixture_cell",
+  "warmup_count": 0
+}

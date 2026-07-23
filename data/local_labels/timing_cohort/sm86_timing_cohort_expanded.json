@@ -1,0 +1,943 @@
+{
+  "admitted": [
+    {
+      "arch": "sm_86",
+      "binary_pin_verification": {
+        "binary_path": "workloads/simbench_bw/l1/carveout_sensitivity_probe/carveout_sensitivity_probe_run",
+        "matches_store_pin": true,
+        "on_disk_sha256_at_generation": "279546697af3639e17922fe444c1352acb171d48adfba44da3260ebe3d68f11e"
+      },
+      "binary_sha256": "279546697af3639e17922fe444c1352acb171d48adfba44da3260ebe3d68f11e",
+      "kernel_signature_sha256": "4585d912ad82ae86356fa7d64c2782fc6948e8acc97cc30947abfc4633840f6d",
+      "ncu_metric_version": "ncu_2026.1.x",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "carveout_sensitivity_probe",
+      "source_commit": "661be54a77574b649aa5a82616a2207ad2410376",
+      "status": "admitted",
+      "timing_labels": {
+        "gpc__cycles_elapsed.max": {
+          "dispersion": 0.002308,
+          "n_repeats": 5,
+          "repeatability_rule": "coefficient_of_variation",
+          "rule_threshold": 0.05,
+          "unit": "cycles",
+          "value": 206815.8
+        },
+        "gpu__time_duration.sum": {
+          "dispersion": 0.002353,
+          "n_repeats": 5,
+          "repeatability_rule": "coefficient_of_variation",
+          "rule_threshold": 0.05,
+          "unit": "ns",
+          "value": 109452.8
+        }
+      }
+    },
+    {
+      "arch": "sm_86",
+      "binary_pin_verification": {
+        "binary_path": "workloads/portable_lcd/conv2d_implicit_gemm_bf16_sm80/conv2d_implicit_gemm_bf16_sm80_run",
+        "matches_store_pin": true,
+        "on_disk_sha256_at_generation": "19beb03abd72bc3583ce71dcf779c7f058ac0e0cb976c0a321759535c72d5e3a"
+      },
+      "binary_sha256": "19beb03abd72bc3583ce71dcf779c7f058ac0e0cb976c0a321759535c72d5e3a",
+      "kernel_signature_sha256": "166c68126ca691ffffd1cf792265b04165b17f4a4d8d03860580b4eaf68e9acb",
+      "ncu_metric_version": "ncu_2026.1.x",
+      "shape_point": "timing_shape",
+      "slug": "conv2d_implicit_gemm_bf16_sm80",
+      "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7",
+      "status": "admitted",
+      "timing_labels": {
+        "gpc__cycles_elapsed.max": {
+          "dispersion": 0.00223,
+          "n_repeats": 5,
+          "repeatability_rule": "coefficient_of_variation",
+          "rule_threshold": 0.05,
+          "unit": "cycles",
+          "value": 13366.2
+        },
+        "gpu__time_duration.sum": {
+          "dispersion": 0.00493,
+          "n_repeats": 5,
+          "repeatability_rule": "coefficient_of_variation",
+          "rule_threshold": 0.05,
+          "unit": "ns",
+          "value": 7110.4
+        }
+      }
+    },
+    {
+      "arch": "sm_86",
+      "binary_pin_verification": {
+        "binary_path": "workloads/simbench_bw/l1/cp_async_shared_tile_copy/cp_async_shared_tile_copy_run",
+        "matches_store_pin": true,
+        "on_disk_sha256_at_generation": "b0b510ca0263ad138574a0295f06a2207903b780fe4763cdfa61bb90a53fdc79"
+      },
+      "binary_sha256": "b0b510ca0263ad138574a0295f06a2207903b780fe4763cdfa61bb90a53fdc79",
+      "kernel_signature_sha256": "a99c593cfe75c5246722662748ea2c5598a235cd79be8e80809a3e893ed1d354",
+      "ncu_metric_version": "ncu_2026.1.x",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "cp_async_shared_tile_copy",
+      "source_commit": "f6b5e5d3b19fb4ac507fa3fa0229ebf11073f50f",
+      "status": "admitted",
+      "timing_labels": {
+        "gpc__cycles_elapsed.max": {
+          "dispersion": 0.004988,
+          "n_repeats": 5,
+          "repeatability_rule": "coefficient_of_variation",
+          "rule_threshold": 0.05,
+          "unit": "cycles",
+          "value": 5816.8
+        },
+        "gpu__time_duration.sum": {
+          "dispersion": 0.00729,
+          "n_repeats": 5,
+          "repeatability_rule": "coefficient_of_variation",
+          "rule_threshold": 0.05,
+          "unit": "ns",
+          "value": 3104.0
+        }
+      }
+    },
+    {
+      "arch": "sm_86",
+      "binary_pin_verification": {
+        "binary_path": "workloads/simbench_bw/l1/dram_streaming_dot_product/dram_streaming_dot_product_run",
+        "matches_store_pin": true,
+        "on_disk_sha256_at_generation": "bb022917d38733a47694ea8bd63c2abb1b4e816a07fd1f5adeba707bc38dfd97"
+      },
+      "binary_sha256": "bb022917d38733a47694ea8bd63c2abb1b4e816a07fd1f5adeba707bc38dfd97",
+      "kernel_signature_sha256": "28bc636502da34541b1abb1b2e2f439fab06d0c2a46ba76e4ba1eb314a19346a",
+      "ncu_metric_version": "ncu_2026.1.x",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "dram_streaming_dot_product",
+      "source_commit": "b71d21fa2ce2bb2a55cfc5374d9d46ddf62dcf20",
+      "status": "admitted",
+      "timing_labels": {
+        "gpc__cycles_elapsed.max": {
+          "dispersion": 0.004608,
+          "n_repeats": 5,
+          "repeatability_rule": "coefficient_of_variation",
+          "rule_threshold": 0.05,
+          "unit": "cycles",
+          "value": 5032.2
+        },
+        "gpu__time_duration.sum": {
+          "dispersion": 0.006474,
+          "n_repeats": 5,
+          "repeatability_rule": "coefficient_of_variation",
+          "rule_threshold": 0.05,
+          "unit": "ns",
+          "value": 2707.2
+        }
+      }
+    },
+    {
+      "arch": "sm_86",
+      "binary_pin_verification": {
+        "binary_path": "workloads/portable_lcd/embedding_gather_int32_sm80/embedding_gather_int32_sm80_run",
+        "matches_store_pin": true,
+        "on_disk_sha256_at_generation": "ce2f77933a7ec3581aa62eaf52bd3e8c07de2a78ae61546632a70b2a7a0fe48e"
+      },
+      "binary_sha256": "ce2f77933a7ec3581aa62eaf52bd3e8c07de2a78ae61546632a70b2a7a0fe48e",
+      "kernel_signature_sha256": "8dbf972a5fdbebe33768c592447108592664645c38e0d22514468f664795ff8b",
+      "ncu_metric_version": "ncu_2026.1.x",
+      "shape_point": "timing_shape",
+      "slug": "embedding_gather_int32_sm80",
+      "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7",
+      "status": "admitted",
+      "timing_labels": {
+        "gpc__cycles_elapsed.max": {
+          "dispersion": 0.016691,
+          "n_repeats": 5,
+          "repeatability_rule": "coefficient_of_variation",
+          "rule_threshold": 0.05,
+          "unit": "cycles",
+          "value": 10121.6
+        },
+        "gpu__time_duration.sum": {
+          "dispersion": 0.016044,
+          "n_repeats": 5,
+          "repeatability_rule": "coefficient_of_variation",
+          "rule_threshold": 0.05,
+          "unit": "ns",
+          "value": 5388.8
+        }
+      }
+    },
+    {
+      "arch": "sm_86",
+      "binary_pin_verification": {
+        "binary_path": "workloads/simbench_bw/l1/fp32_fma_dep_chain/fp32_fma_dep_chain_run",
+        "matches_store_pin": true,
+        "on_disk_sha256_at_generation": "55bfc93c0edebe35c6e78b16d6096bd3a21e60f25faa178a410fc59cbf21bbae"
+      },
+      "binary_sha256": "55bfc93c0edebe35c6e78b16d6096bd3a21e60f25faa178a410fc59cbf21bbae",
+      "kernel_signature_sha256": "87f0eeb1256101173117148a10ac97d6367a9307c2b8e33c78df9d43c2f491f7",
+      "ncu_metric_version": "ncu_2026.1.x",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "fp32_fma_dep_chain",
+      "source_commit": "f6b5e5d3b19fb4ac507fa3fa0229ebf11073f50f",
+      "status": "admitted",
+      "timing_labels": {
+        "gpc__cycles_elapsed.max": {
+          "dispersion": 0.005077,
+          "n_repeats": 5,
+          "repeatability_rule": "coefficient_of_variation",
+          "rule_threshold": 0.05,
+          "unit": "cycles",
+          "value": 13039.6
+        },
+        "gpu__time_duration.sum": {
+          "dispersion": 0.005644,
+          "n_repeats": 5,
+          "repeatability_rule": "coefficient_of_variation",
+          "rule_threshold": 0.05,
+          "unit": "ns",
+          "value": 6944.0
+        }
+      }
+    },
+    {
+      "arch": "sm_86",
+      "binary_pin_verification": {
+        "binary_path": "workloads/portable_lcd/gemm_hmma_fp16_sm80/gemm_hmma_fp16_sm80_run",
+        "matches_store_pin": true,
+        "on_disk_sha256_at_generation": "1a638194443715e18b8753bfbde32c9be79e2d59be70585b318600e12d7f6b1d"
+      },
+      "binary_sha256": "1a638194443715e18b8753bfbde32c9be79e2d59be70585b318600e12d7f6b1d",
+      "kernel_signature_sha256": "6c3c64d7b03efd3c0fab89868ff75dc052370434282ac050bbb6c21d3310f9b9",
+      "ncu_metric_version": "ncu_2026.1.x",
+      "shape_point": "timing_shape",
+      "slug": "gemm_hmma_fp16_sm80",
+      "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7",
+      "status": "admitted",
+      "timing_labels": {
+        "gpc__cycles_elapsed.max": {
+          "dispersion": 0.013056,
+          "n_repeats": 5,
+          "repeatability_rule": "coefficient_of_variation",
+          "rule_threshold": 0.05,
+          "unit": "cycles",
+          "value": 6659.6
+        },
+        "gpu__time_duration.sum": {
+          "dispersion": 0.012741,
+          "n_repeats": 5,
+          "repeatability_rule": "coefficient_of_variation",
+          "rule_threshold": 0.05,
+          "unit": "ns",
+          "value": 3552.0
+        }
+      }
+    },
+    {
+      "arch": "sm_86",
+      "binary_pin_verification": {
+        "binary_path": "workloads/portable_lcd/gemm_hmma_fp16_sm80/gemm_hmma_fp16_sm80_run",
+        "matches_store_pin": true,
+        "on_disk_sha256_at_generation": "1a638194443715e18b8753bfbde32c9be79e2d59be70585b318600e12d7f6b1d"
+      },
+      "binary_sha256": "1a638194443715e18b8753bfbde32c9be79e2d59be70585b318600e12d7f6b1d",
+      "kernel_signature_sha256": "6c3c64d7b03efd3c0fab89868ff75dc052370434282ac050bbb6c21d3310f9b9",
+      "ncu_metric_version": "ncu_2026.1.x",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "gemm_hmma_fp16_sm80",
+      "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7",
+      "status": "admitted",
+      "timing_labels": {
+        "gpc__cycles_elapsed.max": {
+          "dispersion": 0.006917,
+          "n_repeats": 5,
+          "repeatability_rule": "coefficient_of_variation",
+          "rule_threshold": 0.05,
+          "unit": "cycles",
+          "value": 6647.2
+        },
+        "gpu__time_duration.sum": {
+          "dispersion": 0.007551,
+          "n_repeats": 5,
+          "repeatability_rule": "coefficient_of_variation",
+          "rule_threshold": 0.05,
+          "unit": "ns",
+          "value": 3545.6
+        }
+      }
+    },
+    {
+      "arch": "sm_86",
+      "binary_pin_verification": {
+        "binary_path": "workloads/portable_lcd/gemm_imma_int8_sm80/gemm_imma_int8_sm80_run",
+        "matches_store_pin": true,
+        "on_disk_sha256_at_generation": "6cd2cf81121ff58834c36aadf8667764e676aa1cb4fd322788a95ea283cca4f8"
+      },
+      "binary_sha256": "6cd2cf81121ff58834c36aadf8667764e676aa1cb4fd322788a95ea283cca4f8",
+      "kernel_signature_sha256": "f7154498956f308d855299538f5255af01943add22c7bd17936b2b4eb8f39ce4",
+      "ncu_metric_version": "ncu_2026.1.x",
+      "shape_point": "timing_shape",
+      "slug": "gemm_imma_int8_sm80",
+      "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7",
+      "status": "admitted",
+      "timing_labels": {
+        "gpc__cycles_elapsed.max": {
+          "dispersion": 0.007437,
+          "n_repeats": 5,
+          "repeatability_rule": "coefficient_of_variation",
+          "rule_threshold": 0.05,
+          "unit": "cycles",
+          "value": 5592.4
+        },
+        "gpu__time_duration.sum": {
+          "dispersion": 0.004798,
+          "n_repeats": 5,
+          "repeatability_rule": "coefficient_of_variation",
+          "rule_threshold": 0.05,
+          "unit": "ns",
+          "value": 2982.4
+        }
+      }
+    },
+    {
+      "arch": "sm_86",
+      "binary_pin_verification": {
+        "binary_path": "workloads/portable_lcd/gemm_imma_int8_sm80/gemm_imma_int8_sm80_run",
+        "matches_store_pin": true,
+        "on_disk_sha256_at_generation": "6cd2cf81121ff58834c36aadf8667764e676aa1cb4fd322788a95ea283cca4f8"
+      },
+      "binary_sha256": "6cd2cf81121ff58834c36aadf8667764e676aa1cb4fd322788a95ea283cca4f8",
+      "kernel_signature_sha256": "f7154498956f308d855299538f5255af01943add22c7bd17936b2b4eb8f39ce4",
+      "ncu_metric_version": "ncu_2026.1.x",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "gemm_imma_int8_sm80",
+      "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7",
+      "status": "admitted",
+      "timing_labels": {
+        "gpc__cycles_elapsed.max": {
+          "dispersion": 0.002333,
+          "n_repeats": 5,
+          "repeatability_rule": "coefficient_of_variation",
+          "rule_threshold": 0.05,
+          "unit": "cycles",
+          "value": 5601.2
+        },
+        "gpu__time_duration.sum": {
+          "dispersion": 0.0,
+          "n_repeats": 5,
+          "repeatability_rule": "coefficient_of_variation",
+          "rule_threshold": 0.05,
+          "unit": "ns",
+          "value": 3008.0
+        }
+      }
+    },
+    {
+      "arch": "sm_86",
+      "binary_pin_verification": {
+        "binary_path": "workloads/portable_lcd/gemm_sparse_2to4_bf16_sm80/gemm_sparse_2to4_bf16_sm80_run",
+        "matches_store_pin": true,
+        "on_disk_sha256_at_generation": "dac635cbb91e33c54424581f6527dae3be4c1cd7fddf170c32bd055296952963"
+      },
+      "binary_sha256": "dac635cbb91e33c54424581f6527dae3be4c1cd7fddf170c32bd055296952963",
+      "kernel_signature_sha256": "5f2fb866479f938277d0dae62cce21626e6c56c68c8e4e447739f5919aac2f9e",
+      "ncu_metric_version": "ncu_2026.1.x",
+      "shape_point": "timing_shape",
+      "slug": "gemm_sparse_2to4_bf16_sm80",
+      "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7",
+      "status": "admitted",
+      "timing_labels": {
+        "gpc__cycles_elapsed.max": {
+          "dispersion": 0.021596,
+          "n_repeats": 5,
+          "repeatability_rule": "coefficient_of_variation",
+          "rule_threshold": 0.05,
+          "unit": "cycles",
+          "value": 4692.2
+        },
+        "gpu__time_duration.sum": {
+          "dispersion": 0.02441,
+          "n_repeats": 5,
+          "repeatability_rule": "coefficient_of_variation",
+          "rule_threshold": 0.05,
+          "unit": "ns",
+          "value": 2521.6
+        }
+      }
+    },
+    {
+      "arch": "sm_86",
+      "binary_pin_verification": {
+        "binary_path": "workloads/simbench_bw/l1/l2_persisting_window_sweep/l2_persisting_window_sweep_run",
+        "matches_store_pin": true,
+        "on_disk_sha256_at_generation": "e6aa9925f55f19d7ab575e27c0c1184609cc5a02f569cfed3dd8e91f9ea3d675"
+      },
+      "binary_sha256": "e6aa9925f55f19d7ab575e27c0c1184609cc5a02f569cfed3dd8e91f9ea3d675",
+      "kernel_signature_sha256": "9b26911afd5effa33f41ae15bce2a7a5d606f797c873e5617db53a36f9f5f6fc",
+      "ncu_metric_version": "ncu_2026.1.x",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "l2_persisting_window_sweep",
+      "source_commit": "f6b5e5d3b19fb4ac507fa3fa0229ebf11073f50f",
+      "status": "admitted",
+      "timing_labels": {
+        "gpc__cycles_elapsed.max": {
+          "dispersion": 0.013623,
+          "n_repeats": 5,
+          "repeatability_rule": "coefficient_of_variation",
+          "rule_threshold": 0.05,
+          "unit": "cycles",
+          "value": 34473.2
+        },
+        "gpu__time_duration.sum": {
+          "dispersion": 0.013702,
+          "n_repeats": 5,
+          "repeatability_rule": "coefficient_of_variation",
+          "rule_threshold": 0.05,
+          "unit": "ns",
+          "value": 18284.8
+        }
+      }
+    },
+    {
+      "arch": "sm_86",
+      "binary_pin_verification": {
+        "binary_path": "workloads/simbench_bw/l1/l2_prefetch_hint_sweep/l2_prefetch_hint_sweep_run",
+        "matches_store_pin": true,
+        "on_disk_sha256_at_generation": "a9e72c8106c33cee877a77343c49e3d8bda32182e681063b504d04b869efefb8"
+      },
+      "binary_sha256": "a9e72c8106c33cee877a77343c49e3d8bda32182e681063b504d04b869efefb8",
+      "kernel_signature_sha256": "30baaa0f6d6054d23fe69560cb76c4f54a907f9bc94fa89d9fc7fc4daf32dbc7",
+      "ncu_metric_version": "ncu_2026.1.x",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "l2_prefetch_hint_sweep",
+      "source_commit": "f6b5e5d3b19fb4ac507fa3fa0229ebf11073f50f",
+      "status": "admitted",
+      "timing_labels": {
+        "gpc__cycles_elapsed.max": {
+          "dispersion": 0.000683,
+          "n_repeats": 5,
+          "repeatability_rule": "coefficient_of_variation",
+          "rule_threshold": 0.05,
+          "unit": "cycles",
+          "value": 316049.4
+        },
+        "gpu__time_duration.sum": {
+          "dispersion": 0.000685,
+          "n_repeats": 5,
+          "repeatability_rule": "coefficient_of_variation",
+          "rule_threshold": 0.05,
+          "unit": "ns",
+          "value": 167251.2
+        }
+      }
+    },
+    {
+      "arch": "sm_86",
+      "binary_pin_verification": {
+        "binary_path": "workloads/portable_lcd/rmsnorm_bwd_bf16_sm80/rmsnorm_bwd_bf16_sm80_run",
+        "matches_store_pin": true,
+        "on_disk_sha256_at_generation": "962bd89b476b10d78a59a580436c2dae18fc371da32da7518c90ddfa2b6054ce"
+      },
+      "binary_sha256": "962bd89b476b10d78a59a580436c2dae18fc371da32da7518c90ddfa2b6054ce",
+      "kernel_signature_sha256": "a1042966e9ab38785b141c9f2e70b768575024abfa0ad97ddca145143f2b83c3",
+      "ncu_metric_version": "ncu_2026.1.x",
+      "shape_point": "timing_shape",
+      "slug": "rmsnorm_bwd_bf16_sm80",
+      "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7",
+      "status": "admitted",
+      "timing_labels": {
+        "gpc__cycles_elapsed.max": {
+          "dispersion": 0.004471,
+          "n_repeats": 5,
+          "repeatability_rule": "coefficient_of_variation",
+          "rule_threshold": 0.05,
+          "unit": "cycles",
+          "value": 5916.8
+        },
+        "gpu__time_duration.sum": {
+          "dispersion": 0.0,
+          "n_repeats": 5,
+          "repeatability_rule": "coefficient_of_variation",
+          "rule_threshold": 0.05,
+          "unit": "ns",
+          "value": 3168.0
+        }
+      }
+    },
+    {
+      "arch": "sm_86",
+      "binary_pin_verification": {
+        "binary_path": "workloads/simbench_bw/l2/rmsnorm_fwd_bf16/rmsnorm_fwd_bf16_run",
+        "matches_store_pin": true,
+        "on_disk_sha256_at_generation": "519142e2477c60471f3627af671e0229f159ee1e35375c7d24107aced64d7d99"
+      },
+      "binary_sha256": "519142e2477c60471f3627af671e0229f159ee1e35375c7d24107aced64d7d99",
+      "kernel_signature_sha256": "874881cf5162a340bdbfdf4061ab2917e382d64eb8bcd407b00e13fbe65507e1",
+      "ncu_metric_version": "ncu_2026.1.x",
+      "shape_point": "trace_00",
+      "slug": "rmsnorm_fwd_bf16",
+      "source_commit": "f6b5e5d3b19fb4ac507fa3fa0229ebf11073f50f",
+      "status": "admitted",
+      "timing_labels": {
+        "gpc__cycles_elapsed.max": {
+          "dispersion": 0.013554,
+          "n_repeats": 5,
+          "repeatability_rule": "coefficient_of_variation",
+          "rule_threshold": 0.05,
+          "unit": "cycles",
+          "value": 10278.8
+        },
+        "gpu__time_duration.sum": {
+          "dispersion": 0.013897,
+          "n_repeats": 5,
+          "repeatability_rule": "coefficient_of_variation",
+          "rule_threshold": 0.05,
+          "unit": "ns",
+          "value": 5497.6
+        }
+      }
+    },
+    {
+      "arch": "sm_86",
+      "binary_pin_verification": {
+        "binary_path": "workloads/portable_lcd/rmsnorm_fwd_bf16_sm80/rmsnorm_fwd_bf16_sm80_run",
+        "matches_store_pin": true,
+        "on_disk_sha256_at_generation": "e44f714645062197b42dda23e2a41c748e105c8e674b62305c979564d35dec21"
+      },
+      "binary_sha256": "e44f714645062197b42dda23e2a41c748e105c8e674b62305c979564d35dec21",
+      "kernel_signature_sha256": "7848654da87ddb65a3469a248bb5572f936b4650fefbb1d22aaa25f24aa6cbe2",
+      "ncu_metric_version": "ncu_2026.1.x",
+      "shape_point": "timing_shape",
+      "slug": "rmsnorm_fwd_bf16_sm80",
+      "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7",
+      "status": "admitted",
+      "timing_labels": {
+        "gpc__cycles_elapsed.max": {
+          "dispersion": 0.005027,
+          "n_repeats": 5,
+          "repeatability_rule": "coefficient_of_variation",
+          "rule_threshold": 0.05,
+          "unit": "cycles",
+          "value": 5808.0
+        },
+        "gpu__time_duration.sum": {
+          "dispersion": 0.008608,
+          "n_repeats": 5,
+          "repeatability_rule": "coefficient_of_variation",
+          "rule_threshold": 0.05,
+          "unit": "ns",
+          "value": 3110.4
+        }
+      }
+    },
+    {
+      "arch": "sm_86",
+      "binary_pin_verification": {
+        "binary_path": "workloads/portable_lcd/silu_fwd_bf16_sm80/silu_fwd_bf16_sm80_run",
+        "matches_store_pin": true,
+        "on_disk_sha256_at_generation": "12b290606983bbecb919678c86fffb9a1df3e02bf66afe8487eeef085bfa6551"
+      },
+      "binary_sha256": "12b290606983bbecb919678c86fffb9a1df3e02bf66afe8487eeef085bfa6551",
+      "kernel_signature_sha256": "2681564ef5ca9026d42106bbe862a40d3e38b89b52e720a90ad39322c0ff99dc",
+      "ncu_metric_version": "ncu_2026.1.x",
+      "shape_point": "timing_shape",
+      "slug": "silu_fwd_bf16_sm80",
+      "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7",
+      "status": "admitted",
+      "timing_labels": {
+        "gpc__cycles_elapsed.max": {
+          "dispersion": 0.005852,
+          "n_repeats": 5,
+          "repeatability_rule": "coefficient_of_variation",
+          "rule_threshold": 0.05,
+          "unit": "cycles",
+          "value": 4308.2
+        },
+        "gpu__time_duration.sum": {
+          "dispersion": 0.006194,
+          "n_repeats": 5,
+          "repeatability_rule": "coefficient_of_variation",
+          "rule_threshold": 0.05,
+          "unit": "ns",
+          "value": 2310.4
+        }
+      }
+    },
+    {
+      "arch": "sm_86",
+      "binary_pin_verification": {
+        "binary_path": "workloads/simbench_bw/l1/tf32_hmma_gemm_traceable/tf32_hmma_gemm_traceable_run",
+        "matches_store_pin": true,
+        "on_disk_sha256_at_generation": "57d8c9f0a178b2617d4108d091178f090a037e44957508ed3b13594b661fdf65"
+      },
+      "binary_sha256": "57d8c9f0a178b2617d4108d091178f090a037e44957508ed3b13594b661fdf65",
+      "kernel_signature_sha256": "4389fe984bc721ccf9bcd759d75c23d713f5d65ae7ca07ed2e4fe24f02b6d414",
+      "ncu_metric_version": "ncu_2026.1.x",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "tf32_hmma_gemm_traceable",
+      "source_commit": "b71d21fa2ce2bb2a55cfc5374d9d46ddf62dcf20",
+      "status": "admitted",
+      "timing_labels": {
+        "gpc__cycles_elapsed.max": {
+          "dispersion": 0.014697,
+          "n_repeats": 5,
+          "repeatability_rule": "coefficient_of_variation",
+          "rule_threshold": 0.05,
+          "unit": "cycles",
+          "value": 19056.2
+        },
+        "gpu__time_duration.sum": {
+          "dispersion": 0.013305,
+          "n_repeats": 5,
+          "repeatability_rule": "coefficient_of_variation",
+          "rule_threshold": 0.05,
+          "unit": "ns",
+          "value": 10118.4
+        }
+      }
+    },
+    {
+      "arch": "sm_86",
+      "binary_pin_verification": {
+        "binary_path": "workloads/simbench_bw/l1/vendor_sgemm_strided_batched_cublas/vendor_sgemm_strided_batched_cublas_run",
+        "matches_store_pin": true,
+        "on_disk_sha256_at_generation": "0d784a20e147ea35ee22b0f881863b4f53ecf4c023128ba636774d9f4f9daff1"
+      },
+      "binary_sha256": "0d784a20e147ea35ee22b0f881863b4f53ecf4c023128ba636774d9f4f9daff1",
+      "kernel_signature_sha256": "8009b80357819242aa59324689e41d345c7c27edc559c0db332e289d773adb39",
+      "ncu_metric_version": "ncu_2026.1.x",
+      "shape_point": "trace_00",
+      "slug": "vendor_sgemm_strided_batched_cublas",
+      "source_commit": "f6b5e5d3b19fb4ac507fa3fa0229ebf11073f50f",
+      "status": "admitted",
+      "timing_labels": {
+        "gpc__cycles_elapsed.max": {
+          "dispersion": 0.00387,
+          "n_repeats": 5,
+          "repeatability_rule": "coefficient_of_variation",
+          "rule_threshold": 0.05,
+          "unit": "cycles",
+          "value": 16199.4
+        },
+        "gpu__time_duration.sum": {
+          "dispersion": 0.004851,
+          "n_repeats": 5,
+          "repeatability_rule": "coefficient_of_variation",
+          "rule_threshold": 0.05,
+          "unit": "ns",
+          "value": 8601.6
+        }
+      }
+    },
+    {
+      "arch": "sm_86",
+      "binary_pin_verification": {
+        "binary_path": "workloads/simbench_bw/l1/warm_cold_pair_relaunch/warm_cold_pair_relaunch_run",
+        "matches_store_pin": true,
+        "on_disk_sha256_at_generation": "eb3ec15b1d54b498650a94c903d85e4e01881a9531311ac6e27e2d85c560a252"
+      },
+      "binary_sha256": "eb3ec15b1d54b498650a94c903d85e4e01881a9531311ac6e27e2d85c560a252",
+      "kernel_signature_sha256": "779b4acb3473bca619d87757ae102a1e0e7c50006edfa5171689e06af94e7443",
+      "ncu_metric_version": "ncu_2026.1.x",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "warm_cold_pair_relaunch",
+      "source_commit": "f6b5e5d3b19fb4ac507fa3fa0229ebf11073f50f",
+      "status": "admitted",
+      "timing_labels": {
+        "gpc__cycles_elapsed.max": {
+          "dispersion": 0.002761,
+          "n_repeats": 5,
+          "repeatability_rule": "coefficient_of_variation",
+          "rule_threshold": 0.05,
+          "unit": "cycles",
+          "value": 182636.6
+        },
+        "gpu__time_duration.sum": {
+          "dispersion": 0.002756,
+          "n_repeats": 5,
+          "repeatability_rule": "coefficient_of_variation",
+          "rule_threshold": 0.05,
+          "unit": "ns",
+          "value": 96659.2
+        }
+      }
+    },
+    {
+      "arch": "sm_86",
+      "binary_pin_verification": {
+        "binary_path": "workloads/simbench_bw/l1/working_set_capacity_sweep/working_set_capacity_sweep_run",
+        "matches_store_pin": true,
+        "on_disk_sha256_at_generation": "197379525a6e267b2e018513086fb85b3b861a696b0e14fb061d3839ac8e7dd6"
+      },
+      "binary_sha256": "197379525a6e267b2e018513086fb85b3b861a696b0e14fb061d3839ac8e7dd6",
+      "kernel_signature_sha256": "4a89354e3a81afb6d1ee9c0aea25f10cb68d1d31779c978bd37c6ee5713622e1",
+      "ncu_metric_version": "ncu_2026.1.x",
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "working_set_capacity_sweep",
+      "source_commit": "661be54a77574b649aa5a82616a2207ad2410376",
+      "status": "admitted",
+      "timing_labels": {
+        "gpc__cycles_elapsed.max": {
+          "dispersion": 0.004815,
+          "n_repeats": 5,
+          "repeatability_rule": "coefficient_of_variation",
+          "rule_threshold": 0.05,
+          "unit": "cycles",
+          "value": 143441.2
+        },
+        "gpu__time_duration.sum": {
+          "dispersion": 0.004796,
+          "n_repeats": 5,
+          "repeatability_rule": "coefficient_of_variation",
+          "rule_threshold": 0.05,
+          "unit": "ns",
+          "value": 75936.0
+        }
+      }
+    }
+  ],
+  "arch": "sm_86",
+  "artifact_kind": "sm86_timing_cohort_expanded",
+  "distinct_admitted_slugs": [
+    "carveout_sensitivity_probe",
+    "conv2d_implicit_gemm_bf16_sm80",
+    "cp_async_shared_tile_copy",
+    "dram_streaming_dot_product",
+    "embedding_gather_int32_sm80",
+    "fp32_fma_dep_chain",
+    "gemm_hmma_fp16_sm80",
+    "gemm_imma_int8_sm80",
+    "gemm_sparse_2to4_bf16_sm80",
+    "l2_persisting_window_sweep",
+    "l2_prefetch_hint_sweep",
+    "rmsnorm_bwd_bf16_sm80",
+    "rmsnorm_fwd_bf16",
+    "rmsnorm_fwd_bf16_sm80",
+    "silu_fwd_bf16_sm80",
+    "tf32_hmma_gemm_traceable",
+    "vendor_sgemm_strided_batched_cublas",
+    "warm_cold_pair_relaunch",
+    "working_set_capacity_sweep"
+  ],
+  "generated_at_commit": "661be54a77574b649aa5a82616a2207ad2410376",
+  "min_distinct_slugs": 10,
+  "n_admitted": 21,
+  "n_typed": 13,
+  "rule_thresholds": {
+    "gpc__cycles_elapsed.max": 0.05,
+    "gpu__time_duration.sum": 0.05
+  },
+  "schema_version": 1,
+  "timing_metrics": [
+    "gpu__time_duration.sum",
+    "gpc__cycles_elapsed.max"
+  ],
+  "typed": [
+    {
+      "arch": "sm_86",
+      "binary_sha256": "93bd779ba719542965c18d9f73f5aa5a545c6631bbfb87575a9239e0765bab30",
+      "evidence": {
+        "expected_binary_sha256": "93bd779ba719542965c18d9f73f5aa5a545c6631bbfb87575a9239e0765bab30",
+        "legacy_cohort": "data/local_labels/timing_cohort/ac4_long_duration_cohort_sm_86.json",
+        "on_disk_binary_sha256": "19beb03abd72bc3583ce71dcf779c7f058ac0e0cb976c0a321759535c72d5e3a"
+      },
+      "kernel_signature_sha256": "b6e3e32590349b15aff276ac6529626073ac854106dd6f10a2b34fd154ba6c65",
+      "ncu_metric_version": null,
+      "shape_point": "ac4_mixed_conv_b20_h56_w56_c32_f32_rep2_blk2240",
+      "slug": "conv2d_implicit_gemm_bf16_sm80",
+      "source_commit": "d8a5b887093263debcd3a9931644e315a56735f3",
+      "status": "typed",
+      "typed_reason": "timing_binary_sha256_mismatch"
+    },
+    {
+      "arch": "sm_86",
+      "binary_sha256": "93bd779ba719542965c18d9f73f5aa5a545c6631bbfb87575a9239e0765bab30",
+      "evidence": {
+        "expected_binary_sha256": "93bd779ba719542965c18d9f73f5aa5a545c6631bbfb87575a9239e0765bab30",
+        "legacy_cohort": "data/local_labels/timing_cohort/ac4_long_duration_cohort_sm_86.json",
+        "on_disk_binary_sha256": "19beb03abd72bc3583ce71dcf779c7f058ac0e0cb976c0a321759535c72d5e3a"
+      },
+      "kernel_signature_sha256": "1d29284c3ed372c9a85d2c0fb3c173e86a5eb6285294eb46e17b3db03f38c0ff",
+      "ncu_metric_version": null,
+      "shape_point": "ac4_mixed_conv_b24_h48_w48_c32_f32_rep2_blk2048",
+      "slug": "conv2d_implicit_gemm_bf16_sm80",
+      "source_commit": "d8a5b887093263debcd3a9931644e315a56735f3",
+      "status": "typed",
+      "typed_reason": "timing_binary_sha256_mismatch"
+    },
+    {
+      "arch": "sm_86",
+      "binary_sha256": "93bd779ba719542965c18d9f73f5aa5a545c6631bbfb87575a9239e0765bab30",
+      "evidence": {
+        "expected_binary_sha256": "93bd779ba719542965c18d9f73f5aa5a545c6631bbfb87575a9239e0765bab30",
+        "legacy_cohort": "data/local_labels/timing_cohort/ac4_long_duration_cohort_sm_86.json",
+        "on_disk_binary_sha256": "19beb03abd72bc3583ce71dcf779c7f058ac0e0cb976c0a321759535c72d5e3a"
+      },
+      "kernel_signature_sha256": "4172fe26c832bbbaba56feb1ff261e0da11f93264e6869dced6cc0f283f17620",
+      "ncu_metric_version": null,
+      "shape_point": "ac4_mixed_conv_b24_h48_w48_c32_f32_rep2_blk2304",
+      "slug": "conv2d_implicit_gemm_bf16_sm80",
+      "source_commit": "d8a5b887093263debcd3a9931644e315a56735f3",
+      "status": "typed",
+      "typed_reason": "timing_binary_sha256_mismatch"
+    },
+    {
+      "arch": "sm_86",
+      "binary_sha256": "93bd779ba719542965c18d9f73f5aa5a545c6631bbfb87575a9239e0765bab30",
+      "evidence": {
+        "expected_binary_sha256": "93bd779ba719542965c18d9f73f5aa5a545c6631bbfb87575a9239e0765bab30",
+        "legacy_cohort": "data/local_labels/timing_cohort/ac4_long_duration_cohort_sm_86.json",
+        "on_disk_binary_sha256": "19beb03abd72bc3583ce71dcf779c7f058ac0e0cb976c0a321759535c72d5e3a"
+      },
+      "kernel_signature_sha256": "1b8de2d0480c779b912123bd2cdc812662f8cf74c51c3beebc2818c8beeb1a6c",
+      "ncu_metric_version": null,
+      "shape_point": "ac4_mixed_conv_b24_h48_w48_c32_f32_rep2_blk2560",
+      "slug": "conv2d_implicit_gemm_bf16_sm80",
+      "source_commit": "d8a5b887093263debcd3a9931644e315a56735f3",
+      "status": "typed",
+      "typed_reason": "timing_binary_sha256_mismatch"
+    },
+    {
+      "arch": "sm_86",
+      "binary_sha256": "93bd779ba719542965c18d9f73f5aa5a545c6631bbfb87575a9239e0765bab30",
+      "evidence": {
+        "expected_binary_sha256": "93bd779ba719542965c18d9f73f5aa5a545c6631bbfb87575a9239e0765bab30",
+        "legacy_cohort": "data/local_labels/timing_cohort/ac4_long_duration_cohort_sm_86.json",
+        "on_disk_binary_sha256": "bb022917d38733a47694ea8bd63c2abb1b4e816a07fd1f5adeba707bc38dfd97"
+      },
+      "kernel_signature_sha256": "df59dde4085274edd4472d88caa68803e3e77e4fbf50855cf14be2f53bfc55fc",
+      "ncu_metric_version": null,
+      "shape_point": "ac4_mixed_dot_n16777216_p24",
+      "slug": "dram_streaming_dot_product",
+      "source_commit": "d8a5b887093263debcd3a9931644e315a56735f3",
+      "status": "typed",
+      "typed_reason": "timing_binary_sha256_mismatch"
+    },
+    {
+      "arch": "sm_86",
+      "binary_sha256": "93bd779ba719542965c18d9f73f5aa5a545c6631bbfb87575a9239e0765bab30",
+      "evidence": {
+        "expected_binary_sha256": "93bd779ba719542965c18d9f73f5aa5a545c6631bbfb87575a9239e0765bab30",
+        "legacy_cohort": "data/local_labels/timing_cohort/ac4_long_duration_cohort_sm_86.json",
+        "on_disk_binary_sha256": "bb022917d38733a47694ea8bd63c2abb1b4e816a07fd1f5adeba707bc38dfd97"
+      },
+      "kernel_signature_sha256": "f06c3b39ade9c9a80b2086524acfb403a1b61abbb64a6748ed85b1193d19fe57",
+      "ncu_metric_version": null,
+      "shape_point": "ac4_mixed_dot_n8388608_p48",
+      "slug": "dram_streaming_dot_product",
+      "source_commit": "d8a5b887093263debcd3a9931644e315a56735f3",
+      "status": "typed",
+      "typed_reason": "timing_binary_sha256_mismatch"
+    },
+    {
+      "arch": "sm_86",
+      "binary_sha256": "93bd779ba719542965c18d9f73f5aa5a545c6631bbfb87575a9239e0765bab30",
+      "evidence": {
+        "expected_binary_sha256": "93bd779ba719542965c18d9f73f5aa5a545c6631bbfb87575a9239e0765bab30",
+        "legacy_cohort": "data/local_labels/timing_cohort/ac4_long_duration_cohort_sm_86.json",
+        "on_disk_binary_sha256": "f71c2f5cabc89f1eb893c4fd8dadd3fe0426cfaae03b1b4838f6629351b08dbd"
+      },
+      "kernel_signature_sha256": "87d363f1b9e4ec045ffee0a0e10d21754667f7391ab24539711751e8d303df67",
+      "ncu_metric_version": null,
+      "shape_point": "ac4_mixed_flash_bh16_sq512_sk512_d16_rep48_blk2304",
+      "slug": "flash_attn_fwd_bf16_sm80",
+      "source_commit": "d8a5b887093263debcd3a9931644e315a56735f3",
+      "status": "typed",
+      "typed_reason": "timing_binary_sha256_mismatch"
+    },
+    {
+      "arch": "sm_86",
+      "binary_sha256": "93bd779ba719542965c18d9f73f5aa5a545c6631bbfb87575a9239e0765bab30",
+      "evidence": {
+        "expected_binary_sha256": "93bd779ba719542965c18d9f73f5aa5a545c6631bbfb87575a9239e0765bab30",
+        "legacy_cohort": "data/local_labels/timing_cohort/ac4_long_duration_cohort_sm_86.json",
+        "on_disk_binary_sha256": "f71c2f5cabc89f1eb893c4fd8dadd3fe0426cfaae03b1b4838f6629351b08dbd"
+      },
+      "kernel_signature_sha256": "9c2d19b506389e0330234c64813fc0751ec9bd65d44567f9ca039b7f7789b6f3",
+      "ncu_metric_version": null,
+      "shape_point": "ac4_mixed_flash_bh16_sq512_sk512_d16_rep64",
+      "slug": "flash_attn_fwd_bf16_sm80",
+      "source_commit": "d8a5b887093263debcd3a9931644e315a56735f3",
+      "status": "typed",
+      "typed_reason": "timing_binary_sha256_mismatch"
+    },
+    {
+      "arch": "sm_86",
+      "binary_sha256": "93bd779ba719542965c18d9f73f5aa5a545c6631bbfb87575a9239e0765bab30",
+      "evidence": {
+        "expected_binary_sha256": "93bd779ba719542965c18d9f73f5aa5a545c6631bbfb87575a9239e0765bab30",
+        "legacy_cohort": "data/local_labels/timing_cohort/ac4_long_duration_cohort_sm_86.json",
+        "on_disk_binary_sha256": "bab4489d033e31a50df904d3246eb37adf3b8e52fa3d8015c008a0ce3147b629"
+      },
+      "kernel_signature_sha256": "8e00b0b83be1d2feceaa65db3a509fa0f248b54ac11a676c5b6471697626945e",
+      "ncu_metric_version": null,
+      "shape_point": "ac4_mixed_gemm_m2048_n2048_k4096",
+      "slug": "gemm_hmma_bf16_sm80",
+      "source_commit": "d8a5b887093263debcd3a9931644e315a56735f3",
+      "status": "typed",
+      "typed_reason": "timing_binary_sha256_mismatch"
+    },
+    {
+      "arch": "sm_86",
+      "binary_sha256": "93bd779ba719542965c18d9f73f5aa5a545c6631bbfb87575a9239e0765bab30",
+      "evidence": {
+        "expected_binary_sha256": "93bd779ba719542965c18d9f73f5aa5a545c6631bbfb87575a9239e0765bab30",
+        "legacy_cohort": "data/local_labels/timing_cohort/ac4_long_duration_cohort_sm_86.json",
+        "on_disk_binary_sha256": "bab4489d033e31a50df904d3246eb37adf3b8e52fa3d8015c008a0ce3147b629"
+      },
+      "kernel_signature_sha256": "3a37435ddc808efa214df7f4187a5ee88c080d1c92c6d34419107236f0fee2da",
+      "ncu_metric_version": null,
+      "shape_point": "ac4_mixed_gemm_m2048_n4096_k2048",
+      "slug": "gemm_hmma_bf16_sm80",
+      "source_commit": "d8a5b887093263debcd3a9931644e315a56735f3",
+      "status": "typed",
+      "typed_reason": "timing_binary_sha256_mismatch"
+    },
+    {
+      "arch": "sm_86",
+      "binary_sha256": "93bd779ba719542965c18d9f73f5aa5a545c6631bbfb87575a9239e0765bab30",
+      "evidence": {
+        "expected_binary_sha256": "93bd779ba719542965c18d9f73f5aa5a545c6631bbfb87575a9239e0765bab30",
+        "legacy_cohort": "data/local_labels/timing_cohort/ac4_long_duration_cohort_sm_86.json",
+        "on_disk_binary_sha256": "bab4489d033e31a50df904d3246eb37adf3b8e52fa3d8015c008a0ce3147b629"
+      },
+      "kernel_signature_sha256": "1585eea38df7574ec26438fd53e78a707fcc9149749c32ccc9e651d48a9dcb88",
+      "ncu_metric_version": null,
+      "shape_point": "ac4_mixed_gemm_m3072_n2048_k3072",
+      "slug": "gemm_hmma_bf16_sm80",
+      "source_commit": "d8a5b887093263debcd3a9931644e315a56735f3",
+      "status": "typed",
+      "typed_reason": "timing_binary_sha256_mismatch"
+    },
+    {
+      "arch": "sm_86",
+      "binary_sha256": "93bd779ba719542965c18d9f73f5aa5a545c6631bbfb87575a9239e0765bab30",
+      "evidence": {
+        "expected_binary_sha256": "93bd779ba719542965c18d9f73f5aa5a545c6631bbfb87575a9239e0765bab30",
+        "legacy_cohort": "data/local_labels/timing_cohort/ac4_long_duration_cohort_sm_86.json",
+        "on_disk_binary_sha256": "bab4489d033e31a50df904d3246eb37adf3b8e52fa3d8015c008a0ce3147b629"
+      },
+      "kernel_signature_sha256": "68c3f080cb5abe2fe71b7026ba88220352de82a27381447d5f0855b983676fd1",
+      "ncu_metric_version": null,
+      "shape_point": "ac4_mixed_gemm_m4096_n2048_k2048",
+      "slug": "gemm_hmma_bf16_sm80",
+      "source_commit": "d8a5b887093263debcd3a9931644e315a56735f3",
+      "status": "typed",
+      "typed_reason": "timing_binary_sha256_mismatch"
+    },
+    {
+      "arch": "sm_86",
+      "binary_sha256": "93bd779ba719542965c18d9f73f5aa5a545c6631bbfb87575a9239e0765bab30",
+      "evidence": {
+        "expected_binary_sha256": "93bd779ba719542965c18d9f73f5aa5a545c6631bbfb87575a9239e0765bab30",
+        "legacy_cohort": "data/local_labels/timing_cohort/ac4_long_duration_cohort_sm_86.json",
+        "on_disk_binary_sha256": "bab4489d033e31a50df904d3246eb37adf3b8e52fa3d8015c008a0ce3147b629"
+      },
+      "kernel_signature_sha256": "dcb780234a02b510d17d0d6f4d193c7e25241e8adbd71486ec34b3b402829a72",
+      "ncu_metric_version": null,
+      "shape_point": "ac4_mixed_gemm_m4096_n4096_k1024",
+      "slug": "gemm_hmma_bf16_sm80",
+      "source_commit": "d8a5b887093263debcd3a9931644e315a56735f3",
+      "status": "typed",
+      "typed_reason": "timing_binary_sha256_mismatch"
+    }
+  ]
+}

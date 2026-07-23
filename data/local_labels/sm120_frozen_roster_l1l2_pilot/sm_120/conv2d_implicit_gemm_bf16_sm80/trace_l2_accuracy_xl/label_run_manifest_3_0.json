@@ -1,0 +1,12 @@
+{
+  "arch": "sm_120",
+  "binary_sha256": "5e3b7358f69bd55c374939fafbb947c208278dc4e923c024540de0a8ea539053",
+  "kernel_signature_sha256": "166c68126ca691ffffd1cf792265b04165b17f4a4d8d03860580b4eaf68e9acb",
+  "kernel_signature_source": "fallback_legacy",
+  "launch_index": 0,
+  "repeat_index": 3,
+  "schema_version": 1,
+  "shape_point": "trace_l2_accuracy_xl",
+  "slug": "conv2d_implicit_gemm_bf16_sm80",
+  "source_commit": "339c75f60d6a108c4d9a60b24384829f4184a3d3"
+}

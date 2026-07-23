@@ -1,0 +1,200 @@
+# sm_120 pilot-cell reverification artifact.
+#
+# Records the per-cell sol-execbench compile +
+# correctness verdict for the 12 pilot cells selected
+# in the analyze-routed pilot-selection step. These
+# cells already exist on disk; this artifact is the
+# reverification cohort, NOT new-port credit toward the
+# 30-new-hand-port floor (role=pilot_reverification per
+# row).
+
+[meta]
+schema_version = "1.0"
+host_arch = "sm_120"
+captured_at_utc = "2026-05-27T13:00:00+00:00"
+row_count = 12
+aggregate_passed = 12
+aggregate_correctness_failed = 0
+aggregate_compile_failed = 0
+aggregate_error = 0
+payload_sha256 = "f6b5ab6af46492ec1f811345824272df47a1c0b47808a15405a69904cd5e3f04"
+
+[[entries]]
+slug = "problem_002_fused_add_rmsnorm_h4096"
+language = "cuda_cpp"
+benchmark_subset = "FlashInfer-Bench"
+benchmark_dir = "sol-execbench/data/benchmark/FlashInfer-Bench/002_fused_add_rmsnorm_h4096"
+solution_path = "baselines/FIB/problem_002_fused_add_rmsnorm_h4096/cuda_cpp/solution.json"
+verdict = "passed"
+workload_count = 14
+passed_workload_count = 14
+command_argv = ["/home/jakeshea/solbench_baseline/.venv/bin/sol-execbench", "/home/jakeshea/solbench_baseline/sol-execbench/data/benchmark/FlashInfer-Bench/002_fused_add_rmsnorm_h4096", "--solution", "/home/jakeshea/solbench_baseline/baselines/FIB/problem_002_fused_add_rmsnorm_h4096/cuda_cpp/solution.json", "--json", "--compile-timeout", "120", "--timeout", "120"]
+captured_at_utc = "2026-05-27T02:23:56+00:00"
+host_arch = "sm_120"
+role = "pilot_reverification"
+quarantine_reason = ""
+
+[[entries]]
+slug = "problem_010_attention_value_projection_with_transpose"
+language = "cuda_cpp"
+benchmark_subset = "L1"
+benchmark_dir = "sol-execbench/data/benchmark/L1/010_attention_value_projection_with_transpose"
+solution_path = "baselines/L1/problem_010_attention_value_projection_with_transpose/cuda_cpp/solution.json"
+verdict = "passed"
+workload_count = 16
+passed_workload_count = 16
+command_argv = ["/home/jakeshea/solbench_baseline/.venv/bin/sol-execbench", "/home/jakeshea/solbench_baseline/sol-execbench/data/benchmark/L1/010_attention_value_projection_with_transpose", "--solution", "/home/jakeshea/solbench_baseline/baselines/L1/problem_010_attention_value_projection_with_transpose/cuda_cpp/solution.json", "--json", "--compile-timeout", "120", "--timeout", "120"]
+captured_at_utc = "2026-05-27T02:28:53+00:00"
+host_arch = "sm_120"
+role = "pilot_reverification"
+quarantine_reason = ""
+
+[[entries]]
+slug = "problem_021_cross_attention_text_video_conditioning_backward"
+language = "cuda_cpp"
+benchmark_subset = "L2"
+benchmark_dir = "sol-execbench/data/benchmark/L2/021_cross_attention_text_video_conditioning_backward"
+solution_path = "baselines/L2/problem_021_cross_attention_text_video_conditioning_backward/cuda_cpp/solution.json"
+verdict = "passed"
+workload_count = 16
+passed_workload_count = 16
+command_argv = ["/home/jakeshea/solbench_baseline/.venv/bin/sol-execbench", "/home/jakeshea/solbench_baseline/sol-execbench/data/benchmark/L2/021_cross_attention_text_video_conditioning_backward", "--solution", "/home/jakeshea/solbench_baseline/baselines/L2/problem_021_cross_attention_text_video_conditioning_backward/cuda_cpp/solution.json", "--json", "--compile-timeout", "120", "--timeout", "120"]
+captured_at_utc = "2026-05-27T02:30:33+00:00"
+host_arch = "sm_120"
+role = "pilot_reverification"
+quarantine_reason = ""
+
+[[entries]]
+slug = "problem_024_rmsnorm_h2048"
+language = "cuda_cpp"
+benchmark_subset = "FlashInfer-Bench"
+benchmark_dir = "sol-execbench/data/benchmark/FlashInfer-Bench/024_rmsnorm_h2048"
+solution_path = "baselines/FIB/problem_024_rmsnorm_h2048/cuda_cpp/solution.json"
+verdict = "passed"
+workload_count = 7
+passed_workload_count = 7
+command_argv = ["/home/jakeshea/solbench_baseline/.venv/bin/sol-execbench", "/home/jakeshea/solbench_baseline/sol-execbench/data/benchmark/FlashInfer-Bench/024_rmsnorm_h2048", "--solution", "/home/jakeshea/solbench_baseline/baselines/FIB/problem_024_rmsnorm_h2048/cuda_cpp/solution.json", "--json", "--compile-timeout", "120", "--timeout", "120"]
+captured_at_utc = "2026-05-27T02:23:26+00:00"
+host_arch = "sm_120"
+role = "pilot_reverification"
+quarantine_reason = ""
+
+[[entries]]
+slug = "problem_025_video_latent_gelu_activation"
+language = "cuda_cpp"
+benchmark_subset = "L1"
+benchmark_dir = "sol-execbench/data/benchmark/L1/025_video_latent_gelu_activation"
+solution_path = "baselines/L1/problem_025_video_latent_gelu_activation/cuda_cpp/solution.json"
+verdict = "passed"
+workload_count = 16
+passed_workload_count = 16
+command_argv = ["/home/jakeshea/solbench_baseline/.venv/bin/sol-execbench", "/home/jakeshea/solbench_baseline/sol-execbench/data/benchmark/L1/025_video_latent_gelu_activation", "--solution", "/home/jakeshea/solbench_baseline/baselines/L1/problem_025_video_latent_gelu_activation/cuda_cpp/solution.json", "--json", "--compile-timeout", "120", "--timeout", "120"]
+captured_at_utc = "2026-05-27T02:25:07+00:00"
+host_arch = "sm_120"
+role = "pilot_reverification"
+quarantine_reason = ""
+
+[[entries]]
+slug = "problem_030_flux_concatenated_sequence_processing_with_split"
+language = "cuda_cpp"
+benchmark_subset = "L2"
+benchmark_dir = "sol-execbench/data/benchmark/L2/030_flux_concatenated_sequence_processing_with_split"
+solution_path = "baselines/L2/problem_030_flux_concatenated_sequence_processing_with_split/cuda_cpp/solution.json"
+verdict = "passed"
+workload_count = 16
+passed_workload_count = 16
+command_argv = ["/home/jakeshea/solbench_baseline/.venv/bin/sol-execbench", "/home/jakeshea/solbench_baseline/sol-execbench/data/benchmark/L2/030_flux_concatenated_sequence_processing_with_split", "--solution", "/home/jakeshea/solbench_baseline/baselines/L2/problem_030_flux_concatenated_sequence_processing_with_split/cuda_cpp/solution.json", "--json", "--compile-timeout", "120", "--timeout", "120"]
+captured_at_utc = "2026-05-27T02:27:53+00:00"
+host_arch = "sm_120"
+role = "pilot_reverification"
+quarantine_reason = ""
+
+[[entries]]
+slug = "problem_045_fused_linear_gelu_grn_linear"
+language = "cuda_cpp"
+benchmark_subset = "L1"
+benchmark_dir = "sol-execbench/data/benchmark/L1/045_fused_linear_gelu_grn_linear"
+solution_path = "baselines/L1/problem_045_fused_linear_gelu_grn_linear/cuda_cpp/solution.json"
+verdict = "passed"
+workload_count = 14
+passed_workload_count = 14
+command_argv = ["/home/jakeshea/solbench_baseline/.venv/bin/sol-execbench", "/home/jakeshea/solbench_baseline/sol-execbench/data/benchmark/L1/045_fused_linear_gelu_grn_linear", "--solution", "/home/jakeshea/solbench_baseline/baselines/L1/problem_045_fused_linear_gelu_grn_linear/cuda_cpp/solution.json", "--json", "--compile-timeout", "120", "--timeout", "120"]
+captured_at_utc = "2026-05-27T02:27:29+00:00"
+host_arch = "sm_120"
+role = "pilot_reverification"
+quarantine_reason = ""
+
+[[entries]]
+slug = "problem_051_attention_qkv_with_qk_norm_single_kernel_backward"
+language = "cuda_cpp"
+benchmark_subset = "L1"
+benchmark_dir = "sol-execbench/data/benchmark/L1/051_attention_qkv_with_qk_norm_single_kernel_backward"
+solution_path = "baselines/L1/problem_051_attention_qkv_with_qk_norm_single_kernel_backward/cuda_cpp/solution.json"
+verdict = "passed"
+workload_count = 16
+passed_workload_count = 16
+command_argv = ["/home/jakeshea/solbench_baseline/.venv/bin/sol-execbench", "/home/jakeshea/solbench_baseline/sol-execbench/data/benchmark/L1/051_attention_qkv_with_qk_norm_single_kernel_backward", "--solution", "/home/jakeshea/solbench_baseline/baselines/L1/problem_051_attention_qkv_with_qk_norm_single_kernel_backward/cuda_cpp/solution.json", "--json", "--compile-timeout", "120", "--timeout", "120"]
+captured_at_utc = "2026-05-27T02:29:57+00:00"
+host_arch = "sm_120"
+role = "pilot_reverification"
+quarantine_reason = ""
+
+[[entries]]
+slug = "problem_063_attention_output_reshape_and_projection"
+language = "cuda_cpp"
+benchmark_subset = "L1"
+benchmark_dir = "sol-execbench/data/benchmark/L1/063_attention_output_reshape_and_projection"
+solution_path = "baselines/L1/problem_063_attention_output_reshape_and_projection/cuda_cpp/solution.json"
+verdict = "passed"
+workload_count = 16
+passed_workload_count = 16
+command_argv = ["/home/jakeshea/solbench_baseline/.venv/bin/sol-execbench", "/home/jakeshea/solbench_baseline/sol-execbench/data/benchmark/L1/063_attention_output_reshape_and_projection", "--solution", "/home/jakeshea/solbench_baseline/baselines/L1/problem_063_attention_output_reshape_and_projection/cuda_cpp/solution.json", "--json", "--compile-timeout", "120", "--timeout", "120"]
+captured_at_utc = "2026-05-27T02:29:08+00:00"
+host_arch = "sm_120"
+role = "pilot_reverification"
+quarantine_reason = ""
+
+[[entries]]
+slug = "problem_068_gelu_approximate_feedforward_backward"
+language = "cuda_cpp"
+benchmark_subset = "L2"
+benchmark_dir = "sol-execbench/data/benchmark/L2/068_gelu_approximate_feedforward_backward"
+solution_path = "baselines/L2/problem_068_gelu_approximate_feedforward_backward/cuda_cpp/solution.json"
+verdict = "passed"
+workload_count = 16
+passed_workload_count = 16
+command_argv = ["/home/jakeshea/solbench_baseline/.venv/bin/sol-execbench", "/home/jakeshea/solbench_baseline/sol-execbench/data/benchmark/L2/068_gelu_approximate_feedforward_backward", "--solution", "/home/jakeshea/solbench_baseline/baselines/L2/problem_068_gelu_approximate_feedforward_backward/cuda_cpp/solution.json", "--json", "--compile-timeout", "120", "--timeout", "120"]
+captured_at_utc = "2026-05-27T02:25:55+00:00"
+host_arch = "sm_120"
+role = "pilot_reverification"
+quarantine_reason = ""
+
+[[entries]]
+slug = "problem_069_rms_norm"
+language = "cuda_cpp"
+benchmark_subset = "L1"
+benchmark_dir = "sol-execbench/data/benchmark/L1/069_rms_norm"
+solution_path = "baselines/L1/problem_069_rms_norm/cuda_cpp/solution.json"
+verdict = "passed"
+workload_count = 16
+passed_workload_count = 16
+command_argv = ["/home/jakeshea/solbench_baseline/.venv/bin/sol-execbench", "/home/jakeshea/solbench_baseline/sol-execbench/data/benchmark/L1/069_rms_norm", "--solution", "/home/jakeshea/solbench_baseline/baselines/L1/problem_069_rms_norm/cuda_cpp/solution.json", "--json", "--compile-timeout", "120", "--timeout", "120"]
+captured_at_utc = "2026-05-27T02:24:30+00:00"
+host_arch = "sm_120"
+role = "pilot_reverification"
+quarantine_reason = ""
+
+[[entries]]
+slug = "problem_093_grouped_topk_moe_routing_backward"
+language = "cuda_cpp"
+benchmark_subset = "L1"
+benchmark_dir = "sol-execbench/data/benchmark/L1/093_grouped_topk_moe_routing_backward"
+solution_path = "baselines/L1/problem_093_grouped_topk_moe_routing_backward/cuda_cpp/solution.json"
+verdict = "passed"
+workload_count = 16
+passed_workload_count = 16
+command_argv = ["/home/jakeshea/solbench_baseline/.venv/bin/sol-execbench", "/home/jakeshea/solbench_baseline/sol-execbench/data/benchmark/L1/093_grouped_topk_moe_routing_backward", "--solution", "/home/jakeshea/solbench_baseline/baselines/L1/problem_093_grouped_topk_moe_routing_backward/cuda_cpp/solution.json", "--json", "--compile-timeout", "120", "--timeout", "120"]
+captured_at_utc = "2026-05-27T02:31:22+00:00"
+host_arch = "sm_120"
+role = "pilot_reverification"
+quarantine_reason = ""

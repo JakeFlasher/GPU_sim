@@ -1,0 +1,14 @@
+{
+  "associativity_l2": 16,
+  "captured_at_utc": "2026-05-29T22:39:46+00:00",
+  "geometry_source": "sm86_pilot_static_device_card_v1",
+  "language": "cuda_cpp",
+  "num_l2_slices": 6,
+  "raw_l1_hit_rate": 0.198829345703125,
+  "raw_l2_hit_rate": 0.07533988807272074,
+  "schema_version": 1,
+  "scored": true,
+  "slug": "problem_078_group_norm_fusion",
+  "tier2_sidecar_sha256": "2b083326a7e4b62409c4bafca910980ea7271f868cfa04fdc26eeca1b32cc397",
+  "typed_reason": ""
+}

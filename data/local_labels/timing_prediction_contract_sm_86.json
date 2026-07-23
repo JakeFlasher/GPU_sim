@@ -1,0 +1,62 @@
+{
+  "arch": "sm_86",
+  "artifact_kind": "timing_prediction_contract",
+  "cycle_error_definition": {
+    "bootstrap_statistic": "geomean_relative_error",
+    "epsilon_floor_applied": false,
+    "forbidden_bounded_fraction_formula": "abs(pred - true) / max(true, epsilon)",
+    "geomean_relative_error_formula": "exp(mean_i(abs(r_i))) - 1",
+    "median_abs_log_relative_error_formula": "median_i(abs(r_i))",
+    "per_cell_residual_formula": "ln(p_i / t_i)",
+    "requires_strictly_positive_inputs": true
+  },
+  "deploy_ns_leg": {
+    "clock_plausibility_band_mhz": {
+      "max": 3000,
+      "min": 300
+    },
+    "closes_research_success_alone": false,
+    "crosswalk_deploy_observable": "cupti_activity_plus_cuda_event",
+    "crosswalk_reference_metric_id": "gpu__time_duration.sum",
+    "dual_source_noise_floor_ns": 110352,
+    "floor_relative_bound_default": 0.2,
+    "min_cohort_duration_ns_for_default_bound": 551760,
+    "min_cohort_duration_ns_for_tighter_bound": 1103520,
+    "requires_crosswalk_artifact": true,
+    "role": "derived_clock_uncertainty_interval",
+    "tighter_bound": 0.1
+  },
+  "evidence_statuses": [
+    "Offline-verified",
+    "Verified-live-sm_86"
+  ],
+  "generated_at_utc": "2026-05-30T18:47:41Z",
+  "headline": {
+    "is_sole_publication_headline": true,
+    "publication_target_metric_id": "gpc__cycles_elapsed.max",
+    "publication_target_registry_key": "exec_cycles_gpc_max",
+    "rationale": "The elapsed cycle count is DVFS-stable, so it is the only load-bearing publication target. The nanosecond value is the cycle count multiplied by a clock conversion that double-counts the cycle error and carries clock-regime uncertainty, so it is a derived diagnostic, not a co-equal headline.",
+    "target_unit": "cycles"
+  },
+  "publication_gate": {
+    "bootstrap_ci_confidence": 0.95,
+    "bootstrap_geomean_upper_bound_max": 0.25,
+    "bootstrap_resamples": 2000,
+    "closes_research_success": true,
+    "geomean_relative_error_max": 0.15,
+    "median_abs_log_relative_error_max": 0.1,
+    "min_scored_cells": 10
+  },
+  "schema_version": 1,
+  "smoke_tier": {
+    "closes_research_success": false,
+    "min_scored_cells": 5,
+    "reports_only": true
+  },
+  "source_commit": "eb9e837ddebe020c416cfddcc7b657609a2268ce",
+  "terminal_states": {
+    "deferred_cross_arch_requires_sm120_session": "Sentinel recorded for any cross-architecture leg this single-architecture session cannot witness.",
+    "research_success": "Recorded when the cycle publication gate passes on the long cohort; the cycle headline is the only leg permitted to close this state.",
+    "verdict_falsification": "Recorded when a leg is honestly refuted below its floor; a first-class terminal outcome, never a silent or reported-only result."
+  }
+}

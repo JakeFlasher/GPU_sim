@@ -1,0 +1,513 @@
+{
+  "cells": [
+    {
+      "arch": "sm_86",
+      "per_feature_observations": [
+        {
+          "availability_at_prediction_time": "prediction_time_available",
+          "computed_effect": 0.0,
+          "correlation_method": "paired_delta",
+          "feature_name": "per_warp_occupancy",
+          "observed_value": 1.0,
+          "sample_size": 2
+        },
+        {
+          "availability_at_prediction_time": "prediction_time_available",
+          "computed_effect": 0.0,
+          "correlation_method": "paired_delta",
+          "feature_name": "blockDim",
+          "observed_value": 32.0,
+          "sample_size": 2
+        },
+        {
+          "availability_at_prediction_time": "prediction_time_available",
+          "computed_effect": 1020.0,
+          "correlation_method": "paired_delta",
+          "feature_name": "gridDim",
+          "observed_value": 64.0,
+          "sample_size": 2
+        },
+        {
+          "availability_at_prediction_time": "label-provenance-only",
+          "computed_effect": null,
+          "correlation_method": "inconclusive_small_n",
+          "feature_name": "dvfs_state",
+          "observed_value": null,
+          "plan_2_prohibition_status": "forbidden_requires_explicit_reopen",
+          "sample_size": 0
+        },
+        {
+          "availability_at_prediction_time": "not_collected_for_cell",
+          "computed_effect": null,
+          "correlation_method": "inconclusive_small_n",
+          "feature_name": "mshr_pressure_proxy",
+          "observed_value": null,
+          "sample_size": 0
+        }
+      ],
+      "shape_point": "trace_l2_accuracy_xl",
+      "signed_residual": 0.08320873479718616,
+      "slug": "carveout_sensitivity_probe"
+    },
+    {
+      "arch": "sm_86",
+      "per_feature_observations": [
+        {
+          "availability_at_prediction_time": "prediction_time_available",
+          "computed_effect": 0.0,
+          "correlation_method": "paired_delta",
+          "feature_name": "per_warp_occupancy",
+          "observed_value": 1.0,
+          "sample_size": 2
+        },
+        {
+          "availability_at_prediction_time": "prediction_time_available",
+          "computed_effect": 0.0,
+          "correlation_method": "paired_delta",
+          "feature_name": "blockDim",
+          "observed_value": 32.0,
+          "sample_size": 2
+        },
+        {
+          "availability_at_prediction_time": "prediction_time_available",
+          "computed_effect": 1020.0,
+          "correlation_method": "paired_delta",
+          "feature_name": "gridDim",
+          "observed_value": 64.0,
+          "sample_size": 2
+        },
+        {
+          "availability_at_prediction_time": "label-provenance-only",
+          "computed_effect": null,
+          "correlation_method": "inconclusive_small_n",
+          "feature_name": "dvfs_state",
+          "observed_value": null,
+          "plan_2_prohibition_status": "forbidden_requires_explicit_reopen",
+          "sample_size": 0
+        },
+        {
+          "availability_at_prediction_time": "not_collected_for_cell",
+          "computed_effect": null,
+          "correlation_method": "inconclusive_small_n",
+          "feature_name": "mshr_pressure_proxy",
+          "observed_value": null,
+          "sample_size": 0
+        }
+      ],
+      "shape_point": "trace_l2_accuracy_xl",
+      "signed_residual": 0.46680706124106996,
+      "slug": "l2_thrash_pointer_chase"
+    },
+    {
+      "arch": "sm_86",
+      "per_feature_observations": [
+        {
+          "availability_at_prediction_time": "prediction_time_available",
+          "computed_effect": 0.0,
+          "correlation_method": "paired_delta",
+          "feature_name": "per_warp_occupancy",
+          "observed_value": 8.0,
+          "sample_size": 2
+        },
+        {
+          "availability_at_prediction_time": "prediction_time_available",
+          "computed_effect": 0.0,
+          "correlation_method": "paired_delta",
+          "feature_name": "blockDim",
+          "observed_value": 256.0,
+          "sample_size": 2
+        },
+        {
+          "availability_at_prediction_time": "prediction_time_available",
+          "computed_effect": 1020.0,
+          "correlation_method": "paired_delta",
+          "feature_name": "gridDim",
+          "observed_value": 64.0,
+          "sample_size": 2
+        },
+        {
+          "availability_at_prediction_time": "label-provenance-only",
+          "computed_effect": null,
+          "correlation_method": "inconclusive_small_n",
+          "feature_name": "dvfs_state",
+          "observed_value": null,
+          "plan_2_prohibition_status": "forbidden_requires_explicit_reopen",
+          "sample_size": 0
+        },
+        {
+          "availability_at_prediction_time": "not_collected_for_cell",
+          "computed_effect": null,
+          "correlation_method": "inconclusive_small_n",
+          "feature_name": "mshr_pressure_proxy",
+          "observed_value": null,
+          "sample_size": 0
+        }
+      ],
+      "shape_point": "timing_shape",
+      "signed_residual": 0.22146937500000008,
+      "slug": "layernorm_fwd_bf16_sm80"
+    },
+    {
+      "arch": "sm_86",
+      "per_feature_observations": [
+        {
+          "availability_at_prediction_time": "prediction_time_available",
+          "computed_effect": 0.0,
+          "correlation_method": "paired_delta",
+          "feature_name": "per_warp_occupancy",
+          "observed_value": 1.0,
+          "sample_size": 2
+        },
+        {
+          "availability_at_prediction_time": "prediction_time_available",
+          "computed_effect": 0.0,
+          "correlation_method": "paired_delta",
+          "feature_name": "blockDim",
+          "observed_value": 32.0,
+          "sample_size": 2
+        },
+        {
+          "availability_at_prediction_time": "prediction_time_available",
+          "computed_effect": 1020.0,
+          "correlation_method": "paired_delta",
+          "feature_name": "gridDim",
+          "observed_value": 64.0,
+          "sample_size": 2
+        },
+        {
+          "availability_at_prediction_time": "label-provenance-only",
+          "computed_effect": null,
+          "correlation_method": "inconclusive_small_n",
+          "feature_name": "dvfs_state",
+          "observed_value": null,
+          "plan_2_prohibition_status": "forbidden_requires_explicit_reopen",
+          "sample_size": 0
+        },
+        {
+          "availability_at_prediction_time": "not_collected_for_cell",
+          "computed_effect": null,
+          "correlation_method": "inconclusive_small_n",
+          "feature_name": "mshr_pressure_proxy",
+          "observed_value": null,
+          "sample_size": 0
+        }
+      ],
+      "shape_point": "trace_l2_accuracy_xl",
+      "signed_residual": 0.7433219636969943,
+      "slug": "register_spill_local_mem"
+    },
+    {
+      "arch": "sm_86",
+      "per_feature_observations": [
+        {
+          "availability_at_prediction_time": "prediction_time_available",
+          "computed_effect": 0.0,
+          "correlation_method": "paired_delta",
+          "feature_name": "per_warp_occupancy",
+          "observed_value": 8.0,
+          "sample_size": 2
+        },
+        {
+          "availability_at_prediction_time": "prediction_time_available",
+          "computed_effect": 0.0,
+          "correlation_method": "paired_delta",
+          "feature_name": "blockDim",
+          "observed_value": 256.0,
+          "sample_size": 2
+        },
+        {
+          "availability_at_prediction_time": "prediction_time_available",
+          "computed_effect": 1020.0,
+          "correlation_method": "paired_delta",
+          "feature_name": "gridDim",
+          "observed_value": 64.0,
+          "sample_size": 2
+        },
+        {
+          "availability_at_prediction_time": "label-provenance-only",
+          "computed_effect": null,
+          "correlation_method": "inconclusive_small_n",
+          "feature_name": "dvfs_state",
+          "observed_value": null,
+          "plan_2_prohibition_status": "forbidden_requires_explicit_reopen",
+          "sample_size": 0
+        },
+        {
+          "availability_at_prediction_time": "not_collected_for_cell",
+          "computed_effect": null,
+          "correlation_method": "inconclusive_small_n",
+          "feature_name": "mshr_pressure_proxy",
+          "observed_value": null,
+          "sample_size": 0
+        }
+      ],
+      "shape_point": "timing_shape",
+      "signed_residual": 0.289025859375,
+      "slug": "rmsnorm_fwd_bf16_sm80"
+    },
+    {
+      "arch": "sm_86",
+      "per_feature_observations": [
+        {
+          "availability_at_prediction_time": "prediction_time_available",
+          "computed_effect": 0.0,
+          "correlation_method": "paired_delta",
+          "feature_name": "per_warp_occupancy",
+          "observed_value": 8.0,
+          "sample_size": 2
+        },
+        {
+          "availability_at_prediction_time": "prediction_time_available",
+          "computed_effect": 0.0,
+          "correlation_method": "paired_delta",
+          "feature_name": "blockDim",
+          "observed_value": 256.0,
+          "sample_size": 2
+        },
+        {
+          "availability_at_prediction_time": "prediction_time_available",
+          "computed_effect": 1020.0,
+          "correlation_method": "paired_delta",
+          "feature_name": "gridDim",
+          "observed_value": 4.0,
+          "sample_size": 2
+        },
+        {
+          "availability_at_prediction_time": "label-provenance-only",
+          "computed_effect": null,
+          "correlation_method": "inconclusive_small_n",
+          "feature_name": "dvfs_state",
+          "observed_value": null,
+          "plan_2_prohibition_status": "forbidden_requires_explicit_reopen",
+          "sample_size": 0
+        },
+        {
+          "availability_at_prediction_time": "not_collected_for_cell",
+          "computed_effect": null,
+          "correlation_method": "inconclusive_small_n",
+          "feature_name": "mshr_pressure_proxy",
+          "observed_value": null,
+          "sample_size": 0
+        }
+      ],
+      "shape_point": "correctness_shape",
+      "signed_residual": 0.04590000000000005,
+      "slug": "silu_fwd_bf16_sm80"
+    },
+    {
+      "arch": "sm_86",
+      "per_feature_observations": [
+        {
+          "availability_at_prediction_time": "prediction_time_available",
+          "computed_effect": 0.0,
+          "correlation_method": "paired_delta",
+          "feature_name": "per_warp_occupancy",
+          "observed_value": 8.0,
+          "sample_size": 2
+        },
+        {
+          "availability_at_prediction_time": "prediction_time_available",
+          "computed_effect": 0.0,
+          "correlation_method": "paired_delta",
+          "feature_name": "blockDim",
+          "observed_value": 256.0,
+          "sample_size": 2
+        },
+        {
+          "availability_at_prediction_time": "prediction_time_available",
+          "computed_effect": 1020.0,
+          "correlation_method": "paired_delta",
+          "feature_name": "gridDim",
+          "observed_value": 1024.0,
+          "sample_size": 2
+        },
+        {
+          "availability_at_prediction_time": "label-provenance-only",
+          "computed_effect": null,
+          "correlation_method": "inconclusive_small_n",
+          "feature_name": "dvfs_state",
+          "observed_value": null,
+          "plan_2_prohibition_status": "forbidden_requires_explicit_reopen",
+          "sample_size": 0
+        },
+        {
+          "availability_at_prediction_time": "not_collected_for_cell",
+          "computed_effect": null,
+          "correlation_method": "inconclusive_small_n",
+          "feature_name": "mshr_pressure_proxy",
+          "observed_value": null,
+          "sample_size": 0
+        }
+      ],
+      "shape_point": "timing_shape",
+      "signed_residual": 0.3984599999999999,
+      "slug": "silu_fwd_bf16_sm80"
+    },
+    {
+      "arch": "sm_86",
+      "per_feature_observations": [
+        {
+          "availability_at_prediction_time": "prediction_time_available",
+          "computed_effect": 0.0,
+          "correlation_method": "paired_delta",
+          "feature_name": "per_warp_occupancy",
+          "observed_value": 8.0,
+          "sample_size": 2
+        },
+        {
+          "availability_at_prediction_time": "prediction_time_available",
+          "computed_effect": 0.0,
+          "correlation_method": "paired_delta",
+          "feature_name": "blockDim",
+          "observed_value": 256.0,
+          "sample_size": 2
+        },
+        {
+          "availability_at_prediction_time": "prediction_time_available",
+          "computed_effect": 1020.0,
+          "correlation_method": "paired_delta",
+          "feature_name": "gridDim",
+          "observed_value": 64.0,
+          "sample_size": 2
+        },
+        {
+          "availability_at_prediction_time": "label-provenance-only",
+          "computed_effect": null,
+          "correlation_method": "inconclusive_small_n",
+          "feature_name": "dvfs_state",
+          "observed_value": null,
+          "plan_2_prohibition_status": "forbidden_requires_explicit_reopen",
+          "sample_size": 0
+        },
+        {
+          "availability_at_prediction_time": "not_collected_for_cell",
+          "computed_effect": null,
+          "correlation_method": "inconclusive_small_n",
+          "feature_name": "mshr_pressure_proxy",
+          "observed_value": null,
+          "sample_size": 0
+        }
+      ],
+      "shape_point": "timing_shape",
+      "signed_residual": 0.3857333333333334,
+      "slug": "softmax_safe_bf16_sm80"
+    },
+    {
+      "arch": "sm_86",
+      "per_feature_observations": [
+        {
+          "availability_at_prediction_time": "prediction_time_available",
+          "computed_effect": 0.0,
+          "correlation_method": "paired_delta",
+          "feature_name": "per_warp_occupancy",
+          "observed_value": 1.0,
+          "sample_size": 2
+        },
+        {
+          "availability_at_prediction_time": "prediction_time_available",
+          "computed_effect": 0.0,
+          "correlation_method": "paired_delta",
+          "feature_name": "blockDim",
+          "observed_value": 32.0,
+          "sample_size": 2
+        },
+        {
+          "availability_at_prediction_time": "prediction_time_available",
+          "computed_effect": 1020.0,
+          "correlation_method": "paired_delta",
+          "feature_name": "gridDim",
+          "observed_value": 64.0,
+          "sample_size": 2
+        },
+        {
+          "availability_at_prediction_time": "label-provenance-only",
+          "computed_effect": null,
+          "correlation_method": "inconclusive_small_n",
+          "feature_name": "dvfs_state",
+          "observed_value": null,
+          "plan_2_prohibition_status": "forbidden_requires_explicit_reopen",
+          "sample_size": 0
+        },
+        {
+          "availability_at_prediction_time": "not_collected_for_cell",
+          "computed_effect": null,
+          "correlation_method": "inconclusive_small_n",
+          "feature_name": "mshr_pressure_proxy",
+          "observed_value": null,
+          "sample_size": 0
+        }
+      ],
+      "shape_point": "trace_l2_accuracy_xl",
+      "signed_residual": 0.10784023581385271,
+      "slug": "working_set_capacity_sweep"
+    }
+  ],
+  "cohort_admitted_count": 9,
+  "features": [
+    {
+      "expected_physical_sign": "inconclusive",
+      "feature_name": "per_warp_occupancy",
+      "schema_owner": "kernel_proto",
+      "sidecar_source_file": "tools/nvbit_tracer/traces_enhanced/dynamic_trace/kernel.proto"
+    },
+    {
+      "expected_physical_sign": "inconclusive",
+      "feature_name": "blockDim",
+      "schema_owner": "kernel_proto",
+      "sidecar_source_file": "tools/nvbit_tracer/traces_enhanced/dynamic_trace/kernel.proto"
+    },
+    {
+      "expected_physical_sign": "positive",
+      "feature_name": "gridDim",
+      "schema_owner": "kernel_proto",
+      "sidecar_source_file": "tools/nvbit_tracer/traces_enhanced/dynamic_trace/kernel.proto"
+    },
+    {
+      "expected_physical_sign": "null_no_directional_hypothesis",
+      "feature_name": "dvfs_state",
+      "schema_owner": "nvml",
+      "sidecar_source_file": "workloads/simbench_bw/schemas/nvml_covariate.schema.json"
+    },
+    {
+      "expected_physical_sign": "positive",
+      "feature_name": "mshr_pressure_proxy",
+      "schema_owner": "cupti_activity",
+      "sidecar_source_file": "workloads/simbench_bw/schemas/cupti_activity_sidecar.schema.json"
+    }
+  ],
+  "generator": "tools/sm_86_predictor_accuracy_recovery_v2/build_missing_feature_candidates.py",
+  "partial_closure_override": {
+    "accepted": true,
+    "date_iso": "2026-05-18",
+    "decided_admitted_count": 9,
+    "reason": "Operator accepted the 9-cell admitted cohort as this plan's de-facto admitted state. The plan-pinned >=11 admission floor cannot be reached under the contract-pinned 0.03 stddev repeatability gate because 4 of the 6 candidate cells in the strengthening matrix are predictor_hostile-by-design L2-stressors (dram_stream_stride_mix / l2_persisting_window_sweep / l2_prefetch_hint_sweep / warm_cold_pair_relaunch) whose inherent NCU-replay variance is structurally above the gate. The bottleneck is label-side measurement-repeatability, not a predictor-accuracy gap; the gate is not loosened. Set-associative promotion was rejected as L1-only and not an L2 admission path."
+  },
+  "recommendations": [
+    {
+      "feature_name": "per_warp_occupancy",
+      "justification": "The silu correctness/timing paired-delta on per_warp_occupancy is +0.00; the canonical pair holds this feature constant by design so the small-N escape value applies.",
+      "recommendation_for_plan_2": "inconclusive"
+    },
+    {
+      "feature_name": "blockDim",
+      "justification": "The silu correctness/timing paired-delta on blockDim is +0.00; the canonical pair holds this feature constant by design so the small-N escape value applies.",
+      "recommendation_for_plan_2": "inconclusive"
+    },
+    {
+      "feature_name": "gridDim",
+      "justification": "The silu correctness/timing paired-delta on gridDim is +1020 (grid volume changes between the two shape points). Both shape points predict identically under the current predictor but truth differs by ~0.35 absolute, so gridDim is a strong candidate for inclusion as a predictor input in the downstream calibration-fitting plan.",
+      "recommendation_for_plan_2": "predictor_input"
+    },
+    {
+      "feature_name": "dvfs_state",
+      "justification": "The no-DVFS-as-predictor-input directive forbids dvfs_state as a predictor input in both this plan and the downstream calibration-fitting plan. Lifting the prohibition requires an explicit directive reopen with portability evidence (cloud vs local; sm_86 vs sm_120).",
+      "recommendation_for_plan_2": "discard"
+    },
+    {
+      "feature_name": "mshr_pressure_proxy",
+      "justification": "The CUPTI Activity-derived MSHR-pressure proxy has no per-cell scalar observation under the current JOIN: the checked-absence path returned not_collected_for_cell on every admitted cell (zero auxiliary CUPTI Activity sidecars under the cells' trace directories); sample size on the cohort is 0 so the small-N escape value applies.",
+      "recommendation_for_plan_2": "inconclusive"
+    }
+  ],
+  "schema_version": 1
+}

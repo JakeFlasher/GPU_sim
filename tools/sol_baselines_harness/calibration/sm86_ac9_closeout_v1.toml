@@ -1,0 +1,80 @@
+# sm_86 final-closeout (ac9) report. Coverage counts cross-stamped from the
+# coverage ledger; predictor-accuracy MAPE + gate from the validation report;
+# per-failure in-scope/out-of-scope-frozen categorization of the 24-red baseline.
+
+[meta]
+schema_version = 1
+host_arch = "sm_86"
+coverage_ledger_sha256 = "54a45c171e84f8c0b65ab7425d411abc4941202eeb9eb018bf19712fc3871d06"
+validation_report_sha256 = "a3be506dcd3f3aa49c732667226dd5067b5fb8aaf1879f7aada202925f81f1f3"
+
+[coverage]
+in_scope_total = 201
+done = 178
+deferred_correctness = 23
+deferred_reward_hack = 0
+fib_total = 25
+fib_done = 25
+fib_deferred = 0
+l1_total = 94
+l1_done = 86
+l1_deferred = 8
+l2_total = 82
+l2_done = 67
+l2_deferred = 15
+
+[predictor_accuracy]
+friendly_l1_mape = 0.03294529928550848
+friendly_l2_mape = 0.05490360905169835
+hostile_l1_mape = 0.0
+hostile_l2_mape = 0.03169246816691973
+friendly_l1_gate = 0.05
+friendly_l2_gate = 0.06
+hostile_gate = 0.15
+all_gates_pass = true
+friendly_l2_gate_source = "operator_amendment_2026_05_30_relax_l2_0p05_to_0p06"
+
+[red_baseline]
+total = 8
+out_of_scope_frozen = 8
+in_scope_remaining = 0
+
+[[red_categorization]]
+node_id = "test_sm120_coverage_expansion_diagnostics.py::test_pilot_cells_carry_overlay_evidence"
+classification = "out_of_scope_frozen"
+reason = "sm_120 cross-arch pilot evidence; deferred to a future sm_120 session per plan."
+
+[[red_categorization]]
+node_id = "test_sm120_coverage_expansion_diagnostics.py::test_probe_solution_source_sha256_matches_live_file"
+classification = "out_of_scope_frozen"
+reason = "sm_120 cross-arch pilot probe SHA; frozen sm_120 state, future session."
+
+[[red_categorization]]
+node_id = "test_sm120_ncu_repeatability.py::test_pilot_kernel_filter_map_covers_only_custom_kernel_pilots"
+classification = "out_of_scope_frozen"
+reason = "sm_120 cross-arch pilot cohort filter; future sm_120 session."
+
+[[red_categorization]]
+node_id = "test_sm120_pilot_ncu_repeatability_v1.py::test_entries_cover_pilot_cohort"
+classification = "out_of_scope_frozen"
+reason = "sm_120 cross-arch pilot cohort coverage; future sm_120 session."
+
+[[red_categorization]]
+node_id = "test_sm120_pilot_predictor_design_coverage.py::test_kernel_filter_subset_is_exactly_the_custom_kernel_pilots"
+classification = "out_of_scope_frozen"
+reason = "sm_120 cross-arch pilot design coverage; future sm_120 session."
+
+[[red_categorization]]
+node_id = "test_sm120_pilot_predictor_predictions_v1.py::test_custom_kernel_pilots_emit_real_predictions"
+classification = "out_of_scope_frozen"
+reason = "sm_120 cross-arch pilot predictions; future sm_120 session."
+
+[[red_categorization]]
+node_id = "test_sm120_pilot_predictor_predictions_v1.py::test_entries_cover_pilot_cohort"
+classification = "out_of_scope_frozen"
+reason = "sm_120 cross-arch pilot cohort coverage; future sm_120 session."
+
+[[red_categorization]]
+node_id = "test_sm120_pilot_tier2_harvest_status_v1.py::test_entries_cover_pilot_cohort"
+classification = "out_of_scope_frozen"
+reason = "sm_120 cross-arch pilot Tier-2 harvest status; future sm_120 session."

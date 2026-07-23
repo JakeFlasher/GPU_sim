@@ -1,0 +1,53 @@
+{
+  "by_assoc": {
+    "16": {
+      "raw_l1_hit_rate": 0.17408220022148763,
+      "raw_l2_hit_rate": 0.5324187609165215,
+      "scored": true,
+      "typed_reason": ""
+    },
+    "32": {
+      "raw_l1_hit_rate": 0.17408220022148763,
+      "raw_l2_hit_rate": 0.7793558338647195,
+      "scored": true,
+      "typed_reason": ""
+    },
+    "4": {
+      "raw_l1_hit_rate": 0.17408220022148763,
+      "raw_l2_hit_rate": 0.1590604923366964,
+      "scored": true,
+      "typed_reason": ""
+    },
+    "64": {
+      "raw_l1_hit_rate": 0.17408220022148763,
+      "raw_l2_hit_rate": 0.8619824025042784,
+      "scored": true,
+      "typed_reason": ""
+    },
+    "8": {
+      "raw_l1_hit_rate": 0.17408220022148763,
+      "raw_l2_hit_rate": 0.31705737207033957,
+      "scored": true,
+      "typed_reason": ""
+    }
+  },
+  "candidates": [
+    4,
+    8,
+    16,
+    32,
+    64
+  ],
+  "captured_at_utc": "2026-05-30T01:05:06+00:00",
+  "dense_reuse": {
+    "distinct_sectors": 302052,
+    "reuse_factor": 36.18778223617125,
+    "total_sector_accesses": 10930592,
+    "truncated": true
+  },
+  "schema_version": 2,
+  "scored": true,
+  "slug": "problem_050_attention_qkv_projection_with_bias_and_reshape",
+  "tier2_sidecar_sha256": "d567b2c016880d0bde523df33397a075a2a4f20b9dbc6a0e97bd55a73dee2c89",
+  "typed_reason": ""
+}

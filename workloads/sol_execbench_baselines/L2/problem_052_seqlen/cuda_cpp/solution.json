@@ -1,0 +1,44 @@
+{
+  "name": "problem_052_seqlen_cuda_cpp_scaffold",
+  "definition": "052_seqlen-finetuned-reconstructed_hyena_gating_and_output_projection",
+  "author": "scaffold",
+  "spec": {
+    "languages": [
+      "cuda_cpp"
+    ],
+    "target_hardware": [
+      "LOCAL"
+    ],
+    "entry_point": "main.cpp::run",
+    "dependencies": [],
+    "destination_passing_style": true,
+    "binding": "torch",
+    "compile_options": {
+      "cflags": [],
+      "cuda_cflags": [
+        "-O3",
+        "--use_fast_math",
+        "-gencode",
+        "arch=compute_86,code=sm_86"
+      ],
+      "ld_flags": [
+        "-lcuda"
+      ]
+    }
+  },
+  "sources": [
+    {
+      "path": "main.cpp",
+      "content": "#include <torch/extension.h>\n#include <ATen/ATen.h>\n#include <ATen/cuda/CUDAContext.h>\n#include <c10/cuda/CUDAGuard.h>\n#include <string>\n\n// Hyena order-2 gating + FFT convolution + output projection.\n//\n// Reference (052_seqlen-finetuned-reconstructed_hyena_gating_and_output_projection):\n//     seqlen   = v.shape[-1]\n//     fft_size = 2 * seqlen\n//     v = v * x1                                   # order-2 gate (dropout=0)\n//     k_0   = k[0]                                 # [d_model, L]\n//     bias_0= bias[0]                              # [d_model]\n//     k_f = rfft(k_0, n=fft_size) / fft_size       # complex, divide complex tensor\n//     u_f = rfft(v,   n=fft_size)                  # complex\n//     y   = irfft(u_f * k_f.unsqueeze(0), n=fft_size, norm='forward')[..., :seqlen]\n//     v   = y + v * bias_0.unsqueeze(-1)           # gated v reused here\n//     y   = v * x0                                 # final gate\n//     y   = y.transpose(1, 2)                      # [B, d_model, L] -> [B, L, d_model]\n//     output = matmul(y, out_proj_weight.t()) + out_proj_bias\n//\n// All math is float32; the FFT intermediates are complex64. rfft / irfft default\n// to dim=-1; the forward rfft uses the default norm (None, i.e. \"backward\": no\n// forward scaling) while the inverse uses norm='forward' (which divides by N on\n// the inverse). The reference's manual k_f / fft_size division is therefore the\n// only forward-side scaling and is kept as an explicit divide of the COMPLEX\n// tensor. The n=fft_size argument implicitly zero-pads along dim=-1 to fft_size,\n// and the post-irfft [..., :seqlen] slice keeps the causal head.\n//\n// Per definition.json (insertion order):\n//   inputs (all float32):\n//     v               : [batch_size, d_model, seq_len]\n//     x0              : [batch_size, d_model, seq_len]\n//     x1              : [batch_size, d_model, seq_len]\n//     k               : [order_minus_1, d_model, seq_len]\n//     bias            : [order_minus_1, d_model]\n//     out_proj_weight : [d_model, d_model]\n//     out_proj_bias   : [d_model]\n//   output (float32, DPS pre-alloc, written in place):\n//     output          : [batch_size, seq_len, d_model]\n//\n// Implementation: pure ATen dispatch -- no custom CUDA kernels. at::fft_rfft /\n// at::fft_irfft route through cuFFT at the same fp32 precision the reference's\n// torch.fft uses; the complex multiply, gating, transpose, and output linear\n// match the reference exactly. Destination-passing style.\n\nstatic void check_fp32_cuda(const torch::Tensor& t, const std::string& name) {\n    TORCH_CHECK(t.is_cuda(), name, \" must be a CUDA tensor\");\n    TORCH_CHECK(t.dtype() == torch::kFloat32, name, \" must be float32, got \", t.dtype());\n}\n\nvoid run(\n    const torch::Tensor& v,\n    const torch::Tensor& x0,\n    const torch::Tensor& x1,\n    const torch::Tensor& k,\n    const torch::Tensor& bias,\n    const torch::Tensor& out_proj_weight,\n    const torch::Tensor& out_proj_bias,\n    torch::Tensor output\n) {\n    check_fp32_cuda(v, \"v\");\n    check_fp32_cuda(x0, \"x0\");\n    check_fp32_cuda(x1, \"x1\");\n    check_fp32_cuda(k, \"k\");\n    check_fp32_cuda(bias, \"bias\");\n    check_fp32_cuda(out_proj_weight, \"out_proj_weight\");\n    check_fp32_cuda(out_proj_bias, \"out_proj_bias\");\n\n    TORCH_CHECK(v.dim() == 3, \"v must be 3D [batch, d_model, seqlen], got \", v.dim(), \"D\");\n    TORCH_CHECK(k.dim() == 3, \"k must be 3D [order_minus_1, d_model, seqlen], got \", k.dim(), \"D\");\n    TORCH_CHECK(bias.dim() == 2, \"bias must be 2D [order_minus_1, d_model], got \", bias.dim(), \"D\");\n\n    const c10::cuda::CUDAGuard device_guard(v.device());\n\n    const int64_t seqlen = v.size(-1);\n    const int64_t fft_size = 2 * seqlen;\n\n    // Order-2 gate (dropout=0.0, so the multiply is the whole step).\n    auto v_gated = v * x1;\n\n    // Filter k[0] and skip-connection bias[0].\n    auto k_0 = k.select(/*dim=*/0, 0);      // [d_model, seqlen]\n    auto bias_0 = bias.select(/*dim=*/0, 0);  // [d_model]\n\n    // rfft along dim=-1 with default norm (None / \"backward\"); the n=fft_size\n    // argument zero-pads to fft_size. The filter spectrum is divided by fft_size\n    // as a COMPLEX-tensor scale, matching the reference ordering.\n    auto k_f = at::fft_rfft(k_0, /*n=*/fft_size, /*dim=*/-1, /*norm=*/c10::nullopt)\n                   / static_cast<double>(fft_size);   // [d_model, fft_size/2+1]\n    auto u_f = at::fft_rfft(v_gated, /*n=*/fft_size, /*dim=*/-1, /*norm=*/c10::nullopt);\n                                                       // [batch, d_model, fft_size/2+1]\n\n    // Frequency-domain multiply (broadcast k_f over batch) then inverse rfft with\n    // norm='forward' (the 1/N inverse scaling lives here); keep the causal head.\n    auto prod = u_f * k_f.unsqueeze(0);\n    auto y_conv = at::fft_irfft(prod, /*n=*/fft_size, /*dim=*/-1, /*norm=*/c10::optional<c10::string_view>(\"forward\"));\n    y_conv = y_conv.narrow(/*dim=*/-1, /*start=*/0, /*length=*/seqlen);\n\n    // Skip connection with bias (uses the gated v, not the original input).\n    auto v_skip = y_conv + v_gated * bias_0.unsqueeze(-1);\n\n    // Final gate with x0.\n    auto y_gated = v_skip * x0;\n\n    // [batch, d_model, L] -> [batch, L, d_model].\n    auto y_t = y_gated.transpose(1, 2);\n\n    // Output projection: y @ out_proj_weight.T + out_proj_bias.\n    auto result = at::matmul(y_t, out_proj_weight.t()) + out_proj_bias;\n\n    TORCH_CHECK(result.sizes() == output.sizes(),\n                \"output shape \", result.sizes(),\n                \" does not match pre-allocated \", output.sizes());\n\n    output.copy_(result);\n}\n\nPYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {\n    m.def(\"run\", &run,\n          \"Hyena order-2 gating + FFT convolution + output projection via ATen / \"\n          \"cuFFT: v*x1 gate, rfft(n=2L)/N filter spectrum, frequency-domain \"\n          \"multiply, irfft(norm='forward')[:L], bias skip, x0 gate, transpose, \"\n          \"output linear. fp32 throughout; destination-passing style.\");\n}\n"
+    },
+    {
+      "path": "kernel.cu",
+      "content": "// Stub translation unit: this ATen-delegated port has no custom device kernels.\n// A bare .cu is still needed so torch's cpp_extension builds a CUDA extension\n// (adding CUDA include paths); a .cpp-only extension fails to find\n// cuda_runtime_api.h.\n#include <cuda_runtime.h>\n"
+    },
+    {
+      "path": "kernel.h",
+      "content": "#pragma once\n// Intentionally empty: ATen-delegated port, no custom kernel launcher.\n"
+    }
+  ],
+  "description": "Scaffolded baseline for problem_052_seqlen (language=cuda_cpp); hand-edit the copied exemplar to implement the target problem before harness-running. Destination-passing-style is set true; outputs appear after inputs in definition.json insertion order."
+}

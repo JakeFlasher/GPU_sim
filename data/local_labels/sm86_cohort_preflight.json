@@ -1,0 +1,747 @@
+{
+  "schema_version": 1,
+  "generated_at_utc": "2026-05-28T09:07:17Z",
+  "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7",
+  "host_sku": "rtx_3090_ti",
+  "host_arch": "sm_86",
+  "n_cells": 20,
+  "n_sm86_cells_in_label": 20,
+  "action_summary": {
+    "READY": 0,
+    "REBUILD_BINARY_LOCAL": 0,
+    "REBUILD_TRACE_LOCAL": 20,
+    "REGENERATE_SIDECARS_LOCAL": 0,
+    "REBUILD_BUNDLE_LOCAL": 0,
+    "TERMINAL_TYPED_FAILURE": 0
+  },
+  "closed_action_enum": [
+    "READY",
+    "REBUILD_BINARY_LOCAL",
+    "REBUILD_TRACE_LOCAL",
+    "REGENERATE_SIDECARS_LOCAL",
+    "REBUILD_BUNDLE_LOCAL",
+    "TERMINAL_TYPED_FAILURE"
+  ],
+  "cells": [
+    {
+      "arch": "sm_86",
+      "slug": "carveout_sensitivity_probe",
+      "shape_point": "trace_l2_accuracy_xl",
+      "binary_sha256": "6500e5381757f96200d6c64d4a642d95f9e4efb42e810b4a056386bbfd063119",
+      "kernel_signature_sha256": "4585d912ad82ae86356fa7d64c2782fc6948e8acc97cc30947abfc4633840f6d",
+      "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7",
+      "workload": "simbench_bw",
+      "binary_path": "workloads/simbench_bw/l1/carveout_sensitivity_probe/carveout_sensitivity_probe_run",
+      "binary_present": true,
+      "binary_arch_gate": [
+        "sm_86",
+        "sm_90a",
+        "sm_120"
+      ],
+      "arch_gate_excludes_sm_86": false,
+      "trace_dir": "workloads/simbench_bw/results/carveout_sensitivity_probe/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl",
+      "trace_present": false,
+      "sidecar_paths": {
+        "sharing_locality": "workloads/simbench_bw/results/carveout_sensitivity_probe/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sharing_locality/sharing_locality.json",
+        "hrd_profile": "workloads/simbench_bw/results/carveout_sensitivity_probe/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/hrd_profile/hrd_profile.json",
+        "sector_stream": "workloads/simbench_bw/results/carveout_sensitivity_probe/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sector_stream/sector_stream.jsonl",
+        "sector_stream_mpi": "workloads/simbench_bw/results/carveout_sensitivity_probe/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sector_stream/manifest_pairing_index.json"
+      },
+      "sidecars_present": {
+        "sharing_locality": false,
+        "hrd_profile": false,
+        "sector_stream": false,
+        "sector_stream_mpi": false
+      },
+      "bundle_match_path": null,
+      "bundle_present": false,
+      "proposed_action": "REBUILD_TRACE_LOCAL",
+      "action_typed_reason": null,
+      "preflight_command": "uv run --with-requirements requirements.txt --with protobuf python workloads/simbench_bw/run_suite.py --mode trace --kernel carveout_sensitivity_probe --shape-point trace_l2_accuracy_xl"
+    },
+    {
+      "arch": "sm_86",
+      "slug": "conv2d_implicit_gemm_bf16_sm80",
+      "shape_point": "timing_shape",
+      "binary_sha256": "19beb03abd72bc3583ce71dcf779c7f058ac0e0cb976c0a321759535c72d5e3a",
+      "kernel_signature_sha256": "166c68126ca691ffffd1cf792265b04165b17f4a4d8d03860580b4eaf68e9acb",
+      "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7",
+      "workload": "portable_lcd",
+      "binary_path": "workloads/portable_lcd/conv2d_implicit_gemm_bf16_sm80/conv2d_implicit_gemm_bf16_sm80_run",
+      "binary_present": true,
+      "binary_arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "arch_gate_excludes_sm_86": false,
+      "trace_dir": "workloads/portable_lcd/results/conv2d_implicit_gemm_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape",
+      "trace_present": false,
+      "sidecar_paths": {
+        "sharing_locality": "workloads/portable_lcd/results/conv2d_implicit_gemm_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/sharing_locality/sharing_locality.json",
+        "hrd_profile": "workloads/portable_lcd/results/conv2d_implicit_gemm_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/hrd_profile/hrd_profile.json",
+        "sector_stream": "workloads/portable_lcd/results/conv2d_implicit_gemm_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/sector_stream/sector_stream.jsonl",
+        "sector_stream_mpi": "workloads/portable_lcd/results/conv2d_implicit_gemm_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/sector_stream/manifest_pairing_index.json"
+      },
+      "sidecars_present": {
+        "sharing_locality": false,
+        "hrd_profile": false,
+        "sector_stream": false,
+        "sector_stream_mpi": false
+      },
+      "bundle_match_path": null,
+      "bundle_present": false,
+      "proposed_action": "REBUILD_TRACE_LOCAL",
+      "action_typed_reason": null,
+      "preflight_command": "uv run --with-requirements requirements.txt --with protobuf python tools/local_labels/activation_trace_orchestrator.py --slug conv2d_implicit_gemm_bf16_sm80 --shape-point timing_shape --sku rtx_3090_ti --arch-dir sm_86"
+    },
+    {
+      "arch": "sm_86",
+      "slug": "cross_entropy_fwd_fp32_sm80",
+      "shape_point": "timing_shape",
+      "binary_sha256": "0dfdcadd5a6400883c151539d0d5c3feabd6d08c16f894e20ccec6d8e8080087",
+      "kernel_signature_sha256": "317570008f9dcda3325fb71f1fdaa418d8de9a0d7b3ece65c1642f0de798eddb",
+      "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7",
+      "workload": "portable_lcd",
+      "binary_path": "workloads/portable_lcd/cross_entropy_fwd_fp32_sm80/cross_entropy_fwd_fp32_sm80_run",
+      "binary_present": true,
+      "binary_arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "arch_gate_excludes_sm_86": false,
+      "trace_dir": "workloads/portable_lcd/results/cross_entropy_fwd_fp32_sm80/rtx_3090_ti/sm_86/trace_timing_shape",
+      "trace_present": false,
+      "sidecar_paths": {
+        "sharing_locality": "workloads/portable_lcd/results/cross_entropy_fwd_fp32_sm80/rtx_3090_ti/sm_86/trace_timing_shape/sharing_locality/sharing_locality.json",
+        "hrd_profile": "workloads/portable_lcd/results/cross_entropy_fwd_fp32_sm80/rtx_3090_ti/sm_86/trace_timing_shape/hrd_profile/hrd_profile.json",
+        "sector_stream": "workloads/portable_lcd/results/cross_entropy_fwd_fp32_sm80/rtx_3090_ti/sm_86/trace_timing_shape/sector_stream/sector_stream.jsonl",
+        "sector_stream_mpi": "workloads/portable_lcd/results/cross_entropy_fwd_fp32_sm80/rtx_3090_ti/sm_86/trace_timing_shape/sector_stream/manifest_pairing_index.json"
+      },
+      "sidecars_present": {
+        "sharing_locality": false,
+        "hrd_profile": false,
+        "sector_stream": false,
+        "sector_stream_mpi": false
+      },
+      "bundle_match_path": null,
+      "bundle_present": false,
+      "proposed_action": "REBUILD_TRACE_LOCAL",
+      "action_typed_reason": null,
+      "preflight_command": "uv run --with-requirements requirements.txt --with protobuf python tools/local_labels/activation_trace_orchestrator.py --slug cross_entropy_fwd_fp32_sm80 --shape-point timing_shape --sku rtx_3090_ti --arch-dir sm_86"
+    },
+    {
+      "arch": "sm_86",
+      "slug": "dram_streaming_dot_product",
+      "shape_point": "trace_l2_accuracy_xl",
+      "binary_sha256": "90aa0c8880b020f958c90e087b67c82fb71e6d3afbc44c5fa1b72b5831d462a0",
+      "kernel_signature_sha256": "28bc636502da34541b1abb1b2e2f439fab06d0c2a46ba76e4ba1eb314a19346a",
+      "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7",
+      "workload": "simbench_bw",
+      "binary_path": "workloads/simbench_bw/l1/dram_streaming_dot_product/dram_streaming_dot_product_run",
+      "binary_present": true,
+      "binary_arch_gate": [
+        "sm_86",
+        "sm_90a",
+        "sm_120"
+      ],
+      "arch_gate_excludes_sm_86": false,
+      "trace_dir": "workloads/simbench_bw/results/dram_streaming_dot_product/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl",
+      "trace_present": false,
+      "sidecar_paths": {
+        "sharing_locality": "workloads/simbench_bw/results/dram_streaming_dot_product/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sharing_locality/sharing_locality.json",
+        "hrd_profile": "workloads/simbench_bw/results/dram_streaming_dot_product/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/hrd_profile/hrd_profile.json",
+        "sector_stream": "workloads/simbench_bw/results/dram_streaming_dot_product/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sector_stream/sector_stream.jsonl",
+        "sector_stream_mpi": "workloads/simbench_bw/results/dram_streaming_dot_product/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sector_stream/manifest_pairing_index.json"
+      },
+      "sidecars_present": {
+        "sharing_locality": false,
+        "hrd_profile": false,
+        "sector_stream": false,
+        "sector_stream_mpi": false
+      },
+      "bundle_match_path": null,
+      "bundle_present": false,
+      "proposed_action": "REBUILD_TRACE_LOCAL",
+      "action_typed_reason": null,
+      "preflight_command": "uv run --with-requirements requirements.txt --with protobuf python workloads/simbench_bw/run_suite.py --mode trace --kernel dram_streaming_dot_product --shape-point trace_l2_accuracy_xl"
+    },
+    {
+      "arch": "sm_86",
+      "slug": "embedding_gather_int32_sm80",
+      "shape_point": "timing_shape",
+      "binary_sha256": "ce2f77933a7ec3581aa62eaf52bd3e8c07de2a78ae61546632a70b2a7a0fe48e",
+      "kernel_signature_sha256": "8dbf972a5fdbebe33768c592447108592664645c38e0d22514468f664795ff8b",
+      "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7",
+      "workload": "portable_lcd",
+      "binary_path": "workloads/portable_lcd/embedding_gather_int32_sm80/embedding_gather_int32_sm80_run",
+      "binary_present": true,
+      "binary_arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "arch_gate_excludes_sm_86": false,
+      "trace_dir": "workloads/portable_lcd/results/embedding_gather_int32_sm80/rtx_3090_ti/sm_86/trace_timing_shape",
+      "trace_present": false,
+      "sidecar_paths": {
+        "sharing_locality": "workloads/portable_lcd/results/embedding_gather_int32_sm80/rtx_3090_ti/sm_86/trace_timing_shape/sharing_locality/sharing_locality.json",
+        "hrd_profile": "workloads/portable_lcd/results/embedding_gather_int32_sm80/rtx_3090_ti/sm_86/trace_timing_shape/hrd_profile/hrd_profile.json",
+        "sector_stream": "workloads/portable_lcd/results/embedding_gather_int32_sm80/rtx_3090_ti/sm_86/trace_timing_shape/sector_stream/sector_stream.jsonl",
+        "sector_stream_mpi": "workloads/portable_lcd/results/embedding_gather_int32_sm80/rtx_3090_ti/sm_86/trace_timing_shape/sector_stream/manifest_pairing_index.json"
+      },
+      "sidecars_present": {
+        "sharing_locality": false,
+        "hrd_profile": false,
+        "sector_stream": false,
+        "sector_stream_mpi": false
+      },
+      "bundle_match_path": null,
+      "bundle_present": false,
+      "proposed_action": "REBUILD_TRACE_LOCAL",
+      "action_typed_reason": null,
+      "preflight_command": "uv run --with-requirements requirements.txt --with protobuf python tools/local_labels/activation_trace_orchestrator.py --slug embedding_gather_int32_sm80 --shape-point timing_shape --sku rtx_3090_ti --arch-dir sm_86"
+    },
+    {
+      "arch": "sm_86",
+      "slug": "gemm_hmma_bf16_sm80",
+      "shape_point": "timing_shape",
+      "binary_sha256": "678e939bd0842056cb6e3c3fc585f372f8ec71333c362b05134421ff365397aa",
+      "kernel_signature_sha256": "8d74efecaa33ede92fae0b0173b9c442199ef5314c30a039792ccb2bbac5a24d",
+      "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7",
+      "workload": "portable_lcd",
+      "binary_path": "workloads/portable_lcd/gemm_hmma_bf16_sm80/gemm_hmma_bf16_sm80_run",
+      "binary_present": true,
+      "binary_arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "arch_gate_excludes_sm_86": false,
+      "trace_dir": "workloads/portable_lcd/results/gemm_hmma_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape",
+      "trace_present": false,
+      "sidecar_paths": {
+        "sharing_locality": "workloads/portable_lcd/results/gemm_hmma_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/sharing_locality/sharing_locality.json",
+        "hrd_profile": "workloads/portable_lcd/results/gemm_hmma_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/hrd_profile/hrd_profile.json",
+        "sector_stream": "workloads/portable_lcd/results/gemm_hmma_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/sector_stream/sector_stream.jsonl",
+        "sector_stream_mpi": "workloads/portable_lcd/results/gemm_hmma_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/sector_stream/manifest_pairing_index.json"
+      },
+      "sidecars_present": {
+        "sharing_locality": false,
+        "hrd_profile": false,
+        "sector_stream": false,
+        "sector_stream_mpi": false
+      },
+      "bundle_match_path": null,
+      "bundle_present": false,
+      "proposed_action": "REBUILD_TRACE_LOCAL",
+      "action_typed_reason": null,
+      "preflight_command": "uv run --with-requirements requirements.txt --with protobuf python tools/local_labels/activation_trace_orchestrator.py --slug gemm_hmma_bf16_sm80 --shape-point timing_shape --sku rtx_3090_ti --arch-dir sm_86"
+    },
+    {
+      "arch": "sm_86",
+      "slug": "gemm_hmma_bf16_sm80",
+      "shape_point": "trace_l2_accuracy_xl",
+      "binary_sha256": "678e939bd0842056cb6e3c3fc585f372f8ec71333c362b05134421ff365397aa",
+      "kernel_signature_sha256": "8d74efecaa33ede92fae0b0173b9c442199ef5314c30a039792ccb2bbac5a24d",
+      "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7",
+      "workload": "portable_lcd",
+      "binary_path": "workloads/portable_lcd/gemm_hmma_bf16_sm80/gemm_hmma_bf16_sm80_run",
+      "binary_present": true,
+      "binary_arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "arch_gate_excludes_sm_86": false,
+      "trace_dir": "workloads/portable_lcd/results/gemm_hmma_bf16_sm80/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl",
+      "trace_present": false,
+      "sidecar_paths": {
+        "sharing_locality": "workloads/portable_lcd/results/gemm_hmma_bf16_sm80/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sharing_locality/sharing_locality.json",
+        "hrd_profile": "workloads/portable_lcd/results/gemm_hmma_bf16_sm80/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/hrd_profile/hrd_profile.json",
+        "sector_stream": "workloads/portable_lcd/results/gemm_hmma_bf16_sm80/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sector_stream/sector_stream.jsonl",
+        "sector_stream_mpi": "workloads/portable_lcd/results/gemm_hmma_bf16_sm80/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sector_stream/manifest_pairing_index.json"
+      },
+      "sidecars_present": {
+        "sharing_locality": false,
+        "hrd_profile": false,
+        "sector_stream": false,
+        "sector_stream_mpi": false
+      },
+      "bundle_match_path": null,
+      "bundle_present": false,
+      "proposed_action": "REBUILD_TRACE_LOCAL",
+      "action_typed_reason": null,
+      "preflight_command": "uv run --with-requirements requirements.txt --with protobuf python tools/local_labels/activation_trace_orchestrator.py --slug gemm_hmma_bf16_sm80 --shape-point trace_l2_accuracy_xl --sku rtx_3090_ti --arch-dir sm_86"
+    },
+    {
+      "arch": "sm_86",
+      "slug": "gemm_hmma_fp16_sm80",
+      "shape_point": "timing_shape",
+      "binary_sha256": "1a638194443715e18b8753bfbde32c9be79e2d59be70585b318600e12d7f6b1d",
+      "kernel_signature_sha256": "6c3c64d7b03efd3c0fab89868ff75dc052370434282ac050bbb6c21d3310f9b9",
+      "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7",
+      "workload": "portable_lcd",
+      "binary_path": "workloads/portable_lcd/gemm_hmma_fp16_sm80/gemm_hmma_fp16_sm80_run",
+      "binary_present": true,
+      "binary_arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "arch_gate_excludes_sm_86": false,
+      "trace_dir": "workloads/portable_lcd/results/gemm_hmma_fp16_sm80/rtx_3090_ti/sm_86/trace_timing_shape",
+      "trace_present": false,
+      "sidecar_paths": {
+        "sharing_locality": "workloads/portable_lcd/results/gemm_hmma_fp16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/sharing_locality/sharing_locality.json",
+        "hrd_profile": "workloads/portable_lcd/results/gemm_hmma_fp16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/hrd_profile/hrd_profile.json",
+        "sector_stream": "workloads/portable_lcd/results/gemm_hmma_fp16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/sector_stream/sector_stream.jsonl",
+        "sector_stream_mpi": "workloads/portable_lcd/results/gemm_hmma_fp16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/sector_stream/manifest_pairing_index.json"
+      },
+      "sidecars_present": {
+        "sharing_locality": false,
+        "hrd_profile": false,
+        "sector_stream": false,
+        "sector_stream_mpi": false
+      },
+      "bundle_match_path": null,
+      "bundle_present": false,
+      "proposed_action": "REBUILD_TRACE_LOCAL",
+      "action_typed_reason": null,
+      "preflight_command": "uv run --with-requirements requirements.txt --with protobuf python tools/local_labels/activation_trace_orchestrator.py --slug gemm_hmma_fp16_sm80 --shape-point timing_shape --sku rtx_3090_ti --arch-dir sm_86"
+    },
+    {
+      "arch": "sm_86",
+      "slug": "gemm_hmma_fp16_sm80",
+      "shape_point": "trace_l2_accuracy_xl",
+      "binary_sha256": "1a638194443715e18b8753bfbde32c9be79e2d59be70585b318600e12d7f6b1d",
+      "kernel_signature_sha256": "6c3c64d7b03efd3c0fab89868ff75dc052370434282ac050bbb6c21d3310f9b9",
+      "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7",
+      "workload": "portable_lcd",
+      "binary_path": "workloads/portable_lcd/gemm_hmma_fp16_sm80/gemm_hmma_fp16_sm80_run",
+      "binary_present": true,
+      "binary_arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "arch_gate_excludes_sm_86": false,
+      "trace_dir": "workloads/portable_lcd/results/gemm_hmma_fp16_sm80/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl",
+      "trace_present": false,
+      "sidecar_paths": {
+        "sharing_locality": "workloads/portable_lcd/results/gemm_hmma_fp16_sm80/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sharing_locality/sharing_locality.json",
+        "hrd_profile": "workloads/portable_lcd/results/gemm_hmma_fp16_sm80/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/hrd_profile/hrd_profile.json",
+        "sector_stream": "workloads/portable_lcd/results/gemm_hmma_fp16_sm80/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sector_stream/sector_stream.jsonl",
+        "sector_stream_mpi": "workloads/portable_lcd/results/gemm_hmma_fp16_sm80/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sector_stream/manifest_pairing_index.json"
+      },
+      "sidecars_present": {
+        "sharing_locality": false,
+        "hrd_profile": false,
+        "sector_stream": false,
+        "sector_stream_mpi": false
+      },
+      "bundle_match_path": null,
+      "bundle_present": false,
+      "proposed_action": "REBUILD_TRACE_LOCAL",
+      "action_typed_reason": null,
+      "preflight_command": "uv run --with-requirements requirements.txt --with protobuf python tools/local_labels/activation_trace_orchestrator.py --slug gemm_hmma_fp16_sm80 --shape-point trace_l2_accuracy_xl --sku rtx_3090_ti --arch-dir sm_86"
+    },
+    {
+      "arch": "sm_86",
+      "slug": "gemm_imma_int8_sm80",
+      "shape_point": "timing_shape",
+      "binary_sha256": "6cd2cf81121ff58834c36aadf8667764e676aa1cb4fd322788a95ea283cca4f8",
+      "kernel_signature_sha256": "f7154498956f308d855299538f5255af01943add22c7bd17936b2b4eb8f39ce4",
+      "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7",
+      "workload": "portable_lcd",
+      "binary_path": "workloads/portable_lcd/gemm_imma_int8_sm80/gemm_imma_int8_sm80_run",
+      "binary_present": true,
+      "binary_arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "arch_gate_excludes_sm_86": false,
+      "trace_dir": "workloads/portable_lcd/results/gemm_imma_int8_sm80/rtx_3090_ti/sm_86/trace_timing_shape",
+      "trace_present": false,
+      "sidecar_paths": {
+        "sharing_locality": "workloads/portable_lcd/results/gemm_imma_int8_sm80/rtx_3090_ti/sm_86/trace_timing_shape/sharing_locality/sharing_locality.json",
+        "hrd_profile": "workloads/portable_lcd/results/gemm_imma_int8_sm80/rtx_3090_ti/sm_86/trace_timing_shape/hrd_profile/hrd_profile.json",
+        "sector_stream": "workloads/portable_lcd/results/gemm_imma_int8_sm80/rtx_3090_ti/sm_86/trace_timing_shape/sector_stream/sector_stream.jsonl",
+        "sector_stream_mpi": "workloads/portable_lcd/results/gemm_imma_int8_sm80/rtx_3090_ti/sm_86/trace_timing_shape/sector_stream/manifest_pairing_index.json"
+      },
+      "sidecars_present": {
+        "sharing_locality": false,
+        "hrd_profile": false,
+        "sector_stream": false,
+        "sector_stream_mpi": false
+      },
+      "bundle_match_path": null,
+      "bundle_present": false,
+      "proposed_action": "REBUILD_TRACE_LOCAL",
+      "action_typed_reason": null,
+      "preflight_command": "uv run --with-requirements requirements.txt --with protobuf python tools/local_labels/activation_trace_orchestrator.py --slug gemm_imma_int8_sm80 --shape-point timing_shape --sku rtx_3090_ti --arch-dir sm_86"
+    },
+    {
+      "arch": "sm_86",
+      "slug": "gemm_imma_int8_sm80",
+      "shape_point": "trace_l2_accuracy_xl",
+      "binary_sha256": "6cd2cf81121ff58834c36aadf8667764e676aa1cb4fd322788a95ea283cca4f8",
+      "kernel_signature_sha256": "f7154498956f308d855299538f5255af01943add22c7bd17936b2b4eb8f39ce4",
+      "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7",
+      "workload": "portable_lcd",
+      "binary_path": "workloads/portable_lcd/gemm_imma_int8_sm80/gemm_imma_int8_sm80_run",
+      "binary_present": true,
+      "binary_arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "arch_gate_excludes_sm_86": false,
+      "trace_dir": "workloads/portable_lcd/results/gemm_imma_int8_sm80/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl",
+      "trace_present": false,
+      "sidecar_paths": {
+        "sharing_locality": "workloads/portable_lcd/results/gemm_imma_int8_sm80/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sharing_locality/sharing_locality.json",
+        "hrd_profile": "workloads/portable_lcd/results/gemm_imma_int8_sm80/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/hrd_profile/hrd_profile.json",
+        "sector_stream": "workloads/portable_lcd/results/gemm_imma_int8_sm80/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sector_stream/sector_stream.jsonl",
+        "sector_stream_mpi": "workloads/portable_lcd/results/gemm_imma_int8_sm80/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sector_stream/manifest_pairing_index.json"
+      },
+      "sidecars_present": {
+        "sharing_locality": false,
+        "hrd_profile": false,
+        "sector_stream": false,
+        "sector_stream_mpi": false
+      },
+      "bundle_match_path": null,
+      "bundle_present": false,
+      "proposed_action": "REBUILD_TRACE_LOCAL",
+      "action_typed_reason": null,
+      "preflight_command": "uv run --with-requirements requirements.txt --with protobuf python tools/local_labels/activation_trace_orchestrator.py --slug gemm_imma_int8_sm80 --shape-point trace_l2_accuracy_xl --sku rtx_3090_ti --arch-dir sm_86"
+    },
+    {
+      "arch": "sm_86",
+      "slug": "gemm_sparse_2to4_bf16_sm80",
+      "shape_point": "timing_shape",
+      "binary_sha256": "dac635cbb91e33c54424581f6527dae3be4c1cd7fddf170c32bd055296952963",
+      "kernel_signature_sha256": "5f2fb866479f938277d0dae62cce21626e6c56c68c8e4e447739f5919aac2f9e",
+      "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7",
+      "workload": "portable_lcd",
+      "binary_path": "workloads/portable_lcd/gemm_sparse_2to4_bf16_sm80/gemm_sparse_2to4_bf16_sm80_run",
+      "binary_present": true,
+      "binary_arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "arch_gate_excludes_sm_86": false,
+      "trace_dir": "workloads/portable_lcd/results/gemm_sparse_2to4_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape",
+      "trace_present": false,
+      "sidecar_paths": {
+        "sharing_locality": "workloads/portable_lcd/results/gemm_sparse_2to4_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/sharing_locality/sharing_locality.json",
+        "hrd_profile": "workloads/portable_lcd/results/gemm_sparse_2to4_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/hrd_profile/hrd_profile.json",
+        "sector_stream": "workloads/portable_lcd/results/gemm_sparse_2to4_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/sector_stream/sector_stream.jsonl",
+        "sector_stream_mpi": "workloads/portable_lcd/results/gemm_sparse_2to4_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/sector_stream/manifest_pairing_index.json"
+      },
+      "sidecars_present": {
+        "sharing_locality": false,
+        "hrd_profile": false,
+        "sector_stream": false,
+        "sector_stream_mpi": false
+      },
+      "bundle_match_path": null,
+      "bundle_present": false,
+      "proposed_action": "REBUILD_TRACE_LOCAL",
+      "action_typed_reason": null,
+      "preflight_command": "uv run --with-requirements requirements.txt --with protobuf python tools/local_labels/activation_trace_orchestrator.py --slug gemm_sparse_2to4_bf16_sm80 --shape-point timing_shape --sku rtx_3090_ti --arch-dir sm_86"
+    },
+    {
+      "arch": "sm_86",
+      "slug": "int8_imma_gemm_traceable",
+      "shape_point": "trace_l2_accuracy_xl",
+      "binary_sha256": "8420371880a1b9c093d5fb786de04402e11e90f4aabebfe6437e09636d7584d2",
+      "kernel_signature_sha256": "95d0f8bfec09679edc1704ded569e87863e7910b9cd02d556e1cacf113e6ec09",
+      "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7",
+      "workload": "simbench_bw",
+      "binary_path": "workloads/simbench_bw/l1/int8_imma_gemm_traceable/int8_imma_gemm_traceable_run",
+      "binary_present": true,
+      "binary_arch_gate": [
+        "sm_86",
+        "sm_90a",
+        "sm_120"
+      ],
+      "arch_gate_excludes_sm_86": false,
+      "trace_dir": "workloads/simbench_bw/results/int8_imma_gemm_traceable/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl",
+      "trace_present": false,
+      "sidecar_paths": {
+        "sharing_locality": "workloads/simbench_bw/results/int8_imma_gemm_traceable/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sharing_locality/sharing_locality.json",
+        "hrd_profile": "workloads/simbench_bw/results/int8_imma_gemm_traceable/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/hrd_profile/hrd_profile.json",
+        "sector_stream": "workloads/simbench_bw/results/int8_imma_gemm_traceable/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sector_stream/sector_stream.jsonl",
+        "sector_stream_mpi": "workloads/simbench_bw/results/int8_imma_gemm_traceable/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sector_stream/manifest_pairing_index.json"
+      },
+      "sidecars_present": {
+        "sharing_locality": false,
+        "hrd_profile": false,
+        "sector_stream": false,
+        "sector_stream_mpi": false
+      },
+      "bundle_match_path": null,
+      "bundle_present": false,
+      "proposed_action": "REBUILD_TRACE_LOCAL",
+      "action_typed_reason": null,
+      "preflight_command": "uv run --with-requirements requirements.txt --with protobuf python workloads/simbench_bw/run_suite.py --mode trace --kernel int8_imma_gemm_traceable --shape-point trace_l2_accuracy_xl"
+    },
+    {
+      "arch": "sm_86",
+      "slug": "rmsnorm_bwd_bf16_sm80",
+      "shape_point": "timing_shape",
+      "binary_sha256": "962bd89b476b10d78a59a580436c2dae18fc371da32da7518c90ddfa2b6054ce",
+      "kernel_signature_sha256": "a1042966e9ab38785b141c9f2e70b768575024abfa0ad97ddca145143f2b83c3",
+      "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7",
+      "workload": "portable_lcd",
+      "binary_path": "workloads/portable_lcd/rmsnorm_bwd_bf16_sm80/rmsnorm_bwd_bf16_sm80_run",
+      "binary_present": true,
+      "binary_arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "arch_gate_excludes_sm_86": false,
+      "trace_dir": "workloads/portable_lcd/results/rmsnorm_bwd_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape",
+      "trace_present": false,
+      "sidecar_paths": {
+        "sharing_locality": "workloads/portable_lcd/results/rmsnorm_bwd_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/sharing_locality/sharing_locality.json",
+        "hrd_profile": "workloads/portable_lcd/results/rmsnorm_bwd_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/hrd_profile/hrd_profile.json",
+        "sector_stream": "workloads/portable_lcd/results/rmsnorm_bwd_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/sector_stream/sector_stream.jsonl",
+        "sector_stream_mpi": "workloads/portable_lcd/results/rmsnorm_bwd_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/sector_stream/manifest_pairing_index.json"
+      },
+      "sidecars_present": {
+        "sharing_locality": false,
+        "hrd_profile": false,
+        "sector_stream": false,
+        "sector_stream_mpi": false
+      },
+      "bundle_match_path": null,
+      "bundle_present": false,
+      "proposed_action": "REBUILD_TRACE_LOCAL",
+      "action_typed_reason": null,
+      "preflight_command": "uv run --with-requirements requirements.txt --with protobuf python tools/local_labels/activation_trace_orchestrator.py --slug rmsnorm_bwd_bf16_sm80 --shape-point timing_shape --sku rtx_3090_ti --arch-dir sm_86"
+    },
+    {
+      "arch": "sm_86",
+      "slug": "rmsnorm_fwd_bf16_sm80",
+      "shape_point": "timing_shape",
+      "binary_sha256": "e44f714645062197b42dda23e2a41c748e105c8e674b62305c979564d35dec21",
+      "kernel_signature_sha256": "7848654da87ddb65a3469a248bb5572f936b4650fefbb1d22aaa25f24aa6cbe2",
+      "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7",
+      "workload": "portable_lcd",
+      "binary_path": "workloads/portable_lcd/rmsnorm_fwd_bf16_sm80/rmsnorm_fwd_bf16_sm80_run",
+      "binary_present": true,
+      "binary_arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "arch_gate_excludes_sm_86": false,
+      "trace_dir": "workloads/portable_lcd/results/rmsnorm_fwd_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape",
+      "trace_present": false,
+      "sidecar_paths": {
+        "sharing_locality": "workloads/portable_lcd/results/rmsnorm_fwd_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/sharing_locality/sharing_locality.json",
+        "hrd_profile": "workloads/portable_lcd/results/rmsnorm_fwd_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/hrd_profile/hrd_profile.json",
+        "sector_stream": "workloads/portable_lcd/results/rmsnorm_fwd_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/sector_stream/sector_stream.jsonl",
+        "sector_stream_mpi": "workloads/portable_lcd/results/rmsnorm_fwd_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/sector_stream/manifest_pairing_index.json"
+      },
+      "sidecars_present": {
+        "sharing_locality": false,
+        "hrd_profile": false,
+        "sector_stream": false,
+        "sector_stream_mpi": false
+      },
+      "bundle_match_path": null,
+      "bundle_present": false,
+      "proposed_action": "REBUILD_TRACE_LOCAL",
+      "action_typed_reason": null,
+      "preflight_command": "uv run --with-requirements requirements.txt --with protobuf python tools/local_labels/activation_trace_orchestrator.py --slug rmsnorm_fwd_bf16_sm80 --shape-point timing_shape --sku rtx_3090_ti --arch-dir sm_86"
+    },
+    {
+      "arch": "sm_86",
+      "slug": "silu_fwd_bf16_sm80",
+      "shape_point": "timing_shape",
+      "binary_sha256": "12b290606983bbecb919678c86fffb9a1df3e02bf66afe8487eeef085bfa6551",
+      "kernel_signature_sha256": "2681564ef5ca9026d42106bbe862a40d3e38b89b52e720a90ad39322c0ff99dc",
+      "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7",
+      "workload": "portable_lcd",
+      "binary_path": "workloads/portable_lcd/silu_fwd_bf16_sm80/silu_fwd_bf16_sm80_run",
+      "binary_present": true,
+      "binary_arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "arch_gate_excludes_sm_86": false,
+      "trace_dir": "workloads/portable_lcd/results/silu_fwd_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape",
+      "trace_present": false,
+      "sidecar_paths": {
+        "sharing_locality": "workloads/portable_lcd/results/silu_fwd_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/sharing_locality/sharing_locality.json",
+        "hrd_profile": "workloads/portable_lcd/results/silu_fwd_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/hrd_profile/hrd_profile.json",
+        "sector_stream": "workloads/portable_lcd/results/silu_fwd_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/sector_stream/sector_stream.jsonl",
+        "sector_stream_mpi": "workloads/portable_lcd/results/silu_fwd_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/sector_stream/manifest_pairing_index.json"
+      },
+      "sidecars_present": {
+        "sharing_locality": false,
+        "hrd_profile": false,
+        "sector_stream": false,
+        "sector_stream_mpi": false
+      },
+      "bundle_match_path": null,
+      "bundle_present": false,
+      "proposed_action": "REBUILD_TRACE_LOCAL",
+      "action_typed_reason": null,
+      "preflight_command": "uv run --with-requirements requirements.txt --with protobuf python tools/local_labels/activation_trace_orchestrator.py --slug silu_fwd_bf16_sm80 --shape-point timing_shape --sku rtx_3090_ti --arch-dir sm_86"
+    },
+    {
+      "arch": "sm_86",
+      "slug": "softmax_safe_bf16_sm80",
+      "shape_point": "timing_shape",
+      "binary_sha256": "68b07b4adc6918b8a5ef3f93e9973a7195e083d28e77465ca55680cc512c3cfd",
+      "kernel_signature_sha256": "dc75edc616c84481008a935794005890d51160f8eafe175a1e530098b3be3e43",
+      "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7",
+      "workload": "portable_lcd",
+      "binary_path": "workloads/portable_lcd/softmax_safe_bf16_sm80/softmax_safe_bf16_sm80_run",
+      "binary_present": true,
+      "binary_arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "arch_gate_excludes_sm_86": false,
+      "trace_dir": "workloads/portable_lcd/results/softmax_safe_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape",
+      "trace_present": false,
+      "sidecar_paths": {
+        "sharing_locality": "workloads/portable_lcd/results/softmax_safe_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/sharing_locality/sharing_locality.json",
+        "hrd_profile": "workloads/portable_lcd/results/softmax_safe_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/hrd_profile/hrd_profile.json",
+        "sector_stream": "workloads/portable_lcd/results/softmax_safe_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/sector_stream/sector_stream.jsonl",
+        "sector_stream_mpi": "workloads/portable_lcd/results/softmax_safe_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/sector_stream/manifest_pairing_index.json"
+      },
+      "sidecars_present": {
+        "sharing_locality": false,
+        "hrd_profile": false,
+        "sector_stream": false,
+        "sector_stream_mpi": false
+      },
+      "bundle_match_path": null,
+      "bundle_present": false,
+      "proposed_action": "REBUILD_TRACE_LOCAL",
+      "action_typed_reason": null,
+      "preflight_command": "uv run --with-requirements requirements.txt --with protobuf python tools/local_labels/activation_trace_orchestrator.py --slug softmax_safe_bf16_sm80 --shape-point timing_shape --sku rtx_3090_ti --arch-dir sm_86"
+    },
+    {
+      "arch": "sm_86",
+      "slug": "swiglu_fwd_bf16_sm80",
+      "shape_point": "timing_shape",
+      "binary_sha256": "ef9df6be093061fcdeff373b79601b6090c6a50434af7e53503240a683e6b9d9",
+      "kernel_signature_sha256": "6441d8ad74297007aee7e16f5c8d5360c4606b4267c8be9357d09b08e1dbb447",
+      "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7",
+      "workload": "portable_lcd",
+      "binary_path": "workloads/portable_lcd/swiglu_fwd_bf16_sm80/swiglu_fwd_bf16_sm80_run",
+      "binary_present": true,
+      "binary_arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "arch_gate_excludes_sm_86": false,
+      "trace_dir": "workloads/portable_lcd/results/swiglu_fwd_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape",
+      "trace_present": false,
+      "sidecar_paths": {
+        "sharing_locality": "workloads/portable_lcd/results/swiglu_fwd_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/sharing_locality/sharing_locality.json",
+        "hrd_profile": "workloads/portable_lcd/results/swiglu_fwd_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/hrd_profile/hrd_profile.json",
+        "sector_stream": "workloads/portable_lcd/results/swiglu_fwd_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/sector_stream/sector_stream.jsonl",
+        "sector_stream_mpi": "workloads/portable_lcd/results/swiglu_fwd_bf16_sm80/rtx_3090_ti/sm_86/trace_timing_shape/sector_stream/manifest_pairing_index.json"
+      },
+      "sidecars_present": {
+        "sharing_locality": false,
+        "hrd_profile": false,
+        "sector_stream": false,
+        "sector_stream_mpi": false
+      },
+      "bundle_match_path": null,
+      "bundle_present": false,
+      "proposed_action": "REBUILD_TRACE_LOCAL",
+      "action_typed_reason": null,
+      "preflight_command": "uv run --with-requirements requirements.txt --with protobuf python tools/local_labels/activation_trace_orchestrator.py --slug swiglu_fwd_bf16_sm80 --shape-point timing_shape --sku rtx_3090_ti --arch-dir sm_86"
+    },
+    {
+      "arch": "sm_86",
+      "slug": "swiglu_fwd_bf16_sm80",
+      "shape_point": "trace_l2_accuracy_xl",
+      "binary_sha256": "ef9df6be093061fcdeff373b79601b6090c6a50434af7e53503240a683e6b9d9",
+      "kernel_signature_sha256": "6441d8ad74297007aee7e16f5c8d5360c4606b4267c8be9357d09b08e1dbb447",
+      "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7",
+      "workload": "portable_lcd",
+      "binary_path": "workloads/portable_lcd/swiglu_fwd_bf16_sm80/swiglu_fwd_bf16_sm80_run",
+      "binary_present": true,
+      "binary_arch_gate": [
+        "sm_86",
+        "sm_90",
+        "sm_120"
+      ],
+      "arch_gate_excludes_sm_86": false,
+      "trace_dir": "workloads/portable_lcd/results/swiglu_fwd_bf16_sm80/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl",
+      "trace_present": false,
+      "sidecar_paths": {
+        "sharing_locality": "workloads/portable_lcd/results/swiglu_fwd_bf16_sm80/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sharing_locality/sharing_locality.json",
+        "hrd_profile": "workloads/portable_lcd/results/swiglu_fwd_bf16_sm80/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/hrd_profile/hrd_profile.json",
+        "sector_stream": "workloads/portable_lcd/results/swiglu_fwd_bf16_sm80/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sector_stream/sector_stream.jsonl",
+        "sector_stream_mpi": "workloads/portable_lcd/results/swiglu_fwd_bf16_sm80/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sector_stream/manifest_pairing_index.json"
+      },
+      "sidecars_present": {
+        "sharing_locality": false,
+        "hrd_profile": false,
+        "sector_stream": false,
+        "sector_stream_mpi": false
+      },
+      "bundle_match_path": null,
+      "bundle_present": false,
+      "proposed_action": "REBUILD_TRACE_LOCAL",
+      "action_typed_reason": null,
+      "preflight_command": "uv run --with-requirements requirements.txt --with protobuf python tools/local_labels/activation_trace_orchestrator.py --slug swiglu_fwd_bf16_sm80 --shape-point trace_l2_accuracy_xl --sku rtx_3090_ti --arch-dir sm_86"
+    },
+    {
+      "arch": "sm_86",
+      "slug": "tf32_hmma_gemm_traceable",
+      "shape_point": "trace_l2_accuracy_xl",
+      "binary_sha256": "cd5e564a126940b8ae16c194d5dec045a1372729417175e0af4f8ae4f89300d2",
+      "kernel_signature_sha256": "4389fe984bc721ccf9bcd759d75c23d713f5d65ae7ca07ed2e4fe24f02b6d414",
+      "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7",
+      "workload": "simbench_bw",
+      "binary_path": "workloads/simbench_bw/l1/tf32_hmma_gemm_traceable/tf32_hmma_gemm_traceable_run",
+      "binary_present": true,
+      "binary_arch_gate": [
+        "sm_86",
+        "sm_90a",
+        "sm_120"
+      ],
+      "arch_gate_excludes_sm_86": false,
+      "trace_dir": "workloads/simbench_bw/results/tf32_hmma_gemm_traceable/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl",
+      "trace_present": false,
+      "sidecar_paths": {
+        "sharing_locality": "workloads/simbench_bw/results/tf32_hmma_gemm_traceable/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sharing_locality/sharing_locality.json",
+        "hrd_profile": "workloads/simbench_bw/results/tf32_hmma_gemm_traceable/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/hrd_profile/hrd_profile.json",
+        "sector_stream": "workloads/simbench_bw/results/tf32_hmma_gemm_traceable/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sector_stream/sector_stream.jsonl",
+        "sector_stream_mpi": "workloads/simbench_bw/results/tf32_hmma_gemm_traceable/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/sector_stream/manifest_pairing_index.json"
+      },
+      "sidecars_present": {
+        "sharing_locality": false,
+        "hrd_profile": false,
+        "sector_stream": false,
+        "sector_stream_mpi": false
+      },
+      "bundle_match_path": null,
+      "bundle_present": false,
+      "proposed_action": "REBUILD_TRACE_LOCAL",
+      "action_typed_reason": null,
+      "preflight_command": "uv run --with-requirements requirements.txt --with protobuf python workloads/simbench_bw/run_suite.py --mode trace --kernel tf32_hmma_gemm_traceable --shape-point trace_l2_accuracy_xl"
+    }
+  ]
+}

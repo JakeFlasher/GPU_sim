@@ -1,0 +1,44 @@
+{
+  "name": "problem_010_gemm_n6144_k4096_cutlass",
+  "definition": "010_gemm_n6144_k4096",
+  "author": "sol-baselines-codegen",
+  "description": "fp16 GEMM C = A @ B.T (N=6144, K=4096 pinned; M varies). CUTLASS device-side template, TensorOp on Sm80, ThreadblockShape 128x128x32, fp32 accumulation, destination-passing style.",
+  "spec": {
+    "languages": [
+      "cutlass"
+    ],
+    "target_hardware": [
+      "LOCAL"
+    ],
+    "entry_point": "main.cpp::run",
+    "dependencies": [],
+    "destination_passing_style": true,
+    "binding": "torch",
+    "compile_options": {
+      "cflags": [
+        "-std=c++17"
+      ],
+      "cuda_cflags": [
+        "-O3",
+        "-std=c++17",
+        "-gencode",
+        "arch=compute_86,code=sm_86"
+      ],
+      "ld_flags": []
+    }
+  },
+  "sources": [
+    {
+      "path": "main.cpp",
+      "content": "#include <torch/extension.h>\n#include <ATen/cuda/CUDAContext.h>\n#include \"kernel.h\"\n\n// Destination-passing-style entry. Per definition.json:\n//   A: [M, K] fp16\n//   B: [N, K] fp16\n//   C (output): [M, N] fp16, pre-allocated by the eval driver.\n// N=6144, K=4096 are pinned by the problem definition; M varies.\n\nvoid run(torch::Tensor A, torch::Tensor B, torch::Tensor C) {\n    TORCH_CHECK(A.is_cuda() && B.is_cuda() && C.is_cuda(),\n                \"all tensors must be CUDA\");\n    TORCH_CHECK(A.dtype() == torch::kFloat16, \"A must be float16\");\n    TORCH_CHECK(B.dtype() == torch::kFloat16, \"B must be float16\");\n    TORCH_CHECK(C.dtype() == torch::kFloat16, \"C must be float16\");\n    TORCH_CHECK(A.is_contiguous() && B.is_contiguous() && C.is_contiguous(),\n                \"all tensors must be contiguous\");\n    TORCH_CHECK(A.dim() == 2 && B.dim() == 2 && C.dim() == 2,\n                \"A/B/C must be 2D\");\n    TORCH_CHECK(A.size(1) == B.size(1),\n                \"inner dim K must match: A is [M, K], B is [N, K]\");\n    TORCH_CHECK(C.size(0) == A.size(0) && C.size(1) == B.size(0),\n                \"C must be [M, N] with M=A.size(0), N=B.size(0)\");\n    TORCH_CHECK(B.size(0) == 6144,\n                \"N is pinned to 6144 by the problem definition\");\n    TORCH_CHECK(A.size(1) == 4096,\n                \"K is pinned to 4096 by the problem definition\");\n\n    cudaStream_t stream = at::cuda::getCurrentCUDAStream();\n    problem_010_gemm_n6144_k4096_launcher(A, B, C, stream);\n}\n\nPYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {\n    m.def(\n        \"run\", &run,\n        \"fp16 GEMM C = A @ B.T via CUTLASS TensorOp on Sm80; \"\n        \"destination-passing style (C pre-allocated).\");\n}\n"
+    },
+    {
+      "path": "kernel.cu",
+      "content": "#include \"kernel.h\"\n\n#include <cutlass/gemm/device/gemm.h>\n#include <cutlass/numeric_types.h>\n#include <cutlass/layout/matrix.h>\n#include <cutlass/arch/arch.h>\n#include <cutlass/arch/mma.h>\n\n// fp16 GEMM with fp32 accumulation: C = A @ B^T.\n//\n// Same row-major-to-mixed-layout encoding as the landed problem_004 /\n// problem_007 GEMM baselines:\n//   A: [M, K] row-major  \u2192  RowMajor    with lda = K.\n//   B: [N, K] row-major  \u2192  ColumnMajor with ldb = K (this is B^T col-major [K, N]).\n//   C: [M, N] row-major  \u2192  RowMajor    with ldc = N.\n//\n// N=6144 and K=4096 are pinned. The (6144, 4096) shape matches Llama\n// 3.1 8B's attn.qkv_proj. Threadblock 128x128x32 tiles N=6144 with 48\n// N-tiles (6144/128); K=4096 fits the 3-stage pipeline. WarpShape\n// 64x64x32 keeps four warps per CTA.\n\nnamespace {\n\nusing ElementInputA = cutlass::half_t;\nusing ElementInputB = cutlass::half_t;\nusing ElementOutput = cutlass::half_t;\nusing ElementAccumulator = float;\n\nusing LayoutInputA = cutlass::layout::RowMajor;\nusing LayoutInputB = cutlass::layout::ColumnMajor;\nusing LayoutOutput = cutlass::layout::RowMajor;\n\nusing MMAOp = cutlass::arch::OpClassTensorOp;\nusing SmArch = cutlass::arch::Sm80;\n\nusing ThreadblockShape = cutlass::gemm::GemmShape<128, 128, 32>;\nusing WarpShape = cutlass::gemm::GemmShape<64, 64, 32>;\nusing InstructionShape = cutlass::gemm::GemmShape<16, 8, 16>;\n\nusing EpilogueOp = cutlass::epilogue::thread::LinearCombination<\n    ElementOutput,\n    128 / cutlass::sizeof_bits<ElementOutput>::value,\n    ElementAccumulator,\n    ElementAccumulator>;\n\nusing SwizzleThreadBlock =\n    cutlass::gemm::threadblock::GemmIdentityThreadblockSwizzle<>;\nconstexpr int NumStages = 3;\n\nusing CutlassGemm = cutlass::gemm::device::Gemm<\n    ElementInputA, LayoutInputA,\n    ElementInputB, LayoutInputB,\n    ElementOutput, LayoutOutput,\n    ElementAccumulator,\n    MMAOp,\n    SmArch,\n    ThreadblockShape,\n    WarpShape,\n    InstructionShape,\n    EpilogueOp,\n    SwizzleThreadBlock,\n    NumStages>;\n\n}  // namespace\n\nvoid problem_010_gemm_n6144_k4096_launcher(\n    const torch::Tensor& A,\n    const torch::Tensor& B,\n    torch::Tensor& C,\n    cudaStream_t stream) {\n\n    const int M = static_cast<int>(A.size(0));\n    const int K = static_cast<int>(A.size(1));\n    const int N = static_cast<int>(B.size(0));\n\n    auto const* A_ptr =\n        reinterpret_cast<ElementInputA const*>(A.data_ptr<at::Half>());\n    auto const* B_ptr =\n        reinterpret_cast<ElementInputB const*>(B.data_ptr<at::Half>());\n    auto* C_ptr =\n        reinterpret_cast<ElementOutput*>(C.data_ptr<at::Half>());\n\n    CutlassGemm gemm_operator;\n\n    CutlassGemm::Arguments args(\n        {M, N, K},\n        {A_ptr, K},\n        {B_ptr, K},\n        {C_ptr, N},\n        {C_ptr, N},\n        {1.0f, 0.0f});\n\n    cutlass::Status status = gemm_operator(args, nullptr, stream);\n    TORCH_CHECK(\n        status == cutlass::Status::kSuccess,\n        \"CUTLASS GEMM failed: \", cutlassGetStatusString(status));\n}\n"
+    },
+    {
+      "path": "kernel.h",
+      "content": "#pragma once\n\n#include <torch/extension.h>\n#include <cuda_runtime.h>\n\n// Host launcher for the fp16 GEMM `C = A @ B.T` baseline.\n// A: [M, K] fp16 row-major. B: [N, K] fp16 row-major. C: [M, N] fp16\n// row-major (destination-passing-style; pre-allocated by the eval\n// driver). N and K are problem constants (N=6144, K=4096); M varies\n// per workload.\nvoid problem_010_gemm_n6144_k4096_launcher(\n    const torch::Tensor& A,\n    const torch::Tensor& B,\n    torch::Tensor& C,\n    cudaStream_t stream);\n"
+    }
+  ]
+}

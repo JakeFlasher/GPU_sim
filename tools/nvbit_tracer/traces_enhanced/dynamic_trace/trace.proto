@@ -1,0 +1,27 @@
+syntax = "proto3";
+
+package dynamic_trace;
+
+import "gpu_device.proto";
+import "instruction.proto";
+
+message Trace {
+  string name = 1;
+  int32 binary_version = 2;
+  string nvbit_version = 3;
+  int32 accelsim_version = 4;
+  bool is_gathered_registers_values = 5;
+  map<int64,gpu_device> gpu_device = 6;
+
+  // Trace-contract identity + capability. Net-new with the ASYNC_COPY+ATOM
+  // address-carrying contract transition (additive, per the CLAUDE.md wire-
+  // extension policy). `trace_contract_id` names the emitted contract so an
+  // old exclusion-semantics trace (field absent/empty) is never silently
+  // cross-compared with a new address-carrying one. `memory_payload_classes`
+  // lists the MemoryOpClass values for which this trace emits address records
+  // under the contract (e.g. [GLOBAL, SHARED, LOCAL, ATOMIC, ASYNC_COPY] post-
+  // flip); its ABSENCE is the legacy signal the consumer identity gates use to
+  // skip the widened ATOMIC/ASYNC enforcement on pre-transition traces.
+  string trace_contract_id = 7;
+  repeated MemoryOpClass memory_payload_classes = 8;
+}

@@ -1,0 +1,21 @@
+# NVIDIA_Manuals post-flight manifest
+# generated: 2026-05-11T23:50:48+08:00
+# columns: folder | n_md | total_bytes_md_only | source_url
+# notes: ncu_guide deleted per user request; backups at <folder>.bak-2026-05-11/
+#
+ampere_compatibility       |   11 |      23080 | https://docs.nvidia.com/cuda/ampere-compatibility-guide/
+ampere_tuning              |   11 |      24884 | https://docs.nvidia.com/cuda/ampere-tuning-guide/
+best_practices             |   73 |     261505 | https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/
+blackwell_compatibility    |   11 |      23064 | https://docs.nvidia.com/cuda/blackwell-compatibility-guide/
+blackwell_tuning           |   11 |      19852 | https://docs.nvidia.com/cuda/blackwell-tuning-guide/
+cuda_binary_utility        |   29 |     111032 | https://docs.nvidia.com/cuda/cuda-binary-utilities/
+cuda_guide                 |  192 |    1241509 | https://docs.nvidia.com/cuda/cuda-programming-guide/
+cuda_inline_ptx            |    9 |      22681 | https://docs.nvidia.com/cuda/inline-ptx-assembly/
+cuda_tile_ir               |   24 |     274850 | https://docs.nvidia.com/cuda/tile-ir/latest/
+cutile_python              |   58 |     153166 | https://docs.nvidia.com/cuda/cutile-python/
+cutlass_cute               |  380 |    1627234 | https://docs.nvidia.com/cutlass/latest/
+nvcc_guide                 |   38 |     182743 | https://docs.nvidia.com/cuda/cuda-compiler-driver-nvcc/
+nvvm_ir                    |   90 |     128648 | https://docs.nvidia.com/cuda/nvvm-ir-spec/
+ptx_compier_api            |   16 |      62132 | https://docs.nvidia.com/cuda/ptx-compiler-api/
+ptx_isa                    |  149 |    1556390 | https://docs.nvidia.com/cuda/parallel-thread-execution/
+ptx_writer_guide           |   22 |      39591 | https://docs.nvidia.com/cuda/ptx-writers-guide-to-interoperability/

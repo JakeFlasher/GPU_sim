@@ -1,0 +1,617 @@
+# sm_120 L2 cohort expansion roster — frozen Round 0.
+#
+# Pinned 30 primary + 10 replacement (slug, shape_point) candidates
+# for the sm_120 L2 cohort expansion loop. Frozen BEFORE any NCU
+# measurement runs; all downstream rounds verify the commit SHA + the
+# SHA256 of this file against the Round 0 contract before any sweep
+# starts.
+#
+# Schema invariants (enforced by
+# tools/local_labels/sm120_cohort_roster_validator.py):
+#   - Exactly 30 rows with split in {calibration, validation, holdout};
+#     exactly 10 rows with split = "replacement".
+#   - Primary split counts: 15 / 8 / 7 (calibration / validation /
+#     holdout). Each split contains >=1 row from each of memory_stress,
+#     tensor_compute, activation_norm.
+#   - Family-bucket distribution among primary: <=35% per bucket
+#     (i.e. <=10 of 30); >=6 each in the three required buckets.
+#   - Every row's family has a matching family_bucket per
+#     data/local_labels/sm120_cohort_family_buckets.toml.
+#   - level == "L2" on every cohort row. The cohort IS L2; source rows
+#     with level=="L1" are admitted to the cohort under the cohort-row
+#     level reading of AC-2.1 because the resulting NCU measurement
+#     reports L2 cache_layer via the trace_l2_accuracy_xl shape.
+#   - arch_gate includes "sm_120" on every row.
+#
+# Sourcing summary:
+#   - 6 simbench_bw L1 microbenches in memory_stress (level=L1 in
+#     source, level=L2 in cohort): dram_stream_stride_mix,
+#     carveout_sensitivity_probe, l2_persisting_window_sweep,
+#     l2_prefetch_hint_sweep, working_set_capacity_sweep,
+#     warm_cold_pair_relaunch — all already-buildable on this host.
+#   - 15 portable_lcd kernels across all three required buckets, with
+#     up to 4 shape_points per kernel (correctness_shape, timing_shape,
+#     trace_l2_accuracy_lg, trace_l2_accuracy_xl) handled by
+#     workloads/portable_lcd/runner_common.h.
+#
+# Replacement pool semantics: a primary row that fails the AC-2.5
+# buildability preflight or the AC-3 NCU sweep with a typed exclusion
+# may be substituted with a replacement row from the same family_bucket;
+# the substitution is logged in the round summary and counts as a
+# typed-excluded primary cell (NOT a silent relaxation).
+
+schema_version = 1
+
+# ---------------------------------------------------------------------
+# PRIMARY 30
+# ---------------------------------------------------------------------
+
+# --- memory_stress primary (10): 5 calibration + 3 validation + 2 holdout ---
+
+[[rows]]
+slug = "dram_stream_stride_mix"
+shape_point = "trace_l2_accuracy_xl"
+family = "memory"
+family_bucket = "memory_stress"
+level = "L2"
+arch_gate = ["sm_90a", "sm_120"]
+split = "calibration"
+binary_path = "workloads/simbench_bw/l1/dram_stream_stride_mix/dram_stream_stride_mix_run"
+manifest_path = "workloads/simbench_bw/l1/dram_stream_stride_mix/results/dram_stream_stride_mix/trace_l2_accuracy_xl/manifest.json"
+trace_json_path = "workloads/simbench_bw/results/dram_stream_stride_mix/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/dynamic_trace.pb"
+roster_source = "simbench_bw"
+candidate_order = 0
+
+[[rows]]
+slug = "carveout_sensitivity_probe"
+shape_point = "trace_l2_accuracy_xl"
+family = "cache"
+family_bucket = "memory_stress"
+level = "L2"
+arch_gate = ["sm_90a", "sm_120"]
+split = "calibration"
+binary_path = "workloads/simbench_bw/l1/carveout_sensitivity_probe/carveout_sensitivity_probe_run"
+manifest_path = "workloads/simbench_bw/l1/carveout_sensitivity_probe/results/carveout_sensitivity_probe/trace_l2_accuracy_xl/manifest.json"
+trace_json_path = "workloads/simbench_bw/results/carveout_sensitivity_probe/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/dynamic_trace.pb"
+roster_source = "simbench_bw"
+candidate_order = 1
+
+[[rows]]
+slug = "l2_persisting_window_sweep"
+shape_point = "trace_l2_accuracy_xl"
+family = "cache"
+family_bucket = "memory_stress"
+level = "L2"
+arch_gate = ["sm_90a", "sm_120"]
+split = "calibration"
+binary_path = "workloads/simbench_bw/l1/l2_persisting_window_sweep/l2_persisting_window_sweep_run"
+manifest_path = "workloads/simbench_bw/l1/l2_persisting_window_sweep/results/l2_persisting_window_sweep/trace_l2_accuracy_xl/manifest.json"
+trace_json_path = "workloads/simbench_bw/results/l2_persisting_window_sweep/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/dynamic_trace.pb"
+roster_source = "simbench_bw"
+candidate_order = 2
+
+[[rows]]
+slug = "l2_prefetch_hint_sweep"
+shape_point = "trace_l2_accuracy_xl"
+family = "cache"
+family_bucket = "memory_stress"
+level = "L2"
+arch_gate = ["sm_90a", "sm_120"]
+split = "calibration"
+binary_path = "workloads/simbench_bw/l1/l2_prefetch_hint_sweep/l2_prefetch_hint_sweep_run"
+manifest_path = "workloads/simbench_bw/l1/l2_prefetch_hint_sweep/results/l2_prefetch_hint_sweep/trace_l2_accuracy_xl/manifest.json"
+trace_json_path = "workloads/simbench_bw/results/l2_prefetch_hint_sweep/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/dynamic_trace.pb"
+roster_source = "simbench_bw"
+candidate_order = 3
+
+[[rows]]
+slug = "working_set_capacity_sweep"
+shape_point = "trace_l2_accuracy_xl"
+family = "cache"
+family_bucket = "memory_stress"
+level = "L2"
+arch_gate = ["sm_90a", "sm_120"]
+split = "calibration"
+binary_path = "workloads/simbench_bw/l1/working_set_capacity_sweep/working_set_capacity_sweep_run"
+manifest_path = "workloads/simbench_bw/l1/working_set_capacity_sweep/results/working_set_capacity_sweep/trace_l2_accuracy_xl/manifest.json"
+trace_json_path = "workloads/simbench_bw/results/working_set_capacity_sweep/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/dynamic_trace.pb"
+roster_source = "simbench_bw"
+candidate_order = 4
+
+[[rows]]
+slug = "warm_cold_pair_relaunch"
+shape_point = "trace_l2_accuracy_xl"
+family = "cache"
+family_bucket = "memory_stress"
+level = "L2"
+arch_gate = ["sm_90a", "sm_120"]
+split = "validation"
+binary_path = "workloads/simbench_bw/l1/warm_cold_pair_relaunch/warm_cold_pair_relaunch_run"
+manifest_path = "workloads/simbench_bw/l1/warm_cold_pair_relaunch/results/warm_cold_pair_relaunch/trace_l2_accuracy_xl/manifest.json"
+trace_json_path = "workloads/simbench_bw/results/warm_cold_pair_relaunch/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/dynamic_trace.pb"
+roster_source = "simbench_bw"
+candidate_order = 5
+
+[[rows]]
+slug = "cross_entropy_fwd_fp32_sm80"
+shape_point = "timing_shape"
+family = "loss"
+family_bucket = "memory_stress"
+level = "L2"
+arch_gate = ["sm_86", "sm_90", "sm_120"]
+split = "validation"
+binary_path = "workloads/portable_lcd/cross_entropy_fwd_fp32_sm80/cross_entropy_fwd_fp32_sm80_run"
+manifest_path = "workloads/portable_lcd/cross_entropy_fwd_fp32_sm80/results/cross_entropy_fwd_fp32_sm80/timing_shape/manifest.json"
+trace_json_path = "workloads/portable_lcd/results/cross_entropy_fwd_fp32_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/dynamic_trace.pb"
+roster_source = "portable_lcd"
+candidate_order = 6
+
+[[rows]]
+slug = "embedding_gather_int32_sm80"
+shape_point = "timing_shape"
+family = "embedding"
+family_bucket = "memory_stress"
+level = "L2"
+arch_gate = ["sm_86", "sm_90", "sm_120"]
+split = "validation"
+binary_path = "workloads/portable_lcd/embedding_gather_int32_sm80/embedding_gather_int32_sm80_run"
+manifest_path = "workloads/portable_lcd/embedding_gather_int32_sm80/results/embedding_gather_int32_sm80/timing_shape/manifest.json"
+trace_json_path = "workloads/portable_lcd/results/embedding_gather_int32_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/dynamic_trace.pb"
+roster_source = "portable_lcd"
+candidate_order = 7
+
+[[rows]]
+slug = "cross_entropy_fwd_fp32_sm80"
+shape_point = "trace_l2_accuracy_xl"
+family = "loss"
+family_bucket = "memory_stress"
+level = "L2"
+arch_gate = ["sm_86", "sm_90", "sm_120"]
+split = "holdout"
+binary_path = "workloads/portable_lcd/cross_entropy_fwd_fp32_sm80/cross_entropy_fwd_fp32_sm80_run"
+manifest_path = "workloads/portable_lcd/cross_entropy_fwd_fp32_sm80/results/cross_entropy_fwd_fp32_sm80/trace_l2_accuracy_xl/manifest.json"
+trace_json_path = "workloads/portable_lcd/results/cross_entropy_fwd_fp32_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/dynamic_trace.pb"
+roster_source = "portable_lcd"
+candidate_order = 8
+
+[[rows]]
+slug = "embedding_gather_int32_sm80"
+shape_point = "trace_l2_accuracy_xl"
+family = "embedding"
+family_bucket = "memory_stress"
+level = "L2"
+arch_gate = ["sm_86", "sm_90", "sm_120"]
+split = "holdout"
+binary_path = "workloads/portable_lcd/embedding_gather_int32_sm80/embedding_gather_int32_sm80_run"
+manifest_path = "workloads/portable_lcd/embedding_gather_int32_sm80/results/embedding_gather_int32_sm80/trace_l2_accuracy_xl/manifest.json"
+trace_json_path = "workloads/portable_lcd/results/embedding_gather_int32_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/dynamic_trace.pb"
+roster_source = "portable_lcd"
+candidate_order = 9
+
+# --- tensor_compute primary (10): 5 calibration + 3 validation + 2 holdout ---
+
+[[rows]]
+slug = "gemm_hmma_bf16_sm80"
+shape_point = "timing_shape"
+family = "gemm_hmma"
+family_bucket = "tensor_compute"
+level = "L2"
+arch_gate = ["sm_86", "sm_90", "sm_120"]
+split = "calibration"
+binary_path = "workloads/portable_lcd/gemm_hmma_bf16_sm80/gemm_hmma_bf16_sm80_run"
+manifest_path = "workloads/portable_lcd/gemm_hmma_bf16_sm80/results/gemm_hmma_bf16_sm80/timing_shape/manifest.json"
+trace_json_path = "workloads/portable_lcd/results/gemm_hmma_bf16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/dynamic_trace.pb"
+roster_source = "portable_lcd"
+candidate_order = 10
+
+[[rows]]
+slug = "gemm_hmma_bf16_sm80"
+shape_point = "trace_l2_accuracy_xl"
+family = "gemm_hmma"
+family_bucket = "tensor_compute"
+level = "L2"
+arch_gate = ["sm_86", "sm_90", "sm_120"]
+split = "calibration"
+binary_path = "workloads/portable_lcd/gemm_hmma_bf16_sm80/gemm_hmma_bf16_sm80_run"
+manifest_path = "workloads/portable_lcd/gemm_hmma_bf16_sm80/results/gemm_hmma_bf16_sm80/trace_l2_accuracy_xl/manifest.json"
+trace_json_path = "workloads/portable_lcd/results/gemm_hmma_bf16_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/dynamic_trace.pb"
+roster_source = "portable_lcd"
+candidate_order = 11
+
+[[rows]]
+slug = "gemm_hmma_fp16_sm80"
+shape_point = "timing_shape"
+family = "gemm_hmma"
+family_bucket = "tensor_compute"
+level = "L2"
+arch_gate = ["sm_86", "sm_90", "sm_120"]
+split = "calibration"
+binary_path = "workloads/portable_lcd/gemm_hmma_fp16_sm80/gemm_hmma_fp16_sm80_run"
+manifest_path = "workloads/portable_lcd/gemm_hmma_fp16_sm80/results/gemm_hmma_fp16_sm80/timing_shape/manifest.json"
+trace_json_path = "workloads/portable_lcd/results/gemm_hmma_fp16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/dynamic_trace.pb"
+roster_source = "portable_lcd"
+candidate_order = 12
+
+[[rows]]
+slug = "gemm_imma_int8_sm80"
+shape_point = "timing_shape"
+family = "gemm_imma"
+family_bucket = "tensor_compute"
+level = "L2"
+arch_gate = ["sm_86", "sm_90", "sm_120"]
+split = "calibration"
+binary_path = "workloads/portable_lcd/gemm_imma_int8_sm80/gemm_imma_int8_sm80_run"
+manifest_path = "workloads/portable_lcd/gemm_imma_int8_sm80/results/gemm_imma_int8_sm80/timing_shape/manifest.json"
+trace_json_path = "workloads/portable_lcd/results/gemm_imma_int8_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/dynamic_trace.pb"
+roster_source = "portable_lcd"
+candidate_order = 13
+
+[[rows]]
+slug = "flash_attn_fwd_bf16_sm80"
+shape_point = "timing_shape"
+family = "attention"
+family_bucket = "tensor_compute"
+level = "L2"
+arch_gate = ["sm_86", "sm_90", "sm_120"]
+split = "calibration"
+binary_path = "workloads/portable_lcd/flash_attn_fwd_bf16_sm80/flash_attn_fwd_bf16_sm80_run"
+manifest_path = "workloads/portable_lcd/flash_attn_fwd_bf16_sm80/results/flash_attn_fwd_bf16_sm80/timing_shape/manifest.json"
+trace_json_path = "workloads/portable_lcd/results/flash_attn_fwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/dynamic_trace.pb"
+roster_source = "portable_lcd"
+candidate_order = 14
+
+[[rows]]
+slug = "gemm_imma_int8_sm80"
+shape_point = "trace_l2_accuracy_xl"
+family = "gemm_imma"
+family_bucket = "tensor_compute"
+level = "L2"
+arch_gate = ["sm_86", "sm_90", "sm_120"]
+split = "validation"
+binary_path = "workloads/portable_lcd/gemm_imma_int8_sm80/gemm_imma_int8_sm80_run"
+manifest_path = "workloads/portable_lcd/gemm_imma_int8_sm80/results/gemm_imma_int8_sm80/trace_l2_accuracy_xl/manifest.json"
+trace_json_path = "workloads/portable_lcd/results/gemm_imma_int8_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/dynamic_trace.pb"
+roster_source = "portable_lcd"
+candidate_order = 15
+
+[[rows]]
+slug = "gemm_sparse_2to4_bf16_sm80"
+shape_point = "timing_shape"
+family = "gemm_sparse"
+family_bucket = "tensor_compute"
+level = "L2"
+arch_gate = ["sm_86", "sm_90", "sm_120"]
+split = "validation"
+binary_path = "workloads/portable_lcd/gemm_sparse_2to4_bf16_sm80/gemm_sparse_2to4_bf16_sm80_run"
+manifest_path = "workloads/portable_lcd/gemm_sparse_2to4_bf16_sm80/results/gemm_sparse_2to4_bf16_sm80/timing_shape/manifest.json"
+trace_json_path = "workloads/portable_lcd/results/gemm_sparse_2to4_bf16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/dynamic_trace.pb"
+roster_source = "portable_lcd"
+candidate_order = 16
+
+[[rows]]
+slug = "flash_attn_bwd_bf16_sm80"
+shape_point = "timing_shape"
+family = "attention"
+family_bucket = "tensor_compute"
+level = "L2"
+arch_gate = ["sm_86", "sm_90", "sm_120"]
+split = "validation"
+binary_path = "workloads/portable_lcd/flash_attn_bwd_bf16_sm80/flash_attn_bwd_bf16_sm80_run"
+manifest_path = "workloads/portable_lcd/flash_attn_bwd_bf16_sm80/results/flash_attn_bwd_bf16_sm80/timing_shape/manifest.json"
+trace_json_path = "workloads/portable_lcd/results/flash_attn_bwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/dynamic_trace.pb"
+roster_source = "portable_lcd"
+candidate_order = 17
+
+[[rows]]
+slug = "gemm_hmma_fp16_sm80"
+shape_point = "trace_l2_accuracy_xl"
+family = "gemm_hmma"
+family_bucket = "tensor_compute"
+level = "L2"
+arch_gate = ["sm_86", "sm_90", "sm_120"]
+split = "holdout"
+binary_path = "workloads/portable_lcd/gemm_hmma_fp16_sm80/gemm_hmma_fp16_sm80_run"
+manifest_path = "workloads/portable_lcd/gemm_hmma_fp16_sm80/results/gemm_hmma_fp16_sm80/trace_l2_accuracy_xl/manifest.json"
+trace_json_path = "workloads/portable_lcd/results/gemm_hmma_fp16_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/dynamic_trace.pb"
+roster_source = "portable_lcd"
+candidate_order = 18
+
+[[rows]]
+slug = "conv2d_implicit_gemm_bf16_sm80"
+shape_point = "timing_shape"
+family = "conv2d"
+family_bucket = "tensor_compute"
+level = "L2"
+arch_gate = ["sm_86", "sm_90", "sm_120"]
+split = "holdout"
+binary_path = "workloads/portable_lcd/conv2d_implicit_gemm_bf16_sm80/conv2d_implicit_gemm_bf16_sm80_run"
+manifest_path = "workloads/portable_lcd/conv2d_implicit_gemm_bf16_sm80/results/conv2d_implicit_gemm_bf16_sm80/timing_shape/manifest.json"
+trace_json_path = "workloads/portable_lcd/results/conv2d_implicit_gemm_bf16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/dynamic_trace.pb"
+roster_source = "portable_lcd"
+candidate_order = 19
+
+# --- activation_norm primary (10): 5 calibration + 2 validation + 3 holdout ---
+
+[[rows]]
+slug = "rmsnorm_fwd_bf16_sm80"
+shape_point = "timing_shape"
+family = "norm_fwd"
+family_bucket = "activation_norm"
+level = "L2"
+arch_gate = ["sm_86", "sm_90", "sm_120"]
+split = "calibration"
+binary_path = "workloads/portable_lcd/rmsnorm_fwd_bf16_sm80/rmsnorm_fwd_bf16_sm80_run"
+manifest_path = "workloads/portable_lcd/rmsnorm_fwd_bf16_sm80/results/rmsnorm_fwd_bf16_sm80/timing_shape/manifest.json"
+trace_json_path = "workloads/portable_lcd/results/rmsnorm_fwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/dynamic_trace.pb"
+roster_source = "portable_lcd"
+candidate_order = 20
+
+[[rows]]
+slug = "rmsnorm_fwd_bf16_sm80"
+shape_point = "trace_l2_accuracy_xl"
+family = "norm_fwd"
+family_bucket = "activation_norm"
+level = "L2"
+arch_gate = ["sm_86", "sm_90", "sm_120"]
+split = "calibration"
+binary_path = "workloads/portable_lcd/rmsnorm_fwd_bf16_sm80/rmsnorm_fwd_bf16_sm80_run"
+manifest_path = "workloads/portable_lcd/rmsnorm_fwd_bf16_sm80/results/rmsnorm_fwd_bf16_sm80/trace_l2_accuracy_xl/manifest.json"
+trace_json_path = "workloads/portable_lcd/results/rmsnorm_fwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/dynamic_trace.pb"
+roster_source = "portable_lcd"
+candidate_order = 21
+
+[[rows]]
+slug = "layernorm_fwd_bf16_sm80"
+shape_point = "timing_shape"
+family = "norm_fwd"
+family_bucket = "activation_norm"
+level = "L2"
+arch_gate = ["sm_86", "sm_90", "sm_120"]
+split = "calibration"
+binary_path = "workloads/portable_lcd/layernorm_fwd_bf16_sm80/layernorm_fwd_bf16_sm80_run"
+manifest_path = "workloads/portable_lcd/layernorm_fwd_bf16_sm80/results/layernorm_fwd_bf16_sm80/timing_shape/manifest.json"
+trace_json_path = "workloads/portable_lcd/results/layernorm_fwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/dynamic_trace.pb"
+roster_source = "portable_lcd"
+candidate_order = 22
+
+[[rows]]
+slug = "softmax_safe_bf16_sm80"
+shape_point = "timing_shape"
+family = "softmax"
+family_bucket = "activation_norm"
+level = "L2"
+arch_gate = ["sm_86", "sm_90", "sm_120"]
+split = "calibration"
+binary_path = "workloads/portable_lcd/softmax_safe_bf16_sm80/softmax_safe_bf16_sm80_run"
+manifest_path = "workloads/portable_lcd/softmax_safe_bf16_sm80/results/softmax_safe_bf16_sm80/timing_shape/manifest.json"
+trace_json_path = "workloads/portable_lcd/results/softmax_safe_bf16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/dynamic_trace.pb"
+roster_source = "portable_lcd"
+candidate_order = 23
+
+[[rows]]
+slug = "swiglu_fwd_bf16_sm80"
+shape_point = "timing_shape"
+family = "activation"
+family_bucket = "activation_norm"
+level = "L2"
+arch_gate = ["sm_86", "sm_90", "sm_120"]
+split = "calibration"
+binary_path = "workloads/portable_lcd/swiglu_fwd_bf16_sm80/swiglu_fwd_bf16_sm80_run"
+manifest_path = "workloads/portable_lcd/swiglu_fwd_bf16_sm80/results/swiglu_fwd_bf16_sm80/timing_shape/manifest.json"
+trace_json_path = "workloads/portable_lcd/results/swiglu_fwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/dynamic_trace.pb"
+roster_source = "portable_lcd"
+candidate_order = 24
+
+[[rows]]
+slug = "layernorm_fwd_bf16_sm80"
+shape_point = "trace_l2_accuracy_xl"
+family = "norm_fwd"
+family_bucket = "activation_norm"
+level = "L2"
+arch_gate = ["sm_86", "sm_90", "sm_120"]
+split = "validation"
+binary_path = "workloads/portable_lcd/layernorm_fwd_bf16_sm80/layernorm_fwd_bf16_sm80_run"
+manifest_path = "workloads/portable_lcd/layernorm_fwd_bf16_sm80/results/layernorm_fwd_bf16_sm80/trace_l2_accuracy_xl/manifest.json"
+trace_json_path = "workloads/portable_lcd/results/layernorm_fwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/dynamic_trace.pb"
+roster_source = "portable_lcd"
+candidate_order = 25
+
+[[rows]]
+slug = "softmax_safe_bf16_sm80"
+shape_point = "trace_l2_accuracy_xl"
+family = "softmax"
+family_bucket = "activation_norm"
+level = "L2"
+arch_gate = ["sm_86", "sm_90", "sm_120"]
+split = "validation"
+binary_path = "workloads/portable_lcd/softmax_safe_bf16_sm80/softmax_safe_bf16_sm80_run"
+manifest_path = "workloads/portable_lcd/softmax_safe_bf16_sm80/results/softmax_safe_bf16_sm80/trace_l2_accuracy_xl/manifest.json"
+trace_json_path = "workloads/portable_lcd/results/softmax_safe_bf16_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/dynamic_trace.pb"
+roster_source = "portable_lcd"
+candidate_order = 26
+
+[[rows]]
+slug = "swiglu_fwd_bf16_sm80"
+shape_point = "trace_l2_accuracy_xl"
+family = "activation"
+family_bucket = "activation_norm"
+level = "L2"
+arch_gate = ["sm_86", "sm_90", "sm_120"]
+split = "holdout"
+binary_path = "workloads/portable_lcd/swiglu_fwd_bf16_sm80/swiglu_fwd_bf16_sm80_run"
+manifest_path = "workloads/portable_lcd/swiglu_fwd_bf16_sm80/results/swiglu_fwd_bf16_sm80/trace_l2_accuracy_xl/manifest.json"
+trace_json_path = "workloads/portable_lcd/results/swiglu_fwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/dynamic_trace.pb"
+roster_source = "portable_lcd"
+candidate_order = 27
+
+[[rows]]
+slug = "silu_fwd_bf16_sm80"
+shape_point = "timing_shape"
+family = "activation"
+family_bucket = "activation_norm"
+level = "L2"
+arch_gate = ["sm_86", "sm_90", "sm_120"]
+split = "holdout"
+binary_path = "workloads/portable_lcd/silu_fwd_bf16_sm80/silu_fwd_bf16_sm80_run"
+manifest_path = "workloads/portable_lcd/silu_fwd_bf16_sm80/results/silu_fwd_bf16_sm80/timing_shape/manifest.json"
+trace_json_path = "workloads/portable_lcd/results/silu_fwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/dynamic_trace.pb"
+roster_source = "portable_lcd"
+candidate_order = 28
+
+[[rows]]
+slug = "rmsnorm_bwd_bf16_sm80"
+shape_point = "timing_shape"
+family = "norm_bwd"
+family_bucket = "activation_norm"
+level = "L2"
+arch_gate = ["sm_86", "sm_90", "sm_120"]
+split = "holdout"
+binary_path = "workloads/portable_lcd/rmsnorm_bwd_bf16_sm80/rmsnorm_bwd_bf16_sm80_run"
+manifest_path = "workloads/portable_lcd/rmsnorm_bwd_bf16_sm80/results/rmsnorm_bwd_bf16_sm80/timing_shape/manifest.json"
+trace_json_path = "workloads/portable_lcd/results/rmsnorm_bwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/dynamic_trace.pb"
+roster_source = "portable_lcd"
+candidate_order = 29
+
+# ---------------------------------------------------------------------
+# REPLACEMENT 10: 4 memory_stress + 3 tensor_compute + 3 activation_norm
+# ---------------------------------------------------------------------
+
+[[rows]]
+slug = "cross_entropy_fwd_fp32_sm80"
+shape_point = "correctness_shape"
+family = "loss"
+family_bucket = "memory_stress"
+level = "L2"
+arch_gate = ["sm_86", "sm_90", "sm_120"]
+split = "replacement"
+binary_path = "workloads/portable_lcd/cross_entropy_fwd_fp32_sm80/cross_entropy_fwd_fp32_sm80_run"
+manifest_path = "workloads/portable_lcd/cross_entropy_fwd_fp32_sm80/results/cross_entropy_fwd_fp32_sm80/correctness_shape/manifest.json"
+trace_json_path = "workloads/portable_lcd/results/cross_entropy_fwd_fp32_sm80/rtx_5060_laptop/sm_120/trace_correctness_shape/dynamic_trace.pb"
+roster_source = "portable_lcd"
+candidate_order = 30
+
+[[rows]]
+slug = "cross_entropy_fwd_fp32_sm80"
+shape_point = "trace_l2_accuracy_lg"
+family = "loss"
+family_bucket = "memory_stress"
+level = "L2"
+arch_gate = ["sm_86", "sm_90", "sm_120"]
+split = "replacement"
+binary_path = "workloads/portable_lcd/cross_entropy_fwd_fp32_sm80/cross_entropy_fwd_fp32_sm80_run"
+manifest_path = "workloads/portable_lcd/cross_entropy_fwd_fp32_sm80/results/cross_entropy_fwd_fp32_sm80/trace_l2_accuracy_lg/manifest.json"
+trace_json_path = "workloads/portable_lcd/results/cross_entropy_fwd_fp32_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_lg/dynamic_trace.pb"
+roster_source = "portable_lcd"
+candidate_order = 31
+
+[[rows]]
+slug = "embedding_gather_int32_sm80"
+shape_point = "correctness_shape"
+family = "embedding"
+family_bucket = "memory_stress"
+level = "L2"
+arch_gate = ["sm_86", "sm_90", "sm_120"]
+split = "replacement"
+binary_path = "workloads/portable_lcd/embedding_gather_int32_sm80/embedding_gather_int32_sm80_run"
+manifest_path = "workloads/portable_lcd/embedding_gather_int32_sm80/results/embedding_gather_int32_sm80/correctness_shape/manifest.json"
+trace_json_path = "workloads/portable_lcd/results/embedding_gather_int32_sm80/rtx_5060_laptop/sm_120/trace_correctness_shape/dynamic_trace.pb"
+roster_source = "portable_lcd"
+candidate_order = 32
+
+[[rows]]
+slug = "embedding_gather_int32_sm80"
+shape_point = "trace_l2_accuracy_lg"
+family = "embedding"
+family_bucket = "memory_stress"
+level = "L2"
+arch_gate = ["sm_86", "sm_90", "sm_120"]
+split = "replacement"
+binary_path = "workloads/portable_lcd/embedding_gather_int32_sm80/embedding_gather_int32_sm80_run"
+manifest_path = "workloads/portable_lcd/embedding_gather_int32_sm80/results/embedding_gather_int32_sm80/trace_l2_accuracy_lg/manifest.json"
+trace_json_path = "workloads/portable_lcd/results/embedding_gather_int32_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_lg/dynamic_trace.pb"
+roster_source = "portable_lcd"
+candidate_order = 33
+
+[[rows]]
+slug = "gemm_hmma_bf16_sm80"
+shape_point = "trace_l2_accuracy_lg"
+family = "gemm_hmma"
+family_bucket = "tensor_compute"
+level = "L2"
+arch_gate = ["sm_86", "sm_90", "sm_120"]
+split = "replacement"
+binary_path = "workloads/portable_lcd/gemm_hmma_bf16_sm80/gemm_hmma_bf16_sm80_run"
+manifest_path = "workloads/portable_lcd/gemm_hmma_bf16_sm80/results/gemm_hmma_bf16_sm80/trace_l2_accuracy_lg/manifest.json"
+trace_json_path = "workloads/portable_lcd/results/gemm_hmma_bf16_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_lg/dynamic_trace.pb"
+roster_source = "portable_lcd"
+candidate_order = 34
+
+[[rows]]
+slug = "gemm_hmma_fp16_sm80"
+shape_point = "trace_l2_accuracy_lg"
+family = "gemm_hmma"
+family_bucket = "tensor_compute"
+level = "L2"
+arch_gate = ["sm_86", "sm_90", "sm_120"]
+split = "replacement"
+binary_path = "workloads/portable_lcd/gemm_hmma_fp16_sm80/gemm_hmma_fp16_sm80_run"
+manifest_path = "workloads/portable_lcd/gemm_hmma_fp16_sm80/results/gemm_hmma_fp16_sm80/trace_l2_accuracy_lg/manifest.json"
+trace_json_path = "workloads/portable_lcd/results/gemm_hmma_fp16_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_lg/dynamic_trace.pb"
+roster_source = "portable_lcd"
+candidate_order = 35
+
+[[rows]]
+slug = "flash_attn_fwd_bf16_sm80"
+shape_point = "trace_l2_accuracy_xl"
+family = "attention"
+family_bucket = "tensor_compute"
+level = "L2"
+arch_gate = ["sm_86", "sm_90", "sm_120"]
+split = "replacement"
+binary_path = "workloads/portable_lcd/flash_attn_fwd_bf16_sm80/flash_attn_fwd_bf16_sm80_run"
+manifest_path = "workloads/portable_lcd/flash_attn_fwd_bf16_sm80/results/flash_attn_fwd_bf16_sm80/trace_l2_accuracy_xl/manifest.json"
+trace_json_path = "workloads/portable_lcd/results/flash_attn_fwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/dynamic_trace.pb"
+roster_source = "portable_lcd"
+candidate_order = 36
+
+[[rows]]
+slug = "layernorm_fwd_bf16_sm80"
+shape_point = "trace_l2_accuracy_lg"
+family = "norm_fwd"
+family_bucket = "activation_norm"
+level = "L2"
+arch_gate = ["sm_86", "sm_90", "sm_120"]
+split = "replacement"
+binary_path = "workloads/portable_lcd/layernorm_fwd_bf16_sm80/layernorm_fwd_bf16_sm80_run"
+manifest_path = "workloads/portable_lcd/layernorm_fwd_bf16_sm80/results/layernorm_fwd_bf16_sm80/trace_l2_accuracy_lg/manifest.json"
+trace_json_path = "workloads/portable_lcd/results/layernorm_fwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_lg/dynamic_trace.pb"
+roster_source = "portable_lcd"
+candidate_order = 37
+
+[[rows]]
+slug = "swiglu_fwd_bf16_sm80"
+shape_point = "trace_l2_accuracy_lg"
+family = "activation"
+family_bucket = "activation_norm"
+level = "L2"
+arch_gate = ["sm_86", "sm_90", "sm_120"]
+split = "replacement"
+binary_path = "workloads/portable_lcd/swiglu_fwd_bf16_sm80/swiglu_fwd_bf16_sm80_run"
+manifest_path = "workloads/portable_lcd/swiglu_fwd_bf16_sm80/results/swiglu_fwd_bf16_sm80/trace_l2_accuracy_lg/manifest.json"
+trace_json_path = "workloads/portable_lcd/results/swiglu_fwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_lg/dynamic_trace.pb"
+roster_source = "portable_lcd"
+candidate_order = 38
+
+[[rows]]
+slug = "silu_fwd_bf16_sm80"
+shape_point = "trace_l2_accuracy_xl"
+family = "activation"
+family_bucket = "activation_norm"
+level = "L2"
+arch_gate = ["sm_86", "sm_90", "sm_120"]
+split = "replacement"
+binary_path = "workloads/portable_lcd/silu_fwd_bf16_sm80/silu_fwd_bf16_sm80_run"
+manifest_path = "workloads/portable_lcd/silu_fwd_bf16_sm80/results/silu_fwd_bf16_sm80/trace_l2_accuracy_xl/manifest.json"
+trace_json_path = "workloads/portable_lcd/results/silu_fwd_bf16_sm80/rtx_5060_laptop/sm_120/trace_trace_l2_accuracy_xl/dynamic_trace.pb"
+roster_source = "portable_lcd"
+candidate_order = 39

@@ -1,0 +1,140 @@
+{
+  "schema_version": 2,
+  "captured_at_utc": "2026-05-28T04:04:44.560821+00:00",
+  "mode": "phase1-local-smoke",
+  "host": {
+    "kernel": "Linux-7.0.5-arch1-1-x86_64-with-glibc2.43",
+    "arch": "x86_64",
+    "python_version": "3.12.12",
+    "hostname": "cachyos-x8664"
+  },
+  "required_probes": [
+    "nvcc",
+    "driver",
+    "cuda_runtime",
+    "device",
+    "cutlass",
+    "nvbit_metrics_tool",
+    "cache_replay_native_available"
+  ],
+  "required_prefer_probes": [],
+  "recommended_probes": [
+    "sm_100a_compile_proof",
+    "sm_100a_cubin_disasm",
+    "nsys",
+    "compute_sanitizer",
+    "cupti",
+    "storage"
+  ],
+  "checks": {
+    "nvcc": {
+      "status": "ok",
+      "version": "13.2",
+      "command": "nvcc --version",
+      "exit_code": 0
+    },
+    "driver": {
+      "status": "ok",
+      "version": "595.71.05",
+      "command": "nvidia-smi --query-gpu=driver_version",
+      "exit_code": 0
+    },
+    "cuda_runtime": {
+      "status": "ok",
+      "version_from_nvcc": "13.2",
+      "note": "runtime version inferred from nvcc; for an authoritative reading run cudaRuntimeGetVersion() via a host stub compile."
+    },
+    "device": {
+      "status": "ok",
+      "device_name": "NVIDIA GeForce RTX 3090 Ti",
+      "compute_capability": "8.6",
+      "is_sm_100_family": false,
+      "is_sm_120_family": false,
+      "memory_total": "24564 MiB",
+      "memory_free": "23841 MiB",
+      "phase_2_target": false
+    },
+    "cutlass": {
+      "status": "ok",
+      "version": "4.4.2",
+      "header_path": "/home/jakeshea/3090ti_5060laptop_cross_study/3090ti_5060laptop_cross_study/solbench_baseline/cutlass/include/cutlass/version.h"
+    },
+    "sm_100a_compile_proof": {
+      "status": "ok",
+      "command": "nvcc -c stub.cu -gencode arch=compute_100a,code=sm_100a (+ metric_extractor.cu + inject_funcs.cu)",
+      "exit_code": 0,
+      "substatus": {
+        "stub_compile": {
+          "status": "ok",
+          "command": "nvcc -c stub.cu -gencode arch=compute_100a,code=sm_100a",
+          "exit_code": 0
+        },
+        "metric_extractor_compile": {
+          "status": "ok",
+          "compiled_sources": [
+            "metric_extractor.cu",
+            "inject_funcs.cu"
+          ],
+          "command_metric_extractor_cu": "nvcc -dc -c -std=c++11 -I/home/jakeshea/3090ti_5060laptop_cross_study/3090ti_5060laptop_cross_study/solbench_baseline/nvbit_tracer/nvbit_release/core -Xptxas -cloning=no -Xcompiler -Wall -gencode arch=compute_100a,code=sm_100a -Xcompiler -fPIC metric_extractor.cu",
+          "command_inject_funcs_cu": "nvcc -I/home/jakeshea/3090ti_5060laptop_cross_study/3090ti_5060laptop_cross_study/solbench_baseline/nvbit_tracer/nvbit_release/core -Xptxas -astoolspatch --keep-device-functions -gencode arch=compute_100a,code=sm_100a -Xcompiler -Wall -Xcompiler -fPIC -c inject_funcs.cu"
+        }
+      }
+    },
+    "sm_100a_cubin_disasm": {
+      "status": "ok",
+      "command": "nvcc -shared -gencode arch=compute_100a,code=sm_100a + cuobjdump -xelf all -arch sm_100a + nvdisasm",
+      "exit_code": 0,
+      "substatus": {
+        "extracted_cubins_count": 2,
+        "sass_found_in_cubin": "stub_sm_100a.2.sm_100a.cubin"
+      }
+    },
+    "cache_replay_native_available": {
+      "status": "degraded",
+      "substatus": {
+        "import_error": "No module named 'cache_analytics_replay_native'",
+        "expected_module": "cache_analytics_replay_native",
+        "operator_opt_out_env": "SIMBENCH_ALLOW_PYTHON_REPLAY_FANOUT",
+        "operator_opt_out_engaged": true,
+        "throughput_floor_sector_lookups_per_sec": 20000000
+      },
+      "waiver_reason": "Compiled cache_analytics_replay_native extension is not built; SIMBENCH_ALLOW_PYTHON_REPLAY_FANOUT=1 downgrades this probe from required-for-fanout to required-prefer. The Python backend is the fallback and the 235-pilot < 2 h replay budget is no longer guaranteed."
+    },
+    "nsys": {
+      "status": "ok",
+      "version": "NVIDIA Nsight Systems version 2025.6.3.343-256337165561v0"
+    },
+    "compute_sanitizer": {
+      "status": "ok",
+      "version": "NVIDIA (R) Compute Sanitizer"
+    },
+    "cupti": {
+      "status": "ok",
+      "library_path": "/usr/local/cuda/extras/CUPTI/lib64/libcupti.so"
+    },
+    "nvbit_metrics_tool": {
+      "status": "ok",
+      "library_path": "/home/jakeshea/3090ti_5060laptop_cross_study/3090ti_5060laptop_cross_study/solbench_baseline/nvbit_tracer/metric_extractor/metric_extractor.so",
+      "size_bytes": 3787832,
+      "mtime_utc": "2026-05-28T04:02:38.010988+00:00",
+      "substatus": {
+        "cubins_present": [
+          "sm_86"
+        ],
+        "sm_100a_present": false,
+        "host_compute_capability": "8.6",
+        "host_phase_2_target": false
+      }
+    },
+    "storage": {
+      "status": "ok",
+      "warn": false,
+      "path": "/home/jakeshea/3090ti_5060laptop_cross_study/3090ti_5060laptop_cross_study/solbench_baseline/scripts/baselines_harness/.harness_traces",
+      "free_gb": 518.29,
+      "total_gb": 951.87,
+      "warn_threshold_gb": 20.0
+    }
+  },
+  "blockers": [],
+  "ready_for_phase_2": true
+}

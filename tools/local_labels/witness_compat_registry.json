@@ -1,0 +1,33 @@
+{
+  "schema_version": 1,
+  "witnesses": [
+    {
+      "migrated_paths": [
+        {
+          "current_pinned_sha256": "c5460f516ab4f648528c0e0d787e3aa29341e350614ac167d5e40932495df04d",
+          "path": "workloads/simbench_bw/l1/dram_stream_stride_mix/Makefile",
+          "witness_sha256": "a3a9e8436c1a5b0559d59f50e795eef83311ddfc47acfe04b538e73e29fd12db"
+        },
+        {
+          "current_pinned_sha256": "815ba11c22205c11603e4a53dcbe662d38b6137b5264176ea19946a653088b28",
+          "path": "workloads/simbench_bw/l1/dram_stream_stride_mix/main.cu",
+          "witness_sha256": "47d33b81a89717f35f9afeff69477c2dc2bc8fb01f68011b47a2961f5743703d"
+        },
+        {
+          "current_pinned_sha256": "940f561bf77c2217e3190eae7fd74c1fec0a7d136c641d6518211e3b10ecf0c6",
+          "path": "workloads/simbench_bw/l2/rmsnorm_fwd_bf16/Makefile",
+          "witness_sha256": "1d01e7885f3fdc5b6cc36ee4700944d52646e0b4923d807b0587a22811de4232"
+        },
+        {
+          "current_pinned_sha256": "2ccf2c0be1e88848f5e335ecc767bf214c08aafaa0438909b3e102c85b01848e",
+          "path": "workloads/simbench_bw/l2/rmsnorm_fwd_bf16/main.cu",
+          "witness_sha256": "6eefbf3fa8f725878065dd0f2cc4e9412bb95b0ef087b19434e64ca45eaa6d29"
+        }
+      ],
+      "source_commit": "7c0b3e152606181e6cf1f869ea50fa7227bc0b02",
+      "witness_file_sha256": "d577b3850f5ed04c798b1475d06cd6f29e48f857c0dc5735f923157e26cc7750",
+      "witness_path": "data/local_labels/campaign/simbench_build_witness_sm86.json",
+      "witness_seal_sha256": "b35754e0de11bf36098131cef344cbd6074865115185798321af391fd6f33147"
+    }
+  ]
+}

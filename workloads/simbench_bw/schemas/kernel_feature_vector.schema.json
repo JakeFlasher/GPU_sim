@@ -1,0 +1,256 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "simbench_bw/schemas/kernel_feature_vector.schema.json",
+  "title": "Per-kernel six-axis feature vector",
+  "description": "Closed-object schema for the per-kernel feature-vector sidecar emitted jointly by `nvbit_trace_summary_adapter.py::emit_kernel_feature_vector()` (axes 1, 2, 3, axis-5.predication_density, axis 6) and `static_sass_features.py` (axis 4, axis-5.register_usage). The composite artifact captures six structural axes that any simulator predicting the kernel's wall-clock or microarchitectural behavior must reproduce: (1) dynamic divergence profile, (2) memory-access stride distribution, (3) per-thread instruction count distribution, (4) static SASS mnemonic family histogram, (5) composite register-usage + predication-density axis with mixed static-dynamic claim semantics, (6) optional SMID migration count gated on tracer support. Each axis carries a `claim_class` enum that controls whether the axis can carry a load-bearing identifiability claim or only a structural sanity check; consumers that violate the claim_class constraint emit a typed `claim_uses_sanity_check_axis_only` diagnostic and the claim is rejected.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "slug",
+    "shape_point",
+    "repeat_index",
+    "launch_index",
+    "kernel_name",
+    "kernel_signature_sha256",
+    "binary_sha256",
+    "claim_scope",
+    "trace_budget_status"
+  ],
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "slug": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+    "shape_point": { "type": "string", "minLength": 1 },
+    "repeat_index": { "type": "integer", "minimum": 0 },
+    "launch_index": { "type": "integer", "minimum": 0 },
+    "kernel_name": { "type": "string", "minLength": 1 },
+    "kernel_signature_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "SHA-256 over canonical kernel-signature inputs. It matches nvbit_trace_summary.schema.json for the same launch and, only when replaying retained pre-S4 dual-run evidence, the frozen CUPTI record validated by historical/cupti_activity_sidecar.v1.schema.json."
+    },
+    "binary_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "claim_scope": {
+      "type": "string",
+      "enum": ["measured_local", "methodology_transfer_only", "deferred"]
+    },
+    "axes": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dynamic_divergence_profile",
+        "memory_access_stride_distribution",
+        "per_thread_instruction_count_distribution",
+        "static_sass_mnemonic_histogram",
+        "register_usage_and_predication_density",
+        "smid_migration_count"
+      ],
+      "properties": {
+        "dynamic_divergence_profile": { "$ref": "#/$defs/axis_dynamic_divergence_profile" },
+        "memory_access_stride_distribution": { "$ref": "#/$defs/axis_memory_access_stride_distribution" },
+        "per_thread_instruction_count_distribution": { "$ref": "#/$defs/axis_per_thread_instruction_count_distribution" },
+        "static_sass_mnemonic_histogram": { "$ref": "#/$defs/axis_static_sass_mnemonic_histogram" },
+        "register_usage_and_predication_density": { "$ref": "#/$defs/axis_register_usage_and_predication_density" },
+        "smid_migration_count": { "$ref": "#/$defs/axis_smid_migration_count" }
+      },
+      "description": "The six structural axes. Required when `trace_budget_status == within_budget`; absent when `trace_budget_status == feature_vector_skipped_oversized_trace`."
+    },
+    "skip_diagnostic": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["trace_byte_count", "trace_budget_mib", "diagnostic_token"],
+      "properties": {
+        "trace_byte_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Observed NVBit trace byte count that exceeded the per-kernel budget."
+        },
+        "trace_budget_mib": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Per-kernel trace byte-count budget in MiB at the time of the skip, mirroring `run_suite.py`'s `trace_budget_mib` setting."
+        },
+        "diagnostic_token": {
+          "type": "string",
+          "const": "feature_vector_skipped_oversized_trace",
+          "description": "Typed diagnostic token. Frozen at the value the closure plan's oversized-trace skip negative test enumerates."
+        }
+      },
+      "description": "Required when `trace_budget_status == feature_vector_skipped_oversized_trace`; absent otherwise."
+    },
+    "trace_budget_status": {
+      "type": "string",
+      "enum": ["within_budget", "feature_vector_skipped_oversized_trace"],
+      "description": "Trace volume budget status. `within_budget` admits the record and requires the six axes; `feature_vector_skipped_oversized_trace` denotes the per-kernel byte-count budget was exceeded, the axes are absent, and the typed `skip_diagnostic` is present. The dichotomy is enforced by the schema's top-level `if/then/else` conditional."
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "trace_budget_status": { "const": "within_budget" }
+        },
+        "required": ["trace_budget_status"]
+      },
+      "then": {
+        "required": ["axes"],
+        "allOf": [
+          { "not": { "required": ["skip_diagnostic"] } }
+        ]
+      },
+      "else": {
+        "required": ["skip_diagnostic"],
+        "allOf": [
+          { "not": { "required": ["axes"] } }
+        ]
+      }
+    }
+  ],
+  "$defs": {
+    "claim_class_dynamic_load_bearing": { "type": "string", "const": "dynamic_load_bearing" },
+    "claim_class_static_sanity_check_only": { "type": "string", "const": "static_sanity_check_only" },
+    "claim_class_mixed_static_dynamic": { "type": "string", "const": "mixed_static_dynamic" },
+    "claim_class_optional_if_supported": { "type": "string", "const": "optional_if_supported" },
+
+    "axis_dynamic_divergence_profile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["claim_class", "active_mask_histogram", "divergence_depth"],
+      "properties": {
+        "claim_class": { "$ref": "#/$defs/claim_class_dynamic_load_bearing" },
+        "active_mask_histogram": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["bucket_size", "buckets"],
+          "properties": {
+            "bucket_size": { "type": "integer", "minimum": 1, "maximum": 32 },
+            "buckets": {
+              "type": "array",
+              "items": { "type": "integer", "minimum": 0 },
+              "description": "Histogram of active-thread counts (0..32) per warp instruction. Indexed by population count of `instruction.proto.active_mask`. Length equals 33 buckets when bucket_size is 1; coarser when bucket_size > 1."
+            }
+          }
+        },
+        "divergence_depth": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["max_depth", "mean_depth", "depth_histogram"],
+          "properties": {
+            "max_depth": { "type": "integer", "minimum": 0 },
+            "mean_depth": { "type": "number", "minimum": 0 },
+            "depth_histogram": {
+              "type": "array",
+              "items": { "type": "integer", "minimum": 0 },
+              "description": "Histogram of branch-reconvergence depth observed at execution time. Bucket 0 is no divergence; deeper buckets count branch nesting at the point an instruction executed."
+            }
+          }
+        }
+      }
+    },
+    "axis_memory_access_stride_distribution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["claim_class", "stride_buckets_bytes", "stride_counts"],
+      "properties": {
+        "claim_class": { "$ref": "#/$defs/claim_class_dynamic_load_bearing" },
+        "stride_buckets_bytes": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 0 },
+          "description": "Stride bucket boundaries in bytes. Power-of-2 boundaries (1, 2, 4, 8, 16, 32, 64, 128+) by default."
+        },
+        "stride_counts": {
+          "type": "array",
+          "items": { "type": "integer", "minimum": 0 },
+          "description": "Per-bucket counts of observed strides. Aligned with stride_buckets_bytes."
+        }
+      }
+    },
+    "axis_per_thread_instruction_count_distribution": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["claim_class", "min_count", "max_count", "mean_count", "stddev_count"],
+      "properties": {
+        "claim_class": { "$ref": "#/$defs/claim_class_dynamic_load_bearing" },
+        "min_count": { "type": "integer", "minimum": 0 },
+        "max_count": { "type": "integer", "minimum": 0 },
+        "mean_count": { "type": "number", "minimum": 0 },
+        "stddev_count": { "type": "number", "minimum": 0 },
+        "percentile_counts": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["p50", "p90", "p99"],
+          "properties": {
+            "p50": { "type": "number", "minimum": 0 },
+            "p90": { "type": "number", "minimum": 0 },
+            "p99": { "type": "number", "minimum": 0 }
+          }
+        }
+      }
+    },
+    "axis_static_sass_mnemonic_histogram": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["claim_class", "static_sass_features_ref"],
+      "properties": {
+        "claim_class": { "$ref": "#/$defs/claim_class_static_sanity_check_only" },
+        "static_sass_features_ref": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Repo-relative path to the corresponding static_sass_features.json sidecar. The composite-axis consumer reads the histogram from that sidecar; this axis is a structural pointer, not a data carrier, to keep the per-kernel feature-vector sidecar from duplicating static data already present in the static SASS sidecar."
+        }
+      }
+    },
+    "axis_register_usage_and_predication_density": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["claim_class", "register_usage", "predication_density"],
+      "properties": {
+        "claim_class": { "$ref": "#/$defs/claim_class_mixed_static_dynamic" },
+        "register_usage": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["claim_class", "regs_per_thread"],
+          "properties": {
+            "claim_class": { "$ref": "#/$defs/claim_class_static_sanity_check_only" },
+            "regs_per_thread": { "type": "integer", "minimum": 0 }
+          },
+          "description": "Static register-usage sub-field; sanity-check claim class only."
+        },
+        "predication_density": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["claim_class", "predicated_instruction_fraction"],
+          "properties": {
+            "claim_class": { "$ref": "#/$defs/claim_class_dynamic_load_bearing" },
+            "predicated_instruction_fraction": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "description": "Dynamic fraction of issued instructions whose guard predicate evaluated true. Load-bearing claim class."
+            }
+          }
+        }
+      }
+    },
+    "axis_smid_migration_count": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["claim_class", "supported_by_tracer"],
+      "properties": {
+        "claim_class": { "$ref": "#/$defs/claim_class_optional_if_supported" },
+        "supported_by_tracer": {
+          "type": "boolean",
+          "description": "True iff the active tracer build supports per-warp `%smid` migration tracking. When false, `migration_count` is absent and downstream consumers MUST treat the axis as not present rather than treating it as zero."
+        },
+        "migration_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of distinct SM ids a warp executed on across the launch lifetime, summed over all warps. Present only when supported_by_tracer is true."
+        }
+      }
+    }
+  }
+}

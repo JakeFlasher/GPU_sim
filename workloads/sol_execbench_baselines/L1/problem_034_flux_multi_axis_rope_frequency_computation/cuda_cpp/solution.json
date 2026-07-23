@@ -1,0 +1,43 @@
+{
+  "name": "problem_034_flux_multi_axis_rope_frequency_computation_cuda_cpp",
+  "definition": "034_flux_multi_axis_rope_frequency_computation",
+  "author": "sol-baselines-codegen",
+  "spec": {
+    "languages": [
+      "cuda_cpp"
+    ],
+    "target_hardware": [
+      "LOCAL"
+    ],
+    "entry_point": "main.cpp::run",
+    "dependencies": [],
+    "destination_passing_style": true,
+    "binding": "torch",
+    "compile_options": {
+      "cflags": [],
+      "cuda_cflags": [
+        "-O3",
+        "--use_fast_math",
+        "-gencode",
+        "arch=compute_86,code=sm_86"
+      ],
+      "ld_flags": [
+        "-lcuda"
+      ]
+    }
+  },
+  "sources": [
+    {
+      "path": "main.cpp",
+      "content": "#include <torch/extension.h>\n#include <ATen/cuda/CUDAContext.h>\n#include \"kernel.h\"\n#include <string>\n\nstatic void check_fp32_contiguous_cuda(\n    const torch::Tensor& tensor, const std::string& name) {\n    TORCH_CHECK(tensor.is_cuda(), name, \" must be a CUDA tensor\");\n    TORCH_CHECK(\n        tensor.dtype() == torch::kFloat32,\n        name, \" must have float32 dtype, got \", tensor.dtype());\n    TORCH_CHECK(tensor.is_contiguous(), name, \" must be contiguous\");\n}\n\n// Destination-passing-style entry. Per definition.json:\n//   ids        : [seq_len, n_axes=3] fp32  (per-axis positions)\n//   theta      : scalar fp32  (RoPE base frequency)\n//   freqs_cos  : [seq_len, total_dim=128] fp32 (DPS)\n//   freqs_sin  : [seq_len, total_dim=128] fp32 (DPS)\n//\n// n_axes, axes_dim = [16, 56, 56], total_dim = 128 are all pinned by\n// the problem definition. The single launcher invocation populates\n// both outputs in parallel.\nvoid run(\n    const torch::Tensor& ids,\n    double theta,\n    torch::Tensor freqs_cos,\n    torch::Tensor freqs_sin\n) {\n    TORCH_CHECK(ids.dim() == 2, \"ids must be 2D [seq_len, n_axes]\");\n    TORCH_CHECK(freqs_cos.dim() == 2, \"freqs_cos must be 2D\");\n    TORCH_CHECK(freqs_sin.dim() == 2, \"freqs_sin must be 2D\");\n\n    constexpr int64_t kNumAxes = 3;\n    constexpr int64_t kTotalDim = 128;\n    TORCH_CHECK(ids.size(1) == kNumAxes,\n                \"ids must have \", kNumAxes,\n                \" axes, got \", ids.size(1));\n    TORCH_CHECK(freqs_cos.size(1) == kTotalDim,\n                \"freqs_cos last dim must be \", kTotalDim,\n                \", got \", freqs_cos.size(1));\n    TORCH_CHECK(freqs_sin.size(1) == kTotalDim,\n                \"freqs_sin last dim must be \", kTotalDim,\n                \", got \", freqs_sin.size(1));\n    TORCH_CHECK(freqs_cos.size(0) == ids.size(0),\n                \"freqs_cos seq_len must match ids seq_len\");\n    TORCH_CHECK(freqs_sin.size(0) == ids.size(0),\n                \"freqs_sin seq_len must match ids seq_len\");\n\n    check_fp32_contiguous_cuda(ids, \"ids\");\n    check_fp32_contiguous_cuda(freqs_cos, \"freqs_cos\");\n    check_fp32_contiguous_cuda(freqs_sin, \"freqs_sin\");\n\n    const float theta_f32 = static_cast<float>(theta);\n    cudaStream_t stream = at::cuda::getCurrentCUDAStream();\n    problem_034_flux_multi_axis_rope_freq_launcher(\n        ids, theta_f32, freqs_cos, freqs_sin, stream);\n}\n\nPYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {\n    m.def(\n        \"run\", &run,\n        \"fp32 multi-axis RoPE frequency computation: generates cos/sin \"\n        \"tables for FLUX 3D position encoding (axes_dim=[16,56,56], \"\n        \"total_dim=128 pinned). Two distinct DPS outputs filled by \"\n        \"one kernel launch.\");\n}\n"
+    },
+    {
+      "path": "kernel.cu",
+      "content": "#include \"kernel.h\"\n#include <cuda_runtime.h>\n\n// fp32 multi-axis RoPE frequency computation for FLUX 3D position\n// encoding (time, height, width). Each output element is a\n// pure-compute sin/cos of an angle whose construction depends on\n// a single ids[s, axis] load plus an on-the-fly inverse-frequency\n// table entry computed via `powf(theta, k / half_dim_axis)`.\n//\n// Grid: (seq_len,), one CTA per seq_len position. Each CTA has\n// BLOCK_THREADS = total_dim = 128 (one thread per output d).\n//\n// Per-axis pinned constants (FLUX-Fill-dev):\n//   axes_dim = {16, 56, 56},  total_dim = 128\n//   axis_offset = {0, 16, 72}, half_dim = {8, 28, 28}\n//\n// Read traffic per CTA: 3 fp32 loads of ids[s, 0..2] (one broadcast\n// per axis range across 16 / 56 / 56 threads respectively) plus\n// the immediate `theta` constant. Output traffic dominates:\n// 128 fp32 cos writes + 128 fp32 sin writes per CTA.\n\nnamespace {\n\nconstexpr int kNumAxes = 3;\nconstexpr int kTotalDim = 128;\nconstexpr int kBlockThreads = kTotalDim;\n\n// Each thread maps its `d` in [0, 128) to (axis, pair_idx, half_dim_f).\n// Compile-time constant axis spec (matches the FLUX-Fill-dev pin).\nstruct AxisSpec {\n    int axis;\n    int pair_idx;\n    float half_dim_f;\n};\n\n__device__ inline AxisSpec resolve_axis(int d) {\n    AxisSpec s;\n    if (d < 16) {\n        // axis 0: d in [0, 16), half_dim = 8\n        s.axis = 0;\n        s.pair_idx = d >> 1;\n        s.half_dim_f = 8.0f;\n    } else if (d < 72) {\n        // axis 1: d in [16, 72), half_dim = 28\n        s.axis = 1;\n        s.pair_idx = (d - 16) >> 1;\n        s.half_dim_f = 28.0f;\n    } else {\n        // axis 2: d in [72, 128), half_dim = 28\n        s.axis = 2;\n        s.pair_idx = (d - 72) >> 1;\n        s.half_dim_f = 28.0f;\n    }\n    return s;\n}\n\n__global__ void __launch_bounds__(kBlockThreads, 8)\nproblem_034_rope_freq_kernel(\n    const float* __restrict__ ids,\n    float theta,\n    float* __restrict__ freqs_cos,\n    float* __restrict__ freqs_sin,\n    int seq_len) {\n\n    const int s = blockIdx.x;\n    const int d = threadIdx.x;\n    if (s >= seq_len) return;\n\n    const AxisSpec spec = resolve_axis(d);\n\n    // Read this row's axis position (broadcast across threads sharing\n    // the same axis).\n    const float axis_pos = ids[s * kNumAxes + spec.axis];\n\n    // Compute freq_band on the fly:\n    //   freq_band = 1.0 / theta^(pair_idx / half_dim)\n    //             = exp(-(pair_idx / half_dim) * log(theta))\n    // Using powf preserves the reference's numerics exactly.\n    const float exponent = static_cast<float>(spec.pair_idx) / spec.half_dim_f;\n    const float freq_band = 1.0f / powf(theta, exponent);\n\n    const float angle = axis_pos * freq_band;\n    const int out_offset = s * kTotalDim + d;\n    freqs_cos[out_offset] = cosf(angle);\n    freqs_sin[out_offset] = sinf(angle);\n}\n\n}  // namespace\n\nvoid problem_034_flux_multi_axis_rope_freq_launcher(\n    const torch::Tensor& ids,\n    float theta,\n    torch::Tensor& freqs_cos,\n    torch::Tensor& freqs_sin,\n    cudaStream_t stream) {\n\n    const int seq_len = static_cast<int>(ids.size(0));\n\n    dim3 grid(seq_len);\n    dim3 block(kBlockThreads);\n\n    problem_034_rope_freq_kernel<<<grid, block, 0, stream>>>(\n        ids.data_ptr<float>(),\n        theta,\n        freqs_cos.data_ptr<float>(),\n        freqs_sin.data_ptr<float>(),\n        seq_len);\n}\n"
+    },
+    {
+      "path": "kernel.h",
+      "content": "#pragma once\n\n#ifndef PROBLEM_034_FLUX_MULTI_AXIS_ROPE_FREQ_KERNEL_H\n#define PROBLEM_034_FLUX_MULTI_AXIS_ROPE_FREQ_KERNEL_H\n\n#include <cuda_runtime.h>\n#include <torch/extension.h>\n\n// Host launcher for the fp32 multi-axis RoPE frequency kernel.\n//\n// Given ids of shape [seq_len, n_axes=3] fp32 and scalar theta,\n// computes freqs_cos and freqs_sin both of shape [seq_len,\n// total_dim=128] by independently running 1D RoPE per axis\n// (axes_dim = [16, 56, 56]) and concatenating along the\n// last dimension. For each axis a with axis_dim = 2 * half_dim_a:\n//\n//   freq_band[a, k] = 1.0 / theta^(k / half_dim_a)  for k in [0, half_dim_a)\n//   angle[s, a, k]  = ids[s, a] * freq_band[a, k]\n//   cos[s, axis_offset_a + 2*k]   = cos(angle[s, a, k])\n//   cos[s, axis_offset_a + 2*k+1] = cos(angle[s, a, k])\n//   sin[s, axis_offset_a + 2*k]   = sin(angle[s, a, k])\n//   sin[s, axis_offset_a + 2*k+1] = sin(angle[s, a, k])\n//\n// (The repeat-by-2 along d-pairs comes from torch.repeat_interleave\n// on the per-axis cos/sin outputs, then concatenation places the\n// three axes' results contiguously: axis 0 occupies d in [0, 16),\n// axis 1 occupies [16, 72), axis 2 occupies [72, 128).)\n//\n// One CTA per seq_len position, BLOCK_THREADS = total_dim = 128\n// (one thread per output d element). Both outputs are filled by\n// one kernel launch.\nvoid problem_034_flux_multi_axis_rope_freq_launcher(\n    const torch::Tensor& ids,\n    float theta,\n    torch::Tensor& freqs_cos,\n    torch::Tensor& freqs_sin,\n    cudaStream_t stream);\n\n#endif  // PROBLEM_034_FLUX_MULTI_AXIS_ROPE_FREQ_KERNEL_H\n"
+    }
+  ]
+}

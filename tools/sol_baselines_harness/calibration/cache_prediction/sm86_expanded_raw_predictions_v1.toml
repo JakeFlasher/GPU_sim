@@ -1,0 +1,711 @@
+# sm_86 EXPANDED raw cache-predictor predictions (calibrator fit input).
+# GENERATED (deterministic) by
+# calibration/cache_prediction/sm86_expanded/emit_expanded_raw_predictions.py
+# from the raw_pred_sidecars_sm86/<slug>.json sidecars (Tier-2 NVBit address
+# trace -> SetAssociativeSimulator -> raw L1/L2). Paired one-way against the
+# expanded NCU-label ledger (cross-stamped below). Raw is the SIMULATOR output,
+# NOT the NCU label (identity-fit-smokescreen): the isotonic re-fit learns
+# the raw->label shift. NVBit is calibration-only (CLAUDE.md Rule 1).
+
+[meta]
+schema_version = 1
+host_arch = "sm_86"
+captured_at_utc = "2026-05-29T22:40:18+00:00"
+expanded_ledger_path = "scripts/baselines_harness/calibration/cache_prediction/label_ledger_v1_sm86_expanded.toml"
+expanded_ledger_sha256 = "cbf05dd4a14bb732b2d1e3aca2e51176db69b46925e9ade4dd50664e19622b8c"
+geometry_source = "sm86_pilot_static_device_card_v1"
+associativity_l2 = 16
+num_l2_slices = 6
+l2_capacity_bytes = 6291456
+scored_count = 45
+unavailable_count = 8
+row_count = 53
+
+[[entries]]
+slug = "problem_001_fused_add_rmsnorm_h2048"
+predictor_bucket = "predictor_friendly"
+scored = true
+typed_reason = ""
+raw_l1_hit_rate = 0.310009765625
+raw_l2_hit_rate = 0.0024768240039629184
+ncu_l1_hit_rate = 0.5344
+ncu_l2_hit_rate = 0.13926174496644295
+tier2_sidecar_sha256 = "c201ad1d17ec95409b1f2d9134bc7878906d499a7dde52830d8558b7bafe98ef"
+sidecar_path = "scripts/baselines_harness/calibration/cache_prediction/raw_pred_sidecars_sm86/problem_001_fused_add_rmsnorm_h2048.json"
+sidecar_sha256 = "802760e8160cad2ae7661f791cbb32005bbbb43385078956b0b89eb90aff4e26"
+
+[[entries]]
+slug = "problem_003_fused_add_rmsnorm_h7168"
+predictor_bucket = "predictor_friendly"
+scored = true
+typed_reason = ""
+raw_l1_hit_rate = 0.22474888392857142
+raw_l2_hit_rate = 0.0714954111930898
+ncu_l1_hit_rate = 0.45530000000000004
+ncu_l2_hit_rate = 0.26262029124570807
+tier2_sidecar_sha256 = "5689e543e1a8585655a0a48a65a05d44007259272042913d75a6c6db139d126f"
+sidecar_path = "scripts/baselines_harness/calibration/cache_prediction/raw_pred_sidecars_sm86/problem_003_fused_add_rmsnorm_h7168.json"
+sidecar_sha256 = "0c1c147fd1f175622697a3f26c9d19aeca40f554f5aff28771d3a83b13eb6326"
+
+[[entries]]
+slug = "problem_003_lm_head_projection_with_logit_slicing"
+predictor_bucket = "predictor_friendly"
+scored = true
+typed_reason = ""
+raw_l1_hit_rate = 0.01256213719893525
+raw_l2_hit_rate = 0.5215415745080272
+ncu_l1_hit_rate = 0.0
+ncu_l2_hit_rate = 0.9346825218200684
+tier2_sidecar_sha256 = "c604b1193cb20da377b2fb58a97f6fc82682258c2a45235be13c76a638106758"
+sidecar_path = "scripts/baselines_harness/calibration/cache_prediction/raw_pred_sidecars_sm86/problem_003_lm_head_projection_with_logit_slicing.json"
+sidecar_sha256 = "c839a41094e35987c168ae7961018b11040135560b1b9699c8c47b446400e7a5"
+
+[[entries]]
+slug = "problem_004_attention_output_projection_with_reshape_backward"
+predictor_bucket = "predictor_friendly"
+scored = false
+typed_reason = "tier2_dump_absent"
+raw_l1_hit_rate = -1.0
+raw_l2_hit_rate = -1.0
+ncu_l1_hit_rate = 0.0
+ncu_l2_hit_rate = 0.8676381213867893
+tier2_sidecar_sha256 = ""
+sidecar_path = "scripts/baselines_harness/calibration/cache_prediction/raw_pred_sidecars_sm86/problem_004_attention_output_projection_with_reshape_backward.json"
+sidecar_sha256 = "bcb07d2aab15c50ec88b6995c2150ebdfa3e878c773bcd066dd273120924ca05"
+
+[[entries]]
+slug = "problem_004_fused_residual_rms_mlp"
+predictor_bucket = "predictor_friendly"
+scored = true
+typed_reason = ""
+raw_l1_hit_rate = 0.16370608457220026
+raw_l2_hit_rate = 0.06272384324358236
+ncu_l1_hit_rate = 0.0
+ncu_l2_hit_rate = 0.0
+tier2_sidecar_sha256 = "87d6ff4d3dd2dbf2981f7cf2392b9d281c53ca772a1b1dd1a29e8ba2ebfe4f35"
+sidecar_path = "scripts/baselines_harness/calibration/cache_prediction/raw_pred_sidecars_sm86/problem_004_fused_residual_rms_mlp.json"
+sidecar_sha256 = "183b13a2e1907477feb5a593a1c4300f1a75d5fb7fa641bd5bf5f65325df8e8d"
+
+[[entries]]
+slug = "problem_004_gemm_n128_k2048"
+predictor_bucket = "predictor_friendly"
+scored = true
+typed_reason = ""
+raw_l1_hit_rate = 0.07810465494791667
+raw_l2_hit_rate = 0.5932293160903052
+ncu_l1_hit_rate = 0.0
+ncu_l2_hit_rate = 0.8125
+tier2_sidecar_sha256 = "69c25d8b43cd7296e1f340dccbddad27924a9f8688298a65a0d039c777a9dd05"
+sidecar_path = "scripts/baselines_harness/calibration/cache_prediction/raw_pred_sidecars_sm86/problem_004_gemm_n128_k2048.json"
+sidecar_sha256 = "4cb8ede0f47714d0a4474eec0d93ccac936f6dcce06cb381297a5d09546bf06c"
+
+[[entries]]
+slug = "problem_005_gemm_n256_k7168"
+predictor_bucket = "predictor_friendly"
+scored = true
+typed_reason = ""
+raw_l1_hit_rate = 0.016626122568183778
+raw_l2_hit_rate = 0.7207857020518329
+ncu_l1_hit_rate = 0.0
+ncu_l2_hit_rate = 0.8958333333333334
+tier2_sidecar_sha256 = "4754eab22ead8b6d45376a5439561db601f9959a285bf44ed0f3759b330ae9b6"
+sidecar_path = "scripts/baselines_harness/calibration/cache_prediction/raw_pred_sidecars_sm86/problem_005_gemm_n256_k7168.json"
+sidecar_sha256 = "6932b8cc98edabefc34ca2f19c4c430cbf44d750f6633a12a7dacc4c011dac5a"
+
+[[entries]]
+slug = "problem_006_gemm_n2048_k4096"
+predictor_bucket = "predictor_friendly"
+scored = true
+typed_reason = ""
+raw_l1_hit_rate = 0.0011193608668932562
+raw_l2_hit_rate = 0.40758691046064505
+ncu_l1_hit_rate = 0.0
+ncu_l2_hit_rate = 0.9360857804616293
+tier2_sidecar_sha256 = "16e09ce93f5b3f70a9d779959d3f913d17f0cc4995f50f34d6412a93a426a2ce"
+sidecar_path = "scripts/baselines_harness/calibration/cache_prediction/raw_pred_sidecars_sm86/problem_006_gemm_n2048_k4096.json"
+sidecar_sha256 = "7783af8ddb644f2b68d588347cb3e03dab630641b7fcb7d68d4161b5a9ff20c7"
+
+[[entries]]
+slug = "problem_007_gemm_n4096_k4096"
+predictor_bucket = "predictor_friendly"
+scored = true
+typed_reason = ""
+raw_l1_hit_rate = 0.002896396564833165
+raw_l2_hit_rate = 0.3457442735865419
+ncu_l1_hit_rate = 0.0
+ncu_l2_hit_rate = 0.9289917548497518
+tier2_sidecar_sha256 = "93452a7ea54c8edcded1121f4d07f3ecd8a78ec46bd7dc188e5a28194822ac34"
+sidecar_path = "scripts/baselines_harness/calibration/cache_prediction/raw_pred_sidecars_sm86/problem_007_gemm_n4096_k4096.json"
+sidecar_sha256 = "d6c323daa38bd4ddeffd22b3f7735b7fb70fc885c07c5974e5d08226b5f41150"
+
+[[entries]]
+slug = "problem_008_expert_output_weighted_index_add_accumulation"
+predictor_bucket = "predictor_friendly"
+scored = true
+typed_reason = ""
+raw_l1_hit_rate = 0.4004077977018503
+raw_l2_hit_rate = 0.671876123902254
+ncu_l1_hit_rate = 0.3977
+ncu_l2_hit_rate = 0.4065088514097616
+tier2_sidecar_sha256 = "dc9ff22ac48eb6d5bd13569b78f90579e4f16d90777dd93f8e6a0d8ec7192cfc"
+sidecar_path = "scripts/baselines_harness/calibration/cache_prediction/raw_pred_sidecars_sm86/problem_008_expert_output_weighted_index_add_accumulation.json"
+sidecar_sha256 = "8f62386e11df1c48eb3e21d7847a64ff31eab67017e289ec083910a192c648f7"
+
+[[entries]]
+slug = "problem_008_gemm_n4096_k14336"
+predictor_bucket = "predictor_friendly"
+scored = true
+typed_reason = ""
+raw_l1_hit_rate = 0.009474066545282218
+raw_l2_hit_rate = 0.3810670424867074
+ncu_l1_hit_rate = 0.0
+ncu_l2_hit_rate = 0.9285400481451126
+tier2_sidecar_sha256 = "5ba99e73b9213f888d539df479ad377a8a9aca194b396712594fbbdbc082d01a"
+sidecar_path = "scripts/baselines_harness/calibration/cache_prediction/raw_pred_sidecars_sm86/problem_008_gemm_n4096_k14336.json"
+sidecar_sha256 = "a849bfbf052d1936b0abee9f2727059d7492dd82469d6cbe1e523f6e42bb10e2"
+
+[[entries]]
+slug = "problem_008_moe_sparse_routing_and_dispatch"
+predictor_bucket = "predictor_friendly"
+scored = true
+typed_reason = ""
+raw_l1_hit_rate = 0.0
+raw_l2_hit_rate = 0.0
+ncu_l1_hit_rate = 0.0
+ncu_l2_hit_rate = 0.0
+tier2_sidecar_sha256 = "ef10473a135b44dec9593c0757c38aea4ca929cfbef4e9697a5ce5ed0625d2f4"
+sidecar_path = "scripts/baselines_harness/calibration/cache_prediction/raw_pred_sidecars_sm86/problem_008_moe_sparse_routing_and_dispatch.json"
+sidecar_sha256 = "a4a2d669db603cd637817d4f8c28c833b951f8abdc0a6516eb81cf6f78d8ed82"
+
+[[entries]]
+slug = "problem_009_gemm_n5120_k2048"
+predictor_bucket = "predictor_friendly"
+scored = true
+typed_reason = ""
+raw_l1_hit_rate = 0.013923433934203441
+raw_l2_hit_rate = 0.4904046182650302
+ncu_l1_hit_rate = 0.0
+ncu_l2_hit_rate = 0.9282524744669596
+tier2_sidecar_sha256 = "194bd14adb7027bca32abdf34d4c707c8653999b83c245d165a76c4a47c84cb8"
+sidecar_path = "scripts/baselines_harness/calibration/cache_prediction/raw_pred_sidecars_sm86/problem_009_gemm_n5120_k2048.json"
+sidecar_sha256 = "b442c2baf8a9f3c90b3277da8a8aa8005ecad81cb7a38eef6441d2108327a9b1"
+
+[[entries]]
+slug = "problem_010_gemm_n6144_k4096"
+predictor_bucket = "predictor_friendly"
+scored = true
+typed_reason = ""
+raw_l1_hit_rate = 0.007786254308383663
+raw_l2_hit_rate = 0.42850143300223786
+ncu_l1_hit_rate = 0.0
+ncu_l2_hit_rate = 0.9338633484310574
+tier2_sidecar_sha256 = "854b82abefbdc66980d36c448a3a89028ac33f74e2b3582b1aff080e182c895f"
+sidecar_path = "scripts/baselines_harness/calibration/cache_prediction/raw_pred_sidecars_sm86/problem_010_gemm_n6144_k4096.json"
+sidecar_sha256 = "7c83999a055e3f14f9d345ef358d077f5e250ca8c191db497ea5678ac17ed8a5"
+
+[[entries]]
+slug = "problem_011_gemm_n28672_k4096"
+predictor_bucket = "predictor_hostile"
+scored = true
+typed_reason = ""
+raw_l1_hit_rate = 0.0062992248544656475
+raw_l2_hit_rate = 0.4361768948940576
+ncu_l1_hit_rate = 0.0
+ncu_l2_hit_rate = 0.941000915708996
+tier2_sidecar_sha256 = "93a773f8e932b44cef7842b39c686f79f43bffd935ee91bfb11262feea548c88"
+sidecar_path = "scripts/baselines_harness/calibration/cache_prediction/raw_pred_sidecars_sm86/problem_011_gemm_n28672_k4096.json"
+sidecar_sha256 = "5b7684ab678aedc962fafdac5a29a2e487258b8752054193946bbd7ef965fbf1"
+
+[[entries]]
+slug = "problem_011_rotary_position_embedding"
+predictor_bucket = "predictor_friendly"
+scored = true
+typed_reason = ""
+raw_l1_hit_rate = 0.9748046875
+raw_l2_hit_rate = 0.0
+ncu_l1_hit_rate = 0.9276333333333334
+ncu_l2_hit_rate = 0.7892802049720339
+tier2_sidecar_sha256 = "854b54bddd57b74770275b7891378f36a60c9697a71a1ab06be1556533d13cd5"
+sidecar_path = "scripts/baselines_harness/calibration/cache_prediction/raw_pred_sidecars_sm86/problem_011_rotary_position_embedding.json"
+sidecar_sha256 = "d49aefb000a1810f491bdc708ca90631479cef8767b29efd4157200fa7753d8e"
+
+[[entries]]
+slug = "problem_012_gqa_paged_decode_h32_kv4_d128_ps1"
+predictor_bucket = "predictor_hostile"
+scored = true
+typed_reason = ""
+raw_l1_hit_rate = 0.06539809671267113
+raw_l2_hit_rate = 0.88552982605729
+ncu_l1_hit_rate = 0.8574333333333334
+ncu_l2_hit_rate = 0.897277570329817
+tier2_sidecar_sha256 = "879eab5c0c6fd507c385e6d18948895dcae651caa3f0172dc7c9961c061536d3"
+sidecar_path = "scripts/baselines_harness/calibration/cache_prediction/raw_pred_sidecars_sm86/problem_012_gqa_paged_decode_h32_kv4_d128_ps1.json"
+sidecar_sha256 = "6ed89bb1cb9b6ce22b80644efc7a710bab3a23908bfb4ea8e912060c29b3491e"
+
+[[entries]]
+slug = "problem_014_gqa_paged_prefill_causal_h32_kv4_d128_ps1"
+predictor_bucket = "predictor_hostile"
+scored = true
+typed_reason = ""
+raw_l1_hit_rate = 0.5981884839335777
+raw_l2_hit_rate = 0.9863709294705204
+ncu_l1_hit_rate = 0.8822333333333333
+ncu_l2_hit_rate = 0.9844556176109185
+tier2_sidecar_sha256 = "d289dbb13160988af9523ce3f12e283074b4cfdea41a77a7985f60cc4a41246d"
+sidecar_path = "scripts/baselines_harness/calibration/cache_prediction/raw_pred_sidecars_sm86/problem_014_gqa_paged_prefill_causal_h32_kv4_d128_ps1.json"
+sidecar_sha256 = "5441a06df9e3d00de9242197236c4f303356c0375c736980ad97f97bbf979c7e"
+
+[[entries]]
+slug = "problem_021_rmsnorm_h128"
+predictor_bucket = "predictor_friendly"
+scored = true
+typed_reason = ""
+raw_l1_hit_rate = 0.6645304361979166
+raw_l2_hit_rate = 0.004791072836436412
+ncu_l1_hit_rate = 0.6629333333333333
+ncu_l2_hit_rate = 0.010723495266904672
+tier2_sidecar_sha256 = "78539bebd2b5e3e951a2ca89b8411b0ede4b366905aa45c5753e8fdfd5251e6f"
+sidecar_path = "scripts/baselines_harness/calibration/cache_prediction/raw_pred_sidecars_sm86/problem_021_rmsnorm_h128.json"
+sidecar_sha256 = "eed85c1d4d5a492204e9f71625f52f4eaf1f639c7ecea30d9ddfa35486b19824"
+
+[[entries]]
+slug = "problem_022_rmsnorm_h512"
+predictor_bucket = "predictor_friendly"
+scored = true
+typed_reason = ""
+raw_l1_hit_rate = 0.6539408365885416
+raw_l2_hit_rate = 0.014168552867515212
+ncu_l1_hit_rate = 0.6578666666666666
+ncu_l2_hit_rate = 0.02487975295072006
+tier2_sidecar_sha256 = "fac82f9df0d8728ceb464a204b4f558551fa8d4d2694c008824a947700733bd8"
+sidecar_path = "scripts/baselines_harness/calibration/cache_prediction/raw_pred_sidecars_sm86/problem_022_rmsnorm_h512.json"
+sidecar_sha256 = "7902352a0504d7070b09ce1e4e17fb21a16b389ac0ade202594acd4f75394330"
+
+[[entries]]
+slug = "problem_022_vision_mlp_gelu_backward"
+predictor_bucket = "predictor_friendly"
+scored = true
+typed_reason = ""
+raw_l1_hit_rate = 0.036858044603281424
+raw_l2_hit_rate = 0.3305021956376385
+ncu_l1_hit_rate = 0.0
+ncu_l2_hit_rate = 0.8638161068870908
+tier2_sidecar_sha256 = "aa08ca06eb3998cb187b9d9fee6bd4bada7cb38eccb4f09701c71a07e86cf0f8"
+sidecar_path = "scripts/baselines_harness/calibration/cache_prediction/raw_pred_sidecars_sm86/problem_022_vision_mlp_gelu_backward.json"
+sidecar_sha256 = "9495be61f7d2ad123df58da9e96b028548af89b40ecc38a1229b18935a4d5ef3"
+
+[[entries]]
+slug = "problem_023_rmsnorm_h1536"
+predictor_bucket = "predictor_friendly"
+scored = true
+typed_reason = ""
+raw_l1_hit_rate = 0.5176595052083334
+raw_l2_hit_rate = 0.09431415555930488
+ncu_l1_hit_rate = 0.6366
+ncu_l2_hit_rate = 0.08330793156046837
+tier2_sidecar_sha256 = "d3ef7c96ec422e8437031a45732e3e587e37308692f8502b320cc22e420295d6"
+sidecar_path = "scripts/baselines_harness/calibration/cache_prediction/raw_pred_sidecars_sm86/problem_023_rmsnorm_h1536.json"
+sidecar_sha256 = "212d46b99ec3958f8265bbf5e1ffc233aecccb5cea900a0052f058102eed054d"
+
+[[entries]]
+slug = "problem_025_rmsnorm_h4096"
+predictor_bucket = "predictor_friendly"
+scored = true
+typed_reason = ""
+raw_l1_hit_rate = 0.3499755859375
+raw_l2_hit_rate = 0.007167449139280125
+ncu_l1_hit_rate = 0.5398999999999999
+ncu_l2_hit_rate = 0.14398595479385692
+tier2_sidecar_sha256 = "cbabc0cc459ee9086406c90768230f41c232227002f0e0430f9dc2808a1e55d1"
+sidecar_path = "scripts/baselines_harness/calibration/cache_prediction/raw_pred_sidecars_sm86/problem_025_rmsnorm_h4096.json"
+sidecar_sha256 = "fb938e0bb33d0651d5c13547ef5d60ca2fb9ce36e4c8437fa4362e8e557d2bb0"
+
+[[entries]]
+slug = "problem_026_rmsnorm_h7168"
+predictor_bucket = "predictor_friendly"
+scored = true
+typed_reason = ""
+raw_l1_hit_rate = 0.33053734188988093
+raw_l2_hit_rate = 0.038282871258758865
+ncu_l1_hit_rate = 0.5547333333333333
+ncu_l2_hit_rate = 0.2105849055337142
+tier2_sidecar_sha256 = "d2cfededdf04f3254d24abb810680342dbc6263e418fb473bf0a0a6075cfff11"
+sidecar_path = "scripts/baselines_harness/calibration/cache_prediction/raw_pred_sidecars_sm86/problem_026_rmsnorm_h7168.json"
+sidecar_sha256 = "ea8d81ba39cf05cedc740d7984f4acf8dc91123adf474c769168e72f97454d02"
+
+[[entries]]
+slug = "problem_030_attention_output_projection_with_residual"
+predictor_bucket = "predictor_friendly"
+scored = true
+typed_reason = ""
+raw_l1_hit_rate = 0.006469673988352714
+raw_l2_hit_rate = 0.514143460710864
+ncu_l1_hit_rate = 0.0
+ncu_l2_hit_rate = 0.9198816811166158
+tier2_sidecar_sha256 = "f2ec977fa7e8d061d71a52397c8d84e3756a9e8adda944f4a836390b38e6d127"
+sidecar_path = "scripts/baselines_harness/calibration/cache_prediction/raw_pred_sidecars_sm86/problem_030_attention_output_projection_with_residual.json"
+sidecar_sha256 = "3285a96923544304d1693c22bbee1a1efca4de0d77274c28db47b53085d0635b"
+
+[[entries]]
+slug = "problem_031_flux_timestep_guidance_projection_embedding"
+predictor_bucket = "predictor_friendly"
+scored = true
+typed_reason = ""
+raw_l1_hit_rate = 0.005095277240848127
+raw_l2_hit_rate = 0.2104973239342261
+ncu_l1_hit_rate = 0.0
+ncu_l2_hit_rate = 0.0
+tier2_sidecar_sha256 = "95dc2dd73882ca2ae43ee1cf392f9e3642eabaec02c9c5154b0a83f964fe0892"
+sidecar_path = "scripts/baselines_harness/calibration/cache_prediction/raw_pred_sidecars_sm86/problem_031_flux_timestep_guidance_projection_embedding.json"
+sidecar_sha256 = "cf747a191cbcb9239f5d1caafb749d6cfcbd7624c3b682f7d914d1914e2fa92e"
+
+[[entries]]
+slug = "problem_032_attention_weights_matmul_with_value_projection"
+predictor_bucket = "predictor_friendly"
+scored = false
+typed_reason = "tier2_dump_absent"
+raw_l1_hit_rate = -1.0
+raw_l2_hit_rate = -1.0
+ncu_l1_hit_rate = 0.0
+ncu_l2_hit_rate = 0.7139951705932618
+tier2_sidecar_sha256 = ""
+sidecar_path = "scripts/baselines_harness/calibration/cache_prediction/raw_pred_sidecars_sm86/problem_032_attention_weights_matmul_with_value_projection.json"
+sidecar_sha256 = "9bca76bc4be6adcfb49f00c5d56a3fd506cd0caaa4eb95e45e6d6f4f4531c324"
+
+[[entries]]
+slug = "problem_033_post_norm_residual"
+predictor_bucket = "predictor_friendly"
+scored = true
+typed_reason = ""
+raw_l1_hit_rate = 0.274017333984375
+raw_l2_hit_rate = 0.003594098112573038
+ncu_l1_hit_rate = 0.4176666666666667
+ncu_l2_hit_rate = 0.1397191114326548
+tier2_sidecar_sha256 = "c80c26916b0743b15d10c8702561fac22e4263145377e3e152889a68429236a7"
+sidecar_path = "scripts/baselines_harness/calibration/cache_prediction/raw_pred_sidecars_sm86/problem_033_post_norm_residual.json"
+sidecar_sha256 = "a24f613324c5fbdd1d1cb518af2b89f80381a05312e69bdf64dc48e5e2a97547"
+
+[[entries]]
+slug = "problem_034_flux_multi_axis_rope_frequency_computation"
+predictor_bucket = "predictor_friendly"
+scored = true
+typed_reason = ""
+raw_l1_hit_rate = 0.9117647058823529
+raw_l2_hit_rate = 0.0
+ncu_l1_hit_rate = 0.8046000000000001
+ncu_l2_hit_rate = 0.5484169461676407
+tier2_sidecar_sha256 = "0003e10088ecbd3baf496db810e3e57bb925d6df411044042e975210c350afbc"
+sidecar_path = "scripts/baselines_harness/calibration/cache_prediction/raw_pred_sidecars_sm86/problem_034_flux_multi_axis_rope_frequency_computation.json"
+sidecar_sha256 = "d9234d47f233af4bcfb3f3e4eb2aa88a40e919e551c548663ca1a04b54cee14b"
+
+[[entries]]
+slug = "problem_035_flux_ada_layer_norm_zero_modulation_extraction"
+predictor_bucket = "predictor_friendly"
+scored = false
+typed_reason = "tier2_dump_absent"
+raw_l1_hit_rate = -1.0
+raw_l2_hit_rate = -1.0
+ncu_l1_hit_rate = 0.03623333333333333
+ncu_l2_hit_rate = 0.8909223637082624
+tier2_sidecar_sha256 = ""
+sidecar_path = "scripts/baselines_harness/calibration/cache_prediction/raw_pred_sidecars_sm86/problem_035_flux_ada_layer_norm_zero_modulation_extraction.json"
+sidecar_sha256 = "91e7803a1c1d2590328229f68d2e1ce9e167d38bd0132600582423b9a776f219"
+
+[[entries]]
+slug = "problem_036_flux_output_norm_projection_chain"
+predictor_bucket = "predictor_friendly"
+scored = true
+typed_reason = ""
+raw_l1_hit_rate = 0.48588026125390316
+raw_l2_hit_rate = 0.027808710399150005
+ncu_l1_hit_rate = 0.4625666666666666
+ncu_l2_hit_rate = 0.20013402119677137
+tier2_sidecar_sha256 = "68b70ed0fb41a7b3bf4ab6c666b8b0c6f4b9275af909db3049e3bbdc16a28894"
+sidecar_path = "scripts/baselines_harness/calibration/cache_prediction/raw_pred_sidecars_sm86/problem_036_flux_output_norm_projection_chain.json"
+sidecar_sha256 = "2d8d41bed532b13a44479f4b010e93c2b46145f94170b81edb0e43a739259c79"
+
+[[entries]]
+slug = "problem_037_flux_feedforward_gelu_approximate"
+predictor_bucket = "predictor_friendly"
+scored = true
+typed_reason = ""
+raw_l1_hit_rate = 0.003058299636586989
+raw_l2_hit_rate = 0.3254951289324725
+ncu_l1_hit_rate = 0.0
+ncu_l2_hit_rate = 0.8237214066364147
+tier2_sidecar_sha256 = "56cb470036cc6d6871e76911a06d767156a69694be74aabd0e886f1393868218"
+sidecar_path = "scripts/baselines_harness/calibration/cache_prediction/raw_pred_sidecars_sm86/problem_037_flux_feedforward_gelu_approximate.json"
+sidecar_sha256 = "2c6b6bb098218e725ac58fe10981c5de4a7af4511425675382d4a5b7cd1b74d9"
+
+[[entries]]
+slug = "problem_038_flux_multi_head_rmsnorm_qk"
+predictor_bucket = "predictor_friendly"
+scored = true
+typed_reason = ""
+raw_l1_hit_rate = 0.4979097372677062
+raw_l2_hit_rate = 0.0
+ncu_l1_hit_rate = 0.44906666666666667
+ncu_l2_hit_rate = 0.08949597268780163
+tier2_sidecar_sha256 = "c68b98115ee37868f27d8d815c39790bbc3c290ec3bb61673c1eb8f8623d9b54"
+sidecar_path = "scripts/baselines_harness/calibration/cache_prediction/raw_pred_sidecars_sm86/problem_038_flux_multi_head_rmsnorm_qk.json"
+sidecar_sha256 = "50c3f4a3d4ddcebb38dee520faa086e3cccf82724e5556fb0c6402a430844816"
+
+[[entries]]
+slug = "problem_046_attention_softmax_with_softcapping_and_dropout"
+predictor_bucket = "predictor_friendly"
+scored = true
+typed_reason = ""
+raw_l1_hit_rate = 0.6666666666666666
+raw_l2_hit_rate = 0.0
+ncu_l1_hit_rate = 0.6667000000000001
+ncu_l2_hit_rate = 0.0
+tier2_sidecar_sha256 = "de3113296cd6a4e869138db01241e54f8813b30c30dfab3265e4d7bf8134cef5"
+sidecar_path = "scripts/baselines_harness/calibration/cache_prediction/raw_pred_sidecars_sm86/problem_046_attention_softmax_with_softcapping_and_dropout.json"
+sidecar_sha256 = "5048645f123a45ba790d7c0da085a79b9b71d38f3c3e532175d0d71af3515a89"
+
+[[entries]]
+slug = "problem_048_fused_gate_up_projection_with_swiglu"
+predictor_bucket = "predictor_friendly"
+scored = false
+typed_reason = "tier2_dump_absent"
+raw_l1_hit_rate = -1.0
+raw_l2_hit_rate = -1.0
+ncu_l1_hit_rate = 0.0
+ncu_l2_hit_rate = 0.9127327012427059
+tier2_sidecar_sha256 = ""
+sidecar_path = "scripts/baselines_harness/calibration/cache_prediction/raw_pred_sidecars_sm86/problem_048_fused_gate_up_projection_with_swiglu.json"
+sidecar_sha256 = "109bf266ecea782ebbc2359f44d561036d5f91ff1d0998c2acb4129d30c32020"
+
+[[entries]]
+slug = "problem_050_attention_qkv_projection_with_bias_and_reshape"
+predictor_bucket = "predictor_friendly"
+scored = true
+typed_reason = ""
+raw_l1_hit_rate = 0.16093923521904163
+raw_l2_hit_rate = 0.5529087267977213
+ncu_l1_hit_rate = 0.009433333333333334
+ncu_l2_hit_rate = 0.9027862933530907
+tier2_sidecar_sha256 = "7f35e70b5c59ed416d9a097a1ae0bf5ec2e54e83da539f24f9021f871dc6af28"
+sidecar_path = "scripts/baselines_harness/calibration/cache_prediction/raw_pred_sidecars_sm86/problem_050_attention_qkv_projection_with_bias_and_reshape.json"
+sidecar_sha256 = "ee6858fc240e7a34ec6e9c395f646d469859c4e4d9f00e7aa725722468d89796"
+
+[[entries]]
+slug = "problem_054_audio_attention_qkv_projection_with_normalization"
+predictor_bucket = "predictor_friendly"
+scored = false
+typed_reason = "tier2_dump_absent"
+raw_l1_hit_rate = -1.0
+raw_l2_hit_rate = -1.0
+ncu_l1_hit_rate = 0.006999999999999999
+ncu_l2_hit_rate = 0.9429330342129688
+tier2_sidecar_sha256 = ""
+sidecar_path = "scripts/baselines_harness/calibration/cache_prediction/raw_pred_sidecars_sm86/problem_054_audio_attention_qkv_projection_with_normalization.json"
+sidecar_sha256 = "f41bd9e866069b24ad49c3a15e62966f2f5f83e2309865d44ad26cdfb2c33495"
+
+[[entries]]
+slug = "problem_055_attention_qkv_projection_with_gqa_reshape"
+predictor_bucket = "predictor_friendly"
+scored = false
+typed_reason = "tier2_dump_absent"
+raw_l1_hit_rate = -1.0
+raw_l2_hit_rate = -1.0
+ncu_l1_hit_rate = 0.0
+ncu_l2_hit_rate = 0.9042844650029948
+tier2_sidecar_sha256 = ""
+sidecar_path = "scripts/baselines_harness/calibration/cache_prediction/raw_pred_sidecars_sm86/problem_055_attention_qkv_projection_with_gqa_reshape.json"
+sidecar_sha256 = "8fd279f3fd279f9f88fd1de5b7861dee6a0a76580241939bbc561172f1bc6773"
+
+[[entries]]
+slug = "problem_056_mamba_ssm_dt_projection_softplus_clamp_backward"
+predictor_bucket = "predictor_friendly"
+scored = true
+typed_reason = ""
+raw_l1_hit_rate = 0.07048848470052084
+raw_l2_hit_rate = 0.055855723739722266
+ncu_l1_hit_rate = 0.0
+ncu_l2_hit_rate = 0.9375
+tier2_sidecar_sha256 = "f91ea679afd7e67239bae72f1c0ce4ba3da9cd9a435fc261d1b778d0e354ee1e"
+sidecar_path = "scripts/baselines_harness/calibration/cache_prediction/raw_pred_sidecars_sm86/problem_056_mamba_ssm_dt_projection_softplus_clamp_backward.json"
+sidecar_sha256 = "a115327f9b5397fd8265b4e184f3570c396b82fd382b9bcb5b249bedb0228aa4"
+
+[[entries]]
+slug = "problem_059_moe_group_score_aggregation_and_masking"
+predictor_bucket = "predictor_friendly"
+scored = true
+typed_reason = ""
+raw_l1_hit_rate = 0.0
+raw_l2_hit_rate = 0.0
+ncu_l1_hit_rate = 0.0
+ncu_l2_hit_rate = 0.0
+tier2_sidecar_sha256 = "1ee35304bd51bbc780887d4340c158ebc87b17c4f2198eb386e1d6ff8c25dcd0"
+sidecar_path = "scripts/baselines_harness/calibration/cache_prediction/raw_pred_sidecars_sm86/problem_059_moe_group_score_aggregation_and_masking.json"
+sidecar_sha256 = "8a7a934c8f01c4d4558eca8161076a3932286abfd172cf8f526b681cd8762d3b"
+
+[[entries]]
+slug = "problem_061_tanh_gated_residual_add_backward"
+predictor_bucket = "predictor_friendly"
+scored = true
+typed_reason = ""
+raw_l1_hit_rate = 0.016961040822620947
+raw_l2_hit_rate = 0.00020971144197095987
+ncu_l1_hit_rate = 0.0138
+ncu_l2_hit_rate = 0.001485186708902496
+tier2_sidecar_sha256 = "e49c13d5907376b13f148a0d2aae830af4654d9417fc10779a1328ca0eb2bebb"
+sidecar_path = "scripts/baselines_harness/calibration/cache_prediction/raw_pred_sidecars_sm86/problem_061_tanh_gated_residual_add_backward.json"
+sidecar_sha256 = "ad44ac0e6dff9172c0263854ceb6c71e9e226963e05e910f8aaa34645dd17935"
+
+[[entries]]
+slug = "problem_065_fused_statistics_projection_and_split"
+predictor_bucket = "predictor_friendly"
+scored = false
+typed_reason = "tier2_dump_absent"
+raw_l1_hit_rate = -1.0
+raw_l2_hit_rate = -1.0
+ncu_l1_hit_rate = 0.0
+ncu_l2_hit_rate = 0.8409839771412037
+tier2_sidecar_sha256 = ""
+sidecar_path = "scripts/baselines_harness/calibration/cache_prediction/raw_pred_sidecars_sm86/problem_065_fused_statistics_projection_and_split.json"
+sidecar_sha256 = "49f9395d294d88351a312fac306dcaa93b84445c9909560eae20a4d5fb7f1d9e"
+
+[[entries]]
+slug = "problem_066_masked_softmax_with_attention_dropout_backward"
+predictor_bucket = "predictor_friendly"
+scored = true
+typed_reason = ""
+raw_l1_hit_rate = 0.10988595897450246
+raw_l2_hit_rate = 0.07649210874385518
+ncu_l1_hit_rate = 0.40700000000000003
+ncu_l2_hit_rate = 0.18952572971151718
+tier2_sidecar_sha256 = "29cdef2ab46ef106ac12985b44c635bb6fc05083bb0cb2a7b9bee4f1507f7485"
+sidecar_path = "scripts/baselines_harness/calibration/cache_prediction/raw_pred_sidecars_sm86/problem_066_masked_softmax_with_attention_dropout_backward.json"
+sidecar_sha256 = "2f49dff605bd4fe26c3293d9a1e84d7de2f2990975a66bc2881d87210c5455f9"
+
+[[entries]]
+slug = "problem_071_kv_cache_update_with_rope"
+predictor_bucket = "predictor_hostile"
+scored = true
+typed_reason = ""
+raw_l1_hit_rate = 0.655029296875
+raw_l2_hit_rate = 0.018665958952583158
+ncu_l1_hit_rate = 0.2611
+ncu_l2_hit_rate = 0.5796325666003846
+tier2_sidecar_sha256 = "8df4547fd54c04dde6331cde41c159f3ec9fd0ad5636594824a7d0b260c1f0ca"
+sidecar_path = "scripts/baselines_harness/calibration/cache_prediction/raw_pred_sidecars_sm86/problem_071_kv_cache_update_with_rope.json"
+sidecar_sha256 = "b00e3c9d20f1e9d6b3980db61ad8efaf6b9ecf1e3142560204f832184ea4901e"
+
+[[entries]]
+slug = "problem_074_fused_gated_mlp_silu"
+predictor_bucket = "predictor_friendly"
+scored = true
+typed_reason = ""
+raw_l1_hit_rate = 0.0
+raw_l2_hit_rate = 0.0
+ncu_l1_hit_rate = 0.0
+ncu_l2_hit_rate = 0.0
+tier2_sidecar_sha256 = "e34c7e609f1f9938f4c589c7b1dc3dfb868230496eef7de4c7a0c9b2932f98ac"
+sidecar_path = "scripts/baselines_harness/calibration/cache_prediction/raw_pred_sidecars_sm86/problem_074_fused_gated_mlp_silu.json"
+sidecar_sha256 = "9362485b7c26b15683d5288cc187a238cbfb6be274a0858db473a1a14225ecb0"
+
+[[entries]]
+slug = "problem_077_whisper_decoder_output_projection"
+predictor_bucket = "predictor_friendly"
+scored = true
+typed_reason = ""
+raw_l1_hit_rate = 0.06715038621632256
+raw_l2_hit_rate = 0.5275331995822823
+ncu_l1_hit_rate = 0.0
+ncu_l2_hit_rate = 0.9368460816463458
+tier2_sidecar_sha256 = "4048a6597184c4e58d44ebbc86bd76342efde3c5f6894c0c8c25dd5ea4b023be"
+sidecar_path = "scripts/baselines_harness/calibration/cache_prediction/raw_pred_sidecars_sm86/problem_077_whisper_decoder_output_projection.json"
+sidecar_sha256 = "6de0203aa9cf71aa97340ad6bf869ce4730d01e47d338f7e82ee764a098679ba"
+
+[[entries]]
+slug = "problem_078_group_norm_fusion"
+predictor_bucket = "predictor_friendly"
+scored = true
+typed_reason = ""
+raw_l1_hit_rate = 0.198829345703125
+raw_l2_hit_rate = 0.07533988807272074
+ncu_l1_hit_rate = 0.26113333333333333
+ncu_l2_hit_rate = 0.0010309270658804487
+tier2_sidecar_sha256 = "2b083326a7e4b62409c4bafca910980ea7271f868cfa04fdc26eeca1b32cc397"
+sidecar_path = "scripts/baselines_harness/calibration/cache_prediction/raw_pred_sidecars_sm86/problem_078_group_norm_fusion.json"
+sidecar_sha256 = "1c738d1e4e29a0ca01a5c042c8499a9ba20193869c317464fb3508ea87e1c3e4"
+
+[[entries]]
+slug = "problem_080_adaptive_layernorm_continuous_with_modulation"
+predictor_bucket = "predictor_friendly"
+scored = true
+typed_reason = ""
+raw_l1_hit_rate = 0.49479668867911786
+raw_l2_hit_rate = 0.05928927714128383
+ncu_l1_hit_rate = 0.5406
+ncu_l2_hit_rate = 0.23104482004966168
+tier2_sidecar_sha256 = "3c9243572091a282eece6548f877a157e7b1c29e92fbc67a6d452bdf03360c20"
+sidecar_path = "scripts/baselines_harness/calibration/cache_prediction/raw_pred_sidecars_sm86/problem_080_adaptive_layernorm_continuous_with_modulation.json"
+sidecar_sha256 = "6a51eefa19d43a1141c15f5f9248525678f16b04d9cacd83f0f0644700e46ceb"
+
+[[entries]]
+slug = "problem_083_attention_score_value_matmul"
+predictor_bucket = "predictor_friendly"
+scored = false
+typed_reason = "tier2_dump_absent"
+raw_l1_hit_rate = -1.0
+raw_l2_hit_rate = -1.0
+ncu_l1_hit_rate = 0.8503333333333334
+ncu_l2_hit_rate = 0.6317704656544421
+tier2_sidecar_sha256 = ""
+sidecar_path = "scripts/baselines_harness/calibration/cache_prediction/raw_pred_sidecars_sm86/problem_083_attention_score_value_matmul.json"
+sidecar_sha256 = "3098d61a33b70b35873e0153b285d199e957bdf83c5fbbcb9ced16e3a88b7ee4"
+
+[[entries]]
+slug = "problem_084_silu_activation_backward"
+predictor_bucket = "predictor_friendly"
+scored = true
+typed_reason = ""
+raw_l1_hit_rate = 0.0
+raw_l2_hit_rate = 0.0
+ncu_l1_hit_rate = 0.0
+ncu_l2_hit_rate = 0.0
+tier2_sidecar_sha256 = "62a8c750bd5f67bf3bd58aab6d44b457b283ce2ebe4e218b6f12371d681d954b"
+sidecar_path = "scripts/baselines_harness/calibration/cache_prediction/raw_pred_sidecars_sm86/problem_084_silu_activation_backward.json"
+sidecar_sha256 = "c8156ff3ca61b80c85be9d9a51323ce6c867112ffdad2e82195771fb67e45d08"
+
+[[entries]]
+slug = "problem_085_geglu_activation"
+predictor_bucket = "predictor_friendly"
+scored = true
+typed_reason = ""
+raw_l1_hit_rate = 0.0
+raw_l2_hit_rate = 0.0
+ncu_l1_hit_rate = 0.0
+ncu_l2_hit_rate = 0.0
+tier2_sidecar_sha256 = "72efe92909edf509154b84b493dca7e0ad8a69cbd93d8c1003c14b04c1e60c35"
+sidecar_path = "scripts/baselines_harness/calibration/cache_prediction/raw_pred_sidecars_sm86/problem_085_geglu_activation.json"
+sidecar_sha256 = "6b824b79b87441b8baf717de4a93195fbf2bb71c0f356ca78da99d72ad4d4b3a"
+
+[[entries]]
+slug = "problem_088_rotary_position_embedding_application"
+predictor_bucket = "predictor_friendly"
+scored = true
+typed_reason = ""
+raw_l1_hit_rate = 0.23431750720564407
+raw_l2_hit_rate = 0.10984261111235963
+ncu_l1_hit_rate = 0.263
+ncu_l2_hit_rate = 0.6308301917870686
+tier2_sidecar_sha256 = "a120d9afe9e9a393a2d4b1920e20abb2b59fc548b9773418452d2846d08f817a"
+sidecar_path = "scripts/baselines_harness/calibration/cache_prediction/raw_pred_sidecars_sm86/problem_088_rotary_position_embedding_application.json"
+sidecar_sha256 = "9e5d055ed5840d3121745315b7a60b9989a4d70fab318ce1903bc0ed77beea85"
+
+[[entries]]
+slug = "problem_090_batched_2d_rope_position_encoding_backward"
+predictor_bucket = "predictor_friendly"
+scored = true
+typed_reason = ""
+raw_l1_hit_rate = 0.0
+raw_l2_hit_rate = 0.0
+ncu_l1_hit_rate = 0.0
+ncu_l2_hit_rate = 0.0
+tier2_sidecar_sha256 = "3dae8a5b817790b9cd5784347f440d8c71e98c7185041bcc8db97e498496470a"
+sidecar_path = "scripts/baselines_harness/calibration/cache_prediction/raw_pred_sidecars_sm86/problem_090_batched_2d_rope_position_encoding_backward.json"
+sidecar_sha256 = "ea6c9f49120754dc90b9bfd5187759a0e8d056242b82b5abd5acf312672adf33"

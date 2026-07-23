@@ -1,0 +1,87 @@
+{
+  "schema_version": 1,
+  "generator": "sm_86_predictor_accuracy_recovery/round-1",
+  "loop_session": "2026-05-17_11-26-33",
+  "plan_commit_at_initialization": "b533410",
+  "description": "Implementation-state inventory of the five predictor-refinement sub-slices (slice geometry, sector edges, write policy, CTA/SM interleave, cross-launch L2 state — the fifth added per a user adjudication of plan DEC-3). Each entry maps the sub-slice to its producer-side code path(s), existing witness test(s), bundle field(s) consumed, and any known no-op condition on the current 5-cell admitted activation corpus. The canonical sub-slice identifiers (sub_slice_id field) reference the plan-published acceptance-criterion numbering and are required to match exactly for downstream consumers; they are not re-prosable. The plan-token scanner exempts this file by exact path with a rationale comment.",
+  "entries": [
+    {
+      "sub_slice_id": "AC-4.1",
+      "description": "Slice-geometry-aware effective capacity. Per-slice independent LRU walker with sector routing via sector_id % num_l2_slices; per-access capacity threshold = max(1, capacity_bytes // num_l2_slices // 32).",
+      "code_paths": [
+        "tools/hrd_profiler/observation_builder.py",
+        "workloads/simbench_bw/cache_predictor.py",
+        "tools/hrd_profiler/device_properties.json",
+        "tools/hrd_profiler/device_properties.py"
+      ],
+      "existing_witness_tests": [
+        "tools/hrd_profiler/test_observation_builder.py::SliceAwareCapacityTest",
+        "tools/hrd_profiler/test_observation_builder.py::SliceAwareCapacityTest::test_slice_overflow_decreases_hit_rate",
+        "tools/hrd_profiler/test_observation_builder.py::SliceAwareCapacityTest::test_small_working_set_unchanged_hit_rate",
+        "tools/hrd_profiler/test_observation_builder.py::SliceAwareCapacityTest::test_num_l2_slices_default_is_backward_compatible"
+      ],
+      "bundle_fields_consumed": [
+        "cache_model_num_l2_slices",
+        "cache_model_num_l2_slices_source"
+      ],
+      "known_no_op_conditions": "On admitted cells whose working set fits within ONE L2 slice (= total L2 capacity / num_l2_slices = 6 MB / 6 = 1 MB / slice on GA102 RTX 3090 Ti), slice geometry produces no-op delta. Per the current 5-cell admitted corpus: silu_fwd correctness_shape (1 KB working set) is the canonical fits-in-one-slice cell; layernorm/rmsnorm/silu/softmax timing_shapes (~1 MB each) sit at the per-slice capacity boundary and should show measurable delta."
+    },
+    {
+      "sub_slice_id": "AC-4.2",
+      "description": "Sector-edge accounting at 32B granularity. The sector expansion loop expands sub-32B accesses across boundary into multiple sector touches; aligned 32B accesses count once.",
+      "code_paths": [
+        "tools/hrd_profiler/observation_builder.py"
+      ],
+      "existing_witness_tests": [
+        "tools/hrd_profiler/test_observation_builder.py::SectorEdgeAccountingTest"
+      ],
+      "bundle_fields_consumed": [
+        "cache_model_num_l2_slices"
+      ],
+      "known_no_op_conditions": "On admitted cells whose memory accesses are all 32B-aligned + 32B-sized (no sub-32B sub-spans), sector-edge accounting produces no-op delta vs the legacy walker. The activation kernels (layernorm/rmsnorm/silu/softmax bf16) emit primarily 16-bit-aligned 32-byte coalesced loads which should be 32B-aligned at the warp level, so the per-cell delta is expected to be small (no_op_classification: aligned_access_only_corpus or other). The existing SectorEdgeAccountingTest covers 4 contract cells (aligned-fits, aligned-crosses, sub-32B-fits, sub-32B-crosses) at the unit level."
+    },
+    {
+      "sub_slice_id": "AC-4.3",
+      "description": "Write-policy classification. The producer distinguishes per-access memory_op_access_kind (load/store/atomic/async_copy) and the consumer filter excludes no-write-allocate paths (e.g., SHARED + CLUSTER_DSMEM stores) from L2 hit-rate aggregation.",
+      "code_paths": [
+        "tools/hrd_profiler/observation_builder.py",
+        "workloads/simbench_bw/cache_predictor.py"
+      ],
+      "existing_witness_tests": [
+        "tools/hrd_profiler/test_observation_builder.py::WritePolicyClassificationTest"
+      ],
+      "bundle_fields_consumed": [
+        "no_write_allocate_excluded_count",
+        "per_access_kind_counts"
+      ],
+      "known_no_op_conditions": "On admitted-cell traces whose `memory_op_access_kind` field is NOT populated (legacy traces emitted before the access-kind wire field landed), the walker routes accesses to `unspecified_kind_count` and this sub-slice produces no-op delta. The ablation entry must classify per-cell as `no_access_kind_in_trace` if the trace is legacy. Fresh-trace requirement: at least one admitted cell's trace must have populated `memory_op_access_kind` per-access fields for the write-policy sub-slice to claim empirical impact."
+    },
+    {
+      "sub_slice_id": "AC-4.4",
+      "description": "CTA/SM interleaving model. The round-robin merge function interleaves per-TB access sequences when cta_interleave_enabled=True, approximating concurrent CTA execution and exposing cross-CTA sector reuse.",
+      "code_paths": [
+        "tools/hrd_profiler/observation_builder.py"
+      ],
+      "existing_witness_tests": [
+        "tools/hrd_profiler/test_observation_builder.py::CtaInterleaveAggregationTest",
+        "tools/hrd_profiler/test_walk_launch_second_hrd_layer.py"
+      ],
+      "bundle_fields_consumed": [
+        "cache_model_cta_interleave_enabled"
+      ],
+      "known_no_op_conditions": "On admitted single-TB cells (1 CTA total), CTA interleaving produces no-op delta. On admitted multi-TB cells whose per-CTA working sets are DISJOINT (no shared sectors), interleaving also produces no-op delta. Per the current corpus: silu_fwd correctness_shape (4 CTAs, small per-CTA working set, may overlap or not) and the multi-TB timing_shapes (64-1024 CTAs) are the candidates for measurable delta. silu_fwd timing_shape (1024 CTAs sharing L2 sectors) is the canonical headline candidate for this sub-slice's empirical impact."
+    },
+    {
+      "sub_slice_id": "AC-4.5",
+      "description": "Cross-launch L2 state empirical closure (added per a user adjudication of plan DEC-3 during the loop bootstrap). Extends _walk_launch with a cross_launch_state_carryover=True mode that carries surviving sector LRU state between kernel launches within a session, so multi-launch kernels share warm L2 between launches.",
+      "code_paths": [
+        "tools/hrd_profiler/observation_builder.py"
+      ],
+      "existing_witness_tests": [],
+      "bundle_fields_consumed": [
+        "cache_model_cross_launch_state_carryover"
+      ],
+      "known_no_op_conditions": "On admitted single-launch cells (layernorm/silu/softmax-single-pass), cross-launch state carryover produces no-op delta (no second launch to inherit state). On admitted multi-launch cells (rmsnorm 3 launches: reduce+sum+norm; softmax 2 launches: reduce+norm) the carryover is expected to measurably affect the second/third launch's hit rate. The implementation does NOT yet exist (the loop bootstrap landed inventory + scanner + audit only); the bundle field cache_model_cross_launch_state_carryover is NOT yet in cache_predictor.py — both land in the dedicated empirical-closure round for this sub-slice. This inventory entry reflects the post-DEC-3 plan target, not current code state."
+    }
+  ]
+}

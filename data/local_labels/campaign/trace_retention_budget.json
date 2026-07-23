@@ -1,0 +1,10 @@
+{
+  "schema_version": 1,
+  "_note": "Declared aggregate on-disk retention ceiling for the sm_86 live-capture corpus (compressed .pb.zst traces + label sidecars + control-bits). The preflight gate refuses to start a capture session unless free disk on the output filesystem exceeds this ceiling, so a session cannot begin and then wedge halfway through a multi-GB atomic-heavy cell. Per-cell size/runtime budgets remain the province of tools/cloud/trace_budgets.py; this is the coarse session-admission ceiling.",
+  "arch": "sm_86",
+  "sku": "rtx_3090_ti",
+  "retention_budget_gib": 200,
+  "metadata_margin_gib": 8,
+  "raw_staging_margin_gib": 16,
+  "rationale": "Previously-dropped atomic/async records now carry 32-lane address vectors; the atomic histogram cell alone is ~411M records / multi-GB before compression. The sum of explicit runnable-cell retained ceilings plus the 8 GiB metadata margin must remain within the 200 GiB corpus ceiling. Preflight separately reserves 16 GiB for one compression/sampling workspace while the raw trace and its retained replacement coexist."
+}

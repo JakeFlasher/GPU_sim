@@ -1,0 +1,26 @@
+schema_version = 1
+slug = "warp_divergence_reconvergence"
+
+# Warp-divergence + reconvergence microbench: each warp executes a
+# branch tree of `branches` levels, then reconverges. Reference is a
+# seeded tensor of the same axis-product envelope.
+
+[[timing_shapes]]
+name = "timing_00"
+axes = { warps = 4096, branches = 4, iterations = 256 }
+launch_config = { grid = [128, 1, 1], block = [256, 1, 1] }
+warm_up_iters = 5
+repeat_iters = 30
+
+[[trace_shapes]]
+name = "trace_00"
+axes = { warps = 64, branches = 4, iterations = 16 }
+launch_config = { grid = [4, 1, 1], block = [128, 1, 1] }
+predicted_bytes = 655360
+estimator_source = "static"
+
+[[correctness_shapes]]
+name = "correctness_00"
+axes = { warps = 4, branches = 2, iterations = 4 }
+launch_config = { grid = [1, 1, 1], block = [32, 1, 1] }
+digest_kind = "hash"

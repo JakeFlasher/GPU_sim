@@ -1,0 +1,54 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "arch_profile.schema.json",
+  "title": "ArchProfile card",
+  "description": "One per-architecture / per-SKU hardware + policy card. The canonical arch identity is the bare sm_XX arch_id; the sku disambiguates cards sharing a compute capability. Fields that were never captured on local silicon use the research_gap object instead of a value.",
+  "type": "object",
+  "additionalProperties": true,
+  "required": ["arch_id", "sku", "compute_capability", "build_arch_family", "sm_count", "bare_ldg_e_default", "cache_layers", "evidence_status"],
+  "properties": {
+    "arch_id": {"type": "string", "enum": ["sm_86", "sm_120"], "description": "Canonical bare deploy/label arch token."},
+    "sku": {"type": "string", "description": "Device-tier SKU, e.g. rtx_3090_ti / rtx_5060_laptop."},
+    "display_name": {"type": "string"},
+    "die": {"type": "string"},
+    "microarchitecture": {"type": "string"},
+    "role": {"type": "string"},
+    "compute_capability": {"type": "array", "items": {"type": "integer"}, "minItems": 2, "maxItems": 2},
+    "aliases": {"type": "array", "items": {"type": "string"}},
+    "device_name_substrings": {"type": "array", "items": {"type": "string"}},
+    "build_arch_family": {"type": "array", "items": {"type": "string"}, "description": "Compile-time fatbin slices; may include server-only tokens forbidden as deploy arch_ids."},
+    "gencode": {"type": "string"},
+    "sm_count": {"$ref": "#/$defs/intOrGap"},
+    "griddim_penalty_alpha": {"$ref": "#/$defs/numOrGap"},
+    "bare_ldg_e_default": {"type": "string", "enum": ["ca", "bypass", "unknown_typed_unavailable"]},
+    "cache_layers": {"type": "array", "items": {"type": "string", "enum": ["L1", "L2"]}},
+    "l2_geometry": {"$ref": "#/$defs/objOrGap"},
+    "l1_geometry": {"$ref": "#/$defs/objOrGap"},
+    "latencies_cycles": {
+      "$ref": "#/$defs/objOrGap",
+      "description": "Measured load-to-use latencies in SM cycles from the counter-free tools/pchase harness (clock64-timed, boost-invariant). Microbench-derived simulator INPUTS — never NCU counter values (Rule 1). Keys: l1_hit, l2_hit, dram, shared; unresolved probes (e.g. mshr_outstanding_misses) carry research_gap objects. provenance names the pchase static card + driver + host clock-lock state."
+    },
+    "nvml_reference_operating_point": {"$ref": "#/$defs/objOrGap"},
+    "duration_crosswalk": {"$ref": "#/$defs/objOrGap"},
+    "dram_bandwidth": {
+      "$ref": "#/$defs/objOrGap",
+      "description": "Aggregate DRAM read-bandwidth covariate at the LOCKED operating point: peak_bytes_per_second (vendor bus-width x data-rate spec), locked_sm_clock_mhz / locked_mem_clock_mhz (the -lgc/-lmc protocol locks the latencies_cycles table was measured under), provenance. Vendor-documented + protocol-derived simulator INPUT — never an NCU value (Rule 1). Peak is a documented-default service-rate hypothesis until a locked-protocol bandwidth microbench supersedes it; cards without a locked operating point carry research_gap."
+    },
+    "evidence_status": {"type": "string"},
+    "predictor_state": {"type": "object"}
+  },
+  "$defs": {
+    "researchGap": {
+      "type": "object",
+      "required": ["status", "reason"],
+      "properties": {
+        "status": {"const": "research_gap"},
+        "reason": {"type": "string"},
+        "challenge": {"type": "string"}
+      }
+    },
+    "intOrGap": {"anyOf": [{"type": "integer"}, {"$ref": "#/$defs/researchGap"}]},
+    "numOrGap": {"anyOf": [{"type": "number"}, {"$ref": "#/$defs/researchGap"}]},
+    "objOrGap": {"anyOf": [{"type": "object"}, {"$ref": "#/$defs/researchGap"}, {"type": "null"}]}
+  }
+}

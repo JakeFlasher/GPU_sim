@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "slug": "rmsnorm_fwd_bf16",
+  "shape_point": "rows=1024,hidden=4096",
+  "repeat_index": 0,
+  "launch_index": 0,
+  "kernel_signature_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "binary_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+  "nvbit_tracer_build_hash": "nvbit-1.8-host-build-abcdef",
+  "claim_scope": "measured_local",
+  "phase_definitions": [
+    {
+      "phase_id": 0,
+      "phase_kind": "function_entry",
+      "source_location_hint": "rmsnorm_fwd:entry"
+    },
+    {
+      "phase_id": 1,
+      "phase_kind": "bar_sync",
+      "source_location_hint": "rmsnorm_fwd:bar_after_reduce"
+    },
+    {
+      "phase_id": 2,
+      "phase_kind": "function_exit",
+      "source_location_hint": "rmsnorm_fwd:exit"
+    }
+  ],
+  "per_phase_cycle_records": [
+    {"phase_id": 0, "cta_id_x": 0, "cta_id_y": 0, "cta_id_z": 0, "sm_id": 0, "warpid_tb": 0, "cycles": 1024},
+    {"phase_id": 1, "cta_id_x": 0, "cta_id_y": 0, "cta_id_z": 0, "sm_id": 0, "warpid_tb": 0, "cycles": 4096},
+    {"phase_id": 2, "cta_id_x": 0, "cta_id_y": 0, "cta_id_z": 0, "sm_id": 0, "warpid_tb": 0, "cycles": 256}
+  ],
+  "ab_overhead_record": {
+    "t_wall_no_inject_ns": 12000,
+    "t_wall_with_inject_ns": 13200,
+    "overhead_pct": 10.0,
+    "admission_threshold_pct": 15.0,
+    "admitted": true
+  },
+  "dual_run_manifest_ref": "results/dual_run_manifest__rmsnorm_fwd_bf16__abc123.json",
+  "phase_boundary_status": "resolved"
+}

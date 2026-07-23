@@ -1,0 +1,105 @@
+{
+  "argv_clock_policy_flag": "",
+  "argv_provenance": [
+    [
+      "ncu",
+      "--launch-skip",
+      "5",
+      "--launch-count",
+      "1",
+      "--clock-control",
+      "none",
+      "--replay-mode",
+      "kernel",
+      "--section",
+      "MemoryWorkloadAnalysis",
+      "--metrics",
+      "l1tex__t_sector_pipe_lsu_mem_global_op_ld_hit_rate.pct,l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum,l1tex__t_sectors_pipe_lsu_mem_global_op_ld_lookup_hit.sum,lts__t_sectors_srcunit_tex_op_read.sum,lts__t_sectors_srcunit_tex_op_read_lookup_hit.sum",
+      "--csv",
+      "/home/jakeshea/3090ti_5060laptop_cross_study/3090ti_5060laptop_cross_study/solbench_baseline/nvbit_tracer/metric_extractor/tests/calibration_cohort_b/problem_066_masked_softmax_with_attention_dropout_backward"
+    ],
+    [
+      "ncu",
+      "--launch-skip",
+      "5",
+      "--launch-count",
+      "1",
+      "--clock-control",
+      "none",
+      "--replay-mode",
+      "kernel",
+      "--section",
+      "MemoryWorkloadAnalysis",
+      "--metrics",
+      "l1tex__t_sector_pipe_lsu_mem_global_op_ld_hit_rate.pct,l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum,l1tex__t_sectors_pipe_lsu_mem_global_op_ld_lookup_hit.sum,lts__t_sectors_srcunit_tex_op_read.sum,lts__t_sectors_srcunit_tex_op_read_lookup_hit.sum",
+      "--csv",
+      "/home/jakeshea/3090ti_5060laptop_cross_study/3090ti_5060laptop_cross_study/solbench_baseline/nvbit_tracer/metric_extractor/tests/calibration_cohort_b/problem_066_masked_softmax_with_attention_dropout_backward"
+    ],
+    [
+      "ncu",
+      "--launch-skip",
+      "5",
+      "--launch-count",
+      "1",
+      "--clock-control",
+      "none",
+      "--replay-mode",
+      "kernel",
+      "--section",
+      "MemoryWorkloadAnalysis",
+      "--metrics",
+      "l1tex__t_sector_pipe_lsu_mem_global_op_ld_hit_rate.pct,l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum,l1tex__t_sectors_pipe_lsu_mem_global_op_ld_lookup_hit.sum,lts__t_sectors_srcunit_tex_op_read.sum,lts__t_sectors_srcunit_tex_op_read_lookup_hit.sum",
+      "--csv",
+      "/home/jakeshea/3090ti_5060laptop_cross_study/3090ti_5060laptop_cross_study/solbench_baseline/nvbit_tracer/metric_extractor/tests/calibration_cohort_b/problem_066_masked_softmax_with_attention_dropout_backward"
+    ]
+  ],
+  "captured_at_utc": "2026-05-29T21:39:25+00:00",
+  "completed": true,
+  "cv_cap": 0.05,
+  "cv_quarantined": false,
+  "failure_reason": "",
+  "language": "cuda_cpp",
+  "launch_skip_count": 5,
+  "ncu_l1_hit_rate_mean": 0.40700000000000003,
+  "ncu_l2_hit_rate_mean": 0.18952572971151718,
+  "ncu_metric_family": [
+    "l1tex__t_sector_pipe_lsu_mem_global_op_ld_hit_rate.pct",
+    "l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum",
+    "l1tex__t_sectors_pipe_lsu_mem_global_op_ld_lookup_hit.sum",
+    "lts__t_sectors_srcunit_tex_op_read.sum",
+    "lts__t_sectors_srcunit_tex_op_read_lookup_hit.sum"
+  ],
+  "no_read_only_traffic": false,
+  "predictor_bucket": "predictor_friendly",
+  "probe_binary_sha256": "fac441c69d94212b1a861a42f1a9128e93f5508c2ac40a57f1f6644a0291f847",
+  "relative_cv_l1": 0.004346881084263987,
+  "relative_cv_l2": 0.006177960581738703,
+  "runs": [
+    {
+      "l1_global_load_hit_rate": 0.4086,
+      "l1_global_load_sectors_hit": 2035204,
+      "l1_global_load_sectors_total": 4980736,
+      "l2_read_hit_rate": 0.1882108223573874,
+      "l2_read_sectors_hit": 554381,
+      "l2_read_sectors_total": 2945532
+    },
+    {
+      "l1_global_load_hit_rate": 0.4073,
+      "l1_global_load_sectors_hit": 2028728,
+      "l1_global_load_sectors_total": 4980736,
+      "l2_read_hit_rate": 0.1899107319492359,
+      "l2_read_sectors_hit": 560618,
+      "l2_read_sectors_total": 2952008
+    },
+    {
+      "l1_global_load_hit_rate": 0.40509999999999996,
+      "l1_global_load_sectors_hit": 2017815,
+      "l1_global_load_sectors_total": 4980736,
+      "l2_read_hit_rate": 0.19045563482792824,
+      "l2_read_sectors_hit": 564305,
+      "l2_read_sectors_total": 2962921
+    }
+  ],
+  "schema_version": 2,
+  "slug": "problem_066_masked_softmax_with_attention_dropout_backward"
+}

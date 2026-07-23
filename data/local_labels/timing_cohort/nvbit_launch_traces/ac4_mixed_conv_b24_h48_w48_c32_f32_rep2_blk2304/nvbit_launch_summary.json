@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "slug": "conv2d_implicit_gemm_bf16_sm80",
+  "shape_point": "ac4_mixed_conv_b24_h48_w48_c32_f32_rep2_blk2304",
+  "repeat_index": 0,
+  "launch_index": 0,
+  "kernel_name": "conv2d_implicit_gemm_bf16_sm80_kernel___0",
+  "kernel_signature_sha256": "da5d7032940c10588a9693c2e200f854d202c33ea1a53e205d95ba5dc3fdf942",
+  "inst_count": 331776,
+  "binary_sha256": "93bd779ba719542965c18d9f73f5aa5a545c6631bbfb87575a9239e0765bab30",
+  "nvbit_trace_pb_path": "data/local_labels/timing_cohort/nvbit_launch_traces/ac4_mixed_conv_b24_h48_w48_c32_f32_rep2_blk2304/dynamic_trace.pb",
+  "nvbit_trace_pb_sha256": "273bc6bd7e52984eff3ea701b3f1af28e059ad71b0f832c5725cf943ea90e503",
+  "nvbit_tracer_build_hash": "67083eace7f6257ce5e33a6eb80ae0d3f240bbd667f254cdb67e1b7d20d5ed51"
+}

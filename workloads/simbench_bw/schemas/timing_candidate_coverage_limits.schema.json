@@ -1,0 +1,115 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "simbench_bw/schemas/timing_candidate_coverage_limits.schema.json",
+  "title": "Timing candidate coverage limits",
+  "description": "Typed coverage-limit artifact for long-duration timing candidates that are not admitted into the current same-binary publication cohort. Non-admitted families are recorded as terminal typed falsifications and contribute zero success cells.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_kind",
+    "arch",
+    "source_commit",
+    "admitted_cohort_artifact",
+    "candidate_catalog_artifact",
+    "success_policy",
+    "required_family_buckets",
+    "family_coverage"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "artifact_kind": {"type": "string", "const": "timing_candidate_coverage_limits"},
+    "arch": {"type": "string", "const": "sm_86"},
+    "source_commit": {"type": "string", "minLength": 1},
+    "admitted_cohort_artifact": {"$ref": "#/$defs/artifact_ref"},
+    "candidate_catalog_artifact": {"$ref": "#/$defs/artifact_ref"},
+    "success_policy": {
+      "type": "string",
+      "const": "only cells in the admitted long-duration cohort count as successful timing cells"
+    },
+    "required_family_buckets": {
+      "type": "array",
+      "prefixItems": [
+        {"const": "gemm_family"},
+        {"const": "conv"},
+        {"const": "attention"},
+        {"const": "memory_stress"}
+      ],
+      "minItems": 4,
+      "maxItems": 4
+    },
+    "family_coverage": {
+      "type": "array",
+      "minItems": 4,
+      "items": {"$ref": "#/$defs/family"}
+    }
+  },
+  "$defs": {
+    "artifact_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    },
+    "family": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "family_bucket",
+        "status",
+        "candidate_slugs",
+        "admitted_slugs",
+        "counted_success_cells",
+        "typed_reason"
+      ],
+      "properties": {
+        "family_bucket": {
+          "type": "string",
+          "enum": [
+            "gemm_family",
+            "conv",
+            "attention",
+            "memory_stress"
+          ]
+        },
+        "status": {"type": "string", "enum": ["admitted", "typed_falsification"]},
+        "candidate_slugs": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "uniqueItems": true
+        },
+        "admitted_slugs": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "uniqueItems": true
+        },
+        "counted_success_cells": {"type": "integer", "minimum": 0},
+        "typed_reason": {"type": ["string", "null"]}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"status": {"const": "admitted"}}},
+          "then": {
+            "properties": {
+              "counted_success_cells": {"type": "integer", "minimum": 1},
+              "typed_reason": {"type": "null"}
+            }
+          }
+        },
+        {
+          "if": {"properties": {"status": {"const": "typed_falsification"}}},
+          "then": {
+            "properties": {
+              "counted_success_cells": {"const": 0},
+              "admitted_slugs": {"maxItems": 0},
+              "typed_reason": {"type": "string", "minLength": 1}
+            }
+          }
+        }
+      ]
+    }
+  }
+}

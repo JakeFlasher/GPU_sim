@@ -1,0 +1,41 @@
+{
+  "aggregation": "kernel",
+  "binary_sha256": "dcb271c1c12b862a132394c073b7a356848d565f42d6833a7065427edbd371da",
+  "cache_hit_rate_l1tex_sector": 0.2481,
+  "cache_hit_rate_l2_sector": 0.8085922516302263,
+  "confidence_interval_l1tex_sector": {
+    "aggregation": "kernel",
+    "confidence_level": 0.95,
+    "lower": 0.2481,
+    "units": "sector_hit_rate_fraction",
+    "upper": 0.2481
+  },
+  "confidence_interval_l2_sector": {
+    "aggregation": "kernel",
+    "confidence_level": 0.95,
+    "lower": 0.8085922516302263,
+    "units": "sector_hit_rate_fraction",
+    "upper": 0.8085922516302263
+  },
+  "cuda_version": "13.2",
+  "device": "sm_120",
+  "driver_version": "595.71.05",
+  "gpu_uuid_sha256": "ef017d784a3b6f40a69523223cfa6f793072c5656e64dc3f1cd3ec2fefaee188",
+  "launch_index": 0,
+  "parser_diagnostics": {
+    "ncu_lts_pct_overcount_raw_counter_ratio_used": [
+      {
+        "metric_label": "lts__t_sector_hit_rate.pct",
+        "raw_value": 158.38
+      }
+    ]
+  },
+  "profiler_family": "nsight_compute",
+  "profiler_version": "Version 2026.1.1.0 (build 37634170) (public-release)",
+  "repeat_index": 2,
+  "replay_mode": "kernel",
+  "schema_version": 1,
+  "shape_point": "correctness_shape",
+  "slug": "embedding_gather_int32_sm80",
+  "warmup_count": 0
+}

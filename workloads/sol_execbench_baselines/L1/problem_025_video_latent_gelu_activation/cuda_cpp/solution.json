@@ -1,0 +1,44 @@
+{
+  "name": "problem_025_video_latent_gelu_activation_cuda_cpp",
+  "definition": "025_video_latent_gelu_activation",
+  "author": "solbench",
+  "spec": {
+    "languages": [
+      "cuda_cpp"
+    ],
+    "target_hardware": [
+      "LOCAL"
+    ],
+    "entry_point": "main.cpp::run",
+    "dependencies": [],
+    "destination_passing_style": true,
+    "binding": "torch",
+    "compile_options": {
+      "cflags": [],
+      "cuda_cflags": [
+        "-O3",
+        "--use_fast_math",
+        "-gencode",
+        "arch=compute_86,code=sm_86"
+      ],
+      "ld_flags": [
+        "-lcuda"
+      ]
+    }
+  },
+  "sources": [
+    {
+      "path": "main.cpp",
+      "content": "#include <torch/extension.h>\n#include <ATen/cuda/CUDAContext.h>\n#include \"kernel.h\"\n#include <string>\n\nstatic void check_fp32_contiguous_cuda(\n    const torch::Tensor& tensor, const std::string& name) {\n    TORCH_CHECK(tensor.is_cuda(), name, \" must be a CUDA tensor\");\n    TORCH_CHECK(\n        tensor.dtype() == torch::kFloat32,\n        name, \" must have float32 dtype, got \", tensor.dtype());\n    TORCH_CHECK(tensor.is_contiguous(), name, \" must be contiguous\");\n}\n\n// Destination-passing-style entry. definition.json declares:\n//   x      : [batch_size, seq_len, intermediate_size] fp32\n//   output : [batch_size, seq_len, intermediate_size] fp32 (DPS)\n//\n// intermediate_size is constant at 4096 per definition.json;\n// batch_size and seq_len are variable.\nvoid run(\n    const torch::Tensor& x,\n    torch::Tensor output\n) {\n    TORCH_CHECK(x.dim() == 3, \"x must be 3D [batch, seq, intermediate]\");\n    TORCH_CHECK(output.dim() == 3, \"output must be 3D\");\n    TORCH_CHECK(\n        x.sizes() == output.sizes(),\n        \"output shape must match x\");\n\n    check_fp32_contiguous_cuda(x, \"x\");\n    check_fp32_contiguous_cuda(output, \"output\");\n\n    cudaStream_t stream = at::cuda::getCurrentCUDAStream();\n    problem_025_video_latent_gelu_launcher(x, output, stream);\n}\n\nPYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {\n    m.def(\n        \"run\", &run,\n        \"FP32 GELU (tanh approximation) element-wise on video latent \"\n        \"tensors. Destination-passing style; float4-vectorized \"\n        \"load/store along the contiguous last dim.\");\n}\n"
+    },
+    {
+      "path": "kernel.cu",
+      "content": "#include \"kernel.h\"\n#include <cuda_runtime.h>\n\n// FP32 GELU with tanh approximation:\n//   output = 0.5 * x * (1 + tanh(sqrt(2/pi) * (x + 0.044715 * x^3)))\n//\n// Streams x and writes output via float4 vectorized loads/stores\n// when the element count is a multiple of 4 and the tensor base\n// pointer is 16-byte aligned (always true for ATen-allocated CUDA\n// tensors). For the tail, a scalar fallback handles any remainder.\n//\n// Numerical contract: the reference uses ``torch.tanh`` (FP32\n// math.tanh-style). ``tanhf`` matches the reference's tolerance\n// (max_atol=1e-5, max_rtol=0.05 per the workload set).\n\nnamespace {\n\nconstexpr float kSqrt2OverPi = 0.7978845608028654f;\nconstexpr float kCoeff = 0.044715f;\n\n__device__ __forceinline__ float gelu_tanh_approx_f(float x) {\n    float inner = kSqrt2OverPi * (x + kCoeff * x * x * x);\n    return 0.5f * x * (1.0f + tanhf(inner));\n}\n\n__global__ void problem_025_gelu_vec4_kernel(\n    const float4* __restrict__ x,\n    float4* __restrict__ output,\n    int n_vec4) {\n\n    const int idx = blockIdx.x * blockDim.x + threadIdx.x;\n    if (idx >= n_vec4) {\n        return;\n    }\n    float4 in = x[idx];\n    float4 out;\n    out.x = gelu_tanh_approx_f(in.x);\n    out.y = gelu_tanh_approx_f(in.y);\n    out.z = gelu_tanh_approx_f(in.z);\n    out.w = gelu_tanh_approx_f(in.w);\n    output[idx] = out;\n}\n\n__global__ void problem_025_gelu_tail_kernel(\n    const float* __restrict__ x,\n    float* __restrict__ output,\n    int tail_start,\n    int total) {\n\n    const int idx = tail_start + blockIdx.x * blockDim.x + threadIdx.x;\n    if (idx >= total) {\n        return;\n    }\n    output[idx] = gelu_tanh_approx_f(x[idx]);\n}\n\n}  // namespace\n\nvoid problem_025_video_latent_gelu_launcher(\n    const torch::Tensor& x,\n    torch::Tensor& output,\n    cudaStream_t stream) {\n\n    const int total = static_cast<int>(x.numel());\n    const int n_vec4 = total / 4;\n    const int tail_start = n_vec4 * 4;\n\n    constexpr int BLOCK_THREADS = 256;\n\n    if (n_vec4 > 0) {\n        const int grid = (n_vec4 + BLOCK_THREADS - 1) / BLOCK_THREADS;\n        problem_025_gelu_vec4_kernel<<<grid, BLOCK_THREADS, 0, stream>>>(\n            reinterpret_cast<const float4*>(x.data_ptr<float>()),\n            reinterpret_cast<float4*>(output.data_ptr<float>()),\n            n_vec4);\n    }\n    if (tail_start < total) {\n        const int remaining = total - tail_start;\n        const int grid = (remaining + BLOCK_THREADS - 1) / BLOCK_THREADS;\n        problem_025_gelu_tail_kernel<<<grid, BLOCK_THREADS, 0, stream>>>(\n            x.data_ptr<float>(),\n            output.data_ptr<float>(),\n            tail_start,\n            total);\n    }\n}\n"
+    },
+    {
+      "path": "kernel.h",
+      "content": "#pragma once\n\n#ifndef PROBLEM_025_VIDEO_LATENT_GELU_ACTIVATION_KERNEL_H\n#define PROBLEM_025_VIDEO_LATENT_GELU_ACTIVATION_KERNEL_H\n\n#include <cuda_runtime.h>\n#include <torch/extension.h>\n\n// Host launcher for the FP32 GELU (tanh approximation) element-wise\n// kernel. Input ``x`` is [batch_size, seq_len, intermediate_size]\n// FP32 contiguous; ``output`` is pre-allocated with the same shape\n// and dtype (destination-passing style). The kernel does no data\n// rearrangement; it streams ``x`` once and writes ``output`` once.\nvoid problem_025_video_latent_gelu_launcher(\n    const torch::Tensor& x,\n    torch::Tensor& output,\n    cudaStream_t stream);\n\n#endif  // PROBLEM_025_VIDEO_LATENT_GELU_ACTIVATION_KERNEL_H\n"
+    }
+  ],
+  "description": "Hand-port of problem_025 FP32 GELU (tanh) element-wise on video latent tensors for the local sm_86 3090 Ti."
+}

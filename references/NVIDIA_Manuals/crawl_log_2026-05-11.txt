@@ -1,0 +1,2059 @@
+===== [ampere_compatibility] https://docs.nvidia.com/cuda/ampere-compatibility-guide/ =====
+23:39:47 [INFO] ============================================================
+23:39:47 [INFO] NVIDIA Documentation Crawler & Markdown Converter
+23:39:47 [INFO] ============================================================
+23:39:47 [INFO] Input URL  : https://docs.nvidia.com/cuda/ampere-compatibility-guide/
+23:39:47 [INFO] Base URL   : https://docs.nvidia.com/cuda/ampere-compatibility-guide/
+23:39:47 [INFO] TOC URL    : https://docs.nvidia.com/cuda/ampere-compatibility-guide/contents.html
+23:39:47 [INFO] Output dir : /home/jakeshea/solbench_leaderboard/references/NVIDIA_Manuals/ampere_compatibility.new
+23:39:47 [INFO] 
+[1/4] Fetching table of contents …
+23:39:47 [INFO]   GET https://docs.nvidia.com/cuda/ampere-compatibility-guide/contents.html  (attempt 1)
+23:39:49 [INFO]   0 TOC entries found
+23:39:49 [INFO]   Document title: Ampere Compatibility Guide
+23:39:49 [INFO] 
+[2/4] Single-page doc — fetching main page …
+23:39:49 [INFO]   GET https://docs.nvidia.com/cuda/ampere-compatibility-guide/  (attempt 1)
+23:39:51 [INFO]   Parsed 0.0 MB of HTML
+23:39:51 [INFO] 
+[3/4] Extracting sections …
+23:39:51 [INFO]   15 sections extracted
+23:39:51 [INFO] 
+[4/4] Writing individual Markdown files (split-depth=2) …
+23:39:51 [INFO]   Saved index → 00_index.md
+23:39:51 [INFO]   [1/10] 01_nvidia-ampere-gpu-architecture-compatibility.md  (0.5 KB)
+23:39:51 [INFO]   [2/10] 01-01_about-this-document.md  (0.8 KB)
+23:39:51 [INFO]   [3/10] 01-02_application-compatibility-on-the-nvidia-ampere-gpu-architecture.md  (3.1 KB)
+23:39:51 [INFO]   [4/10] 01-03_verifying-ampere-compatibility-for-existing-applications.md  (2.7 KB)
+23:39:51 [INFO]   [5/10] 01-04_building-applications-with-the-nvidia-ampere-gpu-architecture-support.md  (7.5 KB)
+23:39:51 [INFO]   [6/10] 02_revision-history.md  (0.4 KB)
+23:39:51 [INFO]   [7/10] 03_notices.md  (0.3 KB)
+23:39:51 [INFO]   [8/10] 03-01_notice.md  (5.1 KB)
+23:39:51 [INFO]   [9/10] 03-02_opencl.md  (0.4 KB)
+23:39:51 [INFO]   [10/10] 03-03_trademarks.md  (0.8 KB)
+23:39:51 [INFO]   Total: 10 files + index
+23:39:51 [INFO] 
+============================================================
+23:39:51 [INFO] Done!  Files in: /home/jakeshea/solbench_leaderboard/references/NVIDIA_Manuals/ampere_compatibility.new
+23:39:51 [INFO] ============================================================
+  -> ampere_compatibility.new/  11 .md files
+===== [ampere_tuning] https://docs.nvidia.com/cuda/ampere-tuning-guide/ =====
+23:39:51 [INFO] ============================================================
+23:39:51 [INFO] NVIDIA Documentation Crawler & Markdown Converter
+23:39:51 [INFO] ============================================================
+23:39:51 [INFO] Input URL  : https://docs.nvidia.com/cuda/ampere-tuning-guide/
+23:39:51 [INFO] Base URL   : https://docs.nvidia.com/cuda/ampere-tuning-guide/
+23:39:51 [INFO] TOC URL    : https://docs.nvidia.com/cuda/ampere-tuning-guide/contents.html
+23:39:51 [INFO] Output dir : /home/jakeshea/solbench_leaderboard/references/NVIDIA_Manuals/ampere_tuning.new
+23:39:51 [INFO] 
+[1/4] Fetching table of contents …
+23:39:52 [INFO]   GET https://docs.nvidia.com/cuda/ampere-tuning-guide/contents.html  (attempt 1)
+23:39:53 [INFO]   0 TOC entries found
+23:39:53 [INFO]   Document title: Ampere Tuning Guide
+23:39:53 [INFO] 
+[2/4] Single-page doc — fetching main page …
+23:39:53 [INFO]   GET https://docs.nvidia.com/cuda/ampere-tuning-guide/  (attempt 1)
+23:39:55 [INFO]   Parsed 0.0 MB of HTML
+23:39:55 [INFO] 
+[3/4] Extracting sections …
+23:39:55 [INFO]   22 sections extracted
+23:39:55 [INFO] 
+[4/4] Writing individual Markdown files (split-depth=2) …
+23:39:55 [INFO]   Saved index → 00_index.md
+23:39:55 [INFO]   [1/10] 01_nvidia-ampere-gpu-architecture-tuning-guide.md  (0.4 KB)
+23:39:55 [INFO]   [2/10] 01-01_nvidia-ampere-gpu-architecture.md  (1.1 KB)
+23:39:55 [INFO]   [3/10] 01-02_cuda-best-practices.md  (1.1 KB)
+23:39:55 [INFO]   [4/10] 01-03_application-compatibility.md  (0.7 KB)
+23:39:55 [INFO]   [5/10] 01-04_nvidia-ampere-gpu-architecture-tuning.md  (13.1 KB)
+23:39:55 [INFO]   [6/10] 02_revision-history.md  (0.4 KB)
+23:39:55 [INFO]   [7/10] 03_notices.md  (0.3 KB)
+23:39:55 [INFO]   [8/10] 03-01_notice.md  (5.1 KB)
+23:39:55 [INFO]   [9/10] 03-02_opencl.md  (0.3 KB)
+23:39:55 [INFO]   [10/10] 03-03_trademarks.md  (0.9 KB)
+23:39:55 [INFO]   Total: 10 files + index
+23:39:55 [INFO] 
+============================================================
+23:39:55 [INFO] Done!  Files in: /home/jakeshea/solbench_leaderboard/references/NVIDIA_Manuals/ampere_tuning.new
+23:39:55 [INFO] ============================================================
+  -> ampere_tuning.new/  11 .md files
+===== [best_practices] https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/ =====
+23:39:55 [INFO] ============================================================
+23:39:55 [INFO] NVIDIA Documentation Crawler & Markdown Converter
+23:39:55 [INFO] ============================================================
+23:39:55 [INFO] Input URL  : https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/
+23:39:55 [INFO] Base URL   : https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/
+23:39:55 [INFO] TOC URL    : https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/contents.html
+23:39:55 [INFO] Output dir : /home/jakeshea/solbench_leaderboard/references/NVIDIA_Manuals/best_practices.new
+23:39:55 [INFO] 
+[1/4] Fetching table of contents …
+23:39:56 [INFO]   GET https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/contents.html  (attempt 1)
+23:39:58 [INFO]   0 TOC entries found
+23:39:58 [INFO]   Document title: Cuda C Best Practices Guide
+23:39:58 [INFO] 
+[2/4] Single-page doc — fetching main page …
+23:39:58 [INFO]   GET https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/  (attempt 1)
+23:39:59 [INFO]   Parsed 0.4 MB of HTML
+23:39:59 [INFO] 
+[3/4] Extracting sections …
+23:39:59 [INFO]   139 sections extracted
+23:39:59 [INFO] 
+[4/4] Writing individual Markdown files (split-depth=2) …
+23:39:59 [INFO]   Saved index → 00_index.md
+23:39:59 [INFO]   [1/72] 01_overview.md  (0.8 KB)
+23:39:59 [INFO]   [2/72] 02_preface.md  (1.0 KB)
+23:39:59 [INFO]   [3/72] 02-01_who-should-read-this-guide.md  (1.2 KB)
+23:39:59 [INFO]   [4/72] 02-02_assess-parallelize-optimize-deploy.md  (5.3 KB)
+23:39:59 [INFO]   [5/72] 02-03_recommendations-and-best-practices.md  (1.8 KB)
+23:39:59 [INFO]   [6/72] 02-04_assessing-your-application.md  (1.3 KB)
+23:39:59 [INFO]   [7/72] 03_heterogeneous-computing.md  (1.0 KB)
+23:39:59 [INFO]   [8/72] 03-01_differences-between-host-and-device.md  (2.9 KB)
+23:39:59 [INFO]   [9/72] 03-02_what-runs-on-a-cuda-enabled-device.md  (5.0 KB)
+23:39:59 [INFO]   [10/72] 04_application-profiling.md  (0.4 KB)
+23:39:59 [INFO]   [11/72] 04-01_profile.md  (9.3 KB)
+23:39:59 [INFO]   [12/72] 05_parallelizing-your-application.md  (1.3 KB)
+23:39:59 [INFO]   [13/72] 06_getting-started.md  (0.6 KB)
+23:39:59 [INFO]   [14/72] 06-01_parallel-libraries.md  (1.7 KB)
+23:39:59 [INFO]   [15/72] 06-02_parallelizing-compilers.md  (1.2 KB)
+23:39:59 [INFO]   [16/72] 06-03_coding-to-expose-parallelism.md  (1.7 KB)
+23:39:59 [INFO]   [17/72] 07_getting-the-right-answer.md  (0.9 KB)
+23:39:59 [INFO]   [18/72] 07-01_verification.md  (3.6 KB)
+23:39:59 [INFO]   [19/72] 07-02_debugging.md  (0.7 KB)
+23:39:59 [INFO]   [20/72] 07-03_numerical-accuracy-and-precision.md  (4.1 KB)
+23:39:59 [INFO]   [21/72] 08_optimizing-cuda-applications.md  (1.6 KB)
+23:39:59 [INFO]   [22/72] 09_performance-metrics.md  (0.7 KB)
+23:39:59 [INFO]   [23/72] 09-01_timing.md  (4.3 KB)
+23:39:59 [INFO]   [24/72] 09-02_bandwidth.md  (6.4 KB)
+23:39:59 [INFO]   [25/72] 10_memory-optimizations.md  (0.7 KB)
+23:39:59 [INFO]   [26/72] 10-01_data-transfer-between-host-and-device.md  (15.6 KB)
+23:39:59 [INFO]   [27/72] 10-02_device-memory-spaces.md  (49.1 KB)
+23:39:59 [INFO]   [28/72] 10-03_allocation.md  (0.5 KB)
+23:39:59 [INFO]   [29/72] 10-04_numa-best-practices.md  (1.1 KB)
+23:39:59 [INFO]   [30/72] 11_execution-configuration-optimizations.md  (1.4 KB)
+23:39:59 [INFO]   [31/72] 11-01_occupancy.md  (5.6 KB)
+23:39:59 [INFO]   [32/72] 11-02_hiding-register-dependencies.md  (1.1 KB)
+23:39:59 [INFO]   [33/72] 11-03_thread-and-block-heuristics.md  (3.9 KB)
+23:39:59 [INFO]   [34/72] 11-04_effects-of-shared-memory.md  (1.8 KB)
+23:39:59 [INFO]   [35/72] 11-05_concurrent-kernel-execution.md  (1.7 KB)
+23:39:59 [INFO]   [36/72] 11-06_multiple-contexts.md  (2.8 KB)
+23:39:59 [INFO]   [37/72] 12_instruction-optimization.md  (0.7 KB)
+23:39:59 [INFO]   [38/72] 12-01_arithmetic-instructions.md  (25.5 KB)
+23:39:59 [INFO]   [39/72] 12-02_memory-instructions.md  (1.2 KB)
+23:39:59 [INFO]   [40/72] 13_control-flow.md  (0.3 KB)
+23:39:59 [INFO]   [41/72] 13-01_branching-and-divergence.md  (2.0 KB)
+23:39:59 [INFO]   [42/72] 13-02_branch-predication.md  (1.5 KB)
+23:39:59 [INFO]   [43/72] 14_deploying-cuda-applications.md  (1.2 KB)
+23:39:59 [INFO]   [44/72] 15_understanding-the-programming-environment.md  (0.9 KB)
+23:39:59 [INFO]   [45/72] 15-01_cuda-compute-capability.md  (2.0 KB)
+23:39:59 [INFO]   [46/72] 15-02_additional-hardware-data.md  (1.1 KB)
+23:39:59 [INFO]   [47/72] 15-03_which-compute-capability-target.md  (0.9 KB)
+23:39:59 [INFO]   [48/72] 15-04_cuda-runtime.md  (1.8 KB)
+23:39:59 [INFO]   [49/72] 16_cuda-compatibility-developer-s-guide.md  (2.0 KB)
+23:39:59 [INFO]   [50/72] 16-01_cuda-toolkit-versioning.md  (3.3 KB)
+23:39:59 [INFO]   [51/72] 16-02_source-compatibility.md  (1.3 KB)
+23:39:59 [INFO]   [52/72] 16-03_binary-compatibility.md  (7.0 KB)
+23:39:59 [INFO]   [53/72] 16-04_cuda-compatibility-across-minor-releases.md  (15.9 KB)
+23:39:59 [INFO]   [54/72] 17_preparing-for-deployment.md  (0.4 KB)
+23:39:59 [INFO]   [55/72] 17-01_testing-for-cuda-availability.md  (2.6 KB)
+23:39:59 [INFO]   [56/72] 17-02_error-handling.md  (1.9 KB)
+23:39:59 [INFO]   [57/72] 17-03_building-for-maximum-compatibility.md  (3.3 KB)
+23:39:59 [INFO]   [58/72] 17-04_distributing-the-cuda-runtime-and-libraries.md  (10.3 KB)
+23:39:59 [INFO]   [59/72] 18_deployment-infrastructure-tools.md  (0.4 KB)
+23:39:59 [INFO]   [60/72] 18-01_nvidia-smi.md  (3.1 KB)
+23:39:59 [INFO]   [61/72] 18-02_nvml.md  (1.4 KB)
+23:39:59 [INFO]   [62/72] 18-03_cluster-management-tools.md  (0.7 KB)
+23:39:59 [INFO]   [63/72] 18-04_compiler-jit-cache-management-tools.md  (1.1 KB)
+23:39:59 [INFO]   [64/72] 18-05_cuda-visible-devices.md  (1.0 KB)
+23:39:59 [INFO]   [65/72] 19_id98.md  (0.4 KB)
+23:39:59 [INFO]   [66/72] 19-01_overall-performance-optimization-strategies.md  (2.6 KB)
+23:39:59 [INFO]   [67/72] 20_nvcc-compiler-switches.md  (0.4 KB)
+23:39:59 [INFO]   [68/72] 20-01_nvcc.md  (1.5 KB)
+23:39:59 [INFO]   [69/72] 21_notices.md  (0.3 KB)
+23:39:59 [INFO]   [70/72] 21-01_notice.md  (5.1 KB)
+23:39:59 [INFO]   [71/72] 21-02_opencl.md  (0.4 KB)
+23:39:59 [INFO]   [72/72] 21-03_trademarks.md  (0.5 KB)
+23:39:59 [INFO]   Total: 72 files + index
+23:39:59 [INFO] 
+============================================================
+23:39:59 [INFO] Done!  Files in: /home/jakeshea/solbench_leaderboard/references/NVIDIA_Manuals/best_practices.new
+23:39:59 [INFO] ============================================================
+  -> best_practices.new/  73 .md files
+===== [blackwell_compatibility] https://docs.nvidia.com/cuda/blackwell-compatibility-guide/ =====
+23:40:00 [INFO] ============================================================
+23:40:00 [INFO] NVIDIA Documentation Crawler & Markdown Converter
+23:40:00 [INFO] ============================================================
+23:40:00 [INFO] Input URL  : https://docs.nvidia.com/cuda/blackwell-compatibility-guide/
+23:40:00 [INFO] Base URL   : https://docs.nvidia.com/cuda/blackwell-compatibility-guide/
+23:40:00 [INFO] TOC URL    : https://docs.nvidia.com/cuda/blackwell-compatibility-guide/contents.html
+23:40:00 [INFO] Output dir : /home/jakeshea/solbench_leaderboard/references/NVIDIA_Manuals/blackwell_compatibility.new
+23:40:00 [INFO] 
+[1/4] Fetching table of contents …
+23:40:00 [INFO]   GET https://docs.nvidia.com/cuda/blackwell-compatibility-guide/contents.html  (attempt 1)
+23:40:02 [INFO]   0 TOC entries found
+23:40:02 [INFO]   Document title: Blackwell Compatibility Guide
+23:40:02 [INFO] 
+[2/4] Single-page doc — fetching main page …
+23:40:02 [INFO]   GET https://docs.nvidia.com/cuda/blackwell-compatibility-guide/  (attempt 1)
+23:40:04 [INFO]   Parsed 0.0 MB of HTML
+23:40:04 [INFO] 
+[3/4] Extracting sections …
+23:40:04 [INFO]   15 sections extracted
+23:40:04 [INFO] 
+[4/4] Writing individual Markdown files (split-depth=2) …
+23:40:04 [INFO]   Saved index → 00_index.md
+23:40:04 [INFO]   [1/10] 01_blackwell-architecture-compatibility.md  (0.4 KB)
+23:40:04 [INFO]   [2/10] 01-01_about-this-document.md  (0.8 KB)
+23:40:04 [INFO]   [3/10] 01-02_application-compatibility-on-blackwell-architecture.md  (3.4 KB)
+23:40:04 [INFO]   [4/10] 01-03_verifying-blackwell-compatibility-for-existing-applications.md  (2.6 KB)
+23:40:04 [INFO]   [5/10] 01-04_building-applications-with-blackwell-architecture-support.md  (7.2 KB)
+23:40:04 [INFO]   [6/10] 02_revision-history.md  (0.4 KB)
+23:40:04 [INFO]   [7/10] 03_notices.md  (0.3 KB)
+23:40:04 [INFO]   [8/10] 03-01_notice.md  (5.1 KB)
+23:40:04 [INFO]   [9/10] 03-02_opencl.md  (0.4 KB)
+23:40:04 [INFO]   [10/10] 03-03_trademarks.md  (0.9 KB)
+23:40:04 [INFO]   Total: 10 files + index
+23:40:04 [INFO] 
+============================================================
+23:40:04 [INFO] Done!  Files in: /home/jakeshea/solbench_leaderboard/references/NVIDIA_Manuals/blackwell_compatibility.new
+23:40:04 [INFO] ============================================================
+  -> blackwell_compatibility.new/  11 .md files
+===== [blackwell_tuning] https://docs.nvidia.com/cuda/blackwell-tuning-guide/ =====
+23:40:04 [INFO] ============================================================
+23:40:04 [INFO] NVIDIA Documentation Crawler & Markdown Converter
+23:40:04 [INFO] ============================================================
+23:40:04 [INFO] Input URL  : https://docs.nvidia.com/cuda/blackwell-tuning-guide/
+23:40:04 [INFO] Base URL   : https://docs.nvidia.com/cuda/blackwell-tuning-guide/
+23:40:04 [INFO] TOC URL    : https://docs.nvidia.com/cuda/blackwell-tuning-guide/contents.html
+23:40:04 [INFO] Output dir : /home/jakeshea/solbench_leaderboard/references/NVIDIA_Manuals/blackwell_tuning.new
+23:40:04 [INFO] 
+[1/4] Fetching table of contents …
+23:40:04 [INFO]   GET https://docs.nvidia.com/cuda/blackwell-tuning-guide/contents.html  (attempt 1)
+23:40:06 [INFO]   0 TOC entries found
+23:40:06 [INFO]   Document title: Blackwell Tuning Guide
+23:40:06 [INFO] 
+[2/4] Single-page doc — fetching main page …
+23:40:06 [INFO]   GET https://docs.nvidia.com/cuda/blackwell-tuning-guide/  (attempt 1)
+23:40:08 [INFO]   Parsed 0.0 MB of HTML
+23:40:08 [INFO] 
+[3/4] Extracting sections …
+23:40:08 [INFO]   18 sections extracted
+23:40:08 [INFO] 
+[4/4] Writing individual Markdown files (split-depth=2) …
+23:40:08 [INFO]   Saved index → 00_index.md
+23:40:08 [INFO]   [1/10] 01_nvidia-blackwell-tuning-guide.md  (0.4 KB)
+23:40:08 [INFO]   [2/10] 01-01_nvidia-blackwell-gpu-architecture.md  (1.2 KB)
+23:40:08 [INFO]   [3/10] 01-02_cuda-best-practices.md  (1.2 KB)
+23:40:08 [INFO]   [4/10] 01-03_application-compatibility.md  (0.7 KB)
+23:40:08 [INFO]   [5/10] 01-04_nvidia-blackwell-tuning.md  (8.2 KB)
+23:40:08 [INFO]   [6/10] 02_revision-history.md  (0.8 KB)
+23:40:08 [INFO]   [7/10] 03_notices.md  (0.3 KB)
+23:40:08 [INFO]   [8/10] 03-01_notice.md  (5.1 KB)
+23:40:08 [INFO]   [9/10] 03-02_opencl.md  (0.4 KB)
+23:40:08 [INFO]   [10/10] 03-03_trademarks.md  (0.5 KB)
+23:40:08 [INFO]   Total: 10 files + index
+23:40:08 [INFO] 
+============================================================
+23:40:08 [INFO] Done!  Files in: /home/jakeshea/solbench_leaderboard/references/NVIDIA_Manuals/blackwell_tuning.new
+23:40:08 [INFO] ============================================================
+  -> blackwell_tuning.new/  11 .md files
+===== [cuda_binary_utility] https://docs.nvidia.com/cuda/cuda-binary-utilities/ =====
+23:40:08 [INFO] ============================================================
+23:40:08 [INFO] NVIDIA Documentation Crawler & Markdown Converter
+23:40:08 [INFO] ============================================================
+23:40:08 [INFO] Input URL  : https://docs.nvidia.com/cuda/cuda-binary-utilities/
+23:40:08 [INFO] Base URL   : https://docs.nvidia.com/cuda/cuda-binary-utilities/
+23:40:08 [INFO] TOC URL    : https://docs.nvidia.com/cuda/cuda-binary-utilities/contents.html
+23:40:08 [INFO] Output dir : /home/jakeshea/solbench_leaderboard/references/NVIDIA_Manuals/cuda_binary_utility.new
+23:40:08 [INFO] 
+[1/4] Fetching table of contents …
+23:40:09 [INFO]   GET https://docs.nvidia.com/cuda/cuda-binary-utilities/contents.html  (attempt 1)
+23:40:10 [INFO]   0 TOC entries found
+23:40:10 [INFO]   Document title: Cuda Binary Utilities
+23:40:10 [INFO] 
+[2/4] Single-page doc — fetching main page …
+23:40:10 [INFO]   GET https://docs.nvidia.com/cuda/cuda-binary-utilities/  (attempt 1)
+23:40:12 [INFO]   Parsed 0.2 MB of HTML
+23:40:12 [INFO] 
+[3/4] Extracting sections …
+23:40:12 [INFO]   28 sections extracted
+23:40:12 [INFO] 
+[4/4] Writing individual Markdown files (split-depth=2) …
+23:40:12 [INFO]   Saved index → 00_index.md
+23:40:12 [INFO]   [1/28] 01_overview.md  (0.4 KB)
+23:40:12 [INFO]   [2/28] 01-01_what-is-a-cuda-binary.md  (1.0 KB)
+23:40:12 [INFO]   [3/28] 01-02_differences-between-cuobjdump-and-nvdisasm.md  (1.1 KB)
+23:40:12 [INFO]   [4/28] 01-03_command-option-types-and-notation.md  (3.2 KB)
+23:40:12 [INFO]   [5/28] 02_cuobjdump.md  (0.8 KB)
+23:40:12 [INFO]   [6/28] 02-01_usage.md  (9.3 KB)
+23:40:12 [INFO]   [7/28] 02-02_command-line-options.md  (3.9 KB)
+23:40:12 [INFO]   [8/28] 03_nvdisasm.md  (1.2 KB)
+23:40:12 [INFO]   [9/28] 03-01_nvdisasm-usage.md  (18.2 KB)
+23:40:12 [INFO]   [10/28] 03-02_id5.md  (4.7 KB)
+23:40:12 [INFO]   [11/28] 04_instruction-set-reference.md  (0.5 KB)
+23:40:12 [INFO]   [12/28] 04-01_turing-instruction-set.md  (7.0 KB)
+23:40:12 [INFO]   [13/28] 04-02_nvidia-ampere-gpu-and-ada-instruction-set.md  (7.5 KB)
+23:40:12 [INFO]   [14/28] 04-03_hopper-instruction-set.md  (9.2 KB)
+23:40:12 [INFO]   [15/28] 04-04_blackwell-instruction-set.md  (11.3 KB)
+23:40:12 [INFO]   [16/28] 05_cu-filt.md  (0.5 KB)
+23:40:12 [INFO]   [17/28] 05-01_id6.md  (1.8 KB)
+23:40:12 [INFO]   [18/28] 05-02_cuplusplusfilt-options.md  (1.0 KB)
+23:40:12 [INFO]   [19/28] 05-03_library-availability.md  (2.6 KB)
+23:40:12 [INFO]   [20/28] 06_nvprune.md  (0.4 KB)
+23:40:12 [INFO]   [21/28] 06-01_id9.md  (1.2 KB)
+23:40:12 [INFO]   [22/28] 06-02_nvprune-options.md  (1.5 KB)
+23:40:12 [INFO]   [23/28] 07_appendix.md  (0.3 KB)
+23:40:12 [INFO]   [24/28] 07-01_json-format.md  (11.8 KB)
+23:40:12 [INFO]   [25/28] 08_notices.md  (0.3 KB)
+23:40:12 [INFO]   [26/28] 08-01_notice.md  (5.1 KB)
+23:40:12 [INFO]   [27/28] 08-02_opencl.md  (0.4 KB)
+23:40:12 [INFO]   [28/28] 08-03_trademarks.md  (0.5 KB)
+23:40:12 [INFO]   Total: 28 files + index
+23:40:12 [INFO] 
+============================================================
+23:40:12 [INFO] Done!  Files in: /home/jakeshea/solbench_leaderboard/references/NVIDIA_Manuals/cuda_binary_utility.new
+23:40:12 [INFO] ============================================================
+  -> cuda_binary_utility.new/  29 .md files
+===== [cuda_inline_ptx] https://docs.nvidia.com/cuda/inline-ptx-assembly/ =====
+23:40:12 [INFO] ============================================================
+23:40:12 [INFO] NVIDIA Documentation Crawler & Markdown Converter
+23:40:12 [INFO] ============================================================
+23:40:12 [INFO] Input URL  : https://docs.nvidia.com/cuda/inline-ptx-assembly/
+23:40:12 [INFO] Base URL   : https://docs.nvidia.com/cuda/inline-ptx-assembly/
+23:40:12 [INFO] TOC URL    : https://docs.nvidia.com/cuda/inline-ptx-assembly/contents.html
+23:40:12 [INFO] Output dir : /home/jakeshea/solbench_leaderboard/references/NVIDIA_Manuals/cuda_inline_ptx.new
+23:40:12 [INFO] 
+[1/4] Fetching table of contents …
+23:40:13 [INFO]   GET https://docs.nvidia.com/cuda/inline-ptx-assembly/contents.html  (attempt 1)
+23:40:15 [INFO]   0 TOC entries found
+23:40:15 [INFO]   Document title: Inline Ptx Assembly
+23:40:15 [INFO] 
+[2/4] Single-page doc — fetching main page …
+23:40:15 [INFO]   GET https://docs.nvidia.com/cuda/inline-ptx-assembly/  (attempt 1)
+23:40:16 [INFO]   Parsed 0.1 MB of HTML
+23:40:16 [INFO] 
+[3/4] Extracting sections …
+23:40:16 [INFO]   14 sections extracted
+23:40:16 [INFO] 
+[4/4] Writing individual Markdown files (split-depth=2) …
+23:40:16 [INFO]   Saved index → 00_index.md
+23:40:16 [INFO]   [1/8] 01_using-inline-ptx-assembly-in-cuda.md  (0.8 KB)
+23:40:16 [INFO]   [2/8] 01-01_assembler-asm-statements.md  (9.1 KB)
+23:40:16 [INFO]   [3/8] 01-02_pitfalls.md  (3.6 KB)
+23:40:16 [INFO]   [4/8] 01-03_error-checking.md  (1.7 KB)
+23:40:16 [INFO]   [5/8] 02_notices.md  (0.3 KB)
+23:40:16 [INFO]   [6/8] 02-01_notice.md  (5.1 KB)
+23:40:16 [INFO]   [7/8] 02-02_opencl.md  (0.3 KB)
+23:40:16 [INFO]   [8/8] 02-03_trademarks.md  (0.5 KB)
+23:40:16 [INFO]   Total: 8 files + index
+23:40:16 [INFO] 
+============================================================
+23:40:16 [INFO] Done!  Files in: /home/jakeshea/solbench_leaderboard/references/NVIDIA_Manuals/cuda_inline_ptx.new
+23:40:16 [INFO] ============================================================
+  -> cuda_inline_ptx.new/  9 .md files
+===== [ncu_guide] https://docs.nvidia.com/nsight-compute/OccupancyCalculatorPythonInterface/ =====
+23:40:16 [INFO] ============================================================
+23:40:16 [INFO] NVIDIA Documentation Crawler & Markdown Converter
+23:40:16 [INFO] ============================================================
+23:40:16 [INFO] Input URL  : https://docs.nvidia.com/nsight-compute/OccupancyCalculatorPythonInterface/
+23:40:16 [INFO] Base URL   : https://docs.nvidia.com/nsight-compute/OccupancyCalculatorPythonInterface/
+23:40:16 [INFO] TOC URL    : https://docs.nvidia.com/nsight-compute/OccupancyCalculatorPythonInterface/contents.html
+23:40:16 [INFO] Output dir : /home/jakeshea/solbench_leaderboard/references/NVIDIA_Manuals/ncu_guide.new
+23:40:16 [INFO] 
+[1/4] Fetching table of contents …
+23:40:17 [INFO]   Adjusted TOC URL → https://docs.nvidia.com/nsight-compute/OccupancyCalculatorPythonInterface/index.html
+23:40:17 [INFO]   GET https://docs.nvidia.com/nsight-compute/OccupancyCalculatorPythonInterface/index.html  (attempt 1)
+23:40:19 [INFO]   0 TOC entries found
+23:40:19 [INFO]   Document title: Occupancycalculatorpythoninterface
+23:40:19 [INFO] 
+[2/4] Single-page doc — fetching main page …
+23:40:19 [INFO]   GET https://docs.nvidia.com/nsight-compute/OccupancyCalculatorPythonInterface/  (attempt 1)
+23:40:21 [INFO]   Parsed 0.0 MB of HTML
+23:40:21 [INFO] 
+[3/4] Extracting sections …
+23:40:21 [INFO]   3 sections extracted
+23:40:21 [INFO] 
+[4/4] Writing individual Markdown files (split-depth=2) …
+23:40:21 [INFO]   Saved index → 00_index.md
+23:40:21 [INFO]   [1/3] 04_occupancy-calculator-python-interface.md  (0.5 KB)
+23:40:21 [INFO]   [2/3] 04-01_introduction.md  (1.0 KB)
+23:40:21 [INFO]   [3/3] 04-02_api-reference.md  (13.6 KB)
+23:40:21 [INFO]   Total: 3 files + index
+23:40:21 [INFO] 
+============================================================
+23:40:21 [INFO] Done!  Files in: /home/jakeshea/solbench_leaderboard/references/NVIDIA_Manuals/ncu_guide.new
+23:40:21 [INFO] ============================================================
+  -> ncu_guide.new/  4 .md files
+===== [nvcc_guide] https://docs.nvidia.com/cuda/cuda-compiler-driver-nvcc/ =====
+23:40:21 [INFO] ============================================================
+23:40:21 [INFO] NVIDIA Documentation Crawler & Markdown Converter
+23:40:21 [INFO] ============================================================
+23:40:21 [INFO] Input URL  : https://docs.nvidia.com/cuda/cuda-compiler-driver-nvcc/
+23:40:21 [INFO] Base URL   : https://docs.nvidia.com/cuda/cuda-compiler-driver-nvcc/
+23:40:21 [INFO] TOC URL    : https://docs.nvidia.com/cuda/cuda-compiler-driver-nvcc/contents.html
+23:40:21 [INFO] Output dir : /home/jakeshea/solbench_leaderboard/references/NVIDIA_Manuals/nvcc_guide.new
+23:40:21 [INFO] 
+[1/4] Fetching table of contents …
+23:40:21 [INFO]   GET https://docs.nvidia.com/cuda/cuda-compiler-driver-nvcc/contents.html  (attempt 1)
+23:40:23 [INFO]   0 TOC entries found
+23:40:23 [INFO]   Document title: Cuda Compiler Driver Nvcc
+23:40:23 [INFO] 
+[2/4] Single-page doc — fetching main page …
+23:40:23 [INFO]   GET https://docs.nvidia.com/cuda/cuda-compiler-driver-nvcc/  (attempt 1)
+23:40:25 [INFO]   Parsed 0.4 MB of HTML
+23:40:25 [INFO] 
+[3/4] Extracting sections …
+23:40:25 [INFO]   269 sections extracted
+23:40:25 [INFO] 
+[4/4] Writing individual Markdown files (split-depth=2) …
+23:40:25 [INFO]   Saved index → 00_index.md
+23:40:25 [INFO]   [1/37] 01_introduction.md  (0.3 KB)
+23:40:25 [INFO]   [2/37] 01-01_overview.md  (3.3 KB)
+23:40:25 [INFO]   [3/37] 01-02_supported-host-compilers.md  (1.8 KB)
+23:40:25 [INFO]   [4/37] 02_compilation-phases.md  (0.3 KB)
+23:40:25 [INFO]   [5/37] 02-01_nvcc-identification-macro.md  (2.5 KB)
+23:40:25 [INFO]   [6/37] 02-02_nvcc-phases.md  (1.5 KB)
+23:40:25 [INFO]   [7/37] 02-03_supported-input-file-suffixes.md  (1.5 KB)
+23:40:25 [INFO]   [8/37] 02-04_supported-phases.md  (3.1 KB)
+23:40:25 [INFO]   [9/37] 03_the-cuda-compilation-trajectory.md  (1.8 KB)
+23:40:25 [INFO]   [10/37] 04_nvcc-command-options.md  (0.3 KB)
+23:40:25 [INFO]   [11/37] 04-01_command-option-types-and-notation.md  (2.3 KB)
+23:40:25 [INFO]   [12/37] 04-02_command-option-description.md  (108.5 KB)
+23:40:25 [INFO]   [13/37] 04-03_nvcc-environment-variables.md  (1.8 KB)
+23:40:25 [INFO]   [14/37] 05_gpu-compilation.md  (0.5 KB)
+23:40:25 [INFO]   [15/37] 05-01_gpu-generations.md  (1.9 KB)
+23:40:25 [INFO]   [16/37] 05-02_gpu-feature-list.md  (1.3 KB)
+23:40:25 [INFO]   [17/37] 05-03_application-compatibility.md  (1.0 KB)
+23:40:25 [INFO]   [18/37] 05-04_virtual-architectures.md  (2.3 KB)
+23:40:25 [INFO]   [19/37] 05-05_virtual-architecture-feature-list.md  (1.2 KB)
+23:40:25 [INFO]   [20/37] 05-06_further-mechanisms.md  (2.9 KB)
+23:40:25 [INFO]   [21/37] 05-07_nvcc-examples.md  (8.9 KB)
+23:40:25 [INFO]   [22/37] 06_using-separate-compilation-in-cuda.md  (0.9 KB)
+23:40:25 [INFO]   [23/37] 06-01_code-changes-for-separate-compilation.md  (1.0 KB)
+23:40:25 [INFO]   [24/37] 06-02_nvcc-options-for-separate-compilation.md  (1.9 KB)
+23:40:25 [INFO]   [25/37] 06-03_libraries.md  (1.1 KB)
+23:40:25 [INFO]   [26/37] 06-04_examples.md  (3.5 KB)
+23:40:25 [INFO]   [27/37] 06-05_optimization-of-separate-compilation.md  (1.5 KB)
+23:40:25 [INFO]   [28/37] 06-06_potential-separate-compilation-issues.md  (5.7 KB)
+23:40:25 [INFO]   [29/37] 07_miscellaneous-nvcc-usage.md  (0.4 KB)
+23:40:25 [INFO]   [30/37] 07-01_cross-compilation.md  (0.9 KB)
+23:40:25 [INFO]   [31/37] 07-02_keeping-intermediate-phase-files.md  (1.1 KB)
+23:40:25 [INFO]   [32/37] 07-03_cleaning-up-generated-files.md  (1.0 KB)
+23:40:25 [INFO]   [33/37] 07-04_printing-code-generation-statistics.md  (1.6 KB)
+23:40:25 [INFO]   [34/37] 08_notices.md  (0.3 KB)
+23:40:25 [INFO]   [35/37] 08-01_notice.md  (5.1 KB)
+23:40:25 [INFO]   [36/37] 08-02_opencl.md  (0.4 KB)
+23:40:25 [INFO]   [37/37] 08-03_trademarks.md  (0.5 KB)
+23:40:25 [INFO]   Total: 37 files + index
+23:40:25 [INFO] 
+============================================================
+23:40:25 [INFO] Done!  Files in: /home/jakeshea/solbench_leaderboard/references/NVIDIA_Manuals/nvcc_guide.new
+23:40:25 [INFO] ============================================================
+  -> nvcc_guide.new/  38 .md files
+===== [nvvm_ir] https://docs.nvidia.com/cuda/nvvm-ir-spec/ =====
+23:40:25 [INFO] ============================================================
+23:40:25 [INFO] NVIDIA Documentation Crawler & Markdown Converter
+23:40:25 [INFO] ============================================================
+23:40:25 [INFO] Input URL  : https://docs.nvidia.com/cuda/nvvm-ir-spec/
+23:40:25 [INFO] Base URL   : https://docs.nvidia.com/cuda/nvvm-ir-spec/
+23:40:25 [INFO] TOC URL    : https://docs.nvidia.com/cuda/nvvm-ir-spec/contents.html
+23:40:25 [INFO] Output dir : /home/jakeshea/solbench_leaderboard/references/NVIDIA_Manuals/nvvm_ir.new
+23:40:25 [INFO] 
+[1/4] Fetching table of contents …
+23:40:26 [INFO]   GET https://docs.nvidia.com/cuda/nvvm-ir-spec/contents.html  (attempt 1)
+23:40:28 [INFO]   0 TOC entries found
+23:40:28 [INFO]   Document title: Nvvm Ir Spec
+23:40:28 [INFO] 
+[2/4] Single-page doc — fetching main page …
+23:40:28 [INFO]   GET https://docs.nvidia.com/cuda/nvvm-ir-spec/  (attempt 1)
+23:40:29 [INFO]   Parsed 0.2 MB of HTML
+23:40:29 [INFO] 
+[3/4] Extracting sections …
+23:40:29 [INFO]   111 sections extracted
+23:40:29 [INFO] 
+[4/4] Writing individual Markdown files (split-depth=2) …
+23:40:29 [INFO]   Saved index → 00_index.md
+23:40:29 [INFO]   [1/89] 01_introduction.md  (2.8 KB)
+23:40:29 [INFO]   [2/89] 02_identifiers.md  (0.5 KB)
+23:40:29 [INFO]   [3/89] 03_high-level-structure.md  (0.3 KB)
+23:40:29 [INFO]   [4/89] 03-01_linkage-types.md  (0.6 KB)
+23:40:29 [INFO]   [5/89] 03-02_calling-conventions.md  (3.5 KB)
+23:40:29 [INFO]   [6/89] 03-03_visibility-styles.md  (0.4 KB)
+23:40:29 [INFO]   [7/89] 03-04_dll-storage-classes.md  (0.3 KB)
+23:40:29 [INFO]   [8/89] 03-05_thread-local-storage-models.md  (0.4 KB)
+23:40:29 [INFO]   [9/89] 03-06_runtime-preemption-specifiers.md  (0.4 KB)
+23:40:29 [INFO]   [10/89] 03-07_structure-types.md  (0.3 KB)
+23:40:29 [INFO]   [11/89] 03-08_non-integral-pointer-type.md  (0.4 KB)
+23:40:29 [INFO]   [12/89] 03-09_comdats.md  (0.3 KB)
+23:40:29 [INFO]   [13/89] 03-10_source-filename.md  (0.3 KB)
+23:40:29 [INFO]   [14/89] 03-11_global-variables.md  (0.9 KB)
+23:40:29 [INFO]   [15/89] 03-12_functions.md  (0.4 KB)
+23:40:29 [INFO]   [16/89] 03-13_aliases.md  (0.3 KB)
+23:40:29 [INFO]   [17/89] 03-14_ifuncs.md  (0.3 KB)
+23:40:29 [INFO]   [18/89] 03-15_named-metadata.md  (1.8 KB)
+23:40:29 [INFO]   [19/89] 03-16_parameter-attributes.md  (0.6 KB)
+23:40:29 [INFO]   [20/89] 03-17_garbage-collector-strategy-names.md  (0.4 KB)
+23:40:29 [INFO]   [21/89] 03-18_prefix-data.md  (0.3 KB)
+23:40:29 [INFO]   [22/89] 03-19_prologue-data.md  (0.3 KB)
+23:40:29 [INFO]   [23/89] 03-20_attribute-groups.md  (0.4 KB)
+23:40:29 [INFO]   [24/89] 03-21_function-attributes.md  (0.8 KB)
+23:40:29 [INFO]   [25/89] 03-22_global-attributes.md  (0.3 KB)
+23:40:29 [INFO]   [26/89] 03-23_operand-bundles.md  (0.3 KB)
+23:40:29 [INFO]   [27/89] 03-24_module-level-inline-assembly.md  (0.4 KB)
+23:40:29 [INFO]   [28/89] 03-25_data-layout.md  (1.0 KB)
+23:40:29 [INFO]   [29/89] 03-26_target-triple.md  (0.5 KB)
+23:40:29 [INFO]   [30/89] 03-27_pointer-aliasing-rules.md  (0.3 KB)
+23:40:29 [INFO]   [31/89] 03-28_volatile-memory-access.md  (0.4 KB)
+23:40:29 [INFO]   [32/89] 03-29_memory-model-for-concurrent-operations.md  (0.5 KB)
+23:40:29 [INFO]   [33/89] 03-30_atomic-memory-ordering-constraints.md  (0.5 KB)
+23:40:29 [INFO]   [34/89] 03-31_fast-math-flags.md  (0.3 KB)
+23:40:29 [INFO]   [35/89] 03-32_use-list-order-directives.md  (0.4 KB)
+23:40:29 [INFO]   [36/89] 04_type-system.md  (0.5 KB)
+23:40:29 [INFO]   [37/89] 05_constants.md  (0.7 KB)
+23:40:29 [INFO]   [38/89] 06_other-values.md  (0.3 KB)
+23:40:29 [INFO]   [39/89] 06-01_inline-assembler-expressions.md  (0.7 KB)
+23:40:29 [INFO]   [40/89] 07_metadata.md  (0.3 KB)
+23:40:29 [INFO]   [41/89] 07-01_metadata-nodes-and-metadata-strings.md  (0.9 KB)
+23:40:29 [INFO]   [42/89] 08_thinlto-summary.md  (0.3 KB)
+23:40:29 [INFO]   [43/89] 09_intrinsic-global-variables.md  (0.6 KB)
+23:40:29 [INFO]   [44/89] 10_instructions.md  (0.3 KB)
+23:40:29 [INFO]   [45/89] 10-01_terminator-instructions.md  (0.4 KB)
+23:40:29 [INFO]   [46/89] 10-02_binary-operations.md  (0.4 KB)
+23:40:29 [INFO]   [47/89] 10-03_bitwise-binary-operations.md  (0.4 KB)
+23:40:29 [INFO]   [48/89] 10-04_vector-operations.md  (0.4 KB)
+23:40:29 [INFO]   [49/89] 10-05_aggregate-operations.md  (0.4 KB)
+23:40:29 [INFO]   [50/89] 10-06_memory-access-and-addressing-operations.md  (3.2 KB)
+23:40:29 [INFO]   [51/89] 10-07_conversion-operations.md  (0.7 KB)
+23:40:29 [INFO]   [52/89] 10-08_other-operations.md  (0.5 KB)
+23:40:29 [INFO]   [53/89] 11_supported-intrinsic-functions.md  (0.4 KB)
+23:40:29 [INFO]   [54/89] 11-01_supported-variable-argument-handling-intrinsics.md  (0.5 KB)
+23:40:29 [INFO]   [55/89] 11-02_supported-standard-c-c-library-intrinsics.md  (1.0 KB)
+23:40:29 [INFO]   [56/89] 11-03_supported-bit-manipulations-intrinsics.md  (0.9 KB)
+23:40:29 [INFO]   [57/89] 11-04_supported-specialised-arithmetic-intrinsics.md  (0.4 KB)
+23:40:29 [INFO]   [58/89] 11-05_supported-arithmetic-with-overflow-intrinsics.md  (0.5 KB)
+23:40:29 [INFO]   [59/89] 11-06_supported-half-precision-floating-point-intrinsics.md  (0.5 KB)
+23:40:29 [INFO]   [60/89] 11-07_supported-debugger-intrinsics.md  (0.4 KB)
+23:40:29 [INFO]   [61/89] 11-08_supported-memory-use-markers.md  (0.5 KB)
+23:40:29 [INFO]   [62/89] 11-09_supported-general-intrinsics.md  (0.6 KB)
+23:40:29 [INFO]   [63/89] 12_address-space.md  (0.3 KB)
+23:40:29 [INFO]   [64/89] 12-01_address-spaces.md  (1.9 KB)
+23:40:29 [INFO]   [65/89] 12-02_generic-pointers-and-non-generic-pointers.md  (4.4 KB)
+23:40:29 [INFO]   [66/89] 12-03_the-alloca-instruction.md  (0.4 KB)
+23:40:29 [INFO]   [67/89] 13_global-property-annotation.md  (0.3 KB)
+23:40:29 [INFO]   [68/89] 13-01_overview.md  (0.5 KB)
+23:40:29 [INFO]   [69/89] 13-02_representation-of-properties.md  (1.6 KB)
+23:40:29 [INFO]   [70/89] 13-03_supported-properties.md  (2.0 KB)
+23:40:29 [INFO]   [71/89] 14_texture-and-surface.md  (0.3 KB)
+23:40:29 [INFO]   [72/89] 14-01_texture-variable-and-surface-variable.md  (0.9 KB)
+23:40:29 [INFO]   [73/89] 14-02_accessing-texture-memory-or-surface-memory.md  (1.1 KB)
+23:40:29 [INFO]   [74/89] 15_nvvm-specific-intrinsic-functions.md  (0.4 KB)
+23:40:29 [INFO]   [75/89] 15-01_atomic.md  (2.1 KB)
+23:40:29 [INFO]   [76/89] 15-02_barrier-and-memory-fence.md  (3.9 KB)
+23:40:29 [INFO]   [77/89] 15-03_address-space-conversion.md  (0.4 KB)
+23:40:29 [INFO]   [78/89] 15-04_special-registers.md  (1.0 KB)
+23:40:29 [INFO]   [79/89] 15-05_texture-surface-access.md  (28.0 KB)
+23:40:29 [INFO]   [80/89] 15-06_warp-level-operations.md  (18.9 KB)
+23:40:29 [INFO]   [81/89] 16_source-level-debugging-support.md  (2.3 KB)
+23:40:29 [INFO]   [82/89] 17_nvvm-abi-for-ptx.md  (0.3 KB)
+23:40:29 [INFO]   [83/89] 17-01_id1.md  (1.0 KB)
+23:40:29 [INFO]   [84/89] 17-02_parameter-passing-and-return.md  (1.2 KB)
+23:40:29 [INFO]   [85/89] 18_revision-history.md  (2.1 KB)
+23:40:29 [INFO]   [86/89] 19_notices.md  (0.2 KB)
+23:40:29 [INFO]   [87/89] 19-01_notice.md  (5.0 KB)
+23:40:29 [INFO]   [88/89] 19-02_opencl.md  (0.3 KB)
+23:40:29 [INFO]   [89/89] 19-03_trademarks.md  (0.5 KB)
+23:40:29 [INFO]   Total: 89 files + index
+23:40:29 [INFO] 
+============================================================
+23:40:29 [INFO] Done!  Files in: /home/jakeshea/solbench_leaderboard/references/NVIDIA_Manuals/nvvm_ir.new
+23:40:29 [INFO] ============================================================
+  -> nvvm_ir.new/  90 .md files
+===== [ptx_compier_api] https://docs.nvidia.com/cuda/ptx-compiler-api/ =====
+23:40:30 [INFO] ============================================================
+23:40:30 [INFO] NVIDIA Documentation Crawler & Markdown Converter
+23:40:30 [INFO] ============================================================
+23:40:30 [INFO] Input URL  : https://docs.nvidia.com/cuda/ptx-compiler-api/
+23:40:30 [INFO] Base URL   : https://docs.nvidia.com/cuda/ptx-compiler-api/
+23:40:30 [INFO] TOC URL    : https://docs.nvidia.com/cuda/ptx-compiler-api/contents.html
+23:40:30 [INFO] Output dir : /home/jakeshea/solbench_leaderboard/references/NVIDIA_Manuals/ptx_compier_api.new
+23:40:30 [INFO] 
+[1/4] Fetching table of contents …
+23:40:30 [INFO]   GET https://docs.nvidia.com/cuda/ptx-compiler-api/contents.html  (attempt 1)
+23:40:32 [INFO]   0 TOC entries found
+23:40:32 [INFO]   Document title: Ptx Compiler Api
+23:40:32 [INFO] 
+[2/4] Single-page doc — fetching main page …
+23:40:32 [INFO]   GET https://docs.nvidia.com/cuda/ptx-compiler-api/  (attempt 1)
+23:40:34 [INFO]   Parsed 0.1 MB of HTML
+23:40:34 [INFO] 
+[3/4] Extracting sections …
+23:40:34 [INFO]   22 sections extracted
+23:40:34 [INFO] 
+[4/4] Writing individual Markdown files (split-depth=2) …
+23:40:34 [INFO]   Saved index → 00_index.md
+23:40:34 [INFO]   [1/15] 01_introduction.md  (1.8 KB)
+23:40:34 [INFO]   [2/15] 02_getting-started.md  (0.3 KB)
+23:40:34 [INFO]   [3/15] 02-01_system-requirements.md  (0.5 KB)
+23:40:34 [INFO]   [4/15] 02-02_installation.md  (0.7 KB)
+23:40:34 [INFO]   [5/15] 03_thread-safety.md  (0.4 KB)
+23:40:34 [INFO]   [6/15] 04_user-interface.md  (0.7 KB)
+23:40:34 [INFO]   [7/15] 04-01_ptx-compiler-handle.md  (1.2 KB)
+23:40:34 [INFO]   [8/15] 04-02_error-codes.md  (1.5 KB)
+23:40:34 [INFO]   [9/15] 04-03_api-versioning.md  (6.1 KB)
+23:40:34 [INFO]   [10/15] 04-04_compilation-apis.md  (17.1 KB)
+23:40:34 [INFO]   [11/15] 05_compilation-options.md  (10.1 KB)
+23:40:34 [INFO]   [12/15] 06_basic-usage.md  (4.8 KB)
+23:40:34 [INFO]   [13/15] 07_example-simple-vector-addition.md  (7.5 KB)
+23:40:34 [INFO]   [14/15] 07-01_build-instruction.md  (1.0 KB)
+23:40:34 [INFO]   [15/15] 07-02_notices.md  (5.9 KB)
+23:40:34 [INFO]   Total: 15 files + index
+23:40:34 [INFO] 
+============================================================
+23:40:34 [INFO] Done!  Files in: /home/jakeshea/solbench_leaderboard/references/NVIDIA_Manuals/ptx_compier_api.new
+23:40:34 [INFO] ============================================================
+  -> ptx_compier_api.new/  16 .md files
+===== [ptx_isa] https://docs.nvidia.com/cuda/parallel-thread-execution/ =====
+23:40:34 [INFO] ============================================================
+23:40:34 [INFO] NVIDIA Documentation Crawler & Markdown Converter
+23:40:34 [INFO] ============================================================
+23:40:34 [INFO] Input URL  : https://docs.nvidia.com/cuda/parallel-thread-execution/
+23:40:34 [INFO] Base URL   : https://docs.nvidia.com/cuda/parallel-thread-execution/
+23:40:34 [INFO] TOC URL    : https://docs.nvidia.com/cuda/parallel-thread-execution/contents.html
+23:40:34 [INFO] Output dir : /home/jakeshea/solbench_leaderboard/references/NVIDIA_Manuals/ptx_isa.new
+23:40:34 [INFO] 
+[1/4] Fetching table of contents …
+23:40:35 [INFO]   GET https://docs.nvidia.com/cuda/parallel-thread-execution/contents.html  (attempt 1)
+23:40:36 [INFO]   0 TOC entries found
+23:40:36 [INFO]   Document title: Parallel Thread Execution
+23:40:36 [INFO] 
+[2/4] Single-page doc — fetching main page …
+23:40:36 [INFO]   GET https://docs.nvidia.com/cuda/parallel-thread-execution/  (attempt 1)
+23:40:39 [INFO]   Parsed 3.3 MB of HTML
+23:40:39 [INFO] 
+[3/4] Extracting sections …
+23:40:39 [INFO]   682 sections extracted
+23:40:39 [INFO] 
+[4/4] Writing individual Markdown files (split-depth=2) …
+23:40:39 [INFO]   Saved index → 00_index.md
+23:40:39 [INFO]   [1/148] 01_introduction.md  (0.5 KB)
+23:40:39 [INFO]   [2/148] 01-01_scalable-data-parallel-computing-using-gpus.md  (2.2 KB)
+23:40:39 [INFO]   [3/148] 01-02_goals-of-ptx.md  (1.4 KB)
+23:40:39 [INFO]   [4/148] 01-03_ptx-isa-version-9-2.md  (0.8 KB)
+23:40:39 [INFO]   [5/148] 01-04_document-structure.md  (2.6 KB)
+23:40:39 [INFO]   [6/148] 02_programming-model.md  (0.3 KB)
+23:40:39 [INFO]   [7/148] 02-01_highly-multithreaded-coprocessor.md  (1.0 KB)
+23:40:39 [INFO]   [8/148] 02-02_thread-hierarchy.md  (7.2 KB)
+23:40:39 [INFO]   [9/148] 02-03_memory-hierarchy.md  (2.5 KB)
+23:40:39 [INFO]   [10/148] 03_ptx-machine-model.md  (0.3 KB)
+23:40:39 [INFO]   [11/148] 03-01_set-of-simt-multiprocessors.md  (4.8 KB)
+23:40:39 [INFO]   [12/148] 03-02_independent-thread-scheduling.md  (2.0 KB)
+23:40:39 [INFO]   [13/148] 03-03_on-chip-shared-memory.md  (1.3 KB)
+23:40:39 [INFO]   [14/148] 04_syntax.md  (0.6 KB)
+23:40:39 [INFO]   [15/148] 04-01_source-format.md  (1.2 KB)
+23:40:39 [INFO]   [16/148] 04-02_comments.md  (0.7 KB)
+23:40:39 [INFO]   [17/148] 04-03_statements.md  (4.3 KB)
+23:40:39 [INFO]   [18/148] 04-04_identifiers.md  (2.1 KB)
+23:40:39 [INFO]   [19/148] 04-05_constants.md  (10.9 KB)
+23:40:39 [INFO]   [20/148] 05_state-spaces-types-and-variables.md  (0.6 KB)
+23:40:39 [INFO]   [21/148] 05-01_state-spaces.md  (22.1 KB)
+23:40:39 [INFO]   [22/148] 05-02_types.md  (10.9 KB)
+23:40:39 [INFO]   [23/148] 05-03_texture-sampler-and-surface-types.md  (9.7 KB)
+23:40:39 [INFO]   [24/148] 05-04_variables.md  (13.3 KB)
+23:40:39 [INFO]   [25/148] 05-05_tensors.md  (37.3 KB)
+23:40:39 [INFO]   [26/148] 06_instruction-operands.md  (0.3 KB)
+23:40:39 [INFO]   [27/148] 06-01_operand-type-information.md  (0.8 KB)
+23:40:39 [INFO]   [28/148] 06-02_source-operands.md  (1.2 KB)
+23:40:39 [INFO]   [29/148] 06-03_destination-operands.md  (0.6 KB)
+23:40:39 [INFO]   [30/148] 06-04_using-addresses-arrays-and-vectors.md  (7.7 KB)
+23:40:39 [INFO]   [31/148] 06-05_type-conversion.md  (6.1 KB)
+23:40:39 [INFO]   [32/148] 06-06_operand-costs.md  (1.4 KB)
+23:40:39 [INFO]   [33/148] 07_abstracting-abi.md  (0.9 KB)
+23:40:39 [INFO]   [34/148] 07-01_function-declarations-and-definitions.md  (8.1 KB)
+23:40:39 [INFO]   [35/148] 07-02_variadic-functions.md  (0.7 KB)
+23:40:39 [INFO]   [36/148] 07-03_alloca.md  (1.0 KB)
+23:40:39 [INFO]   [37/148] 08_memory-consistency-model.md  (1.1 KB)
+23:40:39 [INFO]   [38/148] 08-01_scope-and-applicability.md  (1.1 KB)
+23:40:39 [INFO]   [39/148] 08-02_memory-operations.md  (4.5 KB)
+23:40:39 [INFO]   [40/148] 08-03_memory-consistency-state-spaces.md  (1.0 KB)
+23:40:39 [INFO]   [41/148] 08-04_operation-types.md  (4.7 KB)
+23:40:39 [INFO]   [42/148] 08-05_scope.md  (1.3 KB)
+23:40:39 [INFO]   [43/148] 08-06_proxies.md  (1.1 KB)
+23:40:39 [INFO]   [44/148] 08-07_morally-strong-operations.md  (2.5 KB)
+23:40:39 [INFO]   [45/148] 08-08_release-acquire-patterns.md  (2.4 KB)
+23:40:39 [INFO]   [46/148] 08-09_ordering-memory-operations.md  (10.9 KB)
+23:40:39 [INFO]   [47/148] 08-10_axioms.md  (10.7 KB)
+23:40:39 [INFO]   [48/148] 08-11_special-cases.md  (1.4 KB)
+23:40:39 [INFO]   [49/148] 09_instruction-set.md  (0.3 KB)
+23:40:39 [INFO]   [50/148] 09-01_format-and-semantics-of-instruction-descriptions.md  (0.7 KB)
+23:40:39 [INFO]   [51/148] 09-02_ptx-instructions.md  (1.1 KB)
+23:40:39 [INFO]   [52/148] 09-03_predicated-execution.md  (5.9 KB)
+23:40:39 [INFO]   [53/148] 09-04_type-information-for-instructions-and-operands.md  (10.9 KB)
+23:40:39 [INFO]   [54/148] 09-05_divergence-of-threads-in-control-constructs.md  (1.6 KB)
+23:40:39 [INFO]   [55/148] 09-06_semantics.md  (2.3 KB)
+23:40:40 [INFO]   [56/148] 09-07_instructions.md  (1081.2 KB)
+23:40:40 [INFO]   [57/148] 10_special-registers.md  (1.2 KB)
+23:40:40 [INFO]   [58/148] 10-01_special-registers-tid.md  (1.8 KB)
+23:40:40 [INFO]   [59/148] 10-02_special-registers-ntid.md  (1.8 KB)
+23:40:40 [INFO]   [60/148] 10-03_special-registers-laneid.md  (0.8 KB)
+23:40:40 [INFO]   [61/148] 10-04_special-registers-warpid.md  (1.3 KB)
+23:40:40 [INFO]   [62/148] 10-05_special-registers-nwarpid.md  (0.8 KB)
+23:40:40 [INFO]   [63/148] 10-06_special-registers-ctaid.md  (1.4 KB)
+23:40:40 [INFO]   [64/148] 10-07_special-registers-nctaid.md  (1.6 KB)
+23:40:40 [INFO]   [65/148] 10-08_special-registers-smid.md  (1.2 KB)
+23:40:40 [INFO]   [66/148] 10-09_special-registers-nsmid.md  (0.9 KB)
+23:40:40 [INFO]   [67/148] 10-10_special-registers-gridid.md  (1.6 KB)
+23:40:40 [INFO]   [68/148] 10-11_special-registers-is-explicit-cluster.md  (0.9 KB)
+23:40:40 [INFO]   [69/148] 10-12_special-registers-clusterid.md  (1.3 KB)
+23:40:40 [INFO]   [70/148] 10-13_special-registers-nclusterid.md  (1.2 KB)
+23:40:40 [INFO]   [71/148] 10-14_special-registers-cluster-ctaid.md  (1.4 KB)
+23:40:40 [INFO]   [72/148] 10-15_special-registers-cluster-nctaid.md  (1.3 KB)
+23:40:40 [INFO]   [73/148] 10-16_special-registers-cluster-ctarank.md  (0.9 KB)
+23:40:40 [INFO]   [74/148] 10-17_special-registers-cluster-nctarank.md  (0.9 KB)
+23:40:40 [INFO]   [75/148] 10-18_special-registers-lanemask-eq.md  (0.9 KB)
+23:40:40 [INFO]   [76/148] 10-19_special-registers-lanemask-le.md  (0.9 KB)
+23:40:40 [INFO]   [77/148] 10-20_special-registers-lanemask-lt.md  (0.9 KB)
+23:40:40 [INFO]   [78/148] 10-21_special-registers-lanemask-ge.md  (0.9 KB)
+23:40:40 [INFO]   [79/148] 10-22_special-registers-lanemask-gt.md  (0.9 KB)
+23:40:40 [INFO]   [80/148] 10-23_special-registers-clock.md  (1.1 KB)
+23:40:40 [INFO]   [81/148] 10-24_special-registers-clock64.md  (0.9 KB)
+23:40:40 [INFO]   [82/148] 10-25_special-registers-pm0-pm7.md  (1.0 KB)
+23:40:40 [INFO]   [83/148] 10-26_special-registers-pm0-64-pm7-64.md  (1.2 KB)
+23:40:40 [INFO]   [84/148] 10-27_special-registers-envreg-32.md  (1.0 KB)
+23:40:40 [INFO]   [85/148] 10-28_special-registers-globaltimer.md  (1.2 KB)
+23:40:40 [INFO]   [86/148] 10-29_special-registers-reserved-smem.md  (2.0 KB)
+23:40:40 [INFO]   [87/148] 10-30_special-registers-total-smem-size.md  (1.3 KB)
+23:40:40 [INFO]   [88/148] 10-31_special-registers-aggr-smem-size.md  (1.0 KB)
+23:40:40 [INFO]   [89/148] 10-32_special-registers-dynamic-smem-size.md  (1.0 KB)
+23:40:40 [INFO]   [90/148] 10-33_special-registers-current-graph-exec.md  (1.1 KB)
+23:40:40 [INFO]   [91/148] 11_directives.md  (0.3 KB)
+23:40:40 [INFO]   [92/148] 11-01_ptx-module-directives.md  (14.7 KB)
+23:40:40 [INFO]   [93/148] 11-02_specifying-kernel-entry-points-and-functions.md  (10.0 KB)
+23:40:40 [INFO]   [94/148] 11-03_control-flow-directives.md  (6.0 KB)
+23:40:40 [INFO]   [95/148] 11-04_performance-tuning-directives.md  (14.3 KB)
+23:40:40 [INFO]   [96/148] 11-05_debugging-directives.md  (9.3 KB)
+23:40:40 [INFO]   [97/148] 11-06_linking-directives.md  (4.1 KB)
+23:40:40 [INFO]   [98/148] 11-07_cluster-dimension-directives.md  (4.2 KB)
+23:40:40 [INFO]   [99/148] 11-08_miscellaneous-directives.md  (1.9 KB)
+23:40:40 [INFO]   [100/148] 12_descriptions-pragma-strings.md  (0.5 KB)
+23:40:40 [INFO]   [101/148] 12-01_pragma-strings-nounroll.md  (1.9 KB)
+23:40:40 [INFO]   [102/148] 12-02_pragma-strings-used-bytes-mask.md  (1.8 KB)
+23:40:40 [INFO]   [103/148] 12-03_pragma-strings-enable-smem-spilling.md  (2.4 KB)
+23:40:40 [INFO]   [104/148] 12-04_pragma-strings-frequency.md  (1.2 KB)
+23:40:40 [INFO]   [105/148] 13_release-notes.md  (12.9 KB)
+23:40:40 [INFO]   [106/148] 13-01_changes-in-ptx-isa-version-9-2.md  (1.2 KB)
+23:40:40 [INFO]   [107/148] 13-02_changes-in-ptx-isa-version-9-1.md  (1.1 KB)
+23:40:40 [INFO]   [108/148] 13-03_changes-in-ptx-isa-version-9-0.md  (1.8 KB)
+23:40:40 [INFO]   [109/148] 13-04_changes-in-ptx-isa-version-8-8.md  (3.7 KB)
+23:40:40 [INFO]   [110/148] 13-05_changes-in-ptx-isa-version-8-7.md  (1.8 KB)
+23:40:40 [INFO]   [111/148] 13-06_changes-in-ptx-isa-version-8-6.md  (3.2 KB)
+23:40:40 [INFO]   [112/148] 13-07_changes-in-ptx-isa-version-8-5.md  (0.7 KB)
+23:40:40 [INFO]   [113/148] 13-08_changes-in-ptx-isa-version-8-4.md  (0.8 KB)
+23:40:40 [INFO]   [114/148] 13-09_changes-in-ptx-isa-version-8-3.md  (1.1 KB)
+23:40:40 [INFO]   [115/148] 13-10_changes-in-ptx-isa-version-8-2.md  (1.3 KB)
+23:40:40 [INFO]   [116/148] 13-11_changes-in-ptx-isa-version-8-1.md  (1.4 KB)
+23:40:40 [INFO]   [117/148] 13-12_changes-in-ptx-isa-version-8-0.md  (1.9 KB)
+23:40:40 [INFO]   [118/148] 13-13_changes-in-ptx-isa-version-7-8.md  (2.8 KB)
+23:40:40 [INFO]   [119/148] 13-14_changes-in-ptx-isa-version-7-7.md  (0.6 KB)
+23:40:40 [INFO]   [120/148] 13-15_changes-in-ptx-isa-version-7-6.md  (0.9 KB)
+23:40:40 [INFO]   [121/148] 13-16_changes-in-ptx-isa-version-7-5.md  (1.1 KB)
+23:40:40 [INFO]   [122/148] 13-17_changes-in-ptx-isa-version-7-4.md  (1.2 KB)
+23:40:40 [INFO]   [123/148] 13-18_changes-in-ptx-isa-version-7-3.md  (1.0 KB)
+23:40:40 [INFO]   [124/148] 13-19_changes-in-ptx-isa-version-7-2.md  (0.7 KB)
+23:40:40 [INFO]   [125/148] 13-20_changes-in-ptx-isa-version-7-1.md  (1.1 KB)
+23:40:40 [INFO]   [126/148] 13-21_changes-in-ptx-isa-version-7-0.md  (2.2 KB)
+23:40:40 [INFO]   [127/148] 13-22_changes-in-ptx-isa-version-6-5.md  (1.2 KB)
+23:40:40 [INFO]   [128/148] 13-23_changes-in-ptx-isa-version-6-4.md  (1.5 KB)
+23:40:40 [INFO]   [129/148] 13-24_changes-in-ptx-isa-version-6-3.md  (1.6 KB)
+23:40:40 [INFO]   [130/148] 13-25_changes-in-ptx-isa-version-6-2.md  (1.5 KB)
+23:40:40 [INFO]   [131/148] 13-26_changes-in-ptx-isa-version-6-1.md  (0.7 KB)
+23:40:40 [INFO]   [132/148] 13-27_changes-in-ptx-isa-version-6-0.md  (2.3 KB)
+23:40:40 [INFO]   [133/148] 13-28_changes-in-ptx-isa-version-5-0.md  (1.4 KB)
+23:40:40 [INFO]   [134/148] 13-29_changes-in-ptx-isa-version-4-3.md  (1.0 KB)
+23:40:40 [INFO]   [135/148] 13-30_changes-in-ptx-isa-version-4-2.md  (1.2 KB)
+23:40:40 [INFO]   [136/148] 13-31_changes-in-ptx-isa-version-4-1.md  (0.9 KB)
+23:40:40 [INFO]   [137/148] 13-32_changes-in-ptx-isa-version-4-0.md  (1.1 KB)
+23:40:40 [INFO]   [138/148] 13-33_changes-in-ptx-isa-version-3-2.md  (1.0 KB)
+23:40:40 [INFO]   [139/148] 13-34_changes-in-ptx-isa-version-3-1.md  (2.1 KB)
+23:40:40 [INFO]   [140/148] 13-35_changes-in-ptx-isa-version-3-0.md  (1.9 KB)
+23:40:40 [INFO]   [141/148] 13-36_changes-in-ptx-isa-version-2-3.md  (1.5 KB)
+23:40:40 [INFO]   [142/148] 13-37_changes-in-ptx-isa-version-2-2.md  (1.7 KB)
+23:40:40 [INFO]   [143/148] 13-38_changes-in-ptx-isa-version-2-1.md  (1.6 KB)
+23:40:40 [INFO]   [144/148] 13-39_changes-in-ptx-isa-version-2-0.md  (5.1 KB)
+23:40:40 [INFO]   [145/148] 14_notices.md  (0.3 KB)
+23:40:40 [INFO]   [146/148] 14-01_notice.md  (5.1 KB)
+23:40:40 [INFO]   [147/148] 14-02_opencl.md  (0.4 KB)
+23:40:40 [INFO]   [148/148] 14-03_trademarks.md  (0.5 KB)
+23:40:40 [INFO]   Total: 148 files + index
+23:40:40 [INFO] 
+============================================================
+23:40:40 [INFO] Done!  Files in: /home/jakeshea/solbench_leaderboard/references/NVIDIA_Manuals/ptx_isa.new
+23:40:40 [INFO] ============================================================
+  -> ptx_isa.new/  149 .md files
+===== [ptx_writer_guide] https://docs.nvidia.com/cuda/ptx-writers-guide-to-interoperability/ =====
+23:40:40 [INFO] ============================================================
+23:40:40 [INFO] NVIDIA Documentation Crawler & Markdown Converter
+23:40:40 [INFO] ============================================================
+23:40:40 [INFO] Input URL  : https://docs.nvidia.com/cuda/ptx-writers-guide-to-interoperability/
+23:40:40 [INFO] Base URL   : https://docs.nvidia.com/cuda/ptx-writers-guide-to-interoperability/
+23:40:40 [INFO] TOC URL    : https://docs.nvidia.com/cuda/ptx-writers-guide-to-interoperability/contents.html
+23:40:40 [INFO] Output dir : /home/jakeshea/solbench_leaderboard/references/NVIDIA_Manuals/ptx_writer_guide.new
+23:40:40 [INFO] 
+[1/4] Fetching table of contents …
+23:40:40 [INFO]   GET https://docs.nvidia.com/cuda/ptx-writers-guide-to-interoperability/contents.html  (attempt 1)
+23:40:42 [INFO]   0 TOC entries found
+23:40:42 [INFO]   Document title: Ptx Writers Guide To Interoperability
+23:40:42 [INFO] 
+[2/4] Single-page doc — fetching main page …
+23:40:42 [INFO]   GET https://docs.nvidia.com/cuda/ptx-writers-guide-to-interoperability/  (attempt 1)
+23:40:44 [INFO]   Parsed 0.1 MB of HTML
+23:40:44 [INFO] 
+[3/4] Extracting sections …
+23:40:44 [INFO]   21 sections extracted
+23:40:44 [INFO] 
+[4/4] Writing individual Markdown files (split-depth=2) …
+23:40:44 [INFO]   Saved index → 00_index.md
+23:40:44 [INFO]   [1/21] 01_introduction.md  (1.4 KB)
+23:40:44 [INFO]   [2/21] 02_data-representation.md  (0.4 KB)
+23:40:44 [INFO]   [3/21] 02-01_fundamental-types.md  (2.0 KB)
+23:40:44 [INFO]   [4/21] 02-02_aggregates-and-unions.md  (2.0 KB)
+23:40:44 [INFO]   [5/21] 02-03_bit-fields.md  (3.4 KB)
+23:40:44 [INFO]   [6/21] 02-04_texture-sampler-and-surface-types.md  (2.2 KB)
+23:40:44 [INFO]   [7/21] 03_function-calling-sequence.md  (1.0 KB)
+23:40:44 [INFO]   [8/21] 03-01_registers.md  (0.6 KB)
+23:40:44 [INFO]   [9/21] 03-02_stack-frame.md  (0.5 KB)
+23:40:44 [INFO]   [10/21] 03-03_parameter-passing.md  (2.3 KB)
+23:40:44 [INFO]   [11/21] 04_system-calls.md  (3.7 KB)
+23:40:44 [INFO]   [12/21] 05_atomics-application-binary-interface.md  (4.2 KB)
+23:40:44 [INFO]   [13/21] 06_debug-information.md  (0.4 KB)
+23:40:44 [INFO]   [14/21] 06-01_generation-of-debug-information.md  (1.1 KB)
+23:40:44 [INFO]   [15/21] 06-02_cuda-specific-dwarf-definitions.md  (1.3 KB)
+23:40:44 [INFO]   [16/21] 07_example.md  (3.6 KB)
+23:40:44 [INFO]   [17/21] 08_c.md  (0.8 KB)
+23:40:44 [INFO]   [18/21] 09_notices.md  (0.3 KB)
+23:40:44 [INFO]   [19/21] 09-01_notice.md  (5.1 KB)
+23:40:44 [INFO]   [20/21] 09-02_opencl.md  (0.4 KB)
+23:40:44 [INFO]   [21/21] 09-03_trademarks.md  (0.6 KB)
+23:40:44 [INFO]   Total: 21 files + index
+23:40:44 [INFO] 
+============================================================
+23:40:44 [INFO] Done!  Files in: /home/jakeshea/solbench_leaderboard/references/NVIDIA_Manuals/ptx_writer_guide.new
+23:40:44 [INFO] ============================================================
+  -> ptx_writer_guide.new/  22 .md files
+
+===== [MULTI: cutile_python] https://docs.nvidia.com/cuda/cutile-python/index.html =====
+23:41:09 [INFO] ============================================================
+23:41:09 [INFO] NVIDIA Multi-Page Documentation Crawler
+23:41:09 [INFO] ============================================================
+23:41:09 [INFO] Start URL  : https://docs.nvidia.com/cuda/cutile-python/index.html
+23:41:09 [INFO] Base URL   : https://docs.nvidia.com/cuda/cutile-python/
+23:41:09 [INFO] Doc Root   : https://docs.nvidia.com/cuda/cutile-python/
+23:41:09 [INFO] Output     : /home/jakeshea/solbench_leaderboard/references/NVIDIA_Manuals/cutile_python.new
+23:41:09 [INFO] 
+[1/3] Discovering pages ...
+23:41:09 [INFO]   Index page: https://docs.nvidia.com/cuda/cutile-python/index.html
+23:41:09 [INFO]   GET https://docs.nvidia.com/cuda/cutile-python/index.html  (attempt 1)
+23:41:11 [INFO]   Document: cuTile Python — cuTile Python
+23:41:11 [INFO]     -> 11 pages via sidebar navigation
+23:41:11 [INFO]   12 page(s) to crawl
+23:41:11 [INFO] 
+[2/3] Crawling pages & extracting sections ...
+23:41:11 [INFO]   [1/12] https://docs.nvidia.com/cuda/cutile-python/index.html
+23:41:11 [INFO]     -> 1 sections
+23:41:11 [INFO]   [2/12] https://docs.nvidia.com/cuda/cutile-python/generated/release_notes.html
+23:41:11 [INFO]   GET https://docs.nvidia.com/cuda/cutile-python/generated/release_notes.html  (attempt 1)
+23:41:13 [INFO]     -> 19 sections
+23:41:13 [INFO]   [3/12] https://docs.nvidia.com/cuda/cutile-python/quickstart.html
+23:41:13 [INFO]   GET https://docs.nvidia.com/cuda/cutile-python/quickstart.html  (attempt 1)
+23:41:14 [INFO]     -> 1 section (whole-page fallback)
+23:41:14 [INFO]   [4/12] https://docs.nvidia.com/cuda/cutile-python/execution.html
+23:41:14 [INFO]   GET https://docs.nvidia.com/cuda/cutile-python/execution.html  (attempt 1)
+23:41:16 [INFO]     -> 14 sections
+23:41:16 [INFO]   [5/12] https://docs.nvidia.com/cuda/cutile-python/data.html
+23:41:16 [INFO]   GET https://docs.nvidia.com/cuda/cutile-python/data.html  (attempt 1)
+23:41:18 [INFO]     -> 12 sections
+23:41:18 [INFO]   [6/12] https://docs.nvidia.com/cuda/cutile-python/memory_model.html
+23:41:18 [INFO]   GET https://docs.nvidia.com/cuda/cutile-python/memory_model.html  (attempt 1)
+23:41:20 [INFO]     -> 1 section (whole-page fallback)
+23:41:20 [INFO]   [7/12] https://docs.nvidia.com/cuda/cutile-python/interoperability.html
+23:41:20 [INFO]   GET https://docs.nvidia.com/cuda/cutile-python/interoperability.html  (attempt 1)
+23:41:22 [INFO]     -> 1 section (whole-page fallback)
+23:41:22 [INFO]   [8/12] https://docs.nvidia.com/cuda/cutile-python/performance.html
+23:41:22 [INFO]   GET https://docs.nvidia.com/cuda/cutile-python/performance.html  (attempt 1)
+23:41:23 [INFO]     -> 5 sections
+23:41:23 [INFO]   [9/12] https://docs.nvidia.com/cuda/cutile-python/operations.html
+23:41:23 [INFO]   GET https://docs.nvidia.com/cuda/cutile-python/operations.html  (attempt 1)
+23:41:25 [INFO]     -> 1 section (whole-page fallback)
+23:41:25 [INFO]   [10/12] https://docs.nvidia.com/cuda/cutile-python/compilation.html
+23:41:25 [INFO]   GET https://docs.nvidia.com/cuda/cutile-python/compilation.html  (attempt 1)
+23:41:27 [INFO]     -> 1 section (whole-page fallback)
+23:41:27 [INFO]   [11/12] https://docs.nvidia.com/cuda/cutile-python/debugging.html
+23:41:27 [INFO]   GET https://docs.nvidia.com/cuda/cutile-python/debugging.html  (attempt 1)
+23:41:29 [INFO]     -> 1 section (whole-page fallback)
+23:41:29 [INFO]   [12/12] https://docs.nvidia.com/cuda/cutile-python/known_issues.html
+23:41:29 [INFO]   GET https://docs.nvidia.com/cuda/cutile-python/known_issues.html  (attempt 1)
+23:41:30 [INFO]     -> 1 section (whole-page fallback)
+23:41:30 [INFO]   Total: 58 sections from 12 page(s)
+23:41:30 [INFO] 
+[3/3] Converting to Markdown ...
+23:41:30 [INFO]   Saved index -> 00_index.md
+23:41:30 [INFO]   [1/57] 0001_cutile-python.md  (4.0 KB)
+23:41:30 [INFO]   [2/57] 0002_release-notes.md  (0.3 KB)
+23:41:30 [INFO]   [3/57] 01-03-00_id1.md  (0.3 KB)
+23:41:30 [INFO]   [4/57] 0004_features.md  (1.6 KB)
+23:41:30 [INFO]   [5/57] 0005_enhancements.md  (0.5 KB)
+23:41:30 [INFO]   [6/57] 0006_bug-fixes.md  (0.4 KB)
+23:41:30 [INFO]   [7/57] 0007_abi-changes.md  (0.4 KB)
+23:41:30 [INFO]   [8/57] 01-02-00_id2.md  (0.3 KB)
+23:41:30 [INFO]   [9/57] 0009_ctk-13-2-features.md  (0.9 KB)
+23:41:30 [INFO]   [10/57] 0010_id3.md  (1.1 KB)
+23:41:30 [INFO]   [11/57] 0011_id4.md  (0.8 KB)
+23:41:30 [INFO]   [12/57] 0012_id5.md  (0.6 KB)
+23:41:30 [INFO]   [13/57] 01-01-00_id6.md  (0.3 KB)
+23:41:30 [INFO]   [14/57] 0014_id7.md  (0.5 KB)
+23:41:30 [INFO]   [15/57] 0015_id8.md  (0.5 KB)
+23:41:30 [INFO]   [16/57] 0016_id9.md  (1.5 KB)
+23:41:30 [INFO]   [17/57] 01-00-01_id10.md  (0.3 KB)
+23:41:30 [INFO]   [18/57] 0018_id11.md  (0.5 KB)
+23:41:30 [INFO]   [19/57] 0019_id12.md  (0.4 KB)
+23:41:30 [INFO]   [20/57] 01-00-00_id13.md  (0.3 KB)
+23:41:30 [INFO]   [21/57] 0021_quickstart.md  (12.3 KB)
+23:41:30 [INFO]   [22/57] 0022_execution-model.md  (0.3 KB)
+23:41:30 [INFO]   [23/57] 0023_abstract-machine.md  (1.7 KB)
+23:41:30 [INFO]   [24/57] 0024_execution-spaces.md  (1.1 KB)
+23:41:30 [INFO]   [25/57] 0025_tile-functions.md  (1.6 KB)
+23:41:30 [INFO]   [26/57] 0026_execution-tile-kernels.md  (4.0 KB)
+23:41:30 [INFO]   [27/57] 0027_python-subset.md  (0.6 KB)
+23:41:30 [INFO]   [28/57] 0028_object-model-lifetimes.md  (1.3 KB)
+23:41:30 [INFO]   [29/57] 0029_control-flow.md  (0.9 KB)
+23:41:30 [INFO]   [30/57] 0030_tile-parallelism.md  (0.6 KB)
+23:41:30 [INFO]   [31/57] 0031_constantness.md  (0.3 KB)
+23:41:30 [INFO]   [32/57] 0032_constant-expressions-objects.md  (1.6 KB)
+23:41:30 [INFO]   [33/57] 0033_constant-embedding.md  (0.9 KB)
+23:41:30 [INFO]   [34/57] 0034_constant-type-hints.md  (1.4 KB)
+23:41:30 [INFO]   [35/57] 0035_data-model.md  (1.0 KB)
+23:41:30 [INFO]   [36/57] 0036_global-arrays.md  (2.7 KB)
+23:41:30 [INFO]   [37/57] 0037_tiles-and-scalars.md  (3.1 KB)
+23:41:30 [INFO]   [38/57] 0038_element-tile-space.md  (1.8 KB)
+23:41:30 [INFO]   [39/57] 0039_tiled-views.md  (1.1 KB)
+23:41:30 [INFO]   [40/57] 0040_shape-broadcasting.md  (1.3 KB)
+23:41:30 [INFO]   [41/57] 0041_data-types.md  (6.6 KB)
+23:41:30 [INFO]   [42/57] 0042_numeric-arithmetic-data-types.md  (0.6 KB)
+23:41:30 [INFO]   [43/57] 0043_arithmetic-promotion.md  (4.3 KB)
+23:41:30 [INFO]   [44/57] 0044_tuples.md  (0.5 KB)
+23:41:30 [INFO]   [45/57] 0045_rounding-modes.md  (1.6 KB)
+23:41:30 [INFO]   [46/57] 0046_padding-modes.md  (1.5 KB)
+23:41:30 [INFO]   [47/57] 0047_memory-model.md  (9.4 KB)
+23:41:30 [INFO]   [48/57] 0048_interoperability.md  (9.6 KB)
+23:41:30 [INFO]   [49/57] 0049_performance-tuning.md  (0.6 KB)
+23:41:30 [INFO]   [50/57] 0050_architecture-specific-configuration.md  (2.2 KB)
+23:41:30 [INFO]   [51/57] 0051_load-store-performance-hints.md  (1.4 KB)
+23:41:30 [INFO]   [52/57] 0052_example.md  (0.7 KB)
+23:41:30 [INFO]   [53/57] 0053_autotuning.md  (6.5 KB)
+23:41:30 [INFO]   [54/57] 0054_operations.md  (12.9 KB)
+23:41:30 [INFO]   [55/57] 0055_compilation-and-export.md  (17.0 KB)
+23:41:30 [INFO]   [56/57] 0056_debugging.md  (8.0 KB)
+23:41:30 [INFO]   [57/57] 0057_known-issues.md  (8.4 KB)
+23:41:30 [INFO]   Total: 57 files + index
+23:41:30 [INFO] 
+============================================================
+23:41:30 [INFO] Done!  Files in: /home/jakeshea/solbench_leaderboard/references/NVIDIA_Manuals/cutile_python.new
+23:41:30 [INFO] ============================================================
+  -> cutile_python.new/  58 .md files
+
+===== [MULTI: cuda_tile_ir] https://docs.nvidia.com/cuda/tile-ir/latest/index.html =====
+23:41:31 [INFO] ============================================================
+23:41:31 [INFO] NVIDIA Multi-Page Documentation Crawler
+23:41:31 [INFO] ============================================================
+23:41:31 [INFO] Start URL  : https://docs.nvidia.com/cuda/tile-ir/latest/index.html
+23:41:31 [INFO] Base URL   : https://docs.nvidia.com/cuda/tile-ir/latest/
+23:41:31 [INFO] Doc Root   : https://docs.nvidia.com/cuda/tile-ir/latest/
+23:41:31 [INFO] Output     : /home/jakeshea/solbench_leaderboard/references/NVIDIA_Manuals/cuda_tile_ir.new
+23:41:31 [INFO] 
+[1/3] Discovering pages ...
+23:41:31 [INFO]   Index page: https://docs.nvidia.com/cuda/tile-ir/latest/index.html
+23:41:31 [INFO]   GET https://docs.nvidia.com/cuda/tile-ir/latest/index.html  (attempt 1)
+23:41:33 [INFO]   Document: Tile IR — Tile IR
+23:41:33 [INFO]     -> 12 pages via sidebar navigation
+23:41:33 [INFO]   13 page(s) to crawl
+23:41:33 [INFO] 
+[2/3] Crawling pages & extracting sections ...
+23:41:33 [INFO]   [1/13] https://docs.nvidia.com/cuda/tile-ir/latest/index.html
+23:41:33 [INFO]     -> 1 sections
+23:41:33 [INFO]   [2/13] https://docs.nvidia.com/cuda/tile-ir/latest/sections/introduction.html
+23:41:33 [INFO]   GET https://docs.nvidia.com/cuda/tile-ir/latest/sections/introduction.html  (attempt 1)
+23:41:35 [INFO]     -> 1 section (whole-page fallback)
+23:41:35 [INFO]   [3/13] https://docs.nvidia.com/cuda/tile-ir/latest/sections/prog_model.html
+23:41:35 [INFO]   GET https://docs.nvidia.com/cuda/tile-ir/latest/sections/prog_model.html  (attempt 1)
+23:41:36 [INFO]     -> 1 section (whole-page fallback)
+23:41:36 [INFO]   [4/13] https://docs.nvidia.com/cuda/tile-ir/latest/sections/syntax.html
+23:41:36 [INFO]   GET https://docs.nvidia.com/cuda/tile-ir/latest/sections/syntax.html  (attempt 1)
+23:41:38 [INFO]     -> 1 section (whole-page fallback)
+23:41:38 [INFO]   [5/13] https://docs.nvidia.com/cuda/tile-ir/latest/sections/bytecode.html
+23:41:38 [INFO]   GET https://docs.nvidia.com/cuda/tile-ir/latest/sections/bytecode.html  (attempt 1)
+23:41:40 [INFO]     -> 22 sections
+23:41:40 [INFO]   [6/13] https://docs.nvidia.com/cuda/tile-ir/latest/sections/types.html
+23:41:40 [INFO]   GET https://docs.nvidia.com/cuda/tile-ir/latest/sections/types.html  (attempt 1)
+23:41:42 [INFO]     -> 1 section (whole-page fallback)
+23:41:42 [INFO]   [7/13] https://docs.nvidia.com/cuda/tile-ir/latest/sections/semantics.html
+23:41:42 [INFO]   GET https://docs.nvidia.com/cuda/tile-ir/latest/sections/semantics.html  (attempt 1)
+23:41:44 [INFO]     -> 1 section (whole-page fallback)
+23:41:44 [INFO]   [8/13] https://docs.nvidia.com/cuda/tile-ir/latest/sections/memory_model.html
+23:41:44 [INFO]   GET https://docs.nvidia.com/cuda/tile-ir/latest/sections/memory_model.html  (attempt 1)
+23:41:45 [INFO]     -> 1 section (whole-page fallback)
+23:41:45 [INFO]   [9/13] https://docs.nvidia.com/cuda/tile-ir/latest/sections/operations.html
+23:41:45 [INFO]   GET https://docs.nvidia.com/cuda/tile-ir/latest/sections/operations.html  (attempt 1)
+23:41:47 [INFO]     -> 1 section (whole-page fallback)
+23:41:47 [INFO]   [10/13] https://docs.nvidia.com/cuda/tile-ir/latest/sections/debug_info.html
+23:41:47 [INFO]   GET https://docs.nvidia.com/cuda/tile-ir/latest/sections/debug_info.html  (attempt 1)
+23:41:49 [INFO]     -> 1 section (whole-page fallback)
+23:41:49 [INFO]   [11/13] https://docs.nvidia.com/cuda/tile-ir/latest/sections/stability.html
+23:41:49 [INFO]   GET https://docs.nvidia.com/cuda/tile-ir/latest/sections/stability.html  (attempt 1)
+23:41:51 [INFO]     -> 1 section (whole-page fallback)
+23:41:51 [INFO]   [12/13] https://docs.nvidia.com/cuda/tile-ir/latest/sections/appendix.html
+23:41:51 [INFO]   GET https://docs.nvidia.com/cuda/tile-ir/latest/sections/appendix.html  (attempt 1)
+23:41:52 [INFO]     -> 1 section (whole-page fallback)
+23:41:52 [INFO]   [13/13] https://docs.nvidia.com/cuda/tile-ir/latest/sections/release_notes.html
+23:41:52 [INFO]   GET https://docs.nvidia.com/cuda/tile-ir/latest/sections/release_notes.html  (attempt 1)
+23:41:54 [INFO]     -> 1 section (whole-page fallback)
+23:41:54 [INFO]   Total: 34 sections from 13 page(s)
+23:41:54 [INFO] 
+[3/3] Converting to Markdown ...
+23:41:54 [INFO]   Saved index -> 00_index.md
+23:41:54 [INFO]   [1/23] 0001_tile-ir.md  (1.1 KB)
+23:41:54 [INFO]   [2/23] 0002_1-introduction.md  (9.8 KB)
+23:41:54 [INFO]   [3/23] 0003_2-programming-model.md  (27.1 KB)
+23:41:54 [INFO]   [4/23] 0004_3-syntax.md  (7.7 KB)
+23:41:54 [INFO]   [5/23] 04_binary-format.md  (1.3 KB)
+23:41:54 [INFO]   [6/23] 04-01_primitives.md  (0.5 KB)
+23:41:54 [INFO]   [7/23] 04-01-01_fixed-width-integers.md  (0.7 KB)
+23:41:54 [INFO]   [8/23] 04-01-02_variable-width-integers.md  (1.1 KB)
+23:41:54 [INFO]   [9/23] 04-02_file-structure.md  (0.9 KB)
+23:41:54 [INFO]   [10/23] 04-02-01_magic-number.md  (0.5 KB)
+23:41:54 [INFO]   [11/23] 04-02-02_version.md  (2.7 KB)
+23:41:54 [INFO]   [12/23] 04-02-03_sections.md  (20.7 KB)
+23:41:54 [INFO]   [13/23] 04-03_operation-opcodes-and-encodings.md  (1.3 KB)
+23:41:54 [INFO]   [14/23] 04-04_operation-encoding-details.md  (3.8 KB)
+23:41:54 [INFO]   [15/23] 04-05_section-ordering.md  (1.9 KB)
+23:41:54 [INFO]   [16/23] 0016_5-type-system.md  (14.5 KB)
+23:41:54 [INFO]   [17/23] 0017_6-semantics.md  (18.7 KB)
+23:41:54 [INFO]   [18/23] 0018_7-memory-model.md  (11.4 KB)
+23:41:54 [INFO]   [19/23] 0019_8-operations.md  (81.1 KB)
+23:41:54 [INFO]   [20/23] 0020_9-debug-info.md  (11.8 KB)
+23:41:54 [INFO]   [21/23] 0021_10-stability.md  (10.4 KB)
+23:41:54 [INFO]   [22/23] 0022_11-appendix.md  (32.4 KB)
+23:41:54 [INFO]   [23/23] 0023_12-release-notes.md  (5.7 KB)
+23:41:54 [INFO]   Total: 23 files + index
+23:41:54 [INFO] 
+============================================================
+23:41:54 [INFO] Done!  Files in: /home/jakeshea/solbench_leaderboard/references/NVIDIA_Manuals/cuda_tile_ir.new
+23:41:54 [INFO] ============================================================
+  -> cuda_tile_ir.new/  24 .md files
+
+===== [MULTI: cuda_guide] https://docs.nvidia.com/cuda/cuda-programming-guide/index.html =====
+23:41:54 [INFO] ============================================================
+23:41:54 [INFO] NVIDIA Multi-Page Documentation Crawler
+23:41:54 [INFO] ============================================================
+23:41:54 [INFO] Start URL  : https://docs.nvidia.com/cuda/cuda-programming-guide/index.html
+23:41:54 [INFO] Base URL   : https://docs.nvidia.com/cuda/cuda-programming-guide/
+23:41:54 [INFO] Doc Root   : https://docs.nvidia.com/cuda/cuda-programming-guide/
+23:41:54 [INFO] Output     : /home/jakeshea/solbench_leaderboard/references/NVIDIA_Manuals/cuda_guide.new
+23:41:54 [INFO] 
+[1/3] Discovering pages ...
+23:41:55 [INFO]   Index page: https://docs.nvidia.com/cuda/cuda-programming-guide/index.html
+23:41:55 [INFO]   GET https://docs.nvidia.com/cuda/cuda-programming-guide/index.html  (attempt 1)
+23:41:56 [INFO]   Document: CUDA Programming Guide — CUDA Programming Guide
+23:41:56 [INFO]     -> 47 pages via sidebar navigation
+23:41:56 [INFO]   48 page(s) to crawl
+23:41:56 [INFO] 
+[2/3] Crawling pages & extracting sections ...
+23:41:56 [INFO]   [1/48] https://docs.nvidia.com/cuda/cuda-programming-guide/index.html
+23:41:56 [INFO]     -> 1 sections
+23:41:56 [INFO]   [2/48] https://docs.nvidia.com/cuda/cuda-programming-guide/part1.html
+23:41:56 [INFO]   GET https://docs.nvidia.com/cuda/cuda-programming-guide/part1.html  (attempt 1)
+23:41:58 [INFO]     -> 1 section (whole-page fallback)
+23:41:58 [INFO]   [3/48] https://docs.nvidia.com/cuda/cuda-programming-guide/01-introduction/introduction.html
+23:41:58 [INFO]   GET https://docs.nvidia.com/cuda/cuda-programming-guide/01-introduction/introduction.html  (attempt 1)
+23:42:00 [INFO]     -> 1 section (whole-page fallback)
+23:42:00 [INFO]   [4/48] https://docs.nvidia.com/cuda/cuda-programming-guide/01-introduction/programming-model.html
+23:42:00 [INFO]   GET https://docs.nvidia.com/cuda/cuda-programming-guide/01-introduction/programming-model.html  (attempt 1)
+23:42:01 [INFO]     -> 1 section (whole-page fallback)
+23:42:01 [INFO]   [5/48] https://docs.nvidia.com/cuda/cuda-programming-guide/01-introduction/cuda-platform.html
+23:42:01 [INFO]   GET https://docs.nvidia.com/cuda/cuda-programming-guide/01-introduction/cuda-platform.html  (attempt 1)
+23:42:03 [INFO]     -> 1 section (whole-page fallback)
+23:42:03 [INFO]   [6/48] https://docs.nvidia.com/cuda/cuda-programming-guide/part2.html
+23:42:03 [INFO]   GET https://docs.nvidia.com/cuda/cuda-programming-guide/part2.html  (attempt 1)
+23:42:05 [INFO]     -> 1 section (whole-page fallback)
+23:42:05 [INFO]   [7/48] https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/intro-to-cuda-cpp.html
+23:42:05 [INFO]   GET https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/intro-to-cuda-cpp.html  (attempt 1)
+23:42:07 [INFO]     -> 1 section (whole-page fallback)
+23:42:07 [INFO]   [8/48] https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/writing-cuda-kernels.html
+23:42:07 [INFO]   GET https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/writing-cuda-kernels.html  (attempt 1)
+23:42:08 [INFO]     -> 1 section (whole-page fallback)
+23:42:08 [INFO]   [9/48] https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/asynchronous-execution.html
+23:42:08 [INFO]   GET https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/asynchronous-execution.html  (attempt 1)
+23:42:10 [INFO]     -> 25 sections
+23:42:10 [INFO]   [10/48] https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/understanding-memory.html
+23:42:10 [INFO]   GET https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/understanding-memory.html  (attempt 1)
+23:42:12 [INFO]     -> 1 section (whole-page fallback)
+23:42:12 [INFO]   [11/48] https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/nvcc.html
+23:42:12 [INFO]   GET https://docs.nvidia.com/cuda/cuda-programming-guide/02-basics/nvcc.html  (attempt 1)
+23:42:14 [INFO]     -> 15 sections
+23:42:14 [INFO]   [12/48] https://docs.nvidia.com/cuda/cuda-programming-guide/part3.html
+23:42:14 [INFO]   GET https://docs.nvidia.com/cuda/cuda-programming-guide/part3.html  (attempt 1)
+23:42:15 [INFO]     -> 1 section (whole-page fallback)
+23:42:15 [INFO]   [13/48] https://docs.nvidia.com/cuda/cuda-programming-guide/03-advanced/advanced-host-programming.html
+23:42:15 [INFO]   GET https://docs.nvidia.com/cuda/cuda-programming-guide/03-advanced/advanced-host-programming.html  (attempt 1)
+23:42:17 [INFO]     -> 1 section (whole-page fallback)
+23:42:17 [INFO]   [14/48] https://docs.nvidia.com/cuda/cuda-programming-guide/03-advanced/advanced-kernel-programming.html
+23:42:17 [INFO]   GET https://docs.nvidia.com/cuda/cuda-programming-guide/03-advanced/advanced-kernel-programming.html  (attempt 1)
+23:42:19 [INFO]     -> 1 section (whole-page fallback)
+23:42:19 [INFO]   [15/48] https://docs.nvidia.com/cuda/cuda-programming-guide/03-advanced/driver-api.html
+23:42:19 [INFO]   GET https://docs.nvidia.com/cuda/cuda-programming-guide/03-advanced/driver-api.html  (attempt 1)
+23:42:21 [INFO]     -> 1 section (whole-page fallback)
+23:42:21 [INFO]   [16/48] https://docs.nvidia.com/cuda/cuda-programming-guide/03-advanced/multi-gpu-systems.html
+23:42:21 [INFO]   GET https://docs.nvidia.com/cuda/cuda-programming-guide/03-advanced/multi-gpu-systems.html  (attempt 1)
+23:42:23 [INFO]     -> 1 section (whole-page fallback)
+23:42:23 [INFO]   [17/48] https://docs.nvidia.com/cuda/cuda-programming-guide/03-advanced/feature-survey.html
+23:42:23 [INFO]   GET https://docs.nvidia.com/cuda/cuda-programming-guide/03-advanced/feature-survey.html  (attempt 1)
+23:42:24 [INFO]     -> 1 section (whole-page fallback)
+23:42:24 [INFO]   [18/48] https://docs.nvidia.com/cuda/cuda-programming-guide/part4.html
+23:42:24 [INFO]   GET https://docs.nvidia.com/cuda/cuda-programming-guide/part4.html  (attempt 1)
+23:42:26 [INFO]     -> 1 section (whole-page fallback)
+23:42:26 [INFO]   [19/48] https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/unified-memory.html
+23:42:26 [INFO]   GET https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/unified-memory.html  (attempt 1)
+23:42:28 [INFO]     -> 1 section (whole-page fallback)
+23:42:28 [INFO]   [20/48] https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/cuda-graphs.html
+23:42:28 [INFO]   GET https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/cuda-graphs.html  (attempt 1)
+23:42:30 [INFO]     -> 1 section (whole-page fallback)
+23:42:30 [INFO]   [21/48] https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html
+23:42:30 [INFO]   GET https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/stream-ordered-memory-allocation.html  (attempt 1)
+23:42:32 [INFO]     -> 31 sections
+23:42:32 [INFO]   [22/48] https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/cooperative-groups.html
+23:42:32 [INFO]   GET https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/cooperative-groups.html  (attempt 1)
+23:42:33 [INFO]     -> 19 sections
+23:42:33 [INFO]   [23/48] https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/programmatic-dependent-launch.html
+23:42:33 [INFO]   GET https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/programmatic-dependent-launch.html  (attempt 1)
+23:42:35 [INFO]     -> 4 sections
+23:42:35 [INFO]   [24/48] https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/green-contexts.html
+23:42:35 [INFO]   GET https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/green-contexts.html  (attempt 1)
+23:42:37 [INFO]     -> 1 section (whole-page fallback)
+23:42:37 [INFO]   [25/48] https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/lazy-loading.html
+23:42:37 [INFO]   GET https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/lazy-loading.html  (attempt 1)
+23:42:39 [INFO]     -> 1 section (whole-page fallback)
+23:42:39 [INFO]   [26/48] https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/error-log-management.html
+23:42:39 [INFO]   GET https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/error-log-management.html  (attempt 1)
+23:42:40 [INFO]     -> 6 sections
+23:42:40 [INFO]   [27/48] https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/async-barriers.html
+23:42:40 [INFO]   GET https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/async-barriers.html  (attempt 1)
+23:42:42 [INFO]     -> 1 section (whole-page fallback)
+23:42:42 [INFO]   [28/48] https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/pipelines.html
+23:42:42 [INFO]   GET https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/pipelines.html  (attempt 1)
+23:42:44 [INFO]     -> 8 sections
+23:42:44 [INFO]   [29/48] https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/async-copies.html
+23:42:44 [INFO]   GET https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/async-copies.html  (attempt 1)
+23:42:46 [INFO]     -> 1 section (whole-page fallback)
+23:42:46 [INFO]   [30/48] https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/cluster-launch-control.html
+23:42:46 [INFO]   GET https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/cluster-launch-control.html  (attempt 1)
+23:42:48 [INFO]     -> 1 section (whole-page fallback)
+23:42:48 [INFO]   [31/48] https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/l2-cache-control.html
+23:42:48 [INFO]   GET https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/l2-cache-control.html  (attempt 1)
+23:42:50 [INFO]     -> 1 section (whole-page fallback)
+23:42:50 [INFO]   [32/48] https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/memory-sync-domains.html
+23:42:50 [INFO]   GET https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/memory-sync-domains.html  (attempt 1)
+23:42:51 [INFO]     -> 4 sections
+23:42:51 [INFO]   [33/48] https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/inter-process-communication.html
+23:42:51 [INFO]   GET https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/inter-process-communication.html  (attempt 1)
+23:42:53 [INFO]     -> 3 sections
+23:42:53 [INFO]   [34/48] https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/virtual-memory-management.html
+23:42:53 [INFO]   GET https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/virtual-memory-management.html  (attempt 1)
+23:42:55 [INFO]     -> 21 sections
+23:42:55 [INFO]   [35/48] https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/extended-gpu-memory.html
+23:42:55 [INFO]   GET https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/extended-gpu-memory.html  (attempt 1)
+23:42:57 [INFO]     -> 12 sections
+23:42:57 [INFO]   [36/48] https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/dynamic-parallelism.html
+23:42:57 [INFO]   GET https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/dynamic-parallelism.html  (attempt 1)
+23:42:58 [INFO]     -> 1 section (whole-page fallback)
+23:42:58 [INFO]   [37/48] https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/graphics-interop.html
+23:42:58 [INFO]   GET https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/graphics-interop.html  (attempt 1)
+23:43:00 [INFO]     -> 30 sections
+23:43:00 [INFO]   [38/48] https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/driver-entry-point-access.html
+23:43:00 [INFO]   GET https://docs.nvidia.com/cuda/cuda-programming-guide/04-special-topics/driver-entry-point-access.html  (attempt 1)
+23:43:02 [INFO]     -> 1 section (whole-page fallback)
+23:43:02 [INFO]   [39/48] https://docs.nvidia.com/cuda/cuda-programming-guide/part5.html
+23:43:02 [INFO]   GET https://docs.nvidia.com/cuda/cuda-programming-guide/part5.html  (attempt 1)
+23:43:04 [INFO]     -> 1 section (whole-page fallback)
+23:43:04 [INFO]   [40/48] https://docs.nvidia.com/cuda/cuda-programming-guide/05-appendices/compute-capabilities.html
+23:43:04 [INFO]   GET https://docs.nvidia.com/cuda/cuda-programming-guide/05-appendices/compute-capabilities.html  (attempt 1)
+23:43:06 [INFO]     -> 7 sections
+23:43:06 [INFO]   [41/48] https://docs.nvidia.com/cuda/cuda-programming-guide/05-appendices/environment-variables.html
+23:43:06 [INFO]   GET https://docs.nvidia.com/cuda/cuda-programming-guide/05-appendices/environment-variables.html  (attempt 1)
+23:43:08 [INFO]     -> 1 section (whole-page fallback)
+23:43:08 [INFO]   [42/48] https://docs.nvidia.com/cuda/cuda-programming-guide/05-appendices/cpp-language-support.html
+23:43:08 [INFO]   GET https://docs.nvidia.com/cuda/cuda-programming-guide/05-appendices/cpp-language-support.html  (attempt 1)
+23:43:10 [INFO]     -> 1 section (whole-page fallback)
+23:43:10 [INFO]   [43/48] https://docs.nvidia.com/cuda/cuda-programming-guide/05-appendices/cpp-language-extensions.html
+23:43:10 [INFO]   GET https://docs.nvidia.com/cuda/cuda-programming-guide/05-appendices/cpp-language-extensions.html  (attempt 1)
+23:43:12 [INFO]     -> 1 section (whole-page fallback)
+23:43:12 [INFO]   [44/48] https://docs.nvidia.com/cuda/cuda-programming-guide/05-appendices/mathematical-functions.html
+23:43:12 [INFO]   GET https://docs.nvidia.com/cuda/cuda-programming-guide/05-appendices/mathematical-functions.html  (attempt 1)
+23:43:13 [INFO]     -> 1 section (whole-page fallback)
+23:43:13 [INFO]   [45/48] https://docs.nvidia.com/cuda/cuda-programming-guide/05-appendices/device-callable-apis.html
+23:43:13 [INFO]   GET https://docs.nvidia.com/cuda/cuda-programming-guide/05-appendices/device-callable-apis.html  (attempt 1)
+23:43:15 [INFO]     -> 1 section (whole-page fallback)
+23:43:15 [INFO]   [46/48] https://docs.nvidia.com/cuda/cuda-programming-guide/05-appendices/cuda-cpp-memory-model.html
+23:43:15 [INFO]   GET https://docs.nvidia.com/cuda/cuda-programming-guide/05-appendices/cuda-cpp-memory-model.html  (attempt 1)
+23:43:17 [INFO]     -> 1 section (whole-page fallback)
+23:43:17 [INFO]   [47/48] https://docs.nvidia.com/cuda/cuda-programming-guide/05-appendices/cuda-cpp-execution-model.html
+23:43:17 [INFO]   GET https://docs.nvidia.com/cuda/cuda-programming-guide/05-appendices/cuda-cpp-execution-model.html  (attempt 1)
+23:43:19 [INFO]     -> 1 section (whole-page fallback)
+23:43:19 [INFO]   [48/48] https://docs.nvidia.com/cuda/cuda-programming-guide/notices.html
+23:43:19 [INFO]   GET https://docs.nvidia.com/cuda/cuda-programming-guide/notices.html  (attempt 1)
+23:43:21 [INFO]     -> 4 sections
+23:43:21 [INFO]   Total: 223 sections from 48 page(s)
+23:43:21 [INFO] 
+[3/3] Converting to Markdown ...
+23:43:21 [INFO]   Saved index -> 00_index.md
+23:43:21 [INFO]   [1/191] 0001_cuda-programming-guide.md  (4.2 KB)
+23:43:21 [INFO]   [2/191] 0002_1-introduction-to-cuda.md  (7.1 KB)
+23:43:21 [INFO]   [3/191] 0003_1-1-introduction.md  (10.4 KB)
+23:43:21 [INFO]   [4/191] 0004_1-2-programming-model.md  (16.4 KB)
+23:43:21 [INFO]   [5/191] 0005_1-3-the-cuda-platform.md  (12.7 KB)
+23:43:21 [INFO]   [6/191] 0006_2-programming-gpus-in-cuda.md  (7.2 KB)
+23:43:21 [INFO]   [7/191] 0007_2-1-intro-to-cuda-c.md  (30.6 KB)
+23:43:21 [INFO]   [8/191] 0008_2-2-writing-cuda-simt-kernels.md  (35.0 KB)
+23:43:21 [INFO]   [9/191] 02-03_asynchronous-execution.md  (0.4 KB)
+23:43:21 [INFO]   [10/191] 02-03-01_what-is-asynchronous-concurrent-execution.md  (4.1 KB)
+23:43:21 [INFO]   [11/191] 02-03-02_cuda-streams.md  (2.0 KB)
+23:43:21 [INFO]   [12/191] 02-03-02-01_creating-and-destroying-cuda-streams.md  (1.0 KB)
+23:43:21 [INFO]   [13/191] 02-03-02-02_launching-kernels-in-cuda-streams.md  (1.2 KB)
+23:43:21 [INFO]   [14/191] 02-03-02-03_launching-memory-transfers-in-cuda-streams.md  (2.0 KB)
+23:43:21 [INFO]   [15/191] 02-03-02-04_stream-synchronization.md  (1.6 KB)
+23:43:21 [INFO]   [16/191] 02-03-03_cuda-events.md  (1.6 KB)
+23:43:21 [INFO]   [17/191] 02-03-03-01_creating-and-destroying-cuda-events.md  (0.9 KB)
+23:43:21 [INFO]   [18/191] 02-03-03-02_inserting-events-into-cuda-streams.md  (0.7 KB)
+23:43:21 [INFO]   [19/191] 02-03-03-03_timing-operations-in-cuda-streams.md  (1.5 KB)
+23:43:21 [INFO]   [20/191] 02-03-03-04_checking-the-status-of-cuda-events.md  (3.8 KB)
+23:43:21 [INFO]   [21/191] 02-03-04_callback-functions-from-streams.md  (2.7 KB)
+23:43:21 [INFO]   [22/191] 02-03-04-01_using-cudastreamaddcallback.md  (2.0 KB)
+23:43:21 [INFO]   [23/191] 02-03-04-02_asynchronous-error-handling.md  (3.0 KB)
+23:43:21 [INFO]   [24/191] 02-03-05_cuda-stream-ordering.md  (1.6 KB)
+23:43:21 [INFO]   [25/191] 02-03-06_blocking-and-non-blocking-streams-and-the-default-stream.md  (1.2 KB)
+23:43:21 [INFO]   [26/191] 02-03-06-01_legacy-default-stream.md  (2.3 KB)
+23:43:21 [INFO]   [27/191] 02-03-06-02_per-thread-default-stream.md  (1.3 KB)
+23:43:21 [INFO]   [28/191] 02-03-07_explicit-synchronization.md  (1.3 KB)
+23:43:21 [INFO]   [29/191] 02-03-08_implicit-synchronization.md  (0.9 KB)
+23:43:21 [INFO]   [30/191] 02-03-09_miscellaneous-and-advanced-topics.md  (0.5 KB)
+23:43:21 [INFO]   [31/191] 02-03-09-01_stream-prioritization.md  (1.8 KB)
+23:43:21 [INFO]   [32/191] 02-03-09-02_introduction-to-cuda-graphs-with-stream-capture.md  (3.6 KB)
+23:43:21 [INFO]   [33/191] 02-03-10_summary-of-asynchronous-execution.md  (1.6 KB)
+23:43:21 [INFO]   [34/191] 0034_2-4-unified-and-system-memory.md  (21.0 KB)
+23:43:21 [INFO]   [35/191] 02-05_nvcc-the-nvidia-cuda-compiler.md  (1.5 KB)
+23:43:21 [INFO]   [36/191] 02-05-01_cuda-source-files-and-headers.md  (1.3 KB)
+23:43:21 [INFO]   [37/191] 02-05-02_nvcc-compilation-workflow.md  (3.4 KB)
+23:43:21 [INFO]   [38/191] 02-05-03_nvcc-basic-usage.md  (0.8 KB)
+23:43:21 [INFO]   [39/191] 02-05-03-01_nvcc-ptx-and-cubin-generation.md  (3.5 KB)
+23:43:21 [INFO]   [40/191] 02-05-03-02_host-code-compilation-notes.md  (1.5 KB)
+23:43:21 [INFO]   [41/191] 02-05-03-03_separate-compilation-of-gpu-code.md  (2.8 KB)
+23:43:21 [INFO]   [42/191] 02-05-04_common-compiler-options.md  (0.7 KB)
+23:43:21 [INFO]   [43/191] 02-05-04-01_language-features.md  (1.4 KB)
+23:43:21 [INFO]   [44/191] 02-05-04-02_debugging-options.md  (1.4 KB)
+23:43:21 [INFO]   [45/191] 02-05-04-03_optimization-options.md  (2.0 KB)
+23:43:21 [INFO]   [46/191] 02-05-04-04_link-time-optimization-lto.md  (1.4 KB)
+23:43:21 [INFO]   [47/191] 02-05-04-05_profiling-options.md  (1.2 KB)
+23:43:21 [INFO]   [48/191] 02-05-04-06_fatbin-compression.md  (1.0 KB)
+23:43:21 [INFO]   [49/191] 02-05-04-07_compiler-performance-controls.md  (1.1 KB)
+23:43:21 [INFO]   [50/191] 0050_3-advanced-cuda.md  (8.8 KB)
+23:43:21 [INFO]   [51/191] 0051_3-1-advanced-cuda-apis-and-features.md  (23.6 KB)
+23:43:21 [INFO]   [52/191] 0052_3-2-advanced-kernel-programming.md  (33.0 KB)
+23:43:21 [INFO]   [53/191] 0053_3-3-the-cuda-driver-api.md  (15.9 KB)
+23:43:21 [INFO]   [54/191] 0054_3-4-programming-systems-with-multiple-gpus.md  (15.2 KB)
+23:43:21 [INFO]   [55/191] 0055_3-5-a-tour-of-cuda-features.md  (15.6 KB)
+23:43:21 [INFO]   [56/191] 0056_4-cuda-features.md  (8.1 KB)
+23:43:21 [INFO]   [57/191] 0057_4-1-unified-memory.md  (43.4 KB)
+23:43:21 [INFO]   [58/191] 0058_4-2-cuda-graphs.md  (51.6 KB)
+23:43:21 [INFO]   [59/191] 04-03_stream-ordered-memory-allocator.md  (0.5 KB)
+23:43:21 [INFO]   [60/191] 04-03-01_introduction.md  (1.8 KB)
+23:43:21 [INFO]   [61/191] 04-03-02_memory-management.md  (1.3 KB)
+23:43:21 [INFO]   [62/191] 04-03-02-01_allocating-memory.md  (1.6 KB)
+23:43:21 [INFO]   [63/191] 04-03-02-02_freeing-memory.md  (2.4 KB)
+23:43:21 [INFO]   [64/191] 04-03-03_memory-pools.md  (1.7 KB)
+23:43:21 [INFO]   [65/191] 04-03-03-01_default-implicit-pools.md  (1.0 KB)
+23:43:21 [INFO]   [66/191] 04-03-03-02_explicit-pools.md  (1.5 KB)
+23:43:21 [INFO]   [67/191] 04-03-03-03_device-accessibility-for-multi-gpu-support.md  (2.6 KB)
+23:43:21 [INFO]   [68/191] 04-03-03-04_enabling-memory-pools-for-ipc.md  (10.1 KB)
+23:43:21 [INFO]   [69/191] 04-03-04_best-practices-and-tuning.md  (0.5 KB)
+23:43:21 [INFO]   [70/191] 04-03-04-01_query-for-support.md  (1.9 KB)
+23:43:21 [INFO]   [71/191] 04-03-04-02_physical-page-caching-behavior.md  (2.5 KB)
+23:43:21 [INFO]   [72/191] 04-03-04-03_resource-usage-statistics.md  (1.9 KB)
+23:43:21 [INFO]   [73/191] 04-03-04-04_memory-reuse-policies.md  (5.4 KB)
+23:43:21 [INFO]   [74/191] 04-03-04-05_synchronization-api-actions.md  (1.0 KB)
+23:43:21 [INFO]   [75/191] 04-03-05_addendums.md  (0.4 KB)
+23:43:21 [INFO]   [76/191] 04-03-05-01_cudamemcpyasync-current-context-device-sensitivity.md  (0.9 KB)
+23:43:21 [INFO]   [77/191] 04-03-05-02_cudapointergetattributes-query.md  (0.7 KB)
+23:43:21 [INFO]   [78/191] 04-03-05-03_cudagraphaddmemsetnode.md  (0.6 KB)
+23:43:21 [INFO]   [79/191] 04-03-05-04_pointer-attributes.md  (1.0 KB)
+23:43:21 [INFO]   [80/191] 04-03-05-05_cpu-virtual-memory.md  (0.6 KB)
+23:43:21 [INFO]   [81/191] 04-04_cooperative-groups.md  (0.4 KB)
+23:43:21 [INFO]   [82/191] 04-04-01_cooperative-groups-introduction.md  (1.8 KB)
+23:43:21 [INFO]   [83/191] 04-04-02_cooperative-group-handle-member-functions.md  (1.3 KB)
+23:43:21 [INFO]   [84/191] 04-04-03_default-behavior-groupless-execution.md  (1.8 KB)
+23:43:21 [INFO]   [85/191] 04-04-03-01_create-implicit-group-handles-as-early-as-possible.md  (0.8 KB)
+23:43:21 [INFO]   [86/191] 04-04-03-02_only-pass-group-handles-by-reference.md  (0.8 KB)
+23:43:21 [INFO]   [87/191] 04-04-04_creating-cooperative-groups.md  (1.8 KB)
+23:43:21 [INFO]   [88/191] 04-04-04-01_avoiding-group-creation-hazards.md  (0.7 KB)
+23:43:21 [INFO]   [89/191] 04-04-05_synchronization.md  (0.7 KB)
+23:43:21 [INFO]   [90/191] 04-04-05-01_sync.md  (1.5 KB)
+23:43:21 [INFO]   [91/191] 04-04-05-02_barriers.md  (1.6 KB)
+23:43:21 [INFO]   [92/191] 04-04-06_collective-operations.md  (1.0 KB)
+23:43:21 [INFO]   [93/191] 04-04-06-01_reduce.md  (1.6 KB)
+23:43:21 [INFO]   [94/191] 04-04-06-02_scans.md  (1.2 KB)
+23:43:21 [INFO]   [95/191] 04-04-06-03_invoke-one.md  (1.4 KB)
+23:43:21 [INFO]   [96/191] 04-04-07_asynchronous-data-movement.md  (1.8 KB)
+23:43:21 [INFO]   [97/191] 04-04-07-01_memcpy-async-alignment-requirements.md  (0.8 KB)
+23:43:21 [INFO]   [98/191] 04-04-08_large-scale-groups.md  (0.8 KB)
+23:43:21 [INFO]   [99/191] 04-04-08-01_when-to-use-cudalaunchcooperativekernel.md  (1.8 KB)
+23:43:21 [INFO]   [100/191] 04-05_programmatic-dependent-launch-and-synchronization.md  (1.0 KB)
+23:43:21 [INFO]   [101/191] 04-05-01_background.md  (2.9 KB)
+23:43:21 [INFO]   [102/191] 04-05-02_api-description.md  (2.7 KB)
+23:43:21 [INFO]   [103/191] 04-05-03_use-in-cuda-graphs.md  (2.3 KB)
+23:43:21 [INFO]   [104/191] 0104_4-6-green-contexts.md  (38.0 KB)
+23:43:21 [INFO]   [105/191] 0105_4-7-lazy-loading.md  (12.5 KB)
+23:43:21 [INFO]   [106/191] 04-08_error-log-management.md  (0.6 KB)
+23:43:21 [INFO]   [107/191] 04-08-01_error-log-management-background.md  (0.7 KB)
+23:43:21 [INFO]   [108/191] 04-08-02_activation.md  (0.7 KB)
+23:43:21 [INFO]   [109/191] 04-08-03_output.md  (0.9 KB)
+23:43:21 [INFO]   [110/191] 04-08-04_error-log-management-api-description.md  (2.9 KB)
+23:43:21 [INFO]   [111/191] 04-08-05_limitations-and-known-issues.md  (1.1 KB)
+23:43:21 [INFO]   [112/191] 0112_4-9-asynchronous-barriers.md  (19.7 KB)
+23:43:21 [INFO]   [113/191] 04-10_pipelines.md  (1.0 KB)
+23:43:21 [INFO]   [114/191] 04-10-01_initialization.md  (2.4 KB)
+23:43:21 [INFO]   [115/191] 04-10-02_submitting-work.md  (0.9 KB)
+23:43:21 [INFO]   [116/191] 04-10-03_consuming-work.md  (0.9 KB)
+23:43:21 [INFO]   [117/191] 04-10-04_warp-entanglement.md  (3.0 KB)
+23:43:21 [INFO]   [118/191] 04-10-05_early-exit.md  (0.6 KB)
+23:43:21 [INFO]   [119/191] 04-10-06_tracking-asynchronous-memory-operations.md  (4.1 KB)
+23:43:21 [INFO]   [120/191] 04-10-07_producer-consumer-pattern-using-pipelines.md  (4.2 KB)
+23:43:21 [INFO]   [121/191] 0121_4-11-asynchronous-data-copies.md  (51.7 KB)
+23:43:21 [INFO]   [122/191] 0122_4-12-work-stealing-with-cluster-launch-control.md  (14.0 KB)
+23:43:21 [INFO]   [123/191] 0123_4-13-l2-cache-control.md  (15.4 KB)
+23:43:21 [INFO]   [124/191] 04-14_memory-synchronization-domains.md  (0.5 KB)
+23:43:21 [INFO]   [125/191] 04-14-01_memory-fence-interference.md  (2.6 KB)
+23:43:21 [INFO]   [126/191] 04-14-02_isolating-traffic-with-domains.md  (1.6 KB)
+23:43:21 [INFO]   [127/191] 04-14-03_using-domains-in-cuda.md  (4.1 KB)
+23:43:21 [INFO]   [128/191] 04-15_interprocess-communication.md  (3.0 KB)
+23:43:21 [INFO]   [129/191] 04-15-01_ipc-using-the-legacy-interprocess-communication-api.md  (2.3 KB)
+23:43:21 [INFO]   [130/191] 04-15-02_ipc-using-the-virtual-memory-management-api.md  (0.8 KB)
+23:43:21 [INFO]   [131/191] 04-16_virtual-memory-management.md  (4.6 KB)
+23:43:21 [INFO]   [132/191] 04-16-01_preliminaries.md  (0.4 KB)
+23:43:21 [INFO]   [133/191] 04-16-01-01_definitions.md  (3.5 KB)
+23:43:21 [INFO]   [134/191] 04-16-01-02_virtual-memory-management-query-for-support.md  (3.5 KB)
+23:43:21 [INFO]   [135/191] 04-16-02_api-overview.md  (3.4 KB)
+23:43:21 [INFO]   [136/191] 04-16-03_unicast-memory-sharing.md  (1.4 KB)
+23:43:21 [INFO]   [137/191] 04-16-03-01_allocate-and-export.md  (4.4 KB)
+23:43:21 [INFO]   [138/191] 04-16-03-02_share-and-import.md  (6.2 KB)
+23:43:21 [INFO]   [139/191] 04-16-03-03_reserve-and-map.md  (3.0 KB)
+23:43:21 [INFO]   [140/191] 04-16-03-04_access-rights.md  (2.2 KB)
+23:43:21 [INFO]   [141/191] 04-16-03-05_releasing-the-memory.md  (1.4 KB)
+23:43:21 [INFO]   [142/191] 04-16-04_multicast-memory-sharing.md  (3.4 KB)
+23:43:21 [INFO]   [143/191] 04-16-04-01_allocating-multicast-objects.md  (1.3 KB)
+23:43:21 [INFO]   [144/191] 04-16-04-02_add-devices-to-multicast-objects.md  (0.8 KB)
+23:43:21 [INFO]   [145/191] 04-16-04-03_bind-memory-to-multicast-objects.md  (0.8 KB)
+23:43:21 [INFO]   [146/191] 04-16-04-04_use-multicast-mappings.md  (2.8 KB)
+23:43:21 [INFO]   [147/191] 04-16-05_advanced-configuration.md  (0.4 KB)
+23:43:21 [INFO]   [148/191] 04-16-05-01_memory-type.md  (0.7 KB)
+23:43:21 [INFO]   [149/191] 04-16-05-02_compressible-memory.md  (1.9 KB)
+23:43:21 [INFO]   [150/191] 04-16-05-03_virtual-aliasing-support.md  (2.7 KB)
+23:43:21 [INFO]   [151/191] 04-16-05-04_os-specific-handle-details-for-ipc.md  (2.0 KB)
+23:43:21 [INFO]   [152/191] 04-17_extended-gpu-memory.md  (1.2 KB)
+23:43:21 [INFO]   [153/191] 04-17-01_extended-gpu-memory-preliminaries.md  (0.6 KB)
+23:43:21 [INFO]   [154/191] 04-17-01-01_egm-platforms-system-topology.md  (1.1 KB)
+23:43:21 [INFO]   [155/191] 04-17-01-02_socket-identifiers-what-are-they-how-to-access-them.md  (1.5 KB)
+23:43:21 [INFO]   [156/191] 04-17-01-03_allocators-and-egm-support.md  (0.8 KB)
+23:43:21 [INFO]   [157/191] 04-17-01-04_memory-management-extensions-to-current-apis.md  (2.4 KB)
+23:43:21 [INFO]   [158/191] 04-17-02_using-the-egm-interface.md  (0.4 KB)
+23:43:21 [INFO]   [159/191] 04-17-02-01_single-node-single-gpu.md  (0.7 KB)
+23:43:21 [INFO]   [160/191] 04-17-02-02_single-node-multi-gpu.md  (5.0 KB)
+23:43:21 [INFO]   [161/191] 04-17-02-03_multi-node-multi-gpu.md  (3.5 KB)
+23:43:21 [INFO]   [162/191] 0162_4-18-cuda-dynamic-parallelism.md  (20.2 KB)
+23:43:21 [INFO]   [163/191] 04-19_cuda-interoperability-with-apis.md  (1.3 KB)
+23:43:21 [INFO]   [164/191] 04-19-01_graphics-interoperability.md  (1.9 KB)
+23:43:21 [INFO]   [165/191] 04-19-01-01_opengl-interoperability.md  (6.2 KB)
+23:43:21 [INFO]   [166/191] 04-19-01-02_direct3d-interoperability.md  (6.2 KB)
+23:43:21 [INFO]   [167/191] 04-19-01-03_interoperability-in-a-scalable-link-interface-sli-configuration.md  (2.6 KB)
+23:43:21 [INFO]   [168/191] 04-19-02_external-resource-interoperability.md  (2.7 KB)
+23:43:21 [INFO]   [169/191] 04-19-02-01_id5.md  (31.3 KB)
+23:43:21 [INFO]   [170/191] 04-19-02-02_id7.md  (16.2 KB)
+23:43:21 [INFO]   [171/191] 04-19-02-03_nvidia-software-communication-interface-interoperability-nvsci.md  (14.6 KB)
+23:43:21 [INFO]   [172/191] 0172_4-20-driver-entry-point-access.md  (20.5 KB)
+23:43:21 [INFO]   [173/191] 0173_5-technical-appendices.md  (8.4 KB)
+23:43:21 [INFO]   [174/191] 05-01_compute-capabilities.md  (1.4 KB)
+23:43:21 [INFO]   [175/191] 05-01-01_obtain-the-gpu-compute-capability.md  (2.4 KB)
+23:43:21 [INFO]   [176/191] 05-01-02_feature-availability.md  (0.8 KB)
+23:43:21 [INFO]   [177/191] 05-01-02-01_architecture-specific-features.md  (1.3 KB)
+23:43:21 [INFO]   [178/191] 05-01-02-02_family-specific-features.md  (1.1 KB)
+23:43:21 [INFO]   [179/191] 05-01-02-03_feature-set-compiler-targets.md  (4.9 KB)
+23:43:21 [INFO]   [180/191] 05-01-03_features-and-technical-specifications.md  (7.9 KB)
+23:43:21 [INFO]   [181/191] 0181_5-2-cuda-environment-variables.md  (17.7 KB)
+23:43:21 [INFO]   [182/191] 0182_5-3-c-language-support.md  (67.9 KB)
+23:43:21 [INFO]   [183/191] 0183_5-4-c-c-language-extensions.md  (74.5 KB)
+23:43:21 [INFO]   [184/191] 0184_5-5-floating-point-computation.md  (42.7 KB)
+23:43:21 [INFO]   [185/191] 0185_5-6-device-callable-apis-and-intrinsics.md  (44.0 KB)
+23:43:21 [INFO]   [186/191] 0186_5-7-cuda-c-memory-model.md  (14.6 KB)
+23:43:21 [INFO]   [187/191] 0187_5-8-cuda-c-execution-model.md  (15.8 KB)
+23:43:21 [INFO]   [188/191] 06_notices.md  (0.3 KB)
+23:43:21 [INFO]   [189/191] 06-01_notice.md  (5.1 KB)
+23:43:21 [INFO]   [190/191] 06-02_opencl.md  (0.4 KB)
+23:43:21 [INFO]   [191/191] 06-03_trademarks.md  (0.5 KB)
+23:43:21 [INFO]   Total: 191 files + index
+23:43:21 [INFO] 
+============================================================
+23:43:21 [INFO] Done!  Files in: /home/jakeshea/solbench_leaderboard/references/NVIDIA_Manuals/cuda_guide.new
+23:43:21 [INFO] ============================================================
+  -> cuda_guide.new/  192 .md files
+
+===== [MULTI: cutlass_cute] https://docs.nvidia.com/cutlass/latest/index.html =====
+23:43:21 [INFO] ============================================================
+23:43:21 [INFO] NVIDIA Multi-Page Documentation Crawler
+23:43:21 [INFO] ============================================================
+23:43:21 [INFO] Start URL  : https://docs.nvidia.com/cutlass/latest/index.html
+23:43:21 [INFO] Base URL   : https://docs.nvidia.com/cutlass/latest/
+23:43:21 [INFO] Doc Root   : https://docs.nvidia.com/cutlass/latest/
+23:43:21 [INFO] Output     : /home/jakeshea/solbench_leaderboard/references/NVIDIA_Manuals/cutlass_cute.new
+23:43:21 [INFO] 
+[1/3] Discovering pages ...
+23:43:21 [INFO]   Index page: https://docs.nvidia.com/cutlass/latest/index.html
+23:43:21 [INFO]   GET https://docs.nvidia.com/cutlass/latest/index.html  (attempt 1)
+23:43:23 [INFO]   Document: Welcome to CUTLASS
+23:43:23 [INFO]     -> 80 pages via sidebar navigation
+23:43:23 [INFO]   81 page(s) to crawl
+23:43:23 [INFO] 
+[2/3] Crawling pages & extracting sections ...
+23:43:23 [INFO]   [1/81] https://docs.nvidia.com/cutlass/latest/index.html
+23:43:23 [INFO]     -> 6 sections
+23:43:23 [INFO]   [2/81] https://docs.nvidia.com/cutlass/latest/CHANGELOG.html
+23:43:23 [INFO]   GET https://docs.nvidia.com/cutlass/latest/CHANGELOG.html  (attempt 1)
+23:43:25 [INFO]     -> 79 sections
+23:43:25 [INFO]   [3/81] https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/overview.html
+23:43:25 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/overview.html  (attempt 1)
+23:43:27 [INFO]     -> 9 sections
+23:43:27 [INFO]   [4/81] https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/functionality.html
+23:43:27 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/functionality.html  (attempt 1)
+23:43:28 [INFO]     -> 1 section (whole-page fallback)
+23:43:28 [INFO]   [5/81] https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/quick_start.html
+23:43:28 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/quick_start.html  (attempt 1)
+23:43:30 [INFO]     -> 1 section (whole-page fallback)
+23:43:30 [INFO]   [6/81] https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl.html
+23:43:30 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl.html  (attempt 1)
+23:43:32 [INFO]     -> 1 section (whole-page fallback)
+23:43:32 [INFO]   [7/81] https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl_general/dsl_introduction.html
+23:43:32 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl_general/dsl_introduction.html  (attempt 1)
+23:43:34 [INFO]     -> 1 section (whole-page fallback)
+23:43:34 [INFO]   [8/81] https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl_general/dsl_code_generation.html
+23:43:34 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl_general/dsl_code_generation.html  (attempt 1)
+23:43:35 [INFO]     -> 1 section (whole-page fallback)
+23:43:35 [INFO]   [9/81] https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl_general/dsl_control_flow.html
+23:43:35 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl_general/dsl_control_flow.html  (attempt 1)
+23:43:37 [INFO]     -> 1 section (whole-page fallback)
+23:43:37 [INFO]   [10/81] https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl_general/dsl_jit_arg_generation.html
+23:43:37 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl_general/dsl_jit_arg_generation.html  (attempt 1)
+23:43:39 [INFO]     -> 1 section (whole-page fallback)
+23:43:39 [INFO]   [11/81] https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl_general/dsl_dynamic_layout.html
+23:43:39 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl_general/dsl_dynamic_layout.html  (attempt 1)
+23:43:41 [INFO]     -> 5 sections
+23:43:41 [INFO]   [12/81] https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl_general/dsl_jit_caching.html
+23:43:41 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl_general/dsl_jit_caching.html  (attempt 1)
+23:43:43 [INFO]     -> 1 section (whole-page fallback)
+23:43:43 [INFO]   [13/81] https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl_general/dsl_jit_compilation_options.html
+23:43:43 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl_general/dsl_jit_compilation_options.html  (attempt 1)
+23:43:44 [INFO]     -> 4 sections
+23:43:44 [INFO]   [14/81] https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl_general/types.html
+23:43:44 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl_general/types.html  (attempt 1)
+23:43:46 [INFO]     -> 23 sections
+23:43:46 [INFO]   [15/81] https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl_general/framework_integration.html
+23:43:46 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl_general/framework_integration.html  (attempt 1)
+23:43:48 [INFO]     -> 11 sections
+23:43:48 [INFO]   [16/81] https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl_general/debugging.html
+23:43:48 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl_general/debugging.html  (attempt 1)
+23:43:50 [INFO]     -> 1 section (whole-page fallback)
+23:43:50 [INFO]   [17/81] https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl_general/autotuning_gemm.html
+23:43:50 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl_general/autotuning_gemm.html  (attempt 1)
+23:43:51 [INFO]     -> 1 sections
+23:43:51 [INFO]   [18/81] https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl_general/notebooks.html
+23:43:51 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl_general/notebooks.html  (attempt 1)
+23:43:53 [INFO]     -> 1 section (whole-page fallback)
+23:43:53 [INFO]   [19/81] https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/deprecation.html
+23:43:53 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/deprecation.html  (attempt 1)
+23:43:55 [INFO]     -> 1 section (whole-page fallback)
+23:43:55 [INFO]   [20/81] https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl_general/compile_with_tvm_ffi.html
+23:43:55 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl_general/compile_with_tvm_ffi.html  (attempt 1)
+23:43:57 [INFO]     -> 18 sections
+23:43:57 [INFO]   [21/81] https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl_general/dsl_ahead_of_time_compilation.html
+23:43:57 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl_general/dsl_ahead_of_time_compilation.html  (attempt 1)
+23:43:59 [INFO]     -> 10 sections
+23:43:59 [INFO]   [22/81] https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl_general/resources.html
+23:43:59 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl_general/resources.html  (attempt 1)
+23:44:00 [INFO]     -> 1 section (whole-page fallback)
+23:44:00 [INFO]   [23/81] https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl_api.html
+23:44:00 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl_api.html  (attempt 1)
+23:44:02 [INFO]     -> 1 section (whole-page fallback)
+23:44:02 [INFO]   [24/81] https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl_api/changelog.html
+23:44:02 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl_api/changelog.html  (attempt 1)
+23:44:04 [INFO]     -> 5 sections
+23:44:04 [INFO]   [25/81] https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl_api/cute.html
+23:44:04 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl_api/cute.html  (attempt 1)
+23:44:06 [INFO]     -> 1 section (whole-page fallback)
+23:44:06 [INFO]   [26/81] https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl_api/cute_arch.html
+23:44:06 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl_api/cute_arch.html  (attempt 1)
+23:44:07 [INFO]     -> 1 section (whole-page fallback)
+23:44:07 [INFO]   [27/81] https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl_api/cute_runtime.html
+23:44:07 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl_api/cute_runtime.html  (attempt 1)
+23:44:09 [INFO]     -> 1 section (whole-page fallback)
+23:44:09 [INFO]   [28/81] https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl_api/cute_nvgpu.html
+23:44:09 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl_api/cute_nvgpu.html  (attempt 1)
+23:44:11 [INFO]     -> 1 section (whole-page fallback)
+23:44:11 [INFO]   [29/81] https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl_api/cute_nvgpu_common.html
+23:44:11 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl_api/cute_nvgpu_common.html  (attempt 1)
+23:44:13 [INFO]     -> 1 section (whole-page fallback)
+23:44:13 [INFO]   [30/81] https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl_api/cute_nvgpu_warp.html
+23:44:13 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl_api/cute_nvgpu_warp.html  (attempt 1)
+23:44:14 [INFO]     -> 1 section (whole-page fallback)
+23:44:14 [INFO]   [31/81] https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl_api/cute_nvgpu_warpgroup.html
+23:44:14 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl_api/cute_nvgpu_warpgroup.html  (attempt 1)
+23:44:16 [INFO]     -> 1 section (whole-page fallback)
+23:44:16 [INFO]   [32/81] https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl_api/cute_nvgpu_cpasync.html
+23:44:16 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl_api/cute_nvgpu_cpasync.html  (attempt 1)
+23:44:18 [INFO]     -> 1 section (whole-page fallback)
+23:44:18 [INFO]   [33/81] https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl_api/cute_nvgpu_tcgen05.html
+23:44:18 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl_api/cute_nvgpu_tcgen05.html  (attempt 1)
+23:44:20 [INFO]     -> 1 sections
+23:44:20 [INFO]   [34/81] https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl_api/pipeline.html
+23:44:20 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl_api/pipeline.html  (attempt 1)
+23:44:22 [INFO]     -> 1 sections
+23:44:22 [INFO]   [35/81] https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl_api/utils.html
+23:44:22 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl_api/utils.html  (attempt 1)
+23:44:23 [INFO]     -> 1 sections
+23:44:23 [INFO]   [36/81] https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl_api/utils_sm90.html
+23:44:23 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl_api/utils_sm90.html  (attempt 1)
+23:44:25 [INFO]     -> 3 sections
+23:44:25 [INFO]   [37/81] https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl_api/utils_sm100.html
+23:44:25 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/cute_dsl_api/utils_sm100.html  (attempt 1)
+23:44:27 [INFO]     -> 1 section (whole-page fallback)
+23:44:27 [INFO]   [38/81] https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/limitations.html
+23:44:27 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/limitations.html  (attempt 1)
+23:44:29 [INFO]     -> 1 section (whole-page fallback)
+23:44:29 [INFO]   [39/81] https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/faqs.html
+23:44:29 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/faqs.html  (attempt 1)
+23:44:31 [INFO]     -> 5 sections
+23:44:31 [INFO]   [40/81] https://docs.nvidia.com/cutlass/latest/overview.html
+23:44:31 [INFO]   GET https://docs.nvidia.com/cutlass/latest/overview.html  (attempt 1)
+23:44:32 [INFO]     -> 1 section (whole-page fallback)
+23:44:32 [INFO]   [41/81] https://docs.nvidia.com/cutlass/latest/media/docs/cpp/getting_started.html
+23:44:32 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/cpp/getting_started.html  (attempt 1)
+23:44:34 [INFO]     -> 1 section (whole-page fallback)
+23:44:34 [INFO]   [42/81] https://docs.nvidia.com/cutlass/latest/media/docs/cpp/quickstart.html
+23:44:34 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/cpp/quickstart.html  (attempt 1)
+23:44:36 [INFO]     -> 1 section (whole-page fallback)
+23:44:36 [INFO]   [43/81] https://docs.nvidia.com/cutlass/latest/media/docs/cpp/ide_setup.html
+23:44:36 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/cpp/ide_setup.html  (attempt 1)
+23:44:38 [INFO]     -> 8 sections
+23:44:38 [INFO]   [44/81] https://docs.nvidia.com/cutlass/latest/media/docs/cpp/build/index.html
+23:44:38 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/cpp/build/index.html  (attempt 1)
+23:44:40 [INFO]     -> 1 section (whole-page fallback)
+23:44:40 [INFO]   [45/81] https://docs.nvidia.com/cutlass/latest/media/docs/cpp/build/building_in_windows_with_visual_studio.html
+23:44:40 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/cpp/build/building_in_windows_with_visual_studio.html  (attempt 1)
+23:44:42 [INFO]     -> 1 section (whole-page fallback)
+23:44:42 [INFO]   [46/81] https://docs.nvidia.com/cutlass/latest/media/docs/cpp/build/building_with_clang_as_host_compiler.html
+23:44:42 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/cpp/build/building_with_clang_as_host_compiler.html  (attempt 1)
+23:44:44 [INFO]     -> 1 section (whole-page fallback)
+23:44:44 [INFO]   [47/81] https://docs.nvidia.com/cutlass/latest/media/docs/cpp/functionality.html
+23:44:44 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/cpp/functionality.html  (attempt 1)
+23:44:45 [INFO]     -> 1 section (whole-page fallback)
+23:44:45 [INFO]   [48/81] https://docs.nvidia.com/cutlass/latest/media/docs/cpp/terminology.html
+23:44:45 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/cpp/terminology.html  (attempt 1)
+23:44:47 [INFO]     -> 3 sections
+23:44:47 [INFO]   [49/81] https://docs.nvidia.com/cutlass/latest/media/docs/cpp/fundamental_types.html
+23:44:47 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/cpp/fundamental_types.html  (attempt 1)
+23:44:49 [INFO]     -> 1 section (whole-page fallback)
+23:44:49 [INFO]   [50/81] https://docs.nvidia.com/cutlass/latest/media/docs/cpp/programming_guidelines.html
+23:44:49 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/cpp/programming_guidelines.html  (attempt 1)
+23:44:51 [INFO]     -> 1 section (whole-page fallback)
+23:44:51 [INFO]   [51/81] https://docs.nvidia.com/cutlass/latest/media/docs/cpp/heuristics.html
+23:44:51 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/cpp/heuristics.html  (attempt 1)
+23:44:52 [INFO]     -> 1 section (whole-page fallback)
+23:44:52 [INFO]   [52/81] https://docs.nvidia.com/cutlass/latest/media/docs/cpp/efficient_gemm.html
+23:44:52 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/cpp/efficient_gemm.html  (attempt 1)
+23:44:54 [INFO]     -> 13 sections
+23:44:54 [INFO]   [53/81] https://docs.nvidia.com/cutlass/latest/media/docs/cpp/pipeline.html
+23:44:54 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/cpp/pipeline.html  (attempt 1)
+23:44:56 [INFO]     -> 11 sections
+23:44:56 [INFO]   [54/81] https://docs.nvidia.com/cutlass/latest/media/docs/cpp/profiler.html
+23:44:56 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/cpp/profiler.html  (attempt 1)
+23:44:58 [INFO]     -> 24 sections
+23:44:58 [INFO]   [55/81] https://docs.nvidia.com/cutlass/latest/media/docs/cpp/dependent_kernel_launch.html
+23:44:58 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/cpp/dependent_kernel_launch.html  (attempt 1)
+23:45:00 [INFO]     -> 1 section (whole-page fallback)
+23:45:00 [INFO]   [56/81] https://docs.nvidia.com/cutlass/latest/media/docs/cpp/blackwell.html
+23:45:00 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/cpp/blackwell.html  (attempt 1)
+23:45:02 [INFO]     -> 1 section (whole-page fallback)
+23:45:02 [INFO]   [57/81] https://docs.nvidia.com/cutlass/latest/media/docs/cpp/blackwell_functionality.html
+23:45:02 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/cpp/blackwell_functionality.html  (attempt 1)
+23:45:04 [INFO]     -> 17 sections
+23:45:04 [INFO]   [58/81] https://docs.nvidia.com/cutlass/latest/media/docs/cpp/blackwell_cluster_launch_control.html
+23:45:04 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/cpp/blackwell_cluster_launch_control.html  (attempt 1)
+23:45:06 [INFO]     -> 1 section (whole-page fallback)
+23:45:06 [INFO]   [59/81] https://docs.nvidia.com/cutlass/latest/media/docs/cpp/cute/index.html
+23:45:06 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/cpp/cute/index.html  (attempt 1)
+23:45:08 [INFO]     -> 1 section (whole-page fallback)
+23:45:08 [INFO]   [60/81] https://docs.nvidia.com/cutlass/latest/media/docs/cpp/cute/00_quickstart.html
+23:45:08 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/cpp/cute/00_quickstart.html  (attempt 1)
+23:45:10 [INFO]     -> 1 section (whole-page fallback)
+23:45:10 [INFO]   [61/81] https://docs.nvidia.com/cutlass/latest/media/docs/cpp/cute/01_layout.html
+23:45:10 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/cpp/cute/01_layout.html  (attempt 1)
+23:45:14 [INFO]     -> 1 section (whole-page fallback)
+23:45:14 [INFO]   [62/81] https://docs.nvidia.com/cutlass/latest/media/docs/cpp/cute/02_layout_algebra.html
+23:45:14 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/cpp/cute/02_layout_algebra.html  (attempt 1)
+23:45:16 [INFO]     -> 1 section (whole-page fallback)
+23:45:16 [INFO]   [63/81] https://docs.nvidia.com/cutlass/latest/media/docs/cpp/cute/03_tensor.html
+23:45:16 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/cpp/cute/03_tensor.html  (attempt 1)
+23:45:17 [INFO]     -> 1 section (whole-page fallback)
+23:45:17 [INFO]   [64/81] https://docs.nvidia.com/cutlass/latest/media/docs/cpp/cute/04_algorithms.html
+23:45:17 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/cpp/cute/04_algorithms.html  (attempt 1)
+23:45:19 [INFO]     -> 1 section (whole-page fallback)
+23:45:19 [INFO]   [65/81] https://docs.nvidia.com/cutlass/latest/media/docs/cpp/cute/0t_mma_atom.html
+23:45:19 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/cpp/cute/0t_mma_atom.html  (attempt 1)
+23:45:21 [INFO]     -> 1 section (whole-page fallback)
+23:45:21 [INFO]   [66/81] https://docs.nvidia.com/cutlass/latest/media/docs/cpp/cute/0x_gemm_tutorial.html
+23:45:21 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/cpp/cute/0x_gemm_tutorial.html  (attempt 1)
+23:45:23 [INFO]     -> 1 section (whole-page fallback)
+23:45:23 [INFO]   [67/81] https://docs.nvidia.com/cutlass/latest/media/docs/cpp/cute/0y_predication.html
+23:45:23 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/cpp/cute/0y_predication.html  (attempt 1)
+23:45:25 [INFO]     -> 1 section (whole-page fallback)
+23:45:25 [INFO]   [68/81] https://docs.nvidia.com/cutlass/latest/media/docs/cpp/cute/0z_tma_tensors.html
+23:45:25 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/cpp/cute/0z_tma_tensors.html  (attempt 1)
+23:45:26 [INFO]     -> 1 section (whole-page fallback)
+23:45:26 [INFO]   [69/81] https://docs.nvidia.com/cutlass/latest/media/docs/cpp/cutlass_3x.html
+23:45:26 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/cpp/cutlass_3x.html  (attempt 1)
+23:45:28 [INFO]     -> 1 section (whole-page fallback)
+23:45:28 [INFO]   [70/81] https://docs.nvidia.com/cutlass/latest/media/docs/cpp/cutlass_3x_design.html
+23:45:28 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/cpp/cutlass_3x_design.html  (attempt 1)
+23:45:31 [INFO]     -> 7 sections
+23:45:31 [INFO]   [71/81] https://docs.nvidia.com/cutlass/latest/media/docs/cpp/cutlass_3x_backwards_compatibility.html
+23:45:31 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/cpp/cutlass_3x_backwards_compatibility.html  (attempt 1)
+23:45:32 [INFO]     -> 1 section (whole-page fallback)
+23:45:32 [INFO]   [72/81] https://docs.nvidia.com/cutlass/latest/media/docs/cpp/gemm_api_3x.html
+23:45:32 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/cpp/gemm_api_3x.html  (attempt 1)
+23:45:34 [INFO]     -> 13 sections
+23:45:34 [INFO]   [73/81] https://docs.nvidia.com/cutlass/latest/media/docs/cpp/cutlass_2x.html
+23:45:34 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/cpp/cutlass_2x.html  (attempt 1)
+23:45:36 [INFO]     -> 1 section (whole-page fallback)
+23:45:36 [INFO]   [74/81] https://docs.nvidia.com/cutlass/latest/media/docs/cpp/layout.html
+23:45:36 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/cpp/layout.html  (attempt 1)
+23:45:38 [INFO]     -> 8 sections
+23:45:38 [INFO]   [75/81] https://docs.nvidia.com/cutlass/latest/media/docs/cpp/gemm_api.html
+23:45:38 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/cpp/gemm_api.html  (attempt 1)
+23:45:40 [INFO]     -> 1 section (whole-page fallback)
+23:45:40 [INFO]   [76/81] https://docs.nvidia.com/cutlass/latest/media/docs/cpp/tile_iterator_concept.html
+23:45:40 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/cpp/tile_iterator_concept.html  (attempt 1)
+23:45:42 [INFO]     -> 1 section (whole-page fallback)
+23:45:42 [INFO]   [77/81] https://docs.nvidia.com/cutlass/latest/media/docs/cpp/utilities.html
+23:45:42 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/cpp/utilities.html  (attempt 1)
+23:45:43 [INFO]     -> 1 section (whole-page fallback)
+23:45:43 [INFO]   [78/81] https://docs.nvidia.com/cutlass/latest/media/docs/cpp/code_organization.html
+23:45:43 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/cpp/code_organization.html  (attempt 1)
+23:45:45 [INFO]     -> 11 sections
+23:45:45 [INFO]   [79/81] https://docs.nvidia.com/cutlass/latest/media/docs/cpp/grouped_scheduler.html
+23:45:45 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/cpp/grouped_scheduler.html  (attempt 1)
+23:45:47 [INFO]     -> 23 sections
+23:45:47 [INFO]   [80/81] https://docs.nvidia.com/cutlass/latest/media/docs/cpp/implicit_gemm_convolution.html
+23:45:47 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/cpp/implicit_gemm_convolution.html  (attempt 1)
+23:45:49 [INFO]     -> 16 sections
+23:45:49 [INFO]   [81/81] https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/license.html
+23:45:49 [INFO]   GET https://docs.nvidia.com/cutlass/latest/media/docs/pythonDSL/license.html  (attempt 1)
+23:45:50 [INFO]     -> 1 section (whole-page fallback)
+23:45:50 [INFO]   Total: 389 sections from 81 page(s)
+23:45:50 [INFO] 
+[3/3] Converting to Markdown ...
+23:45:50 [INFO]   Saved index -> 00_index.md
+23:45:50 [INFO]   [1/379] 0001_welcome-to-cutlass.md  (0.3 KB)
+23:45:50 [INFO]   [2/379] 0002_what-is-cutlass.md  (0.6 KB)
+23:45:50 [INFO]   [3/379] 0003_c-and-python-integration.md  (0.9 KB)
+23:45:50 [INFO]   [4/379] 0004_extensive-mixed-precision-data-type-support.md  (1.0 KB)
+23:45:50 [INFO]   [5/379] 0005_performance-across-nvidia-architectures.md  (1.1 KB)
+23:45:50 [INFO]   [6/379] 0006_beyond-gemm-convolution-support.md  (0.7 KB)
+23:45:50 [INFO]   [7/379] 0007_changelog.md  (0.3 KB)
+23:45:50 [INFO]   [8/379] 0008_cutlass-4-x.md  (0.3 KB)
+23:45:50 [INFO]   [9/379] 04-05-00_id1.md  (0.3 KB)
+23:45:50 [INFO]   [10/379] 0010_cute-dsl.md  (1.0 KB)
+23:45:50 [INFO]   [11/379] 0011_cutlass-c.md  (0.8 KB)
+23:45:50 [INFO]   [12/379] 04-04-02_id2.md  (0.3 KB)
+23:45:50 [INFO]   [13/379] 0013_id3.md  (0.8 KB)
+23:45:50 [INFO]   [14/379] 0014_id4.md  (0.3 KB)
+23:45:50 [INFO]   [15/379] 04-04-01_id5.md  (0.3 KB)
+23:45:50 [INFO]   [16/379] 0016_id6.md  (0.3 KB)
+23:45:50 [INFO]   [17/379] 04-04-00_id7.md  (0.3 KB)
+23:45:50 [INFO]   [18/379] 0018_id8.md  (5.7 KB)
+23:45:50 [INFO]   [19/379] 0019_id9.md  (3.5 KB)
+23:45:50 [INFO]   [20/379] 04-03-05_id10.md  (0.3 KB)
+23:45:50 [INFO]   [21/379] 0021_id11.md  (0.4 KB)
+23:45:50 [INFO]   [22/379] 0022_id12.md  (0.3 KB)
+23:45:50 [INFO]   [23/379] 04-03-04_id13.md  (0.3 KB)
+23:45:50 [INFO]   [24/379] 0024_id14.md  (0.7 KB)
+23:45:50 [INFO]   [25/379] 0025_id15.md  (0.5 KB)
+23:45:50 [INFO]   [26/379] 04-03-03_id16.md  (0.6 KB)
+23:45:50 [INFO]   [27/379] 04-03-02_id17.md  (0.5 KB)
+23:45:50 [INFO]   [28/379] 04-03-01_id18.md  (0.3 KB)
+23:45:50 [INFO]   [29/379] 0029_id19.md  (0.5 KB)
+23:45:50 [INFO]   [30/379] 0030_id20.md  (0.5 KB)
+23:45:50 [INFO]   [31/379] 04-03-00_id21.md  (0.3 KB)
+23:45:50 [INFO]   [32/379] 0032_id22.md  (5.6 KB)
+23:45:50 [INFO]   [33/379] 0033_id23.md  (3.8 KB)
+23:45:50 [INFO]   [34/379] 04-02-01_id24.md  (0.3 KB)
+23:45:50 [INFO]   [35/379] 0035_id25.md  (0.6 KB)
+23:45:50 [INFO]   [36/379] 0036_id26.md  (0.4 KB)
+23:45:50 [INFO]   [37/379] 04-02-00_id27.md  (0.3 KB)
+23:45:50 [INFO]   [38/379] 0038_id28.md  (1.3 KB)
+23:45:50 [INFO]   [39/379] 0039_id29.md  (7.4 KB)
+23:45:50 [INFO]   [40/379] 04-01-00_id30.md  (0.3 KB)
+23:45:50 [INFO]   [41/379] 0041_id31.md  (0.9 KB)
+23:45:50 [INFO]   [42/379] 0042_id32.md  (2.0 KB)
+23:45:50 [INFO]   [43/379] 04-00-00_id33.md  (0.3 KB)
+23:45:50 [INFO]   [44/379] 0044_id34.md  (2.2 KB)
+23:45:50 [INFO]   [45/379] 0045_id35.md  (4.3 KB)
+23:45:50 [INFO]   [46/379] 0046_cutlass-3-x.md  (0.3 KB)
+23:45:50 [INFO]   [47/379] 03-09-02_id36.md  (0.7 KB)
+23:45:50 [INFO]   [48/379] 03-09-01_id37.md  (0.7 KB)
+23:45:50 [INFO]   [49/379] 03-09-00_id38.md  (7.4 KB)
+23:45:50 [INFO]   [50/379] 03-08-00_id39.md  (10.0 KB)
+23:45:50 [INFO]   [51/379] 03-07-00_id40.md  (3.2 KB)
+23:45:50 [INFO]   [52/379] 03-06-00_id41.md  (3.8 KB)
+23:45:50 [INFO]   [53/379] 03-05-01_id42.md  (3.6 KB)
+23:45:50 [INFO]   [54/379] 03-05-00_id43.md  (4.0 KB)
+23:45:50 [INFO]   [55/379] 03-04-01_id44.md  (0.7 KB)
+23:45:50 [INFO]   [56/379] 03-04-00_id45.md  (1.9 KB)
+23:45:50 [INFO]   [57/379] 03-03_id46.md  (1.6 KB)
+23:45:50 [INFO]   [58/379] 03-02-02_id47.md  (0.3 KB)
+23:45:50 [INFO]   [59/379] 03-02-01_id48.md  (1.0 KB)
+23:45:50 [INFO]   [60/379] 03-02-00_id49.md  (2.6 KB)
+23:45:50 [INFO]   [61/379] 03-01-00_id50.md  (3.8 KB)
+23:45:50 [INFO]   [62/379] 03-00-00_id51.md  (3.6 KB)
+23:45:50 [INFO]   [63/379] 0063_cutlass-2-x.md  (0.3 KB)
+23:45:50 [INFO]   [64/379] 02-11-00_id52.md  (4.0 KB)
+23:45:50 [INFO]   [65/379] 02-10-00_id53.md  (3.5 KB)
+23:45:50 [INFO]   [66/379] 02-09-00_id54.md  (5.0 KB)
+23:45:50 [INFO]   [67/379] 02-08-00_id55.md  (2.3 KB)
+23:45:50 [INFO]   [68/379] 02-07-00_id56.md  (1.5 KB)
+23:45:50 [INFO]   [69/379] 02-06-01_id57.md  (0.5 KB)
+23:45:50 [INFO]   [70/379] 02-06-00_id58.md  (3.3 KB)
+23:45:50 [INFO]   [71/379] 02-05-00_id59.md  (1.6 KB)
+23:45:50 [INFO]   [72/379] 02-04-00_id60.md  (1.1 KB)
+23:45:50 [INFO]   [73/379] 02-03-00_id61.md  (1.9 KB)
+23:45:50 [INFO]   [74/379] 02-02-00_id62.md  (1.5 KB)
+23:45:50 [INFO]   [75/379] 02-01-00_id63.md  (0.8 KB)
+23:45:50 [INFO]   [76/379] 02-00-00_id64.md  (1.5 KB)
+23:45:50 [INFO]   [77/379] 0077_cutlass-1-x.md  (0.3 KB)
+23:45:50 [INFO]   [78/379] 01-03-02_id65.md  (0.3 KB)
+23:45:50 [INFO]   [79/379] 01-03-00_id66.md  (0.4 KB)
+23:45:50 [INFO]   [80/379] 01-02-00_id67.md  (0.4 KB)
+23:45:50 [INFO]   [81/379] 01-01-00_id68.md  (0.8 KB)
+23:45:50 [INFO]   [82/379] 01-00-01_id69.md  (0.6 KB)
+23:45:50 [INFO]   [83/379] 01-00-00_id70.md  (0.4 KB)
+23:45:50 [INFO]   [84/379] 00-00-01_id71.md  (0.3 KB)
+23:45:50 [INFO]   [85/379] 0085_copyright.md  (1.8 KB)
+23:45:50 [INFO]   [86/379] 0086_overview.md  (1.0 KB)
+23:45:50 [INFO]   [87/379] 0087_why-cutlass-dsls.md  (1.1 KB)
+23:45:50 [INFO]   [88/379] 0088_key-concepts-and-approach.md  (0.6 KB)
+23:45:50 [INFO]   [89/379] 0089_core-cute-dsl-abstractions.md  (1.4 KB)
+23:45:50 [INFO]   [90/379] 0090_relationship-to-cutlass-c.md  (1.2 KB)
+23:45:50 [INFO]   [91/379] 0091_getting-started.md  (1.0 KB)
+23:45:50 [INFO]   [92/379] 0092_current-status-roadmap.md  (0.5 KB)
+23:45:50 [INFO]   [93/379] 0093_upcoming-milestones.md  (0.8 KB)
+23:45:50 [INFO]   [94/379] 0094_community-feedback.md  (1.0 KB)
+23:45:50 [INFO]   [95/379] 0095_functionality.md  (6.5 KB)
+23:45:50 [INFO]   [96/379] 0096_quick-start-guide.md  (9.1 KB)
+23:45:50 [INFO]   [97/379] 0097_page-6-cute-dsl.md  (8.7 KB)
+23:45:50 [INFO]   [98/379] 0098_introduction.md  (11.6 KB)
+23:45:50 [INFO]   [99/379] 0099_code-generation.md  (13.0 KB)
+23:45:50 [INFO]   [100/379] 0100_control-flow.md  (13.1 KB)
+23:45:50 [INFO]   [101/379] 0101_jit-argument-generation.md  (14.9 KB)
+23:45:50 [INFO]   [102/379] 0102_static-vs-dynamic-layouts.md  (0.5 KB)
+23:45:50 [INFO]   [103/379] 0103_static-layout.md  (3.3 KB)
+23:45:50 [INFO]   [104/379] 0104_dynamic-layout.md  (2.0 KB)
+23:45:50 [INFO]   [105/379] 0105_static-layout-vs-dynamic-layout.md  (1.2 KB)
+23:45:50 [INFO]   [106/379] 0106_programming-with-static-and-dynamic-layout.md  (2.8 KB)
+23:45:50 [INFO]   [107/379] 0107_jit-caching.md  (10.7 KB)
+23:45:50 [INFO]   [108/379] 0108_jit-compilation-options.md  (0.5 KB)
+23:45:50 [INFO]   [109/379] 0109_jit-compilation-options-overview.md  (1.4 KB)
+23:45:50 [INFO]   [110/379] 0110_cute-compile-compilation-options-as-strings.md  (2.1 KB)
+23:45:50 [INFO]   [111/379] 0111_cute-compile-compilation-options-as-separate-python-types.md  (1.8 KB)
+23:45:50 [INFO]   [112/379] 0112_types-id1.md  (0.3 KB)
+23:45:50 [INFO]   [113/379] 0113_types-overview.md  (0.6 KB)
+23:45:50 [INFO]   [114/379] 0114_core-numeric-types.md  (0.4 KB)
+23:45:50 [INFO]   [115/379] 0115_intvalue.md  (1.6 KB)
+23:45:50 [INFO]   [116/379] 0116_ratio.md  (1.7 KB)
+23:45:50 [INFO]   [117/379] 0117_layout-algebra-types.md  (0.4 KB)
+23:45:50 [INFO]   [118/379] 0118_scaledbasis.md  (2.2 KB)
+23:45:50 [INFO]   [119/379] 0119_swizzle.md  (1.4 KB)
+23:45:50 [INFO]   [120/379] 0120_layout.md  (2.1 KB)
+23:45:50 [INFO]   [121/379] 0121_composedlayout.md  (1.7 KB)
+23:45:50 [INFO]   [122/379] 0122_memory-and-pointer-types.md  (0.4 KB)
+23:45:50 [INFO]   [123/379] 0123_pointer.md  (2.1 KB)
+23:45:50 [INFO]   [124/379] 0124_structured-data-types.md  (0.4 KB)
+23:45:50 [INFO]   [125/379] 0125_struct.md  (4.1 KB)
+23:45:50 [INFO]   [126/379] 0126_union.md  (1.1 KB)
+23:45:50 [INFO]   [127/379] 0127_deprecated-types.md  (0.4 KB)
+23:45:50 [INFO]   [128/379] 0128_thrmma.md  (0.5 KB)
+23:45:50 [INFO]   [129/379] 0129_thrcopy.md  (0.5 KB)
+23:45:50 [INFO]   [130/379] 0130_type-hierarchies-and-relationships.md  (1.0 KB)
+23:45:50 [INFO]   [131/379] 0131_best-practices.md  (1.5 KB)
+23:45:50 [INFO]   [132/379] 0132_see-also.md  (1.2 KB)
+23:45:50 [INFO]   [133/379] 0133_integration-with-frameworks.md  (0.9 KB)
+23:45:50 [INFO]   [134/379] 0134_implicit-conversion.md  (1.1 KB)
+23:45:50 [INFO]   [135/379] 0135_explicit-conversion-using-from-dlpack.md  (2.7 KB)
+23:45:50 [INFO]   [136/379] 0136_code-example.md  (1.8 KB)
+23:45:50 [INFO]   [137/379] 0137_when-to-use-explicit-conversion.md  (1.2 KB)
+23:45:50 [INFO]   [138/379] 0138_mark-the-tensor-s-layout-as-dynamic-with-mark-layout-dynamic.md  (2.8 KB)
+23:45:50 [INFO]   [139/379] 0139_framework_integration-id1.md  (2.9 KB)
+23:45:50 [INFO]   [140/379] 0140_mark-the-tensor-s-layout-as-dynamic-with-mark-compact-shape-dynamic.md  (3.4 KB)
+23:45:50 [INFO]   [141/379] 0141_framework_integration-id2.md  (3.7 KB)
+23:45:50 [INFO]   [142/379] 0142_leveraging-tvm-ffi-for-faster-pytorch-interop.md  (1.1 KB)
+23:45:50 [INFO]   [143/379] 0143_bypass-the-dlpack-protocol.md  (3.4 KB)
+23:45:50 [INFO]   [144/379] 0144_debugging-with-the-dsl.md  (13.4 KB)
+23:45:50 [INFO]   [145/379] 0145_guidance-for-auto-tuning.md  (8.7 KB)
+23:45:50 [INFO]   [146/379] 0146_educational-notebooks.md  (9.7 KB)
+23:45:50 [INFO]   [147/379] 0147_deprecation-policy.md  (9.6 KB)
+23:45:50 [INFO]   [148/379] 0148_compile_with_tvm_ffi-id1.md  (1.0 KB)
+23:45:50 [INFO]   [149/379] 0149_enable-apache-tvm-ffi-in-dsl.md  (1.5 KB)
+23:45:50 [INFO]   [150/379] 0150_minimizing-host-overhead.md  (1.5 KB)
+23:45:50 [INFO]   [151/379] 0151_fake-tensor-for-compilation.md  (2.4 KB)
+23:45:50 [INFO]   [152/379] 0152_note-on-stride-order.md  (1.0 KB)
+23:45:50 [INFO]   [153/379] 0153_cute-tensor-adapter-for-tvm-ffi.md  (1.3 KB)
+23:45:50 [INFO]   [154/379] 0154_working-with-torch-tensors.md  (0.7 KB)
+23:45:50 [INFO]   [155/379] 0155_working-with-streams.md  (2.2 KB)
+23:45:50 [INFO]   [156/379] 0156_using-environment-stream.md  (2.1 KB)
+23:45:50 [INFO]   [157/379] 0157_working-with-tuples.md  (1.8 KB)
+23:45:50 [INFO]   [158/379] 0158_working-with-variadic-tuples.md  (2.6 KB)
+23:45:50 [INFO]   [159/379] 0159_working-with-named-tuples.md  (2.5 KB)
+23:45:50 [INFO]   [160/379] 0160_supported-types.md  (1.4 KB)
+23:45:50 [INFO]   [161/379] 0161_error-handling.md  (3.8 KB)
+23:45:50 [INFO]   [162/379] 0162_working-with-devices.md  (0.8 KB)
+23:45:50 [INFO]   [163/379] 0163_exporting-compiled-module.md  (3.0 KB)
+23:45:50 [INFO]   [164/379] 0164_keyword-arguments-and-defaults.md  (4.5 KB)
+23:45:50 [INFO]   [165/379] 0165_limitations.md  (1.3 KB)
+23:45:50 [INFO]   [166/379] 0166_ahead-of-time-aot-compilation.md  (0.6 KB)
+23:45:50 [INFO]   [167/379] 0167_dsl_ahead_of_time_compilation-overview.md  (1.4 KB)
+23:45:50 [INFO]   [168/379] 0168_cute-abi-aot-workflow.md  (0.4 KB)
+23:45:50 [INFO]   [169/379] 0169_export-interface.md  (2.1 KB)
+23:45:50 [INFO]   [170/379] 0170_loading-in-python.md  (1.1 KB)
+23:45:50 [INFO]   [171/379] 0171_c-integration-with-static-linking.md  (2.2 KB)
+23:45:50 [INFO]   [172/379] 0172_c-integration-with-dynamic-loading.md  (2.8 KB)
+23:45:50 [INFO]   [173/379] 0173_supported-argument-types.md  (1.4 KB)
+23:45:50 [INFO]   [174/379] 0174_object-file-compatibility-issues.md  (1.2 KB)
+23:45:50 [INFO]   [175/379] 0175_relation-to-apache-tvm-ffi-aot.md  (1.4 KB)
+23:45:50 [INFO]   [176/379] 0176_talks-and-presentations.md  (7.7 KB)
+23:45:50 [INFO]   [177/379] 0177_cute-dsl-api.md  (7.1 KB)
+23:45:50 [INFO]   [178/379] 0178_changelog-for-cute-dsl-api-changes.md  (0.5 KB)
+23:45:50 [INFO]   [179/379] 04-03-00_changelog-id2.md  (1.7 KB)
+23:45:50 [INFO]   [180/379] 04-02-00_changelog-id4.md  (1.1 KB)
+23:45:50 [INFO]   [181/379] 04-01-00_changelog-id6.md  (2.7 KB)
+23:45:50 [INFO]   [182/379] 04-00-00_changelog-id9.md  (0.5 KB)
+23:45:50 [INFO]   [183/379] 0183_cute.md  (62.1 KB)
+23:45:50 [INFO]   [184/379] 0184_arch.md  (23.0 KB)
+23:45:50 [INFO]   [185/379] 0185_runtime.md  (17.0 KB)
+23:45:50 [INFO]   [186/379] 0186_cute_nvgpu.md  (8.1 KB)
+23:45:50 [INFO]   [187/379] 0187_common.md  (13.6 KB)
+23:45:50 [INFO]   [188/379] 0188_warp-submodule.md  (12.0 KB)
+23:45:50 [INFO]   [189/379] 0189_warpgroup-submodule.md  (12.0 KB)
+23:45:50 [INFO]   [190/379] 0190_cpasync-submodule.md  (13.4 KB)
+23:45:50 [INFO]   [191/379] 0191_module-cutlass-cute-nvgpu-tcgen05.md  (18.7 KB)
+23:45:50 [INFO]   [192/379] 0192_module-cutlass-pipeline.md  (62.2 KB)
+23:45:50 [INFO]   [193/379] 0193_cutlass-utils.md  (56.1 KB)
+23:45:50 [INFO]   [194/379] 0194_module-cutlass-utils-sm90.md  (4.6 KB)
+23:45:50 [INFO]   [195/379] 0195_parameters.md  (0.6 KB)
+23:45:50 [INFO]   [196/379] 0196_returns.md  (0.4 KB)
+23:45:50 [INFO]   [197/379] 0197_utilities-for-sm100.md  (13.5 KB)
+23:45:50 [INFO]   [198/379] 0198_page-38-limitations.md  (13.5 KB)
+23:45:50 [INFO]   [199/379] 0199_faqs.md  (0.3 KB)
+23:45:50 [INFO]   [200/379] 0200_general.md  (2.9 KB)
+23:45:50 [INFO]   [201/379] 0201_migration.md  (1.5 KB)
+23:45:50 [INFO]   [202/379] 0202_technical.md  (3.2 KB)
+23:45:50 [INFO]   [203/379] 0203_license.md  (1.4 KB)
+23:45:50 [INFO]   [204/379] 0204_page-40-overview.md  (25.5 KB)
+23:45:50 [INFO]   [205/379] 0205_page-41-getting-started.md  (9.0 KB)
+23:45:50 [INFO]   [206/379] 0206_quickstart.md  (25.3 KB)
+23:45:50 [INFO]   [207/379] 0207_ide-setup-for-cutlass-development.md  (0.6 KB)
+23:45:50 [INFO]   [208/379] 0208_ide_setup-overview.md  (1.1 KB)
+23:45:50 [INFO]   [209/379] 0209_vscode-setup.md  (1.4 KB)
+23:45:50 [INFO]   [210/379] 0210_clangd-setup.md  (0.8 KB)
+23:45:50 [INFO]   [211/379] 0211_global-config.md  (1.6 KB)
+23:45:50 [INFO]   [212/379] 0212_local-config.md  (0.7 KB)
+23:45:50 [INFO]   [213/379] 0213_note-on-compile-commands-json.md  (0.9 KB)
+23:45:50 [INFO]   [214/379] 0214_ide_setup-copyright.md  (1.9 KB)
+23:45:50 [INFO]   [215/379] 0215_build.md  (9.1 KB)
+23:45:50 [INFO]   [216/379] 0216_building-on-windows-with-visual-studio.md  (10.5 KB)
+23:45:50 [INFO]   [217/379] 0217_building-with-clang-as-host-compiler.md  (11.0 KB)
+23:45:50 [INFO]   [218/379] 0218_page-47-functionality.md  (14.6 KB)
+23:45:50 [INFO]   [219/379] 0219_cutlass-terminology.md  (5.2 KB)
+23:45:50 [INFO]   [220/379] 0220_terminology-id1.md  (0.3 KB)
+23:45:50 [INFO]   [221/379] 0221_terminology-copyright.md  (1.9 KB)
+23:45:50 [INFO]   [222/379] 0222_fundamental-types.md  (15.5 KB)
+23:45:50 [INFO]   [223/379] 0223_programming-guidelines.md  (36.1 KB)
+23:45:50 [INFO]   [224/379] 0224_gemm-heuristics.md  (9.2 KB)
+23:45:50 [INFO]   [225/379] 0225_efficient-gemm-in-cuda.md  (0.7 KB)
+23:45:50 [INFO]   [226/379] 0226_hierarchical-structure.md  (3.3 KB)
+23:45:50 [INFO]   [227/379] 0227_threadblock-level-gemm.md  (1.8 KB)
+23:45:50 [INFO]   [228/379] 0228_warp-level-gemm.md  (1.0 KB)
+23:45:50 [INFO]   [229/379] 0229_thread-level-gemm.md  (0.9 KB)
+23:45:50 [INFO]   [230/379] 0230_epilogue.md  (1.1 KB)
+23:45:50 [INFO]   [231/379] 0231_optimizations.md  (0.6 KB)
+23:45:50 [INFO]   [232/379] 0232_pipelining.md  (1.7 KB)
+23:45:50 [INFO]   [233/379] 0233_threadblock-rasterization.md  (0.9 KB)
+23:45:50 [INFO]   [234/379] 0234_parallelized-reductions.md  (3.3 KB)
+23:45:50 [INFO]   [235/379] 0235_hopper-warp-specialization.md  (5.6 KB)
+23:45:50 [INFO]   [236/379] 0236_resources.md  (1.4 KB)
+23:45:50 [INFO]   [237/379] 0237_efficient_gemm-copyright.md  (1.9 KB)
+23:45:50 [INFO]   [238/379] 0238_synchronization-primitives.md  (0.4 KB)
+23:45:50 [INFO]   [239/379] 0239_overview-of-cuda-s-synchronization-methods.md  (1.9 KB)
+23:45:50 [INFO]   [240/379] 0240_cutlass-s-abstractions-for-hopper-features.md  (0.9 KB)
+23:45:50 [INFO]   [241/379] 0241_asynchronous-pipelines.md  (6.6 KB)
+23:45:50 [INFO]   [242/379] 0242_pipeline-copyright.md  (1.9 KB)
+23:45:50 [INFO]   [243/379] 0243_cutlass-profiler.md  (1.3 KB)
+23:45:50 [INFO]   [244/379] 0244_emitting-kernels-via-emit-kernel-listing-py.md  (1.3 KB)
+23:45:50 [INFO]   [245/379] 0245_instantiating-more-kernels-with-hopper.md  (4.1 KB)
+23:45:50 [INFO]   [246/379] 0246_instantiating-more-mma-shapes-with-hopper.md  (0.8 KB)
+23:45:50 [INFO]   [247/379] 0247_mixed-input-data-type-kernels-for-hopper.md  (1.2 KB)
+23:45:50 [INFO]   [248/379] 0248_instantiating-more-kernels-with-blackwell.md  (3.0 KB)
+23:45:50 [INFO]   [249/379] 0249_cutlass-profiler-usage.md  (8.9 KB)
+23:45:50 [INFO]   [250/379] 0250_gemm.md  (0.6 KB)
+23:45:50 [INFO]   [251/379] 0251_gemm-arguments.md  (9.3 KB)
+23:45:50 [INFO]   [252/379] 0252_exhaustive-search-mode-and-top-k-output-ranking-according-to-performance-in-gflo.md  (1.6 KB)
+23:45:50 [INFO]   [253/379] 0253_usage-examples.md  (2.0 KB)
+23:45:50 [INFO]   [254/379] 0254_example-cuda-core-gemm-operation.md  (1.4 KB)
+23:45:50 [INFO]   [255/379] 0255_example-tensor-core-gemm-operations.md  (1.4 KB)
+23:45:50 [INFO]   [256/379] 0256_covering-the-problem-space.md  (0.8 KB)
+23:45:50 [INFO]   [257/379] 0257_output.md  (1.2 KB)
+23:45:50 [INFO]   [258/379] 0258_cutlass-3-0-gemm-procedural-names.md  (3.9 KB)
+23:45:50 [INFO]   [259/379] 0259_further-documentation.md  (0.6 KB)
+23:45:50 [INFO]   [260/379] 0260_convolution.md  (0.8 KB)
+23:45:50 [INFO]   [261/379] 0261_convolution-arguments.md  (5.5 KB)
+23:45:50 [INFO]   [262/379] 0262_example-cuda-core-convolution-operation.md  (1.7 KB)
+23:45:50 [INFO]   [263/379] 0263_example-tensor-core-convolution-operation.md  (1.8 KB)
+23:45:50 [INFO]   [264/379] 0264_profiler-copyright.md  (1.9 KB)
+23:45:50 [INFO]   [265/379] 0265_dependent-kernel-launch.md  (9.4 KB)
+23:45:50 [INFO]   [266/379] 0266_blackwell-specific.md  (8.7 KB)
+23:45:50 [INFO]   [267/379] 0267_blackwell-sm100-gemms.md  (2.4 KB)
+23:45:50 [INFO]   [268/379] 0268_new-in-blackwell-sm100.md  (0.4 KB)
+23:45:50 [INFO]   [269/379] 0269_block-scaled-gemms.md  (1.3 KB)
+23:45:50 [INFO]   [270/379] 0270_blackwell-narrow-precision-data-types.md  (2.2 KB)
+23:45:50 [INFO]   [271/379] 0271_layouts-tensor-alignment-requirements-to-target-tcgen05-mma-instructions.md  (21.2 KB)
+23:45:50 [INFO]   [272/379] 0272_mma-tile-shapes-supported.md  (18.5 KB)
+23:45:50 [INFO]   [273/379] 0273_epilogue-config-supported.md  (2.9 KB)
+23:45:50 [INFO]   [274/379] 0274_auto-kernel-dispatch-policies.md  (1.7 KB)
+23:45:50 [INFO]   [275/379] 0275_building-a-block-scaled-kernel.md  (12.9 KB)
+23:45:50 [INFO]   [276/379] 0276_scale-factor-layouts.md  (2.1 KB)
+23:45:50 [INFO]   [277/379] 0277_blackwell-sm120-gemms.md  (2.9 KB)
+23:45:50 [INFO]   [278/379] 0278_cluster-size.md  (0.4 KB)
+23:45:50 [INFO]   [279/379] 0279_tensor-layout.md  (0.4 KB)
+23:45:50 [INFO]   [280/379] 0280_pingpong-v-s-cooperative-kernel-schedule.md  (0.9 KB)
+23:45:50 [INFO]   [281/379] 0281_epilogue-schedule.md  (0.4 KB)
+23:45:50 [INFO]   [282/379] 0282_tile-size.md  (3.0 KB)
+23:45:50 [INFO]   [283/379] 0283_blackwell_functionality-copyright.md  (1.9 KB)
+23:45:50 [INFO]   [284/379] 0284_blackwell-cluster-launch-control.md  (13.8 KB)
+23:45:50 [INFO]   [285/379] 0285_page-59-cute.md  (5.3 KB)
+23:45:50 [INFO]   [286/379] 0286_00_quickstart.md  (11.8 KB)
+23:45:50 [INFO]   [287/379] 0287_01_layout.md  (25.8 KB)
+23:45:50 [INFO]   [288/379] 0288_02_layout_algebra.md  (25.0 KB)
+23:45:50 [INFO]   [289/379] 0289_03_tensor.md  (21.4 KB)
+23:45:50 [INFO]   [290/379] 0290_04_algorithms.md  (13.3 KB)
+23:45:50 [INFO]   [291/379] 0291_0t_mma_atom.md  (22.6 KB)
+23:45:50 [INFO]   [292/379] 0292_0x_gemm_tutorial.md  (25.2 KB)
+23:45:50 [INFO]   [293/379] 0293_0y_predication.md  (16.1 KB)
+23:45:50 [INFO]   [294/379] 0294_0z_tma_tensors.md  (17.3 KB)
+23:45:50 [INFO]   [295/379] 0295_page-69-cutlass-3-x.md  (9.1 KB)
+23:45:50 [INFO]   [296/379] 0296_cutlass-3-0-design.md  (0.6 KB)
+23:45:50 [INFO]   [297/379] 0297_cutlass-3-0-design-goals.md  (0.9 KB)
+23:45:50 [INFO]   [298/379] 0298_a-new-conceptual-gemm-hierarchy.md  (1.8 KB)
+23:45:50 [INFO]   [299/379] 0299_adoption-of-cute-layout-and-tensors.md  (2.3 KB)
+23:45:50 [INFO]   [300/379] 0300_reducing-the-number-of-named-types-and-iterator-concepts.md  (1.9 KB)
+23:45:50 [INFO]   [301/379] 0301_correctness-by-default-performance-through-clear-individual-points-of-tuning.md  (1.8 KB)
+23:45:50 [INFO]   [302/379] 0302_cutlass_3x_design-copyright.md  (1.9 KB)
+23:45:50 [INFO]   [303/379] 0303_gemm-backwards-compatibility.md  (20.5 KB)
+23:45:50 [INFO]   [304/379] 0304_cutlass-3-0-gemm-api.md  (0.9 KB)
+23:45:50 [INFO]   [305/379] 0305_cutlass-gemm-model.md  (3.0 KB)
+23:45:50 [INFO]   [306/379] 0306_cutlass-gemm-components.md  (3.0 KB)
+23:45:50 [INFO]   [307/379] 0307_collective-api.md  (2.0 KB)
+23:45:50 [INFO]   [308/379] 0308_collective-mainloops.md  (3.0 KB)
+23:45:50 [INFO]   [309/379] 0309_collective-dispatch-policies.md  (3.4 KB)
+23:45:50 [INFO]   [310/379] 0310_collective-builder-for-collectivemmas.md  (3.8 KB)
+23:45:50 [INFO]   [311/379] 0311_gemm_api_3x-epilogue.md  (0.9 KB)
+23:45:50 [INFO]   [312/379] 0312_kernel-api.md  (5.9 KB)
+23:45:50 [INFO]   [313/379] 0313_device-api.md  (4.1 KB)
+23:45:50 [INFO]   [314/379] 0314_tiled-mma-and-copy.md  (1.7 KB)
+23:45:50 [INFO]   [315/379] 0315_atom-api.md  (1.6 KB)
+23:45:50 [INFO]   [316/379] 0316_gemm_api_3x-copyright.md  (1.9 KB)
+23:45:50 [INFO]   [317/379] 0317_page-73-cutlass-2-x.md  (6.0 KB)
+23:45:50 [INFO]   [318/379] 0318_layouts-and-tensors.md  (1.2 KB)
+23:45:50 [INFO]   [319/379] 0319_cutlass-layout-concept.md  (4.0 KB)
+23:45:50 [INFO]   [320/379] 0320_accessing-elements-within-a-tensor.md  (0.4 KB)
+23:45:50 [INFO]   [321/379] 0321_tensorref.md  (0.9 KB)
+23:45:50 [INFO]   [322/379] 0322_tensorview.md  (1.6 KB)
+23:45:50 [INFO]   [323/379] 0323_summary.md  (0.8 KB)
+23:45:50 [INFO]   [324/379] 0324_appendix-existing-layouts.md  (1.9 KB)
+23:45:50 [INFO]   [325/379] 0325_layout-copyright.md  (1.9 KB)
+23:45:50 [INFO]   [326/379] 0326_gemm-api.md  (16.1 KB)
+23:45:50 [INFO]   [327/379] 0327_tile-iterator-concepts.md  (14.9 KB)
+23:45:50 [INFO]   [328/379] 0328_utilities.md  (15.4 KB)
+23:45:50 [INFO]   [329/379] 0329_code-organization.md  (1.0 KB)
+23:45:50 [INFO]   [330/379] 0330_cutlass-template-library.md  (4.2 KB)
+23:45:50 [INFO]   [331/379] 0331_code_organization-cute.md  (1.0 KB)
+23:45:50 [INFO]   [332/379] 0332_tools.md  (0.4 KB)
+23:45:50 [INFO]   [333/379] 0333_cutlass-instance-library.md  (1.7 KB)
+23:45:50 [INFO]   [334/379] 0334_code_organization-cutlass-profiler.md  (0.8 KB)
+23:45:50 [INFO]   [335/379] 0335_cutlass-utilities.md  (1.2 KB)
+23:45:50 [INFO]   [336/379] 0336_examples.md  (1.7 KB)
+23:45:50 [INFO]   [337/379] 0337_media.md  (0.4 KB)
+23:45:50 [INFO]   [338/379] 0338_tests.md  (1.1 KB)
+23:45:50 [INFO]   [339/379] 0339_code_organization-copyright.md  (1.9 KB)
+23:45:50 [INFO]   [340/379] 0340_grouped-kernel-schedulers.md  (1.8 KB)
+23:45:50 [INFO]   [341/379] 0341_introduction-to-grouped-kernel-schedulers.md  (1.3 KB)
+23:45:50 [INFO]   [342/379] 0342_grouped-gemm-scheduler.md  (1.0 KB)
+23:45:50 [INFO]   [343/379] 0343_computing-the-schedule-for-a-given-block.md  (1.9 KB)
+23:45:50 [INFO]   [344/379] 0344_grouped-rank2k-scheduler.md  (0.7 KB)
+23:45:50 [INFO]   [345/379] 0345_inefficiency-of-grouped-gemm-scheduler-for-grouped-rank2k-problems.md  (1.9 KB)
+23:45:50 [INFO]   [346/379] 0346_specializing-the-scheduler-for-triangular-problems.md  (1.5 KB)
+23:45:50 [INFO]   [347/379] 0347_calculating-row-i-given-threadblock-id-t.md  (1.1 KB)
+23:45:50 [INFO]   [348/379] 0348_calculating-column-j-given-threadblock-id-t-and-row-i.md  (0.9 KB)
+23:45:50 [INFO]   [349/379] 0349_accounting-for-non-square-grids.md  (2.0 KB)
+23:45:50 [INFO]   [350/379] 0350_handling-cases-with-grid-dimensions-that-aren-t-multiples-of-each-other.md  (1.5 KB)
+23:45:50 [INFO]   [351/379] 0351_handling-upper-triangular-matrices.md  (0.5 KB)
+23:45:50 [INFO]   [352/379] 0352_scheduler-modes.md  (0.7 KB)
+23:45:50 [INFO]   [353/379] 0353_groupschedulemode-kdeviceonly-default.md  (1.4 KB)
+23:45:50 [INFO]   [354/379] 0354_precomputing-schedules-on-the-host-groupschedulemode-khostprecompute.md  (1.8 KB)
+23:45:50 [INFO]   [355/379] 0355_which-scheduler-mode-should-i-use.md  (0.5 KB)
+23:45:50 [INFO]   [356/379] 0356_how-are-the-parameters-used-as-input-to-the-grouped-kernel-e-g-ptra-lda-set-in-m.md  (0.9 KB)
+23:45:50 [INFO]   [357/379] 0357_can-host-side-work-be-overlapped-with-other-device-kernels-in-my-application.md  (0.9 KB)
+23:45:50 [INFO]   [358/379] 0358_how-compute-intensive-are-the-problems-in-my-group.md  (1.2 KB)
+23:45:50 [INFO]   [359/379] 0359_improving-load-balance-by-sorting-problems.md  (0.9 KB)
+23:45:50 [INFO]   [360/379] 0360_potential-problems-with-imbalanced-k-dimension.md  (2.4 KB)
+23:45:50 [INFO]   [361/379] 0361_potential-for-sorting-problems-to-reduce-imbalance.md  (1.7 KB)
+23:45:50 [INFO]   [362/379] 0362_grouped_scheduler-copyright.md  (1.9 KB)
+23:45:50 [INFO]   [363/379] 0363_cutlass-convolution.md  (0.6 KB)
+23:45:50 [INFO]   [364/379] 0364_implicit_gemm_convolution-introduction.md  (0.8 KB)
+23:45:50 [INFO]   [365/379] 0365_implicit-gemm-algorithm.md  (1.4 KB)
+23:45:50 [INFO]   [366/379] 0366_mapping-convolution-to-gemm.md  (3.6 KB)
+23:45:50 [INFO]   [367/379] 0367_cutlass-convolution-implementation.md  (0.9 KB)
+23:45:50 [INFO]   [368/379] 0368_cutlass-device-level-convolution-operator.md  (5.9 KB)
+23:45:50 [INFO]   [369/379] 0369_launching-the-convolution.md  (3.3 KB)
+23:45:50 [INFO]   [370/379] 0370_cutlass-components.md  (3.6 KB)
+23:45:50 [INFO]   [371/379] 0371_loading-activations-and-filters.md  (6.0 KB)
+23:45:50 [INFO]   [372/379] 0372_making-use-of-tensor-cores.md  (3.2 KB)
+23:45:50 [INFO]   [373/379] 0373_shared-memory-layouts.md  (3.9 KB)
+23:45:50 [INFO]   [374/379] 0374_updating-the-output-tensor.md  (2.2 KB)
+23:45:50 [INFO]   [375/379] 0375_unit-tests.md  (1.2 KB)
+23:45:50 [INFO]   [376/379] 0376_convolution-example.md  (0.5 KB)
+23:45:50 [INFO]   [377/379] 0377_building-and-running-the-example.md  (3.9 KB)
+23:45:50 [INFO]   [378/379] 0378_implicit_gemm_convolution-copyright.md  (1.9 KB)
+23:45:50 [INFO]   [379/379] 0379_software-license-agreement.md  (20.2 KB)
+23:45:50 [INFO]   Total: 379 files + index
+23:45:50 [INFO] 
+============================================================
+23:45:50 [INFO] Done!  Files in: /home/jakeshea/solbench_leaderboard/references/NVIDIA_Manuals/cutlass_cute.new
+23:45:50 [INFO] ============================================================
+  -> cutlass_cute.new/  380 .md files

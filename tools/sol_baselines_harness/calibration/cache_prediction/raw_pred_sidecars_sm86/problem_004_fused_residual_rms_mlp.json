@@ -1,0 +1,14 @@
+{
+  "associativity_l2": 16,
+  "captured_at_utc": "2026-05-29T22:14:19+00:00",
+  "geometry_source": "sm86_pilot_static_device_card_v1",
+  "language": "cuda_cpp",
+  "num_l2_slices": 6,
+  "raw_l1_hit_rate": 0.16370608457220026,
+  "raw_l2_hit_rate": 0.06272384324358236,
+  "schema_version": 1,
+  "scored": true,
+  "slug": "problem_004_fused_residual_rms_mlp",
+  "tier2_sidecar_sha256": "87d6ff4d3dd2dbf2981f7cf2392b9d281c53ca772a1b1dd1a29e8ba2ebfe4f35",
+  "typed_reason": ""
+}

@@ -1,0 +1,187 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "simbench_bw/schemas/static_sass_features.schema.json",
+  "title": "Static SASS feature vector",
+  "description": "Closed-object schema for the per-kernel static SASS feature vector emitted by `workloads/simbench_bw/static_sass_features.py`. The output describes the BUILT cubin's static structural features: a per-mnemonic-family histogram (load/store, FP, integer, tensor-core, control, atomics) and the static register-usage record (regs_per_thread, register pressure indicators). All fields in this schema are CLAIMED ONLY AS STRUCTURAL SANITY CHECKS — they cannot carry an identifiability claim on their own per the closure plan's claim_class discipline. The downstream kernel feature vector (`kernel_feature_vector.schema.json`) composes a load-bearing dynamic axis (predication density) on top of this static feature vector to form the composite axis (5).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "slug",
+    "binary_sha256",
+    "kernel_name",
+    "kernel_signature_sha256",
+    "claim_scope",
+    "mnemonic_histogram",
+    "register_usage",
+    "tool_provenance"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "slug": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9_]*$",
+      "description": "SimBench-BW kernel slug."
+    },
+    "binary_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "SHA-256 of the kernel runner binary the cubin was extracted from."
+    },
+    "kernel_name": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Demangled kernel symbol name."
+    },
+    "kernel_signature_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "SHA-256 over the canonical kernel-signature inputs. It matches nvbit_trace_summary.schema.json for the same kernel and, only during replay of retained pre-S4 evidence, the frozen CUPTI record validated by historical/cupti_activity_sidecar.v1.schema.json."
+    },
+    "claim_scope": {
+      "type": "string",
+      "enum": ["measured_local", "methodology_transfer_only", "deferred"],
+      "description": "Cross-die claim-scope label per the closure plan's cross-die discipline."
+    },
+    "mnemonic_histogram": {
+      "$ref": "#/$defs/mnemonic_histogram",
+      "description": "Static SASS mnemonic family histogram. Composite-axis sub-field whose claim_class is `static_sanity_check_only`: it cannot serve as the SOLE evidence for an identifiability claim per the closure plan's claim discipline. A consumer that uses this sub-field as the only evidence emits a typed `claim_uses_sanity_check_axis_only` diagnostic and the claim is rejected."
+    },
+    "register_usage": {
+      "$ref": "#/$defs/register_usage",
+      "description": "Static register-usage record. Composite-axis sub-field whose claim_class is `static_sanity_check_only`."
+    },
+    "tool_provenance": {
+      "$ref": "#/$defs/tool_provenance",
+      "description": "Provenance of the SASS-extraction tool invocation that produced this record."
+    },
+    "claim_class": {
+      "type": "string",
+      "const": "static_sanity_check_only",
+      "description": "Claim class for the entire static-features artifact. Frozen at `static_sanity_check_only` for every record this schema admits."
+    }
+  },
+  "$defs": {
+    "mnemonic_histogram": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "total_instruction_count",
+        "families"
+      ],
+      "properties": {
+        "schema_version": { "type": "integer", "const": 1 },
+        "total_instruction_count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Total static instruction count across all family buckets. Must equal the sum of every family bucket's count."
+        },
+        "families": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "floating_point",
+            "integer",
+            "load_store",
+            "tensor_core",
+            "control",
+            "atomics",
+            "shared_memory_ops",
+            "predication",
+            "other"
+          ],
+          "properties": {
+            "floating_point": { "$ref": "#/$defs/family_bucket" },
+            "integer": { "$ref": "#/$defs/family_bucket" },
+            "load_store": { "$ref": "#/$defs/family_bucket" },
+            "tensor_core": { "$ref": "#/$defs/family_bucket" },
+            "control": { "$ref": "#/$defs/family_bucket" },
+            "atomics": { "$ref": "#/$defs/family_bucket" },
+            "shared_memory_ops": { "$ref": "#/$defs/family_bucket" },
+            "predication": { "$ref": "#/$defs/family_bucket" },
+            "other": { "$ref": "#/$defs/family_bucket" }
+          },
+          "description": "Per-family static counts. Family taxonomy follows `references/NVIDIA_Manuals/cuda_binary_utility/04_instruction-set-reference.md` section on Blackwell mnemonic family categories."
+        }
+      }
+    },
+    "family_bucket": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["count", "exemplar_mnemonics"],
+      "properties": {
+        "count": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Static instruction count attributed to this family."
+        },
+        "exemplar_mnemonics": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "description": "Up to 8 distinct mnemonic strings observed in this family bucket. Used for human-readable diagnostics, not for any quantitative claim."
+        }
+      }
+    },
+    "register_usage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "regs_per_thread",
+        "stack_frame_bytes",
+        "spill_loads_static",
+        "spill_stores_static"
+      ],
+      "properties": {
+        "regs_per_thread": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Per-thread register usage as reported by the cubin metadata."
+        },
+        "stack_frame_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Static stack-frame size per thread, bytes."
+        },
+        "spill_loads_static": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Static count of spill-load instructions in the SASS dump."
+        },
+        "spill_stores_static": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Static count of spill-store instructions in the SASS dump."
+        }
+      }
+    },
+    "tool_provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "extractor_name",
+        "extractor_version",
+        "extracted_dated_iso8601"
+      ],
+      "properties": {
+        "extractor_name": {
+          "type": "string",
+          "enum": ["cuobjdump_dump_sass"],
+          "description": "SASS extractor identifier. Currently only the `cuobjdump --dump-sass` path is admissible."
+        },
+        "extractor_version": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Extractor version string (e.g. cuobjdump from a CUDA toolkit release)."
+        },
+        "extracted_dated_iso8601": {
+          "type": "string",
+          "format": "date-time"
+        }
+      }
+    }
+  }
+}

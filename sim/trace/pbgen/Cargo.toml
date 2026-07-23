@@ -1,0 +1,13 @@
+[package]
+name = "sim-trace-pbgen"
+version = "0.0.1"
+edition = "2024"
+publish = false
+description = "One-shot generator for sim-trace's committed prost bindings. Not a workspace member; run explicitly via regen_pb.sh."
+
+# Standalone on purpose: this crate must never build as part of `cargo build`
+# in sim/ — it only runs when the .proto schema changes.
+[workspace]
+
+[dependencies]
+prost-build = "0.14"

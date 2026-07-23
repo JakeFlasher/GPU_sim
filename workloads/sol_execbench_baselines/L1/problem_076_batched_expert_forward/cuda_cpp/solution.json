@@ -1,0 +1,44 @@
+{
+  "name": "problem_076_batched_expert_forward_cuda_cpp_scaffold",
+  "definition": "076_batched_expert_forward",
+  "author": "scaffold",
+  "spec": {
+    "languages": [
+      "cuda_cpp"
+    ],
+    "target_hardware": [
+      "LOCAL"
+    ],
+    "entry_point": "main.cpp::run",
+    "dependencies": [],
+    "destination_passing_style": true,
+    "binding": "torch",
+    "compile_options": {
+      "cflags": [],
+      "cuda_cflags": [
+        "-O3",
+        "--use_fast_math",
+        "-gencode",
+        "arch=compute_86,code=sm_86"
+      ],
+      "ld_flags": [
+        "-lcuda"
+      ]
+    }
+  },
+  "sources": [
+    {
+      "path": "main.cpp",
+      "content": "#include <torch/extension.h>\n#include <ATen/cuda/CUDAContext.h>\n#include <c10/cuda/CUDAGuard.h>\n#include <string>\n\n// Batched MoE expert forward pass (gpt-oss-120b inference path).\n//\n// Reference (problem_076_batched_expert_forward): every expert is evaluated in\n// parallel over the full token set. The hidden states are replicated across\n// experts, a batched gate_up projection runs, the interleaved gate / up halves\n// are split out and clamped, a custom gated GLU activation fires, a batched\n// down projection follows, and the per-expert results are weighted by the\n// routing weights and summed. Reproduced op-for-op below.\n//\n// Per definition.json (insertion order):\n//   inputs (all float32 except the scalar alpha / limit):\n//     hidden_states     : [batch_size, seq_len, hidden_size]\n//     routing_weights   : [tokens, num_experts]   (tokens = batch_size * seq_len)\n//     gate_up_proj      : [num_experts, hidden_size, gate_up_dim]  (gate_up_dim = 2 * expert_dim)\n//     gate_up_proj_bias : [num_experts, gate_up_dim]\n//     down_proj         : [num_experts, expert_dim, hidden_size]\n//     down_proj_bias    : [num_experts, hidden_size]\n//     alpha             : scalar (passed as double)\n//     limit             : scalar (passed as double)\n//   output (float32, DPS pre-alloc, written in place):\n//     output            : [batch_size, seq_len, hidden_size]\n//\n// The gate / up halves are interleaved along the last axis of the projection:\n// gate takes the even positions (start 0, step 2), up the odd positions\n// (start 1, step 2). The clamp is asymmetric -- gate is bounded above by the\n// limit only, up is bounded both below by -limit and above by limit. The GLU\n// is gate * sigmoid(gate * alpha) scaled by (up + 1), so alpha multiplies the\n// gate inside the sigmoid and limit bounds both halves before activation.\n//\n// Implementation: pure ATen / cuBLAS dispatch -- NO custom CUDA kernels. The\n// at::bmm calls route through the same batched cuBLAS GEMM torch.bmm issues,\n// every tensor stays float32 throughout (matching the reference's profile, no\n// casts), and the strided slices / clamp bounds / activation form / routing\n// reduction order all match the reference. Output is written in place into the\n// pre-allocated destination (destination-passing style).\n\nstatic void check_fp32_cuda(const torch::Tensor& t, const std::string& name) {\n    TORCH_CHECK(t.is_cuda(), name, \" must be a CUDA tensor\");\n    TORCH_CHECK(t.dtype() == torch::kFloat32, name, \" must be float32, got \", t.dtype());\n}\n\nvoid run(\n    const torch::Tensor& hidden_states,\n    const torch::Tensor& routing_weights,\n    const torch::Tensor& gate_up_proj,\n    const torch::Tensor& gate_up_proj_bias,\n    const torch::Tensor& down_proj,\n    const torch::Tensor& down_proj_bias,\n    double alpha,\n    double limit,\n    torch::Tensor output\n) {\n    check_fp32_cuda(hidden_states, \"hidden_states\");\n    check_fp32_cuda(routing_weights, \"routing_weights\");\n    check_fp32_cuda(gate_up_proj, \"gate_up_proj\");\n    check_fp32_cuda(gate_up_proj_bias, \"gate_up_proj_bias\");\n    check_fp32_cuda(down_proj, \"down_proj\");\n    check_fp32_cuda(down_proj_bias, \"down_proj_bias\");\n    check_fp32_cuda(output, \"output\");\n    TORCH_CHECK(hidden_states.dim() == 3,\n                \"hidden_states must be 3D [B, S, hidden], got \", hidden_states.dim(), \"D\");\n    TORCH_CHECK(gate_up_proj.dim() == 3,\n                \"gate_up_proj must be 3D [E, hidden, gate_up_dim], got \", gate_up_proj.dim(), \"D\");\n    TORCH_CHECK(down_proj.dim() == 3,\n                \"down_proj must be 3D [E, expert_dim, hidden], got \", down_proj.dim(), \"D\");\n\n    const c10::cuda::CUDAGuard device_guard(hidden_states.device());\n\n    const int64_t batch_size = hidden_states.size(0);\n    const int64_t seq_len = hidden_states.size(1);\n    const int64_t hidden_size = hidden_states.size(2);\n    const int64_t num_experts = gate_up_proj.size(0);\n\n    // Flatten the batch and sequence axes into one token axis.\n    auto hidden_flat = hidden_states.reshape({-1, hidden_size});\n\n    // Replicate the tokens across every expert, then split the replicas back\n    // out into the expert batch axis: (num_experts, tokens, hidden).\n    auto hidden_repeated = hidden_flat.repeat({num_experts, 1});\n    auto hidden_batched = hidden_repeated.view({num_experts, -1, hidden_size});\n\n    // Batched gate_up projection with a broadcast bias add over the token axis.\n    auto gate_up = at::bmm(hidden_batched, gate_up_proj);\n    gate_up = gate_up + gate_up_proj_bias.unsqueeze(1);\n\n    // Split the interleaved halves: gate from the even lane, up from the odd\n    // lane, each stepping by two along the last axis.\n    const int64_t last_dim = gate_up.dim() - 1;\n    const int64_t end = gate_up.size(last_dim);\n    auto gate = at::slice(gate_up, last_dim, /*start=*/0, /*end=*/end, /*step=*/2);\n    auto up = at::slice(gate_up, last_dim, /*start=*/1, /*end=*/end, /*step=*/2);\n\n    // Clamp before activation: gate is bounded above only, up on both sides.\n    gate = at::clamp(gate, /*min=*/c10::nullopt, /*max=*/limit);\n    up = at::clamp(up, /*min=*/-limit, /*max=*/limit);\n\n    // Custom gated GLU: gate * sigmoid(gate * alpha), scaled by (up + 1).\n    auto glu = gate * at::sigmoid(gate * alpha);\n    auto gated_output = (up + 1) * glu;\n\n    // Batched down projection with a broadcast bias add over the token axis.\n    auto expert_outputs = at::bmm(gated_output, down_proj);\n    expert_outputs = expert_outputs + down_proj_bias.unsqueeze(1);\n\n    // Restore the (num_experts, batch, seq, hidden) layout for routing.\n    expert_outputs = expert_outputs.view({num_experts, batch_size, seq_len, hidden_size});\n\n    // Bring the routing weights to (num_experts, batch, seq, 1) so they\n    // broadcast over the hidden axis.\n    auto routing_weights_reshaped =\n        routing_weights.transpose(0, 1).view({num_experts, batch_size, seq_len, 1});\n\n    // Weight each expert's output and sum across the expert axis.\n    auto result = (expert_outputs * routing_weights_reshaped).sum(/*dim=*/0);\n\n    TORCH_CHECK(result.sizes() == output.sizes(),\n                \"expert forward output shape \", result.sizes(),\n                \" does not match pre-allocated output \", output.sizes());\n    output.copy_(result);\n}\n\nPYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {\n    m.def(\"run\", &run,\n          \"Batched MoE expert forward pass via at::bmm gate_up / down \"\n          \"projections + interleaved gate / up split + asymmetric clamp + \"\n          \"gated GLU + routing-weighted sum (pure ATen / cuBLAS dispatch); \"\n          \"fp32; destination-passing style.\");\n}\n"
+    },
+    {
+      "path": "kernel.cu",
+      "content": "// Stub translation unit: this ATen-delegated port has no custom device kernels.\n// A bare .cu is still needed so torch's cpp_extension builds a CUDA extension\n// (adding CUDA include paths); a .cpp-only extension fails to find\n// cuda_runtime_api.h.\n#include <cuda_runtime.h>\n"
+    },
+    {
+      "path": "kernel.h",
+      "content": "#pragma once\n// Intentionally empty: ATen-delegated port, no custom kernel launcher.\n"
+    }
+  ],
+  "description": "Scaffolded baseline for problem_076_batched_expert_forward (language=cuda_cpp); hand-edit the copied exemplar to implement the target problem before harness-running. Destination-passing-style is set true; outputs appear after inputs in definition.json insertion order."
+}

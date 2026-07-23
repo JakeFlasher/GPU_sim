@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "simbench_bw/schemas/ncu_metric_availability_probe.schema.json",
+  "title": "NCU Metric-Availability Probe",
+  "description": "Committed artifact produced by tools/local_labels/probe_ncu_metric_availability.py from a live `ncu --query-metrics` enumeration on the local card. Records, for every target metric named by tools/local_labels/read_ncu_report.py plus the committed metric_registry.json, the exact rolled-up NCU id, type, unit, and availability on this device. Unavailable/renamed/uncatalogued metrics carry a typed `excluded_reason` and NO fabricated value. Quarantined to data/local_labels/.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "device", "arch", "ncu_metric_version", "n_targets", "n_available", "n_excluded", "gpu__time_duration_sum_confirmed", "metrics"],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "device": {"type": "string", "minLength": 1, "description": "Device name reported by NCU's query (e.g. 'NVIDIA GeForce RTX 3090 Ti')."},
+    "arch": {"type": "string", "enum": ["sm_86", "sm_120"]},
+    "ncu_metric_version": {"type": "string", "description": "Normalized NCU release family (e.g. ncu_2026.1.x) parsed from `ncu --version`."},
+    "query_command": {"type": "string"},
+    "n_targets": {"type": "integer", "minimum": 1},
+    "n_available": {"type": "integer", "minimum": 0},
+    "n_excluded": {"type": "integer", "minimum": 0},
+    "get_L1_Total_Requests_resolved_to": {
+      "anyOf": [{"type": "string", "minLength": 1}, {"type": "null"}],
+      "description": "The concrete NCU metric id get_L1_Total_Requests resolved to (e.g. l1tex__t_requests.sum), or null when the candidate was not confirmed available."
+    },
+    "gpu__time_duration_sum_confirmed": {"type": "boolean"},
+    "metrics": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/probe_metric"}
+    }
+  },
+  "$defs": {
+    "probe_metric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["ncu_metric", "sources", "available"],
+      "properties": {
+        "ncu_metric": {"type": "string", "minLength": 1},
+        "sources": {"type": "array", "items": {"type": "string", "enum": ["read_ncu_report", "registry"]}, "minItems": 1},
+        "available": {"type": "boolean"},
+        "ncu_type": {"type": "string", "description": "NCU metric type (Counter / Ratio / Throughput / ...). Present iff available."},
+        "ncu_unit": {"type": "string", "description": "NCU metric unit (may be empty for unitless counts). Present iff available."},
+        "rollup": {"type": "string", "minLength": 1, "description": "The rollup suffix (max / sum / pct / avg.per_cycle_elapsed / ...), or 'none' for a scalar metric. Present iff available."},
+        "excluded_reason": {"type": "string", "enum": ["metric_not_in_ncu_catalog_on_device", "metric_listed_but_unavailable_on_device", "launch_config_metric_not_in_counter_catalog", "occupancy_calculator_metric_not_in_counter_catalog"], "description": "Typed reason this metric is not collectable as an NCU counter on this device. Present iff NOT available; never paired with a fabricated value."},
+        "base_metric": {"type": "string", "minLength": 1, "description": "The base metric (portion before the first rollup '.'). Present iff NOT available."},
+        "read_ncu_report_get_function": {"type": "string", "minLength": 1},
+        "registry_key": {"type": "string", "minLength": 1}
+      },
+      "allOf": [
+        {
+          "description": "Available metrics carry the NCU-reported type/unit/rollup; excluded metrics MUST NOT (no fabricated value).",
+          "if": {"properties": {"available": {"const": true}}, "required": ["available"]},
+          "then": {"required": ["ncu_type", "ncu_unit", "rollup"]},
+          "else": {"required": ["excluded_reason", "base_metric"], "not": {"anyOf": [{"required": ["ncu_type"]}, {"required": ["ncu_unit"]}, {"required": ["rollup"]}]}}
+        }
+      ]
+    }
+  }
+}

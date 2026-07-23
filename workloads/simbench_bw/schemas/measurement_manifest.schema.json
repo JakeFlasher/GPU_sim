@@ -1,0 +1,151 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "simbench_bw/schemas/measurement_manifest.schema.json",
+  "title": "SimBench-BW measurement manifest",
+  "description": "Per-measurement sidecar written alongside every timing / trace artifact. Records the device-identity fields captured at orchestrator startup plus the run metadata (iteration counts, compiler flags). Every measurement record in suite_results.json must have exactly one of these. Schema v2 removed the `ncu` mode and the `lock_mode` field; the project's measurement contract is non-root cloud-only with no clock-lock primitive, so neither slot is meaningful anymore.",
+  "schema_version": 2,
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "slug",
+    "mode",
+    "warm_up_iters",
+    "repeat_iters",
+    "cv_pct",
+    "cuda_version",
+    "driver_version",
+    "gpu_sku",
+    "gpu_uuid",
+    "sm_count",
+    "total_global_mem_bytes",
+    "device_name",
+    "compute_capability_major",
+    "compute_capability_minor",
+    "binary_sha256",
+    "compiler_flags",
+    "kb_capability_card",
+    "timestamp_utc"
+  ],
+  "properties": {
+    "schema_version": { "type": "integer", "const": 2 },
+    "slug": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+    "mode": {
+      "type": "string",
+      "enum": ["correctness", "timing", "trace"]
+    },
+    "warm_up_iters": { "type": "integer", "minimum": 0 },
+    "repeat_iters": { "type": "integer", "minimum": 1 },
+    "cv_pct": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Coefficient of variation of timing samples, in percent."
+    },
+    "cuda_version": { "type": "string" },
+    "driver_version": { "type": "string" },
+    "gpu_sku": {
+      "type": "string",
+      "description": "Short SKU label (e.g. rtx_pro_6000_blackwell, h100_sxm, rtx_3090_ti)."
+    },
+    "gpu_uuid": {
+      "type": "string",
+      "description": "Device UUID from cuDeviceGetUuid or cudaDeviceProp.uuid."
+    },
+    "sm_count": { "type": "integer", "minimum": 1 },
+    "total_global_mem_bytes": { "type": "integer", "minimum": 1 },
+    "device_name": {
+      "type": "string",
+      "description": "cudaGetDeviceProperties.name, unmodified."
+    },
+    "compute_capability_major": { "type": "integer", "minimum": 1 },
+    "compute_capability_minor": { "type": "integer", "minimum": 0 },
+    "binary_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "SHA-256 of the kernel executable produced by nvcc."
+    },
+    "kernel_signature_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "SHA-256 of the kernel source / .cu file used as the operator-pinned source-of-truth for the kernel-signature join key. Optional: emitted by the local-label producer (activation_trace_orchestrator + run_suite trace path) so the sweep harness's `--measurement-manifests` contract has a single source of truth for the join-key field. Historical run_suite.py timing/correctness manifests omit this field and are still admitted."
+    },
+    "register_cap": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Optional register-cap build-variant axis (the -maxrregcount cap). Present only for a register_cap build-variant cell; absent for a base cell. Paired with variant_id (== register_cap_<register_cap>). Additive optional field staged by the variant-aware manifest staging path from the per-variant trace JSON; absence keeps base manifests byte-compatible. Mirrors the optional register_cap on local_label_admitted.schema.json / local_label_sidecar.schema.json."
+    },
+    "variant_id": {
+      "type": "string",
+      "pattern": "^register_cap_(0|[1-9][0-9]*)$",
+      "description": "Optional canonical build-variant identity string (register_cap_<cap>, ASCII-decimal, no leading zeros) for a register_cap build-variant cell. Absent for a base cell. The canonical-decimal pattern mirrors local_label_admitted.schema.json so one physical cap cannot be staged under two aliases (register_cap_64 vs register_cap_064)."
+    },
+    "compiler_flags": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Exact nvcc flag list used to produce the binary. Preserves -gencode and -Xptxas content."
+    },
+    "kb_capability_card": {
+      "type": "string",
+      "const": "references/NVIDIA_Manuals/blackwell_compatibility/01_blackwell-architecture-compatibility.md",
+      "description": "Authoritative feature-surface reference for the Blackwell target. Required on every run."
+    },
+    "timestamp_utc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "shape_point": {
+      "type": "string",
+      "description": "Name of the shape_point used for this measurement; references a named entry in shapes/<slug>.toml."
+    },
+    "trace_volume_exceeded_sidecar": {
+      "type": "string",
+      "description": "Relative path to the trace_volume_exceeded.json sidecar when mode=trace and the run hit the budget. Absent otherwise."
+    },
+    "tolerance_triplet": {
+      "type": "object",
+      "description": "Tolerance key applied when mode=correctness; looked up in tolerances.toml.",
+      "additionalProperties": false,
+      "required": ["dtype", "reduction_kind", "kernel_family"],
+      "properties": {
+        "dtype": { "type": "string" },
+        "reduction_kind": { "type": "string" },
+        "kernel_family": { "type": "string" }
+      }
+    },
+    "enable_cupti_activity": {
+      "type": "boolean",
+      "description": "Historical provenance flag retained for replay of pre-S4 timing manifests. A true value records that the now-retired CUPTI Activity collector ran and that historical sibling sidecars may be validated; false or absent records no historical CUPTI capture. Active producers do not emit this field, invoke the collector, or create CUPTI sidecars."
+    },
+    "nvml_polling_interval_ns": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 10000000,
+      "description": "Historical NVML sampler target interval, in nanoseconds, retained only on pre-S4 manifests that enabled the retired CUPTI/NVML path. Replay requires each referenced historical NVML sidecar's polling_interval_ns to equal this cached value. Active producers do not emit this field; the 10000000 ns ceiling preserves the frozen 100 Hz floor."
+    },
+    "nvml_claim_scope": {
+      "type": "string",
+      "enum": ["measured_local"],
+      "description": "Historical NVML covariate claim-scope label cached by the retired timing producer. Replay admits only the frozen `measured_local` value. Active producers do not emit this field or initiate NVML capture."
+    },
+    "nvml_sidecar_paths": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "pattern": "^nvml_covariate_[0-9]+\\.json$"
+      },
+      "description": "Relative filenames of retained pre-S4 per-repeat NVML covariate sidecars. Replay may walk these historical siblings, verify cached-field equality, and compare their status union with `nvml_collector_status`. Active producers do not emit this field or create NVML sidecars."
+    },
+    "nvml_collector_status": {
+      "type": "string",
+      "enum": [
+        "ok",
+        "nvml_covariate_unavailable",
+        "nvml_alignment_gap",
+        "nvml_covariate_regression_ineffective",
+        "nvml_covariate_mixed"
+      ],
+      "description": "Cached union of per-repeat NVML collector statuses retained on a pre-S4 timing manifest. The first four values mirror the frozen nvml_covariate.schema.json replay enum; `nvml_covariate_mixed` denotes a heterogeneous historical union. Replay rejects disagreement with the referenced sidecars. Active producers do not emit this field."
+    }
+  }
+}

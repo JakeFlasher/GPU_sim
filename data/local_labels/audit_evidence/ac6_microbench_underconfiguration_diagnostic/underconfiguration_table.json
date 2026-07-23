@@ -1,0 +1,865 @@
+{
+  "microbench_cells": [
+    {
+      "actionable_underconfigured_bin_count": 6,
+      "actionable_underconfigured_bin_count_from_evidence": 6,
+      "actionable_underconfigured_bin_summary": [
+        {
+          "hierarchy_layer": "allocation",
+          "observation_count": 7,
+          "rd_sector_units_max": 1,
+          "rd_sector_units_min": 1,
+          "typed_reason": "cache_model_underconfigured"
+        },
+        {
+          "hierarchy_layer": "allocation",
+          "observation_count": 31,
+          "rd_sector_units_max": 7,
+          "rd_sector_units_min": 4,
+          "typed_reason": "cache_model_underconfigured"
+        },
+        {
+          "hierarchy_layer": "region",
+          "observation_count": 28,
+          "rd_sector_units_max": 1,
+          "rd_sector_units_min": 1,
+          "typed_reason": "cache_model_underconfigured"
+        },
+        {
+          "hierarchy_layer": "sector",
+          "observation_count": 1,
+          "rd_sector_units_max": 255,
+          "rd_sector_units_min": 128,
+          "typed_reason": "cache_model_underconfigured"
+        },
+        {
+          "hierarchy_layer": "sector",
+          "observation_count": 3,
+          "rd_sector_units_max": 511,
+          "rd_sector_units_min": 256,
+          "typed_reason": "cache_model_underconfigured"
+        },
+        {
+          "hierarchy_layer": "sector",
+          "observation_count": 2,
+          "rd_sector_units_max": 1023,
+          "rd_sector_units_min": 512,
+          "typed_reason": "cache_model_underconfigured"
+        }
+      ],
+      "admitted_bin_count": 9,
+      "bin_count": 16,
+      "bundle_underconfigured": true,
+      "hrd_profile_path": "workloads/simbench_bw/results/carveout_sensitivity_probe/rtx_3090_ti/sm_86/trace_trace_00/hrd_profile/hrd_profile.json",
+      "min_underconfigured_observation_count": 1,
+      "nonblocking_typed_unavailable_bin_count": 1,
+      "shape_point": "trace_00",
+      "slug": "carveout_sensitivity_probe",
+      "total_observations": 26625,
+      "underconfigured_bin_count": 7,
+      "underconfigured_bin_summary": [
+        {
+          "hierarchy_layer": "allocation",
+          "observation_count": 7,
+          "rd_sector_units_max": 1,
+          "rd_sector_units_min": 1
+        },
+        {
+          "hierarchy_layer": "allocation",
+          "observation_count": 31,
+          "rd_sector_units_max": 7,
+          "rd_sector_units_min": 4
+        },
+        {
+          "hierarchy_layer": "region",
+          "observation_count": 28,
+          "rd_sector_units_max": 1,
+          "rd_sector_units_min": 1
+        },
+        {
+          "hierarchy_layer": "sector",
+          "observation_count": 1,
+          "rd_sector_units_max": 255,
+          "rd_sector_units_min": 128
+        },
+        {
+          "hierarchy_layer": "sector",
+          "observation_count": 3,
+          "rd_sector_units_max": 511,
+          "rd_sector_units_min": 256
+        },
+        {
+          "hierarchy_layer": "sector",
+          "observation_count": 2,
+          "rd_sector_units_max": 1023,
+          "rd_sector_units_min": 512
+        },
+        {
+          "hierarchy_layer": "region",
+          "observation_count": 7,
+          "rd_sector_units_max": null,
+          "rd_sector_units_min": null
+        }
+      ]
+    },
+    {
+      "actionable_underconfigured_bin_count": 3,
+      "actionable_underconfigured_bin_count_from_evidence": 3,
+      "actionable_underconfigured_bin_count_local_scan": 3,
+      "actionable_underconfigured_bin_summary": [
+        {
+          "hierarchy_layer": "sector",
+          "observation_count": 2,
+          "rd_sector_units_max": 2,
+          "rd_sector_units_min": 2,
+          "typed_reason": "cache_model_underconfigured"
+        },
+        {
+          "hierarchy_layer": "sector",
+          "observation_count": 2,
+          "rd_sector_units_max": 3,
+          "rd_sector_units_min": 3,
+          "typed_reason": "cache_model_underconfigured"
+        },
+        {
+          "hierarchy_layer": "sector",
+          "observation_count": 28,
+          "rd_sector_units_max": 7,
+          "rd_sector_units_min": 4,
+          "typed_reason": "cache_model_underconfigured"
+        }
+      ],
+      "admitted_bin_count": 9,
+      "bin_count": 13,
+      "bundle_underconfigured": true,
+      "hrd_profile_path": "workloads/simbench_bw/results/dram_stream_stride_mix/rtx_3090_ti/sm_86/trace_trace_00/hrd_profile/hrd_profile.json",
+      "min_underconfigured_observation_count": 2,
+      "nonblocking_typed_unavailable_bin_count": 1,
+      "shape_point": "trace_00",
+      "slug": "dram_stream_stride_mix",
+      "total_observations": 1851393,
+      "underconfigured_bin_count": 4,
+      "underconfigured_bin_summary": [
+        {
+          "hierarchy_layer": "sector",
+          "observation_count": 2,
+          "rd_sector_units_max": 2,
+          "rd_sector_units_min": 2
+        },
+        {
+          "hierarchy_layer": "sector",
+          "observation_count": 2,
+          "rd_sector_units_max": 3,
+          "rd_sector_units_min": 3
+        },
+        {
+          "hierarchy_layer": "sector",
+          "observation_count": 28,
+          "rd_sector_units_max": 7,
+          "rd_sector_units_min": 4
+        },
+        {
+          "hierarchy_layer": "region",
+          "observation_count": 3,
+          "rd_sector_units_max": null,
+          "rd_sector_units_min": null
+        }
+      ]
+    },
+    {
+      "actionable_underconfigured_bin_count": 3,
+      "actionable_underconfigured_bin_count_from_evidence": 3,
+      "actionable_underconfigured_bin_summary": [
+        {
+          "hierarchy_layer": "allocation",
+          "observation_count": 12,
+          "rd_sector_units_max": 1,
+          "rd_sector_units_min": 1,
+          "typed_reason": "cache_model_underconfigured"
+        },
+        {
+          "hierarchy_layer": "sector",
+          "observation_count": 32,
+          "rd_sector_units_max": 63,
+          "rd_sector_units_min": 32,
+          "typed_reason": "cache_model_underconfigured"
+        },
+        {
+          "hierarchy_layer": "sector",
+          "observation_count": 4,
+          "rd_sector_units_max": 127,
+          "rd_sector_units_min": 64,
+          "typed_reason": "cache_model_underconfigured"
+        }
+      ],
+      "admitted_bin_count": 5,
+      "bin_count": 9,
+      "bundle_underconfigured": true,
+      "hrd_profile_path": "workloads/simbench_bw/results/l2_persisting_window_sweep/rtx_3090_ti/sm_86/trace_trace_00/hrd_profile/hrd_profile.json",
+      "min_underconfigured_observation_count": 3,
+      "nonblocking_typed_unavailable_bin_count": 1,
+      "shape_point": "trace_00",
+      "slug": "l2_persisting_window_sweep",
+      "total_observations": 10241,
+      "underconfigured_bin_count": 4,
+      "underconfigured_bin_summary": [
+        {
+          "hierarchy_layer": "allocation",
+          "observation_count": 12,
+          "rd_sector_units_max": 1,
+          "rd_sector_units_min": 1
+        },
+        {
+          "hierarchy_layer": "sector",
+          "observation_count": 32,
+          "rd_sector_units_max": 63,
+          "rd_sector_units_min": 32
+        },
+        {
+          "hierarchy_layer": "sector",
+          "observation_count": 4,
+          "rd_sector_units_max": 127,
+          "rd_sector_units_min": 64
+        },
+        {
+          "hierarchy_layer": "region",
+          "observation_count": 3,
+          "rd_sector_units_max": null,
+          "rd_sector_units_min": null
+        }
+      ]
+    },
+    {
+      "actionable_underconfigured_bin_count": 3,
+      "actionable_underconfigured_bin_count_from_evidence": 3,
+      "actionable_underconfigured_bin_summary": [
+        {
+          "hierarchy_layer": "allocation",
+          "observation_count": 8,
+          "rd_sector_units_max": 0,
+          "rd_sector_units_min": 0,
+          "typed_reason": "cache_model_underconfigured"
+        },
+        {
+          "hierarchy_layer": "sector",
+          "observation_count": 28,
+          "rd_sector_units_max": 63,
+          "rd_sector_units_min": 32,
+          "typed_reason": "cache_model_underconfigured"
+        },
+        {
+          "hierarchy_layer": "sector",
+          "observation_count": 8,
+          "rd_sector_units_max": 127,
+          "rd_sector_units_min": 64,
+          "typed_reason": "cache_model_underconfigured"
+        }
+      ],
+      "admitted_bin_count": 5,
+      "bin_count": 9,
+      "bundle_underconfigured": true,
+      "hrd_profile_path": "workloads/simbench_bw/results/l2_prefetch_hint_sweep/rtx_3090_ti/sm_86/trace_trace_00/hrd_profile/hrd_profile.json",
+      "min_underconfigured_observation_count": 3,
+      "nonblocking_typed_unavailable_bin_count": 1,
+      "shape_point": "trace_00",
+      "slug": "l2_prefetch_hint_sweep",
+      "total_observations": 24577,
+      "underconfigured_bin_count": 4,
+      "underconfigured_bin_summary": [
+        {
+          "hierarchy_layer": "allocation",
+          "observation_count": 8,
+          "rd_sector_units_max": 0,
+          "rd_sector_units_min": 0
+        },
+        {
+          "hierarchy_layer": "sector",
+          "observation_count": 28,
+          "rd_sector_units_max": 63,
+          "rd_sector_units_min": 32
+        },
+        {
+          "hierarchy_layer": "sector",
+          "observation_count": 8,
+          "rd_sector_units_max": 127,
+          "rd_sector_units_min": 64
+        },
+        {
+          "hierarchy_layer": "region",
+          "observation_count": 3,
+          "rd_sector_units_max": null,
+          "rd_sector_units_min": null
+        }
+      ]
+    },
+    {
+      "actionable_underconfigured_bin_count": 1,
+      "actionable_underconfigured_bin_count_from_evidence": 1,
+      "actionable_underconfigured_bin_summary": [
+        {
+          "hierarchy_layer": "sector",
+          "observation_count": 4,
+          "rd_sector_units_max": 7,
+          "rd_sector_units_min": 4,
+          "typed_reason": "cache_model_underconfigured"
+        }
+      ],
+      "admitted_bin_count": 4,
+      "bin_count": 6,
+      "bundle_underconfigured": true,
+      "hrd_profile_path": "workloads/simbench_bw/results/l2_thrash_pointer_chase/rtx_3090_ti/sm_86/trace_trace_00/hrd_profile/hrd_profile.json",
+      "min_underconfigured_observation_count": 3,
+      "nonblocking_typed_unavailable_bin_count": 1,
+      "shape_point": "trace_00",
+      "slug": "l2_thrash_pointer_chase",
+      "total_observations": 16417,
+      "underconfigured_bin_count": 2,
+      "underconfigured_bin_summary": [
+        {
+          "hierarchy_layer": "sector",
+          "observation_count": 4,
+          "rd_sector_units_max": 7,
+          "rd_sector_units_min": 4
+        },
+        {
+          "hierarchy_layer": "region",
+          "observation_count": 3,
+          "rd_sector_units_max": null,
+          "rd_sector_units_min": null
+        }
+      ]
+    },
+    {
+      "actionable_underconfigured_bin_count": 2,
+      "actionable_underconfigured_bin_count_from_evidence": 2,
+      "actionable_underconfigured_bin_summary": [
+        {
+          "hierarchy_layer": "sector",
+          "observation_count": 32,
+          "rd_sector_units_max": 63,
+          "rd_sector_units_min": 32,
+          "typed_reason": "cache_model_underconfigured"
+        },
+        {
+          "hierarchy_layer": "sector",
+          "observation_count": 4,
+          "rd_sector_units_max": 127,
+          "rd_sector_units_min": 64,
+          "typed_reason": "cache_model_underconfigured"
+        }
+      ],
+      "admitted_bin_count": 5,
+      "bin_count": 8,
+      "bundle_underconfigured": true,
+      "hrd_profile_path": "workloads/simbench_bw/results/register_spill_local_mem/rtx_3090_ti/sm_86/trace_trace_00/hrd_profile/hrd_profile.json",
+      "min_underconfigured_observation_count": 3,
+      "nonblocking_typed_unavailable_bin_count": 1,
+      "shape_point": "trace_00",
+      "slug": "register_spill_local_mem",
+      "total_observations": 34817,
+      "underconfigured_bin_count": 3,
+      "underconfigured_bin_summary": [
+        {
+          "hierarchy_layer": "sector",
+          "observation_count": 32,
+          "rd_sector_units_max": 63,
+          "rd_sector_units_min": 32
+        },
+        {
+          "hierarchy_layer": "sector",
+          "observation_count": 4,
+          "rd_sector_units_max": 127,
+          "rd_sector_units_min": 64
+        },
+        {
+          "hierarchy_layer": "region",
+          "observation_count": 3,
+          "rd_sector_units_max": null,
+          "rd_sector_units_min": null
+        }
+      ]
+    },
+    {
+      "actionable_underconfigured_bin_count": 1,
+      "actionable_underconfigured_bin_count_from_evidence": 1,
+      "actionable_underconfigured_bin_summary": [
+        {
+          "hierarchy_layer": "sector",
+          "observation_count": 8,
+          "rd_sector_units_max": 1023,
+          "rd_sector_units_min": 512,
+          "typed_reason": "cache_model_underconfigured"
+        }
+      ],
+      "admitted_bin_count": 6,
+      "bin_count": 8,
+      "bundle_underconfigured": true,
+      "hrd_profile_path": "workloads/simbench_bw/results/warm_cold_pair_relaunch/rtx_3090_ti/sm_86/trace_trace_00/hrd_profile/hrd_profile.json",
+      "min_underconfigured_observation_count": 7,
+      "nonblocking_typed_unavailable_bin_count": 1,
+      "shape_point": "trace_00",
+      "slug": "warm_cold_pair_relaunch",
+      "total_observations": 1064962,
+      "underconfigured_bin_count": 2,
+      "underconfigured_bin_summary": [
+        {
+          "hierarchy_layer": "sector",
+          "observation_count": 8,
+          "rd_sector_units_max": 1023,
+          "rd_sector_units_min": 512
+        },
+        {
+          "hierarchy_layer": "region",
+          "observation_count": 7,
+          "rd_sector_units_max": null,
+          "rd_sector_units_min": null
+        }
+      ]
+    },
+    {
+      "actionable_underconfigured_bin_count": 12,
+      "actionable_underconfigured_bin_count_from_evidence": 12,
+      "actionable_underconfigured_bin_summary": [
+        {
+          "hierarchy_layer": "allocation",
+          "observation_count": 9,
+          "rd_sector_units_max": 1,
+          "rd_sector_units_min": 1,
+          "typed_reason": "cache_model_underconfigured"
+        },
+        {
+          "hierarchy_layer": "line",
+          "observation_count": 2,
+          "rd_sector_units_max": 511,
+          "rd_sector_units_min": 256,
+          "typed_reason": "cache_model_underconfigured"
+        },
+        {
+          "hierarchy_layer": "line",
+          "observation_count": 1,
+          "rd_sector_units_max": 1023,
+          "rd_sector_units_min": 512,
+          "typed_reason": "cache_model_underconfigured"
+        },
+        {
+          "hierarchy_layer": "line",
+          "observation_count": 1,
+          "rd_sector_units_max": 2047,
+          "rd_sector_units_min": 1024,
+          "typed_reason": "cache_model_underconfigured"
+        },
+        {
+          "hierarchy_layer": "sector",
+          "observation_count": 1,
+          "rd_sector_units_max": 31,
+          "rd_sector_units_min": 16,
+          "typed_reason": "cache_model_underconfigured"
+        },
+        {
+          "hierarchy_layer": "sector",
+          "observation_count": 1,
+          "rd_sector_units_max": 255,
+          "rd_sector_units_min": 128,
+          "typed_reason": "cache_model_underconfigured"
+        },
+        {
+          "hierarchy_layer": "sector",
+          "observation_count": 2,
+          "rd_sector_units_max": 511,
+          "rd_sector_units_min": 256,
+          "typed_reason": "cache_model_underconfigured"
+        },
+        {
+          "hierarchy_layer": "sector",
+          "observation_count": 1,
+          "rd_sector_units_max": 1023,
+          "rd_sector_units_min": 512,
+          "typed_reason": "cache_model_underconfigured"
+        },
+        {
+          "hierarchy_layer": "sector",
+          "observation_count": 5,
+          "rd_sector_units_max": 2047,
+          "rd_sector_units_min": 1024,
+          "typed_reason": "cache_model_underconfigured"
+        },
+        {
+          "hierarchy_layer": "sector",
+          "observation_count": 7,
+          "rd_sector_units_max": 4095,
+          "rd_sector_units_min": 2048,
+          "typed_reason": "cache_model_underconfigured"
+        },
+        {
+          "hierarchy_layer": "sector",
+          "observation_count": 17,
+          "rd_sector_units_max": 8191,
+          "rd_sector_units_min": 4096,
+          "typed_reason": "cache_model_underconfigured"
+        },
+        {
+          "hierarchy_layer": "sector",
+          "observation_count": 1,
+          "rd_sector_units_max": 16383,
+          "rd_sector_units_min": 8192,
+          "typed_reason": "cache_model_underconfigured"
+        }
+      ],
+      "admitted_bin_count": 5,
+      "bin_count": 18,
+      "bundle_underconfigured": true,
+      "hrd_profile_path": "workloads/simbench_bw/results/working_set_capacity_sweep/rtx_3090_ti/sm_86/trace_trace_00/hrd_profile/hrd_profile.json",
+      "min_underconfigured_observation_count": 1,
+      "nonblocking_typed_unavailable_bin_count": 1,
+      "shape_point": "trace_00",
+      "slug": "working_set_capacity_sweep",
+      "total_observations": 10241,
+      "underconfigured_bin_count": 13,
+      "underconfigured_bin_summary": [
+        {
+          "hierarchy_layer": "allocation",
+          "observation_count": 9,
+          "rd_sector_units_max": 1,
+          "rd_sector_units_min": 1
+        },
+        {
+          "hierarchy_layer": "line",
+          "observation_count": 2,
+          "rd_sector_units_max": 511,
+          "rd_sector_units_min": 256
+        },
+        {
+          "hierarchy_layer": "line",
+          "observation_count": 1,
+          "rd_sector_units_max": 1023,
+          "rd_sector_units_min": 512
+        },
+        {
+          "hierarchy_layer": "line",
+          "observation_count": 1,
+          "rd_sector_units_max": 2047,
+          "rd_sector_units_min": 1024
+        },
+        {
+          "hierarchy_layer": "sector",
+          "observation_count": 1,
+          "rd_sector_units_max": 31,
+          "rd_sector_units_min": 16
+        },
+        {
+          "hierarchy_layer": "sector",
+          "observation_count": 1,
+          "rd_sector_units_max": 255,
+          "rd_sector_units_min": 128
+        },
+        {
+          "hierarchy_layer": "sector",
+          "observation_count": 2,
+          "rd_sector_units_max": 511,
+          "rd_sector_units_min": 256
+        },
+        {
+          "hierarchy_layer": "sector",
+          "observation_count": 1,
+          "rd_sector_units_max": 1023,
+          "rd_sector_units_min": 512
+        },
+        {
+          "hierarchy_layer": "sector",
+          "observation_count": 5,
+          "rd_sector_units_max": 2047,
+          "rd_sector_units_min": 1024
+        },
+        {
+          "hierarchy_layer": "sector",
+          "observation_count": 7,
+          "rd_sector_units_max": 4095,
+          "rd_sector_units_min": 2048
+        },
+        {
+          "hierarchy_layer": "sector",
+          "observation_count": 17,
+          "rd_sector_units_max": 8191,
+          "rd_sector_units_min": 4096
+        },
+        {
+          "hierarchy_layer": "sector",
+          "observation_count": 1,
+          "rd_sector_units_max": 16383,
+          "rd_sector_units_min": 8192
+        },
+        {
+          "hierarchy_layer": "region",
+          "observation_count": 3,
+          "rd_sector_units_max": null,
+          "rd_sector_units_min": null
+        }
+      ]
+    },
+    {
+      "actionable_underconfigured_bin_count": 0,
+      "actionable_underconfigured_bin_count_from_evidence": 0,
+      "actionable_underconfigured_bin_count_local_scan": 0,
+      "actionable_underconfigured_bin_summary": [],
+      "admitted_bin_count": 13,
+      "bin_count": 14,
+      "bundle_underconfigured": false,
+      "hrd_profile_path": "workloads/simbench_bw/results/carveout_sensitivity_probe/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/hrd_profile/hrd_profile.json",
+      "min_underconfigured_observation_count": 7,
+      "nonblocking_typed_unavailable_bin_count": 1,
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "carveout_sensitivity_probe",
+      "total_observations": 3215361,
+      "underconfigured_bin_count": 1,
+      "underconfigured_bin_summary": [
+        {
+          "hierarchy_layer": "region",
+          "observation_count": 7,
+          "rd_sector_units_max": null,
+          "rd_sector_units_min": null
+        }
+      ]
+    },
+    {
+      "actionable_underconfigured_bin_count": 0,
+      "actionable_underconfigured_bin_count_from_evidence": 0,
+      "actionable_underconfigured_bin_count_local_scan": 0,
+      "actionable_underconfigured_bin_summary": [],
+      "admitted_bin_count": 11,
+      "bin_count": 12,
+      "bundle_underconfigured": false,
+      "hrd_profile_path": "workloads/simbench_bw/results/dram_stream_stride_mix/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/hrd_profile/hrd_profile.json",
+      "min_underconfigured_observation_count": 3,
+      "nonblocking_typed_unavailable_bin_count": 1,
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "dram_stream_stride_mix",
+      "total_observations": 524289,
+      "underconfigured_bin_count": 1,
+      "underconfigured_bin_summary": [
+        {
+          "hierarchy_layer": "region",
+          "observation_count": 3,
+          "rd_sector_units_max": null,
+          "rd_sector_units_min": null
+        }
+      ]
+    },
+    {
+      "actionable_underconfigured_bin_count": 1,
+      "actionable_underconfigured_bin_count_from_evidence": 1,
+      "actionable_underconfigured_bin_count_local_scan": 1,
+      "actionable_underconfigured_bin_summary": [
+        {
+          "hierarchy_layer": "allocation",
+          "observation_count": 1,
+          "rd_sector_units_max": 2,
+          "rd_sector_units_min": 2,
+          "typed_reason": "cache_model_underconfigured"
+        }
+      ],
+      "admitted_bin_count": 5,
+      "bin_count": 7,
+      "bundle_underconfigured": true,
+      "hrd_profile_path": "workloads/simbench_bw/results/l2_persisting_window_sweep/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/hrd_profile/hrd_profile.json",
+      "min_underconfigured_observation_count": 1,
+      "nonblocking_typed_unavailable_bin_count": 1,
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "l2_persisting_window_sweep",
+      "total_observations": 2146305,
+      "underconfigured_bin_count": 2,
+      "underconfigured_bin_summary": [
+        {
+          "hierarchy_layer": "allocation",
+          "observation_count": 1,
+          "rd_sector_units_max": 2,
+          "rd_sector_units_min": 2
+        },
+        {
+          "hierarchy_layer": "region",
+          "observation_count": 3,
+          "rd_sector_units_max": null,
+          "rd_sector_units_min": null
+        }
+      ]
+    },
+    {
+      "actionable_underconfigured_bin_count": 0,
+      "actionable_underconfigured_bin_count_from_evidence": 0,
+      "actionable_underconfigured_bin_count_local_scan": 0,
+      "actionable_underconfigured_bin_summary": [],
+      "admitted_bin_count": 8,
+      "bin_count": 9,
+      "bundle_underconfigured": false,
+      "hrd_profile_path": "workloads/simbench_bw/results/l2_prefetch_hint_sweep/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/hrd_profile/hrd_profile.json",
+      "min_underconfigured_observation_count": 3,
+      "nonblocking_typed_unavailable_bin_count": 1,
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "l2_prefetch_hint_sweep",
+      "total_observations": 4456449,
+      "underconfigured_bin_count": 1,
+      "underconfigured_bin_summary": [
+        {
+          "hierarchy_layer": "region",
+          "observation_count": 3,
+          "rd_sector_units_max": null,
+          "rd_sector_units_min": null
+        }
+      ]
+    },
+    {
+      "actionable_underconfigured_bin_count": 1,
+      "actionable_underconfigured_bin_count_from_evidence": 1,
+      "actionable_underconfigured_bin_count_local_scan": 1,
+      "actionable_underconfigured_bin_summary": [
+        {
+          "hierarchy_layer": "sector",
+          "observation_count": 1,
+          "rd_sector_units_max": 1,
+          "rd_sector_units_min": 1,
+          "typed_reason": "cache_model_underconfigured"
+        }
+      ],
+      "admitted_bin_count": 4,
+      "bin_count": 6,
+      "bundle_underconfigured": true,
+      "hrd_profile_path": "workloads/simbench_bw/results/l2_thrash_pointer_chase/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/hrd_profile/hrd_profile.json",
+      "min_underconfigured_observation_count": 1,
+      "nonblocking_typed_unavailable_bin_count": 1,
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "l2_thrash_pointer_chase",
+      "total_observations": 264193,
+      "underconfigured_bin_count": 2,
+      "underconfigured_bin_summary": [
+        {
+          "hierarchy_layer": "sector",
+          "observation_count": 1,
+          "rd_sector_units_max": 1,
+          "rd_sector_units_min": 1
+        },
+        {
+          "hierarchy_layer": "region",
+          "observation_count": 3,
+          "rd_sector_units_max": null,
+          "rd_sector_units_min": null
+        }
+      ]
+    },
+    {
+      "actionable_underconfigured_bin_count": 2,
+      "actionable_underconfigured_bin_count_from_evidence": 2,
+      "actionable_underconfigured_bin_count_local_scan": 2,
+      "actionable_underconfigured_bin_summary": [
+        {
+          "hierarchy_layer": "sector",
+          "observation_count": 4,
+          "rd_sector_units_max": 1,
+          "rd_sector_units_min": 1,
+          "typed_reason": "cache_model_underconfigured"
+        },
+        {
+          "hierarchy_layer": "sector",
+          "observation_count": 10,
+          "rd_sector_units_max": 15,
+          "rd_sector_units_min": 8,
+          "typed_reason": "cache_model_underconfigured"
+        }
+      ],
+      "admitted_bin_count": 13,
+      "bin_count": 16,
+      "bundle_underconfigured": true,
+      "hrd_profile_path": "workloads/simbench_bw/results/register_spill_local_mem/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/hrd_profile/hrd_profile.json",
+      "min_underconfigured_observation_count": 3,
+      "nonblocking_typed_unavailable_bin_count": 1,
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "register_spill_local_mem",
+      "total_observations": 393217,
+      "underconfigured_bin_count": 3,
+      "underconfigured_bin_summary": [
+        {
+          "hierarchy_layer": "sector",
+          "observation_count": 4,
+          "rd_sector_units_max": 1,
+          "rd_sector_units_min": 1
+        },
+        {
+          "hierarchy_layer": "sector",
+          "observation_count": 10,
+          "rd_sector_units_max": 15,
+          "rd_sector_units_min": 8
+        },
+        {
+          "hierarchy_layer": "region",
+          "observation_count": 3,
+          "rd_sector_units_max": null,
+          "rd_sector_units_min": null
+        }
+      ]
+    },
+    {
+      "actionable_underconfigured_bin_count": 0,
+      "actionable_underconfigured_bin_count_from_evidence": 0,
+      "actionable_underconfigured_bin_count_local_scan": 0,
+      "actionable_underconfigured_bin_summary": [],
+      "admitted_bin_count": 8,
+      "bin_count": 9,
+      "bundle_underconfigured": false,
+      "hrd_profile_path": "workloads/simbench_bw/results/warm_cold_pair_relaunch/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/hrd_profile/hrd_profile.json",
+      "min_underconfigured_observation_count": 7,
+      "nonblocking_typed_unavailable_bin_count": 1,
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "warm_cold_pair_relaunch",
+      "total_observations": 1048578,
+      "underconfigured_bin_count": 1,
+      "underconfigured_bin_summary": [
+        {
+          "hierarchy_layer": "region",
+          "observation_count": 7,
+          "rd_sector_units_max": null,
+          "rd_sector_units_min": null
+        }
+      ]
+    },
+    {
+      "actionable_underconfigured_bin_count": 1,
+      "actionable_underconfigured_bin_count_from_evidence": 1,
+      "actionable_underconfigured_bin_count_local_scan": 1,
+      "actionable_underconfigured_bin_summary": [
+        {
+          "hierarchy_layer": "allocation",
+          "observation_count": 1,
+          "rd_sector_units_max": 2,
+          "rd_sector_units_min": 2,
+          "typed_reason": "cache_model_underconfigured"
+        }
+      ],
+      "admitted_bin_count": 5,
+      "bin_count": 7,
+      "bundle_underconfigured": true,
+      "hrd_profile_path": "workloads/simbench_bw/results/working_set_capacity_sweep/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl/hrd_profile/hrd_profile.json",
+      "min_underconfigured_observation_count": 1,
+      "nonblocking_typed_unavailable_bin_count": 1,
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "working_set_capacity_sweep",
+      "total_observations": 2658305,
+      "underconfigured_bin_count": 2,
+      "underconfigured_bin_summary": [
+        {
+          "hierarchy_layer": "allocation",
+          "observation_count": 1,
+          "rd_sector_units_max": 2,
+          "rd_sector_units_min": 2
+        },
+        {
+          "hierarchy_layer": "region",
+          "observation_count": 3,
+          "rd_sector_units_max": null,
+          "rd_sector_units_min": null
+        }
+      ]
+    }
+  ],
+  "minimum_bin_sample_count": 50,
+  "schema_version": 1,
+  "total_admitted_bins": 115,
+  "total_underconfigured_bins": 52
+}

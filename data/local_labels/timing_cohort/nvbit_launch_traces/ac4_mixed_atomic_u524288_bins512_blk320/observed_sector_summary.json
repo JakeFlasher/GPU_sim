@@ -1,0 +1,49 @@
+{
+  "arch": "sm_86",
+  "artifact_kind": "timing_nvbit_observed_sector_summary",
+  "binary_sha256": "e2151e3732238acb4dcf030d1b0a191cc587a8b84e3d29224c25caff1d455592",
+  "kernel_signature_sha256": "687c8e95ebae13224af17e312f94b002f9eecbcb57c8a2294d7d2bd5d564ba58",
+  "observation_basis": {
+    "memory_instruction_record_count": 10240,
+    "observed_access_count": 327680,
+    "observed_hit_count": 286720,
+    "observed_miss_count": 40960,
+    "stats_total_insts": 47321600,
+    "stats_total_reported_insts": 47321600,
+    "threadblock_proto_file_count": 320,
+    "threadblock_proto_set_sha256": "f28566bc85e59e57d6f9ae89f4af3fc94a73e88c62df2bcfc4b42379116641d1",
+    "trace_contract_ok": true
+  },
+  "producer": "nvbit_threadblock_proto_summarize_launch_v1",
+  "schema_version": 1,
+  "shape_point": "ac4_mixed_atomic_u524288_bins512_blk320",
+  "slug": "global_atomic_histogram",
+  "source_commit": "3a715f5a9fe773046a266dac46a6d58caf135484",
+  "summarize_launch": {
+    "async_copy_count": 0,
+    "atomic_count": 0,
+    "cold_count": 40960,
+    "finite_miss_count": 0,
+    "load_count": 163840,
+    "per_access_kind_counts": {
+      "1": 163840,
+      "2": 163840
+    },
+    "per_op_class_counts": {
+      "1": 327680
+    },
+    "reuse_distance_finite_p50": 0,
+    "reuse_distance_finite_p90": 0,
+    "reuse_distance_finite_p99": 0,
+    "store_count": 163840,
+    "unique_sector_count": 40960,
+    "unspecified_kind_count": 0,
+    "working_set_sector_count": 40960
+  },
+  "trace_window": {
+    "instr_begin": 31,
+    "instr_end": 48,
+    "instruction_trace_mode": "bounded_observed_global_store_trace",
+    "window_role": "per_cell_observed_global_memory_window"
+  }
+}

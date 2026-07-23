@@ -1,0 +1,57 @@
+# sm_120 validation report (Round 10: real fit + real evaluation).
+# associativity_l2=32 picked by empirical sweep; sidecar carries non-empty L1/L2 anchors.
+# Gate state: friendly L1=0.0357 (PASS) | friendly L2=0.0378 (PASS) | hostile L1=0.0000 (PASS) | hostile L2=0.0203 (PASS)
+
+[meta]
+schema_version = "1.0"
+captured_at_utc = "2026-05-26T22:36:32.964504+00:00"
+host_arch = "sm_120"
+isotonic_params_sha256 = "04644ce6b975dc8a188b0b740934346e7a5295a5d75aba6eb95725a46f5ba146"
+ledger_sha256 = "b3fbd09e32b08f522f26626da701faf9ab1d0681fdde2d5e56e7c486aee0f594"
+validation_split_sha256 = "8e75ee1d2ac41df290159c4ebdb34211ccfc356f682f6535061bb02e08ea0216"
+historical_label_split_sha256 = "2a818dc622ee22b711751b51fc4582fdaa2ba348260866f08e6603056febdfa6"
+validation_cells_evaluated = 12
+measured_cells_in_ledger = 0
+ledger_total_entries = 83
+error_formula = "absolute_per_cell_in_fraction_domain"
+error_formula_dec_l_rationale = "Per DEC-L: absolute in fraction domain"
+split_methodology = "Real fit on historical-label split's calibration_only cells (Round 10 empirical-sweep geometry); evaluated on validation_only cells."
+gate_evaluation_state = "evaluated"
+associativity_l2_source = "empirical_sweep_round10"
+simulator_unavailable_cells_count = 5
+simulator_unavailable_cells = ["problem_011_rotary_position_embedding", "problem_012_gqa_paged_decode_h32_kv4_d128_ps1", "problem_014_gqa_paged_prefill_causal_h32_kv4_d128_ps1", "problem_034_flux_multi_axis_rope_frequency_computation", "problem_038_flux_multi_head_rmsnorm_qk"]
+simulator_unavailable_typed_reasons = ["hostile_subclass_uncalibrated", "simulator_l2_metric_family_undercount"]
+simulator_unavailable_manifest_sha256 = "b7d6b6d00555ee22bb3753b31c36b668bc3b530d0beee2488beae3730700a7b2"
+
+[cohort_friendly]
+present = true
+cell_count = 10
+cells = ["problem_059_moe_group_score_aggregation_and_masking", "problem_061_tanh_gated_residual_add_backward", "problem_074_fused_gated_mlp_silu", "problem_077_whisper_decoder_output_projection", "problem_078_group_norm_fusion", "problem_080_adaptive_layernorm_continuous_with_modulation", "problem_084_silu_activation_backward", "problem_085_geglu_activation", "problem_088_rotary_position_embedding_application", "problem_090_batched_2d_rope_position_encoding_backward"]
+l1_mape = 0.035733365067350156
+l2_mape = 0.03778862902066693
+l1_gate_threshold = 0.05
+l2_gate_threshold = 0.05
+l1_gate_pass = true
+l2_gate_pass = true
+bundle_pass = true
+
+[cohort_hostile]
+present = true
+cell_count = 2
+cells = ["calib_vector_cross_32B", "problem_011_gemm_n28672_k4096"]
+l1_mape = 0.0
+l2_mape = 0.020278363665925406
+l1_gate_threshold = 0.15
+l2_gate_threshold = 0.15
+l1_gate_pass = true
+l2_gate_pass = true
+bundle_pass = true
+
+[overall]
+all_gates_pass = true
+cohort_friendly_pass = true
+cohort_hostile_pass = true
+cohort_friendly_present = true
+cohort_hostile_present = true
+fail_closed = false
+fail_closed_reason = ""

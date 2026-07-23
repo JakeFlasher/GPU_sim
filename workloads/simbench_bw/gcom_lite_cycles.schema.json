@@ -1,0 +1,265 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "gcom_lite_cycles",
+  "description": "GCoM-lite analytical cycles evaluation over the expanded timing cohort: per-cell rows with four individually inspectable component terms (compute, stall, memory, imbalance — each carrying its formula and inputs), the analytical interval prior, the cal/val-only ridge residual, and a single declared deployable channel; sealed-holdout members carry predictions without label consumption; cells missing committed inputs land typed.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_kind",
+    "arch",
+    "generated_at_commit",
+    "model_version",
+    "deployable_channel",
+    "feature_names",
+    "issue_width_per_sm",
+    "ridge_lambda",
+    "inputs",
+    "fit",
+    "n_rows",
+    "n_modeled",
+    "n_typed",
+    "cells"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "artifact_kind": {
+      "const": "gcom_lite_cycles"
+    },
+    "arch": {
+      "const": "sm_86"
+    },
+    "generated_at_commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "model_version": {
+      "const": "gcom_lite_interval_cpi_stack_v1"
+    },
+    "deployable_channel": {
+      "const": "deployable_gcom_lite_interval_no_same_slug_substitution"
+    },
+    "feature_names": {
+      "type": "array",
+      "minItems": 8,
+      "maxItems": 8,
+      "items": {
+        "type": "string"
+      }
+    },
+    "issue_width_per_sm": {
+      "const": 4.0
+    },
+    "ridge_lambda": {
+      "const": 10.0
+    },
+    "inputs": {
+      "type": "object"
+    },
+    "fit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pool",
+        "n_fit",
+        "ridge_coefficients",
+        "target",
+        "holdout_labels_consumed"
+      ],
+      "properties": {
+        "pool": {
+          "const": "expanded_cohort_minus_sealed_holdout_members"
+        },
+        "n_fit": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "ridge_coefficients": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "number"
+          }
+        },
+        "target": {
+          "const": "log(true_cycles / analytical_prior)"
+        },
+        "holdout_labels_consumed": {
+          "const": false
+        }
+      }
+    },
+    "n_rows": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "n_modeled": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "n_typed": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "cells": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": [
+          "slug",
+          "shape_point",
+          "binary_sha256",
+          "kernel_signature_sha256",
+          "status"
+        ],
+        "properties": {
+          "slug": {
+            "type": "string"
+          },
+          "shape_point": {
+            "type": "string"
+          },
+          "binary_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "kernel_signature_sha256": {
+            "type": "string",
+            "pattern": "^[0-9a-f]{64}$"
+          },
+          "status": {
+            "enum": [
+              "modeled_fit_pool",
+              "modeled_holdout_reserved",
+              "typed"
+            ]
+          },
+          "typed_reason": {
+            "type": "string"
+          },
+          "evidence": {
+            "type": "object"
+          },
+          "component_terms": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "compute",
+              "stall",
+              "memory",
+              "imbalance"
+            ],
+            "additionalItems": false,
+            "properties": {
+              "compute": {
+                "$ref": "#/definitions/term"
+              },
+              "stall": {
+                "$ref": "#/definitions/term"
+              },
+              "memory": {
+                "$ref": "#/definitions/term"
+              },
+              "imbalance": {
+                "$ref": "#/definitions/term"
+              }
+            }
+          },
+          "analytical_prior_cycles": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          },
+          "feature_vector": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "number"
+            }
+          },
+          "label_consumed_for_fit": {
+            "type": "boolean"
+          },
+          "prediction_channel": {
+            "const": "deployable_gcom_lite_interval_no_same_slug_substitution"
+          },
+          "ridge_residual_log": {
+            "type": "number"
+          },
+          "predicted_cycles": {
+            "type": "number",
+            "exclusiveMinimum": 0
+          }
+        },
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "status": {
+                  "const": "typed"
+                }
+              }
+            },
+            "then": {
+              "required": [
+                "typed_reason",
+                "evidence"
+              ]
+            },
+            "else": {
+              "required": [
+                "component_terms",
+                "analytical_prior_cycles",
+                "feature_vector",
+                "label_consumed_for_fit",
+                "prediction_channel",
+                "ridge_residual_log",
+                "predicted_cycles"
+              ]
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "status": {
+                  "const": "modeled_holdout_reserved"
+                }
+              }
+            },
+            "then": {
+              "properties": {
+                "label_consumed_for_fit": {
+                  "const": false
+                }
+              }
+            }
+          }
+        ]
+      }
+    }
+  },
+  "definitions": {
+    "term": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cycles",
+        "formula",
+        "inputs"
+      ],
+      "properties": {
+        "cycles": {
+          "type": "number",
+          "minimum": 0
+        },
+        "formula": {
+          "type": "string",
+          "minLength": 1
+        },
+        "inputs": {
+          "type": "object"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,59 @@
+{
+  "cells": [
+    {
+      "arch": "sm_120",
+      "binary_sha256": "cb2ec7a8ae5763fbc47ff5deb9f4aab970ebf1239468067b51737ce655348b5d",
+      "cache_hit_rate_l1tex_sector_pct": 53.56,
+      "cache_hit_rate_l2_sector_pct": 42.602,
+      "evidence_kind": "live",
+      "kernel_signature_sha256": "4e67133229c83d42c23af358bc313cc3e9d8f4746c817bc2cb237c45ec86c3ce",
+      "l1tex_label_status": "mean_present",
+      "n_repeats": 5,
+      "ncu_metric_version": "ncu_2026.1.x",
+      "profiler_version": "ncu_2026.1.x",
+      "schema_version": 4,
+      "shape_point": "timing_shape",
+      "slug": "layernorm_fwd_bf16_sm80",
+      "source_commit": "274e841535052d677fc4c223f8ec0847d6cae2f5",
+      "stddev_l1tex_sector": 0.00036742346141748156,
+      "stddev_l2_sector": 0.009730724536230586
+    },
+    {
+      "arch": "sm_120",
+      "binary_sha256": "b6e9d7e11edb04c02ea7230b60ee89b9424975b9e95888847020764176349cb4",
+      "cache_hit_rate_l1tex_sector_pct": 25.0,
+      "cache_hit_rate_l2_sector_pct": 18.722,
+      "evidence_kind": "live",
+      "kernel_signature_sha256": "2681564ef5ca9026d42106bbe862a40d3e38b89b52e720a90ad39322c0ff99dc",
+      "l1tex_label_status": "mean_present",
+      "n_repeats": 5,
+      "ncu_metric_version": "ncu_2026.1.x",
+      "profiler_version": "ncu_2026.1.x",
+      "schema_version": 4,
+      "shape_point": "timing_shape",
+      "slug": "silu_fwd_bf16_sm80",
+      "source_commit": "274e841535052d677fc4c223f8ec0847d6cae2f5",
+      "stddev_l1tex_sector": 0.0,
+      "stddev_l2_sector": 0.003910498689425671
+    },
+    {
+      "arch": "sm_120",
+      "binary_sha256": "4f85c8a402121057c7a6d2f8de1614cf0a41c795d8030be5f21fdf944dcd7eae",
+      "cache_hit_rate_l1tex_sector_pct": 50.0,
+      "cache_hit_rate_l2_sector_pct": 18.264,
+      "evidence_kind": "live",
+      "kernel_signature_sha256": "dc75edc616c84481008a935794005890d51160f8eafe175a1e530098b3be3e43",
+      "l1tex_label_status": "mean_present",
+      "n_repeats": 5,
+      "ncu_metric_version": "ncu_2026.1.x",
+      "profiler_version": "ncu_2026.1.x",
+      "schema_version": 4,
+      "shape_point": "timing_shape",
+      "slug": "softmax_safe_bf16_sm80",
+      "source_commit": "274e841535052d677fc4c223f8ec0847d6cae2f5",
+      "stddev_l1tex_sector": 0.0,
+      "stddev_l2_sector": 0.004892647545041447
+    }
+  ],
+  "schema_version": 4
+}

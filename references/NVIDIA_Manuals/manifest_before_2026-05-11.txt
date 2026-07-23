@@ -1,0 +1,21 @@
+# NVIDIA_Manuals pre-flight manifest
+# generated: 2026-05-11T23:38:26+08:00
+# columns: folder | n_md | total_bytes | source_url
+#
+ampere_compatibility       |    4 |      21197 | https://docs.nvidia.com/cuda/ampere-compatibility-guide/
+ampere_tuning              |    4 |      23448 | https://docs.nvidia.com/cuda/ampere-tuning-guide/
+best_practices             |   22 |    2215267 | https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/
+blackwell_compatibility    |    4 |      21238 | https://docs.nvidia.com/cuda/blackwell-compatibility-guide/
+blackwell_tuning           |    4 |      18433 | https://docs.nvidia.com/cuda/blackwell-tuning-guide/
+cuda_binary_utility        |    9 |     284087 | https://docs.nvidia.com/cuda/cuda-binary-utilities/
+cuda_guide                 |  833 |   11895229 | https://docs.nvidia.com/cuda/cuda-programming-guide/
+cuda_inline_ptx            |    3 |      21627 | https://docs.nvidia.com/cuda/inline-ptx-assembly/
+cuda_tile_ir               |  741 |     972203 | https://docs.nvidia.com/cuda/tile-ir/latest/
+cutile_python              |   76 |     380973 | https://docs.nvidia.com/cuda/cutile-python/
+cutlass_cute               |  755 |   20385610 | https://docs.nvidia.com/cutlass/latest/
+ncu_guide                  |    7 |   12345479 | https://docs.nvidia.com/nsight-compute/OccupancyCalculatorPythonInterface/
+nvcc_guide                 |    9 |     354507 | https://docs.nvidia.com/cuda/cuda-compiler-driver-nvcc/
+nvvm_ir                    |   20 |     113877 | https://docs.nvidia.com/cuda/nvvm-ir-spec/
+ptx_compier_api            |    8 |      60672 | https://docs.nvidia.com/cuda/ptx-compiler-api/
+ptx_isa                    |   15 |   22075213 | https://docs.nvidia.com/cuda/parallel-thread-execution/
+ptx_writer_guide           |   10 |     961010 | https://docs.nvidia.com/cuda/ptx-writers-guide-to-interoperability/

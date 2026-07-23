@@ -1,0 +1,37 @@
+{
+  "aliases": {
+    "llmcompassahardwareevaluationframeworkforllminference": "arxiv:2312.03134",
+    "nvarchsim": "title:needforspeedexperiencesbuildingatrustworthysystemlevelgpusimulator",
+    "stemswiftandtrustworthylargescalegpusimulationwithfinegrainederrormodeling": "title:stemswiftandtrustworthylargescalegpusimulationwithfinegrainederrormodelingandhierarchicalclustering"
+  },
+  "papers": {
+    "needforspeedexperiencesbuildingatrustworthysystemlevelgpusimulator": {
+      "local_path": "papers/HPCA_2021_NVArchSim.pdf",
+      "source_url": "https://d1qx31qr3h6wln.cloudfront.net/publications/HPCA_2021_NVArchSim.pdf"
+    },
+    "navisimahighlyaccurategpusimulatorforamdrdnagpus": {
+      "local_path": "papers/navisim_pact_2022.pdf"
+    },
+    "dissectingandmodelingthearchitectureofmoderngpucores": {
+      "local_path": "papers/Dissecting_and_Modeling_the_Architecture_of_ModernGPUCores_MICRO_2025_Open_Access.pdf"
+    },
+    "nvbitadynamicbinaryinstrumentationframeworkfornvidiagpus": {
+      "landing_page": "https://research.nvidia.com/publication/2019-10_nvbit-dynamic-binary-instrumentation-framework-nvidia-gpus"
+    },
+    "accelwattchapowermodelingframeworkformoderngpus": {
+      "landing_page": "https://engineering.purdue.edu/tgrogers/publication/kandiah-micro-2021/"
+    },
+    "gpumechgpuperformancemodelingtechniquebasedonintervalanalysis": {
+      "pdf_url": "https://citeseerx.ist.psu.edu/document?doi=9fcbf89aab2b77d5d9383318291e415d5be07a53&repid=rep1&type=pdf"
+    },
+    "mdmthegpumemorydivergencemodel": {
+      "pdf_url": "https://ntnuopen.ntnu.no/ntnu-xmlui/bitstream/11250/2734404/2/mdm-micro20-preprint.pdf"
+    },
+    "mgvmdesigningvirtualmemorysystemofmcmgpus": {
+      "pdf_url": "https://www.csa.iisc.ac.in/~arkapravab/papers/MICRO22_MGvm.pdf"
+    },
+    "heterogeneousdietodieinterfacesforchipletinterconnection": {
+      "landing_page": "https://www.researchgate.net/publication/376362225_Heterogeneous_Die-to-Die_Interfaces_Enabling_More_Flexible_Chiplet_Interconnection_Systems"
+    }
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "ledger_id": "pilot_ledger_001",
+  "claim_scope": "measured_local",
+  "mechanism_panel_ref": "workloads/simbench_bw/identifiability/mechanism_panel.toml",
+  "power_analysis_ref": "workloads/simbench_bw/identifiability/power_analysis_report.json",
+  "mechanism_confusion_matrix_ref": "workloads/simbench_bw/identifiability/mechanism_confusion_matrix.toml",
+  "mcc_method": "benjamini_hochberg",
+  "cells": [
+    {
+      "mechanism_id": "mshr_coalescing",
+      "kernel_slug": "rmsnorm_fwd_bf16",
+      "data_provenance": "measured",
+      "verdict": "identifiable_at_threshold",
+      "effect_size": 0.18,
+      "ci_lower": 0.10,
+      "ci_upper": 0.26,
+      "n_pairs": 8,
+      "is_negative_control": false,
+      "mcc_corrected_p_value": 0.012,
+      "pre_registered_effect_size_threshold": 0.05,
+      "mde_precondition_status": "mde_satisfied"
+    },
+    {
+      "mechanism_id": "no_op_negative_control",
+      "kernel_slug": "rmsnorm_fwd_bf16",
+      "data_provenance": "measured",
+      "verdict": "not_identifiable",
+      "effect_size": 0.01,
+      "ci_lower": -0.02,
+      "ci_upper": 0.04,
+      "n_pairs": 8,
+      "is_negative_control": true,
+      "mcc_corrected_p_value": 0.84,
+      "pre_registered_effect_size_threshold": 0.05,
+      "mde_precondition_status": "mde_satisfied"
+    }
+  ],
+  "ledger_status": "ledger_admitted"
+}

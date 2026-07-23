@@ -1,0 +1,2356 @@
+{
+ "registry_version": 2,
+ "label_schema_version": 5,
+ "description": "Single source of truth for every ground-truth target metric the local-label pipeline can carry. Each entry binds a canonical Nsight Compute metric identifier to the label-style sidecar/admitted field names, its unit, valid range, parser transform, aggregation/repeatability rule, nullable policy, and deployability (label-only vs feature-eligible). registry_version 2 additionally pins, for every entry, a metric_class (HOW the value is produced), a risk_tier (how hard it is to reproduce without privileged counters), an ncu_observation_contract (the counting-unit / rollup / numerator / denominator / op-classes the Nsight Compute identifier observes), and a per_arch_availability map (sm_86 host-observed status; sm_120 deferred). Derived entries (derived_ratio / derived_pct_peak) additionally carry a composition block whose formula references dependency metric KEYS and device-constant names as bare identifiers. The hit-rate fraction metrics (L2 mandatory, L1/TEX) keep the historical flat field names and the percentage parser transform; every non-percentage family (cycles, ns, count) is carried under the unit_tagged_metrics block introduced at label_schema_version 5. The label_field names are deliberately chosen to avoid tools/local_labels/import_label.py's forbidden-field denylist (no metric_*/counter_*/event_*/pm_*/cupti_* prefixes). The availability column is the host-observed status; entries marked probe_pending are confirmed against this card by the metric-availability probe artifact, and unresolved entries (no settled canonical identifier yet) must be resolved by the probe before any head may target them. [2026-07-06 1B extension: +18 warp_stall entries (Warp State stall reasons) and the SOL headline pair; every entry now carries model_io_role (target|input|either) \u2014 the Rule-1 successor of deployability, which is retained until consumers migrate.] [2026-07-07 \u00a76.4 correction: the three sector/request-stream observation contracts over LTS and unified L1TEX (cache_hit_rate_l2_sector, traffic_l2_total_requests_from_tex, and the unified l1tex sector hit-rate) now list global_atomic and global_reduction op classes \u2014 Nsight Compute's lts__t_sectors/l1tex__t_sectors streams include ATOM/RED sectors (op_atom/op_red rollups exist and the ac4_global_atomic_histogram cell's 99.9% L2 label is RED-dominated); the previous lists under-documented the stream. Per-op-ld contracts are unchanged. Vocabulary note: the pre-existing aggregate L1 total-requests contract spells the same physical classes as bare 'atomic'/'reduction' tokens; both spellings are deliberately outside the op-class gate vocabulary consumers use (emit_ac4_load_bearing_coverage._GATEABLE_OP_CLASSES contains the global_-prefixed forms only, and the aggregate entries carry bare 'local'/'texture'/'surface' tokens that keep them ungated either way) — harmonize when the sim-emit contract layer regenerates the registry, not piecemeal.] [2026-07-08 sim-emit resolution: the sim-emit contract layer (sim/emit) landed and does NOT consume the ncu_observation_contract op_classes lists (it binds only key/ncu_metric/unit/valid_max/parser_transform/model_io_role per descriptor, checked by the registry_lockstep test); the bare-vs-global_-prefixed op-class vocabulary is therefore an eval/label-factory concern, not a sim-emit one, and needs NO rename — the per-op global_-prefixed contracts and the space-agnostic aggregate total-requests bare tokens coexist by design. Harmonization item CLOSED.]",
+ "units": [
+  "pct",
+  "count",
+  "ns",
+  "cycles"
+ ],
+ "deployability_kinds": [
+  "label_only",
+  "feature_eligible"
+ ],
+ "parser_transforms": [
+  "percent_to_fraction",
+  "identity_nonneg"
+ ],
+ "repeatability_rules": [
+  "stddev_abs",
+  "coefficient_of_variation",
+  "relative_tolerance"
+ ],
+ "carrier_kinds": [
+  "flat_field",
+  "unit_tagged_metric"
+ ],
+ "repeatability_thresholds": {
+  "stddev_abs": 0.03,
+  "coefficient_of_variation": 0.05,
+  "relative_tolerance": 0.05
+ },
+ "metrics": [
+  {
+   "key": "cache_hit_rate_l2_sector",
+   "ncu_metric": "lts__t_sector_hit_rate.pct",
+   "unit": "pct",
+   "family": "cache_hit_rate",
+   "metric_class": "derived_ratio",
+   "risk_tier": "T2",
+   "cache_layer": "L2",
+   "carrier": "flat_field",
+   "sidecar_field": "cache_hit_rate_l2_sector",
+   "admitted_field": "cache_hit_rate_l2_sector_pct",
+   "valid_min": 0.0,
+   "valid_max": 1.0,
+   "parser_transform": "percent_to_fraction",
+   "aggregation": "mean_fraction",
+   "repeatability_rule": "stddev_abs",
+   "nullable": false,
+   "deployability": "label_only",
+   "availability": "available",
+   "ncu_observation_contract": {
+    "counting_unit": "LTS",
+    "rollup": "pct",
+    "numerator": "lts__t_sectors_lookup_hit",
+    "denominator": "lts__t_sectors",
+    "op_classes": [
+     "global_load",
+     "global_store",
+     "global_atomic",
+     "global_reduction",
+     "local",
+     "texture",
+     "surface"
+    ],
+    "unsupported_op_behavior": "kUnspecified->unsupported_memory_path typed fallback"
+   },
+   "composition": {
+    "formula": "label_only_no_predictor_composition",
+    "dependencies": [],
+    "device_constants": [],
+    "note": "Frozen L2 sector hit-rate is consumed directly as a calibration label from Nsight Compute's own lts__t_sector_hit_rate.pct rollup. The honest predictor-side L2 sector denominator (LTS input sectors net of the L1-write stream) is validated downstream and is NOT yet expressible from registered primitives, so no predictor composition is asserted here; the registered cross-level traffic keys (traffic_dram_read_sectors, traffic_l2_total_requests_from_tex) approximate but do not equal the LTS sector denominator."
+   },
+   "per_arch_availability": {
+    "sm_86": "available",
+    "sm_120": "sm_120_deferred_no_live_evidence"
+   },
+   "notes": "Mandatory frozen L2 sector hit-rate target; consumed by the frozen sm_86 v5 calibration head. Path unchanged.",
+   "model_io_role": "target"
+  },
+  {
+   "key": "cache_hit_rate_l1tex_sector",
+   "ncu_metric": "l1tex__t_sector_hit_rate.pct",
+   "unit": "pct",
+   "family": "cache_hit_rate",
+   "metric_class": "derived_ratio",
+   "risk_tier": "T2",
+   "cache_layer": "L1TEX",
+   "carrier": "flat_field",
+   "sidecar_field": "cache_hit_rate_l1tex_sector",
+   "admitted_field": "cache_hit_rate_l1tex_sector_pct",
+   "valid_min": 0.0,
+   "valid_max": 1.0,
+   "parser_transform": "percent_to_fraction",
+   "aggregation": "mean_fraction",
+   "repeatability_rule": "stddev_abs",
+   "nullable": true,
+   "deployability": "label_only",
+   "availability": "available",
+   "ncu_observation_contract": {
+    "counting_unit": "L1TEX",
+    "rollup": "pct",
+    "numerator": "l1tex__t_sectors_lookup_hit",
+    "denominator": "l1tex__t_sectors",
+    "op_classes": [
+     "global_load",
+     "global_store",
+     "global_atomic",
+     "global_reduction",
+     "local",
+     "texture",
+     "surface"
+    ],
+    "unsupported_op_behavior": "kUnspecified->unsupported_memory_path typed fallback"
+   },
+   "composition": {
+    "formula": "label_only_no_predictor_composition",
+    "dependencies": [],
+    "device_constants": [],
+    "note": "Unified L1TEX sector hit-rate is consumed directly from Nsight Compute's own l1tex__t_sector_hit_rate.pct rollup until registered primitives expose the matching unified sector numerator/denominator. The prior read-stream approximation was not dimensionally aligned with this unified denominator."
+   },
+   "per_arch_availability": {
+    "sm_86": "available",
+    "sm_120": "sm_120_deferred_no_live_evidence"
+   },
+   "notes": "L1/TEX unified sector hit-rate. Already carried on admitted sm_86 cells; promoted to a load-bearing predicted target by the L1-promotion work (separate bounded calibration head).",
+   "model_io_role": "target"
+  },
+  {
+   "key": "cache_hit_rate_l1tex_read_sector",
+   "ncu_metric": "l1tex__t_sector_pipe_lsu_mem_global_op_ld_hit_rate.pct",
+   "unit": "pct",
+   "family": "cache_hit_rate",
+   "metric_class": "derived_ratio",
+   "risk_tier": "T2",
+   "cache_layer": "L1TEX",
+   "carrier": "unit_tagged_metric",
+   "sidecar_field": "cache_hit_rate_l1tex_read_sector",
+   "admitted_field": "cache_hit_rate_l1tex_read_sector_pct",
+   "valid_min": 0.0,
+   "valid_max": 1.0,
+   "parser_transform": "percent_to_fraction",
+   "aggregation": "mean_fraction",
+   "repeatability_rule": "stddev_abs",
+   "nullable": true,
+   "deployability": "label_only",
+   "availability": "available",
+   "ncu_observation_contract": {
+    "counting_unit": "L1TEX",
+    "rollup": "pct",
+    "numerator": "l1tex__t_sectors_pipe_lsu_mem_global_op_ld_lookup_hit",
+    "denominator": "l1tex__t_sectors_pipe_lsu_mem_global_op_ld",
+    "op_classes": [
+     "global_load"
+    ],
+    "unsupported_op_behavior": "kUnspecified->unsupported_memory_path typed fallback"
+   },
+   "composition": {
+    "formula": "label_only_no_predictor_composition",
+    "dependencies": [],
+    "device_constants": [],
+    "note": "Global-load L1TEX sector hit-rate is consumed directly from Nsight Compute's l1tex__t_sector_pipe_lsu_mem_global_op_ld_hit_rate.pct rollup until a global-load-only miss primitive is registered. The available xbar2l1 read-sector stream includes local/global loads and cannot be divided by the global-only sector denominator."
+   },
+   "per_arch_availability": {
+    "sm_86": "available",
+    "sm_120": "sm_120_deferred_no_live_evidence"
+   },
+   "notes": "L1/TEX read-only (global load) sector hit-rate.",
+   "model_io_role": "target"
+  },
+  {
+   "key": "exec_cycles_gpc_max",
+   "ncu_metric": "gpc__cycles_elapsed.max",
+   "unit": "cycles",
+   "family": "execution_time",
+   "metric_class": "time_clock",
+   "risk_tier": "T3",
+   "carrier": "unit_tagged_metric",
+   "sidecar_field": "exec_cycles_gpc_max",
+   "admitted_field": "exec_cycles_gpc_max",
+   "valid_min": 0.0,
+   "valid_max": null,
+   "parser_transform": "identity_nonneg",
+   "aggregation": "mean_nonneg",
+   "repeatability_rule": "coefficient_of_variation",
+   "nullable": true,
+   "deployability": "label_only",
+   "availability": "available",
+   "ncu_observation_contract": {
+    "counting_unit": "GPC",
+    "rollup": "max",
+    "numerator": "gpc__cycles_elapsed",
+    "denominator": null,
+    "op_classes": [],
+    "unsupported_op_behavior": "kUnspecified->unsupported_memory_path typed fallback"
+   },
+   "per_arch_availability": {
+    "sm_86": "available",
+    "sm_120": "sm_120_deferred_no_live_evidence"
+   },
+   "notes": "Primary execution-time target (DVFS-stable cycle count).",
+   "model_io_role": "target"
+  },
+  {
+   "key": "exec_duration_ns",
+   "ncu_metric": "gpu__time_duration.sum",
+   "unit": "ns",
+   "family": "execution_time",
+   "metric_class": "time_clock",
+   "risk_tier": "T3",
+   "carrier": "unit_tagged_metric",
+   "sidecar_field": "exec_duration_ns",
+   "admitted_field": "exec_duration_ns",
+   "valid_min": 0.0,
+   "valid_max": null,
+   "parser_transform": "identity_nonneg",
+   "aggregation": "mean_nonneg",
+   "repeatability_rule": "coefficient_of_variation",
+   "nullable": true,
+   "deployability": "label_only",
+   "availability": "available",
+   "ncu_observation_contract": {
+    "counting_unit": "GPU",
+    "rollup": "sum",
+    "numerator": "gpu__time_duration",
+    "denominator": null,
+    "op_classes": [],
+    "unsupported_op_behavior": "kUnspecified->unsupported_memory_path typed fallback"
+   },
+   "per_arch_availability": {
+    "sm_86": "available",
+    "sm_120": "sm_120_deferred_no_live_evidence"
+   },
+   "notes": "Secondary execution-time target (wall-clock ns); the spelling gpu__time_duration.sum is confirmed by the metric-availability probe.",
+   "model_io_role": "target"
+  },
+  {
+   "key": "traffic_gmem_ld_requests",
+   "ncu_metric": "l1tex__t_requests_pipe_lsu_mem_global_op_ld.sum",
+   "unit": "count",
+   "family": "traffic",
+   "metric_class": "replay_count",
+   "risk_tier": "T1",
+   "traffic_subset": "mandatory",
+   "carrier": "unit_tagged_metric",
+   "sidecar_field": "traffic_gmem_ld_requests",
+   "admitted_field": "traffic_gmem_ld_requests",
+   "valid_min": 0.0,
+   "valid_max": null,
+   "parser_transform": "identity_nonneg",
+   "aggregation": "mean_nonneg",
+   "repeatability_rule": "relative_tolerance",
+   "nullable": true,
+   "deployability": "label_only",
+   "availability": "available",
+   "ncu_observation_contract": {
+    "counting_unit": "L1TEX",
+    "rollup": "sum",
+    "numerator": "l1tex__t_requests_pipe_lsu_mem_global_op_ld",
+    "denominator": null,
+    "op_classes": [
+     "global_load"
+    ],
+    "unsupported_op_behavior": "kUnspecified->unsupported_memory_path typed fallback"
+   },
+   "per_arch_availability": {
+    "sm_86": "available",
+    "sm_120": "sm_120_deferred_no_live_evidence"
+   },
+   "notes": "Global-memory load requests.",
+   "model_io_role": "target"
+  },
+  {
+   "key": "traffic_gmem_st_requests",
+   "ncu_metric": "l1tex__t_requests_pipe_lsu_mem_global_op_st.sum",
+   "unit": "count",
+   "family": "traffic",
+   "metric_class": "replay_count",
+   "risk_tier": "T1",
+   "traffic_subset": "mandatory",
+   "carrier": "unit_tagged_metric",
+   "sidecar_field": "traffic_gmem_st_requests",
+   "admitted_field": "traffic_gmem_st_requests",
+   "valid_min": 0.0,
+   "valid_max": null,
+   "parser_transform": "identity_nonneg",
+   "aggregation": "mean_nonneg",
+   "repeatability_rule": "relative_tolerance",
+   "nullable": true,
+   "deployability": "label_only",
+   "availability": "available",
+   "ncu_observation_contract": {
+    "counting_unit": "L1TEX",
+    "rollup": "sum",
+    "numerator": "l1tex__t_requests_pipe_lsu_mem_global_op_st",
+    "denominator": null,
+    "op_classes": [
+     "global_store"
+    ],
+    "unsupported_op_behavior": "kUnspecified->unsupported_memory_path typed fallback"
+   },
+   "per_arch_availability": {
+    "sm_86": "available",
+    "sm_120": "sm_120_deferred_no_live_evidence"
+   },
+   "notes": "Global-memory store requests.",
+   "model_io_role": "target"
+  },
+  {
+   "key": "traffic_gmem_ld_sectors",
+   "ncu_metric": "l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum",
+   "unit": "count",
+   "family": "traffic",
+   "metric_class": "replay_count",
+   "risk_tier": "T1",
+   "traffic_subset": "mandatory",
+   "carrier": "unit_tagged_metric",
+   "sidecar_field": "traffic_gmem_ld_sectors",
+   "admitted_field": "traffic_gmem_ld_sectors",
+   "valid_min": 0.0,
+   "valid_max": null,
+   "parser_transform": "identity_nonneg",
+   "aggregation": "mean_nonneg",
+   "repeatability_rule": "relative_tolerance",
+   "nullable": true,
+   "deployability": "label_only",
+   "availability": "available",
+   "ncu_observation_contract": {
+    "counting_unit": "L1TEX",
+    "rollup": "sum",
+    "numerator": "l1tex__t_sectors_pipe_lsu_mem_global_op_ld",
+    "denominator": null,
+    "op_classes": [
+     "global_load"
+    ],
+    "unsupported_op_behavior": "kUnspecified->unsupported_memory_path typed fallback"
+   },
+   "per_arch_availability": {
+    "sm_86": "available",
+    "sm_120": "sm_120_deferred_no_live_evidence"
+   },
+   "notes": "Global-memory load sectors.",
+   "model_io_role": "target"
+  },
+  {
+   "key": "traffic_gmem_st_sectors",
+   "ncu_metric": "l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum",
+   "unit": "count",
+   "family": "traffic",
+   "metric_class": "replay_count",
+   "risk_tier": "T1",
+   "traffic_subset": "mandatory",
+   "carrier": "unit_tagged_metric",
+   "sidecar_field": "traffic_gmem_st_sectors",
+   "admitted_field": "traffic_gmem_st_sectors",
+   "valid_min": 0.0,
+   "valid_max": null,
+   "parser_transform": "identity_nonneg",
+   "aggregation": "mean_nonneg",
+   "repeatability_rule": "relative_tolerance",
+   "nullable": true,
+   "deployability": "label_only",
+   "availability": "available",
+   "ncu_observation_contract": {
+    "counting_unit": "L1TEX",
+    "rollup": "sum",
+    "numerator": "l1tex__t_sectors_pipe_lsu_mem_global_op_st",
+    "denominator": null,
+    "op_classes": [
+     "global_store"
+    ],
+    "unsupported_op_behavior": "kUnspecified->unsupported_memory_path typed fallback"
+   },
+   "per_arch_availability": {
+    "sm_86": "available",
+    "sm_120": "sm_120_deferred_no_live_evidence"
+   },
+   "notes": "Global-memory store sectors.",
+   "model_io_role": "target"
+  },
+  {
+   "key": "traffic_dram_read_sectors",
+   "ncu_metric": "dram__sectors_read.sum",
+   "unit": "count",
+   "family": "traffic",
+   "metric_class": "cache_stream",
+   "risk_tier": "T2",
+   "traffic_subset": "mandatory",
+   "carrier": "unit_tagged_metric",
+   "sidecar_field": "traffic_dram_read_sectors",
+   "admitted_field": "traffic_dram_read_sectors",
+   "valid_min": 0.0,
+   "valid_max": null,
+   "parser_transform": "identity_nonneg",
+   "aggregation": "mean_nonneg",
+   "repeatability_rule": "relative_tolerance",
+   "nullable": true,
+   "deployability": "label_only",
+   "availability": "available",
+   "ncu_observation_contract": {
+    "counting_unit": "DRAM",
+    "rollup": "sum",
+    "numerator": "dram__sectors_read",
+    "denominator": null,
+    "op_classes": [
+     "dram_read"
+    ],
+    "unsupported_op_behavior": "kUnspecified->unsupported_memory_path typed fallback"
+   },
+   "per_arch_availability": {
+    "sm_86": "available",
+    "sm_120": "sm_120_deferred_no_live_evidence"
+   },
+   "notes": "DRAM read sectors.",
+   "model_io_role": "target"
+  },
+  {
+   "key": "traffic_dram_write_sectors",
+   "ncu_metric": "dram__sectors_write.sum",
+   "unit": "count",
+   "family": "traffic",
+   "metric_class": "cache_stream",
+   "risk_tier": "T2",
+   "traffic_subset": "mandatory",
+   "carrier": "unit_tagged_metric",
+   "sidecar_field": "traffic_dram_write_sectors",
+   "admitted_field": "traffic_dram_write_sectors",
+   "valid_min": 0.0,
+   "valid_max": null,
+   "parser_transform": "identity_nonneg",
+   "aggregation": "mean_nonneg",
+   "repeatability_rule": "relative_tolerance",
+   "nullable": true,
+   "deployability": "label_only",
+   "availability": "available",
+   "ncu_observation_contract": {
+    "counting_unit": "DRAM",
+    "rollup": "sum",
+    "numerator": "dram__sectors_write",
+    "denominator": null,
+    "op_classes": [
+     "dram_write"
+    ],
+    "unsupported_op_behavior": "kUnspecified->unsupported_memory_path typed fallback"
+   },
+   "per_arch_availability": {
+    "sm_86": "available",
+    "sm_120": "sm_120_deferred_no_live_evidence"
+   },
+   "notes": "DRAM write sectors.",
+   "model_io_role": "target"
+  },
+  {
+   "key": "traffic_l2_total_requests_from_tex",
+   "ncu_metric": "lts__t_requests_srcunit_tex.sum",
+   "unit": "count",
+   "family": "traffic",
+   "metric_class": "cache_stream",
+   "risk_tier": "T2",
+   "traffic_subset": "mandatory",
+   "carrier": "unit_tagged_metric",
+   "sidecar_field": "traffic_l2_total_requests_from_tex",
+   "admitted_field": "traffic_l2_total_requests_from_tex",
+   "valid_min": 0.0,
+   "valid_max": null,
+   "parser_transform": "identity_nonneg",
+   "aggregation": "mean_nonneg",
+   "repeatability_rule": "relative_tolerance",
+   "nullable": true,
+   "deployability": "label_only",
+   "availability": "available",
+   "ncu_observation_contract": {
+    "counting_unit": "LTS",
+    "rollup": "sum",
+    "numerator": "lts__t_requests_srcunit_tex",
+    "denominator": null,
+    "op_classes": [
+     "global_load",
+     "global_store",
+     "global_atomic",
+     "global_reduction",
+     "local",
+     "texture",
+     "surface"
+    ],
+    "unsupported_op_behavior": "kUnspecified->unsupported_memory_path typed fallback"
+   },
+   "per_arch_availability": {
+    "sm_86": "available",
+    "sm_120": "sm_120_deferred_no_live_evidence"
+   },
+   "notes": "L2 total requests sourced from the TEX/L1 unit (the load-bearing L2 total-request count).",
+   "model_io_role": "target"
+  },
+  {
+   "key": "traffic_l2_read_sectors_from_l1",
+   "ncu_metric": "l1tex__m_xbar2l1tex_read_sectors_mem_lg_op_ld.sum",
+   "unit": "count",
+   "family": "traffic",
+   "metric_class": "cache_stream",
+   "risk_tier": "T2",
+   "traffic_subset": "extended",
+   "carrier": "unit_tagged_metric",
+   "sidecar_field": "traffic_l2_read_sectors_from_l1",
+   "admitted_field": "traffic_l2_read_sectors_from_l1",
+   "valid_min": 0.0,
+   "valid_max": null,
+   "parser_transform": "identity_nonneg",
+   "aggregation": "mean_nonneg",
+   "repeatability_rule": "relative_tolerance",
+   "nullable": true,
+   "deployability": "label_only",
+   "availability": "available",
+   "ncu_observation_contract": {
+    "counting_unit": "XBAR2L1",
+    "rollup": "sum",
+    "numerator": "l1tex__m_xbar2l1tex_read_sectors_mem_lg_op_ld",
+    "denominator": null,
+    "op_classes": [
+     "global_load",
+     "local_load"
+    ],
+    "unsupported_op_behavior": "kUnspecified->unsupported_memory_path typed fallback"
+   },
+   "per_arch_availability": {
+    "sm_86": "available",
+    "sm_120": "sm_120_deferred_no_live_evidence"
+   },
+   "notes": "Crossbar->L1TEX read sectors (local/global load).",
+   "model_io_role": "target"
+  },
+  {
+   "key": "traffic_l1_write_sectors_to_l2",
+   "ncu_metric": "l1tex__m_l1tex2xbar_write_sectors_mem_lg_op_st.sum",
+   "unit": "count",
+   "family": "traffic",
+   "metric_class": "cache_stream",
+   "risk_tier": "T2",
+   "traffic_subset": "extended",
+   "carrier": "unit_tagged_metric",
+   "sidecar_field": "traffic_l1_write_sectors_to_l2",
+   "admitted_field": "traffic_l1_write_sectors_to_l2",
+   "valid_min": 0.0,
+   "valid_max": null,
+   "parser_transform": "identity_nonneg",
+   "aggregation": "mean_nonneg",
+   "repeatability_rule": "relative_tolerance",
+   "nullable": true,
+   "deployability": "label_only",
+   "availability": "available",
+   "ncu_observation_contract": {
+    "counting_unit": "L1TEX2XBAR",
+    "rollup": "sum",
+    "numerator": "l1tex__m_l1tex2xbar_write_sectors_mem_lg_op_st",
+    "denominator": null,
+    "op_classes": [
+     "global_store",
+     "local_store"
+    ],
+    "unsupported_op_behavior": "kUnspecified->unsupported_memory_path typed fallback"
+   },
+   "per_arch_availability": {
+    "sm_86": "available",
+    "sm_120": "sm_120_deferred_no_live_evidence"
+   },
+   "notes": "L1TEX->crossbar write sectors (local/global store).",
+   "model_io_role": "target"
+  },
+  {
+   "key": "traffic_gmem_atom_requests",
+   "ncu_metric": "l1tex__t_requests_pipe_lsu_mem_global_op_atom.sum",
+   "unit": "count",
+   "family": "traffic",
+   "metric_class": "replay_count",
+   "risk_tier": "T1",
+   "traffic_subset": "extended",
+   "carrier": "unit_tagged_metric",
+   "sidecar_field": "traffic_gmem_atom_requests",
+   "admitted_field": "traffic_gmem_atom_requests",
+   "valid_min": 0.0,
+   "valid_max": null,
+   "parser_transform": "identity_nonneg",
+   "aggregation": "mean_nonneg",
+   "repeatability_rule": "relative_tolerance",
+   "nullable": true,
+   "deployability": "label_only",
+   "availability": "available",
+   "ncu_observation_contract": {
+    "counting_unit": "L1TEX",
+    "rollup": "sum",
+    "numerator": "l1tex__t_requests_pipe_lsu_mem_global_op_atom",
+    "denominator": null,
+    "op_classes": [
+     "global_atomic"
+    ],
+    "unsupported_op_behavior": "kUnspecified->unsupported_memory_path typed fallback"
+   },
+   "per_arch_availability": {
+    "sm_86": "available",
+    "sm_120": "sm_120_deferred_no_live_evidence"
+   },
+   "notes": "Global-memory atomic requests (deferred-extended traffic family).",
+   "model_io_role": "target"
+  },
+  {
+   "key": "traffic_gmem_red_requests",
+   "ncu_metric": "l1tex__t_requests_pipe_lsu_mem_global_op_red.sum",
+   "unit": "count",
+   "family": "traffic",
+   "metric_class": "replay_count",
+   "risk_tier": "T1",
+   "traffic_subset": "extended",
+   "carrier": "unit_tagged_metric",
+   "sidecar_field": "traffic_gmem_red_requests",
+   "admitted_field": "traffic_gmem_red_requests",
+   "valid_min": 0.0,
+   "valid_max": null,
+   "parser_transform": "identity_nonneg",
+   "aggregation": "mean_nonneg",
+   "repeatability_rule": "relative_tolerance",
+   "nullable": true,
+   "deployability": "label_only",
+   "availability": "available",
+   "ncu_observation_contract": {
+    "counting_unit": "L1TEX",
+    "rollup": "sum",
+    "numerator": "l1tex__t_requests_pipe_lsu_mem_global_op_red",
+    "denominator": null,
+    "op_classes": [
+     "global_reduction"
+    ],
+    "unsupported_op_behavior": "kUnspecified->unsupported_memory_path typed fallback"
+   },
+   "per_arch_availability": {
+    "sm_86": "available",
+    "sm_120": "sm_120_deferred_no_live_evidence"
+   },
+   "notes": "Global-memory reduction requests (deferred-extended traffic family).",
+   "model_io_role": "target"
+  },
+  {
+   "key": "traffic_l1_total_requests",
+   "ncu_metric": "l1tex__t_requests.sum",
+   "unit": "count",
+   "family": "traffic",
+   "metric_class": "replay_count",
+   "risk_tier": "T1",
+   "traffic_subset": "extended",
+   "carrier": "unit_tagged_metric",
+   "sidecar_field": "traffic_l1_total_requests",
+   "admitted_field": "traffic_l1_total_requests",
+   "valid_min": 0.0,
+   "valid_max": null,
+   "parser_transform": "identity_nonneg",
+   "aggregation": "mean_nonneg",
+   "repeatability_rule": "relative_tolerance",
+   "nullable": true,
+   "deployability": "label_only",
+   "availability": "available",
+   "ncu_observation_contract": {
+    "counting_unit": "L1TEX",
+    "rollup": "sum",
+    "numerator": "l1tex__t_requests",
+    "denominator": null,
+    "op_classes": [
+     "global_load",
+     "global_store",
+     "local",
+     "texture",
+     "surface",
+     "atomic",
+     "reduction"
+    ],
+    "unsupported_op_behavior": "kUnspecified->unsupported_memory_path typed fallback"
+   },
+   "per_arch_availability": {
+    "sm_86": "available",
+    "sm_120": "sm_120_deferred_no_live_evidence"
+   },
+   "notes": "Canonical resolution of read_ncu_report.py's get_L1_Total_Requests. The metric-availability probe confirmed l1tex__t_requests.sum is available on this card (RTX 3090 Ti, GA102, ncu_2026.1.x) and Codex ratified it as the correct canonical identifier for 'L1 total requests' (vs a per-pipe sum); availability is therefore 'available'. label_only deployability: it is an NCU-counter label, not a deployable inference feature.",
+   "model_io_role": "target"
+  },
+  {
+   "key": "occupancy_achieved_warps_pct",
+   "ncu_metric": "sm__warps_active.avg.pct_of_peak_sustained_active",
+   "unit": "pct",
+   "family": "occupancy",
+   "metric_class": "time_clock",
+   "risk_tier": "T3",
+   "carrier": "unit_tagged_metric",
+   "sidecar_field": "occupancy_achieved_warps_pct",
+   "admitted_field": "occupancy_achieved_warps_pct",
+   "valid_min": 0.0,
+   "valid_max": 1.0,
+   "parser_transform": "percent_to_fraction",
+   "aggregation": "mean_fraction",
+   "repeatability_rule": "stddev_abs",
+   "nullable": true,
+   "deployability": "label_only",
+   "availability": "available",
+   "ncu_observation_contract": {
+    "counting_unit": "SM",
+    "rollup": "avg.pct_of_peak_sustained_active",
+    "numerator": "sm__warps_active",
+    "denominator": "sm__warps_active_peak_sustained_active",
+    "op_classes": [],
+    "unsupported_op_behavior": "kUnspecified->unsupported_memory_path typed fallback"
+   },
+   "per_arch_availability": {
+    "sm_86": "available",
+    "sm_120": "sm_120_deferred_no_live_evidence"
+   },
+   "notes": "ACHIEVED occupancy. Counter-derived; captured as a label/diagnostic only and never admissible as a deployable inference feature (no-deployability-leakage contract).",
+   "model_io_role": "target"
+  },
+  {
+   "key": "ipc_inst_per_cycle",
+   "ncu_metric": "sm__inst_executed.avg.per_cycle_elapsed",
+   "unit": "count",
+   "family": "ipc",
+   "metric_class": "derived_ratio",
+   "risk_tier": "T3",
+   "carrier": "unit_tagged_metric",
+   "sidecar_field": "ipc_inst_per_cycle",
+   "admitted_field": "ipc_inst_per_cycle",
+   "valid_min": 0.0,
+   "valid_max": null,
+   "parser_transform": "identity_nonneg",
+   "aggregation": "mean_nonneg",
+   "repeatability_rule": "relative_tolerance",
+   "nullable": true,
+   "deployability": "label_only",
+   "availability": "available",
+   "ncu_observation_contract": {
+    "counting_unit": "SM",
+    "rollup": "avg.per_cycle_elapsed",
+    "numerator": "sm__inst_executed",
+    "denominator": "sm__cycles_elapsed",
+    "op_classes": [],
+    "unsupported_op_behavior": "kUnspecified->unsupported_memory_path typed fallback"
+   },
+   "composition": {
+    "formula": "smsp_inst_executed_sum / (sm_count * exec_cycles_gpc_max)",
+    "dependencies": [
+     "smsp_inst_executed_sum",
+     "exec_cycles_gpc_max"
+    ],
+    "device_constants": [
+     "sm_count"
+    ],
+    "note": "Instructions per elapsed cycle composed from the SMSP instruction-executed sum normalized by SM count and elapsed GPC cycles: smsp_inst_executed_sum / (sm_count * exec_cycles_gpc_max). This aligns the GPU-wide instruction sum with NCU's SM-average per-cycle-elapsed rollup."
+   },
+   "per_arch_availability": {
+    "sm_86": "available",
+    "sm_120": "sm_120_deferred_no_live_evidence"
+   },
+   "notes": "Instructions per elapsed cycle. Counter-derived; captured as a label/diagnostic only and never admissible as a deployable inference feature (no-deployability-leakage contract).",
+   "model_io_role": "target"
+  },
+  {
+   "key": "occupancy_limit_warps_theoretical",
+   "ncu_metric": "launch__occupancy_limit_warps",
+   "unit": "count",
+   "family": "occupancy_theoretical",
+   "metric_class": "static",
+   "risk_tier": "T0",
+   "carrier": "unit_tagged_metric",
+   "sidecar_field": "occupancy_limit_warps_theoretical",
+   "admitted_field": "occupancy_limit_warps_theoretical",
+   "valid_min": 0.0,
+   "valid_max": null,
+   "parser_transform": "identity_nonneg",
+   "aggregation": "mean_nonneg",
+   "repeatability_rule": "relative_tolerance",
+   "nullable": true,
+   "deployability": "feature_eligible",
+   "availability": "excluded",
+   "ncu_observation_contract": {
+    "counting_unit": "launch_config",
+    "rollup": "max",
+    "numerator": "launch__occupancy_limit_warps",
+    "denominator": null,
+    "op_classes": [],
+    "unsupported_op_behavior": "kUnspecified->unsupported_memory_path typed fallback"
+   },
+   "per_arch_availability": {
+    "sm_86": "available",
+    "sm_120": "sm_120_deferred_no_live_evidence"
+   },
+   "notes": "Theoretical (static-derivable) occupancy limit. Feature-eligible: may be a predictor input because it is launch-geometry-derivable without privileged counters. per_arch_availability.sm_86 is 'available' because the occupancy calculator computes it from launch geometry and device constants; the counter-side availability column stays 'excluded' to record that it is NOT counter-sourced on this card.",
+   "model_io_role": "input"
+  },
+  {
+   "key": "occupancy_limit_blocks_theoretical",
+   "ncu_metric": "launch__occupancy_limit_blocks",
+   "unit": "count",
+   "family": "occupancy_theoretical",
+   "metric_class": "static",
+   "risk_tier": "T0",
+   "carrier": "unit_tagged_metric",
+   "sidecar_field": "occupancy_limit_blocks_theoretical",
+   "admitted_field": "occupancy_limit_blocks_theoretical",
+   "valid_min": 0.0,
+   "valid_max": null,
+   "parser_transform": "identity_nonneg",
+   "aggregation": "mean_nonneg",
+   "repeatability_rule": "relative_tolerance",
+   "nullable": true,
+   "deployability": "feature_eligible",
+   "availability": "excluded",
+   "ncu_observation_contract": {
+    "counting_unit": "launch_config",
+    "rollup": "max",
+    "numerator": "launch__occupancy_limit_blocks",
+    "denominator": null,
+    "op_classes": [],
+    "unsupported_op_behavior": "kUnspecified->unsupported_memory_path typed fallback"
+   },
+   "per_arch_availability": {
+    "sm_86": "available",
+    "sm_120": "sm_120_deferred_no_live_evidence"
+   },
+   "notes": "Theoretical block-limited occupancy bound (max_blocks_per_sm). Feature-eligible: computed by the occupancy calculator from launch geometry + device constants, NOT counter-sourced; per_arch_availability.sm_86 'available' (calculator-derivable) while the counter availability column stays 'excluded'.",
+   "model_io_role": "input"
+  },
+  {
+   "key": "occupancy_limit_registers_theoretical",
+   "ncu_metric": "launch__occupancy_limit_registers",
+   "unit": "count",
+   "family": "occupancy_theoretical",
+   "metric_class": "static",
+   "risk_tier": "T0",
+   "carrier": "unit_tagged_metric",
+   "sidecar_field": "occupancy_limit_registers_theoretical",
+   "admitted_field": "occupancy_limit_registers_theoretical",
+   "valid_min": 0.0,
+   "valid_max": null,
+   "parser_transform": "identity_nonneg",
+   "aggregation": "mean_nonneg",
+   "repeatability_rule": "relative_tolerance",
+   "nullable": true,
+   "deployability": "feature_eligible",
+   "availability": "excluded",
+   "ncu_observation_contract": {
+    "counting_unit": "launch_config",
+    "rollup": "max",
+    "numerator": "launch__occupancy_limit_registers",
+    "denominator": null,
+    "op_classes": [],
+    "unsupported_op_behavior": "kUnspecified->unsupported_memory_path typed fallback"
+   },
+   "per_arch_availability": {
+    "sm_86": "available",
+    "sm_120": "sm_120_deferred_no_live_evidence"
+   },
+   "notes": "Theoretical register-limited occupancy bound (registers_per_sm / per-thread register count under register/warp allocation granularity). Feature-eligible: computed by the occupancy calculator, NOT counter-sourced; per_arch_availability.sm_86 'available' (calculator-derivable) while the counter availability column stays 'excluded'.",
+   "model_io_role": "input"
+  },
+  {
+   "key": "occupancy_limit_shared_mem_theoretical",
+   "ncu_metric": "launch__occupancy_limit_shared_mem",
+   "unit": "count",
+   "family": "occupancy_theoretical",
+   "metric_class": "static",
+   "risk_tier": "T0",
+   "carrier": "unit_tagged_metric",
+   "sidecar_field": "occupancy_limit_shared_mem_theoretical",
+   "admitted_field": "occupancy_limit_shared_mem_theoretical",
+   "valid_min": 0.0,
+   "valid_max": null,
+   "parser_transform": "identity_nonneg",
+   "aggregation": "mean_nonneg",
+   "repeatability_rule": "relative_tolerance",
+   "nullable": true,
+   "deployability": "feature_eligible",
+   "availability": "excluded",
+   "ncu_observation_contract": {
+    "counting_unit": "launch_config",
+    "rollup": "max",
+    "numerator": "launch__occupancy_limit_shared_mem",
+    "denominator": null,
+    "op_classes": [],
+    "unsupported_op_behavior": "kUnspecified->unsupported_memory_path typed fallback"
+   },
+   "per_arch_availability": {
+    "sm_86": "requires_runtime_carveout",
+    "sm_120": "sm_120_deferred_no_live_evidence"
+   },
+   "notes": "Shared-memory-limited occupancy bound. UNLIKE warps/blocks/registers (exact from pure-static launch geometry + device constants), this limit depends on the launch's CONFIGURED shared-memory carveout (launch__shared_mem_config_size, a runtime/driver decision) plus the driver-reserved per-block shared memory: limit = configured_carveout // round_up(static + dynamic + reserved_shared_memory_per_block_bytes, shared_mem_allocation_unit_bytes). The pure-static inputs do NOT determine the configured carveout, so per_arch_availability.sm_86 is 'requires_runtime_carveout': the occupancy calculator resolves it typed_unavailable (reason requires_runtime_shared_mem_carveout) without a carveout, and exact only when a carveout is supplied (validated 8192 -> 8 vs NCU). Feature-eligible as a deployable static feature when the carveout is provided; the counter availability column stays 'excluded' (not counter-sourced).",
+   "model_io_role": "input"
+  },
+  {
+   "key": "smsp_inst_executed_sum",
+   "ncu_metric": "smsp__inst_executed.sum",
+   "unit": "count",
+   "family": "instruction",
+   "metric_class": "replay_count",
+   "risk_tier": "T1",
+   "carrier": "unit_tagged_metric",
+   "sidecar_field": "smsp_inst_executed_sum",
+   "admitted_field": "smsp_inst_executed_sum",
+   "valid_min": 0.0,
+   "valid_max": null,
+   "parser_transform": "identity_nonneg",
+   "aggregation": "mean_nonneg",
+   "repeatability_rule": "relative_tolerance",
+   "nullable": true,
+   "deployability": "label_only",
+   "availability": "available",
+   "ncu_observation_contract": {
+    "counting_unit": "SMSP",
+    "rollup": "sum",
+    "numerator": "smsp__inst_executed",
+    "denominator": null,
+    "op_classes": [],
+    "unsupported_op_behavior": "kUnspecified->unsupported_memory_path typed fallback"
+   },
+   "per_arch_availability": {
+    "sm_86": "available",
+    "sm_120": "sm_120_deferred_no_live_evidence"
+   },
+   "notes": "Total warp instructions executed (SMSP sum). Replay-count primitive; the IPC composition divides it by exec_cycles_gpc_max.",
+   "model_io_role": "target"
+  },
+  {
+   "key": "exec_cycles_sm_active_avg",
+   "ncu_metric": "sm__cycles_active.avg",
+   "unit": "cycles",
+   "family": "execution_time",
+   "metric_class": "time_clock",
+   "risk_tier": "T3",
+   "carrier": "unit_tagged_metric",
+   "sidecar_field": "exec_cycles_sm_active_avg",
+   "admitted_field": "exec_cycles_sm_active_avg",
+   "valid_min": 0.0,
+   "valid_max": null,
+   "parser_transform": "identity_nonneg",
+   "aggregation": "mean_nonneg",
+   "repeatability_rule": "coefficient_of_variation",
+   "nullable": true,
+   "deployability": "label_only",
+   "availability": "available",
+   "ncu_observation_contract": {
+    "counting_unit": "SM",
+    "rollup": "avg",
+    "numerator": "sm__cycles_active",
+    "denominator": null,
+    "op_classes": [],
+    "unsupported_op_behavior": "kUnspecified->unsupported_memory_path typed fallback"
+   },
+   "per_arch_availability": {
+    "sm_86": "available",
+    "sm_120": "sm_120_deferred_no_live_evidence"
+   },
+   "notes": "Average active-SM cycle count (DVFS-bound timing covariate).",
+   "model_io_role": "target"
+  },
+  {
+   "key": "warps_active_per_cycle_active_avg",
+   "ncu_metric": "sm__warps_active.avg.per_cycle_active",
+   "unit": "count",
+   "family": "occupancy",
+   "metric_class": "time_clock",
+   "risk_tier": "T3",
+   "carrier": "unit_tagged_metric",
+   "sidecar_field": "warps_active_per_cycle_active_avg",
+   "admitted_field": "warps_active_per_cycle_active_avg",
+   "valid_min": 0.0,
+   "valid_max": null,
+   "parser_transform": "identity_nonneg",
+   "aggregation": "mean_nonneg",
+   "repeatability_rule": "relative_tolerance",
+   "nullable": true,
+   "deployability": "label_only",
+   "availability": "available",
+   "ncu_observation_contract": {
+    "counting_unit": "SM",
+    "rollup": "avg.per_cycle_active",
+    "numerator": "sm__warps_active",
+    "denominator": "sm__cycles_active",
+    "op_classes": [],
+    "unsupported_op_behavior": "kUnspecified->unsupported_memory_path typed fallback"
+   },
+   "per_arch_availability": {
+    "sm_86": "available",
+    "sm_120": "sm_120_deferred_no_live_evidence"
+   },
+   "notes": "Mean resident warps per active cycle. Counter-derived occupancy diagnostic; label-only.",
+   "model_io_role": "target"
+  },
+  {
+   "key": "sm_clock_hz_covariate",
+   "ncu_metric": "gpc__cycles_elapsed.avg.per_second",
+   "unit": "count",
+   "family": "clock_covariate",
+   "metric_class": "time_clock",
+   "risk_tier": "T3",
+   "carrier": "unit_tagged_metric",
+   "sidecar_field": "sm_clock_hz_covariate",
+   "admitted_field": "sm_clock_hz_covariate",
+   "valid_min": 0.0,
+   "valid_max": null,
+   "parser_transform": "identity_nonneg",
+   "aggregation": "mean_nonneg",
+   "repeatability_rule": "coefficient_of_variation",
+   "nullable": true,
+   "deployability": "label_only",
+   "availability": "available",
+   "ncu_observation_contract": {
+    "counting_unit": "GPC",
+    "rollup": "avg.per_second",
+    "numerator": "gpc__cycles_elapsed",
+    "denominator": "time_elapsed_seconds",
+    "op_classes": [],
+    "unsupported_op_behavior": "kUnspecified->unsupported_memory_path typed fallback"
+   },
+   "per_arch_availability": {
+    "sm_86": "available",
+    "sm_120": "sm_120_deferred_no_live_evidence"
+   },
+   "notes": "Observed SM (GPC) clock rate covariate in Hz (elapsed cycles per second). DVFS-state covariate; the unit 'count' tags it as a non-percentage scalar carried under the unit-tagged block.",
+   "model_io_role": "target"
+  },
+  {
+   "key": "mem_clock_hz_covariate",
+   "ncu_metric": "dram__cycles_elapsed.avg.per_second",
+   "unit": "count",
+   "family": "clock_covariate",
+   "metric_class": "time_clock",
+   "risk_tier": "T3",
+   "carrier": "unit_tagged_metric",
+   "sidecar_field": "mem_clock_hz_covariate",
+   "admitted_field": "mem_clock_hz_covariate",
+   "valid_min": 0.0,
+   "valid_max": null,
+   "parser_transform": "identity_nonneg",
+   "aggregation": "mean_nonneg",
+   "repeatability_rule": "coefficient_of_variation",
+   "nullable": true,
+   "deployability": "label_only",
+   "availability": "available",
+   "ncu_observation_contract": {
+    "counting_unit": "DRAM",
+    "rollup": "avg.per_second",
+    "numerator": "dram__cycles_elapsed",
+    "denominator": "time_elapsed_seconds",
+    "op_classes": [],
+    "unsupported_op_behavior": "kUnspecified->unsupported_memory_path typed fallback"
+   },
+   "per_arch_availability": {
+    "sm_86": "available",
+    "sm_120": "sm_120_deferred_no_live_evidence"
+   },
+   "notes": "Observed memory (DRAM) clock rate covariate in Hz (elapsed cycles per second). DVFS-state covariate; the unit 'count' tags it as a non-percentage scalar carried under the unit-tagged block. Probed available on NVIDIA GeForce RTX 3090 Ti (ncu_2026.1.x) by the 2026-06-04 regeneration of ncu_metric_availability_probe_sm_86.json (43-target catalog query).",
+   "model_io_role": "target"
+  },
+  {
+   "key": "traffic_local_ld_requests",
+   "ncu_metric": "l1tex__t_requests_pipe_lsu_mem_local_op_ld.sum",
+   "unit": "count",
+   "family": "traffic",
+   "metric_class": "replay_count",
+   "risk_tier": "T1",
+   "traffic_subset": "extended",
+   "carrier": "unit_tagged_metric",
+   "sidecar_field": "traffic_local_ld_requests",
+   "admitted_field": "traffic_local_ld_requests",
+   "valid_min": 0.0,
+   "valid_max": null,
+   "parser_transform": "identity_nonneg",
+   "aggregation": "mean_nonneg",
+   "repeatability_rule": "relative_tolerance",
+   "nullable": true,
+   "deployability": "label_only",
+   "availability": "available",
+   "ncu_observation_contract": {
+    "counting_unit": "L1TEX",
+    "rollup": "sum",
+    "numerator": "l1tex__t_requests_pipe_lsu_mem_local_op_ld",
+    "denominator": null,
+    "op_classes": [
+     "local_load"
+    ],
+    "unsupported_op_behavior": "kUnspecified->unsupported_memory_path typed fallback"
+   },
+   "per_arch_availability": {
+    "sm_86": "available",
+    "sm_120": "sm_120_deferred_no_live_evidence"
+   },
+   "notes": "Local-memory (register-spill / stack) load requests. Probed available on NVIDIA GeForce RTX 3090 Ti (ncu_2026.1.x) by the 2026-06-04 regeneration of ncu_metric_availability_probe_sm_86.json (43-target catalog query).",
+   "model_io_role": "target"
+  },
+  {
+   "key": "traffic_local_st_requests",
+   "ncu_metric": "l1tex__t_requests_pipe_lsu_mem_local_op_st.sum",
+   "unit": "count",
+   "family": "traffic",
+   "metric_class": "replay_count",
+   "risk_tier": "T1",
+   "traffic_subset": "extended",
+   "carrier": "unit_tagged_metric",
+   "sidecar_field": "traffic_local_st_requests",
+   "admitted_field": "traffic_local_st_requests",
+   "valid_min": 0.0,
+   "valid_max": null,
+   "parser_transform": "identity_nonneg",
+   "aggregation": "mean_nonneg",
+   "repeatability_rule": "relative_tolerance",
+   "nullable": true,
+   "deployability": "label_only",
+   "availability": "available",
+   "ncu_observation_contract": {
+    "counting_unit": "L1TEX",
+    "rollup": "sum",
+    "numerator": "l1tex__t_requests_pipe_lsu_mem_local_op_st",
+    "denominator": null,
+    "op_classes": [
+     "local_store"
+    ],
+    "unsupported_op_behavior": "kUnspecified->unsupported_memory_path typed fallback"
+   },
+   "per_arch_availability": {
+    "sm_86": "available",
+    "sm_120": "sm_120_deferred_no_live_evidence"
+   },
+   "notes": "Local-memory (register-spill / stack) store requests. Probed available on NVIDIA GeForce RTX 3090 Ti (ncu_2026.1.x) by the 2026-06-04 regeneration of ncu_metric_availability_probe_sm_86.json (43-target catalog query).",
+   "model_io_role": "target"
+  },
+  {
+   "key": "traffic_tex_requests",
+   "ncu_metric": "l1tex__t_requests_pipe_tex_mem_texture.sum",
+   "unit": "count",
+   "family": "traffic",
+   "metric_class": "replay_count",
+   "risk_tier": "T1",
+   "traffic_subset": "extended",
+   "carrier": "unit_tagged_metric",
+   "sidecar_field": "traffic_tex_requests",
+   "admitted_field": "traffic_tex_requests",
+   "valid_min": 0.0,
+   "valid_max": null,
+   "parser_transform": "identity_nonneg",
+   "aggregation": "mean_nonneg",
+   "repeatability_rule": "relative_tolerance",
+   "nullable": true,
+   "deployability": "label_only",
+   "availability": "available",
+   "ncu_observation_contract": {
+    "counting_unit": "L1TEX",
+    "rollup": "sum",
+    "numerator": "l1tex__t_requests_pipe_tex_mem_texture",
+    "denominator": null,
+    "op_classes": [
+     "texture"
+    ],
+    "unsupported_op_behavior": "kUnspecified->unsupported_memory_path typed fallback"
+   },
+   "per_arch_availability": {
+    "sm_86": "available",
+    "sm_120": "sm_120_deferred_no_live_evidence"
+   },
+   "notes": "Texture-pipe texture-fetch requests. per_arch_availability.sm_86 'probe_pending': the sm_86 metric-availability probe did not confirm this tex-pipe identifier on this card. Probed available on NVIDIA GeForce RTX 3090 Ti (ncu_2026.1.x) by the 2026-06-04 regeneration of ncu_metric_availability_probe_sm_86.json (43-target catalog query).",
+   "model_io_role": "target"
+  },
+  {
+   "key": "traffic_surface_ld_requests",
+   "ncu_metric": "l1tex__t_requests_pipe_tex_mem_surface_op_ld.sum",
+   "unit": "count",
+   "family": "traffic",
+   "metric_class": "replay_count",
+   "risk_tier": "T1",
+   "traffic_subset": "extended",
+   "carrier": "unit_tagged_metric",
+   "sidecar_field": "traffic_surface_ld_requests",
+   "admitted_field": "traffic_surface_ld_requests",
+   "valid_min": 0.0,
+   "valid_max": null,
+   "parser_transform": "identity_nonneg",
+   "aggregation": "mean_nonneg",
+   "repeatability_rule": "relative_tolerance",
+   "nullable": true,
+   "deployability": "label_only",
+   "availability": "available",
+   "ncu_observation_contract": {
+    "counting_unit": "L1TEX",
+    "rollup": "sum",
+    "numerator": "l1tex__t_requests_pipe_tex_mem_surface_op_ld",
+    "denominator": null,
+    "op_classes": [
+     "surface_load"
+    ],
+    "unsupported_op_behavior": "kUnspecified->unsupported_memory_path typed fallback"
+   },
+   "per_arch_availability": {
+    "sm_86": "available",
+    "sm_120": "sm_120_deferred_no_live_evidence"
+   },
+   "notes": "Texture-pipe surface load requests. per_arch_availability.sm_86 'probe_pending': not confirmed by the sm_86 probe. Probed available on NVIDIA GeForce RTX 3090 Ti (ncu_2026.1.x) by the 2026-06-04 regeneration of ncu_metric_availability_probe_sm_86.json (43-target catalog query).",
+   "model_io_role": "target"
+  },
+  {
+   "key": "traffic_surface_st_requests",
+   "ncu_metric": "l1tex__t_requests_pipe_tex_mem_surface_op_st.sum",
+   "unit": "count",
+   "family": "traffic",
+   "metric_class": "replay_count",
+   "risk_tier": "T1",
+   "traffic_subset": "extended",
+   "carrier": "unit_tagged_metric",
+   "sidecar_field": "traffic_surface_st_requests",
+   "admitted_field": "traffic_surface_st_requests",
+   "valid_min": 0.0,
+   "valid_max": null,
+   "parser_transform": "identity_nonneg",
+   "aggregation": "mean_nonneg",
+   "repeatability_rule": "relative_tolerance",
+   "nullable": true,
+   "deployability": "label_only",
+   "availability": "available",
+   "ncu_observation_contract": {
+    "counting_unit": "L1TEX",
+    "rollup": "sum",
+    "numerator": "l1tex__t_requests_pipe_tex_mem_surface_op_st",
+    "denominator": null,
+    "op_classes": [
+     "surface_store"
+    ],
+    "unsupported_op_behavior": "kUnspecified->unsupported_memory_path typed fallback"
+   },
+   "per_arch_availability": {
+    "sm_86": "available",
+    "sm_120": "sm_120_deferred_no_live_evidence"
+   },
+   "notes": "Texture-pipe surface store requests. per_arch_availability.sm_86 'probe_pending': not confirmed by the sm_86 probe. Probed available on NVIDIA GeForce RTX 3090 Ti (ncu_2026.1.x) by the 2026-06-04 regeneration of ncu_metric_availability_probe_sm_86.json (43-target catalog query).",
+   "model_io_role": "target"
+  },
+  {
+   "key": "traffic_surface_red_requests",
+   "ncu_metric": "l1tex__t_requests_pipe_tex_mem_surface_op_red.sum",
+   "unit": "count",
+   "family": "traffic",
+   "metric_class": "replay_count",
+   "risk_tier": "T1",
+   "traffic_subset": "extended",
+   "carrier": "unit_tagged_metric",
+   "sidecar_field": "traffic_surface_red_requests",
+   "admitted_field": "traffic_surface_red_requests",
+   "valid_min": 0.0,
+   "valid_max": null,
+   "parser_transform": "identity_nonneg",
+   "aggregation": "mean_nonneg",
+   "repeatability_rule": "relative_tolerance",
+   "nullable": true,
+   "deployability": "label_only",
+   "availability": "available",
+   "ncu_observation_contract": {
+    "counting_unit": "L1TEX",
+    "rollup": "sum",
+    "numerator": "l1tex__t_requests_pipe_tex_mem_surface_op_red",
+    "denominator": null,
+    "op_classes": [
+     "surface_reduction"
+    ],
+    "unsupported_op_behavior": "kUnspecified->unsupported_memory_path typed fallback"
+   },
+   "per_arch_availability": {
+    "sm_86": "available",
+    "sm_120": "sm_120_deferred_no_live_evidence"
+   },
+   "notes": "Texture-pipe surface reduction requests. per_arch_availability.sm_86 'probe_pending': not confirmed by the sm_86 probe. Probed available on NVIDIA GeForce RTX 3090 Ti (ncu_2026.1.x) by the 2026-06-04 regeneration of ncu_metric_availability_probe_sm_86.json (43-target catalog query).",
+   "model_io_role": "target"
+  },
+  {
+   "key": "traffic_surface_atom_requests",
+   "ncu_metric": "l1tex__t_requests_pipe_tex_mem_surface_op_atom.sum",
+   "unit": "count",
+   "family": "traffic",
+   "metric_class": "replay_count",
+   "risk_tier": "T1",
+   "traffic_subset": "extended",
+   "carrier": "unit_tagged_metric",
+   "sidecar_field": "traffic_surface_atom_requests",
+   "admitted_field": "traffic_surface_atom_requests",
+   "valid_min": 0.0,
+   "valid_max": null,
+   "parser_transform": "identity_nonneg",
+   "aggregation": "mean_nonneg",
+   "repeatability_rule": "relative_tolerance",
+   "nullable": true,
+   "deployability": "label_only",
+   "availability": "available",
+   "ncu_observation_contract": {
+    "counting_unit": "L1TEX",
+    "rollup": "sum",
+    "numerator": "l1tex__t_requests_pipe_tex_mem_surface_op_atom",
+    "denominator": null,
+    "op_classes": [
+     "surface_atomic"
+    ],
+    "unsupported_op_behavior": "kUnspecified->unsupported_memory_path typed fallback"
+   },
+   "per_arch_availability": {
+    "sm_86": "available",
+    "sm_120": "sm_120_deferred_no_live_evidence"
+   },
+   "notes": "Texture-pipe surface atomic requests. per_arch_availability.sm_86 'probe_pending': not confirmed by the sm_86 probe. Probed available on NVIDIA GeForce RTX 3090 Ti (ncu_2026.1.x) by the 2026-06-04 regeneration of ncu_metric_availability_probe_sm_86.json (43-target catalog query).",
+   "model_io_role": "target"
+  },
+  {
+   "key": "dram_bytes_per_second",
+   "ncu_metric": "dram__bytes.sum.per_second",
+   "unit": "count",
+   "family": "dram_throughput",
+   "metric_class": "derived_ratio",
+   "risk_tier": "T3",
+   "carrier": "unit_tagged_metric",
+   "sidecar_field": "dram_bytes_per_second",
+   "admitted_field": "dram_bytes_per_second",
+   "valid_min": 0.0,
+   "valid_max": null,
+   "parser_transform": "identity_nonneg",
+   "aggregation": "mean_nonneg",
+   "repeatability_rule": "relative_tolerance",
+   "nullable": true,
+   "deployability": "label_only",
+   "availability": "available",
+   "ncu_observation_contract": {
+    "counting_unit": "DRAM",
+    "rollup": "avg.per_second",
+    "numerator": "dram__bytes",
+    "denominator": "time_elapsed_seconds",
+    "op_classes": [
+     "dram_read",
+     "dram_write"
+    ],
+    "unsupported_op_behavior": "kUnspecified->unsupported_memory_path typed fallback"
+   },
+   "composition": {
+    "formula": "(traffic_dram_read_sectors + traffic_dram_write_sectors) * sector_size_bytes / (exec_duration_ns / 1e9)",
+    "dependencies": [
+     "traffic_dram_read_sectors",
+     "traffic_dram_write_sectors",
+     "exec_duration_ns"
+    ],
+    "device_constants": [
+     "sector_size_bytes"
+    ],
+    "note": "Achieved DRAM bytes/second = total DRAM sectors moved (read+write) * sector_size_bytes, divided by the kernel duration in seconds (exec_duration_ns / 1e9). A derived rate, not a percentage-of-peak."
+   },
+   "per_arch_availability": {
+    "sm_86": "available",
+    "sm_120": "sm_120_deferred_no_live_evidence"
+   },
+   "notes": "Achieved DRAM throughput in bytes/second (derived rate). Composed from DRAM sector counts and kernel duration; label-only. Probed available on NVIDIA GeForce RTX 3090 Ti (ncu_2026.1.x) by the 2026-06-04 regeneration of ncu_metric_availability_probe_sm_86.json (43-target catalog query).",
+   "model_io_role": "target"
+  },
+  {
+   "key": "throughput_compute_mem_access_pct_peak",
+   "ncu_metric": "gpu__compute_memory_access_throughput.avg.pct_of_peak_sustained_elapsed",
+   "unit": "pct",
+   "family": "speed_of_light",
+   "metric_class": "derived_pct_peak",
+   "risk_tier": "T3",
+   "carrier": "unit_tagged_metric",
+   "sidecar_field": "throughput_compute_mem_access_pct_peak",
+   "admitted_field": "throughput_compute_mem_access_pct_peak_pct",
+   "valid_min": 0.0,
+   "valid_max": 1.0,
+   "parser_transform": "percent_to_fraction",
+   "aggregation": "mean_fraction",
+   "repeatability_rule": "stddev_abs",
+   "nullable": true,
+   "deployability": "label_only",
+   "availability": "available",
+   "ncu_observation_contract": {
+    "counting_unit": "GPU",
+    "rollup": "avg.pct_of_peak_sustained_elapsed",
+    "numerator": "gpu__compute_memory_access_throughput",
+    "denominator": "gpu__compute_memory_access_throughput_peak_sustained_elapsed",
+    "op_classes": [],
+    "unsupported_op_behavior": "kUnspecified->unsupported_memory_path typed fallback"
+   },
+   "composition": {
+    "formula": "min(dram_bytes_per_second / peak_dram_bytes_per_s, 1.0)",
+    "dependencies": [
+     "dram_bytes_per_second"
+    ],
+    "device_constants": [
+     "peak_dram_bytes_per_s"
+    ],
+    "note": "Provisional speed-of-light proxy for the compute-memory-access throughput percentage: achieved DRAM bandwidth fraction, clamped to 1.0. This is NOT the exact NCU per-subsystem speed-of-light (the max over SM/L1/L2/DRAM subsystem utilizations); device_constants.json carries no per-subsystem peak, only peak_dram_bytes_per_s, so the exact composition is a downstream timing-model refinement. Resolves typed_unavailable on sm_86 while dram_bytes_per_second is per_arch probe_pending, and on sm_120 (deferred), so no number is published yet."
+   },
+   "per_arch_availability": {
+    "sm_86": "available",
+    "sm_120": "sm_120_deferred_no_live_evidence"
+   },
+   "notes": "Speed-of-light compute-memory-access throughput (% of peak). per_arch_availability.sm_86 'probe_pending': the speed-of-light percentage normalization is not yet validated against this card's probe; held as a label only. Probed available on NVIDIA GeForce RTX 3090 Ti (ncu_2026.1.x) by the 2026-06-04 regeneration of ncu_metric_availability_probe_sm_86.json (43-target catalog query).",
+   "model_io_role": "target"
+  },
+  {
+   "key": "throughput_compute_mem_request_pct_peak",
+   "ncu_metric": "gpu__compute_memory_request_throughput.avg.pct_of_peak_sustained_elapsed",
+   "unit": "pct",
+   "family": "speed_of_light",
+   "metric_class": "derived_pct_peak",
+   "risk_tier": "T3",
+   "carrier": "unit_tagged_metric",
+   "sidecar_field": "throughput_compute_mem_request_pct_peak",
+   "admitted_field": "throughput_compute_mem_request_pct_peak_pct",
+   "valid_min": 0.0,
+   "valid_max": 1.0,
+   "parser_transform": "percent_to_fraction",
+   "aggregation": "mean_fraction",
+   "repeatability_rule": "stddev_abs",
+   "nullable": true,
+   "deployability": "label_only",
+   "availability": "available",
+   "ncu_observation_contract": {
+    "counting_unit": "GPU",
+    "rollup": "avg.pct_of_peak_sustained_elapsed",
+    "numerator": "gpu__compute_memory_request_throughput",
+    "denominator": "gpu__compute_memory_request_throughput_peak_sustained_elapsed",
+    "op_classes": [],
+    "unsupported_op_behavior": "kUnspecified->unsupported_memory_path typed fallback"
+   },
+   "composition": {
+    "formula": "min(dram_bytes_per_second / peak_dram_bytes_per_s, 1.0)",
+    "dependencies": [
+     "dram_bytes_per_second"
+    ],
+    "device_constants": [
+     "peak_dram_bytes_per_s"
+    ],
+    "note": "Provisional speed-of-light proxy for the compute-memory-request throughput percentage: achieved DRAM bandwidth fraction, clamped to 1.0. This is NOT the exact NCU per-subsystem speed-of-light (the max over SM/L1/L2/DRAM subsystem utilizations); device_constants.json carries no per-subsystem peak, only peak_dram_bytes_per_s, so the exact composition is a downstream timing-model refinement. Resolves typed_unavailable on sm_86 while dram_bytes_per_second is per_arch probe_pending, and on sm_120 (deferred), so no number is published yet."
+   },
+   "per_arch_availability": {
+    "sm_86": "available",
+    "sm_120": "sm_120_deferred_no_live_evidence"
+   },
+   "notes": "Speed-of-light compute-memory-request throughput (% of peak). per_arch_availability.sm_86 'probe_pending': normalization not yet probe-validated on this card. Probed available on NVIDIA GeForce RTX 3090 Ti (ncu_2026.1.x) by the 2026-06-04 regeneration of ncu_metric_availability_probe_sm_86.json (43-target catalog query).",
+   "model_io_role": "target"
+  },
+  {
+   "key": "throughput_sm_memory_pct_peak",
+   "ncu_metric": "sm__memory_throughput.avg.pct_of_peak_sustained_elapsed",
+   "unit": "pct",
+   "family": "speed_of_light",
+   "metric_class": "derived_pct_peak",
+   "risk_tier": "T3",
+   "carrier": "unit_tagged_metric",
+   "sidecar_field": "throughput_sm_memory_pct_peak",
+   "admitted_field": "throughput_sm_memory_pct_peak_pct",
+   "valid_min": 0.0,
+   "valid_max": 1.0,
+   "parser_transform": "percent_to_fraction",
+   "aggregation": "mean_fraction",
+   "repeatability_rule": "stddev_abs",
+   "nullable": true,
+   "deployability": "label_only",
+   "availability": "available",
+   "ncu_observation_contract": {
+    "counting_unit": "SM",
+    "rollup": "avg.pct_of_peak_sustained_elapsed",
+    "numerator": "sm__memory_throughput",
+    "denominator": "sm__memory_throughput_peak_sustained_elapsed",
+    "op_classes": [],
+    "unsupported_op_behavior": "kUnspecified->unsupported_memory_path typed fallback"
+   },
+   "composition": {
+    "formula": "min(dram_bytes_per_second / peak_dram_bytes_per_s, 1.0)",
+    "dependencies": [
+     "dram_bytes_per_second"
+    ],
+    "device_constants": [
+     "peak_dram_bytes_per_s"
+    ],
+    "note": "Provisional speed-of-light proxy for the SM memory-pipe throughput percentage: achieved DRAM bandwidth fraction, clamped to 1.0. This is NOT the exact NCU SM-memory speed-of-light (the SM memory pipe is distinct from DRAM bandwidth); device_constants.json carries no SM-memory peak, only peak_dram_bytes_per_s, so the exact composition is a downstream timing-model refinement. Resolves typed_unavailable on sm_86 while dram_bytes_per_second is per_arch probe_pending, and on sm_120 (deferred), so no number is published yet."
+   },
+   "per_arch_availability": {
+    "sm_86": "available",
+    "sm_120": "sm_120_deferred_no_live_evidence"
+   },
+   "notes": "Speed-of-light SM memory throughput (% of peak). per_arch_availability.sm_86 'probe_pending': normalization not yet probe-validated on this card. Probed available on NVIDIA GeForce RTX 3090 Ti (ncu_2026.1.x) by the 2026-06-04 regeneration of ncu_metric_availability_probe_sm_86.json (43-target catalog query).",
+   "model_io_role": "target"
+  },
+  {
+   "key": "traffic_dram_sectors_op_read",
+   "ncu_metric": "dram__sectors_op_read.sum",
+   "unit": "count",
+   "family": "traffic",
+   "metric_class": "typed_unavailable",
+   "risk_tier": "T2",
+   "traffic_subset": "extended",
+   "carrier": "unit_tagged_metric",
+   "sidecar_field": "traffic_dram_sectors_op_read",
+   "admitted_field": "traffic_dram_sectors_op_read",
+   "valid_min": 0.0,
+   "valid_max": null,
+   "parser_transform": "identity_nonneg",
+   "aggregation": "mean_nonneg",
+   "repeatability_rule": "relative_tolerance",
+   "nullable": true,
+   "deployability": "label_only",
+   "availability": "excluded",
+   "ncu_observation_contract": {
+    "counting_unit": "unavailable",
+    "rollup": "unavailable",
+    "numerator": "unsupported_metric_spelling",
+    "denominator": null,
+    "op_classes": [],
+    "unsupported_op_behavior": "kUnspecified->unsupported_memory_path typed fallback"
+   },
+   "per_arch_availability": {
+    "sm_86": "excluded",
+    "sm_120": "sm_120_deferred_no_live_evidence"
+   },
+   "notes": "Unsupported DRAM op-spelling alias on local NCU 2026.1 sm_86. The catalog-confirmed canonical DRAM read sector metric is dram__sectors_read.sum, registered as traffic_dram_read_sectors; this row is retained only as an explicit fail-closed unavailable target.",
+   "model_io_role": "target"
+  },
+  {
+   "key": "traffic_dram_sectors_op_write",
+   "ncu_metric": "dram__sectors_op_write.sum",
+   "unit": "count",
+   "family": "traffic",
+   "metric_class": "typed_unavailable",
+   "risk_tier": "T2",
+   "traffic_subset": "extended",
+   "carrier": "unit_tagged_metric",
+   "sidecar_field": "traffic_dram_sectors_op_write",
+   "admitted_field": "traffic_dram_sectors_op_write",
+   "valid_min": 0.0,
+   "valid_max": null,
+   "parser_transform": "identity_nonneg",
+   "aggregation": "mean_nonneg",
+   "repeatability_rule": "relative_tolerance",
+   "nullable": true,
+   "deployability": "label_only",
+   "availability": "excluded",
+   "ncu_observation_contract": {
+    "counting_unit": "unavailable",
+    "rollup": "unavailable",
+    "numerator": "unsupported_metric_spelling",
+    "denominator": null,
+    "op_classes": [],
+    "unsupported_op_behavior": "kUnspecified->unsupported_memory_path typed fallback"
+   },
+   "per_arch_availability": {
+    "sm_86": "excluded",
+    "sm_120": "sm_120_deferred_no_live_evidence"
+   },
+   "notes": "Unsupported DRAM op-spelling alias on local NCU 2026.1 sm_86. The catalog-confirmed canonical DRAM write sector metric is dram__sectors_write.sum, registered as traffic_dram_write_sectors; this row is retained only as an explicit fail-closed unavailable target.",
+   "model_io_role": "target"
+  },
+  {
+   "key": "warp_stall_barrier_per_issue_active",
+   "ncu_metric": "smsp__average_warps_issue_stalled_barrier_per_issue_active.ratio",
+   "unit": "count",
+   "family": "warp_stall",
+   "metric_class": "derived_ratio",
+   "risk_tier": "T3",
+   "carrier": "unit_tagged_metric",
+   "sidecar_field": "warp_stall_barrier_per_issue_active",
+   "admitted_field": "warp_stall_barrier_per_issue_active",
+   "valid_min": 0.0,
+   "valid_max": null,
+   "parser_transform": "identity_nonneg",
+   "aggregation": "mean_nonneg",
+   "repeatability_rule": "coefficient_of_variation",
+   "nullable": true,
+   "deployability": "label_only",
+   "model_io_role": "target",
+   "availability": "available",
+   "ncu_observation_contract": {
+    "counting_unit": "SMSP",
+    "rollup": "ratio",
+    "numerator": "smsp__warps_issue_stalled_barrier",
+    "denominator": "smsp__issue_active",
+    "op_classes": [],
+    "unsupported_op_behavior": "kUnspecified->unsupported_memory_path typed fallback"
+   },
+   "per_arch_availability": {
+    "sm_86": "available",
+    "sm_120": "sm_120_deferred_no_live_evidence"
+   },
+   "notes": "Warp State section stall reason 'barrier': average warps resident per issue-active cycle in this state (dimensionless average-warp count; bounded by resident warps/SMSP, so no valid_max is pinned). Simulator validation counter for the sim/sm scheduler model (plan \u00a71B/\u00a76.2). Added by the 1B registry extension (2026-07-06). Live-verified on NVIDIA GeForce RTX 3090 Ti (NCU 2026.1.0, driver 610.43.02, host clock-locked 1350 MHz): present in --query-metrics and captured on a live kernel. sm_120 availability awaits the 5060 probe (post-M2).",
+   "composition": {
+    "formula": "label_only_no_predictor_composition",
+    "dependencies": [],
+    "device_constants": [],
+    "note": "Consumed directly as an NCU ground-truth target (1B extension). The simulator's emission layer (sim/emit) will compute its own prediction from engine state per the observation contract; no registry-level predictor composition is asserted yet \u2014 that contract lands with the Phase-2 emission layer."
+   }
+  },
+  {
+   "key": "warp_stall_branch_resolving_per_issue_active",
+   "ncu_metric": "smsp__average_warps_issue_stalled_branch_resolving_per_issue_active.ratio",
+   "unit": "count",
+   "family": "warp_stall",
+   "metric_class": "derived_ratio",
+   "risk_tier": "T3",
+   "carrier": "unit_tagged_metric",
+   "sidecar_field": "warp_stall_branch_resolving_per_issue_active",
+   "admitted_field": "warp_stall_branch_resolving_per_issue_active",
+   "valid_min": 0.0,
+   "valid_max": null,
+   "parser_transform": "identity_nonneg",
+   "aggregation": "mean_nonneg",
+   "repeatability_rule": "coefficient_of_variation",
+   "nullable": true,
+   "deployability": "label_only",
+   "model_io_role": "target",
+   "availability": "available",
+   "ncu_observation_contract": {
+    "counting_unit": "SMSP",
+    "rollup": "ratio",
+    "numerator": "smsp__warps_issue_stalled_branch_resolving",
+    "denominator": "smsp__issue_active",
+    "op_classes": [],
+    "unsupported_op_behavior": "kUnspecified->unsupported_memory_path typed fallback"
+   },
+   "per_arch_availability": {
+    "sm_86": "available",
+    "sm_120": "sm_120_deferred_no_live_evidence"
+   },
+   "notes": "Warp State section stall reason 'branch_resolving': average warps resident per issue-active cycle in this state (dimensionless average-warp count; bounded by resident warps/SMSP, so no valid_max is pinned). Simulator validation counter for the sim/sm scheduler model (plan \u00a71B/\u00a76.2). Added by the 1B registry extension (2026-07-06). Live-verified on NVIDIA GeForce RTX 3090 Ti (NCU 2026.1.0, driver 610.43.02, host clock-locked 1350 MHz): present in --query-metrics and captured on a live kernel. sm_120 availability awaits the 5060 probe (post-M2).",
+   "composition": {
+    "formula": "label_only_no_predictor_composition",
+    "dependencies": [],
+    "device_constants": [],
+    "note": "Consumed directly as an NCU ground-truth target (1B extension). The simulator's emission layer (sim/emit) will compute its own prediction from engine state per the observation contract; no registry-level predictor composition is asserted yet \u2014 that contract lands with the Phase-2 emission layer."
+   }
+  },
+  {
+   "key": "warp_stall_dispatch_stall_per_issue_active",
+   "ncu_metric": "smsp__average_warps_issue_stalled_dispatch_stall_per_issue_active.ratio",
+   "unit": "count",
+   "family": "warp_stall",
+   "metric_class": "derived_ratio",
+   "risk_tier": "T3",
+   "carrier": "unit_tagged_metric",
+   "sidecar_field": "warp_stall_dispatch_stall_per_issue_active",
+   "admitted_field": "warp_stall_dispatch_stall_per_issue_active",
+   "valid_min": 0.0,
+   "valid_max": null,
+   "parser_transform": "identity_nonneg",
+   "aggregation": "mean_nonneg",
+   "repeatability_rule": "coefficient_of_variation",
+   "nullable": true,
+   "deployability": "label_only",
+   "model_io_role": "target",
+   "availability": "available",
+   "ncu_observation_contract": {
+    "counting_unit": "SMSP",
+    "rollup": "ratio",
+    "numerator": "smsp__warps_issue_stalled_dispatch_stall",
+    "denominator": "smsp__issue_active",
+    "op_classes": [],
+    "unsupported_op_behavior": "kUnspecified->unsupported_memory_path typed fallback"
+   },
+   "per_arch_availability": {
+    "sm_86": "available",
+    "sm_120": "sm_120_deferred_no_live_evidence"
+   },
+   "notes": "Warp State section stall reason 'dispatch_stall': average warps resident per issue-active cycle in this state (dimensionless average-warp count; bounded by resident warps/SMSP, so no valid_max is pinned). Simulator validation counter for the sim/sm scheduler model (plan \u00a71B/\u00a76.2). Added by the 1B registry extension (2026-07-06). Live-verified on NVIDIA GeForce RTX 3090 Ti (NCU 2026.1.0, driver 610.43.02, host clock-locked 1350 MHz): present in --query-metrics and captured on a live kernel. sm_120 availability awaits the 5060 probe (post-M2).",
+   "composition": {
+    "formula": "label_only_no_predictor_composition",
+    "dependencies": [],
+    "device_constants": [],
+    "note": "Consumed directly as an NCU ground-truth target (1B extension). The simulator's emission layer (sim/emit) will compute its own prediction from engine state per the observation contract; no registry-level predictor composition is asserted yet \u2014 that contract lands with the Phase-2 emission layer."
+   }
+  },
+  {
+   "key": "warp_stall_drain_per_issue_active",
+   "ncu_metric": "smsp__average_warps_issue_stalled_drain_per_issue_active.ratio",
+   "unit": "count",
+   "family": "warp_stall",
+   "metric_class": "derived_ratio",
+   "risk_tier": "T3",
+   "carrier": "unit_tagged_metric",
+   "sidecar_field": "warp_stall_drain_per_issue_active",
+   "admitted_field": "warp_stall_drain_per_issue_active",
+   "valid_min": 0.0,
+   "valid_max": null,
+   "parser_transform": "identity_nonneg",
+   "aggregation": "mean_nonneg",
+   "repeatability_rule": "coefficient_of_variation",
+   "nullable": true,
+   "deployability": "label_only",
+   "model_io_role": "target",
+   "availability": "available",
+   "ncu_observation_contract": {
+    "counting_unit": "SMSP",
+    "rollup": "ratio",
+    "numerator": "smsp__warps_issue_stalled_drain",
+    "denominator": "smsp__issue_active",
+    "op_classes": [],
+    "unsupported_op_behavior": "kUnspecified->unsupported_memory_path typed fallback"
+   },
+   "per_arch_availability": {
+    "sm_86": "available",
+    "sm_120": "sm_120_deferred_no_live_evidence"
+   },
+   "notes": "Warp State section stall reason 'drain': average warps resident per issue-active cycle in this state (dimensionless average-warp count; bounded by resident warps/SMSP, so no valid_max is pinned). Simulator validation counter for the sim/sm scheduler model (plan \u00a71B/\u00a76.2). Added by the 1B registry extension (2026-07-06). Live-verified on NVIDIA GeForce RTX 3090 Ti (NCU 2026.1.0, driver 610.43.02, host clock-locked 1350 MHz): present in --query-metrics and captured on a live kernel. sm_120 availability awaits the 5060 probe (post-M2).",
+   "composition": {
+    "formula": "label_only_no_predictor_composition",
+    "dependencies": [],
+    "device_constants": [],
+    "note": "Consumed directly as an NCU ground-truth target (1B extension). The simulator's emission layer (sim/emit) will compute its own prediction from engine state per the observation contract; no registry-level predictor composition is asserted yet \u2014 that contract lands with the Phase-2 emission layer."
+   }
+  },
+  {
+   "key": "warp_stall_imc_miss_per_issue_active",
+   "ncu_metric": "smsp__average_warps_issue_stalled_imc_miss_per_issue_active.ratio",
+   "unit": "count",
+   "family": "warp_stall",
+   "metric_class": "derived_ratio",
+   "risk_tier": "T3",
+   "carrier": "unit_tagged_metric",
+   "sidecar_field": "warp_stall_imc_miss_per_issue_active",
+   "admitted_field": "warp_stall_imc_miss_per_issue_active",
+   "valid_min": 0.0,
+   "valid_max": null,
+   "parser_transform": "identity_nonneg",
+   "aggregation": "mean_nonneg",
+   "repeatability_rule": "coefficient_of_variation",
+   "nullable": true,
+   "deployability": "label_only",
+   "model_io_role": "target",
+   "availability": "available",
+   "ncu_observation_contract": {
+    "counting_unit": "SMSP",
+    "rollup": "ratio",
+    "numerator": "smsp__warps_issue_stalled_imc_miss",
+    "denominator": "smsp__issue_active",
+    "op_classes": [],
+    "unsupported_op_behavior": "kUnspecified->unsupported_memory_path typed fallback"
+   },
+   "per_arch_availability": {
+    "sm_86": "available",
+    "sm_120": "sm_120_deferred_no_live_evidence"
+   },
+   "notes": "Warp State section stall reason 'imc_miss': average warps resident per issue-active cycle in this state (dimensionless average-warp count; bounded by resident warps/SMSP, so no valid_max is pinned). Simulator validation counter for the sim/sm scheduler model (plan \u00a71B/\u00a76.2). Added by the 1B registry extension (2026-07-06). Live-verified on NVIDIA GeForce RTX 3090 Ti (NCU 2026.1.0, driver 610.43.02, host clock-locked 1350 MHz): present in --query-metrics and captured on a live kernel. sm_120 availability awaits the 5060 probe (post-M2).",
+   "composition": {
+    "formula": "label_only_no_predictor_composition",
+    "dependencies": [],
+    "device_constants": [],
+    "note": "Consumed directly as an NCU ground-truth target (1B extension). The simulator's emission layer (sim/emit) will compute its own prediction from engine state per the observation contract; no registry-level predictor composition is asserted yet \u2014 that contract lands with the Phase-2 emission layer."
+   }
+  },
+  {
+   "key": "warp_stall_lg_throttle_per_issue_active",
+   "ncu_metric": "smsp__average_warps_issue_stalled_lg_throttle_per_issue_active.ratio",
+   "unit": "count",
+   "family": "warp_stall",
+   "metric_class": "derived_ratio",
+   "risk_tier": "T3",
+   "carrier": "unit_tagged_metric",
+   "sidecar_field": "warp_stall_lg_throttle_per_issue_active",
+   "admitted_field": "warp_stall_lg_throttle_per_issue_active",
+   "valid_min": 0.0,
+   "valid_max": null,
+   "parser_transform": "identity_nonneg",
+   "aggregation": "mean_nonneg",
+   "repeatability_rule": "coefficient_of_variation",
+   "nullable": true,
+   "deployability": "label_only",
+   "model_io_role": "target",
+   "availability": "available",
+   "ncu_observation_contract": {
+    "counting_unit": "SMSP",
+    "rollup": "ratio",
+    "numerator": "smsp__warps_issue_stalled_lg_throttle",
+    "denominator": "smsp__issue_active",
+    "op_classes": [],
+    "unsupported_op_behavior": "kUnspecified->unsupported_memory_path typed fallback"
+   },
+   "per_arch_availability": {
+    "sm_86": "available",
+    "sm_120": "sm_120_deferred_no_live_evidence"
+   },
+   "notes": "Warp State section stall reason 'lg_throttle': average warps resident per issue-active cycle in this state (dimensionless average-warp count; bounded by resident warps/SMSP, so no valid_max is pinned). Simulator validation counter for the sim/sm scheduler model (plan \u00a71B/\u00a76.2). Added by the 1B registry extension (2026-07-06). Live-verified on NVIDIA GeForce RTX 3090 Ti (NCU 2026.1.0, driver 610.43.02, host clock-locked 1350 MHz): present in --query-metrics and captured on a live kernel. sm_120 availability awaits the 5060 probe (post-M2).",
+   "composition": {
+    "formula": "label_only_no_predictor_composition",
+    "dependencies": [],
+    "device_constants": [],
+    "note": "Consumed directly as an NCU ground-truth target (1B extension). The simulator's emission layer (sim/emit) will compute its own prediction from engine state per the observation contract; no registry-level predictor composition is asserted yet \u2014 that contract lands with the Phase-2 emission layer."
+   }
+  },
+  {
+   "key": "warp_stall_long_scoreboard_per_issue_active",
+   "ncu_metric": "smsp__average_warps_issue_stalled_long_scoreboard_per_issue_active.ratio",
+   "unit": "count",
+   "family": "warp_stall",
+   "metric_class": "derived_ratio",
+   "risk_tier": "T3",
+   "carrier": "unit_tagged_metric",
+   "sidecar_field": "warp_stall_long_scoreboard_per_issue_active",
+   "admitted_field": "warp_stall_long_scoreboard_per_issue_active",
+   "valid_min": 0.0,
+   "valid_max": null,
+   "parser_transform": "identity_nonneg",
+   "aggregation": "mean_nonneg",
+   "repeatability_rule": "coefficient_of_variation",
+   "nullable": true,
+   "deployability": "label_only",
+   "model_io_role": "target",
+   "availability": "available",
+   "ncu_observation_contract": {
+    "counting_unit": "SMSP",
+    "rollup": "ratio",
+    "numerator": "smsp__warps_issue_stalled_long_scoreboard",
+    "denominator": "smsp__issue_active",
+    "op_classes": [],
+    "unsupported_op_behavior": "kUnspecified->unsupported_memory_path typed fallback"
+   },
+   "per_arch_availability": {
+    "sm_86": "available",
+    "sm_120": "sm_120_deferred_no_live_evidence"
+   },
+   "notes": "Warp State section stall reason 'long_scoreboard': average warps resident per issue-active cycle in this state (dimensionless average-warp count; bounded by resident warps/SMSP, so no valid_max is pinned). Simulator validation counter for the sim/sm scheduler model (plan \u00a71B/\u00a76.2). Added by the 1B registry extension (2026-07-06). Live-verified on NVIDIA GeForce RTX 3090 Ti (NCU 2026.1.0, driver 610.43.02, host clock-locked 1350 MHz): present in --query-metrics and captured on a live kernel. sm_120 availability awaits the 5060 probe (post-M2).",
+   "composition": {
+    "formula": "label_only_no_predictor_composition",
+    "dependencies": [],
+    "device_constants": [],
+    "note": "Consumed directly as an NCU ground-truth target (1B extension). The simulator's emission layer (sim/emit) will compute its own prediction from engine state per the observation contract; no registry-level predictor composition is asserted yet \u2014 that contract lands with the Phase-2 emission layer."
+   }
+  },
+  {
+   "key": "warp_stall_math_pipe_throttle_per_issue_active",
+   "ncu_metric": "smsp__average_warps_issue_stalled_math_pipe_throttle_per_issue_active.ratio",
+   "unit": "count",
+   "family": "warp_stall",
+   "metric_class": "derived_ratio",
+   "risk_tier": "T3",
+   "carrier": "unit_tagged_metric",
+   "sidecar_field": "warp_stall_math_pipe_throttle_per_issue_active",
+   "admitted_field": "warp_stall_math_pipe_throttle_per_issue_active",
+   "valid_min": 0.0,
+   "valid_max": null,
+   "parser_transform": "identity_nonneg",
+   "aggregation": "mean_nonneg",
+   "repeatability_rule": "coefficient_of_variation",
+   "nullable": true,
+   "deployability": "label_only",
+   "model_io_role": "target",
+   "availability": "available",
+   "ncu_observation_contract": {
+    "counting_unit": "SMSP",
+    "rollup": "ratio",
+    "numerator": "smsp__warps_issue_stalled_math_pipe_throttle",
+    "denominator": "smsp__issue_active",
+    "op_classes": [],
+    "unsupported_op_behavior": "kUnspecified->unsupported_memory_path typed fallback"
+   },
+   "per_arch_availability": {
+    "sm_86": "available",
+    "sm_120": "sm_120_deferred_no_live_evidence"
+   },
+   "notes": "Warp State section stall reason 'math_pipe_throttle': average warps resident per issue-active cycle in this state (dimensionless average-warp count; bounded by resident warps/SMSP, so no valid_max is pinned). Simulator validation counter for the sim/sm scheduler model (plan \u00a71B/\u00a76.2). Added by the 1B registry extension (2026-07-06). Live-verified on NVIDIA GeForce RTX 3090 Ti (NCU 2026.1.0, driver 610.43.02, host clock-locked 1350 MHz): present in --query-metrics and captured on a live kernel. sm_120 availability awaits the 5060 probe (post-M2).",
+   "composition": {
+    "formula": "label_only_no_predictor_composition",
+    "dependencies": [],
+    "device_constants": [],
+    "note": "Consumed directly as an NCU ground-truth target (1B extension). The simulator's emission layer (sim/emit) will compute its own prediction from engine state per the observation contract; no registry-level predictor composition is asserted yet \u2014 that contract lands with the Phase-2 emission layer."
+   }
+  },
+  {
+   "key": "warp_stall_membar_per_issue_active",
+   "ncu_metric": "smsp__average_warps_issue_stalled_membar_per_issue_active.ratio",
+   "unit": "count",
+   "family": "warp_stall",
+   "metric_class": "derived_ratio",
+   "risk_tier": "T3",
+   "carrier": "unit_tagged_metric",
+   "sidecar_field": "warp_stall_membar_per_issue_active",
+   "admitted_field": "warp_stall_membar_per_issue_active",
+   "valid_min": 0.0,
+   "valid_max": null,
+   "parser_transform": "identity_nonneg",
+   "aggregation": "mean_nonneg",
+   "repeatability_rule": "coefficient_of_variation",
+   "nullable": true,
+   "deployability": "label_only",
+   "model_io_role": "target",
+   "availability": "available",
+   "ncu_observation_contract": {
+    "counting_unit": "SMSP",
+    "rollup": "ratio",
+    "numerator": "smsp__warps_issue_stalled_membar",
+    "denominator": "smsp__issue_active",
+    "op_classes": [],
+    "unsupported_op_behavior": "kUnspecified->unsupported_memory_path typed fallback"
+   },
+   "per_arch_availability": {
+    "sm_86": "available",
+    "sm_120": "sm_120_deferred_no_live_evidence"
+   },
+   "notes": "Warp State section stall reason 'membar': average warps resident per issue-active cycle in this state (dimensionless average-warp count; bounded by resident warps/SMSP, so no valid_max is pinned). Simulator validation counter for the sim/sm scheduler model (plan \u00a71B/\u00a76.2). Added by the 1B registry extension (2026-07-06). Live-verified on NVIDIA GeForce RTX 3090 Ti (NCU 2026.1.0, driver 610.43.02, host clock-locked 1350 MHz): present in --query-metrics and captured on a live kernel. sm_120 availability awaits the 5060 probe (post-M2).",
+   "composition": {
+    "formula": "label_only_no_predictor_composition",
+    "dependencies": [],
+    "device_constants": [],
+    "note": "Consumed directly as an NCU ground-truth target (1B extension). The simulator's emission layer (sim/emit) will compute its own prediction from engine state per the observation contract; no registry-level predictor composition is asserted yet \u2014 that contract lands with the Phase-2 emission layer."
+   }
+  },
+  {
+   "key": "warp_stall_mio_throttle_per_issue_active",
+   "ncu_metric": "smsp__average_warps_issue_stalled_mio_throttle_per_issue_active.ratio",
+   "unit": "count",
+   "family": "warp_stall",
+   "metric_class": "derived_ratio",
+   "risk_tier": "T3",
+   "carrier": "unit_tagged_metric",
+   "sidecar_field": "warp_stall_mio_throttle_per_issue_active",
+   "admitted_field": "warp_stall_mio_throttle_per_issue_active",
+   "valid_min": 0.0,
+   "valid_max": null,
+   "parser_transform": "identity_nonneg",
+   "aggregation": "mean_nonneg",
+   "repeatability_rule": "coefficient_of_variation",
+   "nullable": true,
+   "deployability": "label_only",
+   "model_io_role": "target",
+   "availability": "available",
+   "ncu_observation_contract": {
+    "counting_unit": "SMSP",
+    "rollup": "ratio",
+    "numerator": "smsp__warps_issue_stalled_mio_throttle",
+    "denominator": "smsp__issue_active",
+    "op_classes": [],
+    "unsupported_op_behavior": "kUnspecified->unsupported_memory_path typed fallback"
+   },
+   "per_arch_availability": {
+    "sm_86": "available",
+    "sm_120": "sm_120_deferred_no_live_evidence"
+   },
+   "notes": "Warp State section stall reason 'mio_throttle': average warps resident per issue-active cycle in this state (dimensionless average-warp count; bounded by resident warps/SMSP, so no valid_max is pinned). Simulator validation counter for the sim/sm scheduler model (plan \u00a71B/\u00a76.2). Added by the 1B registry extension (2026-07-06). Live-verified on NVIDIA GeForce RTX 3090 Ti (NCU 2026.1.0, driver 610.43.02, host clock-locked 1350 MHz): present in --query-metrics and captured on a live kernel. sm_120 availability awaits the 5060 probe (post-M2).",
+   "composition": {
+    "formula": "label_only_no_predictor_composition",
+    "dependencies": [],
+    "device_constants": [],
+    "note": "Consumed directly as an NCU ground-truth target (1B extension). The simulator's emission layer (sim/emit) will compute its own prediction from engine state per the observation contract; no registry-level predictor composition is asserted yet \u2014 that contract lands with the Phase-2 emission layer."
+   }
+  },
+  {
+   "key": "warp_stall_misc_per_issue_active",
+   "ncu_metric": "smsp__average_warps_issue_stalled_misc_per_issue_active.ratio",
+   "unit": "count",
+   "family": "warp_stall",
+   "metric_class": "derived_ratio",
+   "risk_tier": "T3",
+   "carrier": "unit_tagged_metric",
+   "sidecar_field": "warp_stall_misc_per_issue_active",
+   "admitted_field": "warp_stall_misc_per_issue_active",
+   "valid_min": 0.0,
+   "valid_max": null,
+   "parser_transform": "identity_nonneg",
+   "aggregation": "mean_nonneg",
+   "repeatability_rule": "coefficient_of_variation",
+   "nullable": true,
+   "deployability": "label_only",
+   "model_io_role": "target",
+   "availability": "available",
+   "ncu_observation_contract": {
+    "counting_unit": "SMSP",
+    "rollup": "ratio",
+    "numerator": "smsp__warps_issue_stalled_misc",
+    "denominator": "smsp__issue_active",
+    "op_classes": [],
+    "unsupported_op_behavior": "kUnspecified->unsupported_memory_path typed fallback"
+   },
+   "per_arch_availability": {
+    "sm_86": "available",
+    "sm_120": "sm_120_deferred_no_live_evidence"
+   },
+   "notes": "Warp State section stall reason 'misc': average warps resident per issue-active cycle in this state (dimensionless average-warp count; bounded by resident warps/SMSP, so no valid_max is pinned). Simulator validation counter for the sim/sm scheduler model (plan \u00a71B/\u00a76.2). Added by the 1B registry extension (2026-07-06). Live-verified on NVIDIA GeForce RTX 3090 Ti (NCU 2026.1.0, driver 610.43.02, host clock-locked 1350 MHz): present in --query-metrics and captured on a live kernel. sm_120 availability awaits the 5060 probe (post-M2).",
+   "composition": {
+    "formula": "label_only_no_predictor_composition",
+    "dependencies": [],
+    "device_constants": [],
+    "note": "Consumed directly as an NCU ground-truth target (1B extension). The simulator's emission layer (sim/emit) will compute its own prediction from engine state per the observation contract; no registry-level predictor composition is asserted yet \u2014 that contract lands with the Phase-2 emission layer."
+   }
+  },
+  {
+   "key": "warp_stall_no_instruction_per_issue_active",
+   "ncu_metric": "smsp__average_warps_issue_stalled_no_instruction_per_issue_active.ratio",
+   "unit": "count",
+   "family": "warp_stall",
+   "metric_class": "derived_ratio",
+   "risk_tier": "T3",
+   "carrier": "unit_tagged_metric",
+   "sidecar_field": "warp_stall_no_instruction_per_issue_active",
+   "admitted_field": "warp_stall_no_instruction_per_issue_active",
+   "valid_min": 0.0,
+   "valid_max": null,
+   "parser_transform": "identity_nonneg",
+   "aggregation": "mean_nonneg",
+   "repeatability_rule": "coefficient_of_variation",
+   "nullable": true,
+   "deployability": "label_only",
+   "model_io_role": "target",
+   "availability": "available",
+   "ncu_observation_contract": {
+    "counting_unit": "SMSP",
+    "rollup": "ratio",
+    "numerator": "smsp__warps_issue_stalled_no_instruction",
+    "denominator": "smsp__issue_active",
+    "op_classes": [],
+    "unsupported_op_behavior": "kUnspecified->unsupported_memory_path typed fallback"
+   },
+   "per_arch_availability": {
+    "sm_86": "available",
+    "sm_120": "sm_120_deferred_no_live_evidence"
+   },
+   "notes": "Warp State section stall reason 'no_instruction': average warps resident per issue-active cycle in this state (dimensionless average-warp count; bounded by resident warps/SMSP, so no valid_max is pinned). Simulator validation counter for the sim/sm scheduler model (plan \u00a71B/\u00a76.2). Added by the 1B registry extension (2026-07-06). Live-verified on NVIDIA GeForce RTX 3090 Ti (NCU 2026.1.0, driver 610.43.02, host clock-locked 1350 MHz): present in --query-metrics and captured on a live kernel. sm_120 availability awaits the 5060 probe (post-M2).",
+   "composition": {
+    "formula": "label_only_no_predictor_composition",
+    "dependencies": [],
+    "device_constants": [],
+    "note": "Consumed directly as an NCU ground-truth target (1B extension). The simulator's emission layer (sim/emit) will compute its own prediction from engine state per the observation contract; no registry-level predictor composition is asserted yet \u2014 that contract lands with the Phase-2 emission layer."
+   }
+  },
+  {
+   "key": "warp_stall_not_selected_per_issue_active",
+   "ncu_metric": "smsp__average_warps_issue_stalled_not_selected_per_issue_active.ratio",
+   "unit": "count",
+   "family": "warp_stall",
+   "metric_class": "derived_ratio",
+   "risk_tier": "T3",
+   "carrier": "unit_tagged_metric",
+   "sidecar_field": "warp_stall_not_selected_per_issue_active",
+   "admitted_field": "warp_stall_not_selected_per_issue_active",
+   "valid_min": 0.0,
+   "valid_max": null,
+   "parser_transform": "identity_nonneg",
+   "aggregation": "mean_nonneg",
+   "repeatability_rule": "coefficient_of_variation",
+   "nullable": true,
+   "deployability": "label_only",
+   "model_io_role": "target",
+   "availability": "available",
+   "ncu_observation_contract": {
+    "counting_unit": "SMSP",
+    "rollup": "ratio",
+    "numerator": "smsp__warps_issue_stalled_not_selected",
+    "denominator": "smsp__issue_active",
+    "op_classes": [],
+    "unsupported_op_behavior": "kUnspecified->unsupported_memory_path typed fallback"
+   },
+   "per_arch_availability": {
+    "sm_86": "available",
+    "sm_120": "sm_120_deferred_no_live_evidence"
+   },
+   "notes": "Warp State section stall reason 'not_selected': average warps resident per issue-active cycle in this state (dimensionless average-warp count; bounded by resident warps/SMSP, so no valid_max is pinned). Simulator validation counter for the sim/sm scheduler model (plan \u00a71B/\u00a76.2). Added by the 1B registry extension (2026-07-06). Live-verified on NVIDIA GeForce RTX 3090 Ti (NCU 2026.1.0, driver 610.43.02, host clock-locked 1350 MHz): present in --query-metrics and captured on a live kernel. sm_120 availability awaits the 5060 probe (post-M2).",
+   "composition": {
+    "formula": "label_only_no_predictor_composition",
+    "dependencies": [],
+    "device_constants": [],
+    "note": "Consumed directly as an NCU ground-truth target (1B extension). The simulator's emission layer (sim/emit) will compute its own prediction from engine state per the observation contract; no registry-level predictor composition is asserted yet \u2014 that contract lands with the Phase-2 emission layer."
+   }
+  },
+  {
+   "key": "warp_stall_selected_per_issue_active",
+   "ncu_metric": "smsp__average_warps_issue_stalled_selected_per_issue_active.ratio",
+   "unit": "count",
+   "family": "warp_stall",
+   "metric_class": "derived_ratio",
+   "risk_tier": "T3",
+   "carrier": "unit_tagged_metric",
+   "sidecar_field": "warp_stall_selected_per_issue_active",
+   "admitted_field": "warp_stall_selected_per_issue_active",
+   "valid_min": 0.0,
+   "valid_max": null,
+   "parser_transform": "identity_nonneg",
+   "aggregation": "mean_nonneg",
+   "repeatability_rule": "coefficient_of_variation",
+   "nullable": true,
+   "deployability": "label_only",
+   "model_io_role": "target",
+   "availability": "available",
+   "ncu_observation_contract": {
+    "counting_unit": "SMSP",
+    "rollup": "ratio",
+    "numerator": "smsp__warps_issue_stalled_selected",
+    "denominator": "smsp__issue_active",
+    "op_classes": [],
+    "unsupported_op_behavior": "kUnspecified->unsupported_memory_path typed fallback"
+   },
+   "per_arch_availability": {
+    "sm_86": "available",
+    "sm_120": "sm_120_deferred_no_live_evidence"
+   },
+   "notes": "Warp State section stall reason 'selected': average warps resident per issue-active cycle in this state (dimensionless average-warp count; bounded by resident warps/SMSP, so no valid_max is pinned). Simulator validation counter for the sim/sm scheduler model (plan \u00a71B/\u00a76.2). Added by the 1B registry extension (2026-07-06). Live-verified on NVIDIA GeForce RTX 3090 Ti (NCU 2026.1.0, driver 610.43.02, host clock-locked 1350 MHz): present in --query-metrics and captured on a live kernel. sm_120 availability awaits the 5060 probe (post-M2).",
+   "composition": {
+    "formula": "label_only_no_predictor_composition",
+    "dependencies": [],
+    "device_constants": [],
+    "note": "Consumed directly as an NCU ground-truth target (1B extension). The simulator's emission layer (sim/emit) will compute its own prediction from engine state per the observation contract; no registry-level predictor composition is asserted yet \u2014 that contract lands with the Phase-2 emission layer."
+   }
+  },
+  {
+   "key": "warp_stall_short_scoreboard_per_issue_active",
+   "ncu_metric": "smsp__average_warps_issue_stalled_short_scoreboard_per_issue_active.ratio",
+   "unit": "count",
+   "family": "warp_stall",
+   "metric_class": "derived_ratio",
+   "risk_tier": "T3",
+   "carrier": "unit_tagged_metric",
+   "sidecar_field": "warp_stall_short_scoreboard_per_issue_active",
+   "admitted_field": "warp_stall_short_scoreboard_per_issue_active",
+   "valid_min": 0.0,
+   "valid_max": null,
+   "parser_transform": "identity_nonneg",
+   "aggregation": "mean_nonneg",
+   "repeatability_rule": "coefficient_of_variation",
+   "nullable": true,
+   "deployability": "label_only",
+   "model_io_role": "target",
+   "availability": "available",
+   "ncu_observation_contract": {
+    "counting_unit": "SMSP",
+    "rollup": "ratio",
+    "numerator": "smsp__warps_issue_stalled_short_scoreboard",
+    "denominator": "smsp__issue_active",
+    "op_classes": [],
+    "unsupported_op_behavior": "kUnspecified->unsupported_memory_path typed fallback"
+   },
+   "per_arch_availability": {
+    "sm_86": "available",
+    "sm_120": "sm_120_deferred_no_live_evidence"
+   },
+   "notes": "Warp State section stall reason 'short_scoreboard': average warps resident per issue-active cycle in this state (dimensionless average-warp count; bounded by resident warps/SMSP, so no valid_max is pinned). Simulator validation counter for the sim/sm scheduler model (plan \u00a71B/\u00a76.2). Added by the 1B registry extension (2026-07-06). Live-verified on NVIDIA GeForce RTX 3090 Ti (NCU 2026.1.0, driver 610.43.02, host clock-locked 1350 MHz): present in --query-metrics and captured on a live kernel. sm_120 availability awaits the 5060 probe (post-M2).",
+   "composition": {
+    "formula": "label_only_no_predictor_composition",
+    "dependencies": [],
+    "device_constants": [],
+    "note": "Consumed directly as an NCU ground-truth target (1B extension). The simulator's emission layer (sim/emit) will compute its own prediction from engine state per the observation contract; no registry-level predictor composition is asserted yet \u2014 that contract lands with the Phase-2 emission layer."
+   }
+  },
+  {
+   "key": "warp_stall_sleeping_per_issue_active",
+   "ncu_metric": "smsp__average_warps_issue_stalled_sleeping_per_issue_active.ratio",
+   "unit": "count",
+   "family": "warp_stall",
+   "metric_class": "derived_ratio",
+   "risk_tier": "T3",
+   "carrier": "unit_tagged_metric",
+   "sidecar_field": "warp_stall_sleeping_per_issue_active",
+   "admitted_field": "warp_stall_sleeping_per_issue_active",
+   "valid_min": 0.0,
+   "valid_max": null,
+   "parser_transform": "identity_nonneg",
+   "aggregation": "mean_nonneg",
+   "repeatability_rule": "coefficient_of_variation",
+   "nullable": true,
+   "deployability": "label_only",
+   "model_io_role": "target",
+   "availability": "available",
+   "ncu_observation_contract": {
+    "counting_unit": "SMSP",
+    "rollup": "ratio",
+    "numerator": "smsp__warps_issue_stalled_sleeping",
+    "denominator": "smsp__issue_active",
+    "op_classes": [],
+    "unsupported_op_behavior": "kUnspecified->unsupported_memory_path typed fallback"
+   },
+   "per_arch_availability": {
+    "sm_86": "available",
+    "sm_120": "sm_120_deferred_no_live_evidence"
+   },
+   "notes": "Warp State section stall reason 'sleeping': average warps resident per issue-active cycle in this state (dimensionless average-warp count; bounded by resident warps/SMSP, so no valid_max is pinned). Simulator validation counter for the sim/sm scheduler model (plan \u00a71B/\u00a76.2). Added by the 1B registry extension (2026-07-06). Live-verified on NVIDIA GeForce RTX 3090 Ti (NCU 2026.1.0, driver 610.43.02, host clock-locked 1350 MHz): present in --query-metrics and captured on a live kernel. sm_120 availability awaits the 5060 probe (post-M2).",
+   "composition": {
+    "formula": "label_only_no_predictor_composition",
+    "dependencies": [],
+    "device_constants": [],
+    "note": "Consumed directly as an NCU ground-truth target (1B extension). The simulator's emission layer (sim/emit) will compute its own prediction from engine state per the observation contract; no registry-level predictor composition is asserted yet \u2014 that contract lands with the Phase-2 emission layer."
+   }
+  },
+  {
+   "key": "warp_stall_tex_throttle_per_issue_active",
+   "ncu_metric": "smsp__average_warps_issue_stalled_tex_throttle_per_issue_active.ratio",
+   "unit": "count",
+   "family": "warp_stall",
+   "metric_class": "derived_ratio",
+   "risk_tier": "T3",
+   "carrier": "unit_tagged_metric",
+   "sidecar_field": "warp_stall_tex_throttle_per_issue_active",
+   "admitted_field": "warp_stall_tex_throttle_per_issue_active",
+   "valid_min": 0.0,
+   "valid_max": null,
+   "parser_transform": "identity_nonneg",
+   "aggregation": "mean_nonneg",
+   "repeatability_rule": "coefficient_of_variation",
+   "nullable": true,
+   "deployability": "label_only",
+   "model_io_role": "target",
+   "availability": "available",
+   "ncu_observation_contract": {
+    "counting_unit": "SMSP",
+    "rollup": "ratio",
+    "numerator": "smsp__warps_issue_stalled_tex_throttle",
+    "denominator": "smsp__issue_active",
+    "op_classes": [],
+    "unsupported_op_behavior": "kUnspecified->unsupported_memory_path typed fallback"
+   },
+   "per_arch_availability": {
+    "sm_86": "available",
+    "sm_120": "sm_120_deferred_no_live_evidence"
+   },
+   "notes": "Warp State section stall reason 'tex_throttle': average warps resident per issue-active cycle in this state (dimensionless average-warp count; bounded by resident warps/SMSP, so no valid_max is pinned). Simulator validation counter for the sim/sm scheduler model (plan \u00a71B/\u00a76.2). Added by the 1B registry extension (2026-07-06). Live-verified on NVIDIA GeForce RTX 3090 Ti (NCU 2026.1.0, driver 610.43.02, host clock-locked 1350 MHz): present in --query-metrics and captured on a live kernel. sm_120 availability awaits the 5060 probe (post-M2).",
+   "composition": {
+    "formula": "label_only_no_predictor_composition",
+    "dependencies": [],
+    "device_constants": [],
+    "note": "Consumed directly as an NCU ground-truth target (1B extension). The simulator's emission layer (sim/emit) will compute its own prediction from engine state per the observation contract; no registry-level predictor composition is asserted yet \u2014 that contract lands with the Phase-2 emission layer."
+   }
+  },
+  {
+   "key": "warp_stall_wait_per_issue_active",
+   "ncu_metric": "smsp__average_warps_issue_stalled_wait_per_issue_active.ratio",
+   "unit": "count",
+   "family": "warp_stall",
+   "metric_class": "derived_ratio",
+   "risk_tier": "T3",
+   "carrier": "unit_tagged_metric",
+   "sidecar_field": "warp_stall_wait_per_issue_active",
+   "admitted_field": "warp_stall_wait_per_issue_active",
+   "valid_min": 0.0,
+   "valid_max": null,
+   "parser_transform": "identity_nonneg",
+   "aggregation": "mean_nonneg",
+   "repeatability_rule": "coefficient_of_variation",
+   "nullable": true,
+   "deployability": "label_only",
+   "model_io_role": "target",
+   "availability": "available",
+   "ncu_observation_contract": {
+    "counting_unit": "SMSP",
+    "rollup": "ratio",
+    "numerator": "smsp__warps_issue_stalled_wait",
+    "denominator": "smsp__issue_active",
+    "op_classes": [],
+    "unsupported_op_behavior": "kUnspecified->unsupported_memory_path typed fallback"
+   },
+   "per_arch_availability": {
+    "sm_86": "available",
+    "sm_120": "sm_120_deferred_no_live_evidence"
+   },
+   "notes": "Warp State section stall reason 'wait': average warps resident per issue-active cycle in this state (dimensionless average-warp count; bounded by resident warps/SMSP, so no valid_max is pinned). Simulator validation counter for the sim/sm scheduler model (plan \u00a71B/\u00a76.2). Added by the 1B registry extension (2026-07-06). Live-verified on NVIDIA GeForce RTX 3090 Ti (NCU 2026.1.0, driver 610.43.02, host clock-locked 1350 MHz): present in --query-metrics and captured on a live kernel. sm_120 availability awaits the 5060 probe (post-M2).",
+   "composition": {
+    "formula": "label_only_no_predictor_composition",
+    "dependencies": [],
+    "device_constants": [],
+    "note": "Consumed directly as an NCU ground-truth target (1B extension). The simulator's emission layer (sim/emit) will compute its own prediction from engine state per the observation contract; no registry-level predictor composition is asserted yet \u2014 that contract lands with the Phase-2 emission layer."
+   }
+  },
+  {
+   "key": "throughput_sm_pct_peak",
+   "ncu_metric": "sm__throughput.avg.pct_of_peak_sustained_elapsed",
+   "unit": "pct",
+   "family": "speed_of_light",
+   "metric_class": "derived_pct_peak",
+   "risk_tier": "T3",
+   "carrier": "unit_tagged_metric",
+   "sidecar_field": "throughput_sm_pct_peak",
+   "admitted_field": "throughput_sm_pct_peak_pct",
+   "valid_min": 0.0,
+   "valid_max": 1.0,
+   "parser_transform": "percent_to_fraction",
+   "aggregation": "mean_fraction",
+   "repeatability_rule": "stddev_abs",
+   "nullable": true,
+   "deployability": "label_only",
+   "model_io_role": "target",
+   "availability": "available",
+   "ncu_observation_contract": {
+    "counting_unit": "SM",
+    "rollup": "avg.pct_of_peak_sustained_elapsed",
+    "numerator": "sm__throughput",
+    "denominator": "sm__throughput_peak_sustained_elapsed",
+    "op_classes": [],
+    "unsupported_op_behavior": "kUnspecified->unsupported_memory_path typed fallback"
+   },
+   "per_arch_availability": {
+    "sm_86": "available",
+    "sm_120": "sm_120_deferred_no_live_evidence"
+   },
+   "notes": "The NCU GPU Speed Of Light section's headline COMPUTE throughput (SM throughput assuming ideal SMSP load balancing, % of peak). Primary SOL-vector target for sim/emit. Added by the 1B registry extension (2026-07-06). Live-verified on NVIDIA GeForce RTX 3090 Ti (NCU 2026.1.0, driver 610.43.02, host clock-locked 1350 MHz): present in --query-metrics and captured on a live kernel. sm_120 availability awaits the 5060 probe (post-M2).",
+   "composition": {
+    "formula": "label_only_no_predictor_composition",
+    "dependencies": [],
+    "device_constants": [],
+    "note": "Consumed directly as an NCU ground-truth target (1B extension). The simulator's emission layer (sim/emit) will compute its own prediction from engine state per the observation contract; no registry-level predictor composition is asserted yet \u2014 that contract lands with the Phase-2 emission layer."
+   }
+  },
+  {
+   "key": "throughput_compute_memory_pct_peak",
+   "ncu_metric": "gpu__compute_memory_throughput.avg.pct_of_peak_sustained_elapsed",
+   "unit": "pct",
+   "family": "speed_of_light",
+   "metric_class": "derived_pct_peak",
+   "risk_tier": "T3",
+   "carrier": "unit_tagged_metric",
+   "sidecar_field": "throughput_compute_memory_pct_peak",
+   "admitted_field": "throughput_compute_memory_pct_peak_pct",
+   "valid_min": 0.0,
+   "valid_max": 1.0,
+   "parser_transform": "percent_to_fraction",
+   "aggregation": "mean_fraction",
+   "repeatability_rule": "stddev_abs",
+   "nullable": true,
+   "deployability": "label_only",
+   "model_io_role": "target",
+   "availability": "available",
+   "ncu_observation_contract": {
+    "counting_unit": "GPU",
+    "rollup": "avg.pct_of_peak_sustained_elapsed",
+    "numerator": "gpu__compute_memory_throughput",
+    "denominator": "gpu__compute_memory_throughput_peak_sustained_elapsed",
+    "op_classes": [],
+    "unsupported_op_behavior": "kUnspecified->unsupported_memory_path typed fallback"
+   },
+   "per_arch_availability": {
+    "sm_86": "available",
+    "sm_120": "sm_120_deferred_no_live_evidence"
+   },
+   "notes": "The NCU GPU Speed Of Light section's headline MEMORY throughput (compute memory pipeline, % of peak). Primary SOL-vector target for sim/emit. Added by the 1B registry extension (2026-07-06). Live-verified on NVIDIA GeForce RTX 3090 Ti (NCU 2026.1.0, driver 610.43.02, host clock-locked 1350 MHz): present in --query-metrics and captured on a live kernel. sm_120 availability awaits the 5060 probe (post-M2).",
+   "composition": {
+    "formula": "label_only_no_predictor_composition",
+    "dependencies": [],
+    "device_constants": [],
+    "note": "Consumed directly as an NCU ground-truth target (1B extension). The simulator's emission layer (sim/emit) will compute its own prediction from engine state per the observation contract; no registry-level predictor composition is asserted yet \u2014 that contract lands with the Phase-2 emission layer."
+   }
+  }
+ ],
+ "metric_classes": [
+  "static",
+  "replay_count",
+  "cache_stream",
+  "time_clock",
+  "derived_ratio",
+  "derived_pct_peak",
+  "typed_unavailable"
+ ],
+ "risk_tiers": [
+  "T0",
+  "T1",
+  "T2",
+  "T3"
+ ],
+ "model_io_role_kinds": [
+  "target",
+  "input",
+  "either"
+ ]
+}

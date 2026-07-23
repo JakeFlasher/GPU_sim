@@ -1,0 +1,51 @@
+{
+  "arch": "sm_86",
+  "binary_sha256": "7d0eeb9e1653272094170143981bb388bfc44bed5f382ffcba750a6781cd16f6",
+  "block_dim": {
+    "x": 256,
+    "y": 1,
+    "z": 1
+  },
+  "cupti_activity_join": {
+    "availability": "not_collected_for_cell",
+    "searched_globs": [
+      "cupti_activity_*.json",
+      "cupti_activity/cupti_activity_*.json"
+    ]
+  },
+  "derived": {
+    "grid_volume": 1024,
+    "threads_per_cta": 256,
+    "warps_per_cta": 8.0
+  },
+  "dvfs_state_availability": "label-provenance-only",
+  "generator": "tools/local_labels/extend_launch_parameters.py",
+  "grid_dim": {
+    "x": 1024,
+    "y": 1,
+    "z": 1
+  },
+  "kernel_id": 1,
+  "kernel_signature_sha256": "c8690a32cfd4cdb4e19ffde286a0758f5cb6bcb81b66bf31216465e9f4798b62",
+  "mshr_pressure_proxy_availability": "not_collected_for_cell",
+  "nvml_covariate_join": {
+    "availability": "not_collected_for_cell",
+    "searched_globs": [
+      "nvml_covariate_*.json",
+      "nvml_covariate/nvml_covariate_*.json"
+    ]
+  },
+  "phase_cycle_ledger_join": {
+    "availability": "not_collected_for_cell",
+    "searched_globs": [
+      "phase_cycle_ledger_*.json",
+      "phase_cycle_ledger/phase_cycle_ledger_*.json",
+      "phase_cycle_ledgers/phase_cycle_ledger_*.json"
+    ]
+  },
+  "regs_per_thread": 0,
+  "schema_version": 1,
+  "shape_point": "timing_shape",
+  "slug": "silu_fwd_bf16_sm80",
+  "static_shared_bytes": 0
+}

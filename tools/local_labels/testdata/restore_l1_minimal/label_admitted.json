@@ -1,0 +1,23 @@
+{
+  "cells": [
+    {
+      "arch": "sm_86",
+      "binary_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+      "cache_hit_rate_l1tex_sector_pct": null,
+      "cache_hit_rate_l2_sector_pct": 50.0,
+      "evidence_kind": "live",
+      "kernel_signature_sha256": "2222222222222222222222222222222222222222222222222222222222222222",
+      "l1tex_label_status": "mean_absent_provenance_missing",
+      "n_repeats": 5,
+      "ncu_metric_version": "ncu_2026.1.x",
+      "profiler_version": "ncu_2026.1.x",
+      "schema_version": 5,
+      "shape_point": "fixture_shape",
+      "slug": "fixture_cell",
+      "source_commit": "3333333333333333333333333333333333333333",
+      "stddev_l1tex_sector": null,
+      "stddev_l2_sector": 0.01
+    }
+  ],
+  "schema_version": 5
+}

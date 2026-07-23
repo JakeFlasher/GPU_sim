@@ -1,0 +1,35 @@
+# Wall-clock duration repeatability acceptance registry.
+#
+# Pins the thresholds tools/local_labels/duration_repeatability_aggregator.py
+# reads when gating a per-(arch, slug, shape_point) cell into
+# data/local_labels/duration_admitted.json. The label is the non-root
+# CUPTI dual-source duration_ns (CUPTI Activity reconciled against
+# cudaEventElapsedTime); these thresholds decide whether a cell's repeats
+# are stable enough to serve as a ground-truth label for an empirical
+# wall-clock duration predictor. This is a measurement-acceptance config,
+# not a microarchitectural model.
+#
+# Gate semantics:
+#   - A cell needs at least min_reconciled_repeats repeats whose CUPTI/host
+#     dual-source timestamps reconciled.
+#   - Normal-length kernels (median duration_ns >= short_kernel_ns_threshold)
+#     are admitted only when the robust coefficient of variation
+#     (1.4826 * MAD / median) is at or below cv_ceiling.
+#   - Short kernels (median duration_ns < short_kernel_ns_threshold) gate on
+#     ABSOLUTE jitter instead: the sample standard deviation in nanoseconds
+#     must be at or below short_kernel_abs_jitter_floor_ns. The robust ratio
+#     is unstable at small denominators, so a fixed absolute floor is the
+#     correct estimator there.
+
+schema_version = 1
+
+[acceptance]
+# Minimum count of dual-source-reconciled repeats per cell.
+min_reconciled_repeats = 5
+# Robust coefficient-of-variation ceiling for normal-length kernels.
+cv_ceiling = 0.05
+# Median duration_ns below which a kernel is treated as short and gated on
+# absolute jitter rather than the robust ratio.
+short_kernel_ns_threshold = 5000
+# Absolute jitter floor (sample stddev, nanoseconds) for short kernels.
+short_kernel_abs_jitter_floor_ns = 2000

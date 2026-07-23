@@ -1,0 +1,161 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tools/sm_86_predictor_accuracy_recovery_v2/cohort_accounting.schema.json",
+  "title": "Cohort Accounting Artifact (Post Corpus Expansion)",
+  "description": "Strict accounting artifact for the HEADLINE_COHORT_13 cells. Each entry records per-cell admission_status with a typed exclusion_reason for every excluded_* status. The artifact MUST cover every cell in the constant HEADLINE_COHORT_13 set (13 cells) — silent omissions are a contract break. The artifact is produced by tools/sm_86_predictor_accuracy_recovery_v2/build_cohort_accounting.py from data/local_labels/label_admitted.json plus an optional per-cell exclusion-reasons input. The admission_status enum is closed (admitted / excluded_label_repeatability / excluded_label_provenance_duplicate / excluded_join_key_unmatched / excluded_operator_skipped); a status outside this enum is rejected at parse time.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "cohort_size",
+    "host_arch",
+    "label_admitted_path",
+    "label_admitted_schema_version",
+    "cells",
+    "admitted_count",
+    "admitted_count_per_bucket"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Pinned at 1. Bumped in lockstep with the tool's emission shape."
+    },
+    "cohort_size": {
+      "type": "integer",
+      "const": 13,
+      "description": "The HEADLINE_COHORT_13 constant set; the cells array MUST cover exactly this many distinct (slug, shape_point) pairs."
+    },
+    "host_arch": {
+      "type": "string",
+      "enum": ["sm_86", "sm_120"],
+      "description": "The host architecture for this round of cohort accounting. Plan 1's scope is sm_86 only; sm_120 is reserved for the Tier-2 cross-arch follow-up loop."
+    },
+    "label_admitted_path": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Repo-relative path to the label_admitted.json file the tool consumed. Records the artifact's input provenance for downstream readers."
+    },
+    "label_admitted_schema_version": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "The schema_version pin from the consumed label_admitted.json file. The current pin is 4 (per workloads/simbench_bw/schemas/local_label_admitted.schema.json); the v3-to-v4 migration is enforced at parse time by the admitted-cell schema itself."
+    },
+    "cells": {
+      "type": "array",
+      "minItems": 13,
+      "maxItems": 13,
+      "items": {"$ref": "#/$defs/cohort_cell"},
+      "description": "Per-cell records covering the HEADLINE_COHORT_13 set. minItems=maxItems=13 enforces the all-cell-coverage invariant: every cell in the constant set appears exactly once."
+    },
+    "admitted_count": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 13,
+      "description": "Count of cells whose admission_status is admitted. Must match the per-cell records."
+    },
+    "admitted_count_per_bucket": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["predictor_friendly", "predictor_hostile"],
+      "properties": {
+        "predictor_friendly": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 8,
+          "description": "Count of admitted cells in the predictor_friendly bucket (8-cell bucket total)."
+        },
+        "predictor_hostile": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 5,
+          "description": "Count of admitted cells in the predictor_hostile bucket (5-cell bucket total)."
+        }
+      },
+      "description": "Per-bucket admitted counts. Each bucket's count must match the per-cell records' admitted status within that bucket."
+    }
+  },
+  "$defs": {
+    "cohort_cell": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "slug",
+        "shape_point",
+        "predictor_design_coverage_bucket",
+        "admission_status"
+      ],
+      "properties": {
+        "slug": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Kernel slug from the workload roster."
+        },
+        "shape_point": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Shape-file row identifier (e.g. trace_l2_accuracy_xl, timing_shape, correctness_shape)."
+        },
+        "predictor_design_coverage_bucket": {
+          "type": "string",
+          "enum": ["predictor_friendly", "predictor_hostile"],
+          "description": "Pinned bucket label from comparison_runner._PREDICTOR_DESIGN_COVERAGE_BY_CELL. The contract has 8 friendly + 5 hostile cells totalling 13."
+        },
+        "admission_status": {
+          "type": "string",
+          "enum": [
+            "admitted",
+            "excluded_label_repeatability",
+            "excluded_label_provenance_duplicate",
+            "excluded_join_key_unmatched",
+            "excluded_operator_skipped"
+          ],
+          "description": "Closed-enum admission status. admitted: the cell is in data/local_labels/label_admitted.json. excluded_label_repeatability: the NCU sweep ran but the cell's stddev gate (0.03 fraction threshold) rejected. excluded_label_provenance_duplicate: the NCU sweep produced duplicate sidecars for the same (arch, slug, shape_point) cell whose source_commit manifests disagree, so no canonical label can be admitted. excluded_join_key_unmatched: the NCU sweep ran but the join-key fields disagreed with the predictor's manifest_pairing_index. excluded_operator_skipped: the live sweep did not run this round (operator-budget or hardware-availability gap); the cell is honestly reported as not-yet-evaluated. A status outside this enum is a contract break."
+        },
+        "exclusion_reason": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Required when admission_status is any of the three excluded_* values; forbidden when admission_status is admitted. Human-readable typed reason naming the load-bearing detail (e.g., the stddev value that exceeded the gate, the join-key field that drifted, or the operator-budget rationale)."
+        },
+        "n_repeats": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Optional: the n_repeats value for admitted cells. Carried verbatim from the label_admitted.json record so the report can audit the repeat floor."
+        }
+      },
+      "allOf": [
+        {
+          "description": "exclusion_reason consistency arm: required when status is excluded_*; forbidden when admitted.",
+          "if": {
+            "properties": {
+              "admission_status": {
+                "enum": [
+                  "excluded_label_repeatability",
+                  "excluded_label_provenance_duplicate",
+                  "excluded_join_key_unmatched",
+                  "excluded_operator_skipped"
+                ]
+              }
+            },
+            "required": ["admission_status"]
+          },
+          "then": {
+            "required": ["exclusion_reason"]
+          }
+        },
+        {
+          "description": "admitted-status arm: exclusion_reason MUST be absent when status is admitted.",
+          "if": {
+            "properties": {
+              "admission_status": {"const": "admitted"}
+            },
+            "required": ["admission_status"]
+          },
+          "then": {
+            "not": {"required": ["exclusion_reason"]}
+          }
+        }
+      ]
+    }
+  }
+}

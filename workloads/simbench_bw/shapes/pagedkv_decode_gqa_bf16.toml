@@ -1,0 +1,30 @@
+schema_version = 1
+slug = "pagedkv_decode_gqa_bf16"
+
+# Launch geometry reflects the R13 kernel's actual wrapper:
+#   grid  = (batch, q_heads, 1)   # one block per (batch, query-head) pair
+#   block = (head_dim, 1, 1)      # one thread per output element in the head
+# The kernel signature lives at
+# `l2/pagedkv_decode_gqa_bf16/pagedkv_decode_gqa_bf16.cu::pagedkv_decode_gqa_bf16_launch`.
+# R14 restored shape-contract alignment after R13 shipped a
+# template launch_config; see tests/test_round14_repairs.py for the lock.
+
+[[timing_shapes]]
+name = "timing_00"
+axes = { batch = 8, context = 8192, head_dim = 128, q_heads = 32, kv_heads = 8, page_size = 16 }
+launch_config = { grid = [8, 32, 1], block = [128, 1, 1] }
+warm_up_iters = 5
+repeat_iters = 30
+
+[[trace_shapes]]
+name = "trace_00"
+axes = { batch = 2, context = 16, head_dim = 32, q_heads = 16, kv_heads = 4, page_size = 16 }
+launch_config = { grid = [2, 16, 1], block = [32, 1, 1] }
+predicted_bytes = 167772160
+estimator_source = "static"
+
+[[correctness_shapes]]
+name = "correctness_00"
+axes = { batch = 1, context = 512, head_dim = 64, q_heads = 8, kv_heads = 2, page_size = 16 }
+launch_config = { grid = [1, 8, 1], block = [64, 1, 1] }
+digest_kind = "reduction_summary"

@@ -1,0 +1,14 @@
+{
+  "schema_version": 1,
+  "slug": "dram_streaming_dot_product",
+  "shape_point": "ac4_mixed_dot_n16777216_p6",
+  "repeat_index": 0,
+  "launch_index": 0,
+  "kernel_name": "dram_streaming_dot_product_kernel___0",
+  "kernel_signature_sha256": "53362e22b4c750773fa11fd360682ad6889b401f3742a1517572755bee865757",
+  "inst_count": 2560,
+  "binary_sha256": "e2151e3732238acb4dcf030d1b0a191cc587a8b84e3d29224c25caff1d455592",
+  "nvbit_trace_pb_path": "data/local_labels/timing_cohort/nvbit_launch_traces/ac4_mixed_dot_n16777216_p6/dynamic_trace.pb",
+  "nvbit_trace_pb_sha256": "2f4692c48b31e2e87c9531131c413855507702a6da026e0f2ada5a8377652380",
+  "nvbit_tracer_build_hash": "67083eace7f6257ce5e33a6eb80ae0d3f240bbd667f254cdb67e1b7d20d5ed51"
+}

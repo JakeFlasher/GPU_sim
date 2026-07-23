@@ -1,0 +1,73 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "tools/cache_predictor/l1_static_card_table.schema.json",
+  "title": "L1 Static-Card Table",
+  "description": "Per-arch L1 cache capacity / carveout entries published as the static-card fallback table for the L1 predictor head. The plan's no-hard-coded-capacity discipline: no L1 capacity constant is hard-coded into implementation or tests; every test fixture sources from a manifest, a CUDA-attribute query stub, or a `static_card_constant` table entry. A bundle whose `l1tex_capacity_source` is `static_card_constant` MUST reference an arch that exists in this table; a runtime gate in the L1 head rejects bundles that name an arch not in the table. Plan 1 populates the sm_86 row from documented device properties; sm_120 / sm_100 rows are queued for the Tier-2-cross-arch follow-up loop.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "entries"],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Table schema major version. Additive entry additions do not bump; breaking shape changes do."
+    },
+    "entries": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "arch",
+          "l1tex_capacity_bytes",
+          "carveout_max_l1_bytes",
+          "carveout_max_shared_bytes",
+          "default_l1_bytes",
+          "source_reference"
+        ],
+        "properties": {
+          "arch": {
+            "type": "string",
+            "pattern": "^sm_[0-9]+[a-z]*$",
+            "description": "Compute capability tag matching the standard sm_<N>[suffix] form."
+          },
+          "l1tex_capacity_bytes": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Per-SM unified L1 / shared budget in bytes. The L1 predictor head subtracts the kernel's static + dynamic shared bytes from this budget per the carveout policy."
+          },
+          "carveout_max_l1_bytes": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Maximum L1 share of the unified budget achievable via the cudaFuncSetAttribute carveout. The L1 head caps l1tex_capacity_bytes at this value when the carveout source is `cuda_func_attribute`."
+          },
+          "carveout_max_shared_bytes": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Maximum shared-memory share of the unified budget achievable via the cudaFuncSetAttribute carveout. Records the complementary edge of the carveout policy."
+          },
+          "default_l1_bytes": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "Default L1 capacity when neither manifest nor per-kernel attribute is available. Used when `l1_shared_carveout_source=default`."
+          },
+          "source_reference": {
+            "type": "string",
+            "minLength": 1,
+            "description": "Free-text citation of the NVIDIA documentation / device-props source the table entry was sourced from. Recorded so a future operator can audit + update when the documented values change."
+          },
+          "l1_ways": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "OPTIONAL: per-(SM, set) way count for the set-associative L1 model class (`l1_model_class=set_associative_refinement`). When present, the L1 head MAY route through the per-(SM, set) walker (the DEC-2 model) instead of the fully-associative baseline. When ABSENT, the L1 head falls through to the fully-associative baseline. The set count is computed by the L1 head as `effective_capacity_bytes / 128 / l1_ways`. Provenance for sm_86 is documented in the entry's `source_reference` (microbench_inference of the GA10x L1 data-cache way count)."
+          },
+          "l1_sets_at_full_capacity": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "OPTIONAL: derived set count when `l1tex_capacity_bytes` is fully allocated to L1 (i.e., `l1tex_capacity_bytes / 128 / l1_ways`). Recorded for auditability; the L1 head actually recomputes the set count per-bundle from the cell's effective_capacity_bytes (which accounts for the kernel's carveout). Only meaningful when `l1_ways` is also present."
+          }
+        }
+      }
+    }
+  }
+}

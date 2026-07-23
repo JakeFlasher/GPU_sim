@@ -1,0 +1,44 @@
+{
+  "name": "problem_007_hyena_fft_size_padding_rfft_cuda_cpp_scaffold",
+  "definition": "007_hyena_fft_size_padding_rfft",
+  "author": "scaffold",
+  "spec": {
+    "languages": [
+      "cuda_cpp"
+    ],
+    "target_hardware": [
+      "LOCAL"
+    ],
+    "entry_point": "main.cpp::run",
+    "dependencies": [],
+    "destination_passing_style": true,
+    "binding": "torch",
+    "compile_options": {
+      "cflags": [],
+      "cuda_cflags": [
+        "-O3",
+        "--use_fast_math",
+        "-gencode",
+        "arch=compute_86,code=sm_86"
+      ],
+      "ld_flags": [
+        "-lcuda"
+      ]
+    }
+  },
+  "sources": [
+    {
+      "path": "main.cpp",
+      "content": "#include <torch/extension.h>\n#include <ATen/cuda/CUDAContext.h>\n#include <c10/cuda/CUDAGuard.h>\n#include <string>\n\n// Fused FFT size padding + real FFT for Hyena convolution.\n//\n// Reference (problem_007_hyena_fft_size_padding_rfft):\n//     batch, channels, seqlen = x.shape\n//     fft_size = 2 * seqlen\n//     x_f32   = x.to(torch.float32)\n//     x_freq  = torch.fft.rfft(x_f32, n=fft_size)   # dim=-1, no norm; implicit\n//                                                    # zero-pad of x to fft_size\n//     x_freq  = x_freq / fft_size                    # divide the COMPLEX tensor\n//     x_freq_real = x_freq.real.contiguous()\n//     x_freq_imag = x_freq.imag.contiguous()\n//     return x_freq_real, x_freq_imag\n//\n// Per definition.json (insertion order):\n//   x            : [batch_size, d_model, seqlen]            fp32\n//   x_freq_real  : [batch_size, d_model, freq_len]          fp32  (DPS, pre-alloc)\n//   x_freq_imag  : [batch_size, d_model, freq_len]          fp32  (DPS, pre-alloc)\n//\n//   freq_len = fft_size/2 + 1 = (2*seqlen)/2 + 1 = seqlen + 1.\n//\n// fft_size is derived from x's last dim (fft_size = 2*seqlen) exactly as the\n// reference computes it, not passed as an input.\n//\n// Implementation: pure ATen dispatch -- NO custom CUDA kernels. The single\n// at::fft_rfft call routes through cuFFT with the same fp32 precision profile\n// the reference's torch.fft.rfft uses. at::fft_rfft returns a COMPLEX tensor;\n// dividing it by the scalar fft_size before extracting real/imag matches the\n// reference's \"divide the complex tensor, then split\" ordering exactly.\n// at::real / at::imag return real-valued *views* into the complex storage, so\n// each is materialised with .contiguous() before being copied into its\n// pre-allocated DPS destination (destination-passing style).\n\nstatic void check_fp32_cuda(const torch::Tensor& t, const std::string& name) {\n    TORCH_CHECK(t.is_cuda(), name, \" must be a CUDA tensor\");\n    TORCH_CHECK(t.dtype() == torch::kFloat32, name, \" must be float32, got \", t.dtype());\n}\n\nvoid run(\n    const torch::Tensor& x,\n    torch::Tensor x_freq_real,\n    torch::Tensor x_freq_imag\n) {\n    check_fp32_cuda(x, \"x\");\n    check_fp32_cuda(x_freq_real, \"x_freq_real\");\n    check_fp32_cuda(x_freq_imag, \"x_freq_imag\");\n    TORCH_CHECK(x.dim() == 3, \"x must be 3D [batch, channels, seqlen], got \", x.dim(), \"D\");\n\n    const c10::cuda::CUDAGuard device_guard(x.device());\n\n    const int64_t seqlen = x.size(-1);\n    const int64_t fft_size = 2 * seqlen;\n\n    // x_freq = torch.fft.rfft(x_f32, n=fft_size)  -- dim defaults to -1, norm\n    // defaults to None (\"backward\": no scaling on the forward transform). The\n    // n=fft_size argument implicitly zero-pads x along dim=-1 up to fft_size.\n    // Result is complex64 of last-dim length fft_size/2 + 1 = seqlen + 1.\n    torch::Tensor x_freq = at::fft_rfft(\n        x,\n        /*n=*/fft_size,\n        /*dim=*/-1,\n        /*norm=*/c10::nullopt);\n\n    // x_freq = x_freq / fft_size  -- normalize the COMPLEX tensor by the scalar\n    // (scales both real and imaginary parts), matching the reference ordering.\n    x_freq = x_freq / static_cast<double>(fft_size);\n\n    // Split into real / imag. at::real / at::imag yield real-valued views into\n    // the complex storage; .contiguous() materialises them as standalone fp32\n    // tensors before the in-place copy into the DPS destinations.\n    torch::Tensor real_part = at::real(x_freq).contiguous();\n    torch::Tensor imag_part = at::imag(x_freq).contiguous();\n\n    TORCH_CHECK(real_part.sizes() == x_freq_real.sizes(),\n                \"rfft real-part shape \", real_part.sizes(),\n                \" does not match pre-allocated x_freq_real \", x_freq_real.sizes());\n    TORCH_CHECK(imag_part.sizes() == x_freq_imag.sizes(),\n                \"rfft imag-part shape \", imag_part.sizes(),\n                \" does not match pre-allocated x_freq_imag \", x_freq_imag.sizes());\n\n    x_freq_real.copy_(real_part);\n    x_freq_imag.copy_(imag_part);\n}\n\nPYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {\n    m.def(\"run\", &run,\n          \"Hyena FFT-size padding + real FFT via at::fft_rfft (cuFFT): \"\n          \"rfft(x, n=2*seqlen, dim=-1) / fft_size, split into real/imag; \"\n          \"fp32; destination-passing style.\");\n}\n"
+    },
+    {
+      "path": "kernel.cu",
+      "content": "// Stub translation unit: this ATen-delegated port has no custom __global__\n// kernels. A bare .cu is still needed so torch's cpp_extension builds a CUDA\n// extension (adding CUDA include paths); a .cpp-only extension fails with\n// \"cuda_runtime_api.h: No such file or directory\".\n#include <cuda_runtime.h>\n"
+    },
+    {
+      "path": "kernel.h",
+      "content": "#pragma once\n// Intentionally empty: ATen-delegated port, no custom kernel launcher.\n"
+    }
+  ],
+  "description": "Scaffolded baseline for problem_007_hyena_fft_size_padding_rfft (language=cuda_cpp); hand-edit the copied exemplar to implement the target problem before harness-running. Destination-passing-style is set true; outputs appear after inputs in definition.json insertion order."
+}

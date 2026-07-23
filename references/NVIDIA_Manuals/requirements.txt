@@ -1,0 +1,4 @@
+requests>=2.32
+beautifulsoup4>=4.13
+lxml>=6.0
+brotli>=1.1

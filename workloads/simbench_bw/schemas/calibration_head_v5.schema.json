@@ -1,0 +1,225 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "simbench_bw/schemas/calibration_head_v5.schema.json",
+  "title": "Monotonic Calibration Head v5 Provenance Sidecar",
+  "description": "Schema for the v5 per-bucket monotonic calibration head emitted by tools/local_labels/fit_monotonic_calibration_head_v5.py. Records the head's full provenance: feature_schema (the 6 canonical features + monotonic constraint signs), model_class_per_bucket, monotonic_constraints_by_feature (only on used features), fold_assignments (deterministic stratified round-robin, seed=20260527), selected_hyperparameters, dependency_versions (flat package -> version map), training_cell_ids, source_commit (commit containing the fitter source), dependency_availability (full hierarchy probe), composite_score_formula (verbatim from the goal tracker's model-class hierarchy row), and cohort_scope (per-cell admitted + skipped lists with typed reasons).",
+  "schema_version": 1,
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "schema_version",
+    "calibration_head_version",
+    "source_commit",
+    "dependency_availability",
+    "dependency_versions",
+    "composite_score_formula",
+    "feature_schema",
+    "fit_status",
+    "cohort_scope",
+    "model_class_per_bucket",
+    "monotonic_constraints_by_feature",
+    "fold_assignments",
+    "selected_hyperparameters",
+    "training_cell_ids",
+    "per_bucket_provenance"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "calibration_head_version": {
+      "type": "integer",
+      "const": 5,
+      "description": "Always 5 for this schema. v1/v2/v3/v4 use their own schemas."
+    },
+    "source_commit": {
+      "type": "string",
+      "minLength": 7,
+      "description": "Git HEAD at emission time. MUST point at a commit that contains the fitter source so the artifact is reproducible (the BL-20260527-two-commit-landing-source-commit-pinning discipline)."
+    },
+    "dependency_availability": {
+      "type": "object",
+      "description": "Structured dependency probe: { class_name: { available: bool, version: str|null, import_path: str, package: str } } for each candidate class in the registered hierarchy.",
+      "additionalProperties": {
+        "type": "object",
+        "required": ["available", "version", "import_path", "package"],
+        "properties": {
+          "available": {"type": "boolean"},
+          "version": {"type": ["string", "null"]},
+          "import_path": {"type": "string"},
+          "package": {"type": "string"}
+        }
+      }
+    },
+    "dependency_versions": {
+      "type": "object",
+      "description": "Flat package -> version map. NULL value means the package is not importable on this host. Required v5 provenance per the goal tracker.",
+      "additionalProperties": {
+        "type": ["string", "null"]
+      }
+    },
+    "composite_score_formula": {
+      "type": "object",
+      "required": [
+        "primary",
+        "secondary_tiebreaker",
+        "tertiary",
+        "simpler_model_tiebreaker_scope",
+        "simpler_model_tiebreaker_threshold_fraction"
+      ],
+      "properties": {
+        "primary": {"type": "string", "const": "mean_cv_geomean_relative_error"},
+        "secondary_tiebreaker": {"type": "string", "const": "median_absolute_hit_rate_error"},
+        "tertiary": {"type": "string", "const": "log_loss_eps_1e_minus_6_fractional_bernoulli"},
+        "simpler_model_tiebreaker_scope": {"type": "string", "const": "primary_metric_only_within_2pct_diff"},
+        "simpler_model_tiebreaker_threshold_fraction": {"type": "string", "const": "0.02"}
+      },
+      "description": "Verbatim composite-score formula. Constants pinned so any drift fails closed."
+    },
+    "feature_schema": {
+      "type": "object",
+      "required": ["canonical_feature_names", "monotonic_constraints_by_feature"],
+      "properties": {
+        "canonical_feature_names": {
+          "type": "array",
+          "items": {"type": "string"},
+          "minItems": 6,
+          "maxItems": 6,
+          "description": "The 6 canonical pre-calibration feature names in canonical order."
+        },
+        "monotonic_constraints_by_feature": {
+          "type": "object",
+          "required": [
+            "raw_prediction",
+            "footprint_ratio",
+            "long_rd_tail_mass",
+            "intra_lane_reuse",
+            "global_share",
+            "gridDim_density"
+          ],
+          "properties": {
+            "raw_prediction": {"type": "integer", "const": 1},
+            "footprint_ratio": {"type": "integer", "const": -1},
+            "long_rd_tail_mass": {"type": "integer", "const": -1},
+            "intra_lane_reuse": {"type": "integer", "const": 1},
+            "global_share": {"type": "integer", "const": 0},
+            "gridDim_density": {"type": "integer", "const": -1}
+          },
+          "description": "Pinned sign table per the goal tracker's monotonic constraint sign row. Drift on any feature's sign fails closed."
+        }
+      }
+    },
+    "fit_status": {
+      "type": "string",
+      "enum": [
+        "ok",
+        "empty_cohort_no_admitted_cells",
+        "indeterminate_dependencies_absent"
+      ],
+      "description": "Fit-time outcome. 'empty_cohort_no_admitted_cells' is the schema-valid empty-fit marker when zero cells admit (e.g., all cells fail the canonical_pre_calibration_features_absent gate). 'indeterminate_dependencies_absent' is the schema-valid marker when no registered model class (sklearn IR, pygam GAM, lightgbm GBM, xgboost) is importable on the host."
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "ok",
+        "indeterminate_insufficient_data"
+      ],
+      "description": "Coarse at-a-glance fit outcome: 'ok' when the head was fit (fit_status=='ok'), else 'indeterminate_insufficient_data' (collapses the empty-cohort and dependencies-absent fit_status arms). Optional for backward compatibility with heads emitted before this field was added; emitted by fit_monotonic_calibration_head_v5.py going forward."
+    },
+    "cohort_scope": {
+      "type": "object",
+      "required": ["admitted", "skipped", "admitted_count", "skipped_count"],
+      "properties": {
+        "admitted_count": {"type": "integer", "minimum": 0},
+        "skipped_count": {"type": "integer", "minimum": 0},
+        "admitted": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["arch", "slug", "shape_point", "family_bucket", "label"]
+          }
+        },
+        "skipped": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": ["arch", "slug", "shape_point", "typed_reason"]
+          }
+        }
+      }
+    },
+    "model_class_per_bucket": {
+      "type": "object",
+      "description": "Per-(arch/family_bucket) key -> class name (e.g. 'isotonic_regression_on_frozen_projection'). When the bucket falls back to pooled fit, the class name appends '__pooled_fallback_with_one_hot' per the per-bucket minimum-N rule.",
+      "additionalProperties": {"type": "string"}
+    },
+    "monotonic_constraints_by_feature": {
+      "type": "object",
+      "description": "Per-bucket constraint table. Keys are bucket keys; values are dicts of feature -> sign for ONLY the used features (per the goal tracker's monotonic constraint sign row's 'only on used_features' invariant). Pooled-fallback buckets include 'family_bucket_one_hot' alongside the base projection features.",
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": {"type": "integer", "enum": [-1, 0, 1]}
+      }
+    },
+    "fold_assignments": {
+      "type": "object",
+      "description": "Per-cell-identity -> fold-index map. Cell identities serialized as repr(list) string keys."
+    },
+    "fold_construction": {
+      "type": "object",
+      "description": "Records the fold-construction decision: stratified_round_robin or non_stratified_fallback, with seed=20260527 and per-stratum sizes."
+    },
+    "selected_hyperparameters": {
+      "type": "object",
+      "description": "Per-class selected hyperparameters (e.g., increasing=True + out_of_bounds=clip + projection_weights + projection_features for the IR-on-projection class)."
+    },
+    "selected_class": {
+      "type": "object",
+      "description": "The winning class metadata: name, parameter_count, primary/secondary/tertiary CV scores, selection_reason."
+    },
+    "training_cell_ids": {
+      "type": "object",
+      "description": "Per-bucket list of cell identities used to fit that bucket's head. Required for reproducibility."
+    },
+    "per_bucket_provenance": {
+      "type": "object",
+      "description": "Per-bucket kind + n_train + training_cell_ids + (when kind=pooled_fallback) pooled_bias. Top-level pooled_used_features lists the expanded feature surface including family_bucket_one_hot when any pooled fallback fired."
+    }
+  },
+  "allOf": [
+    {
+      "description": "Per-bucket per_bucket-kind buckets MUST have n_train >= 8 per the per-bucket minimum-N rule. A synthetic head with n_train=5 and kind=per_bucket fails this conditional.",
+      "if": {
+        "required": ["per_bucket_provenance"]
+      },
+      "then": {
+        "properties": {
+          "per_bucket_provenance": {
+            "type": "object",
+            "properties": {
+              "by_bucket": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "object",
+                  "allOf": [
+                    {
+                      "if": {
+                        "properties": {"kind": {"const": "per_bucket"}}
+                      },
+                      "then": {
+                        "properties": {
+                          "n_train": {"type": "integer", "minimum": 8}
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  ]
+}

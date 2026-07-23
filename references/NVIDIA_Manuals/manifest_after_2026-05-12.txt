@@ -1,0 +1,27 @@
+# NVIDIA_Manuals post-refresh manifest (2nd pass with patched crawlers)
+# generated: 2026-05-12T00:16:19+08:00
+# crawlers: patched scripts/crawler_singlefile.py + scripts/crawler_multiTOC.py
+#   - removed apparent_encoding override; default to UTF-8 when Content-Type omits charset
+#   - added HTML-presence + U+FFFD-density sanity check on each fetched page
+#   - fixed enumerate off-by-one in _save_index (was 0-indexed, _write_split was 1-indexed)
+# deps: requests, beautifulsoup4, lxml, brotli (in ./.venv)
+# notes: ncu_guide removed per user request; backups at <folder>.bak-2026-05-11/
+#        corrupt 1st-pass multi-page crawls preserved at <folder>.corrupt-2026-05-11/
+# columns: folder | n_md | bytes_md_only | n_images | source_url
+#
+ampere_compatibility       |   11 |      23044 |    0 | https://docs.nvidia.com/cuda/ampere-compatibility-guide/
+ampere_tuning              |   11 |      24862 |    0 | https://docs.nvidia.com/cuda/ampere-tuning-guide/
+best_practices             |   73 |     260326 |   19 | https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/
+blackwell_compatibility    |   11 |      23022 |    0 | https://docs.nvidia.com/cuda/blackwell-compatibility-guide/
+blackwell_tuning           |   11 |      19824 |    0 | https://docs.nvidia.com/cuda/blackwell-tuning-guide/
+cuda_binary_utility        |   29 |     110926 |    2 | https://docs.nvidia.com/cuda/cuda-binary-utilities/
+cuda_guide                 |  653 |    1880469 |   62 | https://docs.nvidia.com/cuda/cuda-programming-guide/
+cuda_inline_ptx            |    9 |      22659 |    0 | https://docs.nvidia.com/cuda/inline-ptx-assembly/
+cuda_tile_ir               |  295 |     716233 |    3 | https://docs.nvidia.com/cuda/tile-ir/latest/
+cutile_python              |   89 |     136382 |    4 | https://docs.nvidia.com/cuda/cutile-python/
+cutlass_cute               |  716 |    1746760 |   50 | https://docs.nvidia.com/cutlass/latest/
+nvcc_guide                 |   38 |     182480 |    4 | https://docs.nvidia.com/cuda/cuda-compiler-driver-nvcc/
+nvvm_ir                    |   90 |     128640 |    0 | https://docs.nvidia.com/cuda/nvvm-ir-spec/
+ptx_compier_api            |   16 |      62116 |    0 | https://docs.nvidia.com/cuda/ptx-compiler-api/
+ptx_isa                    |  149 |    1537935 |  267 | https://docs.nvidia.com/cuda/parallel-thread-execution/
+ptx_writer_guide           |   22 |      39137 |    6 | https://docs.nvidia.com/cuda/ptx-writers-guide-to-interoperability/

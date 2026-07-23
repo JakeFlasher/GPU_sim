@@ -1,0 +1,17 @@
+---
+title: "2.1. Who Should Read This Guide?"
+section: "2.1"
+source: "https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/#who-should-read-this-guide"
+---
+
+## [2.1. Who Should Read This Guide?](https://docs.nvidia.com/cuda/cuda-c-best-practices-guide#who-should-read-this-guide)[](https://docs.nvidia.com/cuda/cuda-c-best-practices-guide/#who-should-read-this-guide "Permalink to this headline")
+
+The discussions in this guide all use the C++ programming language, so you should be comfortable reading C++ code.
+
+This guide refers to and relies on several other documents that you should have at your disposal for reference, all of which are available at no cost from the CUDA website <https://docs.nvidia.com/cuda/>. The following documents are especially important resources:
+
+- CUDA Installation Guide
+- CUDA C++ Programming Guide
+- CUDA Toolkit Reference Manual
+
+In particular, the optimization section of this guide assumes that you have already successfully downloaded and installed the CUDA Toolkit (if not, please refer to the relevant CUDA Installation Guide for your platform) and that you have a basic familiarity with the CUDA C++ programming language and environment (if not, please refer to the CUDA C++ Programming Guide).

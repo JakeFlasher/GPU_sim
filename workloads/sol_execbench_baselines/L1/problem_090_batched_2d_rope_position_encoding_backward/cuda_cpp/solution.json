@@ -1,0 +1,43 @@
+{
+  "name": "problem_090_batched_2d_rope_position_encoding_backward_cuda_cpp",
+  "definition": "090_batched_2d_rope_position_encoding_backward",
+  "author": "sol-baselines-codegen",
+  "spec": {
+    "languages": [
+      "cuda_cpp"
+    ],
+    "target_hardware": [
+      "LOCAL"
+    ],
+    "entry_point": "main.cpp::run",
+    "dependencies": [],
+    "destination_passing_style": true,
+    "binding": "torch",
+    "compile_options": {
+      "cflags": [],
+      "cuda_cflags": [
+        "-O3",
+        "--use_fast_math",
+        "-gencode",
+        "arch=compute_86,code=sm_86"
+      ],
+      "ld_flags": [
+        "-lcuda"
+      ]
+    }
+  },
+  "sources": [
+    {
+      "path": "main.cpp",
+      "content": "#include <torch/extension.h>\n#include <ATen/cuda/CUDAContext.h>\n#include \"kernel.h\"\n#include <string>\n\nstatic void check_bf16_contiguous_cuda(\n    const torch::Tensor& tensor, const std::string& name) {\n    TORCH_CHECK(tensor.is_cuda(), name, \" must be a CUDA tensor\");\n    TORCH_CHECK(\n        tensor.dtype() == torch::kBFloat16,\n        name, \" must have bfloat16 dtype, got \", tensor.dtype());\n    TORCH_CHECK(tensor.is_contiguous(), name, \" must be contiguous\");\n}\n\nstatic void check_fp32_contiguous_cuda(\n    const torch::Tensor& tensor, const std::string& name) {\n    TORCH_CHECK(tensor.is_cuda(), name, \" must be a CUDA tensor\");\n    TORCH_CHECK(\n        tensor.dtype() == torch::kFloat32,\n        name, \" must have float32 dtype, got \", tensor.dtype());\n    TORCH_CHECK(tensor.is_contiguous(), name, \" must be contiguous\");\n}\n\n// Destination-passing-style entry. Per definition.json:\n//   grad_cos        : [batch_size, seq_len, head_dim] bf16\n//   grad_sin        : [batch_size, seq_len, head_dim] bf16\n//   idx_theta       : [batch_size, seq_len, head_dim] fp32\n//   grad_idx_theta  : [batch_size, seq_len, head_dim] fp32 (DPS)\n//\n// batch_size, seq_len, and head_dim are all workload-variable\n// (no pinned constants for this slug).\nvoid run(\n    const torch::Tensor& grad_cos,\n    const torch::Tensor& grad_sin,\n    const torch::Tensor& idx_theta,\n    torch::Tensor grad_idx_theta\n) {\n    TORCH_CHECK(grad_cos.dim() == 3,\n                \"grad_cos must be 3D [B, S, D]\");\n    TORCH_CHECK(grad_sin.dim() == 3,\n                \"grad_sin must be 3D [B, S, D]\");\n    TORCH_CHECK(idx_theta.dim() == 3,\n                \"idx_theta must be 3D [B, S, D]\");\n    TORCH_CHECK(grad_idx_theta.dim() == 3,\n                \"grad_idx_theta must be 3D [B, S, D]\");\n    TORCH_CHECK(grad_cos.sizes() == idx_theta.sizes(),\n                \"grad_cos shape must match idx_theta\");\n    TORCH_CHECK(grad_sin.sizes() == idx_theta.sizes(),\n                \"grad_sin shape must match idx_theta\");\n    TORCH_CHECK(grad_idx_theta.sizes() == idx_theta.sizes(),\n                \"grad_idx_theta shape must match idx_theta\");\n\n    check_bf16_contiguous_cuda(grad_cos, \"grad_cos\");\n    check_bf16_contiguous_cuda(grad_sin, \"grad_sin\");\n    check_fp32_contiguous_cuda(idx_theta, \"idx_theta\");\n    check_fp32_contiguous_cuda(grad_idx_theta, \"grad_idx_theta\");\n\n    cudaStream_t stream = at::cuda::getCurrentCUDAStream();\n    problem_090_batched_2d_rope_backward_launcher(\n        grad_cos, grad_sin, idx_theta, grad_idx_theta, stream);\n}\n\nPYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {\n    m.def(\n        \"run\", &run,\n        \"BF16/fp32 batched 2D RoPE position-encoding backward: \"\n        \"computes grad_idx_theta = -grad_cos.f32 * sin(idx_theta) \"\n        \"+ grad_sin.f32 * cos(idx_theta) per element. No reductions.\");\n}\n"
+    },
+    {
+      "path": "kernel.cu",
+      "content": "#include \"kernel.h\"\n#include <cuda_bf16.h>\n#include <cuda_runtime.h>\n\n// BF16/fp32 batched 2D RoPE position-encoding backward.\n//\n// Per-element compute (no reductions, no broadcasts):\n//   grad_idx_theta[b, s, d] = -grad_cos[b, s, d].f32 * sin(idx_theta[b, s, d])\n//                            + grad_sin[b, s, d].f32 * cos(idx_theta[b, s, d])\n//\n// Each thread does:\n//   * load fp32 idx_theta,\n//   * SFU sinf + cosf,\n//   * load BF16 grad_cos and grad_sin, cast to fp32,\n//   * fused multiply-add to produce the fp32 output,\n//   * store fp32 grad_idx_theta.\n//\n// One CTA per (b, s) row. Grid: (seq_len, batch_size).\n// BLOCK_THREADS = 256; each thread stride-loops over head_dim.\n\nnamespace {\n\nconstexpr int kBlockThreads = 256;\n\n__global__ void __launch_bounds__(kBlockThreads, 4)\nproblem_090_grad_idx_theta_kernel(\n    const __nv_bfloat16* __restrict__ grad_cos,\n    const __nv_bfloat16* __restrict__ grad_sin,\n    const float* __restrict__ idx_theta,\n    float* __restrict__ grad_idx_theta,\n    int head_dim) {\n\n    const int s = blockIdx.x;\n    const int b = blockIdx.y;\n    const int seq_len = gridDim.x;\n    const int row_offset =\n        (b * seq_len + s) * head_dim;\n\n    const int tid = threadIdx.x;\n    for (int d = tid; d < head_dim; d += kBlockThreads) {\n        const int idx = row_offset + d;\n\n        const float idx_t = idx_theta[idx];\n        const float sin_t = sinf(idx_t);\n        const float cos_t = cosf(idx_t);\n\n        const float g_cos = __bfloat162float(grad_cos[idx]);\n        const float g_sin = __bfloat162float(grad_sin[idx]);\n\n        grad_idx_theta[idx] = -g_cos * sin_t + g_sin * cos_t;\n    }\n}\n\n}  // namespace\n\nvoid problem_090_batched_2d_rope_backward_launcher(\n    const torch::Tensor& grad_cos,\n    const torch::Tensor& grad_sin,\n    const torch::Tensor& idx_theta,\n    torch::Tensor& grad_idx_theta,\n    cudaStream_t stream) {\n\n    const int batch_size = static_cast<int>(idx_theta.size(0));\n    const int seq_len = static_cast<int>(idx_theta.size(1));\n    const int head_dim = static_cast<int>(idx_theta.size(2));\n\n    dim3 grid(seq_len, batch_size);\n    dim3 block(kBlockThreads);\n\n    problem_090_grad_idx_theta_kernel<<<grid, block, 0, stream>>>(\n        reinterpret_cast<const __nv_bfloat16*>(\n            grad_cos.data_ptr<at::BFloat16>()),\n        reinterpret_cast<const __nv_bfloat16*>(\n            grad_sin.data_ptr<at::BFloat16>()),\n        idx_theta.data_ptr<float>(),\n        grad_idx_theta.data_ptr<float>(),\n        head_dim);\n}\n"
+    },
+    {
+      "path": "kernel.h",
+      "content": "#pragma once\n\n#ifndef PROBLEM_090_BATCHED_2D_ROPE_POSITION_ENCODING_BACKWARD_KERNEL_H\n#define PROBLEM_090_BATCHED_2D_ROPE_POSITION_ENCODING_BACKWARD_KERNEL_H\n\n#include <cuda_runtime.h>\n#include <torch/extension.h>\n\n// Host launcher for the BF16/fp32 batched 2D RoPE position encoding\n// backward kernel. The reference forward emits cos(idx_theta) and\n// sin(idx_theta); the backward computes:\n//   grad_idx_theta = -grad_cos.f32 * sin(idx_theta)\n//                  +  grad_sin.f32 * cos(idx_theta)\n//\n// Pure per-element kernel: no reductions, no broadcasts, no\n// head-axis collapse. Every output element depends on exactly the\n// three input elements at the same position.\n//\n// One CTA per (b, s) row over head_dim elements; BLOCK_THREADS =\n// 256 (each thread stride-loops over the row). batch_size, seq_len,\n// and head_dim are all workload-variable.\nvoid problem_090_batched_2d_rope_backward_launcher(\n    const torch::Tensor& grad_cos,\n    const torch::Tensor& grad_sin,\n    const torch::Tensor& idx_theta,\n    torch::Tensor& grad_idx_theta,\n    cudaStream_t stream);\n\n#endif  // PROBLEM_090_BATCHED_2D_ROPE_POSITION_ENCODING_BACKWARD_KERNEL_H\n"
+    }
+  ]
+}

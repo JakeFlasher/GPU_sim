@@ -1,0 +1,21 @@
+{
+  "cells": [
+    {
+      "arch": "sm_120",
+      "detail": "cell ('sm_120', 'conv2d_implicit_gemm_bf16_sm80', 'timing_shape') has no dual-source-reconciled repeats",
+      "n_reconciled_repeats": 0,
+      "shape_point": "timing_shape",
+      "slug": "conv2d_implicit_gemm_bf16_sm80",
+      "typed_reason": "duration_dual_source_reconciliation_failed"
+    },
+    {
+      "arch": "sm_120",
+      "detail": "cell ('sm_120', 'gemm_hmma_fp16_sm80', 'trace_l2_accuracy_lg') robust_cv 0.1057 exceeds cv_ceiling 0.05",
+      "n_reconciled_repeats": 6,
+      "shape_point": "trace_l2_accuracy_lg",
+      "slug": "gemm_hmma_fp16_sm80",
+      "typed_reason": "duration_repeatability_failed"
+    }
+  ],
+  "schema_version": 1
+}

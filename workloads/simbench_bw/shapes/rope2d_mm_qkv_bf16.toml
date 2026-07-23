@@ -1,0 +1,27 @@
+schema_version = 1
+slug = "rope2d_mm_qkv_bf16"
+
+# 2D-RoPE for multimodal QKV: applies separate frequency bands to
+# the spatial axes. Same axis schema as standard RoPE — the kernel
+# decomposes head_dim into two equal-size halves rotated under the
+# (h, w) coordinate frequencies.
+
+[[timing_shapes]]
+name = "timing_00"
+axes = { tokens = 4096, head_dim = 128, heads = 32 }
+launch_config = { grid = [64, 4, 1], block = [128, 1, 1] }
+warm_up_iters = 5
+repeat_iters = 30
+
+[[trace_shapes]]
+name = "trace_00"
+axes = { tokens = 512, head_dim = 64, heads = 16 }
+launch_config = { grid = [64, 4, 1], block = [128, 1, 1] }
+predicted_bytes = 83886080
+estimator_source = "static"
+
+[[correctness_shapes]]
+name = "correctness_00"
+axes = { tokens = 64, head_dim = 32, heads = 4 }
+launch_config = { grid = [4, 1, 1], block = [32, 1, 1] }
+digest_kind = "hash"

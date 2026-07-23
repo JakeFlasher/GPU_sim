@@ -1,0 +1,59 @@
+{
+  "generator": "regenerate_ac6_fail_closed_sweep.py",
+  "loop_session": "2026-05-17_11-26-33",
+  "manifest_sha256": "ba7ff98ad18f3d68a12de8f07b8b79ff7d1b2150680466f859ebd413ddc6eec1",
+  "per_cell_fail_closed_audit": {
+    "sm_86__layernorm_fwd_bf16_sm80__timing_shape.json": {
+      "evidence_documented_floor_stddev": 0.1,
+      "evidence_input_cross_cell_stddev": 0.01832926526212725,
+      "headline_validity_failed_reasons": [
+        "calibration_variance_precondition_failed"
+      ],
+      "result_kind": "typed_unavailable",
+      "typed_reason": "calibration_variance_precondition_failed"
+    },
+    "sm_86__rmsnorm_fwd_bf16_sm80__timing_shape.json": {
+      "evidence_documented_floor_stddev": 0.1,
+      "evidence_input_cross_cell_stddev": 0.01832926526212725,
+      "headline_validity_failed_reasons": [
+        "calibration_variance_precondition_failed"
+      ],
+      "result_kind": "typed_unavailable",
+      "typed_reason": "calibration_variance_precondition_failed"
+    },
+    "sm_86__silu_fwd_bf16_sm80__correctness_shape.json": {
+      "evidence_documented_floor_stddev": 0.1,
+      "evidence_input_cross_cell_stddev": 0.01832926526212725,
+      "headline_validity_failed_reasons": [
+        "calibration_variance_precondition_failed"
+      ],
+      "result_kind": "typed_unavailable",
+      "typed_reason": "calibration_variance_precondition_failed"
+    },
+    "sm_86__silu_fwd_bf16_sm80__timing_shape.json": {
+      "evidence_documented_floor_stddev": 0.1,
+      "evidence_input_cross_cell_stddev": 0.01832926526212725,
+      "headline_validity_failed_reasons": [
+        "calibration_variance_precondition_failed"
+      ],
+      "result_kind": "typed_unavailable",
+      "typed_reason": "calibration_variance_precondition_failed"
+    },
+    "sm_86__softmax_safe_bf16_sm80__timing_shape.json": {
+      "evidence_documented_floor_stddev": 0.1,
+      "evidence_input_cross_cell_stddev": 0.01832926526212725,
+      "headline_validity_failed_reasons": [
+        "calibration_variance_precondition_failed"
+      ],
+      "result_kind": "typed_unavailable",
+      "typed_reason": "calibration_variance_precondition_failed"
+    }
+  },
+  "round": "round-11",
+  "variance_precondition_input": {
+    "current_stddev": 0.01832926526212725,
+    "documented_floor_stddev": 0.1,
+    "precondition_status": "not_satisfied",
+    "source_artifact": "data/sm_86_predictor_accuracy_recovery/ac6_variance_trajectory_post_ac4.json"
+  }
+}

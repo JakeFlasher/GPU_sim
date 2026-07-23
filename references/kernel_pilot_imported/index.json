@@ -1,0 +1,292 @@
+{
+  "schema_version": 1,
+  "description": "Trimmed kernel-pilot import for solbench. Originally 18 frameworks + 11 topics; post-pivot trim retains 5 frameworks (CUTLASS, FlashAttention, FlashInfer, PyTorch, Triton-as-algorithm-reference) and 10 topics (no communication \u2014 solbench has 0 multi-GPU work). See KB_IMPORT_README.md for trim rationale.",
+  "frameworks": [
+    {
+      "id": "pytorch",
+      "name": "PyTorch",
+      "repo": "pytorch/pytorch",
+      "url": "https://github.com/pytorch/pytorch",
+      "kernel_paths": [
+        "aten/src/ATen/native/cuda",
+        "aten/src/ATen/native/transformers/cuda",
+        "aten/src/ATen/native/cudnn",
+        "torch/_inductor",
+        "torch/csrc/distributed"
+      ],
+      "tags": [
+        "aten",
+        "elementwise",
+        "reduction",
+        "attention",
+        "sdpa",
+        "cudnn",
+        "inductor",
+        "nccl"
+      ],
+      "page": "routing/frameworks/pytorch.md",
+      "deep_reference": "references/source-guides/pytorch.md"
+    },
+    {
+      "id": "flash-attention",
+      "name": "FlashAttention",
+      "repo": "Dao-AILab/flash-attention",
+      "url": "https://github.com/Dao-AILab/flash-attention",
+      "kernel_paths": [
+        "csrc/flash_attn/src",
+        "csrc/flash_attn/src/flash_fwd_kernel.h",
+        "flash_attn/cute",
+        "hopper",
+        "benchmarks/benchmark_attn.py",
+        "benchmarks/bench_sm90.py"
+      ],
+      "tags": [
+        "attention",
+        "fmha",
+        "online-softmax",
+        "tma",
+        "wgmma",
+        "hopper",
+        "sm80",
+        "sm90",
+        "cutlass",
+        "cute"
+      ],
+      "page": "routing/frameworks/flash-attention.md",
+      "deep_reference": "references/source-guides/flash-attention.md"
+    },
+    {
+      "id": "flashinfer",
+      "name": "FlashInfer",
+      "repo": "flashinfer-ai/flashinfer",
+      "url": "https://github.com/flashinfer-ai/flashinfer",
+      "kernel_paths": [
+        "csrc",
+        "csrc/fmha_v2/fmha",
+        "csrc/fmha_v2/fmha/hopper",
+        "csrc/fmha_v2/fmha/warpspec",
+        "include/flashinfer",
+        "benchmarks/bench_blackwell_attention.py",
+        "python/flashinfer"
+      ],
+      "tags": [
+        "attention",
+        "fmha",
+        "kv-cache",
+        "page-table",
+        "sampling",
+        "speculative",
+        "hopper",
+        "blackwell"
+      ],
+      "page": "routing/frameworks/flashinfer.md",
+      "deep_reference": "references/source-guides/flashinfer.md"
+    },
+    {
+      "id": "cutlass",
+      "name": "CUTLASS / CuTe",
+      "repo": "NVIDIA/cutlass",
+      "url": "https://github.com/NVIDIA/cutlass",
+      "kernel_paths": [
+        "include/cutlass",
+        "include/cute",
+        "examples",
+        "tools/profiler",
+        "python",
+        "media/docs"
+      ],
+      "tags": [
+        "gemm",
+        "matmul",
+        "epilogue",
+        "cute",
+        "tma",
+        "wgmma",
+        "block-scaled",
+        "fp8",
+        "fp4"
+      ],
+      "page": "routing/frameworks/cutlass.md",
+      "deep_reference": "references/source-guides/cutlass.md",
+      "pr_reference": "references/prs/cutlass.md"
+    },
+    {
+      "id": "triton",
+      "name": "Triton",
+      "repo": "triton-lang/triton",
+      "url": "https://github.com/triton-lang/triton",
+      "kernel_paths": [
+        "python/tutorials",
+        "python/triton/language",
+        "python/triton/runtime",
+        "lib/Conversion",
+        "test/TritonGPU"
+      ],
+      "tags": [
+        "triton",
+        "block-pointer",
+        "tma",
+        "atomic",
+        "autotune",
+        "softmax",
+        "matmul"
+      ],
+      "page": "routing/frameworks/triton.md",
+      "deep_reference": "references/source-guides/triton.md"
+    }
+  ],
+  "topics": [
+    {
+      "id": "attention",
+      "name": "Attention / FMHA / Paged",
+      "applies_to": [
+        "flash-attention",
+        "flashinfer",
+        "pytorch",
+        "cutlass",
+        "triton"
+      ],
+      "tags": [
+        "attention",
+        "fmha",
+        "paged",
+        "kv-cache",
+        "softmax",
+        "online"
+      ],
+      "page": "routing/topics/attention.md"
+    },
+    {
+      "id": "matmul-gemm",
+      "name": "GEMM / Tensor-Core matmul",
+      "applies_to": [
+        "cutlass",
+        "triton",
+        "pytorch"
+      ],
+      "tags": [
+        "gemm",
+        "matmul",
+        "tensor-core",
+        "wgmma",
+        "tma",
+        "epilogue"
+      ],
+      "page": "routing/topics/matmul-gemm.md"
+    },
+    {
+      "id": "moe",
+      "name": "Mixture of Experts",
+      "applies_to": [
+        "triton"
+      ],
+      "tags": [
+        "moe",
+        "fused-moe",
+        "grouped-gemm",
+        "align-block-size",
+        "top-k",
+        "permute"
+      ],
+      "page": "routing/topics/moe.md"
+    },
+    {
+      "id": "normalization",
+      "name": "RMSNorm / LayerNorm fused norms",
+      "applies_to": [
+        "pytorch",
+        "triton"
+      ],
+      "tags": [
+        "rmsnorm",
+        "layernorm",
+        "fused-add-norm",
+        "qk-norm",
+        "qknorm"
+      ],
+      "page": "routing/topics/normalization.md"
+    },
+    {
+      "id": "rope",
+      "name": "RoPE / position embeddings",
+      "applies_to": [
+        "flashinfer",
+        "triton"
+      ],
+      "tags": [
+        "rope",
+        "rotary",
+        "embedding",
+        "interleaved",
+        "neox"
+      ],
+      "page": "routing/topics/rope.md"
+    },
+    {
+      "id": "activation-fusion",
+      "name": "Activation / element-wise fusion",
+      "applies_to": [
+        "pytorch",
+        "triton"
+      ],
+      "tags": [
+        "silu",
+        "gelu",
+        "swiglu",
+        "fused-add",
+        "fused-residual"
+      ],
+      "page": "routing/topics/activation-fusion.md"
+    },
+    {
+      "id": "sampling",
+      "name": "Top-k / Top-p sampling, speculative",
+      "applies_to": [
+        "flashinfer"
+      ],
+      "tags": [
+        "top-k",
+        "top-p",
+        "sampling",
+        "logits",
+        "tree-decode",
+        "speculative",
+        "eagle"
+      ],
+      "page": "routing/topics/sampling.md"
+    },
+    {
+      "id": "quantization-fp8",
+      "name": "FP8 / FP4 / INT8 quantization",
+      "applies_to": [
+        "cutlass"
+      ],
+      "tags": [
+        "fp8",
+        "fp4",
+        "int8",
+        "awq",
+        "gptq",
+        "block-scaled",
+        "per-tensor",
+        "per-channel"
+      ],
+      "page": "routing/topics/quantization-fp8.md"
+    },
+    {
+      "id": "kv-cache",
+      "name": "KV-cache / paged memory",
+      "applies_to": [
+        "flashinfer"
+      ],
+      "tags": [
+        "paged-kv",
+        "block-table",
+        "hi-cache",
+        "radix-cache",
+        "prefix-cache"
+      ],
+      "page": "routing/topics/kv-cache.md"
+    }
+  ]
+}

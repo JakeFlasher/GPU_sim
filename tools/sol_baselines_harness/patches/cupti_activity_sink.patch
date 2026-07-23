@@ -1,0 +1,90 @@
+diff --git a/sol-execbench/src/sol_execbench/core/bench/timing.py b/sol-execbench/src/sol_execbench/core/bench/timing.py
+index 328c9a1..0f8bffd 100644
+--- a/sol-execbench/src/sol_execbench/core/bench/timing.py
++++ b/sol-execbench/src/sol_execbench/core/bench/timing.py
+@@ -214,7 +214,76 @@ def bench_gpu_time_with_cupti(
+         kernels: list[CuptiKernelInfo],
+         activities: list,
+     ):
++        # Env-gated activity sink for the counter-free analytics
++        # framework's CUPTI surface. When SOLBENCH_CUPTI_ACTIVITY_OUT is
++        # set, each activity record is also serialized to JSON at the
++        # named path; the canonical in-memory list population is
++        # unchanged so the upstream timing path stays byte-identical
++        # when the env var is unset. We do NOT register a second
++        # CUPTI subscription — this branch lives entirely inside the
++        # existing callback.
++        import json as _json
++        import os as _os
++        _sink_path = _os.environ.get("SOLBENCH_CUPTI_ACTIVITY_OUT")
++        _sink_fp = open(_sink_path, "a") if _sink_path else None
+         for activity in activities:
++            if _sink_fp is not None:
++                # Composite-key fields for the cross-surface join
++                # contract. An extension: in addition to the original
++                # (kind, start_ns, end_ns, name, correlation_id, cbid)
++                # tuple, the sink now emits raw_name +
++                # demangled_kernel_name plus the launch-shape fields
++                # (grid_xyz, block_xyz, dynamic_smem, stream_id) that
++                # the post-hoc nvbit_metrics joiner needs to verify
++                # the full composite tuple. Every new field uses ``getattr(..., None)``
++                # for portability across CUPTI versions that do not
++                # expose the underlying attribute (e.g. on driver/
++                # activity kinds that lack a grid dim).
++                _raw_name = getattr(activity, "name", None)
++                _demangled = None
++                if _raw_name is not None and activity.kind == (
++                    cupti.ActivityKind.CONCURRENT_KERNEL
++                ):
++                    try:
++                        _demangled = _demangle(_raw_name)
++                    except Exception:  # noqa: BLE001
++                        _demangled = None
++                _grid_x = getattr(activity, "grid_x", None)
++                _grid_y = getattr(activity, "grid_y", None)
++                _grid_z = getattr(activity, "grid_z", None)
++                _block_x = getattr(activity, "block_x", None)
++                _block_y = getattr(activity, "block_y", None)
++                _block_z = getattr(activity, "block_z", None)
++                _dyn_smem = getattr(activity, "dynamic_shared_memory", None)
++                if _dyn_smem is None:
++                    _dyn_smem = getattr(activity, "dynamic_smem", None)
++                _stream_id = getattr(activity, "stream_id", None)
++                _sink_fp.write(_json.dumps({
++                    "kind": int(activity.kind),
++                    "start_ns": getattr(activity, "start", None),
++                    "end_ns": getattr(activity, "end", None),
++                    "name": _raw_name,
++                    "raw_name": _raw_name,
++                    "demangled_kernel_name": _demangled,
++                    "correlation_id": getattr(activity, "correlation_id", None),
++                    "cbid": getattr(activity, "cbid", None),
++                    "grid_xyz": (
++                        [_grid_x, _grid_y, _grid_z]
++                        if _grid_x is not None
++                        and _grid_y is not None
++                        and _grid_z is not None
++                        else None
++                    ),
++                    "block_xyz": (
++                        [_block_x, _block_y, _block_z]
++                        if _block_x is not None
++                        and _block_y is not None
++                        and _block_z is not None
++                        else None
++                    ),
++                    "dynamic_smem": _dyn_smem,
++                    "stream_id": _stream_id,
++                }) + "\n")
+             if activity.kind in (
+                 cupti.ActivityKind.CONCURRENT_KERNEL,
+                 cupti.ActivityKind.MEMCPY,
+@@ -236,6 +305,8 @@ def bench_gpu_time_with_cupti(
+                         activity.kind,
+                     )
+                 )
++        if _sink_fp is not None:
++            _sink_fp.close()
+
+     # Check if args are provided (determines how we call fn)
+     if setup is None:

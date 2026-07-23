@@ -1,0 +1,316 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Interim diagnostic report sidecar (post-corpus-expansion)",
+  "description": "Strict schema for the structured sidecar emitted alongside the interim diagnostic report markdown at tools/sm_86_predictor_accuracy_recovery_v2/build_interim_diagnostic_report.py. The sidecar carries per-cell residual decomposition over every HEADLINE_COHORT_13 cell, independent per-bucket L1+L2 geomeans, the variance-precondition verdict mirrored from the variance-trajectory artifact, the top candidate-feature-catalog recommendations, the three hard-target booleans, and the load-bearing plan_1_closure_status. The conditional allOf arms enforce the closure state machine: closed_all_targets_hit requires every hard target true; aborted_unrecoverable_per_user_decision requires the operator override to be accepted AND at least one hard target false; pending_targets_not_yet_hit_plan_1_5_required requires the operator override to be NOT accepted; an accepted override cannot coexist with pending.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "generator",
+    "cohort_size",
+    "cells",
+    "per_bucket_headline",
+    "variance_precondition_verdict",
+    "cross_cell_stddev",
+    "documented_floor_stddev",
+    "ac6_top_recommendations",
+    "hard_targets",
+    "plan_1_closure_status",
+    "partial_closure_override"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "generator": {"type": "string"},
+    "cohort_size": {"type": "integer", "const": 13},
+    "cells": {
+      "type": "array",
+      "minItems": 13,
+      "maxItems": 13,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "arch", "slug", "shape_point",
+          "admission_status",
+          "predictor_design_coverage_bucket",
+          "ncu_truth_l1_fraction", "predicted_l1_hit_rate",
+          "rel_err_l1", "l1_status",
+          "ncu_truth_l2_fraction", "predicted_l2_hit_rate",
+          "rel_err_l2", "l2_status",
+          "signed_residual_l2",
+          "signed_residual_decomposition",
+          "plan_2_candidate"
+        ],
+        "properties": {
+          "arch": {"type": "string"},
+          "slug": {"type": "string"},
+          "shape_point": {"type": "string"},
+          "admission_status": {
+            "type": "string",
+            "enum": [
+              "admitted",
+              "excluded_label_repeatability",
+              "excluded_label_provenance_duplicate",
+              "excluded_join_key_unmatched",
+              "excluded_operator_skipped"
+            ]
+          },
+          "predictor_design_coverage_bucket": {
+            "type": "string",
+            "enum": ["predictor_friendly", "predictor_hostile"]
+          },
+          "ncu_truth_l1_fraction": {"type": ["number", "null"]},
+          "predicted_l1_hit_rate": {"type": ["number", "null"]},
+          "rel_err_l1": {"type": ["number", "null"]},
+          "l1_status": {
+            "type": "string",
+            "enum": [
+              "scalar_present",
+              "bounded_present",
+              "typed_unavailable_persistent"
+            ]
+          },
+          "ncu_truth_l2_fraction": {"type": ["number", "null"]},
+          "predicted_l2_hit_rate": {"type": ["number", "null"]},
+          "rel_err_l2": {"type": ["number", "null"]},
+          "l2_status": {
+            "type": "string",
+            "enum": [
+              "scalar_present",
+              "bounded_present",
+              "typed_unavailable_persistent"
+            ]
+          },
+          "signed_residual_l2": {"type": ["number", "null"]},
+          "signed_residual_decomposition": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "attributed_to_named_bucket",
+              "unattributable_per_cell"
+            ],
+            "properties": {
+              "attributed_to_named_bucket": {
+                "type": ["number", "null"]
+              },
+              "unattributable_per_cell": {
+                "type": ["number", "null"]
+              }
+            }
+          },
+          "plan_2_candidate": {
+            "type": "string",
+            "enum": [
+              "already_meets_target_no_action_needed",
+              "predictor_friendly_plan_2_accuracy_target",
+              "predictor_hostile_physics_challenge_plan_2",
+              "typed_unavailable_persistent"
+            ]
+          }
+        }
+      }
+    },
+    "per_bucket_headline": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["friendly_l1", "friendly_l2", "hostile_l1", "hostile_l2"],
+      "properties": {
+        "friendly_l1": {"$ref": "#/$defs/bucket_block"},
+        "friendly_l2": {"$ref": "#/$defs/bucket_block"},
+        "hostile_l1": {"$ref": "#/$defs/bucket_block"},
+        "hostile_l2": {"$ref": "#/$defs/bucket_block"}
+      }
+    },
+    "variance_precondition_verdict": {
+      "type": "string",
+      "enum": ["satisfied", "not_satisfied"]
+    },
+    "cross_cell_stddev": {"type": "number", "minimum": 0.0},
+    "documented_floor_stddev": {"type": "number", "const": 0.10},
+    "ac6_top_recommendations": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["feature_name", "recommendation_for_plan_2"],
+        "properties": {
+          "feature_name": {"type": "string"},
+          "recommendation_for_plan_2": {
+            "type": "string",
+            "enum": [
+              "predictor_input",
+              "covariate",
+              "discard",
+              "inconclusive"
+            ]
+          }
+        }
+      }
+    },
+    "hard_targets": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "hard_1_friendly_l2_lt_0_15",
+        "hard_2_friendly_l1_lt_0_20",
+        "hard_3_stddev_ge_0_10"
+      ],
+      "properties": {
+        "hard_1_friendly_l2_lt_0_15": {"type": "boolean"},
+        "hard_2_friendly_l1_lt_0_20": {"type": "boolean"},
+        "hard_3_stddev_ge_0_10": {"type": "boolean"}
+      }
+    },
+    "plan_1_closure_status": {
+      "type": "string",
+      "enum": [
+        "closed_all_targets_hit",
+        "pending_targets_not_yet_hit_plan_1_5_required",
+        "aborted_unrecoverable_per_user_decision"
+      ]
+    },
+    "partial_closure_override": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["accepted", "date_iso", "decided_admitted_count", "reason"],
+      "properties": {
+        "accepted": {"type": "boolean"},
+        "date_iso": {"type": "string"},
+        "decided_admitted_count": {"type": "integer", "minimum": 1},
+        "reason": {"type": "string"}
+      }
+    }
+  },
+  "$defs": {
+    "bucket_block": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "n_cells", "n_scalar", "n_bounded",
+        "n_typed_unavailable", "geomean_rel_err"
+      ],
+      "properties": {
+        "n_cells": {"type": "integer", "minimum": 0},
+        "n_scalar": {"type": "integer", "minimum": 0},
+        "n_bounded": {"type": "integer", "minimum": 0},
+        "n_typed_unavailable": {"type": "integer", "minimum": 0},
+        "geomean_rel_err": {"type": ["number", "null"], "minimum": 0.0}
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "plan_1_closure_status": {"const": "closed_all_targets_hit"}
+        },
+        "required": ["plan_1_closure_status"]
+      },
+      "then": {
+        "properties": {
+          "hard_targets": {
+            "properties": {
+              "hard_1_friendly_l2_lt_0_15": {"const": true},
+              "hard_2_friendly_l1_lt_0_20": {"const": true},
+              "hard_3_stddev_ge_0_10": {"const": true}
+            }
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "plan_1_closure_status": {"const": "aborted_unrecoverable_per_user_decision"}
+        },
+        "required": ["plan_1_closure_status"]
+      },
+      "then": {
+        "properties": {
+          "partial_closure_override": {
+            "properties": {"accepted": {"const": true}}
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "plan_1_closure_status": {"const": "pending_targets_not_yet_hit_plan_1_5_required"}
+        },
+        "required": ["plan_1_closure_status"]
+      },
+      "then": {
+        "properties": {
+          "partial_closure_override": {
+            "properties": {"accepted": {"const": false}}
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "partial_closure_override": {
+            "properties": {"accepted": {"const": true}},
+            "required": ["accepted"]
+          }
+        },
+        "required": ["partial_closure_override"]
+      },
+      "then": {
+        "properties": {
+          "plan_1_closure_status": {
+            "not": {"const": "pending_targets_not_yet_hit_plan_1_5_required"}
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "plan_1_closure_status": {"const": "aborted_unrecoverable_per_user_decision"}
+        },
+        "required": ["plan_1_closure_status"]
+      },
+      "then": {
+        "properties": {
+          "hard_targets": {
+            "anyOf": [
+              {"properties": {"hard_1_friendly_l2_lt_0_15": {"const": false}}},
+              {"properties": {"hard_2_friendly_l1_lt_0_20": {"const": false}}},
+              {"properties": {"hard_3_stddev_ge_0_10": {"const": false}}}
+            ]
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {
+          "hard_targets": {
+            "properties": {
+              "hard_1_friendly_l2_lt_0_15": {"const": true},
+              "hard_2_friendly_l1_lt_0_20": {"const": true},
+              "hard_3_stddev_ge_0_10": {"const": true}
+            },
+            "required": [
+              "hard_1_friendly_l2_lt_0_15",
+              "hard_2_friendly_l1_lt_0_20",
+              "hard_3_stddev_ge_0_10"
+            ]
+          }
+        },
+        "required": ["hard_targets"]
+      },
+      "then": {
+        "properties": {
+          "plan_1_closure_status": {
+            "const": "closed_all_targets_hit"
+          }
+        }
+      }
+    }
+  ]
+}

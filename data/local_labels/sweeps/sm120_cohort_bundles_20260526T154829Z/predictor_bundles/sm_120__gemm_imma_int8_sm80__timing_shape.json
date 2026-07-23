@@ -1,0 +1,62 @@
+{
+  "algorithm_version": "smith_eklund_lru_v1",
+  "bootstrap_resamples": 2000,
+  "bootstrap_seed": 0,
+  "cache_layer": "L2",
+  "cache_model_capacity_bytes": 33554432,
+  "cache_model_cross_launch_state_carryover": false,
+  "cache_model_cta_interleave_enabled": false,
+  "cache_model_hrd_second_layer_enabled": false,
+  "cache_model_num_l2_slices": 1,
+  "cache_model_num_l2_slices_source": "constant",
+  "canonical_pre_calibration_features": {
+    "footprint_ratio": 0.8046445846557617,
+    "global_share": 0.0,
+    "gridDim_density": 0.0,
+    "intra_lane_reuse": 0.9996095275283092,
+    "long_rd_tail_mass": 0.0,
+    "raw_prediction": 0.875
+  },
+  "ci_confidence": 0.95,
+  "ci_half_width": 0.0,
+  "ci_high": 0.875,
+  "ci_low": 0.875,
+  "device": "NVIDIA GeForce RTX 5060 Laptop GPU",
+  "epsilon": 0.01,
+  "evidence": {
+    "cross_launch_state_carryover_applied_launch_count": 0,
+    "grid_dim_correction_alpha": 0.0,
+    "grid_dim_correction_penalty": 0.0,
+    "grid_dim_input": null,
+    "launch_count": 1,
+    "per_launch_hit_rates": [
+      0.875
+    ],
+    "populated_launch_count": 1,
+    "predicted_hit_rate_uncorrected": 0.875,
+    "total_observations": 851936
+  },
+  "grid_dim_alpha_source": "sm120_uncalibrated",
+  "input_sidecar_digests": {
+    "dynamic_trace_pb": {
+      "path": "workloads/portable_lcd/results/gemm_imma_int8_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/dynamic_trace.pb",
+      "sha256": "03acdc4480b714db7355d2c4c6901e393b9e7f0cca5d46285c7aa0588c73cac7"
+    },
+    "sector_stream": {
+      "path": "workloads/portable_lcd/results/gemm_imma_int8_sm80/rtx_5060_laptop/sm_120/trace_timing_shape/sector_stream/sector_stream.jsonl",
+      "sha256": "fee6182cdc8e04002bc7c090c4e9d879f442bbbce84b66300b43b3d398be9c5f"
+    }
+  },
+  "manifest_pairing_index": {
+    "arch": "sm_120",
+    "binary_sha256": "f6134d91285b5d153bedddf959b2aa90112c2a78e3ae48d0866671427a385956",
+    "kernel_signature_sha256": "612476892630fc2fdc2209e7f6a93cf82c7ef460fd8ce93f0b8148b8fc192b04",
+    "shape_point": "timing_shape",
+    "slug": "gemm_imma_int8_sm80",
+    "source_commit": "412867fdafbb113b74f570317104ce26924595b6"
+  },
+  "predicted_hit_rate": 0.875,
+  "result_kind": "scalar",
+  "schema_version": 1,
+  "sector_size_bytes": 32
+}

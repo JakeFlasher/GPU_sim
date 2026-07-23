@@ -1,0 +1,43 @@
+{
+  "name": "problem_088_rotary_position_embedding_application_cuda_cpp",
+  "definition": "088_rotary_position_embedding_application",
+  "author": "sol-baselines-codegen",
+  "spec": {
+    "languages": [
+      "cuda_cpp"
+    ],
+    "target_hardware": [
+      "LOCAL"
+    ],
+    "entry_point": "main.cpp::run",
+    "dependencies": [],
+    "destination_passing_style": true,
+    "binding": "torch",
+    "compile_options": {
+      "cflags": [],
+      "cuda_cflags": [
+        "-O3",
+        "--use_fast_math",
+        "-gencode",
+        "arch=compute_86,code=sm_86"
+      ],
+      "ld_flags": [
+        "-lcuda"
+      ]
+    }
+  },
+  "sources": [
+    {
+      "path": "main.cpp",
+      "content": "#include <torch/extension.h>\n#include <ATen/cuda/CUDAContext.h>\n#include \"kernel.h\"\n#include <string>\n\nstatic void check_fp32_contiguous_cuda(\n    const torch::Tensor& tensor, const std::string& name) {\n    TORCH_CHECK(tensor.is_cuda(), name, \" must be a CUDA tensor\");\n    TORCH_CHECK(\n        tensor.dtype() == torch::kFloat32,\n        name, \" must have float32 dtype, got \", tensor.dtype());\n    TORCH_CHECK(tensor.is_contiguous(), name, \" must be contiguous\");\n}\n\n// Destination-passing-style entry. Per definition.json:\n//   query          : [batch_size, num_heads,    seq_len, head_dim=128]  fp32\n//   key            : [batch_size, num_kv_heads, seq_len, head_dim=128]  fp32\n//   cos            : [seq_len, head_dim]  fp32\n//   sin            : [seq_len, head_dim]  fp32\n//   query_rotated  : [batch_size, num_heads,    seq_len, head_dim]  fp32 (DPS)\n//   key_rotated    : [batch_size, num_kv_heads, seq_len, head_dim]  fp32 (DPS)\n//\n// head_dim is pinned at 128. The same kernel runs twice: once for\n// (query, query_rotated), once for (key, key_rotated). num_heads and\n// num_kv_heads are workload-variable.\nvoid run(\n    const torch::Tensor& query,\n    const torch::Tensor& key,\n    const torch::Tensor& cos,\n    const torch::Tensor& sin,\n    torch::Tensor query_rotated,\n    torch::Tensor key_rotated\n) {\n    TORCH_CHECK(query.dim() == 4, \"query must be 4D [B, H, S, D]\");\n    TORCH_CHECK(key.dim() == 4, \"key must be 4D [B, H_kv, S, D]\");\n    TORCH_CHECK(cos.dim() == 2, \"cos must be 2D [S, D]\");\n    TORCH_CHECK(sin.dim() == 2, \"sin must be 2D [S, D]\");\n    TORCH_CHECK(query_rotated.dim() == 4, \"query_rotated must be 4D\");\n    TORCH_CHECK(key_rotated.dim() == 4, \"key_rotated must be 4D\");\n\n    const int64_t head_dim = query.size(3);\n    TORCH_CHECK(head_dim == 128,\n                \"head_dim must be 128 for problem_088, got \", head_dim);\n    TORCH_CHECK(key.size(3) == head_dim,\n                \"key head_dim must match query head_dim\");\n    TORCH_CHECK(cos.size(1) == head_dim &&\n                sin.size(1) == head_dim,\n                \"cos/sin last dim must be head_dim\");\n    TORCH_CHECK(query_rotated.sizes() == query.sizes(),\n                \"query_rotated shape must match query\");\n    TORCH_CHECK(key_rotated.sizes() == key.sizes(),\n                \"key_rotated shape must match key\");\n    TORCH_CHECK(cos.size(0) == query.size(2) &&\n                sin.size(0) == query.size(2),\n                \"cos/sin seq_len must match query seq_len\");\n    TORCH_CHECK(key.size(2) == query.size(2),\n                \"key seq_len must match query seq_len\");\n    TORCH_CHECK(key.size(0) == query.size(0),\n                \"key batch_size must match query batch_size\");\n\n    check_fp32_contiguous_cuda(query, \"query\");\n    check_fp32_contiguous_cuda(key, \"key\");\n    check_fp32_contiguous_cuda(cos, \"cos\");\n    check_fp32_contiguous_cuda(sin, \"sin\");\n    check_fp32_contiguous_cuda(query_rotated, \"query_rotated\");\n    check_fp32_contiguous_cuda(key_rotated, \"key_rotated\");\n\n    cudaStream_t stream = at::cuda::getCurrentCUDAStream();\n    problem_088_rotary_position_embedding_application_launcher(\n        query, cos, sin, query_rotated, stream);\n    problem_088_rotary_position_embedding_application_launcher(\n        key, cos, sin, key_rotated, stream);\n}\n\nPYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {\n    m.def(\n        \"run\", &run,\n        \"fp32 RoPE application: rotates query and key tensors by \"\n        \"precomputed cos/sin tables. Two distinct DPS outputs \"\n        \"(query_rotated, key_rotated). head_dim=128 pinned.\");\n}\n"
+    },
+    {
+      "path": "kernel.cu",
+      "content": "#include \"kernel.h\"\n#include <cuda_runtime.h>\n\n// fp32 RoPE application: rotate query/key tensors by precomputed\n// cos/sin tables.\n//\n//   rotate_half(x)[..., d] = -x[..., d + half_head_dim]  for d < half_head_dim\n//                          =  x[..., d - half_head_dim]  for d >= half_head_dim\n//   x_rotated[..., d]      = x[..., d] * cos[s, d] +\n//                            rotate_half(x)[..., d] * sin[s, d]\n//\n// head_dim = 128 (pinned by the problem definition); half_head_dim =\n// 64. One CTA per (b, h, s) row; BLOCK_THREADS = head_dim so each\n// thread handles exactly one element of the row. The cos and sin\n// tables are indexed by (s, d) only, so they're reused across all\n// (B, H) row CTAs.\n\nnamespace {\n\nconstexpr int kHeadDim = 128;\nconstexpr int kHalfHeadDim = 64;\nconstexpr int kBlockThreads = kHeadDim;\n\n__global__ void __launch_bounds__(kBlockThreads, 8)\nproblem_088_rope_kernel(\n    const float* __restrict__ x,\n    const float* __restrict__ cos_table,\n    const float* __restrict__ sin_table,\n    float* __restrict__ x_rotated,\n    int num_heads,\n    int seq_len) {\n\n    // Grid layout: (s, num_heads, B). Each CTA handles one\n    // (b, h, s) row of head_dim elements.\n    const int s = blockIdx.x;\n    const int h = blockIdx.y;\n    const int b = blockIdx.z;\n    const int d = threadIdx.x;\n\n    const int row_offset =\n        ((b * num_heads + h) * seq_len + s) * kHeadDim;\n    const int cs_offset = s * kHeadDim;\n\n    const float xv = x[row_offset + d];\n\n    // rotate_half partner:\n    //   d < 64  -> partner = d + 64, sign = -1\n    //   d >= 64 -> partner = d - 64, sign = +1\n    int partner;\n    float partner_sign;\n    if (d < kHalfHeadDim) {\n        partner = d + kHalfHeadDim;\n        partner_sign = -1.0f;\n    } else {\n        partner = d - kHalfHeadDim;\n        partner_sign = 1.0f;\n    }\n    const float xv_partner = x[row_offset + partner];\n    const float rh = partner_sign * xv_partner;\n\n    const float cs = cos_table[cs_offset + d];\n    const float sn = sin_table[cs_offset + d];\n\n    x_rotated[row_offset + d] = xv * cs + rh * sn;\n}\n\n}  // namespace\n\nvoid problem_088_rotary_position_embedding_application_launcher(\n    const torch::Tensor& x,\n    const torch::Tensor& cos_table,\n    const torch::Tensor& sin_table,\n    torch::Tensor& x_rotated,\n    cudaStream_t stream) {\n\n    // x is [B, num_heads_or_kv, S, head_dim] fp32.\n    const int batch_size = static_cast<int>(x.size(0));\n    const int num_heads = static_cast<int>(x.size(1));\n    const int seq_len = static_cast<int>(x.size(2));\n\n    dim3 grid(seq_len, num_heads, batch_size);\n    dim3 block(kBlockThreads);\n\n    problem_088_rope_kernel<<<grid, block, 0, stream>>>(\n        x.data_ptr<float>(),\n        cos_table.data_ptr<float>(),\n        sin_table.data_ptr<float>(),\n        x_rotated.data_ptr<float>(),\n        num_heads,\n        seq_len);\n}\n"
+    },
+    {
+      "path": "kernel.h",
+      "content": "#pragma once\n\n#ifndef PROBLEM_088_ROPE_APPLICATION_KERNEL_H\n#define PROBLEM_088_ROPE_APPLICATION_KERNEL_H\n\n#include <cuda_runtime.h>\n#include <torch/extension.h>\n\n// Host launcher for the fp32 RoPE-application kernel.\n//\n// For each input tensor `x` of shape [B, H, S, head_dim=128] fp32,\n// compute:\n//   rotate_half(x)[..., d]   = -x[..., d + 64]   for d in [0, 64)\n//                            =  x[..., d - 64]   for d in [64, 128)\n//   x_rotated[..., d]        = x[..., d] * cos[s, d] +\n//                              rotate_half(x)[..., d] * sin[s, d]\n//\n// `cos` and `sin` are both [S, head_dim] fp32 and are reused across\n// all (B, H) row CTAs. The launcher is parameterized on the input\n// tensor and output destination so the DPS entry can call it twice\n// (once for query\u2192query_rotated, once for key\u2192key_rotated).\nvoid problem_088_rotary_position_embedding_application_launcher(\n    const torch::Tensor& x,\n    const torch::Tensor& cos_table,\n    const torch::Tensor& sin_table,\n    torch::Tensor& x_rotated,\n    cudaStream_t stream);\n\n#endif  // PROBLEM_088_ROPE_APPLICATION_KERNEL_H\n"
+    }
+  ]
+}

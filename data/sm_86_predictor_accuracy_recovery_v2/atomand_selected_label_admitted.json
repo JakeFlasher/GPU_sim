@@ -1,0 +1,41 @@
+{
+  "cells": [
+    {
+      "arch": "sm_86",
+      "binary_sha256": "ed4d15e1a3dc6e2774996cb07eb5088ce456b3e47ada8ca7d84aca6839a2d0ec",
+      "cache_hit_rate_l1tex_sector_pct": 0.0,
+      "cache_hit_rate_l2_sector_pct": 95.99668,
+      "evidence_kind": "live",
+      "kernel_signature_sha256": "3cb859fabb45a0e34f4f0c52c7aa84c78616b726b25162039bbd2dbd09d85840",
+      "l1tex_label_status": "all_zero",
+      "n_repeats": 5,
+      "ncu_metric_version": "ncu_2026.1.x",
+      "profiler_version": "ncu_2026.1.x",
+      "schema_version": 5,
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "global_atomic_and_histogram",
+      "source_commit": "50b3de0a3f9e87fc23f7e717fa4c0f9b7d7c375a",
+      "stddev_l1tex_sector": 0.0,
+      "stddev_l2_sector": 0.014694181438613165
+    },
+    {
+      "arch": "sm_86",
+      "binary_sha256": "03938af34f462516b82342a796d7aca7b3b09224e9696944fb1499e30c75a819",
+      "cache_hit_rate_l1tex_sector_pct": 0.0,
+      "cache_hit_rate_l2_sector_pct": 96.209503,
+      "evidence_kind": "live",
+      "kernel_signature_sha256": "4fb3992cd157e8249d31c791139dfc46b92c82ec97b23aae892e6cd282d33377",
+      "l1tex_label_status": "all_zero",
+      "n_repeats": 5,
+      "ncu_metric_version": "ncu_2026.1.x",
+      "profiler_version": "ncu_2026.1.x",
+      "schema_version": 5,
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "global_atomic_and_return_used",
+      "source_commit": "50b3de0a3f9e87fc23f7e717fa4c0f9b7d7c375a",
+      "stddev_l1tex_sector": 0.0,
+      "stddev_l2_sector": 0.020424204497101854
+    }
+  ],
+  "schema_version": 5
+}

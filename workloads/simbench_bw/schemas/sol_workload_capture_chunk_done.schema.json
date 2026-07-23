@@ -1,0 +1,476 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "simbench_bw/schemas/sol_workload_capture_chunk_done.schema.json",
+  "title": "Sealed additive SOL workload-row capture chunk",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "manifest_kind", "chunk_id", "cohort",
+    "source_commit", "generated_at_utc", "publication_relative_path",
+    "retained_input_owner", "supplemental_matrix", "canonical_matrix",
+    "flashinfer_corpus", "inputs", "preflights",
+    "chunk_membership", "chunk_membership_sha256", "row_count", "counts",
+    "launch_counts", "retained_artifact_bytes", "publication_storage",
+    "attempt_histories", "cell_results",
+    "done_seal_sha256"
+  ],
+  "properties": {
+    "schema_version": {"const": 2},
+    "manifest_kind": {"const": "sol_workload_capture_chunk_done"},
+    "chunk_id": {"type": "string", "minLength": 1},
+    "cohort": {"enum": ["native", "partial_native_row", "reduced_proxy"]},
+    "source_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "generated_at_utc": {"type": "string", "format": "date-time"},
+    "publication_relative_path": {
+      "type": "string", "pattern": "^sol_workload_chunks/[^/]+$"
+    },
+    "retained_input_owner": {"$ref": "#/$defs/retainedInputOwner"},
+    "supplemental_matrix": {"$ref": "#/$defs/matrixPin"},
+    "canonical_matrix": {"$ref": "#/$defs/matrixPin"},
+    "flashinfer_corpus": {"$ref": "#/$defs/flashinferProof"},
+    "inputs": {
+      "type": "object",
+      "additionalProperties": {"$ref": "#/$defs/inputReference"},
+      "propertyNames": {"pattern": "^[a-z0-9_]+$"},
+      "required": [
+        "authority", "pins", "aggregate_budget", "cell_budgets",
+        "metric_registry", "full_coverage_inventory",
+        "live_coverage_inventory", "runnability", "shrink_provenance",
+        "supplemental_matrix", "canonical_matrix"
+      ]
+    },
+    "preflights": {
+      "type": "array", "minItems": 1, "uniqueItems": true,
+      "items": {"$ref": "#/$defs/retainedInputReference"}
+    },
+    "chunk_membership": {
+      "type": "array", "minItems": 1, "maxItems": 16,
+      "uniqueItems": true, "items": {"$ref": "#/$defs/rowKey"}
+    },
+    "chunk_membership_sha256": {"$ref": "#/$defs/sha256"},
+    "row_count": {"type": "integer", "minimum": 1, "maximum": 16},
+    "counts": {
+      "type": "object", "additionalProperties": false,
+      "properties": {
+        "admitted": {"type": "integer", "minimum": 0},
+        "excluded": {"type": "integer", "minimum": 0},
+        "failed": {"type": "integer", "minimum": 0}
+      }
+    },
+    "launch_counts": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "complete_dynamic_launch_set_rows",
+        "typed_incomplete_dynamic_launch_set_rows", "inventory_launches",
+        "trace_complete_launches", "ncu_label_complete_launches",
+        "control_complete_launches"
+      ],
+      "properties": {
+        "complete_dynamic_launch_set_rows": {"type": "integer", "minimum": 0},
+        "typed_incomplete_dynamic_launch_set_rows": {"type": "integer", "minimum": 0},
+        "inventory_launches": {"type": "integer", "minimum": 1},
+        "trace_complete_launches": {"type": "integer", "minimum": 0},
+        "ncu_label_complete_launches": {"type": "integer", "minimum": 0},
+        "control_complete_launches": {"type": "integer", "minimum": 0}
+      }
+    },
+    "retained_artifact_bytes": {"type": "integer", "minimum": 1},
+    "publication_storage": {"$ref": "#/$defs/storageUsage"},
+    "attempt_histories": {
+      "type": "array", "minItems": 1, "maxItems": 16,
+      "items": {"$ref": "#/$defs/attemptHistory"}
+    },
+    "cell_results": {
+      "type": "array", "minItems": 1, "maxItems": 16,
+      "items": {"$ref": "#/$defs/cellResult"}
+    },
+    "done_seal_sha256": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "uuid": {
+      "type": "string",
+      "pattern": "^(?:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}|[0-9a-f]{32})$"
+    },
+    "safeRelativePath": {
+      "type": "string", "minLength": 1,
+      "pattern": "^(?!/)(?!.*\\\\)(?!.*(?:^|/)\\.{1,2}(?:/|$))[^/]+(?:/[^/]+)*$"
+    },
+    "retainedInputOwner": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "marker_name", "marker_sha256", "root_identity_sha256",
+        "campaign_identity_sha256"
+      ],
+      "properties": {
+        "marker_name": {"const": ".sol_workload_capture_root.json"},
+        "marker_sha256": {"$ref": "#/$defs/sha256"},
+        "campaign_identity_sha256": {"$ref": "#/$defs/sha256"},
+        "root_identity_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "inputReference": {
+      "oneOf": [
+        {"$ref": "#/$defs/trackedInputReference"},
+        {"$ref": "#/$defs/retainedInputReference"}
+      ]
+    },
+    "trackedInputReference": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "kind", "role", "repository_path", "source_commit",
+        "owner_relative_path", "source_name", "size_bytes", "sha256",
+        "git_blob_sha256"
+      ],
+      "properties": {
+        "kind": {"const": "tracked_git_blob"},
+        "role": {"type": "string", "pattern": "^[a-z0-9_]+$"},
+        "repository_path": {"$ref": "#/$defs/safeRelativePath"},
+        "source_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+        "owner_relative_path": {"$ref": "#/$defs/safeRelativePath"},
+        "source_name": {
+          "type": "string", "pattern": "^[^/\\\\]+$",
+          "not": {"enum": [".", ".."]}
+        },
+        "size_bytes": {"type": "integer", "minimum": 1},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "git_blob_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "retainedInputReference": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "kind", "role", "owner_relative_path", "source_name",
+        "size_bytes", "sha256"
+      ],
+      "properties": {
+        "kind": {"const": "retained_external_input"},
+        "role": {"type": "string", "pattern": "^[a-z0-9_]+$"},
+        "owner_relative_path": {"$ref": "#/$defs/safeRelativePath"},
+        "source_name": {
+          "type": "string", "pattern": "^[^/\\\\]+$",
+          "not": {"enum": [".", ".."]}
+        },
+        "size_bytes": {"type": "integer", "minimum": 1},
+        "sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "storageUsage": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "logical_bytes", "physical_bytes", "file_count", "unique_inode_count"
+      ],
+      "properties": {
+        "logical_bytes": {"type": "integer", "minimum": 1},
+        "physical_bytes": {"type": "integer", "minimum": 1},
+        "file_count": {"type": "integer", "minimum": 1},
+        "unique_inode_count": {"type": "integer", "minimum": 1}
+      }
+    },
+    "attemptSummary": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "attempt_ordinal", "attempt_id", "state",
+        "journal_start_seal_sha256", "terminal_seal_sha256",
+        "capture_preflight_path", "capture_preflight_sha256",
+        "file_count", "logical_bytes", "tree_inventory_sha256",
+        "attempt_summary_sha256"
+      ],
+      "properties": {
+        "attempt_ordinal": {"type": "integer", "minimum": 1},
+        "attempt_id": {"anyOf": [{"$ref": "#/$defs/sha256"}, {"type": "null"}]},
+        "state": {"enum": ["complete", "failed", "interrupted", "interrupted_before_start"]},
+        "journal_start_seal_sha256": {"anyOf": [{"$ref": "#/$defs/sha256"}, {"type": "null"}]},
+        "terminal_seal_sha256": {"anyOf": [{"$ref": "#/$defs/sha256"}, {"type": "null"}]},
+        "capture_preflight_path": {
+          "anyOf": [{"const": "capture_preflight.json"}, {"type": "null"}]
+        },
+        "capture_preflight_sha256": {"anyOf": [{"$ref": "#/$defs/sha256"}, {"type": "null"}]},
+        "file_count": {"type": "integer", "minimum": 0},
+        "logical_bytes": {"type": "integer", "minimum": 0},
+        "tree_inventory_sha256": {"$ref": "#/$defs/sha256"},
+        "attempt_summary_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "attemptHistory": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "row_key", "selected_attempt_ordinal", "selected_attempt_id",
+        "attempts", "attempts_sha256", "attempt_history_sha256"
+      ],
+      "properties": {
+        "row_key": {"$ref": "#/$defs/rowKey"},
+        "selected_attempt_ordinal": {"type": "integer", "minimum": 1},
+        "selected_attempt_id": {"$ref": "#/$defs/sha256"},
+        "attempts": {
+          "type": "array", "minItems": 1,
+          "items": {"$ref": "#/$defs/attemptSummary"}
+        },
+        "attempts_sha256": {"$ref": "#/$defs/sha256"},
+        "attempt_history_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "rowKey": {
+      "type": "object", "additionalProperties": false,
+      "required": ["slug", "source_workload_uuid", "variant_id"],
+      "properties": {
+        "slug": {"type": "string", "pattern": "^problem_[0-9]{3}_.+$"},
+        "source_workload_uuid": {
+          "$ref": "#/$defs/uuid"
+        },
+        "variant_id": {"type": "string", "pattern": "^(?:native|[0-9a-f]{64})$"}
+      }
+    },
+    "matrixPin": {
+      "type": "object", "additionalProperties": false,
+      "required": ["input_role", "sha256", "matrix_seal_sha256"],
+      "properties": {
+        "input_role": {"enum": ["supplemental_matrix", "canonical_matrix"]},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "matrix_seal_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "axes": {
+      "type": "object",
+      "additionalProperties": {"type": "integer"}
+    },
+    "binding": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "schema_version", "supplemental_matrix_sha256",
+        "supplemental_matrix_seal_sha256", "chunk_id", "row_key",
+        "cohort", "category", "flashinfer_corpus", "launch_scope",
+        "launch_completeness_contract",
+        "claim_scope", "native_shape", "native_predictive",
+        "problem_level_runnable", "variant_contract_sha256",
+        "row_evidence_sha256", "source_workload_index",
+        "source_workload_uuid", "source_axes", "source_row_sha256",
+        "capture_workload_index", "capture_axes", "capture_row_sha256"
+      ],
+      "properties": {
+        "schema_version": {"const": 1},
+        "supplemental_matrix_sha256": {"$ref": "#/$defs/sha256"},
+        "supplemental_matrix_seal_sha256": {"$ref": "#/$defs/sha256"},
+        "chunk_id": {"type": "string", "minLength": 1},
+        "row_key": {"$ref": "#/$defs/rowKey"},
+        "cohort": {"enum": ["native", "partial_native_row", "reduced_proxy"]},
+        "category": {"enum": ["L1", "L2", "FIB", "Quant"]},
+        "flashinfer_corpus": {"$ref": "#/$defs/flashinferCorpus"},
+        "launch_scope": {"const": "all_in_profiler_roi"},
+        "launch_completeness_contract": {
+          "oneOf": [
+            {"$ref": "#/$defs/exhaustiveLaunchContract"},
+            {"$ref": "#/$defs/representativeLaunchContract"}
+          ]
+        },
+        "execution_profile": {
+          "const": "representative_trace_ncu_control_typed_v1"
+        },
+        "claim_scope": {
+          "enum": [
+            "native_workload_row", "partial_native_workload_row_only",
+            "reduced_proxy_bundle_only"
+          ]
+        },
+        "native_shape": {"type": "boolean"},
+        "native_predictive": {"type": "boolean"},
+        "problem_level_runnable": {"type": "boolean"},
+        "variant_contract_sha256": {"$ref": "#/$defs/sha256"},
+        "row_evidence_sha256": {"$ref": "#/$defs/sha256"},
+        "source_workload_index": {"type": "integer", "minimum": 0},
+        "source_workload_uuid": {"$ref": "#/$defs/uuid"},
+        "source_axes": {"$ref": "#/$defs/axes"},
+        "source_row_sha256": {"$ref": "#/$defs/sha256"},
+        "capture_workload_index": {"type": "integer", "minimum": 0},
+        "capture_axes": {"$ref": "#/$defs/axes"},
+        "capture_row_sha256": {"$ref": "#/$defs/sha256"}
+      },
+      "oneOf": [
+        {
+          "not": {"required": ["execution_profile"]},
+          "properties": {
+            "launch_completeness_contract": {
+              "$ref": "#/$defs/exhaustiveLaunchContract"
+            }
+          }
+        },
+        {
+          "required": ["execution_profile"],
+          "properties": {
+            "launch_completeness_contract": {
+              "$ref": "#/$defs/representativeLaunchContract"
+            }
+          }
+        }
+      ]
+    },
+    "exhaustiveLaunchContract": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "inventory_policy", "launch_scope", "trace_requirement",
+        "ncu_label_requirement", "control_requirement", "admission_policy"
+      ],
+      "properties": {
+        "inventory_policy": {"const": "requires_inventory_before_capture"},
+        "launch_scope": {"const": "all_in_profiler_roi"},
+        "trace_requirement": {"const": "every_inventory_launch_complete"},
+        "ncu_label_requirement": {"const": "every_inventory_launch_complete"},
+        "control_requirement": {"const": "every_inventory_launch_complete"},
+        "admission_policy": {"const": "all_three_layers_complete_for_exact_inventory"}
+      }
+    },
+    "representativeLaunchContract": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "inventory_policy", "launch_scope", "trace_requirement",
+        "ncu_label_requirement", "control_requirement", "admission_policy"
+      ],
+      "properties": {
+        "inventory_policy": {"const": "requires_inventory_before_capture"},
+        "launch_scope": {"const": "all_in_profiler_roi"},
+        "trace_requirement": {"const": "every_inventory_launch_complete"},
+        "ncu_label_requirement": {"const": "every_inventory_launch_complete_cycles_only_binding"},
+        "control_requirement": {"const": "complete_or_origin_unresolved_typed_unavailable"},
+        "admission_policy": {"const": "trace_and_ncu_complete_control_typed_nonblocking"}
+      }
+    },
+    "artifact": {
+      "type": "object", "additionalProperties": false,
+      "required": ["relative_path", "sha256", "size_bytes", "artifact_kind"],
+      "properties": {
+        "relative_path": {"$ref": "#/$defs/safeRelativePath"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "size_bytes": {"type": "integer", "minimum": 0},
+        "artifact_kind": {"type": "string", "minLength": 1}
+      }
+    },
+    "flashinferCorpus": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "policy", "category", "environment_variable", "injection_policy",
+        "root", "data_annex_manifest_path", "data_annex_manifest_sha256",
+        "filtered_manifest_sha256", "file_count", "safetensors_count"
+      ],
+      "properties": {
+        "policy": {"const": "verified_fib_only"},
+        "category": {"enum": ["L1", "L2", "FIB", "Quant"]},
+        "environment_variable": {"const": "FLASHINFER_TRACE_DIR"},
+        "injection_policy": {"enum": [
+          "verified_absolute_root", "forbidden_remove_ambient"
+        ]},
+        "root": {"type": ["string", "null"]},
+        "data_annex_manifest_path": {"const": "evidence/manifests/data_annex.sha256"},
+        "data_annex_manifest_sha256": {"$ref": "#/$defs/sha256"},
+        "filtered_manifest_sha256": {"$ref": "#/$defs/sha256"},
+        "file_count": {"const": 5244},
+        "safetensors_count": {"const": 2611}
+      }
+    },
+    "flashinferProof": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "root_repo_path", "data_annex_manifest_path",
+        "data_annex_manifest_sha256", "filtered_manifest_sha256",
+        "file_count", "safetensors_count", "corpus_identity_sha256"
+      ],
+      "properties": {
+        "root_repo_path": {"const": "data/annex/flashinfer_trace"},
+        "data_annex_manifest_path": {
+          "const": "evidence/manifests/data_annex.sha256"
+        },
+        "data_annex_manifest_sha256": {"$ref": "#/$defs/sha256"},
+        "filtered_manifest_sha256": {"$ref": "#/$defs/sha256"},
+        "file_count": {"const": 5244},
+        "safetensors_count": {"const": 2611},
+        "corpus_identity_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "cellResult": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "roster_source", "slug", "authority_cell_sha256", "disposition",
+        "typed_reason", "detail", "capture_preflight_sha256",
+        "capture_started_at_utc", "admission_run_id", "supersedes",
+        "prior_preparation_failures", "prior_capture_defect_attempts",
+        "definition_equivalence", "definition_equivalence_attestation_sha256",
+        "launch_completeness", "artifacts", "workload_row_binding"
+      ],
+      "properties": {
+        "roster_source": {"const": "sol_execbench"},
+        "slug": {"type": "string", "minLength": 1},
+        "authority_cell_sha256": {"$ref": "#/$defs/sha256"},
+        "disposition": {"enum": ["admitted", "failed"]},
+        "typed_reason": {"type": ["string", "null"]},
+        "detail": {"type": ["string", "null"]},
+        "capture_preflight_sha256": {"$ref": "#/$defs/sha256"},
+        "capture_started_at_utc": {"type": "string", "format": "date-time"},
+        "admission_run_id": {"$ref": "#/$defs/sha256"},
+        "supersedes": {"type": ["object", "null"]},
+        "prior_preparation_failures": {"type": "array"},
+        "prior_capture_defect_attempts": {"type": "array"},
+        "definition_equivalence": {"type": ["object", "null"]},
+        "definition_equivalence_attestation_sha256": {"type": ["string", "null"]},
+        "launch_completeness": {"$ref": "#/$defs/launchCompleteness"},
+        "artifacts": {"type": "array", "minItems": 1, "items": {"$ref": "#/$defs/artifact"}},
+        "workload_row_binding": {"$ref": "#/$defs/binding"}
+      }
+    },
+    "launchCompleteness": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "schema_version", "launch_scope", "contract", "status",
+        "launch_inventory_sha256", "inventory_launch_count",
+        "trace_launch_sequence_sha256", "ncu_replay_sequence_sha256",
+        "trace_ncu_sequence_equal",
+        "trace_complete_launch_count", "ncu_label_complete_launch_count",
+        "control_complete_launch_count", "launches", "completeness_sha256"
+      ],
+      "properties": {
+        "schema_version": {"const": 1},
+        "launch_scope": {"const": "all_in_profiler_roi"},
+        "contract": {"$ref": "#/$defs/binding/properties/launch_completeness_contract"},
+        "status": {"enum": [
+          "complete_dynamic_launch_set",
+          "typed_incomplete_dynamic_launch_set"
+        ]},
+        "launch_inventory_sha256": {"$ref": "#/$defs/sha256"},
+        "trace_launch_sequence_sha256": {"$ref": "#/$defs/sha256"},
+        "ncu_replay_sequence_sha256": {"anyOf": [
+          {"$ref": "#/$defs/sha256"}, {"type": "null"}
+        ]},
+        "trace_ncu_sequence_equal": {"type": "boolean"},
+        "inventory_launch_count": {"type": "integer", "minimum": 1},
+        "trace_complete_launch_count": {"type": "integer", "minimum": 0},
+        "ncu_label_complete_launch_count": {"type": "integer", "minimum": 0},
+        "control_complete_launch_count": {"type": "integer", "minimum": 0},
+        "launches": {
+          "type": "array", "minItems": 1,
+          "items": {
+            "type": "object", "additionalProperties": false,
+            "required": [
+              "launch_ordinal", "launch_identity_sha256", "kernel_name",
+              "trace_complete", "ncu_label_complete", "ncu_report_sha256",
+              "ncu_label_typed_reason", "control_complete",
+              "control_outcome", "control_typed_reason"
+            ],
+            "properties": {
+              "launch_ordinal": {"type": "integer", "minimum": 0},
+              "launch_identity_sha256": {"$ref": "#/$defs/sha256"},
+              "kernel_name": {"type": "string", "minLength": 1},
+              "trace_complete": {"type": "boolean"},
+              "ncu_label_complete": {"type": "boolean"},
+              "ncu_report_sha256": {"anyOf": [
+                {"$ref": "#/$defs/sha256"}, {"type": "null"}
+              ]},
+              "ncu_label_typed_reason": {"type": ["string", "null"]},
+              "control_complete": {"type": "boolean"},
+              "control_outcome": {"type": ["string", "null"]},
+              "control_typed_reason": {"type": ["string", "null"]}
+            }
+          }
+        },
+        "completeness_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    }
+  }
+}

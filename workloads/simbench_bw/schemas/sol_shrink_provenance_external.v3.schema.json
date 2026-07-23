@@ -1,0 +1,193 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "simbench_bw/schemas/sol_shrink_provenance_external.v3.schema.json",
+  "title": "sm_86 SOL-ExecBench external geometry-model provenance stamp v3",
+  "description": "Strict per-row geometry proxy provenance used only by the fresh external-v3 shrink authority. Historical schema bytes and artifacts remain unchanged.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "cell_id",
+    "family",
+    "model",
+    "static_floor",
+    "native_shape",
+    "classification",
+    "native_predictive",
+    "claim_scope",
+    "regime_flags",
+    "ridge_flop_per_byte"
+  ],
+  "properties": {
+    "cell_id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "family": {
+      "type": "string",
+      "minLength": 1
+    },
+    "gpu": {
+      "type": "object"
+    },
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "model_id",
+        "ridge_flop_per_byte"
+      ],
+      "properties": {
+        "model_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "ridge_flop_per_byte": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        }
+      }
+    },
+    "static_floor": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "bytes",
+        "fit_limit_bytes",
+        "fits"
+      ],
+      "properties": {
+        "bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "fit_limit_bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "fits": {
+          "type": "boolean"
+        }
+      }
+    },
+    "native_shape": {
+      "type": "object"
+    },
+    "native_shape_ref": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "native_footprint_gib": {
+      "type": "number",
+      "minimum": 0
+    },
+    "classification": {
+      "type": "string",
+      "enum": [
+        "shape_adjusted",
+        "reduced_representative",
+        "unavailable::oom_shape_gated",
+        "native_captured_via_replay_mode"
+      ]
+    },
+    "native_predictive": {
+      "const": false
+    },
+    "claim_scope": {
+      "const": "reduced_shape_only"
+    },
+    "regime_flags": {
+      "type": "array",
+      "uniqueItems": true,
+      "items": {
+        "enum": [
+          "l2",
+          "roofline"
+        ]
+      }
+    },
+    "ridge_flop_per_byte": {
+      "type": "number",
+      "exclusiveMinimum": 0
+    },
+    "reduced_shape": {
+      "type": "object"
+    },
+    "reduced_footprint_gib": {
+      "type": "number",
+      "minimum": 0
+    },
+    "shrink_vector": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "dim",
+          "from",
+          "to",
+          "factor"
+        ],
+        "properties": {
+          "dim": {
+            "type": "string",
+            "minLength": 1
+          },
+          "from": {
+            "type": "number"
+          },
+          "to": {
+            "type": "number"
+          },
+          "factor": {
+            "type": [
+              "number",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    "replay_mode": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "l2_verdict": {
+      "type": "object"
+    },
+    "roofline_verdict": {
+      "type": "object"
+    },
+    "occupancy_verdict": {
+      "type": "object"
+    },
+    "nearest_miss": {
+      "type": [
+        "object",
+        "null"
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": [
+          "reduced_shape"
+        ]
+      },
+      "then": {
+        "required": [
+          "reduced_footprint_gib",
+          "shrink_vector",
+          "replay_mode",
+          "l2_verdict",
+          "roofline_verdict",
+          "occupancy_verdict"
+        ]
+      }
+    }
+  ]
+}

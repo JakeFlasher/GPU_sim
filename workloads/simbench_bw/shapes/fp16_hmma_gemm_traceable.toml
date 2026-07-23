@@ -1,0 +1,32 @@
+schema_version = 1
+slug = "fp16_hmma_gemm_traceable"
+
+# FP16 HMMA microbench (m16n8k16). FP32 matmul reference of the same
+# (M, N, K) shape under the FP16 fma_chain tolerance band.
+
+[[timing_shapes]]
+name = "timing_00"
+axes = { m = 1024, n = 1024, k = 4096 }
+launch_config = { grid = [64, 128, 1], block = [32, 1, 1] }
+warm_up_iters = 5
+repeat_iters = 30
+
+[[trace_shapes]]
+name = "trace_00"
+axes = { m = 32, n = 16, k = 64 }
+launch_config = { grid = [2, 2, 1], block = [32, 1, 1] }
+predicted_bytes = 5242880
+estimator_source = "static"
+
+[[trace_shapes]]
+name = "trace_l2_accuracy_xl"
+axes = { m = 32, n = 16, k = 256 }
+launch_config = { grid = [2, 2, 1], block = [32, 1, 1] }
+predicted_bytes = 20971520
+estimator_source = "static"
+
+[[correctness_shapes]]
+name = "correctness_00"
+axes = { m = 32, n = 16, k = 64 }
+launch_config = { grid = [2, 2, 1], block = [32, 1, 1] }
+digest_kind = "reduction_summary"

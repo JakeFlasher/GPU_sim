@@ -1,0 +1,91 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "simbench_bw/schemas/timing_candidate_coverage_verdict.schema.json",
+  "title": "Timing candidate coverage verdict",
+  "description": "Terminal verdict for current-scope task5 candidate-family coverage over the long-duration cohort.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_kind",
+    "arch",
+    "source_commit",
+    "terminal_state",
+    "prevents_overall_research_success",
+    "coverage_limits_artifact",
+    "required_family_buckets",
+    "uncovered_required_families",
+    "typed_reason",
+    "detail"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "artifact_kind": {"type": "string", "const": "timing_candidate_coverage_verdict"},
+    "arch": {"type": "string", "const": "sm_86"},
+    "source_commit": {"type": "string", "minLength": 1},
+    "terminal_state": {
+      "type": "string",
+      "enum": ["research_success", "verdict_falsification"]
+    },
+    "prevents_overall_research_success": {"type": "boolean"},
+    "coverage_limits_artifact": {"$ref": "#/$defs/artifact_ref"},
+    "required_family_buckets": {
+      "type": "array",
+      "prefixItems": [
+        {"const": "gemm_family"},
+        {"const": "conv"},
+        {"const": "attention"},
+        {"const": "memory_stress"}
+      ],
+      "minItems": 4,
+      "maxItems": 4
+    },
+    "uncovered_required_families": {
+      "type": "array",
+      "minItems": 0,
+      "items": {
+        "type": "string",
+        "enum": ["gemm_family", "conv", "attention", "memory_stress"]
+      },
+      "uniqueItems": true
+    },
+    "typed_reason": {"type": ["string", "null"]},
+    "detail": {"type": "string", "minLength": 1}
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"terminal_state": {"const": "research_success"}}},
+      "then": {
+        "properties": {
+          "prevents_overall_research_success": {"const": false},
+          "uncovered_required_families": {"maxItems": 0},
+          "typed_reason": {"type": "null"}
+        }
+      }
+    },
+    {
+      "if": {"properties": {"terminal_state": {"const": "verdict_falsification"}}},
+      "then": {
+        "properties": {
+          "prevents_overall_research_success": {"const": true},
+          "uncovered_required_families": {"minItems": 1},
+          "typed_reason": {
+            "type": "string",
+            "const": "non_gemm_long_candidate_path_not_populated"
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "artifact_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1},
+        "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+      }
+    }
+  }
+}

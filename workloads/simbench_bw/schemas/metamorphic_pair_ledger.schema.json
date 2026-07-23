@@ -1,0 +1,139 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "simbench_bw/schemas/metamorphic_pair_ledger.schema.json",
+  "title": "Per-mechanism identifiability ledger over metamorphic pairs",
+  "description": "Closed-object schema for the load-bearing per-mechanism identifiability ledger emitted by `tools/metamorphic_pairs/` after the pre-registration freeze tag has been applied. The ledger reports, for each `(mechanism, kernel)` cell, a typed verdict: whether the measured fingerprint difference between the paired shapes `P_a` and `P_b` is statistically distinguishable per the pre-registered effect-size threshold combined with multiple-comparison correction; whether the predicted fingerprint difference matches in sign and approximate magnitude; and whether the cell is `inconclusive_undersampled` because the pre-roster power analysis did not establish the minimum detectable effect at this cell. Negative-control pairs (predicted indistinguishable) are admitted into the ledger as integrity checks; a negative-control pair reported as `identifiable_at_threshold` flags the entire ledger with `negative_control_failed` and the mechanism panel cannot be trusted.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "ledger_id",
+    "claim_scope",
+    "mechanism_panel_ref",
+    "power_analysis_ref",
+    "mechanism_confusion_matrix_ref",
+    "mcc_method",
+    "cells",
+    "ledger_status"
+  ],
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "ledger_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9_-]{8,64}$",
+      "description": "Stable identifier for this ledger emission. Generated at emission time; unique per ledger commit."
+    },
+    "claim_scope": {
+      "type": "string",
+      "enum": ["measured_local", "methodology_transfer_only", "deferred"]
+    },
+    "mechanism_panel_ref": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Repo-relative path to the pre-registered mechanism panel TOML enumerating the mechanisms this ledger reports on. Frozen pre-registration artifact."
+    },
+    "power_analysis_ref": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Repo-relative path to the pre-roster power-analysis report establishing per-mechanism minimum detectable effect. Frozen pre-registration artifact."
+    },
+    "mechanism_confusion_matrix_ref": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Repo-relative path to `mechanism_confusion_matrix.toml` enumerating which mechanism pairs are expected separable / ambiguous / impossible under counter-free observables. Frozen pre-registration artifact."
+    },
+    "mcc_method": {
+      "type": "string",
+      "enum": ["bonferroni", "benjamini_hochberg"],
+      "description": "Multiple-comparison correction method applied per cell. Frozen at pre-registration time; emitting a verdict before the MCC primitive is registered triggers `identifiability_ledger_emitted_without_mcc`."
+    },
+    "cells": {
+      "type": "array",
+      "minItems": 1,
+      "items": { "$ref": "#/$defs/per_cell_record" }
+    },
+    "ledger_status": {
+      "type": "string",
+      "enum": [
+        "ledger_admitted",
+        "negative_control_failed",
+        "ledger_emitted_without_mcc"
+      ],
+      "description": "Aggregate ledger status. `negative_control_failed` is set when at least one negative-control pair is reported as `identifiable_at_threshold`; the mechanism panel cannot be trusted in that case. `ledger_emitted_without_mcc` is set when the ledger was emitted before the multiple-comparison-correction primitive was registered in the metric framework."
+    }
+  },
+  "$defs": {
+    "per_cell_record": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mechanism_id",
+        "kernel_slug",
+        "data_provenance",
+        "verdict",
+        "effect_size",
+        "ci_lower",
+        "ci_upper",
+        "n_pairs",
+        "is_negative_control",
+        "mcc_corrected_p_value",
+        "pre_registered_effect_size_threshold"
+      ],
+      "properties": {
+        "mechanism_id": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$",
+          "description": "Stable identifier for the mechanism this cell isolates (e.g. `gto_scheduler`, `l1_sector_model`, `mshr_coalescing`, `mma_sync_per_precision_latency`, `shared_atomic_conflict_resolution`, `cluster_barrier`)."
+        },
+        "kernel_slug": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9_]*$"
+        },
+        "data_provenance": {
+          "type": "string",
+          "enum": ["measured", "synthetic"],
+          "description": "Provenance class for this cell. Synthetic cells validate the gate software end-to-end; only measured cells carry scientific identifiability claims."
+        },
+        "verdict": {
+          "type": "string",
+          "enum": [
+            "identifiable_at_threshold",
+            "not_identifiable",
+            "inconclusive_undersampled"
+          ],
+          "description": "Per-cell typed verdict. `not_identifiable` is a first-class scientific result delineating the boundary of counter-free identifiability, NOT a failure. `inconclusive_undersampled` indicates the pre-roster minimum-detectable-effect was not satisfied for this cell; the cell remains in the ledger surfaced explicitly rather than being scoped out."
+        },
+        "effect_size": {
+          "type": "number",
+          "description": "Measured effect size for the (mechanism, kernel) cell, in fingerprint-difference units defined by the per-axis distance metric registered in the metric framework."
+        },
+        "ci_lower": { "type": "number" },
+        "ci_upper": { "type": "number" },
+        "n_pairs": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of metamorphic pairs contributing to this cell's statistic. Must satisfy the per-mechanism sample-size requirement from the pre-roster power analysis."
+        },
+        "is_negative_control": {
+          "type": "boolean",
+          "description": "True iff this cell is a negative-control pair. Negative-control pairs are predicted indistinguishable; a negative-control reported as `identifiable_at_threshold` flags the entire ledger with `negative_control_failed`. Negative-control pairs are excluded from threshold-fitting per the closure plan's negative-control discipline."
+        },
+        "mcc_corrected_p_value": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Multiple-comparison-corrected p-value for the cell, computed via mcc_method."
+        },
+        "pre_registered_effect_size_threshold": {
+          "type": "number",
+          "description": "Frozen pre-registered effect-size threshold for the cell's mechanism."
+        },
+        "mde_precondition_status": {
+          "type": "string",
+          "enum": ["mde_satisfied", "mde_insufficient"],
+          "description": "Pre-roster minimum-detectable-effect status. `mde_insufficient` cells whose verdict is `identifiable_at_threshold` trigger `identifiability_claim_underpowered`."
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "tolerance_ns_calibrated": 110352,
+  "calibration_status": "calibrated",
+  "spec_default_relative_tolerance": 0.05,
+  "spec_default_absolute_floor_ns": 5000,
+  "calibration_workload_slug": "rmsnorm_fwd_bf16",
+  "calibration_workload_shape": "timing_shapes::correctness_calibration",
+  "calibration_target_platform": "rtx_3090_ti",
+  "notes": "tolerance_ns_calibrated is the calibrated ABSOLUTE FLOOR for the dual-source reconciliation bound \u2014 NOT a full replacement for the hybrid contract. Both the collector library (cupti_activity_collector.cu) and the validator (validate.py::_check_cupti_sidecar_semantics) compute the canonical effective bound as `max(0.05 * cuda_event_wall_time_ms * 1e6, max(tolerance_ns_calibrated_or_5000, 5000))`. The calibrated value can only RAISE the absolute branch above the spec-default 5000 ns; the relative 5% branch is always honored, so longer-duration kernels see the looser 5%-of-duration bound. When tolerance_ns_calibrated is null, the formula reduces to the spec-default `max(0.05 * cuda_event_wall_time_ms * 1e6, 5000)`. The previous calibrated value (130560 ns) and its supporting 100-repeat |gap_ns| distribution measured on the now-retired RTX 5060 Laptop have been REMOVED on this branch \u2014 the architectural generation differs between the 5060 (sm_120 Blackwell) and the local RTX 3090 Ti (sm_86 Ampere) by three full GPU generations, so the prior calibration cannot be projected forward to the new local host nor used to anchor the cloud RTX PRO 6000 Blackwell target. To regenerate: (1) build the collector against libcupti on the local RTX 3090 Ti, (2) execute the rmsnorm_fwd_bf16 vertical-slice run with `--enable-cupti-activity`, (3) run `python3 workloads/simbench_bw/calibrate_dual_source_tolerance.py --sidecar-dir <results dir>` to compute the empirical |gap_ns| distribution and populate tolerance_ns_calibrated with `max(p99(|gap_ns|), 5000)`. The collector's --calibrated-tolerance-ns CLI flag accepts -1 to mean 'use spec default'; the orchestrator passes -1 until tolerance_ns_calibrated is non-null.",
+  "calibration_policy": "p99_with_floor",
+  "calibration_run_git_sha": "a0cabd4e338762aad950c28b61843a091911b8b7",
+  "calibration_run_timestamp_utc": "2026-05-07T12:09:59Z",
+  "calibration_n_repeats": 1000,
+  "calibration_gap_distribution_ns": {
+    "count": 1000,
+    "min": 30816,
+    "p50": 69712,
+    "p95": 83106,
+    "p99": 110352,
+    "max": 454624,
+    "mean": 72234.777,
+    "stddev": 16183.849960587802
+  }
+}

@@ -1,0 +1,97 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "simbench_bw/schemas/roofline_coordinate.schema.json",
+  "title": "Per-kernel roofline coordinate projection",
+  "description": "Closed-object schema for the per-kernel roofline-coordinate sidecar emitted by the shape-sweep elasticity fitter. Each record reports the operational intensity of the kernel, achieved bandwidth in GB/s, and resulting roofline-region label (compute-bound / L1-BW-bound / L2-BW-bound / HBM-BW-bound / latency-bound) fit from SimBench-BW shape sweeps, CUPTI Activity wall-clock, NVBit trace summaries, and NVML covariates. Records whose shape-sweep slope fit produces an R² below the pre-registered minimum are marked `roofline_fit_unreliable` and excluded from the cross-kernel map; records whose region label is inconsistent with the corresponding phase ledger emit `roofline_region_inconsistent_with_phase_ledger`.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "slug",
+    "shape_sweep_id",
+    "claim_scope",
+    "operational_intensity_flop_per_byte",
+    "achieved_bandwidth_gbps",
+    "roofline_region_label",
+    "fit_diagnostics"
+  ],
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "slug": { "type": "string", "pattern": "^[a-z][a-z0-9_]*$" },
+    "shape_sweep_id": {
+      "type": "string",
+      "minLength": 1,
+      "description": "Identifier for the shape sweep this record was fit against; the sweep is itself a frozen artifact registered in the pre-registered shape-sweep TOML."
+    },
+    "claim_scope": {
+      "type": "string",
+      "enum": ["measured_local", "methodology_transfer_only", "deferred"]
+    },
+    "operational_intensity_flop_per_byte": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Operational intensity in floating-point operations per byte of memory traffic. Computed from the kernel's static FLOP count divided by measured byte traffic at the dominant memory level."
+    },
+    "achieved_bandwidth_gbps": {
+      "type": "number",
+      "minimum": 0,
+      "description": "Achieved bandwidth at the kernel's operating point, GB/s."
+    },
+    "roofline_region_label": {
+      "type": "string",
+      "enum": [
+        "compute_bound",
+        "l1_bw_bound",
+        "l2_bw_bound",
+        "hbm_bw_bound",
+        "latency_bound",
+        "roofline_fit_unreliable"
+      ],
+      "description": "Roofline-region classification. The five primary labels are mutually exclusive admissible regions; `roofline_fit_unreliable` is the diagnostic label assigned when the shape-sweep slope fit produces an R² below the pre-registered minimum and the cell is excluded from the cross-kernel map."
+    },
+    "fit_diagnostics": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["r_squared", "n_sweep_points", "phase_ledger_consistency_status"],
+      "properties": {
+        "r_squared": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "description": "Coefficient of determination for the shape-sweep slope fit."
+        },
+        "n_sweep_points": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Number of shape-sweep points contributing to the fit."
+        },
+        "phase_ledger_consistency_status": {
+          "type": "string",
+          "enum": [
+            "consistent",
+            "roofline_region_inconsistent_with_phase_ledger",
+            "roofline_consistency_check_skipped_phase_ledger_unavailable"
+          ],
+          "description": "Cross-check result against the kernel's paired phase cycle ledger. The skipped status is set when the kernel's phase ledger was excluded from upstream consumers (overhead exceeded or boundary mapping unresolved); the cross-kernel map keeps the row but does not report a consistency verdict for that cell."
+        },
+        "phase_ledger_latency_floor_cycles": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "phase-ledger-derived latency floor used in the consistency check, when available. Absent when phase_ledger_consistency_status is the skipped value."
+        }
+      }
+    },
+    "anchors": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["latency_table_ref"],
+      "properties": {
+        "latency_table_ref": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Repo-relative path to the artifact that anchored the latency or phase-cycle floor used in this fit."
+        }
+      }
+    }
+  }
+}

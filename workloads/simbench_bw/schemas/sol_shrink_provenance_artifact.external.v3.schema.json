@@ -1,0 +1,963 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "simbench_bw/schemas/sol_shrink_provenance_artifact.external.v3.schema.json",
+  "title": "sm_86 SOL-ExecBench external shrink/proxy provenance authority v3",
+  "description": "Fresh portable shrink authority. Historical v1/v2 schemas and artifacts are unchanged. External children are owner-relative and hash-manifested.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_id",
+    "arch",
+    "sku",
+    "native_env_hash",
+    "provenance_contract_version",
+    "publication_state",
+    "shrink_contract_version",
+    "source_commit",
+    "source_worktree_state",
+    "source_worktree_state_sha256",
+    "runnability_name",
+    "runnability_sha256",
+    "runnability_resume_identity_sha256",
+    "runnability_external_campaign_owner",
+    "probe_contract_sha256",
+    "producer_sha256",
+    "calculator_sha256",
+    "provenance_schema_sha256",
+    "artifact_schema_sha256",
+    "model_registry_sha256",
+    "model_threshold_sha256",
+    "target_count",
+    "target_set_sha256",
+    "targets",
+    "source_closure_file_count",
+    "source_closure_sha256",
+    "source_closure",
+    "provenance_output_name",
+    "checkpoint_output_name",
+    "shrink_plan_identity_sha256",
+    "reduced_output_owner",
+    "shrink_resume_identity_sha256",
+    "external_child_manifest",
+    "cells",
+    "prior_host_capacity_reconciliation"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "artifact_id": {
+      "const": "sm86_sol_shrink_provenance_external_v3"
+    },
+    "arch": {
+      "const": "sm_86"
+    },
+    "sku": {
+      "const": "rtx_3090_ti"
+    },
+    "native_env_hash": {
+      "$ref": "#/$defs/sha256"
+    },
+    "provenance_contract_version": {
+      "const": 3
+    },
+    "publication_state": {
+      "const": "complete"
+    },
+    "shrink_contract_version": {
+      "const": 1
+    },
+    "source_commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "source_worktree_state": {
+      "type": "array",
+      "maxItems": 0
+    },
+    "source_worktree_state_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "runnability_name": {
+      "$ref": "#/$defs/directChildName"
+    },
+    "runnability_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "runnability_resume_identity_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "runnability_external_campaign_owner": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "sha256",
+        "owner_seal_sha256"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[^/\\\\]+$",
+          "not": {
+            "enum": [
+              ".",
+              ".."
+            ]
+          }
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "owner_seal_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "probe_contract_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "producer_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "calculator_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "provenance_schema_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "artifact_schema_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "model_registry_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "model_threshold_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "target_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "target_set_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "targets": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/target"
+      }
+    },
+    "source_closure_file_count": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "source_closure_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "source_closure": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/sourceFile"
+      }
+    },
+    "provenance_output_name": {
+      "$ref": "#/$defs/directChildName"
+    },
+    "checkpoint_output_name": {
+      "$ref": "#/$defs/directChildName"
+    },
+    "shrink_plan_identity_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "reduced_output_owner": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "sha256",
+        "owner_seal_sha256"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[^/\\\\]+$",
+          "not": {
+            "enum": [
+              ".",
+              ".."
+            ]
+          }
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "owner_seal_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "shrink_resume_identity_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "external_child_manifest": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/child"
+      },
+      "uniqueItems": true
+    },
+    "cells": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/v3Cell"
+      }
+    },
+    "prior_host_capacity_reconciliation": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      }
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "directChildName": {
+      "type": "string",
+      "pattern": "^[^/\\\\]+$",
+      "not": {
+        "enum": [
+          ".",
+          ".."
+        ]
+      }
+    },
+    "safeRelativePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[^\\u0000]+$",
+      "not": {
+        "anyOf": [
+          {
+            "pattern": "^/"
+          },
+          {
+            "pattern": "\\\\"
+          },
+          {
+            "pattern": "(^|/)\\.{1,2}(/|$)"
+          },
+          {
+            "pattern": "//"
+          },
+          {
+            "pattern": "/$"
+          }
+        ]
+      }
+    },
+    "definitionDelta": {
+      "type": "array",
+      "description": "Canonical producer order is ascending json_pointer; JSON Schema enforces the closed, unique member shape.",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "json_pointer",
+          "from",
+          "to"
+        ],
+        "properties": {
+          "json_pointer": {
+            "type": "string",
+            "pattern": "^(?:/(?:[^~/]|~[01])*)+$"
+          },
+          "from": true,
+          "to": true
+        }
+      },
+      "uniqueItems": true
+    },
+    "target": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "category",
+        "slug",
+        "language"
+      ],
+      "properties": {
+        "category": {
+          "enum": [
+            "L1",
+            "L2",
+            "FIB",
+            "Quant"
+          ]
+        },
+        "slug": {
+          "type": "string",
+          "minLength": 1
+        },
+        "language": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "sourceFile": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "sha256"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "child": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "sha256"
+      ],
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/directChildName"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "v3Cell": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "claim_scope",
+        "classification",
+        "cohort_id",
+        "cohort_execution_evidence",
+        "correctness_result",
+        "category",
+        "definition_ref",
+        "definition_sha256",
+        "detail",
+        "halvings",
+        "l2_side_verdict",
+        "language",
+        "native_predictive",
+        "native_shape_ref",
+        "native_workload_sha256",
+        "occupancy_wave_verdict",
+        "provenance_contract_version",
+        "reduced_run_detail",
+        "reduced_run_status",
+        "reduced_definition_ref",
+        "reduced_definition_sha256",
+        "definition_delta",
+        "reduced_workload_ref",
+        "reduced_workload_sha256",
+        "replay_mode_check",
+        "roofline_class_verdict",
+        "row_plans",
+        "shrink_vector",
+        "slug",
+        "source_row_count"
+      ],
+      "properties": {
+        "claim_scope": {
+          "const": "reduced_shape_only"
+        },
+        "classification": {
+          "enum": [
+            "reduced_representative",
+            "unavailable::oom_shape_gated",
+            "correctness_failed",
+            "calibration_inconclusive",
+            "needs_model"
+          ]
+        },
+        "cohort_id": {
+          "$ref": "#/$defs/sha256"
+        },
+        "cohort_execution_evidence": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "correctness_result": {
+          "enum": [
+            "passed",
+            "failed",
+            "not_reached"
+          ]
+        },
+        "category": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "definition_ref": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "definition_sha256": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "detail": {
+          "type": "string"
+        },
+        "halvings": {
+          "type": "null"
+        },
+        "l2_side_verdict": {
+          "const": "per_variant_geometry"
+        },
+        "language": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "native_predictive": {
+          "const": false
+        },
+        "native_shape_ref": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "native_workload_sha256": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "occupancy_wave_verdict": {
+          "const": "per_variant_geometry"
+        },
+        "provenance_contract_version": {
+          "const": 3
+        },
+        "reduced_run_detail": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reduced_run_status": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reduced_definition_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/safeRelativePath"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reduced_definition_sha256": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "definition_delta": {
+          "$ref": "#/$defs/definitionDelta"
+        },
+        "reduced_workload_ref": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reduced_workload_sha256": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "replay_mode_check": {
+          "type": "string"
+        },
+        "roofline_class_verdict": {
+          "const": "per_variant_geometry"
+        },
+        "row_plans": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/rowPlan"
+          }
+        },
+        "shrink_vector": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "slug": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_row_count": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "allOf": [
+        {
+          "oneOf": [
+            {
+              "properties": {
+                "reduced_definition_ref": {
+                  "type": "null"
+                },
+                "reduced_definition_sha256": {
+                  "type": "null"
+                },
+                "definition_delta": {
+                  "maxItems": 0
+                },
+                "row_plans": {
+                  "not": {
+                    "contains": {
+                      "properties": {
+                        "definition_delta": {
+                          "minItems": 1
+                        }
+                      },
+                      "required": [
+                        "definition_delta"
+                      ]
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "properties": {
+                "reduced_definition_ref": {
+                  "$ref": "#/$defs/safeRelativePath"
+                },
+                "reduced_definition_sha256": {
+                  "$ref": "#/$defs/sha256"
+                },
+                "definition_delta": {
+                  "minItems": 1
+                },
+                "row_plans": {
+                  "contains": {
+                    "properties": {
+                      "definition_delta": {
+                        "minItems": 1
+                      }
+                    },
+                    "required": [
+                      "definition_delta"
+                    ]
+                  },
+                  "minContains": 1
+                }
+              }
+            }
+          ]
+        },
+        {
+          "if": {
+            "properties": {
+              "classification": {
+                "const": "reduced_representative"
+              }
+            },
+            "required": [
+              "classification"
+            ]
+          },
+          "then": {
+            "properties": {
+              "cohort_execution_evidence": {
+                "type": "object"
+              },
+              "correctness_result": {
+                "const": "passed"
+              },
+              "reduced_run_status": {
+                "const": "runnable"
+              },
+              "reduced_workload_ref": {
+                "type": "string",
+                "minLength": 1
+              },
+              "reduced_workload_sha256": {
+                "$ref": "#/$defs/sha256"
+              },
+              "row_plans": {
+                "minItems": 1,
+                "contains": {
+                  "properties": {
+                    "planning_status": {
+                      "const": "proxy_planned"
+                    }
+                  },
+                  "required": [
+                    "planning_status"
+                  ]
+                },
+                "minContains": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    "rowPlan": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "axes_delta",
+        "claim_scope",
+        "correctness_result",
+        "definition_ref",
+        "definition_sha256",
+        "execution_evidence",
+        "family",
+        "geometry",
+        "model",
+        "native_axes",
+        "native_predictive",
+        "native_row_sha256",
+        "planning_reason",
+        "planning_status",
+        "reduced_axes",
+        "reduced_definition_ref",
+        "reduced_definition_sha256",
+        "definition_delta",
+        "reduced_row_sha256",
+        "reduced_run_detail",
+        "reduced_run_status",
+        "row_sha256_scope",
+        "slug",
+        "source_workload_index",
+        "source_workload_uuid",
+        "static_floor",
+        "variant_id"
+      ],
+      "properties": {
+        "axes_delta": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          }
+        },
+        "claim_scope": {
+          "const": "reduced_shape_only"
+        },
+        "correctness_result": {
+          "enum": [
+            "passed",
+            "failed",
+            "not_reached",
+            "not_applicable"
+          ]
+        },
+        "definition_ref": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "definition_sha256": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "execution_evidence": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "family": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "geometry": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "model": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "native_axes": {
+          "type": "object"
+        },
+        "native_predictive": {
+          "const": false
+        },
+        "native_row_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "planning_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "planning_status": {
+          "enum": [
+            "proxy_planned",
+            "needs_model",
+            "geometry_unavailable",
+            "no_proxy_needed",
+            "not_shrink_eligible"
+          ]
+        },
+        "reduced_axes": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "reduced_definition_ref": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/safeRelativePath"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reduced_definition_sha256": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "definition_delta": {
+          "$ref": "#/$defs/definitionDelta"
+        },
+        "reduced_row_sha256": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reduced_run_detail": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reduced_run_status": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "row_sha256_scope": {
+          "const": "exact_json_line_bytes_excluding_lf_only"
+        },
+        "slug": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_workload_index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "source_workload_uuid": {
+          "type": "string",
+          "minLength": 1
+        },
+        "static_floor": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "variant_id": {
+          "$ref": "#/$defs/sha256"
+        }
+      },
+      "allOf": [
+        {
+          "oneOf": [
+            {
+              "properties": {
+                "reduced_definition_ref": {
+                  "type": "null"
+                },
+                "reduced_definition_sha256": {
+                  "type": "null"
+                },
+                "definition_delta": {
+                  "maxItems": 0
+                }
+              }
+            },
+            {
+              "properties": {
+                "reduced_definition_ref": {
+                  "$ref": "#/$defs/safeRelativePath"
+                },
+                "reduced_definition_sha256": {
+                  "$ref": "#/$defs/sha256"
+                },
+                "definition_delta": {
+                  "minItems": 1
+                }
+              }
+            }
+          ]
+        },
+        {
+          "if": {
+            "not": {
+              "properties": {
+                "planning_status": {
+                  "const": "proxy_planned"
+                }
+              },
+              "required": [
+                "planning_status"
+              ]
+            }
+          },
+          "then": {
+            "properties": {
+              "reduced_definition_ref": {
+                "type": "null"
+              },
+              "reduced_definition_sha256": {
+                "type": "null"
+              },
+              "definition_delta": {
+                "maxItems": 0
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "planning_status": {
+                "const": "proxy_planned"
+              }
+            },
+            "required": [
+              "planning_status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "correctness_result": {
+                "enum": [
+                  "passed",
+                  "failed",
+                  "not_reached"
+                ]
+              },
+              "execution_evidence": {
+                "type": "object"
+              },
+              "family": {
+                "type": "string",
+                "minLength": 1
+              },
+              "reduced_axes": {
+                "type": "object"
+              },
+              "reduced_row_sha256": {
+                "$ref": "#/$defs/sha256"
+              }
+            },
+            "anyOf": [
+              {
+                "properties": {
+                  "axes_delta": {
+                    "minItems": 1
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "definition_delta": {
+                    "minItems": 1
+                  }
+                }
+              }
+            ]
+          }
+        }
+      ]
+    }
+  }
+}

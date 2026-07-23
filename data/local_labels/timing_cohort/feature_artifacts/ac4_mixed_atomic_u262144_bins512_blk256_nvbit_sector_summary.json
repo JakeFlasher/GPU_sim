@@ -1,0 +1,111 @@
+{
+  "arch": "sm_86",
+  "artifact_kind": "timing_nvbit_sector_summary",
+  "binary_sha256": "e2151e3732238acb4dcf030d1b0a191cc587a8b84e3d29224c25caff1d455592",
+  "deploy_legal": true,
+  "kernel_signature_sha256": "5d71878c0518acc951631256ee1e77d37cf13510ab2f0c0b86195d7d56bcedfa",
+  "nvbit_launch_summary": {
+    "harmonized_kernel_name": "global_atomic_histogram_kernel",
+    "harmonized_kernel_signature_sha256": "5d71878c0518acc951631256ee1e77d37cf13510ab2f0c0b86195d7d56bcedfa",
+    "inst_count": 8433664,
+    "instruction_trace_mode": "bounded_observed_global_store_trace",
+    "launch_geometry": {
+      "block_x": 256,
+      "block_y": 1,
+      "block_z": 1,
+      "grid_x": 256,
+      "grid_y": 1,
+      "grid_z": 1,
+      "kernel_name": "global_atomic_histogram_kernel",
+      "shared_mem_dynamic_bytes": 0,
+      "shared_mem_static_bytes": 0
+    },
+    "launch_index": 0,
+    "path": "data/local_labels/timing_cohort/nvbit_launch_traces/ac4_mixed_atomic_u262144_bins512_blk256/nvbit_launch_summary.json",
+    "raw_kernel_name": "global_atomic_histogram_kernel___0",
+    "raw_kernel_signature_sha256": "ed4d89a2c9616b13cee5d3858c58edc84c279890dfb83c3bfcef57603473ec00",
+    "repeat_index": 0,
+    "sha256": "15f7091d136a81eb0ce886f2712e70897d99c107925b5e5c99a35dbdc8a0e23d",
+    "stats_csv_path": "data/local_labels/timing_cohort/nvbit_launch_traces/ac4_mixed_atomic_u262144_bins512_blk256/stats.csv",
+    "stats_csv_sha256": "98145d2afb4a171327f6893dd9a608573dbc5098eb6bfb98fa63195ee564533b"
+  },
+  "observation_basis": {
+    "memory_instruction_record_count": 8192,
+    "observed_access_count": 262144,
+    "observed_hit_count": 229376,
+    "observed_miss_count": 32768,
+    "stats_total_insts": 18982912,
+    "stats_total_reported_insts": 18982912,
+    "threadblock_proto_file_count": 256,
+    "threadblock_proto_set_sha256": "8cb02932207d48733b88ef94a55b6e34ee61b5228cf840d53e6a78aa685cbe34",
+    "trace_contract_ok": true
+  },
+  "observed_sector_summary": {
+    "artifact_kind": "timing_nvbit_observed_sector_summary",
+    "path": "data/local_labels/timing_cohort/nvbit_launch_traces/ac4_mixed_atomic_u262144_bins512_blk256/observed_sector_summary.json",
+    "sha256": "2b11f1b4efff6aa9e65b852bb039379e7d3f57a585d741755e34432cb7980b5a"
+  },
+  "producer": "nvbit_observed_summarize_launch_sector_summary_v1",
+  "schema_version": 1,
+  "sector_count_derivation": {
+    "instruction_trace_mode": "bounded_observed_global_store_trace",
+    "observed_access_count": 262144,
+    "observed_sector_summary_path": "data/local_labels/timing_cohort/nvbit_launch_traces/ac4_mixed_atomic_u262144_bins512_blk256/observed_sector_summary.json",
+    "source": "nvbit_observed_threadblock_proto_sector_stream"
+  },
+  "sector_counts": {
+    "estimated_bytes": 8388608,
+    "global_read_32b_sectors": 131072,
+    "global_write_32b_sectors": 131072,
+    "total_128b_lines": 65536,
+    "total_32b_sectors": 262144
+  },
+  "shape_point": "ac4_mixed_atomic_u262144_bins512_blk256",
+  "slug": "global_atomic_histogram",
+  "source_commit": "3a715f5a9fe773046a266dac46a6d58caf135484",
+  "source_trace": {
+    "capture_mode": "per_cell_same_binary_same_shape_nvbit_bounded_observed_threadblock_trace",
+    "instr_begin": 31,
+    "instr_end": 48,
+    "instruction_trace_mode": "bounded_observed_global_store_trace",
+    "nvbit_trace_pb_path": "data/local_labels/timing_cohort/nvbit_launch_traces/ac4_mixed_atomic_u262144_bins512_blk256/dynamic_trace.pb",
+    "nvbit_trace_pb_sha256": "10443e996aa2a00380b9a8d70aaf09314e40df226891e8e8f265dc09da9dc849",
+    "threadblock_proto_file_count": 256,
+    "threadblock_proto_retention": "summarized_then_pruned_after_digest",
+    "threadblock_proto_set_sha256": "8cb02932207d48733b88ef94a55b6e34ee61b5228cf840d53e6a78aa685cbe34",
+    "trace_dir": "data/local_labels/timing_cohort/nvbit_launch_traces/ac4_mixed_atomic_u262144_bins512_blk256"
+  },
+  "static_inputs": {
+    "static_sass_features_path": "data/local_labels/timing_cohort/feature_artifacts/ac4_mixed_atomic_u262144_bins512_blk256_static_sass_features.json",
+    "static_sass_features_sha256": "2d09c79c873e9340544da98250a424f4e60b03cee3ecd254984b0b9e9557e1ab",
+    "static_work_path": "data/local_labels/timing_cohort/feature_artifacts/ac4_mixed_atomic_u262144_bins512_blk256_static_work.json",
+    "static_work_sha256": "9f9f5086b59834448abf5b79e9a962f0c399aa745f88049c3fea79d579b77c5b"
+  },
+  "summarize_launch": {
+    "async_copy_count": 0,
+    "atomic_count": 0,
+    "cold_count": 32768,
+    "finite_miss_count": 0,
+    "load_count": 131072,
+    "per_access_kind_counts": {
+      "1": 131072,
+      "2": 131072
+    },
+    "per_op_class_counts": {
+      "1": 262144
+    },
+    "reuse_distance_finite_p50": 0,
+    "reuse_distance_finite_p90": 0,
+    "reuse_distance_finite_p99": 0,
+    "store_count": 131072,
+    "unique_sector_count": 32768,
+    "unspecified_kind_count": 0,
+    "working_set_sector_count": 32768
+  },
+  "theoretical_occupancy": {
+    "active_blocks_per_sm": 8,
+    "active_warps_per_sm": 64,
+    "source": "launch_geometry_registers_shared_memory_limits",
+    "warps_per_block": 8
+  }
+}

@@ -1,0 +1,2677 @@
+{
+  "arch": "sm_86",
+  "artifact_kind": "replay_count_emissions",
+  "cells": [
+    {
+      "cell_status": {
+        "status": "emitted"
+      },
+      "coverage": {
+        "excluded_warp_instructions_by_class": {},
+        "modeled_warp_instructions": 100481,
+        "reconstruction_failures": 0,
+        "unspecified_warp_instructions": 0
+      },
+      "identity": {
+        "arch": "sm_86",
+        "binary_sha256": "279546697af3639e17922fe444c1352acb171d48adfba44da3260ebe3d68f11e",
+        "kernel_signature_sha256": "4585d912ad82ae86356fa7d64c2782fc6948e8acc97cc30947abfc4633840f6d",
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "carveout_sensitivity_probe",
+        "source_commit": "e24cc85aced3782e3d9662949801a49abc20dc44"
+      },
+      "metrics": {
+        "l1tex__t_requests.sum": {
+          "status": "scored",
+          "value": 91265
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_atom.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_ld.sum": {
+          "status": "scored",
+          "value": 91200
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_red.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_st.sum": {
+          "status": "scored",
+          "value": 65
+        },
+        "l1tex__t_requests_pipe_lsu_mem_local_op_ld.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_local_op_st.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_atom.sum": {
+          "detail": "'l1tex__t_requests_pipe_tex_mem_surface_op_atom.sum' is typed 'no_expressible_fixture' in the observation contract; it must be recorded as typed-unscoreable, never scored",
+          "status": "typed",
+          "typed_reason": "no_expressible_fixture"
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_ld.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_red.sum": {
+          "detail": "'l1tex__t_requests_pipe_tex_mem_surface_op_red.sum' is typed 'no_expressible_fixture' in the observation contract; it must be recorded as typed-unscoreable, never scored",
+          "status": "typed",
+          "typed_reason": "no_expressible_fixture"
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_st.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_texture.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum": {
+          "status": "scored",
+          "value": 364800
+        },
+        "l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum": {
+          "status": "scored",
+          "value": 257
+        },
+        "smsp__inst_executed.sum": {
+          "status": "scored",
+          "value": 1649152
+        }
+      },
+      "trace_provenance": {
+        "threadblock_files": 64,
+        "trace_dir": "workloads/simbench_bw/results/carveout_sensitivity_probe/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl",
+        "trace_pb_sha256": null
+      }
+    },
+    {
+      "cell_status": {
+        "detail": "trace kernel signature 0b191ed62eb7 != label 166c68126ca6",
+        "status": "typed",
+        "typed_reason": "kernel_signature_mismatch"
+      },
+      "identity": {
+        "arch": "sm_86",
+        "binary_sha256": "19beb03abd72bc3583ce71dcf779c7f058ac0e0cb976c0a321759535c72d5e3a",
+        "kernel_signature_sha256": "166c68126ca691ffffd1cf792265b04165b17f4a4d8d03860580b4eaf68e9acb",
+        "shape_point": "timing_shape",
+        "slug": "conv2d_implicit_gemm_bf16_sm80",
+        "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7"
+      }
+    },
+    {
+      "cell_status": {
+        "detail": "trace kernel signature 9002820601c6 != label 317570008f9d",
+        "status": "typed",
+        "typed_reason": "kernel_signature_mismatch"
+      },
+      "identity": {
+        "arch": "sm_86",
+        "binary_sha256": "0dfdcadd5a6400883c151539d0d5c3feabd6d08c16f894e20ccec6d8e8080087",
+        "kernel_signature_sha256": "317570008f9dcda3325fb71f1fdaa418d8de9a0d7b3ece65c1642f0de798eddb",
+        "shape_point": "timing_shape",
+        "slug": "cross_entropy_fwd_fp32_sm80",
+        "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7"
+      }
+    },
+    {
+      "cell_status": {
+        "status": "emitted"
+      },
+      "coverage": {
+        "excluded_warp_instructions_by_class": {},
+        "modeled_warp_instructions": 192,
+        "reconstruction_failures": 0,
+        "unspecified_warp_instructions": 0
+      },
+      "identity": {
+        "arch": "sm_86",
+        "binary_sha256": "bb022917d38733a47694ea8bd63c2abb1b4e816a07fd1f5adeba707bc38dfd97",
+        "kernel_signature_sha256": "28bc636502da34541b1abb1b2e2f439fab06d0c2a46ba76e4ba1eb314a19346a",
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "dram_streaming_dot_product",
+        "source_commit": "b71d21fa2ce2bb2a55cfc5374d9d46ddf62dcf20"
+      },
+      "metrics": {
+        "l1tex__t_requests.sum": {
+          "status": "scored",
+          "value": 24
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_atom.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_ld.sum": {
+          "status": "scored",
+          "value": 16
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_red.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_st.sum": {
+          "status": "scored",
+          "value": 8
+        },
+        "l1tex__t_requests_pipe_lsu_mem_local_op_ld.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_local_op_st.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_atom.sum": {
+          "detail": "'l1tex__t_requests_pipe_tex_mem_surface_op_atom.sum' is typed 'no_expressible_fixture' in the observation contract; it must be recorded as typed-unscoreable, never scored",
+          "status": "typed",
+          "typed_reason": "no_expressible_fixture"
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_ld.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_red.sum": {
+          "detail": "'l1tex__t_requests_pipe_tex_mem_surface_op_red.sum' is typed 'no_expressible_fixture' in the observation contract; it must be recorded as typed-unscoreable, never scored",
+          "status": "typed",
+          "typed_reason": "no_expressible_fixture"
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_st.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_texture.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum": {
+          "status": "scored",
+          "value": 64
+        },
+        "l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum": {
+          "status": "scored",
+          "value": 8
+        },
+        "smsp__inst_executed.sum": {
+          "status": "scored",
+          "value": 2080
+        }
+      },
+      "trace_provenance": {
+        "threadblock_files": 8,
+        "trace_dir": "workloads/simbench_bw/results/dram_streaming_dot_product/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl",
+        "trace_pb_sha256": null
+      }
+    },
+    {
+      "cell_status": {
+        "detail": "trace kernel signature 863e9fd4e7a8 != label 8dbf972a5fdb",
+        "status": "typed",
+        "typed_reason": "kernel_signature_mismatch"
+      },
+      "identity": {
+        "arch": "sm_86",
+        "binary_sha256": "ce2f77933a7ec3581aa62eaf52bd3e8c07de2a78ae61546632a70b2a7a0fe48e",
+        "kernel_signature_sha256": "8dbf972a5fdbebe33768c592447108592664645c38e0d22514468f664795ff8b",
+        "shape_point": "timing_shape",
+        "slug": "embedding_gather_int32_sm80",
+        "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7"
+      }
+    },
+    {
+      "cell_status": {
+        "detail": "trace sidecar binary 9426d432bb8a != label pin bab4489d033e",
+        "status": "typed",
+        "typed_reason": "trace_binary_stale"
+      },
+      "identity": {
+        "arch": "sm_86",
+        "binary_sha256": "bab4489d033e31a50df904d3246eb37adf3b8e52fa3d8015c008a0ce3147b629",
+        "kernel_signature_sha256": "8d74efecaa33ede92fae0b0173b9c442199ef5314c30a039792ccb2bbac5a24d",
+        "shape_point": "timing_shape",
+        "slug": "gemm_hmma_bf16_sm80",
+        "source_commit": "5088821eb7e205bcce1678d85e6272063e212cd0"
+      }
+    },
+    {
+      "cell_status": {
+        "detail": "trace sidecar binary 9426d432bb8a != label pin bab4489d033e",
+        "status": "typed",
+        "typed_reason": "trace_binary_stale"
+      },
+      "identity": {
+        "arch": "sm_86",
+        "binary_sha256": "bab4489d033e31a50df904d3246eb37adf3b8e52fa3d8015c008a0ce3147b629",
+        "kernel_signature_sha256": "8d74efecaa33ede92fae0b0173b9c442199ef5314c30a039792ccb2bbac5a24d",
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "gemm_hmma_bf16_sm80",
+        "source_commit": "5088821eb7e205bcce1678d85e6272063e212cd0"
+      }
+    },
+    {
+      "cell_status": {
+        "detail": "trace kernel signature a751169dc1fe != label 6c3c64d7b03e",
+        "status": "typed",
+        "typed_reason": "kernel_signature_mismatch"
+      },
+      "identity": {
+        "arch": "sm_86",
+        "binary_sha256": "1a638194443715e18b8753bfbde32c9be79e2d59be70585b318600e12d7f6b1d",
+        "kernel_signature_sha256": "6c3c64d7b03efd3c0fab89868ff75dc052370434282ac050bbb6c21d3310f9b9",
+        "shape_point": "timing_shape",
+        "slug": "gemm_hmma_fp16_sm80",
+        "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7"
+      }
+    },
+    {
+      "cell_status": {
+        "detail": "trace kernel signature a751169dc1fe != label 6c3c64d7b03e",
+        "status": "typed",
+        "typed_reason": "kernel_signature_mismatch"
+      },
+      "identity": {
+        "arch": "sm_86",
+        "binary_sha256": "1a638194443715e18b8753bfbde32c9be79e2d59be70585b318600e12d7f6b1d",
+        "kernel_signature_sha256": "6c3c64d7b03efd3c0fab89868ff75dc052370434282ac050bbb6c21d3310f9b9",
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "gemm_hmma_fp16_sm80",
+        "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7"
+      }
+    },
+    {
+      "cell_status": {
+        "detail": "trace kernel signature 612476892630 != label f7154498956f",
+        "status": "typed",
+        "typed_reason": "kernel_signature_mismatch"
+      },
+      "identity": {
+        "arch": "sm_86",
+        "binary_sha256": "6cd2cf81121ff58834c36aadf8667764e676aa1cb4fd322788a95ea283cca4f8",
+        "kernel_signature_sha256": "f7154498956f308d855299538f5255af01943add22c7bd17936b2b4eb8f39ce4",
+        "shape_point": "timing_shape",
+        "slug": "gemm_imma_int8_sm80",
+        "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7"
+      }
+    },
+    {
+      "cell_status": {
+        "detail": "trace kernel signature 612476892630 != label f7154498956f",
+        "status": "typed",
+        "typed_reason": "kernel_signature_mismatch"
+      },
+      "identity": {
+        "arch": "sm_86",
+        "binary_sha256": "6cd2cf81121ff58834c36aadf8667764e676aa1cb4fd322788a95ea283cca4f8",
+        "kernel_signature_sha256": "f7154498956f308d855299538f5255af01943add22c7bd17936b2b4eb8f39ce4",
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "gemm_imma_int8_sm80",
+        "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7"
+      }
+    },
+    {
+      "cell_status": {
+        "detail": "trace kernel signature 5fdaa06e484b != label 5f2fb866479f",
+        "status": "typed",
+        "typed_reason": "kernel_signature_mismatch"
+      },
+      "identity": {
+        "arch": "sm_86",
+        "binary_sha256": "dac635cbb91e33c54424581f6527dae3be4c1cd7fddf170c32bd055296952963",
+        "kernel_signature_sha256": "5f2fb866479f938277d0dae62cce21626e6c56c68c8e4e447739f5919aac2f9e",
+        "shape_point": "timing_shape",
+        "slug": "gemm_sparse_2to4_bf16_sm80",
+        "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7"
+      }
+    },
+    {
+      "cell_status": {
+        "detail": "trace kernel signature 5bb76f97dce7 != label a1042966e9ab",
+        "status": "typed",
+        "typed_reason": "kernel_signature_mismatch"
+      },
+      "identity": {
+        "arch": "sm_86",
+        "binary_sha256": "962bd89b476b10d78a59a580436c2dae18fc371da32da7518c90ddfa2b6054ce",
+        "kernel_signature_sha256": "a1042966e9ab38785b141c9f2e70b768575024abfa0ad97ddca145143f2b83c3",
+        "shape_point": "timing_shape",
+        "slug": "rmsnorm_bwd_bf16_sm80",
+        "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7"
+      }
+    },
+    {
+      "cell_status": {
+        "detail": "trace kernel signature 14b74a166bd4 != label 7848654da87d",
+        "status": "typed",
+        "typed_reason": "kernel_signature_mismatch"
+      },
+      "identity": {
+        "arch": "sm_86",
+        "binary_sha256": "e44f714645062197b42dda23e2a41c748e105c8e674b62305c979564d35dec21",
+        "kernel_signature_sha256": "7848654da87ddb65a3469a248bb5572f936b4650fefbb1d22aaa25f24aa6cbe2",
+        "shape_point": "timing_shape",
+        "slug": "rmsnorm_fwd_bf16_sm80",
+        "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7"
+      }
+    },
+    {
+      "cell_status": {
+        "detail": "trace kernel signature c8690a32cfd4 != label 2681564ef5ca",
+        "status": "typed",
+        "typed_reason": "kernel_signature_mismatch"
+      },
+      "identity": {
+        "arch": "sm_86",
+        "binary_sha256": "12b290606983bbecb919678c86fffb9a1df3e02bf66afe8487eeef085bfa6551",
+        "kernel_signature_sha256": "2681564ef5ca9026d42106bbe862a40d3e38b89b52e720a90ad39322c0ff99dc",
+        "shape_point": "timing_shape",
+        "slug": "silu_fwd_bf16_sm80",
+        "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7"
+      }
+    },
+    {
+      "cell_status": {
+        "detail": "trace sidecar binary 18897fbd8ffb != label pin 68b07b4adc69",
+        "status": "typed",
+        "typed_reason": "trace_binary_stale"
+      },
+      "identity": {
+        "arch": "sm_86",
+        "binary_sha256": "68b07b4adc6918b8a5ef3f93e9973a7195e083d28e77465ca55680cc512c3cfd",
+        "kernel_signature_sha256": "dc75edc616c84481008a935794005890d51160f8eafe175a1e530098b3be3e43",
+        "shape_point": "timing_shape",
+        "slug": "softmax_safe_bf16_sm80",
+        "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7"
+      }
+    },
+    {
+      "cell_status": {
+        "detail": "trace kernel signature f3486aec4ba9 != label 6441d8ad7429",
+        "status": "typed",
+        "typed_reason": "kernel_signature_mismatch"
+      },
+      "identity": {
+        "arch": "sm_86",
+        "binary_sha256": "64ff4d88480e40732ec85c3d3ce4040fbe695735d1969fd027d4a493b8a3916c",
+        "kernel_signature_sha256": "6441d8ad74297007aee7e16f5c8d5360c4606b4267c8be9357d09b08e1dbb447",
+        "shape_point": "timing_shape",
+        "slug": "swiglu_fwd_bf16_sm80",
+        "source_commit": "5088821eb7e205bcce1678d85e6272063e212cd0"
+      }
+    },
+    {
+      "cell_status": {
+        "detail": "trace sidecar binary ef9df6be0930 != label pin 64ff4d88480e",
+        "status": "typed",
+        "typed_reason": "trace_binary_stale"
+      },
+      "identity": {
+        "arch": "sm_86",
+        "binary_sha256": "64ff4d88480e40732ec85c3d3ce4040fbe695735d1969fd027d4a493b8a3916c",
+        "kernel_signature_sha256": "6441d8ad74297007aee7e16f5c8d5360c4606b4267c8be9357d09b08e1dbb447",
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "swiglu_fwd_bf16_sm80",
+        "source_commit": "5088821eb7e205bcce1678d85e6272063e212cd0"
+      }
+    },
+    {
+      "cell_status": {
+        "status": "emitted"
+      },
+      "coverage": {
+        "excluded_warp_instructions_by_class": {},
+        "modeled_warp_instructions": 784,
+        "reconstruction_failures": 0,
+        "unspecified_warp_instructions": 0
+      },
+      "identity": {
+        "arch": "sm_86",
+        "binary_sha256": "57d8c9f0a178b2617d4108d091178f090a037e44957508ed3b13594b661fdf65",
+        "kernel_signature_sha256": "4389fe984bc721ccf9bcd759d75c23d713f5d65ae7ca07ed2e4fe24f02b6d414",
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "tf32_hmma_gemm_traceable",
+        "source_commit": "b71d21fa2ce2bb2a55cfc5374d9d46ddf62dcf20"
+      },
+      "metrics": {
+        "l1tex__t_requests.sum": {
+          "status": "scored",
+          "value": 784
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_atom.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_ld.sum": {
+          "status": "scored",
+          "value": 768
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_red.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_st.sum": {
+          "status": "scored",
+          "value": 16
+        },
+        "l1tex__t_requests_pipe_lsu_mem_local_op_ld.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_local_op_st.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_atom.sum": {
+          "detail": "'l1tex__t_requests_pipe_tex_mem_surface_op_atom.sum' is typed 'no_expressible_fixture' in the observation contract; it must be recorded as typed-unscoreable, never scored",
+          "status": "typed",
+          "typed_reason": "no_expressible_fixture"
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_ld.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_red.sum": {
+          "detail": "'l1tex__t_requests_pipe_tex_mem_surface_op_red.sum' is typed 'no_expressible_fixture' in the observation contract; it must be recorded as typed-unscoreable, never scored",
+          "status": "typed",
+          "typed_reason": "no_expressible_fixture"
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_st.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_texture.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum": {
+          "detail": "768 misaligned warp footprints; the pinned sector semantic is scope-restricted to aligned footprints",
+          "status": "typed",
+          "typed_reason": "sector_scope_misaligned_footprint"
+        },
+        "l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum": {
+          "status": "scored",
+          "value": 128
+        },
+        "smsp__inst_executed.sum": {
+          "status": "scored",
+          "value": 1716
+        }
+      },
+      "trace_provenance": {
+        "threadblock_files": 4,
+        "trace_dir": "workloads/simbench_bw/results/tf32_hmma_gemm_traceable/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl",
+        "trace_pb_sha256": null
+      }
+    },
+    {
+      "cell_status": {
+        "status": "emitted"
+      },
+      "coverage": {
+        "excluded_warp_instructions_by_class": {},
+        "modeled_warp_instructions": 554305,
+        "reconstruction_failures": 0,
+        "unspecified_warp_instructions": 0
+      },
+      "identity": {
+        "arch": "sm_86",
+        "binary_sha256": "7838290f844f2949968c518befc7b775acf956e92b150f097389224951cf7daa",
+        "kernel_signature_sha256": "bd7cde722287300592d8f1c664841cfca92c75f336960cb33b0f13ebb24050ad",
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "register_spill_local_mem",
+        "source_commit": "45ed15a61906f05217d7715362fa6de51b193439",
+        "variant_id": "register_cap_24"
+      },
+      "metrics": {
+        "l1tex__t_requests.sum": {
+          "status": "scored",
+          "value": 554561
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_atom.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_ld.sum": {
+          "status": "scored",
+          "value": 8192
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_red.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_st.sum": {
+          "status": "scored",
+          "value": 4097
+        },
+        "l1tex__t_requests_pipe_lsu_mem_local_op_ld.sum": {
+          "status": "scored",
+          "value": 271168
+        },
+        "l1tex__t_requests_pipe_lsu_mem_local_op_st.sum": {
+          "status": "scored",
+          "value": 271104
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_atom.sum": {
+          "detail": "'l1tex__t_requests_pipe_tex_mem_surface_op_atom.sum' is typed 'no_expressible_fixture' in the observation contract; it must be recorded as typed-unscoreable, never scored",
+          "status": "typed",
+          "typed_reason": "no_expressible_fixture"
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_ld.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_red.sum": {
+          "detail": "'l1tex__t_requests_pipe_tex_mem_surface_op_red.sum' is typed 'no_expressible_fixture' in the observation contract; it must be recorded as typed-unscoreable, never scored",
+          "status": "typed",
+          "typed_reason": "no_expressible_fixture"
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_st.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_texture.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum": {
+          "detail": "4096 misaligned warp footprints; the pinned sector semantic is scope-restricted to aligned footprints",
+          "status": "typed",
+          "typed_reason": "sector_scope_misaligned_footprint"
+        },
+        "l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum": {
+          "status": "scored",
+          "value": 16385
+        },
+        "smsp__inst_executed.sum": {
+          "status": "scored",
+          "value": 902912
+        }
+      },
+      "trace_provenance": {
+        "threadblock_files": 64,
+        "trace_dir": "workloads/simbench_bw/results/register_spill_local_mem/rtx_3090_ti/sm_86/variants/register_cap_24/trace_trace_l2_accuracy_xl",
+        "trace_pb_sha256": null
+      }
+    },
+    {
+      "cell_status": {
+        "status": "emitted"
+      },
+      "coverage": {
+        "excluded_warp_instructions_by_class": {},
+        "modeled_warp_instructions": 485377,
+        "reconstruction_failures": 0,
+        "unspecified_warp_instructions": 0
+      },
+      "identity": {
+        "arch": "sm_86",
+        "binary_sha256": "0096b01ed25638202968b69ebf08ff6c7de6998448b8e61316f5ef4f24c305ea",
+        "kernel_signature_sha256": "bd7cde722287300592d8f1c664841cfca92c75f336960cb33b0f13ebb24050ad",
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "register_spill_local_mem",
+        "source_commit": "45ed15a61906f05217d7715362fa6de51b193439",
+        "variant_id": "register_cap_32"
+      },
+      "metrics": {
+        "l1tex__t_requests.sum": {
+          "status": "scored",
+          "value": 485633
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_atom.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_ld.sum": {
+          "status": "scored",
+          "value": 8192
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_red.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_st.sum": {
+          "status": "scored",
+          "value": 4097
+        },
+        "l1tex__t_requests_pipe_lsu_mem_local_op_ld.sum": {
+          "status": "scored",
+          "value": 236672
+        },
+        "l1tex__t_requests_pipe_lsu_mem_local_op_st.sum": {
+          "status": "scored",
+          "value": 236672
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_atom.sum": {
+          "detail": "'l1tex__t_requests_pipe_tex_mem_surface_op_atom.sum' is typed 'no_expressible_fixture' in the observation contract; it must be recorded as typed-unscoreable, never scored",
+          "status": "typed",
+          "typed_reason": "no_expressible_fixture"
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_ld.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_red.sum": {
+          "detail": "'l1tex__t_requests_pipe_tex_mem_surface_op_red.sum' is typed 'no_expressible_fixture' in the observation contract; it must be recorded as typed-unscoreable, never scored",
+          "status": "typed",
+          "typed_reason": "no_expressible_fixture"
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_st.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_texture.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum": {
+          "detail": "4096 misaligned warp footprints; the pinned sector semantic is scope-restricted to aligned footprints",
+          "status": "typed",
+          "typed_reason": "sector_scope_misaligned_footprint"
+        },
+        "l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum": {
+          "status": "scored",
+          "value": 16385
+        },
+        "smsp__inst_executed.sum": {
+          "status": "scored",
+          "value": 833344
+        }
+      },
+      "trace_provenance": {
+        "threadblock_files": 64,
+        "trace_dir": "workloads/simbench_bw/results/register_spill_local_mem/rtx_3090_ti/sm_86/variants/register_cap_32/trace_trace_l2_accuracy_xl",
+        "trace_pb_sha256": null
+      }
+    },
+    {
+      "cell_status": {
+        "status": "emitted"
+      },
+      "coverage": {
+        "excluded_warp_instructions_by_class": {},
+        "modeled_warp_instructions": 98945,
+        "reconstruction_failures": 0,
+        "unspecified_warp_instructions": 0
+      },
+      "identity": {
+        "arch": "sm_86",
+        "binary_sha256": "3ba9bc87fd97d694a07b0e0f5a7dc4f0bac1353df92ce94e517d8d61807deaa5",
+        "kernel_signature_sha256": "bd7cde722287300592d8f1c664841cfca92c75f336960cb33b0f13ebb24050ad",
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "register_spill_local_mem",
+        "source_commit": "45ed15a61906f05217d7715362fa6de51b193439",
+        "variant_id": "register_cap_64"
+      },
+      "metrics": {
+        "l1tex__t_requests.sum": {
+          "status": "scored",
+          "value": 99073
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_atom.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_ld.sum": {
+          "status": "scored",
+          "value": 8192
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_red.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_st.sum": {
+          "status": "scored",
+          "value": 4097
+        },
+        "l1tex__t_requests_pipe_lsu_mem_local_op_ld.sum": {
+          "status": "scored",
+          "value": 43392
+        },
+        "l1tex__t_requests_pipe_lsu_mem_local_op_st.sum": {
+          "status": "scored",
+          "value": 43392
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_atom.sum": {
+          "detail": "'l1tex__t_requests_pipe_tex_mem_surface_op_atom.sum' is typed 'no_expressible_fixture' in the observation contract; it must be recorded as typed-unscoreable, never scored",
+          "status": "typed",
+          "typed_reason": "no_expressible_fixture"
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_ld.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_red.sum": {
+          "detail": "'l1tex__t_requests_pipe_tex_mem_surface_op_red.sum' is typed 'no_expressible_fixture' in the observation contract; it must be recorded as typed-unscoreable, never scored",
+          "status": "typed",
+          "typed_reason": "no_expressible_fixture"
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_st.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_texture.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum": {
+          "detail": "4096 misaligned warp footprints; the pinned sector semantic is scope-restricted to aligned footprints",
+          "status": "typed",
+          "typed_reason": "sector_scope_misaligned_footprint"
+        },
+        "l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum": {
+          "status": "scored",
+          "value": 16385
+        },
+        "smsp__inst_executed.sum": {
+          "status": "scored",
+          "value": 445056
+        }
+      },
+      "trace_provenance": {
+        "threadblock_files": 64,
+        "trace_dir": "workloads/simbench_bw/results/register_spill_local_mem/rtx_3090_ti/sm_86/variants/register_cap_64/trace_trace_l2_accuracy_xl",
+        "trace_pb_sha256": null
+      }
+    },
+    {
+      "cell_status": {
+        "status": "emitted"
+      },
+      "coverage": {
+        "excluded_warp_instructions_by_class": {},
+        "modeled_warp_instructions": 12289,
+        "reconstruction_failures": 0,
+        "unspecified_warp_instructions": 0
+      },
+      "identity": {
+        "arch": "sm_86",
+        "binary_sha256": "9c355c3485531959c0ac69e853a8c5c9022e9f04b388c99277381db0b1d91a86",
+        "kernel_signature_sha256": "bd7cde722287300592d8f1c664841cfca92c75f336960cb33b0f13ebb24050ad",
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "register_spill_local_mem",
+        "source_commit": "45ed15a61906f05217d7715362fa6de51b193439",
+        "variant_id": "register_cap_255"
+      },
+      "metrics": {
+        "l1tex__t_requests.sum": {
+          "status": "scored",
+          "value": 12289
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_atom.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_ld.sum": {
+          "status": "scored",
+          "value": 8192
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_red.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_st.sum": {
+          "status": "scored",
+          "value": 4097
+        },
+        "l1tex__t_requests_pipe_lsu_mem_local_op_ld.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_local_op_st.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_atom.sum": {
+          "detail": "'l1tex__t_requests_pipe_tex_mem_surface_op_atom.sum' is typed 'no_expressible_fixture' in the observation contract; it must be recorded as typed-unscoreable, never scored",
+          "status": "typed",
+          "typed_reason": "no_expressible_fixture"
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_ld.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_red.sum": {
+          "detail": "'l1tex__t_requests_pipe_tex_mem_surface_op_red.sum' is typed 'no_expressible_fixture' in the observation contract; it must be recorded as typed-unscoreable, never scored",
+          "status": "typed",
+          "typed_reason": "no_expressible_fixture"
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_st.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_texture.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum": {
+          "detail": "4096 misaligned warp footprints; the pinned sector semantic is scope-restricted to aligned footprints",
+          "status": "typed",
+          "typed_reason": "sector_scope_misaligned_footprint"
+        },
+        "l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum": {
+          "status": "scored",
+          "value": 16385
+        },
+        "smsp__inst_executed.sum": {
+          "status": "scored",
+          "value": 356992
+        }
+      },
+      "trace_provenance": {
+        "threadblock_files": 64,
+        "trace_dir": "workloads/simbench_bw/results/register_spill_local_mem/rtx_3090_ti/sm_86/variants/register_cap_255/trace_trace_l2_accuracy_xl",
+        "trace_pb_sha256": null
+      }
+    },
+    {
+      "cell_status": {
+        "status": "emitted"
+      },
+      "coverage": {
+        "excluded_warp_instructions_by_class": {
+          "ATOMIC": 1056
+        },
+        "modeled_warp_instructions": 2049,
+        "reconstruction_failures": 0,
+        "unspecified_warp_instructions": 0
+      },
+      "identity": {
+        "arch": "sm_86",
+        "binary_sha256": "9c43b9f7674c7a3a8c4fbfbfab44ba574f9d50f947cd8df4e05c1088e5ca9a9f",
+        "kernel_signature_sha256": "575ad657992d58bc685ff58e6a950429dc939463980ce6fe1524c8c7efeb9154",
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "global_atomic_return_used",
+        "source_commit": "ae4664f7ee51df026d4800432ea5af6d42a4dd67"
+      },
+      "metrics": {
+        "l1tex__t_requests.sum": {
+          "status": "scored",
+          "value": 3105
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_atom.sum": {
+          "status": "scored",
+          "value": 1056
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_ld.sum": {
+          "status": "scored",
+          "value": 1024
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_red.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_st.sum": {
+          "status": "scored",
+          "value": 1025
+        },
+        "l1tex__t_requests_pipe_lsu_mem_local_op_ld.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_local_op_st.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_atom.sum": {
+          "detail": "'l1tex__t_requests_pipe_tex_mem_surface_op_atom.sum' is typed 'no_expressible_fixture' in the observation contract; it must be recorded as typed-unscoreable, never scored",
+          "status": "typed",
+          "typed_reason": "no_expressible_fixture"
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_ld.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_red.sum": {
+          "detail": "'l1tex__t_requests_pipe_tex_mem_surface_op_red.sum' is typed 'no_expressible_fixture' in the observation contract; it must be recorded as typed-unscoreable, never scored",
+          "status": "typed",
+          "typed_reason": "no_expressible_fixture"
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_st.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_texture.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum": {
+          "status": "scored",
+          "value": 4096
+        },
+        "l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum": {
+          "status": "scored",
+          "value": 4100
+        },
+        "smsp__inst_executed.sum": {
+          "status": "scored",
+          "value": 22780
+        }
+      },
+      "trace_provenance": {
+        "threadblock_files": 1,
+        "trace_dir": "workloads/simbench_bw/results/global_atomic_return_used/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl",
+        "trace_pb_sha256": null
+      }
+    },
+    {
+      "cell_status": {
+        "status": "emitted"
+      },
+      "coverage": {
+        "excluded_warp_instructions_by_class": {},
+        "modeled_warp_instructions": 2048,
+        "reconstruction_failures": 0,
+        "unspecified_warp_instructions": 0
+      },
+      "identity": {
+        "arch": "sm_86",
+        "binary_sha256": "ba4350edcc19151b355ae8e6cebad3bcdd3cddae914af5b9844318170f6f1f3f",
+        "kernel_signature_sha256": "153672adcbdb398cba4c19499bffec0a83a820eed053478cbfb41c0889d93713",
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "global_scalar_32b_copy",
+        "source_commit": "1a07bef421f556cb54d4c4fb128f8ec9cd5023d6"
+      },
+      "metrics": {
+        "l1tex__t_requests.sum": {
+          "status": "scored",
+          "value": 2048
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_atom.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_ld.sum": {
+          "status": "scored",
+          "value": 1024
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_red.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_st.sum": {
+          "status": "scored",
+          "value": 1024
+        },
+        "l1tex__t_requests_pipe_lsu_mem_local_op_ld.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_local_op_st.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_atom.sum": {
+          "detail": "'l1tex__t_requests_pipe_tex_mem_surface_op_atom.sum' is typed 'no_expressible_fixture' in the observation contract; it must be recorded as typed-unscoreable, never scored",
+          "status": "typed",
+          "typed_reason": "no_expressible_fixture"
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_ld.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_red.sum": {
+          "detail": "'l1tex__t_requests_pipe_tex_mem_surface_op_red.sum' is typed 'no_expressible_fixture' in the observation contract; it must be recorded as typed-unscoreable, never scored",
+          "status": "typed",
+          "typed_reason": "no_expressible_fixture"
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_st.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_texture.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum": {
+          "status": "scored",
+          "value": 4096
+        },
+        "l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum": {
+          "status": "scored",
+          "value": 4096
+        },
+        "smsp__inst_executed.sum": {
+          "status": "scored",
+          "value": 5921
+        }
+      },
+      "trace_provenance": {
+        "threadblock_files": 1,
+        "trace_dir": "workloads/simbench_bw/results/global_scalar_32b_copy/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl",
+        "trace_pb_sha256": null
+      }
+    },
+    {
+      "cell_status": {
+        "status": "emitted"
+      },
+      "coverage": {
+        "excluded_warp_instructions_by_class": {},
+        "modeled_warp_instructions": 512,
+        "reconstruction_failures": 0,
+        "unspecified_warp_instructions": 0
+      },
+      "identity": {
+        "arch": "sm_86",
+        "binary_sha256": "acb59fb5a3dcf91298e7653406a3ca6d318323f759d625e1761585685dc67e61",
+        "kernel_signature_sha256": "a2fb345317578d3ebbdcb0758086a22e3a656ffa392d5d7da5b56fb72bc21d8f",
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "global_vectorized_128b_copy",
+        "source_commit": "1a07bef421f556cb54d4c4fb128f8ec9cd5023d6"
+      },
+      "metrics": {
+        "l1tex__t_requests.sum": {
+          "status": "scored",
+          "value": 512
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_atom.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_ld.sum": {
+          "status": "scored",
+          "value": 256
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_red.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_st.sum": {
+          "status": "scored",
+          "value": 256
+        },
+        "l1tex__t_requests_pipe_lsu_mem_local_op_ld.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_local_op_st.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_atom.sum": {
+          "detail": "'l1tex__t_requests_pipe_tex_mem_surface_op_atom.sum' is typed 'no_expressible_fixture' in the observation contract; it must be recorded as typed-unscoreable, never scored",
+          "status": "typed",
+          "typed_reason": "no_expressible_fixture"
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_ld.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_red.sum": {
+          "detail": "'l1tex__t_requests_pipe_tex_mem_surface_op_red.sum' is typed 'no_expressible_fixture' in the observation contract; it must be recorded as typed-unscoreable, never scored",
+          "status": "typed",
+          "typed_reason": "no_expressible_fixture"
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_st.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_texture.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum": {
+          "status": "scored",
+          "value": 4096
+        },
+        "l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum": {
+          "status": "scored",
+          "value": 4096
+        },
+        "smsp__inst_executed.sum": {
+          "status": "scored",
+          "value": 1505
+        }
+      },
+      "trace_provenance": {
+        "threadblock_files": 1,
+        "trace_dir": "workloads/simbench_bw/results/global_vectorized_128b_copy/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl",
+        "trace_pb_sha256": null
+      }
+    },
+    {
+      "cell_status": {
+        "detail": "trace sidecar binary d4ea864bfa3e != label pin c0fbee25c222",
+        "status": "typed",
+        "typed_reason": "trace_binary_stale"
+      },
+      "identity": {
+        "arch": "sm_86",
+        "binary_sha256": "c0fbee25c22216a1597b42c33a2666c62fa85997f26a4ea67b29b5b8ff7c18b4",
+        "kernel_signature_sha256": "50e72d8dc80c5fee0d00b777f912410e94e01fe70369cf69c2dbe667eefb8427",
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "global_vectorized_64b_copy",
+        "source_commit": "5088821eb7e205bcce1678d85e6272063e212cd0"
+      }
+    },
+    {
+      "cell_status": {
+        "status": "emitted"
+      },
+      "coverage": {
+        "excluded_warp_instructions_by_class": {
+          "ATOMIC": 1056
+        },
+        "modeled_warp_instructions": 2048,
+        "reconstruction_failures": 0,
+        "unspecified_warp_instructions": 0
+      },
+      "identity": {
+        "arch": "sm_86",
+        "binary_sha256": "5a2939632a01db485828bc27930e98da8ad9f50eb59fe5500007793c5fbc5cf4",
+        "kernel_signature_sha256": "7b0d4c0ce3b924918bd9c913ee6a624b46b70462eca9b9388459e4259d333264",
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "global_atomic_histogram",
+        "source_commit": "742aafa7e6bf85d33cddeae7a12f1d7c4700bdac"
+      },
+      "metrics": {
+        "l1tex__t_requests.sum": {
+          "status": "scored",
+          "value": 3104
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_atom.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_ld.sum": {
+          "status": "scored",
+          "value": 1024
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_red.sum": {
+          "status": "scored",
+          "value": 1056
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_st.sum": {
+          "status": "scored",
+          "value": 1024
+        },
+        "l1tex__t_requests_pipe_lsu_mem_local_op_ld.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_local_op_st.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_atom.sum": {
+          "detail": "'l1tex__t_requests_pipe_tex_mem_surface_op_atom.sum' is typed 'no_expressible_fixture' in the observation contract; it must be recorded as typed-unscoreable, never scored",
+          "status": "typed",
+          "typed_reason": "no_expressible_fixture"
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_ld.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_red.sum": {
+          "detail": "'l1tex__t_requests_pipe_tex_mem_surface_op_red.sum' is typed 'no_expressible_fixture' in the observation contract; it must be recorded as typed-unscoreable, never scored",
+          "status": "typed",
+          "typed_reason": "no_expressible_fixture"
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_st.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_texture.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum": {
+          "status": "scored",
+          "value": 4096
+        },
+        "l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum": {
+          "status": "scored",
+          "value": 4096
+        },
+        "smsp__inst_executed.sum": {
+          "status": "scored",
+          "value": 21595
+        }
+      },
+      "trace_provenance": {
+        "threadblock_files": 1,
+        "trace_dir": "workloads/simbench_bw/results/global_atomic_histogram/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl",
+        "trace_pb_sha256": null
+      }
+    },
+    {
+      "cell_status": {
+        "status": "emitted"
+      },
+      "coverage": {
+        "excluded_warp_instructions_by_class": {
+          "ATOMIC": 1056
+        },
+        "modeled_warp_instructions": 2048,
+        "reconstruction_failures": 0,
+        "unspecified_warp_instructions": 0
+      },
+      "identity": {
+        "arch": "sm_86",
+        "binary_sha256": "0c31c6e924111113539d91682e0d3e9a3e5e19cbedc61a75a46c6a30337065d6",
+        "kernel_signature_sha256": "5ffff11014584f390320a0139c95090592adbc6673acffa23190d1792f2ca322",
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "global_atomic_max_histogram",
+        "source_commit": "1c628895cd424ff733cb4eb2854cc6473a4008f5"
+      },
+      "metrics": {
+        "l1tex__t_requests.sum": {
+          "status": "scored",
+          "value": 3104
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_atom.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_ld.sum": {
+          "status": "scored",
+          "value": 1024
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_red.sum": {
+          "status": "scored",
+          "value": 1056
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_st.sum": {
+          "status": "scored",
+          "value": 1024
+        },
+        "l1tex__t_requests_pipe_lsu_mem_local_op_ld.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_local_op_st.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_atom.sum": {
+          "detail": "'l1tex__t_requests_pipe_tex_mem_surface_op_atom.sum' is typed 'no_expressible_fixture' in the observation contract; it must be recorded as typed-unscoreable, never scored",
+          "status": "typed",
+          "typed_reason": "no_expressible_fixture"
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_ld.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_red.sum": {
+          "detail": "'l1tex__t_requests_pipe_tex_mem_surface_op_red.sum' is typed 'no_expressible_fixture' in the observation contract; it must be recorded as typed-unscoreable, never scored",
+          "status": "typed",
+          "typed_reason": "no_expressible_fixture"
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_st.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_texture.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum": {
+          "status": "scored",
+          "value": 4096
+        },
+        "l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum": {
+          "status": "scored",
+          "value": 4096
+        },
+        "smsp__inst_executed.sum": {
+          "status": "scored",
+          "value": 21626
+        }
+      },
+      "trace_provenance": {
+        "threadblock_files": 1,
+        "trace_dir": "workloads/simbench_bw/results/global_atomic_max_histogram/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl",
+        "trace_pb_sha256": null
+      }
+    },
+    {
+      "cell_status": {
+        "status": "emitted"
+      },
+      "coverage": {
+        "excluded_warp_instructions_by_class": {
+          "ATOMIC": 1056
+        },
+        "modeled_warp_instructions": 2049,
+        "reconstruction_failures": 0,
+        "unspecified_warp_instructions": 0
+      },
+      "identity": {
+        "arch": "sm_86",
+        "binary_sha256": "2c29a4e0962c36e37f5b5834fed650861667aa665fc7b285f22438e9c8a9fbe9",
+        "kernel_signature_sha256": "f30caf6dc50fd9516fd04d478119bc414306b0ab1e3b5b15b247b0e3a8d0219e",
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "global_atomic_max_return_used",
+        "source_commit": "1c628895cd424ff733cb4eb2854cc6473a4008f5"
+      },
+      "metrics": {
+        "l1tex__t_requests.sum": {
+          "status": "scored",
+          "value": 3105
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_atom.sum": {
+          "status": "scored",
+          "value": 1056
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_ld.sum": {
+          "status": "scored",
+          "value": 1024
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_red.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_st.sum": {
+          "status": "scored",
+          "value": 1025
+        },
+        "l1tex__t_requests_pipe_lsu_mem_local_op_ld.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_local_op_st.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_atom.sum": {
+          "detail": "'l1tex__t_requests_pipe_tex_mem_surface_op_atom.sum' is typed 'no_expressible_fixture' in the observation contract; it must be recorded as typed-unscoreable, never scored",
+          "status": "typed",
+          "typed_reason": "no_expressible_fixture"
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_ld.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_red.sum": {
+          "detail": "'l1tex__t_requests_pipe_tex_mem_surface_op_red.sum' is typed 'no_expressible_fixture' in the observation contract; it must be recorded as typed-unscoreable, never scored",
+          "status": "typed",
+          "typed_reason": "no_expressible_fixture"
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_st.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_texture.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum": {
+          "status": "scored",
+          "value": 4096
+        },
+        "l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum": {
+          "status": "scored",
+          "value": 4100
+        },
+        "smsp__inst_executed.sum": {
+          "status": "scored",
+          "value": 22553
+        }
+      },
+      "trace_provenance": {
+        "threadblock_files": 1,
+        "trace_dir": "workloads/simbench_bw/results/global_atomic_max_return_used/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl",
+        "trace_pb_sha256": null
+      }
+    },
+    {
+      "cell_status": {
+        "status": "emitted"
+      },
+      "coverage": {
+        "excluded_warp_instructions_by_class": {
+          "ATOMIC": 1056
+        },
+        "modeled_warp_instructions": 2048,
+        "reconstruction_failures": 0,
+        "unspecified_warp_instructions": 0
+      },
+      "identity": {
+        "arch": "sm_86",
+        "binary_sha256": "ed4d15e1a3dc6e2774996cb07eb5088ce456b3e47ada8ca7d84aca6839a2d0ec",
+        "kernel_signature_sha256": "3cb859fabb45a0e34f4f0c52c7aa84c78616b726b25162039bbd2dbd09d85840",
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "global_atomic_and_histogram",
+        "source_commit": "50b3de0a3f9e87fc23f7e717fa4c0f9b7d7c375a"
+      },
+      "metrics": {
+        "l1tex__t_requests.sum": {
+          "status": "scored",
+          "value": 3104
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_atom.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_ld.sum": {
+          "status": "scored",
+          "value": 1024
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_red.sum": {
+          "status": "scored",
+          "value": 1056
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_st.sum": {
+          "status": "scored",
+          "value": 1024
+        },
+        "l1tex__t_requests_pipe_lsu_mem_local_op_ld.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_local_op_st.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_atom.sum": {
+          "detail": "'l1tex__t_requests_pipe_tex_mem_surface_op_atom.sum' is typed 'no_expressible_fixture' in the observation contract; it must be recorded as typed-unscoreable, never scored",
+          "status": "typed",
+          "typed_reason": "no_expressible_fixture"
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_ld.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_red.sum": {
+          "detail": "'l1tex__t_requests_pipe_tex_mem_surface_op_red.sum' is typed 'no_expressible_fixture' in the observation contract; it must be recorded as typed-unscoreable, never scored",
+          "status": "typed",
+          "typed_reason": "no_expressible_fixture"
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_st.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_texture.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum": {
+          "status": "scored",
+          "value": 4096
+        },
+        "l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum": {
+          "status": "scored",
+          "value": 4096
+        },
+        "smsp__inst_executed.sum": {
+          "status": "scored",
+          "value": 21626
+        }
+      },
+      "trace_provenance": {
+        "threadblock_files": 1,
+        "trace_dir": "workloads/simbench_bw/results/global_atomic_and_histogram/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl",
+        "trace_pb_sha256": null
+      }
+    },
+    {
+      "cell_status": {
+        "status": "emitted"
+      },
+      "coverage": {
+        "excluded_warp_instructions_by_class": {
+          "ATOMIC": 1056
+        },
+        "modeled_warp_instructions": 2049,
+        "reconstruction_failures": 0,
+        "unspecified_warp_instructions": 0
+      },
+      "identity": {
+        "arch": "sm_86",
+        "binary_sha256": "03938af34f462516b82342a796d7aca7b3b09224e9696944fb1499e30c75a819",
+        "kernel_signature_sha256": "4fb3992cd157e8249d31c791139dfc46b92c82ec97b23aae892e6cd282d33377",
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "global_atomic_and_return_used",
+        "source_commit": "50b3de0a3f9e87fc23f7e717fa4c0f9b7d7c375a"
+      },
+      "metrics": {
+        "l1tex__t_requests.sum": {
+          "status": "scored",
+          "value": 3105
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_atom.sum": {
+          "status": "scored",
+          "value": 1056
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_ld.sum": {
+          "status": "scored",
+          "value": 1024
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_red.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_st.sum": {
+          "status": "scored",
+          "value": 1025
+        },
+        "l1tex__t_requests_pipe_lsu_mem_local_op_ld.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_local_op_st.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_atom.sum": {
+          "detail": "'l1tex__t_requests_pipe_tex_mem_surface_op_atom.sum' is typed 'no_expressible_fixture' in the observation contract; it must be recorded as typed-unscoreable, never scored",
+          "status": "typed",
+          "typed_reason": "no_expressible_fixture"
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_ld.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_red.sum": {
+          "detail": "'l1tex__t_requests_pipe_tex_mem_surface_op_red.sum' is typed 'no_expressible_fixture' in the observation contract; it must be recorded as typed-unscoreable, never scored",
+          "status": "typed",
+          "typed_reason": "no_expressible_fixture"
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_st.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_texture.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum": {
+          "status": "scored",
+          "value": 4096
+        },
+        "l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum": {
+          "status": "scored",
+          "value": 4100
+        },
+        "smsp__inst_executed.sum": {
+          "status": "scored",
+          "value": 22553
+        }
+      },
+      "trace_provenance": {
+        "threadblock_files": 1,
+        "trace_dir": "workloads/simbench_bw/results/global_atomic_and_return_used/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl",
+        "trace_pb_sha256": null
+      }
+    },
+    {
+      "cell_status": {
+        "status": "emitted"
+      },
+      "coverage": {
+        "excluded_warp_instructions_by_class": {},
+        "modeled_warp_instructions": 8273,
+        "reconstruction_failures": 0,
+        "unspecified_warp_instructions": 0
+      },
+      "identity": {
+        "arch": "sm_86",
+        "binary_sha256": "e2dbf45dc108f94b24da2bb8ca78ed2e51f9d668b1ea4a50a5768ee89649c2d5",
+        "kernel_signature_sha256": "fec8990f34e9ab9a7f271f0ad509b0b7f8db8d3f9c12eb004a09317795d12fb1",
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "local_dynamic_index_array",
+        "source_commit": "9646699bbb91fcbcb6d29e8ca04e92c654df64de"
+      },
+      "metrics": {
+        "l1tex__t_requests.sum": {
+          "status": "scored",
+          "value": 8321
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_atom.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_ld.sum": {
+          "status": "scored",
+          "value": 2112
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_red.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_st.sum": {
+          "status": "scored",
+          "value": 1025
+        },
+        "l1tex__t_requests_pipe_lsu_mem_local_op_ld.sum": {
+          "status": "scored",
+          "value": 4096
+        },
+        "l1tex__t_requests_pipe_lsu_mem_local_op_st.sum": {
+          "status": "scored",
+          "value": 1088
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_atom.sum": {
+          "detail": "'l1tex__t_requests_pipe_tex_mem_surface_op_atom.sum' is typed 'no_expressible_fixture' in the observation contract; it must be recorded as typed-unscoreable, never scored",
+          "status": "typed",
+          "typed_reason": "no_expressible_fixture"
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_ld.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_red.sum": {
+          "detail": "'l1tex__t_requests_pipe_tex_mem_surface_op_red.sum' is typed 'no_expressible_fixture' in the observation contract; it must be recorded as typed-unscoreable, never scored",
+          "status": "typed",
+          "typed_reason": "no_expressible_fixture"
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_st.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_texture.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum": {
+          "detail": "64 misaligned warp footprints; the pinned sector semantic is scope-restricted to aligned footprints",
+          "status": "typed",
+          "typed_reason": "sector_scope_misaligned_footprint"
+        },
+        "l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum": {
+          "status": "scored",
+          "value": 4097
+        },
+        "smsp__inst_executed.sum": {
+          "status": "scored",
+          "value": 36815
+        }
+      },
+      "trace_provenance": {
+        "threadblock_files": 1,
+        "trace_dir": "workloads/simbench_bw/results/local_dynamic_index_array/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl",
+        "trace_pb_sha256": null
+      }
+    },
+    {
+      "cell_status": {
+        "status": "emitted"
+      },
+      "coverage": {
+        "excluded_warp_instructions_by_class": {},
+        "modeled_warp_instructions": 8385,
+        "reconstruction_failures": 0,
+        "unspecified_warp_instructions": 0
+      },
+      "identity": {
+        "arch": "sm_86",
+        "binary_sha256": "3d8605d63e62e09eecb83e12478d31ed3c2fe74e0a0416d1d8f5502e535fbe4c",
+        "kernel_signature_sha256": "6a66ee83c6443ade9523726711d226c60e5c421899d11270d09cd83cf8e821f4",
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "local_volatile_array",
+        "source_commit": "9646699bbb91fcbcb6d29e8ca04e92c654df64de"
+      },
+      "metrics": {
+        "l1tex__t_requests.sum": {
+          "status": "scored",
+          "value": 8385
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_atom.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_ld.sum": {
+          "status": "scored",
+          "value": 1088
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_red.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_st.sum": {
+          "status": "scored",
+          "value": 1025
+        },
+        "l1tex__t_requests_pipe_lsu_mem_local_op_ld.sum": {
+          "status": "scored",
+          "value": 4160
+        },
+        "l1tex__t_requests_pipe_lsu_mem_local_op_st.sum": {
+          "status": "scored",
+          "value": 2112
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_atom.sum": {
+          "detail": "'l1tex__t_requests_pipe_tex_mem_surface_op_atom.sum' is typed 'no_expressible_fixture' in the observation contract; it must be recorded as typed-unscoreable, never scored",
+          "status": "typed",
+          "typed_reason": "no_expressible_fixture"
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_ld.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_red.sum": {
+          "detail": "'l1tex__t_requests_pipe_tex_mem_surface_op_red.sum' is typed 'no_expressible_fixture' in the observation contract; it must be recorded as typed-unscoreable, never scored",
+          "status": "typed",
+          "typed_reason": "no_expressible_fixture"
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_st.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_texture.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum": {
+          "detail": "64 misaligned warp footprints; the pinned sector semantic is scope-restricted to aligned footprints",
+          "status": "typed",
+          "typed_reason": "sector_scope_misaligned_footprint"
+        },
+        "l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum": {
+          "status": "scored",
+          "value": 4097
+        },
+        "smsp__inst_executed.sum": {
+          "status": "scored",
+          "value": 15065
+        }
+      },
+      "trace_provenance": {
+        "threadblock_files": 1,
+        "trace_dir": "workloads/simbench_bw/results/local_volatile_array/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl",
+        "trace_pb_sha256": null
+      }
+    },
+    {
+      "cell_status": {
+        "status": "emitted"
+      },
+      "coverage": {
+        "excluded_warp_instructions_by_class": {},
+        "modeled_warp_instructions": 400,
+        "reconstruction_failures": 0,
+        "unspecified_warp_instructions": 0
+      },
+      "identity": {
+        "arch": "sm_86",
+        "binary_sha256": "0e848c96cfd3323ca99353dc8e0208b6948ccb43289b93231a217a058a47c735",
+        "kernel_signature_sha256": "4f26b1113d4895a4b5df51521c1e2ddea69ddd03c446b9730bd649ff3e1c6b6b",
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "bf16_hmma_gemm_traceable",
+        "source_commit": "f6b5e5d3b19fb4ac507fa3fa0229ebf11073f50f"
+      },
+      "metrics": {
+        "l1tex__t_requests.sum": {
+          "status": "scored",
+          "value": 400
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_atom.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_ld.sum": {
+          "status": "scored",
+          "value": 384
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_red.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_st.sum": {
+          "status": "scored",
+          "value": 16
+        },
+        "l1tex__t_requests_pipe_lsu_mem_local_op_ld.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_local_op_st.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_atom.sum": {
+          "detail": "'l1tex__t_requests_pipe_tex_mem_surface_op_atom.sum' is typed 'no_expressible_fixture' in the observation contract; it must be recorded as typed-unscoreable, never scored",
+          "status": "typed",
+          "typed_reason": "no_expressible_fixture"
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_ld.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_red.sum": {
+          "detail": "'l1tex__t_requests_pipe_tex_mem_surface_op_red.sum' is typed 'no_expressible_fixture' in the observation contract; it must be recorded as typed-unscoreable, never scored",
+          "status": "typed",
+          "typed_reason": "no_expressible_fixture"
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_st.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_texture.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum": {
+          "detail": "384 misaligned warp footprints; the pinned sector semantic is scope-restricted to aligned footprints",
+          "status": "typed",
+          "typed_reason": "sector_scope_misaligned_footprint"
+        },
+        "l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum": {
+          "status": "scored",
+          "value": 128
+        },
+        "smsp__inst_executed.sum": {
+          "status": "scored",
+          "value": 968
+        }
+      },
+      "trace_provenance": {
+        "threadblock_files": 4,
+        "trace_dir": "workloads/simbench_bw/results/bf16_hmma_gemm_traceable/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl",
+        "trace_pb_sha256": null
+      }
+    },
+    {
+      "cell_status": {
+        "status": "emitted"
+      },
+      "coverage": {
+        "excluded_warp_instructions_by_class": {
+          "ASYNC_COPY": 256
+        },
+        "modeled_warp_instructions": 256,
+        "reconstruction_failures": 0,
+        "unspecified_warp_instructions": 0
+      },
+      "identity": {
+        "arch": "sm_86",
+        "binary_sha256": "b0b510ca0263ad138574a0295f06a2207903b780fe4763cdfa61bb90a53fdc79",
+        "kernel_signature_sha256": "a99c593cfe75c5246722662748ea2c5598a235cd79be8e80809a3e893ed1d354",
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "cp_async_shared_tile_copy",
+        "source_commit": "f6b5e5d3b19fb4ac507fa3fa0229ebf11073f50f"
+      },
+      "metrics": {
+        "l1tex__t_requests.sum": {
+          "detail": "unmodeled excluded op classes present: ['ASYNC_COPY']",
+          "status": "typed",
+          "typed_reason": "rollup_unsupported"
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_atom.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_ld.sum": {
+          "detail": "256 ASYNC_COPY warp instructions present; LDGSTS-to-op_ld attribution is not pinned by any fixture",
+          "status": "typed",
+          "typed_reason": "async_copy_unfixtured"
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_red.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_st.sum": {
+          "status": "scored",
+          "value": 128
+        },
+        "l1tex__t_requests_pipe_lsu_mem_local_op_ld.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_local_op_st.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_atom.sum": {
+          "detail": "'l1tex__t_requests_pipe_tex_mem_surface_op_atom.sum' is typed 'no_expressible_fixture' in the observation contract; it must be recorded as typed-unscoreable, never scored",
+          "status": "typed",
+          "typed_reason": "no_expressible_fixture"
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_ld.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_red.sum": {
+          "detail": "'l1tex__t_requests_pipe_tex_mem_surface_op_red.sum' is typed 'no_expressible_fixture' in the observation contract; it must be recorded as typed-unscoreable, never scored",
+          "status": "typed",
+          "typed_reason": "no_expressible_fixture"
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_st.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_texture.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum": {
+          "detail": "LDGSTS sectors land in the global ld pipe; the attribution is not pinned by any fixture",
+          "status": "typed",
+          "typed_reason": "async_copy_unfixtured"
+        },
+        "l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum": {
+          "status": "scored",
+          "value": 512
+        },
+        "smsp__inst_executed.sum": {
+          "status": "scored",
+          "value": 2036
+        }
+      },
+      "trace_provenance": {
+        "threadblock_files": 1,
+        "trace_dir": "workloads/simbench_bw/results/cp_async_shared_tile_copy/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl",
+        "trace_pb_sha256": null
+      }
+    },
+    {
+      "cell_status": {
+        "status": "emitted"
+      },
+      "coverage": {
+        "excluded_warp_instructions_by_class": {},
+        "modeled_warp_instructions": 400,
+        "reconstruction_failures": 0,
+        "unspecified_warp_instructions": 0
+      },
+      "identity": {
+        "arch": "sm_86",
+        "binary_sha256": "74ad45e93ba3fb2b8c35724c6681d5c96cdfc8341de0f368edc3bde0331e63f7",
+        "kernel_signature_sha256": "87f9c439b130a8d25457042b165734612b65b590cd2aa2acc54b95178eb16ad9",
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "fp16_hmma_gemm_traceable",
+        "source_commit": "f6b5e5d3b19fb4ac507fa3fa0229ebf11073f50f"
+      },
+      "metrics": {
+        "l1tex__t_requests.sum": {
+          "status": "scored",
+          "value": 400
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_atom.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_ld.sum": {
+          "status": "scored",
+          "value": 384
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_red.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_st.sum": {
+          "status": "scored",
+          "value": 16
+        },
+        "l1tex__t_requests_pipe_lsu_mem_local_op_ld.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_local_op_st.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_atom.sum": {
+          "detail": "'l1tex__t_requests_pipe_tex_mem_surface_op_atom.sum' is typed 'no_expressible_fixture' in the observation contract; it must be recorded as typed-unscoreable, never scored",
+          "status": "typed",
+          "typed_reason": "no_expressible_fixture"
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_ld.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_red.sum": {
+          "detail": "'l1tex__t_requests_pipe_tex_mem_surface_op_red.sum' is typed 'no_expressible_fixture' in the observation contract; it must be recorded as typed-unscoreable, never scored",
+          "status": "typed",
+          "typed_reason": "no_expressible_fixture"
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_st.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_texture.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum": {
+          "detail": "384 misaligned warp footprints; the pinned sector semantic is scope-restricted to aligned footprints",
+          "status": "typed",
+          "typed_reason": "sector_scope_misaligned_footprint"
+        },
+        "l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum": {
+          "status": "scored",
+          "value": 128
+        },
+        "smsp__inst_executed.sum": {
+          "status": "scored",
+          "value": 968
+        }
+      },
+      "trace_provenance": {
+        "threadblock_files": 4,
+        "trace_dir": "workloads/simbench_bw/results/fp16_hmma_gemm_traceable/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl",
+        "trace_pb_sha256": null
+      }
+    },
+    {
+      "cell_status": {
+        "status": "emitted"
+      },
+      "coverage": {
+        "excluded_warp_instructions_by_class": {},
+        "modeled_warp_instructions": 3088,
+        "reconstruction_failures": 0,
+        "unspecified_warp_instructions": 0
+      },
+      "identity": {
+        "arch": "sm_86",
+        "binary_sha256": "55bfc93c0edebe35c6e78b16d6096bd3a21e60f25faa178a410fc59cbf21bbae",
+        "kernel_signature_sha256": "87f0eeb1256101173117148a10ac97d6367a9307c2b8e33c78df9d43c2f491f7",
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "fp32_fma_dep_chain",
+        "source_commit": "f6b5e5d3b19fb4ac507fa3fa0229ebf11073f50f"
+      },
+      "metrics": {
+        "l1tex__t_requests.sum": {
+          "status": "scored",
+          "value": 3088
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_atom.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_ld.sum": {
+          "status": "scored",
+          "value": 3072
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_red.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_st.sum": {
+          "status": "scored",
+          "value": 16
+        },
+        "l1tex__t_requests_pipe_lsu_mem_local_op_ld.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_local_op_st.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_atom.sum": {
+          "detail": "'l1tex__t_requests_pipe_tex_mem_surface_op_atom.sum' is typed 'no_expressible_fixture' in the observation contract; it must be recorded as typed-unscoreable, never scored",
+          "status": "typed",
+          "typed_reason": "no_expressible_fixture"
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_ld.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_red.sum": {
+          "detail": "'l1tex__t_requests_pipe_tex_mem_surface_op_red.sum' is typed 'no_expressible_fixture' in the observation contract; it must be recorded as typed-unscoreable, never scored",
+          "status": "typed",
+          "typed_reason": "no_expressible_fixture"
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_st.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_texture.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum": {
+          "detail": "3072 misaligned warp footprints; the pinned sector semantic is scope-restricted to aligned footprints",
+          "status": "typed",
+          "typed_reason": "sector_scope_misaligned_footprint"
+        },
+        "l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum": {
+          "status": "scored",
+          "value": 512
+        },
+        "smsp__inst_executed.sum": {
+          "status": "scored",
+          "value": 7792
+        }
+      },
+      "trace_provenance": {
+        "threadblock_files": 16,
+        "trace_dir": "workloads/simbench_bw/results/fp32_fma_dep_chain/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl",
+        "trace_pb_sha256": null
+      }
+    },
+    {
+      "cell_status": {
+        "status": "emitted"
+      },
+      "coverage": {
+        "excluded_warp_instructions_by_class": {},
+        "modeled_warp_instructions": 67073,
+        "reconstruction_failures": 0,
+        "unspecified_warp_instructions": 0
+      },
+      "identity": {
+        "arch": "sm_86",
+        "binary_sha256": "e6aa9925f55f19d7ab575e27c0c1184609cc5a02f569cfed3dd8e91f9ea3d675",
+        "kernel_signature_sha256": "9b26911afd5effa33f41ae15bce2a7a5d606f797c873e5617db53a36f9f5f6fc",
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "l2_persisting_window_sweep",
+        "source_commit": "f6b5e5d3b19fb4ac507fa3fa0229ebf11073f50f"
+      },
+      "metrics": {
+        "l1tex__t_requests.sum": {
+          "status": "scored",
+          "value": 67073
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_atom.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_ld.sum": {
+          "status": "scored",
+          "value": 66816
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_red.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_st.sum": {
+          "status": "scored",
+          "value": 257
+        },
+        "l1tex__t_requests_pipe_lsu_mem_local_op_ld.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_local_op_st.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_atom.sum": {
+          "detail": "'l1tex__t_requests_pipe_tex_mem_surface_op_atom.sum' is typed 'no_expressible_fixture' in the observation contract; it must be recorded as typed-unscoreable, never scored",
+          "status": "typed",
+          "typed_reason": "no_expressible_fixture"
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_ld.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_red.sum": {
+          "detail": "'l1tex__t_requests_pipe_tex_mem_surface_op_red.sum' is typed 'no_expressible_fixture' in the observation contract; it must be recorded as typed-unscoreable, never scored",
+          "status": "typed",
+          "typed_reason": "no_expressible_fixture"
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_st.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_texture.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum": {
+          "status": "scored",
+          "value": 267264
+        },
+        "l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum": {
+          "status": "scored",
+          "value": 1025
+        },
+        "smsp__inst_executed.sum": {
+          "status": "scored",
+          "value": 1273600
+        }
+      },
+      "trace_provenance": {
+        "threadblock_files": 256,
+        "trace_dir": "workloads/simbench_bw/results/l2_persisting_window_sweep/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl",
+        "trace_pb_sha256": null
+      }
+    },
+    {
+      "cell_status": {
+        "status": "emitted"
+      },
+      "coverage": {
+        "excluded_warp_instructions_by_class": {
+          "UNSPECIFIED": 131072
+        },
+        "modeled_warp_instructions": 139265,
+        "reconstruction_failures": 0,
+        "unspecified_warp_instructions": 131072
+      },
+      "identity": {
+        "arch": "sm_86",
+        "binary_sha256": "a9e72c8106c33cee877a77343c49e3d8bda32182e681063b504d04b869efefb8",
+        "kernel_signature_sha256": "30baaa0f6d6054d23fe69560cb76c4f54a907f9bc94fa89d9fc7fc4daf32dbc7",
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "l2_prefetch_hint_sweep",
+        "source_commit": "f6b5e5d3b19fb4ac507fa3fa0229ebf11073f50f"
+      },
+      "metrics": {
+        "l1tex__t_requests.sum": {
+          "detail": "131072 warp instructions in UNSPECIFIED op classes (unknown to the classifier); the rollup's included-pipe coverage cannot be established",
+          "status": "typed",
+          "typed_reason": "rollup_unsupported"
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_atom.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_ld.sum": {
+          "status": "scored",
+          "value": 135168
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_red.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_st.sum": {
+          "status": "scored",
+          "value": 4097
+        },
+        "l1tex__t_requests_pipe_lsu_mem_local_op_ld.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_local_op_st.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_atom.sum": {
+          "detail": "'l1tex__t_requests_pipe_tex_mem_surface_op_atom.sum' is typed 'no_expressible_fixture' in the observation contract; it must be recorded as typed-unscoreable, never scored",
+          "status": "typed",
+          "typed_reason": "no_expressible_fixture"
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_ld.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_red.sum": {
+          "detail": "'l1tex__t_requests_pipe_tex_mem_surface_op_red.sum' is typed 'no_expressible_fixture' in the observation contract; it must be recorded as typed-unscoreable, never scored",
+          "status": "typed",
+          "typed_reason": "no_expressible_fixture"
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_st.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_texture.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum": {
+          "detail": "114688 misaligned warp footprints; the pinned sector semantic is scope-restricted to aligned footprints",
+          "status": "typed",
+          "typed_reason": "sector_scope_misaligned_footprint"
+        },
+        "l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum": {
+          "status": "scored",
+          "value": 16385
+        },
+        "smsp__inst_executed.sum": {
+          "status": "scored",
+          "value": 4252928
+        }
+      },
+      "trace_provenance": {
+        "threadblock_files": 64,
+        "trace_dir": "workloads/simbench_bw/results/l2_prefetch_hint_sweep/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl",
+        "trace_pb_sha256": null
+      }
+    },
+    {
+      "cell_status": {
+        "status": "emitted"
+      },
+      "coverage": {
+        "excluded_warp_instructions_by_class": {},
+        "modeled_warp_instructions": 46080,
+        "reconstruction_failures": 0,
+        "unspecified_warp_instructions": 0
+      },
+      "identity": {
+        "arch": "sm_86",
+        "binary_sha256": "519142e2477c60471f3627af671e0229f159ee1e35375c7d24107aced64d7d99",
+        "kernel_signature_sha256": "874881cf5162a340bdbfdf4061ab2917e382d64eb8bcd407b00e13fbe65507e1",
+        "shape_point": "trace_00",
+        "slug": "rmsnorm_fwd_bf16",
+        "source_commit": "f6b5e5d3b19fb4ac507fa3fa0229ebf11073f50f"
+      },
+      "metrics": {
+        "l1tex__t_requests.sum": {
+          "status": "scored",
+          "value": 32768
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_atom.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_ld.sum": {
+          "status": "scored",
+          "value": 24576
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_red.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_st.sum": {
+          "status": "scored",
+          "value": 8192
+        },
+        "l1tex__t_requests_pipe_lsu_mem_local_op_ld.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_local_op_st.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_atom.sum": {
+          "detail": "'l1tex__t_requests_pipe_tex_mem_surface_op_atom.sum' is typed 'no_expressible_fixture' in the observation contract; it must be recorded as typed-unscoreable, never scored",
+          "status": "typed",
+          "typed_reason": "no_expressible_fixture"
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_ld.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_red.sum": {
+          "detail": "'l1tex__t_requests_pipe_tex_mem_surface_op_red.sum' is typed 'no_expressible_fixture' in the observation contract; it must be recorded as typed-unscoreable, never scored",
+          "status": "typed",
+          "typed_reason": "no_expressible_fixture"
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_st.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_texture.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum": {
+          "status": "scored",
+          "value": 49152
+        },
+        "l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum": {
+          "status": "scored",
+          "value": 16384
+        },
+        "smsp__inst_executed.sum": {
+          "status": "scored",
+          "value": 444416
+        }
+      },
+      "trace_provenance": {
+        "threadblock_files": 256,
+        "trace_dir": "workloads/simbench_bw/results/rmsnorm_fwd_bf16/rtx_3090_ti/sm_86/trace_trace_00",
+        "trace_pb_sha256": null
+      }
+    },
+    {
+      "cell_status": {
+        "status": "emitted"
+      },
+      "coverage": {
+        "excluded_warp_instructions_by_class": {},
+        "modeled_warp_instructions": 8608,
+        "reconstruction_failures": 0,
+        "unspecified_warp_instructions": 0
+      },
+      "identity": {
+        "arch": "sm_86",
+        "binary_sha256": "0d784a20e147ea35ee22b0f881863b4f53ecf4c023128ba636774d9f4f9daff1",
+        "kernel_signature_sha256": "8009b80357819242aa59324689e41d345c7c27edc559c0db332e289d773adb39",
+        "shape_point": "trace_00",
+        "slug": "vendor_sgemm_strided_batched_cublas",
+        "source_commit": "f6b5e5d3b19fb4ac507fa3fa0229ebf11073f50f"
+      },
+      "metrics": {
+        "l1tex__t_requests.sum": {
+          "status": "scored",
+          "value": 384
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_atom.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_ld.sum": {
+          "status": "scored",
+          "value": 256
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_red.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_st.sum": {
+          "status": "scored",
+          "value": 128
+        },
+        "l1tex__t_requests_pipe_lsu_mem_local_op_ld.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_local_op_st.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_atom.sum": {
+          "detail": "'l1tex__t_requests_pipe_tex_mem_surface_op_atom.sum' is typed 'no_expressible_fixture' in the observation contract; it must be recorded as typed-unscoreable, never scored",
+          "status": "typed",
+          "typed_reason": "no_expressible_fixture"
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_ld.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_red.sum": {
+          "detail": "'l1tex__t_requests_pipe_tex_mem_surface_op_red.sum' is typed 'no_expressible_fixture' in the observation contract; it must be recorded as typed-unscoreable, never scored",
+          "status": "typed",
+          "typed_reason": "no_expressible_fixture"
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_st.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_texture.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum": {
+          "status": "scored",
+          "value": 1024
+        },
+        "l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum": {
+          "status": "scored",
+          "value": 512
+        },
+        "smsp__inst_executed.sum": {
+          "status": "scored",
+          "value": 102176
+        }
+      },
+      "trace_provenance": {
+        "threadblock_files": 4,
+        "trace_dir": "workloads/simbench_bw/results/vendor_sgemm_strided_batched_cublas/rtx_3090_ti/sm_86/trace_trace_00",
+        "trace_pb_sha256": null
+      }
+    },
+    {
+      "cell_status": {
+        "status": "emitted"
+      },
+      "coverage": {
+        "excluded_warp_instructions_by_class": {},
+        "modeled_warp_instructions": 12289,
+        "reconstruction_failures": 0,
+        "unspecified_warp_instructions": 0
+      },
+      "identity": {
+        "arch": "sm_86",
+        "binary_sha256": "eb3ec15b1d54b498650a94c903d85e4e01881a9531311ac6e27e2d85c560a252",
+        "kernel_signature_sha256": "779b4acb3473bca619d87757ae102a1e0e7c50006edfa5171689e06af94e7443",
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "warm_cold_pair_relaunch",
+        "source_commit": "f6b5e5d3b19fb4ac507fa3fa0229ebf11073f50f"
+      },
+      "metrics": {
+        "l1tex__t_requests.sum": {
+          "status": "scored",
+          "value": 12289
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_atom.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_ld.sum": {
+          "status": "scored",
+          "value": 8192
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_red.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_st.sum": {
+          "status": "scored",
+          "value": 4097
+        },
+        "l1tex__t_requests_pipe_lsu_mem_local_op_ld.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_local_op_st.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_atom.sum": {
+          "detail": "'l1tex__t_requests_pipe_tex_mem_surface_op_atom.sum' is typed 'no_expressible_fixture' in the observation contract; it must be recorded as typed-unscoreable, never scored",
+          "status": "typed",
+          "typed_reason": "no_expressible_fixture"
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_ld.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_red.sum": {
+          "detail": "'l1tex__t_requests_pipe_tex_mem_surface_op_red.sum' is typed 'no_expressible_fixture' in the observation contract; it must be recorded as typed-unscoreable, never scored",
+          "status": "typed",
+          "typed_reason": "no_expressible_fixture"
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_st.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_texture.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum": {
+          "status": "scored",
+          "value": 32768
+        },
+        "l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum": {
+          "status": "scored",
+          "value": 16385
+        },
+        "smsp__inst_executed.sum": {
+          "status": "scored",
+          "value": 102936
+        }
+      },
+      "trace_provenance": {
+        "threadblock_files": 8,
+        "trace_dir": "workloads/simbench_bw/results/warm_cold_pair_relaunch/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl",
+        "trace_pb_sha256": null
+      }
+    },
+    {
+      "cell_status": {
+        "status": "emitted"
+      },
+      "coverage": {
+        "excluded_warp_instructions_by_class": {},
+        "modeled_warp_instructions": 83073,
+        "reconstruction_failures": 0,
+        "unspecified_warp_instructions": 0
+      },
+      "identity": {
+        "arch": "sm_86",
+        "binary_sha256": "197379525a6e267b2e018513086fb85b3b861a696b0e14fb061d3839ac8e7dd6",
+        "kernel_signature_sha256": "4a89354e3a81afb6d1ee9c0aea25f10cb68d1d31779c978bd37c6ee5713622e1",
+        "shape_point": "trace_l2_accuracy_xl",
+        "slug": "working_set_capacity_sweep",
+        "source_commit": "e24cc85aced3782e3d9662949801a49abc20dc44"
+      },
+      "metrics": {
+        "l1tex__t_requests.sum": {
+          "status": "scored",
+          "value": 83073
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_atom.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_ld.sum": {
+          "status": "scored",
+          "value": 83008
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_red.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_global_op_st.sum": {
+          "status": "scored",
+          "value": 65
+        },
+        "l1tex__t_requests_pipe_lsu_mem_local_op_ld.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_lsu_mem_local_op_st.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_atom.sum": {
+          "detail": "'l1tex__t_requests_pipe_tex_mem_surface_op_atom.sum' is typed 'no_expressible_fixture' in the observation contract; it must be recorded as typed-unscoreable, never scored",
+          "status": "typed",
+          "typed_reason": "no_expressible_fixture"
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_ld.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_red.sum": {
+          "detail": "'l1tex__t_requests_pipe_tex_mem_surface_op_red.sum' is typed 'no_expressible_fixture' in the observation contract; it must be recorded as typed-unscoreable, never scored",
+          "status": "typed",
+          "typed_reason": "no_expressible_fixture"
+        },
+        "l1tex__t_requests_pipe_tex_mem_surface_op_st.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_requests_pipe_tex_mem_texture.sum": {
+          "status": "scored",
+          "value": 0
+        },
+        "l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum": {
+          "status": "scored",
+          "value": 332032
+        },
+        "l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum": {
+          "status": "scored",
+          "value": 257
+        },
+        "smsp__inst_executed.sum": {
+          "status": "scored",
+          "value": 1579776
+        }
+      },
+      "trace_provenance": {
+        "threadblock_files": 64,
+        "trace_dir": "workloads/simbench_bw/results/working_set_capacity_sweep/rtx_3090_ti/sm_86/trace_trace_l2_accuracy_xl",
+        "trace_pb_sha256": null
+      }
+    }
+  ],
+  "contract_build_binary_sha256": "5727ac2fc5bce44711c85eebf08c73457c3db862fb5a3261dc66a300ff3ee262",
+  "n_cells": 44,
+  "n_emitted": 27,
+  "n_typed": 17,
+  "schema_version": 1
+}

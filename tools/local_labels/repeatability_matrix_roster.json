@@ -1,0 +1,14 @@
+[
+  {
+    "slug": "rmsnorm_fwd_bf16_sm80",
+    "binary": "workloads/portable_lcd/rmsnorm_fwd_bf16_sm80/rmsnorm_fwd_bf16_sm80_run",
+    "shape_point": "timing_shape",
+    "app_args": ["--timing_shape"]
+  },
+  {
+    "slug": "softmax_safe_bf16_sm80",
+    "binary": "workloads/portable_lcd/softmax_safe_bf16_sm80/softmax_safe_bf16_sm80_run",
+    "shape_point": "timing_shape",
+    "app_args": ["--timing_shape"]
+  }
+]

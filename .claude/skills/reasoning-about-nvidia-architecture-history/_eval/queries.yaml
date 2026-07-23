@@ -1,0 +1,42 @@
+queries:
+  - prompt: "which patent introduced TMA"
+    expected_skill: reasoning-about-nvidia-architecture-history
+    expected_cards:
+      - .claude/knowledge/patents/patent-family-map.md
+      - .claude/knowledge/patents/arch-hopper.md
+    forbidden_behavior:
+      - cites a patent ID not in the verified corpus
+  - prompt: "explain the three architectural rewrites of NVIDIA GPUs"
+    expected_skill: reasoning-about-nvidia-architecture-history
+    expected_cards:
+      - .claude/knowledge/patents/three-rewrites.md
+      - .claude/knowledge/patents/INDEX.md
+    forbidden_behavior:
+      - presents the three-rewrites thesis as officially declared NVIDIA roadmap (it is the source document's analytic synthesis)
+  - prompt: "did Microsoft or Intel patent something similar to TMEM"
+    expected_skill: reasoning-about-nvidia-architecture-history
+    expected_cards:
+      - .claude/knowledge/patents/competitor-tensor-storage.md
+      - .claude/knowledge/patents/patent-family-map.md
+    forbidden_behavior:
+      - says "TMEM is unique to NVIDIA" (the architectural pressure is industry-wide; only the naming is NVIDIA-specific)
+  - prompt: "how did synchronization evolve from Tesla to Blackwell"
+    expected_skill: reasoning-about-nvidia-architecture-history
+    expected_cards:
+      - .claude/knowledge/patents/evolution-synchronization.md
+    forbidden_behavior:
+      - omits the transaction barrier (Hopper, mbarrier.complete_tx)
+  - prompt: "define BSSY, DSMEM, HMMA, TMEM and which generation introduced each"
+    expected_skill: reasoning-about-nvidia-architecture-history
+    expected_cards:
+      - .claude/knowledge/patents/glossary.md
+      - .claude/knowledge/patents/sass-evolution-timeline.md
+    forbidden_behavior:
+      - treats definitions as synonymous across generations (BSSY is Volta, TMEM is Blackwell)
+  - prompt: "what changed in the GPU execution model from warp-lockstep to ITS to single-thread issue"
+    expected_skill: reasoning-about-nvidia-architecture-history
+    expected_cards:
+      - .claude/knowledge/patents/evolution-execution-model.md
+      - .claude/knowledge/patents/arch-volta.md
+    forbidden_behavior:
+      - claims ITS is sm_60 (it is sm_70 / Volta+)

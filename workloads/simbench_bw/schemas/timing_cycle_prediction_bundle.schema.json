@@ -1,0 +1,342 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "simbench_bw/schemas/timing_cycle_prediction_bundle.schema.json",
+  "title": "Timing cycle prediction bundle",
+  "description": "Per-cell elapsed-cycle predictions for the scoped long-duration timing cohort. Each prediction records a nonnegative pedestal, static analytical prior terms, a ridge residual, the final cycle prediction, deploy-legal inference features, and provenance for the feature sources.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_kind",
+    "arch",
+    "source_commit",
+    "model_version",
+    "deployable_channel",
+    "demoted_channels",
+    "cohort_limitation",
+    "cohort_artifact",
+    "static_work_artifact",
+    "static_sass_features_artifact",
+    "device_peak_constants_artifact",
+    "training",
+    "model",
+    "n_cells",
+    "cells"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "artifact_kind": {"type": "string", "const": "timing_cycle_prediction_bundle"},
+    "arch": {"type": "string", "const": "sm_86"},
+    "source_commit": {"type": "string", "minLength": 1},
+    "model_version": {
+      "type": "string",
+      "minLength": 1,
+      "not": {"const": "timing_cycle_ridge_v3_same_slug_local_residual"},
+      "description": "The demoted v3 same-slug-substitution model version is structurally rejected: its deployable headline leaked truth labels via same-slug scaled-neighbor substitution."
+    },
+    "deployable_channel": {
+      "type": "string",
+      "const": "deployable_ridge_on_roofline_no_same_slug_substitution"
+    },
+    "demoted_channels": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"const": "diagnostic_same_slug_scaled_neighbor_demoted"}
+    },
+    "cohort_limitation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "distinct_slug_count",
+        "distinct_slugs",
+        "typed_reason",
+        "same_slug_substitution_authorized",
+        "note"
+      ],
+      "properties": {
+        "distinct_slug_count": {"type": "integer", "minimum": 1},
+        "distinct_slugs": {
+          "type": "array",
+          "minItems": 1,
+          "items": {"type": "string", "minLength": 1}
+        },
+        "typed_reason": {
+          "type": "string",
+          "const": "timing_cohort_slug_diversity_insufficient_for_slug_disjoint_scoring"
+        },
+        "same_slug_substitution_authorized": {"type": "boolean", "const": false},
+        "note": {"type": "string", "minLength": 1}
+      }
+    },
+    "cohort_artifact": {"type": "string", "minLength": 1},
+    "static_work_artifact": {"type": "string", "minLength": 1},
+    "static_sass_features_artifact": {"type": "string", "minLength": 1},
+    "device_peak_constants_artifact": {"type": "string", "minLength": 1},
+    "training": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target_metric_id",
+        "n_cells",
+        "labels_used_only_for_residual_fit",
+        "per_cell_labels_required_at_inference",
+        "validation_method"
+      ],
+      "properties": {
+        "target_metric_id": {"type": "string", "const": "gpc__cycles_elapsed.max"},
+        "n_cells": {"type": "integer", "minimum": 1},
+        "labels_used_only_for_residual_fit": {"type": "boolean", "const": true},
+        "per_cell_labels_required_at_inference": {"type": "boolean", "const": false},
+        "validation_method": {"type": "string", "const": "leave_one_out"}
+      }
+    },
+    "model": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "ridge_lambda",
+        "feature_names",
+        "residual_coefficients",
+        "pedestal_cycles",
+        "tensor_peak_flops_per_cycle",
+        "tensor_roofline_efficiency_prior",
+        "effective_flops_per_cycle",
+        "compute_prior_source",
+        "dram_bytes_per_cycle"
+      ],
+      "properties": {
+        "kind": {"type": "string", "const": "pedestal_roofline_ridge_residual"},
+        "ridge_lambda": {"type": "number", "exclusiveMinimum": 0},
+        "feature_names": {
+          "type": "array",
+          "items": {"type": "string", "minLength": 1},
+          "minItems": 1
+        },
+        "residual_coefficients": {
+          "type": "array",
+          "items": {"type": "number"},
+          "minItems": 1
+        },
+        "pedestal_cycles": {"type": "number", "minimum": 0},
+        "tensor_peak_flops_per_cycle": {"type": "number", "exclusiveMinimum": 0},
+        "tensor_roofline_efficiency_prior": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
+        "effective_flops_per_cycle": {"type": "number", "exclusiveMinimum": 0},
+        "compute_prior_source": {"type": "string", "const": "static_work_dynamic_flop_count_x_ga102_tensor_peak_x_explicit_efficiency_prior"},
+        "dram_bytes_per_cycle": {"type": "number", "exclusiveMinimum": 0}
+      }
+    },
+    "n_cells": {"type": "integer", "minimum": 1},
+    "cells": {
+      "type": "array",
+      "minItems": 1,
+      "items": {"$ref": "#/$defs/cell"}
+    }
+  },
+  "$defs": {
+    "join_key": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "slug",
+        "shape_point",
+        "arch",
+        "binary_sha256",
+        "kernel_signature_sha256",
+        "source_commit",
+        "metric_target"
+      ],
+      "properties": {
+        "slug": {"type": "string", "minLength": 1},
+        "shape_point": {"type": "string", "minLength": 1},
+        "arch": {"type": "string", "const": "sm_86"},
+        "binary_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "kernel_signature_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "source_commit": {"type": "string", "minLength": 1},
+        "metric_target": {"type": "string", "const": "cycles"}
+      }
+    },
+    "feature_vector": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "bias",
+        "dynamic_flops_giga",
+        "mn_tile_meg",
+        "mk_tile_meg",
+        "nk_tile_meg",
+        "cta_count_10k",
+        "m_norm",
+        "n_norm",
+        "k_norm",
+        "structural_bytes_giga",
+        "nvbit_total_32b_sectors_giga",
+        "predicted_l1_hit_rate",
+        "predicted_l2_hit_rate",
+        "active_warps_per_sm_norm"
+      ],
+      "properties": {
+        "bias": {"type": "number"},
+        "dynamic_flops_giga": {"type": "number", "minimum": 0},
+        "mn_tile_meg": {"type": "number", "minimum": 0},
+        "mk_tile_meg": {"type": "number", "minimum": 0},
+        "nk_tile_meg": {"type": "number", "minimum": 0},
+        "cta_count_10k": {"type": "number", "minimum": 0},
+        "m_norm": {"type": "number", "minimum": 0},
+        "n_norm": {"type": "number", "minimum": 0},
+        "k_norm": {"type": "number", "minimum": 0},
+        "structural_bytes_giga": {"type": "number", "minimum": 0},
+        "nvbit_total_32b_sectors_giga": {"type": "number", "minimum": 0},
+        "predicted_l1_hit_rate": {"type": "number", "minimum": 0, "maximum": 1},
+        "predicted_l2_hit_rate": {"type": "number", "minimum": 0, "maximum": 1},
+        "active_warps_per_sm_norm": {"type": "number", "minimum": 0}
+      }
+    },
+    "prediction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "pedestal_cycles",
+        "compute_cycles",
+        "memory_cycles",
+        "analytical_prior_cycles",
+        "residual_cycles",
+        "predicted_cycles"
+      ],
+      "properties": {
+        "pedestal_cycles": {"type": "number", "minimum": 0},
+        "compute_cycles": {"type": "number", "minimum": 0},
+        "memory_cycles": {"type": "number", "minimum": 0},
+        "analytical_prior_cycles": {"type": "number", "minimum": 0},
+        "residual_cycles": {"type": "number"},
+        "predicted_cycles": {"type": "number", "exclusiveMinimum": 0}
+      }
+    },
+    "same_slug_diagnostic": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "DEMOTED diagnostic-only channel preserving the prior same-slug scaled-neighbor values. Never a deployable prediction: predicted_cycles derives from the nearest same-slug cell's TRUE label.",
+      "required": [
+        "channel",
+        "residual_cycles",
+        "predicted_cycles",
+        "neighbor_slug",
+        "neighbor_shape_point",
+        "neighbor_work_ratio",
+        "validation_abs_log_error"
+      ],
+      "properties": {
+        "channel": {
+          "type": "string",
+          "const": "diagnostic_same_slug_scaled_neighbor_demoted"
+        },
+        "residual_cycles": {"type": "number"},
+        "predicted_cycles": {"type": "number", "exclusiveMinimum": 0},
+        "neighbor_slug": {"type": "string", "minLength": 1},
+        "neighbor_shape_point": {"type": "string", "minLength": 1},
+        "neighbor_work_ratio": {"type": "number", "exclusiveMinimum": 0},
+        "validation_abs_log_error": {"type": "number", "minimum": 0}
+      }
+    },
+    "cell": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "slug",
+        "shape_point",
+        "arch",
+        "regime",
+        "metric_target",
+        "binary_sha256",
+        "kernel_signature_sha256",
+        "source_commit",
+        "join_key",
+        "feature_vector",
+        "feature_provenance",
+        "prediction",
+        "prediction_channel",
+        "diagnostics",
+        "prediction_mode",
+        "model_version",
+        "typed_unavailable_reason",
+        "validation_abs_log_error"
+      ],
+      "properties": {
+        "slug": {"type": "string", "minLength": 1},
+        "shape_point": {"type": "string", "minLength": 1},
+        "arch": {"type": "string", "const": "sm_86"},
+        "regime": {"type": "string", "enum": ["long"]},
+        "metric_target": {"type": "string", "const": "cycles"},
+        "binary_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "kernel_signature_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+        "source_commit": {"type": "string", "minLength": 1},
+        "join_key": {"$ref": "#/$defs/join_key"},
+        "feature_vector": {"$ref": "#/$defs/feature_vector"},
+        "feature_provenance": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "launch_geometry",
+            "nvbit_sector_summary",
+            "static_sass_features",
+            "static_work",
+            "device_peak_constants",
+            "cache_hit_predictions",
+            "static_work_kernel_signature_sha256",
+            "static_sass_kernel_signature_sha256",
+            "sector_summary_source_trace",
+            "predicted_cache_hit_rate_source",
+            "predicted_l1_artifact",
+            "predicted_l2_artifact",
+            "compute_prior_source",
+            "theoretical_occupancy_source",
+            "inference_inputs_deploy_legal"
+          ],
+          "properties": {
+            "launch_geometry": {"type": "string", "minLength": 1},
+            "nvbit_sector_summary": {"type": "string", "minLength": 1},
+            "static_sass_features": {"type": "string", "minLength": 1},
+            "static_work": {"type": "string", "minLength": 1},
+            "device_peak_constants": {"type": "string", "minLength": 1},
+            "cache_hit_predictions": {"type": "string", "minLength": 1},
+            "static_work_kernel_signature_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "static_sass_kernel_signature_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+            "sector_summary_source_trace": {"type": "string", "minLength": 1},
+            "predicted_cache_hit_rate_source": {"type": "string", "minLength": 1},
+            "predicted_l1_artifact": {"type": "string", "minLength": 1},
+            "predicted_l2_artifact": {"type": "string", "minLength": 1},
+            "compute_prior_source": {"type": "string", "const": "static_work_dynamic_flop_count_x_ga102_tensor_peak_x_explicit_efficiency_prior"},
+            "theoretical_occupancy_source": {"type": "string", "minLength": 1},
+            "inference_inputs_deploy_legal": {"type": "boolean", "const": true}
+          }
+        },
+        "prediction": {"$ref": "#/$defs/prediction"},
+        "prediction_channel": {
+          "type": "string",
+          "const": "deployable_ridge_on_roofline_no_same_slug_substitution"
+        },
+        "diagnostics": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["same_slug_scaled_neighbor"],
+          "properties": {
+            "same_slug_scaled_neighbor": {
+              "oneOf": [
+                {"type": "null"},
+                {"$ref": "#/$defs/same_slug_diagnostic"}
+              ]
+            }
+          }
+        },
+        "prediction_mode": {"type": "string", "const": "leave_one_out_validation"},
+        "model_version": {
+          "type": "string",
+          "minLength": 1,
+          "not": {"const": "timing_cycle_ridge_v3_same_slug_local_residual"}
+        },
+        "typed_unavailable_reason": {"type": ["string", "null"]},
+        "validation_abs_log_error": {"type": "number", "minimum": 0}
+      }
+    }
+  }
+}

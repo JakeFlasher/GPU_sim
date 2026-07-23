@@ -1,0 +1,318 @@
+{
+  "arch": "sm_120",
+  "command_template": "uv run python tools/local_labels/collect_portable_lcd_duration.py --roster data/local_labels/sm120_duration_cohort.json --out data/local_labels/duration --slug <slug> --repeats 6 --inner-reps 3",
+  "diagnostic_id": "sm120_duration_candidate_diagnostic_v1",
+  "finding": "Only large single-kernel compute workloads (GEMM/attention) reconcile the dual-source bound; their runners honor size overrides (--m/--n/--k or --BH/--Sq/--Sk/--D) to reach multi-ms. Norm/softmax/elementwise/sparse portable runners and conv2d do NOT honor the overrides and stay sub-ms. The frozen tri-label roster's simbench cells are microbenchmarks (roster walltime targets 0.03-0.55ms) and cannot reconcile. The reconcilable duration cohort is therefore tensor_compute (GEMM/attention) only.",
+  "label_contract": "CUPTI dual-source duration_ns; admit iff |duration_ns - cuda_event_ms*1e6| <= max(0.05*cuda_event, 5000ns)",
+  "non_reconcilers": [
+    {
+      "dual_source_reconciliation_passed": false,
+      "note": "short kernel; conv shape does not consume the GEMM override",
+      "observed_median_ms": 0.07,
+      "override_argv": [
+        "--m",
+        "16384",
+        "--n",
+        "16384",
+        "--k",
+        "8192"
+      ],
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "conv2d_implicit_gemm_bf16_sm80"
+    },
+    {
+      "dual_source_reconciliation_passed": false,
+      "note": "short kernel; retained as the live exclusion witness in duration_excluded.json",
+      "observed_median_ms": 0.21,
+      "override_argv": [
+        "--m",
+        "8192",
+        "--n",
+        "8192",
+        "--k",
+        "8192"
+      ],
+      "shape_point": "timing_shape",
+      "slug": "conv2d_implicit_gemm_bf16_sm80"
+    },
+    {
+      "dual_source_reconciliation_passed": false,
+      "note": "fixed short norm; ignores size overrides",
+      "observed_median_ms": 0.07,
+      "override_argv": [
+        "--BH",
+        "64",
+        "--Sq",
+        "8192",
+        "--Sk",
+        "8192",
+        "--D",
+        "128"
+      ],
+      "shape_point": "timing_shape",
+      "slug": "layernorm_fwd_bf16_sm80"
+    },
+    {
+      "dual_source_reconciliation_passed": false,
+      "note": "fixed short; ignores size overrides",
+      "observed_median_ms": 0.04,
+      "override_argv": [
+        "--m",
+        "16384",
+        "--n",
+        "16384",
+        "--k",
+        "16384"
+      ],
+      "shape_point": "timing_shape",
+      "slug": "cross_entropy_fwd_fp32_sm80"
+    },
+    {
+      "dual_source_reconciliation_passed": false,
+      "note": "fixed short; ignores size overrides",
+      "observed_median_ms": 0.29,
+      "override_argv": [
+        "--m",
+        "16384",
+        "--n",
+        "16384",
+        "--k",
+        "16384"
+      ],
+      "shape_point": "timing_shape",
+      "slug": "embedding_gather_int32_sm80"
+    },
+    {
+      "dual_source_reconciliation_passed": false,
+      "note": "does not honor the override; stays sub-ms",
+      "observed_median_ms": 0.04,
+      "override_argv": [
+        "--m",
+        "16384",
+        "--n",
+        "16384",
+        "--k",
+        "8192"
+      ],
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "swiglu_fwd_bf16_sm80"
+    },
+    {
+      "dual_source_reconciliation_passed": false,
+      "note": "does not honor the override; stays sub-ms",
+      "observed_median_ms": 0.02,
+      "override_argv": [
+        "--m",
+        "16384",
+        "--n",
+        "16384",
+        "--k",
+        "8192"
+      ],
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "silu_fwd_bf16_sm80"
+    },
+    {
+      "dual_source_reconciliation_passed": false,
+      "note": "does not honor the override; stays sub-ms",
+      "observed_median_ms": 0.02,
+      "override_argv": [
+        "--m",
+        "16384",
+        "--n",
+        "16384",
+        "--k",
+        "8192"
+      ],
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "softmax_safe_bf16_sm80"
+    },
+    {
+      "dual_source_reconciliation_passed": false,
+      "note": "sparse path stayed sub-ms; does not honor the dense override",
+      "observed_median_ms": 0.01,
+      "override_argv": [
+        "--m",
+        "2048",
+        "--n",
+        "2048",
+        "--k",
+        "2048"
+      ],
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "gemm_sparse_2to4_bf16_sm80"
+    }
+  ],
+  "reconcilers_admitted": [
+    {
+      "dual_source_reconciliation_passed": true,
+      "note": "admitted",
+      "observed_median_ms": 611.78,
+      "override_argv": [
+        "--BH",
+        "32",
+        "--Sq",
+        "2048",
+        "--Sk",
+        "2048",
+        "--D",
+        "16"
+      ],
+      "shape_point": "trace_l2_accuracy_lg",
+      "slug": "flash_attn_bwd_bf16_sm80"
+    },
+    {
+      "dual_source_reconciliation_passed": true,
+      "note": "admitted",
+      "observed_median_ms": 3380.73,
+      "override_argv": [
+        "--BH",
+        "48",
+        "--Sq",
+        "4096",
+        "--Sk",
+        "4096",
+        "--D",
+        "16"
+      ],
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "flash_attn_bwd_bf16_sm80"
+    },
+    {
+      "dual_source_reconciliation_passed": true,
+      "note": "admitted",
+      "observed_median_ms": 5.9,
+      "override_argv": [
+        "--BH",
+        "48",
+        "--Sq",
+        "2048",
+        "--Sk",
+        "2048",
+        "--D",
+        "16"
+      ],
+      "shape_point": "trace_l2_accuracy_lg",
+      "slug": "flash_attn_fwd_bf16_sm80"
+    },
+    {
+      "dual_source_reconciliation_passed": true,
+      "note": "admitted",
+      "observed_median_ms": 23.25,
+      "override_argv": [
+        "--BH",
+        "48",
+        "--Sq",
+        "4096",
+        "--Sk",
+        "4096",
+        "--D",
+        "16"
+      ],
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "flash_attn_fwd_bf16_sm80"
+    },
+    {
+      "dual_source_reconciliation_passed": true,
+      "note": "admitted",
+      "observed_median_ms": 8.46,
+      "override_argv": [
+        "--m",
+        "2048",
+        "--n",
+        "2048",
+        "--k",
+        "2048"
+      ],
+      "shape_point": "trace_l2_accuracy_lg",
+      "slug": "gemm_hmma_bf16_sm80"
+    },
+    {
+      "dual_source_reconciliation_passed": true,
+      "note": "admitted",
+      "observed_median_ms": 71.13,
+      "override_argv": [
+        "--m",
+        "4096",
+        "--n",
+        "4096",
+        "--k",
+        "4096"
+      ],
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "gemm_hmma_bf16_sm80"
+    },
+    {
+      "dual_source_reconciliation_passed": true,
+      "note": "admitted",
+      "observed_median_ms": 74.93,
+      "override_argv": [
+        "--m",
+        "4096",
+        "--n",
+        "4096",
+        "--k",
+        "4096"
+      ],
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "gemm_hmma_fp16_sm80"
+    },
+    {
+      "dual_source_reconciliation_passed": true,
+      "note": "admitted",
+      "observed_median_ms": 8.23,
+      "override_argv": [
+        "--m",
+        "2048",
+        "--n",
+        "2048",
+        "--k",
+        "2048"
+      ],
+      "shape_point": "trace_l2_accuracy_lg",
+      "slug": "gemm_imma_int8_sm80"
+    },
+    {
+      "dual_source_reconciliation_passed": true,
+      "note": "admitted",
+      "observed_median_ms": 54.66,
+      "override_argv": [
+        "--m",
+        "4096",
+        "--n",
+        "4096",
+        "--k",
+        "4096"
+      ],
+      "shape_point": "trace_l2_accuracy_xl",
+      "slug": "gemm_imma_int8_sm80"
+    }
+  ],
+  "reconcilers_gate_excluded": [
+    {
+      "dual_source_reconciliation_passed": true,
+      "note": "reconciled but EXCLUDED: robust_cv exceeded the 0.05 ceiling at the lg size (duration_repeatability_failed); the xl cell is admitted",
+      "observed_median_ms": 8.46,
+      "override_argv": [
+        "--m",
+        "2048",
+        "--n",
+        "2048",
+        "--k",
+        "2048"
+      ],
+      "shape_point": "trace_l2_accuracy_lg",
+      "slug": "gemm_hmma_fp16_sm80"
+    }
+  ],
+  "schema_version": 1,
+  "verified_live_sm120_proof": {
+    "compute_capability": "sm_120",
+    "cuda_toolkit": "13.2",
+    "driver_version": "595.71.05",
+    "evidence_kind": "timing (DVFS-sensitive)",
+    "gpu": "NVIDIA GeForce RTX 5060 Laptop GPU",
+    "observed_mem_clock_mhz": 9001,
+    "observed_sm_clock_mhz": 967
+  }
+}

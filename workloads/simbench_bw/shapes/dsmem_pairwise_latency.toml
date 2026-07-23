@@ -1,0 +1,26 @@
+schema_version = 1
+slug = "dsmem_pairwise_latency"
+
+# Cluster pairwise DSMEM latency: peer CTA reads its partner's
+# seeded tile via cluster-shared memory. Reference is the seeded
+# tile (kernel reports the same bytes back).
+
+[[timing_shapes]]
+name = "timing_00"
+axes = { tiles = 16, elements = 1024 }
+launch_config = { grid = [2, 1, 1], block = [128, 1, 1] }
+warm_up_iters = 5
+repeat_iters = 30
+
+[[trace_shapes]]
+name = "trace_00"
+axes = { tiles = 4, elements = 64 }
+launch_config = { grid = [2, 1, 1], block = [64, 1, 1] }
+predicted_bytes = 40960
+estimator_source = "static"
+
+[[correctness_shapes]]
+name = "correctness_00"
+axes = { tiles = 2, elements = 16 }
+launch_config = { grid = [2, 1, 1], block = [32, 1, 1] }
+digest_kind = "hash"

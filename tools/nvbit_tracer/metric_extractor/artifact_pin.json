@@ -1,0 +1,115 @@
+{
+  "allowed_build_arches": [
+    "sm_86",
+    "sm_100a"
+  ],
+  "artifact_embedded_arches": [
+    "sm_86"
+  ],
+  "artifact_path": "tools/nvbit_tracer/metric_extractor/metric_extractor.so",
+  "artifact_sha256": "73045a303ac25f99135290468da20aae1c50d275a8e9aca134869cb0229a7e5f",
+  "artifact_status": "grandfathered",
+  "built_under_current_contract": false,
+  "h3_hold": true,
+  "legacy_commit": "deae005734d3119ee5fe105bd4f852b9e64f92ac",
+  "libnvbit_sha256": "db221829106673bcd69d1e05766136f80e2df4497fb8415d8c2f298b96c302f7",
+  "replacement_rule": {
+    "canonical_worktree_rebuild_forbidden_while_h3": true,
+    "operator_wait_required": true,
+    "repin_forbidden_while_h3": true,
+    "replacement_must_pass_current_contract": true
+  },
+  "schema_version": 1,
+  "scratch_witness": {
+    "artifact_sha256": "3431c6a16457777493808c6fb519628119ca4cc9663d5d7574c6d2791b2e2c9f",
+    "pb_lock_sha256": "d522b3ee1560e98512cd460b213adee5a901f77aef0e4fae3ba94699e3b1e222",
+    "status": "pre-contract feasibility witness"
+  },
+  "sdk_manifest_sha256": "d4891f9066f2400d8769dbb9091d28d33293fe2e3cd7420ba8442c5ea99f6534",
+  "source_closure": [
+    {
+      "path": "tools/nvbit_tracer/metric_extractor/Makefile",
+      "sha256": "06707a4d1b13612520c4846b016aceda1309b974da54c07a0fb6500e13dd57d4"
+    },
+    {
+      "path": "tools/nvbit_tracer/metric_extractor/bank_counting.h",
+      "sha256": "6087684eeb29c08da4177740d738a888ca7461f7a994d1b36345a6897ba83a27"
+    },
+    {
+      "path": "tools/nvbit_tracer/metric_extractor/branch_counting.h",
+      "sha256": "82fa70cbca07491408c541ce84c1e3ed66de3ac49695f45363cec83717740bdf"
+    },
+    {
+      "path": "tools/nvbit_tracer/metric_extractor/classifier.h",
+      "sha256": "1cd8b4bbedb0d513f35172ab213f5e721f8b99f4f068c8083f167d6944639634"
+    },
+    {
+      "path": "tools/nvbit_tracer/metric_extractor/common.h",
+      "sha256": "23d1532e15ec9dbdd14e92c52defcf4ed7f0cdfd5bec354ed1729580b219650e"
+    },
+    {
+      "path": "tools/nvbit_tracer/metric_extractor/inject_funcs.cu",
+      "sha256": "5678866609da8732430a5d0dc822e6806c1f61858ede344c37e86e518f877b88"
+    },
+    {
+      "path": "tools/nvbit_tracer/metric_extractor/isa_def/ampere_opcode.h",
+      "sha256": "461b3aa54da71e06a347c19cc06fdb9b5d6adf8f62467115b4b068a57019621b"
+    },
+    {
+      "path": "tools/nvbit_tracer/metric_extractor/isa_def/blackwell_opcode.h",
+      "sha256": "f9b0a7ceed323449b5cafd6f40d0c0c30f7ae2c84e0fca6b2723cb2d1058bc54"
+    },
+    {
+      "path": "tools/nvbit_tracer/metric_extractor/isa_def/hopper_opcode.h",
+      "sha256": "4638d1e3603493c8176d9ba6ea02531b9725102efbe78040b210ba51459a2d16"
+    },
+    {
+      "path": "tools/nvbit_tracer/metric_extractor/isa_def/kepler_opcode.h",
+      "sha256": "6f37cdd396874ae78d7835312a08977ce26094aa0d89019816114e940c703d4d"
+    },
+    {
+      "path": "tools/nvbit_tracer/metric_extractor/isa_def/operation_type.h",
+      "sha256": "773e0750c4ac5585fb2565ef1bf947e43053c1e9dab8e49addad72ed8dfc285a"
+    },
+    {
+      "path": "tools/nvbit_tracer/metric_extractor/isa_def/pascal_opcode.h",
+      "sha256": "0095897beaeb09eec8841d24035234eef72f7d5fe4ac8480a625b27169362e03"
+    },
+    {
+      "path": "tools/nvbit_tracer/metric_extractor/isa_def/trace_opcode.h",
+      "sha256": "92fb21fdcb0b76b49544d8a65576710d9357eaf7181ad2f1ce1979626f481d08"
+    },
+    {
+      "path": "tools/nvbit_tracer/metric_extractor/isa_def/turing_opcode.h",
+      "sha256": "b948dd187e888c54bf84a85d94c8045f9125dc3d9684c4d807b9a85ec8713a1a"
+    },
+    {
+      "path": "tools/nvbit_tracer/metric_extractor/isa_def/volta_opcode.h",
+      "sha256": "c50be0361a94ee2e0f6a677dda8d8cdc99d4bdfe6517d3e74b1d8b063a8a10ae"
+    },
+    {
+      "path": "tools/nvbit_tracer/metric_extractor/metric_extractor.cu",
+      "sha256": "6ccd00dc1dcbfac815e93152ecd567eefe9ab0cfcb5b041a7bcd1ec552f27c7d"
+    },
+    {
+      "path": "tools/nvbit_tracer/metric_extractor/module_origin_resolver.h",
+      "sha256": "b021213b181814fe43a6f2f3fc14f105bddcc3605ba764c4c5d94eb62d351fcd"
+    },
+    {
+      "path": "tools/nvbit_tracer/metric_extractor/saturating_counter.h",
+      "sha256": "02bc00b77920cc844d3dcd18aa3ae5efd1c08695c793e9de97b25188d44c3442"
+    },
+    {
+      "path": "tools/nvbit_tracer/metric_extractor/sector_counting.h",
+      "sha256": "a30346e9c01c976284eb2dfe94a484c2d1002d50948c7806283943fa8c30da19"
+    },
+    {
+      "path": "tools/nvbit_tracer/metric_extractor/tier2_frame_serializer.h",
+      "sha256": "d910be9a5fb263d628212188551630d8872048dfd63f147a91485b429020d274"
+    },
+    {
+      "path": "tools/nvbit_tracer/metric_extractor/tier2_sha256.h",
+      "sha256": "7d5369a178477c2cb342ecebfdcb5b12bf524051a15f52707254ad2a532d547b"
+    }
+  ]
+}

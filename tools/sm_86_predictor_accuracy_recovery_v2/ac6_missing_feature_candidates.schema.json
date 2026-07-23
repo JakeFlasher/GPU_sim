@@ -1,0 +1,285 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Candidate-feature catalog artifact (post-corpus-expansion)",
+  "description": "Strict schema for the candidate-feature catalog emitted by tools/sm_86_predictor_accuracy_recovery_v2/build_missing_feature_candidates.py. The catalog enumerates the named candidate covariates the variance-trajectory artifact's downstream-calibration-fitting plan should evaluate; binds per-cell observations against the variance-trajectory artifact's signed_residual; and emits a per-feature recommendation for the downstream plan. The 5 plan-named candidate covariates (per_warp_occupancy, blockDim, gridDim, dvfs_state, mshr_pressure_proxy) MUST appear in the features array. DVFS observations are pinned to label-provenance-only availability with an explicit forbidden_requires_explicit_reopen prohibition; mismatch is a schema violation.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "generator",
+    "cohort_admitted_count",
+    "features",
+    "cells",
+    "recommendations",
+    "partial_closure_override"
+  ],
+  "properties": {
+    "schema_version": {"type": "integer", "const": 1},
+    "generator": {
+      "type": "string",
+      "description": "Path or identifier of the tool that emitted this artifact."
+    },
+    "cohort_admitted_count": {
+      "type": "integer",
+      "minimum": 1,
+      "description": "Count of admitted cells covered by the catalog's cells array."
+    },
+    "features": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "feature_name", "sidecar_source_file", "schema_owner",
+          "expected_physical_sign"
+        ],
+        "properties": {
+          "feature_name": {
+            "type": "string",
+            "enum": [
+              "per_warp_occupancy",
+              "blockDim",
+              "gridDim",
+              "dvfs_state",
+              "mshr_pressure_proxy"
+            ]
+          },
+          "sidecar_source_file": {
+            "type": "string",
+            "description": "Path to the canonical schema documenting the upstream sidecar source for this feature."
+          },
+          "schema_owner": {
+            "type": "string",
+            "description": "Owning subsystem of the upstream sidecar (e.g., cupti / nvml / nvbit_tracer / kernel_proto)."
+          },
+          "expected_physical_sign": {
+            "type": "string",
+            "enum": [
+              "positive",
+              "negative",
+              "inconclusive",
+              "null_no_directional_hypothesis"
+            ],
+            "description": "Predicted sign of the correlation between the feature and the L2 prediction residual under the working physics model. inconclusive means the sign is unknown a priori; null_no_directional_hypothesis means the feature does not have a directional hypothesis (e.g., gridDim under cross-launch invariance)."
+          }
+        }
+      },
+      "allOf": [
+        {"contains": {"type": "object", "properties": {"feature_name": {"const": "per_warp_occupancy"}}, "required": ["feature_name"]}, "minContains": 1, "maxContains": 1},
+        {"contains": {"type": "object", "properties": {"feature_name": {"const": "blockDim"}}, "required": ["feature_name"]}, "minContains": 1, "maxContains": 1},
+        {"contains": {"type": "object", "properties": {"feature_name": {"const": "gridDim"}}, "required": ["feature_name"]}, "minContains": 1, "maxContains": 1},
+        {"contains": {"type": "object", "properties": {"feature_name": {"const": "dvfs_state"}}, "required": ["feature_name"]}, "minContains": 1, "maxContains": 1},
+        {"contains": {"type": "object", "properties": {"feature_name": {"const": "mshr_pressure_proxy"}}, "required": ["feature_name"]}, "minContains": 1, "maxContains": 1}
+      ]
+    },
+    "cells": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "arch", "slug", "shape_point", "signed_residual",
+          "per_feature_observations"
+        ],
+        "properties": {
+          "arch": {"type": "string"},
+          "slug": {"type": "string"},
+          "shape_point": {"type": "string"},
+          "signed_residual": {
+            "type": "number",
+            "description": "predicted - truth from the variance-trajectory artifact; positive = over-prediction."
+          },
+          "per_feature_observations": {
+            "type": "array",
+            "minItems": 5,
+            "maxItems": 5,
+            "allOf": [
+              {"contains": {"type": "object", "properties": {"feature_name": {"const": "per_warp_occupancy"}}, "required": ["feature_name"]}, "minContains": 1, "maxContains": 1},
+              {"contains": {"type": "object", "properties": {"feature_name": {"const": "blockDim"}}, "required": ["feature_name"]}, "minContains": 1, "maxContains": 1},
+              {"contains": {"type": "object", "properties": {"feature_name": {"const": "gridDim"}}, "required": ["feature_name"]}, "minContains": 1, "maxContains": 1},
+              {"contains": {"type": "object", "properties": {"feature_name": {"const": "dvfs_state"}}, "required": ["feature_name"]}, "minContains": 1, "maxContains": 1},
+              {"contains": {"type": "object", "properties": {"feature_name": {"const": "mshr_pressure_proxy"}}, "required": ["feature_name"]}, "minContains": 1, "maxContains": 1}
+            ],
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "feature_name", "observed_value",
+                "availability_at_prediction_time",
+                "correlation_method", "sample_size",
+                "computed_effect"
+              ],
+              "properties": {
+                "feature_name": {
+                  "type": "string",
+                  "enum": [
+                    "per_warp_occupancy",
+                    "blockDim",
+                    "gridDim",
+                    "dvfs_state",
+                    "mshr_pressure_proxy"
+                  ]
+                },
+                "observed_value": {
+                  "type": ["number", "null"],
+                  "description": "Numeric value of the feature for this cell, or null when not collected."
+                },
+                "availability_at_prediction_time": {
+                  "type": "string",
+                  "enum": [
+                    "prediction_time_available",
+                    "label-provenance-only",
+                    "not_collected_for_cell"
+                  ]
+                },
+                "correlation_method": {
+                  "type": "string",
+                  "enum": [
+                    "pearson",
+                    "spearman",
+                    "paired_delta",
+                    "inconclusive_small_n"
+                  ]
+                },
+                "sample_size": {"type": "integer", "minimum": 0},
+                "computed_effect": {
+                  "type": ["number", "null"],
+                  "description": "Effect statistic per correlation_method, or null when sample is too small / unavailable."
+                },
+                "plan_2_prohibition_status": {
+                  "type": "string",
+                  "enum": [
+                    "forbidden_requires_explicit_reopen",
+                    "permitted_no_prohibition"
+                  ],
+                  "description": "Required when availability_at_prediction_time=label-provenance-only; forbidden otherwise."
+                }
+              },
+              "allOf": [
+                {
+                  "if": {
+                    "properties": {
+                      "availability_at_prediction_time": {
+                        "const": "label-provenance-only"
+                      }
+                    },
+                    "required": ["availability_at_prediction_time"]
+                  },
+                  "then": {
+                    "required": ["plan_2_prohibition_status"],
+                    "properties": {
+                      "plan_2_prohibition_status": {
+                        "const": "forbidden_requires_explicit_reopen"
+                      }
+                    }
+                  }
+                },
+                {
+                  "if": {
+                    "properties": {
+                      "availability_at_prediction_time": {
+                        "const": "prediction_time_available"
+                      }
+                    },
+                    "required": ["availability_at_prediction_time"]
+                  },
+                  "then": {
+                    "not": {"required": ["plan_2_prohibition_status"]}
+                  }
+                },
+                {
+                  "if": {
+                    "properties": {
+                      "availability_at_prediction_time": {
+                        "const": "not_collected_for_cell"
+                      }
+                    },
+                    "required": ["availability_at_prediction_time"]
+                  },
+                  "then": {
+                    "not": {"required": ["plan_2_prohibition_status"]}
+                  }
+                },
+                {
+                  "if": {
+                    "properties": {
+                      "feature_name": {"const": "dvfs_state"}
+                    },
+                    "required": ["feature_name"]
+                  },
+                  "then": {
+                    "properties": {
+                      "availability_at_prediction_time": {
+                        "const": "label-provenance-only"
+                      }
+                    },
+                    "required": [
+                      "availability_at_prediction_time",
+                      "plan_2_prohibition_status"
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "recommendations": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "allOf": [
+        {"contains": {"type": "object", "properties": {"feature_name": {"const": "per_warp_occupancy"}}, "required": ["feature_name"]}, "minContains": 1, "maxContains": 1},
+        {"contains": {"type": "object", "properties": {"feature_name": {"const": "blockDim"}}, "required": ["feature_name"]}, "minContains": 1, "maxContains": 1},
+        {"contains": {"type": "object", "properties": {"feature_name": {"const": "gridDim"}}, "required": ["feature_name"]}, "minContains": 1, "maxContains": 1},
+        {"contains": {"type": "object", "properties": {"feature_name": {"const": "dvfs_state"}}, "required": ["feature_name"]}, "minContains": 1, "maxContains": 1},
+        {"contains": {"type": "object", "properties": {"feature_name": {"const": "mshr_pressure_proxy"}}, "required": ["feature_name"]}, "minContains": 1, "maxContains": 1}
+      ],
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "feature_name", "recommendation_for_plan_2",
+          "justification"
+        ],
+        "properties": {
+          "feature_name": {
+            "type": "string",
+            "enum": [
+              "per_warp_occupancy",
+              "blockDim",
+              "gridDim",
+              "dvfs_state",
+              "mshr_pressure_proxy"
+            ]
+          },
+          "recommendation_for_plan_2": {
+            "type": "string",
+            "enum": [
+              "predictor_input",
+              "covariate",
+              "discard",
+              "inconclusive"
+            ]
+          },
+          "justification": {"type": "string", "minLength": 1}
+        }
+      }
+    },
+    "partial_closure_override": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["accepted", "date_iso", "decided_admitted_count", "reason"],
+      "properties": {
+        "accepted": {"type": "boolean"},
+        "date_iso": {"type": "string"},
+        "decided_admitted_count": {"type": "integer", "minimum": 1},
+        "reason": {"type": "string"}
+      }
+    }
+  }
+}

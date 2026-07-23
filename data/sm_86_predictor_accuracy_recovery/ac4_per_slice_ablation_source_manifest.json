@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "generator": "sm_86_predictor_accuracy_recovery/round-14",
+  "loop_session": "2026-05-17_11-26-33",
+  "description": "Source-backed before-prediction manifest for per-sub-slice ablation entries whose before values are derived from in-memory probe scripts rather than from a committed predictor bundle directory. The sub-slice classification 4.1 entry's before values come directly from the baseline sweep at data/local_labels/sweeps/sweep_20260514T165947Z_a1closure_ebe60dd/predictor_bundles/ and do NOT need a manifest entry. The other four entries (sub-slice classifications 4.2 / 4.3 / 4.4 / 4.5) record their before predictions here so the source-backed recomputation helper at tools/sm_86_predictor_accuracy_recovery/ac3_ablation_recomputation_helper.py can cross-check the ablation artifact's hand-authored numerics against a separate committed source, preventing the drift class where a hand-edit changes the ablation's prediction values in a way that keeps internal arithmetic self-consistent but no longer matches the underlying probe-derived values.",
+  "ablation_artifact_under_validation": "data/sm_86_predictor_accuracy_recovery/ac4_per_slice_ablation.json",
+  "admitted_cells": [
+    {"slug": "layernorm_fwd_bf16_sm80", "shape_point": "timing_shape"},
+    {"slug": "rmsnorm_fwd_bf16_sm80", "shape_point": "timing_shape"},
+    {"slug": "silu_fwd_bf16_sm80", "shape_point": "correctness_shape"},
+    {"slug": "silu_fwd_bf16_sm80", "shape_point": "timing_shape"},
+    {"slug": "softmax_safe_bf16_sm80", "shape_point": "timing_shape"}
+  ],
+  "entries": [
+    {
+      "sub_slice_id": "AC-4.2",
+      "sub_slice_label": "sector_edge_accounting",
+      "before_source_provenance": "The sector-edge expansion loop at tools/hrd_profiler/observation_builder.py is ALWAYS-ON (no flag to disable). Before and after predictions are byte-identical by construction: both runs invoke the same expansion loop. The empirical content is the witness formalization (per-method Contract cell tagging in tools/hrd_profiler/test_observation_builder.py::SectorEdgeAccountingTest) rather than a flag flip.",
+      "no_op_classification": "aligned_access_only_corpus",
+      "per_cell": [
+        {"slug": "layernorm_fwd_bf16_sm80", "shape_point": "timing_shape", "before_predicted_hit_rate": 0.9771133330406533, "byte_identical_to_after": true},
+        {"slug": "rmsnorm_fwd_bf16_sm80", "shape_point": "timing_shape", "before_predicted_hit_rate": 0.9698870262390671, "byte_identical_to_after": true},
+        {"slug": "silu_fwd_bf16_sm80", "shape_point": "correctness_shape", "before_predicted_hit_rate": 0.9375, "byte_identical_to_after": true},
+        {"slug": "silu_fwd_bf16_sm80", "shape_point": "timing_shape", "before_predicted_hit_rate": 0.9375, "byte_identical_to_after": true},
+        {"slug": "softmax_safe_bf16_sm80", "shape_point": "timing_shape", "before_predicted_hit_rate": 0.9607112762371687, "byte_identical_to_after": true}
+      ]
+    },
+    {
+      "sub_slice_id": "AC-4.3",
+      "sub_slice_label": "write_policy_classification",
+      "before_source_provenance": "The before values for the write-policy classification sub-slice come from running the cache predictor (workloads/simbench_bw/cache_predictor.py) with the always-on _is_no_write_allocate filter (lines 170-187 and 354-410) DISABLED so all observations tagged with access_kind == MEMORY_OP_ACCESS_KIND_STORE and memory_op_class in {MEMORY_OP_CLASS_SHARED, MEMORY_OP_CLASS_CLUSTER_DSMEM} are admitted as eligible for the L2 hit/miss tally. Codex independently reproduced these values during the round-5 review by re-walking each cell's data/local_labels/sweeps/sweep_20260514T165947Z_a1closure_ebe60dd/predictor_bundles/<cell>.json's dynamic_trace.pb input with the filter off; the values landed in the ablation artifact's before fields are byte-identical to Codex's reproduction. This manifest commits those values as a separate source for the drift-prevention scanner so any future hand-edit of the ablation artifact's before fields is caught.",
+      "no_op_classification": null,
+      "headline_moved_at_geomean_level": true,
+      "per_cell": [
+        {"slug": "layernorm_fwd_bf16_sm80", "shape_point": "timing_shape", "before_predicted_hit_rate": 0.9785488050676648, "no_write_allocate_excluded_count": 98112, "headline_moved": true},
+        {"slug": "rmsnorm_fwd_bf16_sm80", "shape_point": "timing_shape", "before_predicted_hit_rate": 0.9707547703980522, "no_write_allocate_excluded_count": 32704, "headline_moved": true},
+        {"slug": "silu_fwd_bf16_sm80", "shape_point": "correctness_shape", "before_predicted_hit_rate": 0.9375, "no_write_allocate_excluded_count": 0, "headline_moved": false, "no_op_classification": "no_no_write_allocate_paths_in_corpus"},
+        {"slug": "silu_fwd_bf16_sm80", "shape_point": "timing_shape", "before_predicted_hit_rate": 0.9375, "no_write_allocate_excluded_count": 0, "headline_moved": false, "no_op_classification": "no_no_write_allocate_paths_in_corpus"},
+        {"slug": "softmax_safe_bf16_sm80", "shape_point": "timing_shape", "before_predicted_hit_rate": 0.9621820862513822, "no_write_allocate_excluded_count": 32704, "headline_moved": true}
+      ]
+    },
+    {
+      "sub_slice_id": "AC-4.4",
+      "sub_slice_label": "cta_interleave_aggregation",
+      "before_source_provenance": "The before values for the CTA interleave aggregation sub-slice come from re-walking each cell's dynamic_trace.pb with cta_interleave_enabled=False (the flag-gated baseline of the round-robin merge at tools/hrd_profiler/observation_builder.py::_round_robin_merge_tb_accesses lines 301-327). The probe was an in-memory walker comparison documented in the existing ablation artifact at empirical_evidence_paths.probe_invocation (PYTHONPATH=. uv run --isolated --with protobuf python3 /tmp/probe_cta_interleave.py). Per-cell before/after byte-identical for all 5 admitted cells because the activation kernels distribute work along disjoint contiguous slices (standard CUDA 1-D parallel decomposition); per-CTA working sets do not share L2 sectors. Codex independently re-walked all 5 traces during the round-6 review with cta_interleave_enabled=False and =True; every before/after predicted hit rate matched the committed ablation values exactly and remained byte-identical.",
+      "no_op_classification": "disjoint_cta_working_sets",
+      "per_cell": [
+        {"slug": "layernorm_fwd_bf16_sm80", "shape_point": "timing_shape", "before_predicted_hit_rate": 0.9771133330406533, "byte_identical_to_after": true},
+        {"slug": "rmsnorm_fwd_bf16_sm80", "shape_point": "timing_shape", "before_predicted_hit_rate": 0.9698870262390671, "byte_identical_to_after": true},
+        {"slug": "silu_fwd_bf16_sm80", "shape_point": "correctness_shape", "before_predicted_hit_rate": 0.9375, "byte_identical_to_after": true},
+        {"slug": "silu_fwd_bf16_sm80", "shape_point": "timing_shape", "before_predicted_hit_rate": 0.9375, "byte_identical_to_after": true},
+        {"slug": "softmax_safe_bf16_sm80", "shape_point": "timing_shape", "before_predicted_hit_rate": 0.9607112762371687, "byte_identical_to_after": true}
+      ]
+    },
+    {
+      "sub_slice_id": "AC-4.5",
+      "sub_slice_label": "cross_launch_state_carryover",
+      "before_source_provenance": "The before values for the cross-launch state carryover sub-slice come from re-walking each cell's dynamic_trace.pb with cross_launch_state_carryover=False (the flag-gated baseline of the LaunchSurvivingState + _seed_tracker_with_survivors helpers introduced in the round-7 walker extension). The probe was an in-memory walker comparison documented in the existing ablation artifact at empirical_evidence_paths.probe_invocation (PYTHONPATH=. uv run --isolated --with protobuf python3 /tmp/probe_cross_launch_carryover.py). Per-cell before/after byte-identical for all 5 admitted cells because every committed trace has n_launches=1; the cross-launch state carryover code path branches only at the launch boundary, which never executes for a 1-launch trace. Witness tests in tools/hrd_profiler/test_observation_builder.py::CrossLaunchStateCarryoverTest prove the model captures cross-launch reuse on 2-launch synthetic fixtures (100% hit rate margin under carryover vs cold-start on overlapping working sets), but the production corpus does not exercise this code path.",
+      "no_op_classification": "single_launch_corpus",
+      "per_cell": [
+        {"slug": "layernorm_fwd_bf16_sm80", "shape_point": "timing_shape", "before_predicted_hit_rate": 0.9771133330406533, "byte_identical_to_after": true, "n_launches": 1},
+        {"slug": "rmsnorm_fwd_bf16_sm80", "shape_point": "timing_shape", "before_predicted_hit_rate": 0.9698870262390671, "byte_identical_to_after": true, "n_launches": 1},
+        {"slug": "silu_fwd_bf16_sm80", "shape_point": "correctness_shape", "before_predicted_hit_rate": 0.9375, "byte_identical_to_after": true, "n_launches": 1},
+        {"slug": "silu_fwd_bf16_sm80", "shape_point": "timing_shape", "before_predicted_hit_rate": 0.9375, "byte_identical_to_after": true, "n_launches": 1},
+        {"slug": "softmax_safe_bf16_sm80", "shape_point": "timing_shape", "before_predicted_hit_rate": 0.9607112762371687, "byte_identical_to_after": true, "n_launches": 1}
+      ]
+    }
+  ]
+}

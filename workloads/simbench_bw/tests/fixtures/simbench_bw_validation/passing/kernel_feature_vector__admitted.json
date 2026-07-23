@@ -1,0 +1,58 @@
+{
+  "schema_version": 1,
+  "slug": "rmsnorm_fwd_bf16",
+  "shape_point": "rows=1024,hidden=4096",
+  "repeat_index": 0,
+  "launch_index": 0,
+  "kernel_name": "_Z11rmsnorm_fwdPKfPfii",
+  "kernel_signature_sha256": "0000000000000000000000000000000000000000000000000000000000000000",
+  "binary_sha256": "1111111111111111111111111111111111111111111111111111111111111111",
+  "claim_scope": "measured_local",
+  "trace_budget_status": "within_budget",
+  "axes": {
+    "dynamic_divergence_profile": {
+      "claim_class": "dynamic_load_bearing",
+      "active_mask_histogram": {
+        "bucket_size": 1,
+        "buckets": [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 100]
+      },
+      "divergence_depth": {
+        "max_depth": 0,
+        "mean_depth": 0.0,
+        "depth_histogram": [100]
+      }
+    },
+    "memory_access_stride_distribution": {
+      "claim_class": "dynamic_load_bearing",
+      "stride_buckets_bytes": [1, 2, 4, 8, 16, 32, 64, 128],
+      "stride_counts": [0, 0, 0, 0, 0, 0, 0, 100]
+    },
+    "per_thread_instruction_count_distribution": {
+      "claim_class": "dynamic_load_bearing",
+      "min_count": 256,
+      "max_count": 256,
+      "mean_count": 256.0,
+      "stddev_count": 0.0
+    },
+    "static_sass_mnemonic_histogram": {
+      "claim_class": "static_sanity_check_only",
+      "static_sass_features_ref": "results/static_sass__rmsnorm_fwd_bf16.json"
+    },
+    "register_usage_and_predication_density": {
+      "claim_class": "mixed_static_dynamic",
+      "register_usage": {
+        "claim_class": "static_sanity_check_only",
+        "regs_per_thread": 32
+      },
+      "predication_density": {
+        "claim_class": "dynamic_load_bearing",
+        "predicated_instruction_fraction": 0.05
+      }
+    },
+    "smid_migration_count": {
+      "claim_class": "optional_if_supported",
+      "supported_by_tracer": true,
+      "migration_count": 0
+    }
+  }
+}

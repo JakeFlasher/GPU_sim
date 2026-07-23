@@ -1,0 +1,42 @@
+schema_version = 1
+slug = "global_vectorized_128b_copy"
+
+# 128-bit member of the vector-width request/sector-formation pair. A contiguous
+# float4 global copy (out4[i] = in4[i]) over a 16-byte-aligned buffer, so each
+# per-thread access forms a single 128-bit request (SASS LDG.E.128 / STG.E.128).
+# Paired with global_scalar_32b_copy (LDG.E / STG.E, no .128) — the ONLY
+# difference is the per-access request width. Identity round-trip (out = in) on
+# the seeded buffer; samples*bins is divisible by 4 at every shape so the whole
+# buffer round-trips through the 128-bit path.
+#
+# launch_config is AUTHORITATIVE: the binary's launcher hardcodes grid=(1,1,1) /
+# block=(32,1,1) and strides the float4 buffer over the 32-lane block, so every
+# shape records grid (1,1,1) / block (32,1,1). predicted_bytes validates via
+# trace_size_estimator --validate (axis_product * 160 at this geometry).
+
+[[timing_shapes]]
+name = "timing_00"
+axes = { samples = 1048576, bins = 1024 }
+launch_config = { grid = [1, 1, 1], block = [32, 1, 1] }
+warm_up_iters = 5
+repeat_iters = 30
+
+[[trace_shapes]]
+name = "trace_00"
+axes = { samples = 1024, bins = 64 }
+launch_config = { grid = [1, 1, 1], block = [32, 1, 1] }
+predicted_bytes = 10485760
+estimator_source = "static"
+
+[[trace_shapes]]
+name = "trace_l2_accuracy_xl"
+axes = { samples = 1024, bins = 32 }
+launch_config = { grid = [1, 1, 1], block = [32, 1, 1] }
+predicted_bytes = 5242880
+estimator_source = "static"
+
+[[correctness_shapes]]
+name = "correctness_00"
+axes = { samples = 32, bins = 8 }
+launch_config = { grid = [1, 1, 1], block = [32, 1, 1] }
+digest_kind = "hash"

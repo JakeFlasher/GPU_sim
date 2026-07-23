@@ -1,0 +1,237 @@
+{
+  "schema_version": 1,
+  "closure_id": "sm120_cache_metric_closure_v1",
+  "arch": "sm_120",
+  "registry_version": "cache_memory_registry_v1",
+  "verdict": "engineering_closure_refuted",
+  "cache_claim_load_bearing": false,
+  "named_target": "lts_sector_hit_rate",
+  "named_target_gate": {
+    "median_abs_error": 0.27629416666666673,
+    "threshold_median_abs_error": 0.055,
+    "passed": false,
+    "l2_input_provenance": "l1_miss_filtered",
+    "n_evaluated": 26,
+    "l1_filter_inert": true,
+    "total_l1_eligible_misses": 0,
+    "total_l1_hits_absorbed": 0,
+    "cells_with_zero_l2_input": 4
+  },
+  "named_l1_target": "l1tex_sector_hit_rate",
+  "named_l1_target_gate": {
+    "label_coverage": 26,
+    "evaluated": 0,
+    "unavailable": 26,
+    "median_abs_error": null,
+    "threshold_median_abs_error": 0.055,
+    "passed": false,
+    "l1_filter_inert": true
+  },
+  "named_target_failure_decomposition": {
+    "dominant_failure_mode": "sm120_l1_cache_op_classification_inert",
+    "l1_filter_inert": true,
+    "total_l1_eligible_misses": 0,
+    "total_l1_hits_absorbed": 0,
+    "cells_with_zero_l2_input": 4,
+    "evidence": "Across all evaluated sm_120 cohort cells the cache-op classifier maps ZERO loads to L1-eligible (.ca): total L1-eligible misses and L1 hits absorbed are both 0, so the per-SM L1 filter is inert. This is the DOCUMENTED conservative behavior of the arch-coupling discipline, not a defect: l1_cache_op_classifier._BARE_LDG_E_DEFAULTS_TO_CA admits only sm_86 (where bare LDG.E resolves to the ISA-default .CA), and every other arch -- sm_120 included -- keeps bare LDG.E -> OTHER (ineligible) 'until their default modifier is explicitly documented and tested'. The Blackwell loads observed (LDG.E.U16.CONSTANT, descriptor-based desc[UR..]) match the bare-LDG.E rule and route to OTHER -> bypass, or to the unmodeled-drop path (4 cells reach L2 with zero accesses -> a vacuous 0.0). The L1-miss-filtered L2 predictor therefore cannot be exercised as designed on sm_120, and the median absolute error stays far above the gate.",
+    "promotion_trigger": "Add sm_120 to l1_cache_op_classifier._BARE_LDG_E_DEFAULTS_TO_CA (and model the .CONSTANT / descriptor-based / uniform-datapath load forms) with documented + tested Blackwell cache-op semantics, so sm_120 loads acquire .ca/.cg eligibility and the per-SM L1 filter is exercised; then re-run the L1-miss-filtered evaluation. The named family becomes load-bearing only if the median absolute error then clears the gate."
+  },
+  "evidence_artifact_paths": {
+    "l1_filtered_l2_comparison": "data/local_labels/sm120_l1_filtered_l2_comparison.json",
+    "count_feasibility_analysis": "data/local_labels/count_feasibility_analysis.json",
+    "l1l2_frozen_grain_closure": "data/local_labels/sm120_l1l2_frozen_grain_engineering_closure.json",
+    "label_admitted": "data/local_labels/label_admitted.json"
+  },
+  "targets": [
+    {
+      "target_id": "dram_read_sectors",
+      "kind": "count",
+      "verdict": "engineering_closure_refuted",
+      "basis": "aggregation_domain_mismatch",
+      "evidence_key": "count_feasibility_analysis",
+      "cross_arch_precondition": false
+    },
+    {
+      "target_id": "dram_total_sectors",
+      "kind": "count",
+      "verdict": "engineering_closure_refuted",
+      "basis": "aggregation_domain_mismatch",
+      "evidence_key": "count_feasibility_analysis",
+      "cross_arch_precondition": false
+    },
+    {
+      "target_id": "dram_write_sectors",
+      "kind": "count",
+      "verdict": "engineering_closure_refuted",
+      "basis": "aggregation_domain_mismatch",
+      "evidence_key": "count_feasibility_analysis",
+      "cross_arch_precondition": false
+    },
+    {
+      "target_id": "gmem_atom_red_requests",
+      "kind": "count",
+      "verdict": "engineering_closure_refuted",
+      "basis": "comparable_mapping_no_label_cohort",
+      "evidence_key": "count_feasibility_analysis",
+      "cross_arch_precondition": false
+    },
+    {
+      "target_id": "gmem_ld_sectors_per_request",
+      "kind": "ratio",
+      "verdict": "engineering_closure_refuted",
+      "basis": "comparable_mapping_no_label_cohort",
+      "evidence_key": "count_feasibility_analysis",
+      "cross_arch_precondition": false
+    },
+    {
+      "target_id": "gmem_st_sectors_per_request",
+      "kind": "ratio",
+      "verdict": "engineering_closure_refuted",
+      "basis": "comparable_mapping_no_label_cohort",
+      "evidence_key": "count_feasibility_analysis",
+      "cross_arch_precondition": false
+    },
+    {
+      "target_id": "gmem_total_requests",
+      "kind": "count",
+      "verdict": "engineering_closure_refuted",
+      "basis": "comparable_mapping_no_label_cohort",
+      "evidence_key": "count_feasibility_analysis",
+      "cross_arch_precondition": false
+    },
+    {
+      "target_id": "gmem_total_sectors",
+      "kind": "count",
+      "verdict": "engineering_closure_refuted",
+      "basis": "comparable_mapping_no_label_cohort",
+      "evidence_key": "count_feasibility_analysis",
+      "cross_arch_precondition": false
+    },
+    {
+      "target_id": "l1tex_global_op_atom_requests",
+      "kind": "count",
+      "verdict": "engineering_closure_refuted",
+      "basis": "comparable_mapping_no_label_cohort",
+      "evidence_key": "count_feasibility_analysis",
+      "cross_arch_precondition": false
+    },
+    {
+      "target_id": "l1tex_global_op_ld_requests",
+      "kind": "count",
+      "verdict": "engineering_closure_refuted",
+      "basis": "comparable_mapping_no_label_cohort",
+      "evidence_key": "count_feasibility_analysis",
+      "cross_arch_precondition": false
+    },
+    {
+      "target_id": "l1tex_global_op_ld_sector_hit_rate",
+      "kind": "fraction",
+      "verdict": "engineering_closure_refuted",
+      "basis": "no_committed_global_op_ld_l1_label_cohort",
+      "evidence_key": "label_admitted",
+      "cross_arch_precondition": false
+    },
+    {
+      "target_id": "l1tex_global_op_ld_sectors",
+      "kind": "count",
+      "verdict": "engineering_closure_refuted",
+      "basis": "comparable_mapping_no_label_cohort",
+      "evidence_key": "count_feasibility_analysis",
+      "cross_arch_precondition": false
+    },
+    {
+      "target_id": "l1tex_global_op_red_requests",
+      "kind": "count",
+      "verdict": "engineering_closure_refuted",
+      "basis": "comparable_mapping_no_label_cohort",
+      "evidence_key": "count_feasibility_analysis",
+      "cross_arch_precondition": false
+    },
+    {
+      "target_id": "l1tex_global_op_st_requests",
+      "kind": "count",
+      "verdict": "engineering_closure_refuted",
+      "basis": "comparable_mapping_no_label_cohort",
+      "evidence_key": "count_feasibility_analysis",
+      "cross_arch_precondition": false
+    },
+    {
+      "target_id": "l1tex_global_op_st_sectors",
+      "kind": "count",
+      "verdict": "engineering_closure_refuted",
+      "basis": "comparable_mapping_no_label_cohort",
+      "evidence_key": "count_feasibility_analysis",
+      "cross_arch_precondition": false
+    },
+    {
+      "target_id": "l1tex_sector_hit_rate",
+      "kind": "fraction",
+      "verdict": "engineering_closure_refuted",
+      "basis": "l1_filtered_replay_l1_sector_hit_rate_refuted_l1_classification_inert",
+      "evidence_key": "l1_filtered_l2_comparison",
+      "cross_arch_precondition": false
+    },
+    {
+      "target_id": "l1tex_total_requests",
+      "kind": "count",
+      "verdict": "engineering_closure_refuted",
+      "basis": "aggregation_domain_mismatch",
+      "evidence_key": "count_feasibility_analysis",
+      "cross_arch_precondition": false
+    },
+    {
+      "target_id": "l2_read_sectors_lg_op_ld",
+      "kind": "count",
+      "verdict": "engineering_closure_refuted",
+      "basis": "comparable_mapping_no_label_cohort",
+      "evidence_key": "count_feasibility_analysis",
+      "cross_arch_precondition": false
+    },
+    {
+      "target_id": "l2_total_sectors",
+      "kind": "count",
+      "verdict": "engineering_closure_refuted",
+      "basis": "comparable_mapping_no_label_cohort",
+      "evidence_key": "count_feasibility_analysis",
+      "cross_arch_precondition": false
+    },
+    {
+      "target_id": "l2_write_sectors_lg_op_st",
+      "kind": "count",
+      "verdict": "engineering_closure_refuted",
+      "basis": "comparable_mapping_no_label_cohort",
+      "evidence_key": "count_feasibility_analysis",
+      "cross_arch_precondition": false
+    },
+    {
+      "target_id": "lts_sector_hit_rate",
+      "kind": "fraction",
+      "verdict": "engineering_closure_refuted",
+      "basis": "l1_filtered_replay_accuracy_gate_failed_l1_classification_inert",
+      "evidence_key": "l1_filtered_l2_comparison",
+      "cross_arch_precondition": false
+    },
+    {
+      "target_id": "lts_srcunit_tex_requests",
+      "kind": "count",
+      "verdict": "engineering_closure_refuted",
+      "basis": "aggregation_domain_mismatch",
+      "evidence_key": "count_feasibility_analysis",
+      "cross_arch_precondition": false
+    }
+  ],
+  "target_counts": {
+    "total": 22,
+    "research_success": 0,
+    "engineering_closure_refuted": 22
+  },
+  "verified_live_sm120_proof": {
+    "gpu": "NVIDIA GeForce RTX 5060 Laptop GPU",
+    "compute_capability": "sm_120",
+    "driver": "595.71.05",
+    "cuda": "13.2",
+    "ncu": "2026.1.1.0",
+    "evidence_kind": "live NCU L2 sector hit-rate labels + live NVBit sm_120 traces; the predictor is a deterministic L1-miss-filtered replay over those committed live traces (no NCU invoked by this closure)"
+  },
+  "source_commit": "243722a8857e120c92f44a4f5d22489fa6fe7ded"
+}

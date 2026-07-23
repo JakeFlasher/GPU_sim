@@ -1,0 +1,18 @@
+[package]
+name = "sim-emit"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+sim-arch = { path = "../arch" }
+sim-mem = { path = "../mem" }
+sim-sm = { path = "../sm" }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+
+[lints]
+workspace = true

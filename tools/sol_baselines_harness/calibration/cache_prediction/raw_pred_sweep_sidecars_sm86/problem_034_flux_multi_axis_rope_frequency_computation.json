@@ -1,0 +1,53 @@
+{
+  "by_assoc": {
+    "16": {
+      "raw_l1_hit_rate": 0.9117647058823529,
+      "raw_l2_hit_rate": 0.0,
+      "scored": true,
+      "typed_reason": ""
+    },
+    "32": {
+      "raw_l1_hit_rate": 0.9117647058823529,
+      "raw_l2_hit_rate": 0.0,
+      "scored": true,
+      "typed_reason": ""
+    },
+    "4": {
+      "raw_l1_hit_rate": 0.9117647058823529,
+      "raw_l2_hit_rate": 0.0,
+      "scored": true,
+      "typed_reason": ""
+    },
+    "64": {
+      "raw_l1_hit_rate": 0.9117647058823529,
+      "raw_l2_hit_rate": 0.0,
+      "scored": true,
+      "typed_reason": ""
+    },
+    "8": {
+      "raw_l1_hit_rate": 0.9117647058823529,
+      "raw_l2_hit_rate": 0.0,
+      "scored": true,
+      "typed_reason": ""
+    }
+  },
+  "candidates": [
+    4,
+    8,
+    16,
+    32,
+    64
+  ],
+  "captured_at_utc": "2026-05-30T01:01:21+00:00",
+  "dense_reuse": {
+    "distinct_sectors": 33153,
+    "reuse_factor": 1.2432057430700088,
+    "total_sector_accesses": 41216,
+    "truncated": false
+  },
+  "schema_version": 2,
+  "scored": true,
+  "slug": "problem_034_flux_multi_axis_rope_frequency_computation",
+  "tier2_sidecar_sha256": "e6ff6002be4d056f7fc83d11e3cdef3f9c70489dbe2869a4c14a485a669d3086",
+  "typed_reason": ""
+}

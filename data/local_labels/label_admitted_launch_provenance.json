@@ -1,0 +1,101 @@
+{
+  "description": "Durable launch-skip provenance for A1-era admitted activation labels in data/local_labels/label_admitted.json. The plan's activation-label provenance contract requires each post-R28 admitted row to 'carry the corrected --launch-skip value in its label-side metadata'; the admitted-label schema (workloads/simbench_bw/schemas/local_label_admitted.schema.json) has additionalProperties:false and no field for warmup_count / cache_control / launch_index / launch_skip, so this sidecar provides the durable link between each 7-tuple join key and the sweep config that admitted it. selected_launch_skip equals selected_warmup_count by NCU semantics (--launch-skip=N skips the first N kernel launches before profiling). Enforced by tools/local_labels/test_admitted_label_launch_provenance_scanner.py.",
+  "entries": [
+    {
+      "join_key": {
+        "arch": "sm_86",
+        "binary_sha256": "20ec2891f1734d8801804ad908601016b0e18d2d782d69bd953811b9b00e1850",
+        "kernel_signature_sha256": "56c5ec6b878df3410ae20f6c30635c100eb95c97f9c65f29f4b7354273f20a29",
+        "ncu_metric_version": "ncu_2026.1.x",
+        "shape_point": "timing_shape",
+        "slug": "layernorm_fwd_bf16_sm80",
+        "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+      },
+      "nvbit_build_reason": "Label collection used NCU only against the existing NVBit traces under workloads/simbench_bw/results/<slug>/rtx_3090_ti/sm_86/trace_<shape>/dynamic_trace.pb. Those traces were collected by the prior-loop NVBit tracer build; the durable trace sidecars record tracer_so_path but the tracer's per-build SHA is host-local and not committed. The active loop does not re-collect traces; the post-R28 NCU sweep (see sweep_dir_id) reused the existing traces. Future rounds that re-collect traces (e.g., portable_lcd Path A) MUST transition this status to 'live_capture' with the actual NVBit tracer build SHA from git rev-parse HEAD at the tracer rebuild time.",
+      "nvbit_build_status": "preexisting_trace_nvbit_build_unavailable",
+      "selected_cache_control": "all",
+      "selected_launch_skip": 5,
+      "selected_n_repeats": 5,
+      "selected_warmup_count": 5,
+      "sweep_dir_id": "sweep_20260514T093846Z_b1f6d0854d22",
+      "verdict_path": "data/local_labels/sweeps/sweep_20260514T093846Z_b1f6d0854d22/sweep_20260514T093846Z_18d39d0b18cb/verdict.json"
+    },
+    {
+      "join_key": {
+        "arch": "sm_86",
+        "binary_sha256": "e44f714645062197b42dda23e2a41c748e105c8e674b62305c979564d35dec21",
+        "kernel_signature_sha256": "7848654da87ddb65a3469a248bb5572f936b4650fefbb1d22aaa25f24aa6cbe2",
+        "ncu_metric_version": "ncu_2026.1.x",
+        "shape_point": "timing_shape",
+        "slug": "rmsnorm_fwd_bf16_sm80",
+        "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7"
+      },
+      "nvbit_build_reason": "Label collection used NCU only against the existing NVBit traces under workloads/simbench_bw/results/<slug>/rtx_3090_ti/sm_86/trace_<shape>/dynamic_trace.pb. Those traces were collected by the prior-loop NVBit tracer build; the durable trace sidecars record tracer_so_path but the tracer's per-build SHA is host-local and not committed. The active loop does not re-collect traces; the post-R28 NCU sweep (see sweep_dir_id) reused the existing traces. Future rounds that re-collect traces (e.g., portable_lcd Path A) MUST transition this status to 'live_capture' with the actual NVBit tracer build SHA from git rev-parse HEAD at the tracer rebuild time.",
+      "nvbit_build_status": "preexisting_trace_nvbit_build_unavailable",
+      "selected_cache_control": "all",
+      "selected_launch_skip": 5,
+      "selected_n_repeats": 5,
+      "selected_warmup_count": 5,
+      "sweep_dir_id": "sweep_20260514T093846Z_b1f6d0854d22",
+      "verdict_path": "data/local_labels/sweeps/sweep_20260514T093846Z_b1f6d0854d22/sweep_20260514T093846Z_18d39d0b18cb/verdict.json"
+    },
+    {
+      "join_key": {
+        "arch": "sm_86",
+        "binary_sha256": "7d0eeb9e1653272094170143981bb388bfc44bed5f382ffcba750a6781cd16f6",
+        "kernel_signature_sha256": "c8690a32cfd4cdb4e19ffde286a0758f5cb6bcb81b66bf31216465e9f4798b62",
+        "ncu_metric_version": "ncu_2026.1.x",
+        "shape_point": "correctness_shape",
+        "slug": "silu_fwd_bf16_sm80",
+        "source_commit": "d15b50c791bb91d5955ca677cc934d876b31e674"
+      },
+      "nvbit_build_reason": "Label collection used NCU only against the existing NVBit traces under workloads/simbench_bw/results/<slug>/rtx_3090_ti/sm_86/trace_<shape>/dynamic_trace.pb. Those traces were collected by the prior-loop NVBit tracer build; the durable trace sidecars record tracer_so_path but the tracer's per-build SHA is host-local and not committed. The active loop does not re-collect traces; the post-R28 NCU sweep (see sweep_dir_id) reused the existing traces. Future rounds that re-collect traces (e.g., portable_lcd Path A) MUST transition this status to 'live_capture' with the actual NVBit tracer build SHA from git rev-parse HEAD at the tracer rebuild time.",
+      "nvbit_build_status": "preexisting_trace_nvbit_build_unavailable",
+      "selected_cache_control": "all",
+      "selected_launch_skip": 1,
+      "selected_n_repeats": 15,
+      "selected_warmup_count": 1,
+      "sweep_dir_id": "sweep_20260514T162932Z_ebe60dda69fe",
+      "verdict_path": "data/local_labels/sweeps/sweep_20260514T162932Z_ebe60dda69fe/sweep_20260514T162932Z_d2ec0a599caf/verdict.json"
+    },
+    {
+      "join_key": {
+        "arch": "sm_86",
+        "binary_sha256": "12b290606983bbecb919678c86fffb9a1df3e02bf66afe8487eeef085bfa6551",
+        "kernel_signature_sha256": "2681564ef5ca9026d42106bbe862a40d3e38b89b52e720a90ad39322c0ff99dc",
+        "ncu_metric_version": "ncu_2026.1.x",
+        "shape_point": "timing_shape",
+        "slug": "silu_fwd_bf16_sm80",
+        "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7"
+      },
+      "nvbit_build_reason": "Label collection used NCU only against the existing NVBit traces under workloads/simbench_bw/results/<slug>/rtx_3090_ti/sm_86/trace_<shape>/dynamic_trace.pb. Those traces were collected by the prior-loop NVBit tracer build; the durable trace sidecars record tracer_so_path but the tracer's per-build SHA is host-local and not committed. The active loop does not re-collect traces; the post-R28 NCU sweep (see sweep_dir_id) reused the existing traces. Future rounds that re-collect traces (e.g., portable_lcd Path A) MUST transition this status to 'live_capture' with the actual NVBit tracer build SHA from git rev-parse HEAD at the tracer rebuild time.",
+      "nvbit_build_status": "preexisting_trace_nvbit_build_unavailable",
+      "selected_cache_control": "all",
+      "selected_launch_skip": 5,
+      "selected_n_repeats": 5,
+      "selected_warmup_count": 5,
+      "sweep_dir_id": "sweep_20260514T093846Z_b1f6d0854d22",
+      "verdict_path": "data/local_labels/sweeps/sweep_20260514T093846Z_b1f6d0854d22/sweep_20260514T093846Z_18d39d0b18cb/verdict.json"
+    },
+    {
+      "join_key": {
+        "arch": "sm_86",
+        "binary_sha256": "68b07b4adc6918b8a5ef3f93e9973a7195e083d28e77465ca55680cc512c3cfd",
+        "kernel_signature_sha256": "dc75edc616c84481008a935794005890d51160f8eafe175a1e530098b3be3e43",
+        "ncu_metric_version": "ncu_2026.1.x",
+        "shape_point": "timing_shape",
+        "slug": "softmax_safe_bf16_sm80",
+        "source_commit": "3c54325f964295b3e890d501cea38fa3d96b7ed7"
+      },
+      "nvbit_build_reason": "Label collection used NCU only against the existing NVBit traces under workloads/simbench_bw/results/<slug>/rtx_3090_ti/sm_86/trace_<shape>/dynamic_trace.pb. Those traces were collected by the prior-loop NVBit tracer build; the durable trace sidecars record tracer_so_path but the tracer's per-build SHA is host-local and not committed. The active loop does not re-collect traces; the post-R28 NCU sweep (see sweep_dir_id) reused the existing traces. Future rounds that re-collect traces (e.g., portable_lcd Path A) MUST transition this status to 'live_capture' with the actual NVBit tracer build SHA from git rev-parse HEAD at the tracer rebuild time.",
+      "nvbit_build_status": "preexisting_trace_nvbit_build_unavailable",
+      "selected_cache_control": "all",
+      "selected_launch_skip": 5,
+      "selected_n_repeats": 5,
+      "selected_warmup_count": 5,
+      "sweep_dir_id": "sweep_20260514T093846Z_b1f6d0854d22",
+      "verdict_path": "data/local_labels/sweeps/sweep_20260514T093846Z_b1f6d0854d22/sweep_20260514T093846Z_18d39d0b18cb/verdict.json"
+    }
+  ],
+  "schema_version": 1
+}

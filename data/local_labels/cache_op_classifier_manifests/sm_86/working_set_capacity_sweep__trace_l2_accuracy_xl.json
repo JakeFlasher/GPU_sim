@@ -1,0 +1,658 @@
+{
+  "arch_token": "sm_86",
+  "binary_path": "workloads/simbench_bw/l1/working_set_capacity_sweep/working_set_capacity_sweep_run",
+  "binary_source": "live_cuobjdump",
+  "kernel_mangled_name": "working_set_capacity_sweep_kernel",
+  "per_pc_instruction_cache_op": [
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x230",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0xcb0",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0xd10",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0xd60",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0xd90",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0xe00",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0xe60",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0xee0",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0xf60",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0xfd0",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x1030",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x10d0",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x1160",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x11d0",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x1230",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x1260",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x1280",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x1490",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x1e80",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x1eb0",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x1ee0",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x1f60",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x1fa0",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x1fd0",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x1ff0",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x2000",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x20f0",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x38d0",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x39a0",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x39e0",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x3a10",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x3a90",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x3ab0",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x3ad0",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x3ae0",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x3bc0",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x240",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x440",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0xc10",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0xc40",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0xc80",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0xcf0",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0xd20",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0xe20",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0xe40",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0xe80",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0xe90",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0xf00",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0xfa0",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0xfe0",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x1130",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x1170",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x1190",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x13a0",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x1d20",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x1d50",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x1dc0",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x1e00",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x1e40",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x1e70",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x1e90",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x1ea0",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x1fa0",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x3790",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x37d0",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x3800",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x3880",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x38c0",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x38e0",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x3900",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x3910",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x3a00",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x1e0",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x230",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0xa80",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0xb10",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0xbb0",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0xc30",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0xca0",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0xd40",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0xdb0",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0xe40",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0xee0",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0xf50",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0xfd0",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x1020",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x1070",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x10b0",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x10f0",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x1110",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x18a0",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x1910",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x1920",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x1960",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x19a0",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x19d0",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x19f0",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x1a00",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x1af0",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x22d0",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x2310",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x2340",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x2380",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x23d0",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x2400",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x2420",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x2430",
+      "raw_mnemonic": "LDG.E"
+    },
+    {
+      "instruction_cache_op": "LDG_E_CA",
+      "l1_eligible": true,
+      "pc": "0x2520",
+      "raw_mnemonic": "LDG.E"
+    }
+  ],
+  "sass_provenance_status": "matched",
+  "schema_version": 1
+}

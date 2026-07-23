@@ -1,0 +1,472 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "warp_pool_l1_rescore",
+  "description": "Honest L1 re-score of the warp-pool head over the frozen cohort split under sealed-holdout governance: cal/val pool pairs + aggregates, mechanically recomputed LOOCV/LOSO for the zero-fitted-parameter head, single-touch holdout block, achieved-vs-target gate table (a MISS is an honest typed outcome), old-head baseline read at scoring time, and the structural-feature / correction-factor demotion statements.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_kind",
+    "arch",
+    "generated_at_commit",
+    "head_artifact",
+    "head_config_digest",
+    "tuning_trail",
+    "metric_definitions",
+    "pool",
+    "robustness",
+    "holdout",
+    "achieved_vs_target",
+    "old_head_baseline",
+    "structural_features",
+    "correction_factors",
+    "governance"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "artifact_kind": {
+      "const": "warp_pool_l1_rescore"
+    },
+    "arch": {
+      "const": "sm_86"
+    },
+    "generated_at_commit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "head_artifact": {
+      "type": "string",
+      "minLength": 1
+    },
+    "head_config_digest": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "tuning_trail": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "label_fitted_parameters",
+        "fit_pool",
+        "note",
+        "cal_val_selected_structural_choices"
+      ],
+      "properties": {
+        "label_fitted_parameters": {
+          "type": "array",
+          "maxItems": 0
+        },
+        "fit_pool": {
+          "const": "none_zero_parameter_head"
+        },
+        "note": {
+          "type": "string",
+          "minLength": 1
+        },
+        "cal_val_selected_structural_choices": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "name",
+              "candidates",
+              "selected",
+              "selection_pool",
+              "candidate_pool_mean_abs_error_pp",
+              "rejected_candidate_config_digest",
+              "rationale"
+            ],
+            "properties": {
+              "name": {
+                "type": "string",
+                "minLength": 1
+              },
+              "candidates": {
+                "type": "array",
+                "minItems": 2
+              },
+              "selected": {},
+              "selection_pool": {
+                "const": "calibration_validation"
+              },
+              "candidate_pool_mean_abs_error_pp": {
+                "type": "object",
+                "additionalProperties": {
+                  "type": "number",
+                  "minimum": 0
+                }
+              },
+              "rejected_candidate_config_digest": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "rationale": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        }
+      }
+    },
+    "metric_definitions": {
+      "type": "object"
+    },
+    "pool": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "split",
+        "pairs",
+        "aggregate"
+      ],
+      "properties": {
+        "split": {
+          "const": "calibration_validation"
+        },
+        "pairs": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/definitions/pair"
+          }
+        },
+        "aggregate": {
+          "$ref": "#/definitions/aggregate"
+        }
+      }
+    },
+    "robustness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "loocv",
+        "loso"
+      ],
+      "properties": {
+        "loocv": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "n_folds",
+            "loocv_geomean_rel_error",
+            "loocv_mean_abs_error_pp"
+          ],
+          "properties": {
+            "n_folds": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "loocv_geomean_rel_error": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0
+            },
+            "loocv_mean_abs_error_pp": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0
+            }
+          }
+        },
+        "loso": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "per_slug",
+            "max_relative_change"
+          ],
+          "properties": {
+            "per_slug": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "number",
+                "minimum": 0
+              }
+            },
+            "max_relative_change": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "minimum": 0
+            }
+          }
+        }
+      }
+    },
+    "holdout": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "scored",
+        "label_source",
+        "pairs",
+        "aggregate"
+      ],
+      "properties": {
+        "scored": {
+          "type": "boolean"
+        },
+        "label_source": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "pairs": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/pair"
+          }
+        },
+        "aggregate": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/definitions/aggregate"
+            }
+          ]
+        }
+      }
+    },
+    "achieved_vs_target": {
+      "type": "array",
+      "minItems": 2,
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": [
+          "gate",
+          "target",
+          "achieved",
+          "met"
+        ],
+        "properties": {
+          "gate": {
+            "type": "string",
+            "minLength": 1
+          },
+          "target": {
+            "type": "number"
+          },
+          "achieved": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "met": {
+            "type": [
+              "boolean",
+              "null"
+            ]
+          }
+        }
+      }
+    },
+    "old_head_baseline": {
+      "type": "object"
+    },
+    "structural_features": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "grid_density_penalty",
+        "replacement"
+      ],
+      "properties": {
+        "grid_density_penalty": {
+          "type": "string",
+          "minLength": 1
+        },
+        "replacement": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "correction_factors": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "consumed_by_this_head"
+      ],
+      "properties": {
+        "status": {
+          "const": "remain_demoted"
+        },
+        "consumed_by_this_head": {
+          "const": false
+        }
+      }
+    },
+    "governance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cohort_manifest_digest",
+        "holdout_scope",
+        "holdout_scored"
+      ],
+      "properties": {
+        "cohort_manifest_digest": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "holdout_scope": {
+          "const": "l1_warp_pool_rescore"
+        },
+        "holdout_scored": {
+          "type": "boolean"
+        },
+        "holdout_touch_recorded": {
+          "type": "boolean"
+        }
+      }
+    }
+  },
+  "definitions": {
+    "pair": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "slug",
+        "shape_point",
+        "split",
+        "status",
+        "typed_reason",
+        "predicted_hit_rate",
+        "label_hit_rate",
+        "abs_error_pp",
+        "rel_error"
+      ],
+      "properties": {
+        "slug": {
+          "type": "string",
+          "minLength": 1
+        },
+        "shape_point": {
+          "type": "string",
+          "minLength": 1
+        },
+        "split": {
+          "enum": [
+            "calibration_validation",
+            "holdout"
+          ]
+        },
+        "status": {
+          "enum": [
+            "scored",
+            "typed"
+          ]
+        },
+        "typed_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "predicted_hit_rate": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "label_hit_rate": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0,
+          "maximum": 1
+        },
+        "abs_error_pp": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "rel_error": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        }
+      }
+    },
+    "aggregate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "n_pairs",
+        "n_scored",
+        "n_typed",
+        "mean_abs_error_pp",
+        "p50_abs_error_pp",
+        "p90_abs_error_pp",
+        "geomean_rel_error"
+      ],
+      "properties": {
+        "n_pairs": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "n_scored": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "n_typed": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "mean_abs_error_pp": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "p50_abs_error_pp": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "p90_abs_error_pp": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "geomean_rel_error": {
+          "type": [
+            "number",
+            "null"
+          ],
+          "minimum": 0
+        },
+        "status": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

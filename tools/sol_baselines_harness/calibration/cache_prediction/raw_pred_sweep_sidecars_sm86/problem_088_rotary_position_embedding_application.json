@@ -1,0 +1,53 @@
+{
+  "by_assoc": {
+    "16": {
+      "raw_l1_hit_rate": 0.23774969729314074,
+      "raw_l2_hit_rate": 0.10400472782982824,
+      "scored": true,
+      "typed_reason": ""
+    },
+    "32": {
+      "raw_l1_hit_rate": 0.23774969729314074,
+      "raw_l2_hit_rate": 0.5551059432886273,
+      "scored": true,
+      "typed_reason": ""
+    },
+    "4": {
+      "raw_l1_hit_rate": 0.23774969729314074,
+      "raw_l2_hit_rate": 0.007889754235661238,
+      "scored": true,
+      "typed_reason": ""
+    },
+    "64": {
+      "raw_l1_hit_rate": 0.23774969729314074,
+      "raw_l2_hit_rate": 0.64102371066886,
+      "scored": true,
+      "typed_reason": ""
+    },
+    "8": {
+      "raw_l1_hit_rate": 0.23774969729314074,
+      "raw_l2_hit_rate": 0.027806113806693494,
+      "scored": true,
+      "typed_reason": ""
+    }
+  },
+  "candidates": [
+    4,
+    8,
+    16,
+    32,
+    64
+  ],
+  "captured_at_utc": "2026-05-30T01:08:12+00:00",
+  "dense_reuse": {
+    "distinct_sectors": 729485,
+    "reuse_factor": 2.5098103456548113,
+    "total_sector_accesses": 1830869,
+    "truncated": true
+  },
+  "schema_version": 2,
+  "scored": true,
+  "slug": "problem_088_rotary_position_embedding_application",
+  "tier2_sidecar_sha256": "3ac89edff002a7bba6c0c02121abf64f021c32d57c1d5f793fed923342496e2b",
+  "typed_reason": ""
+}

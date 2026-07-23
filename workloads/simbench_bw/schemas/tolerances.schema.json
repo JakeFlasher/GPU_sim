@@ -1,0 +1,102 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "simbench_bw/schemas/tolerances.schema.json",
+  "title": "SimBench-BW numerical tolerance policy",
+  "description": "Per-(dtype, reduction_kind, kernel_family) tolerance entries consumed by run_suite.py --mode correctness. Distinguishes reduction-order drift, FMA-vs-separate-mul-add divergence, atomic nondeterminism, and compensated-summation expectations.",
+  "schema_version": 1,
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "entries"],
+  "properties": {
+    "schema_version": { "type": "integer", "const": 1 },
+    "entries": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/entry" }
+    }
+  },
+  "$defs": {
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dtype",
+        "reduction_kind",
+        "kernel_family",
+        "rtol",
+        "atol",
+        "max_ulp"
+      ],
+      "properties": {
+        "dtype": {
+          "type": "string",
+          "enum": ["FP32", "TF32", "FP16", "BF16", "FP8_E4M3", "FP8_E5M2", "FP6_E3M2", "FP6_E2M3", "FP4_E2M1", "NVFP4", "INT8", "MIXED"]
+        },
+        "reduction_kind": {
+          "type": "string",
+          "enum": [
+            "none",
+            "tree_sum",
+            "warp_shuffle_sum",
+            "atomic_add",
+            "fma_chain",
+            "separate_mul_add",
+            "compensated_sum"
+          ],
+          "description": "Which reduction / accumulation pattern the kernel uses. A kernel family may have different patterns per phase; entries are keyed by the dominant pattern for the family."
+        },
+        "kernel_family": {
+          "type": "string",
+          "enum": [
+            "attention",
+            "paged_attention",
+            "grouped_gemm",
+            "norm",
+            "rope",
+            "activation",
+            "mma_microbench",
+            "cluster_dsmem",
+            "ssm",
+            "conv",
+            "sampling",
+            "embedding",
+            "tma",
+            "diffusion",
+            "vision_encoder",
+            "audio",
+            "tts",
+            "multimodal",
+            "control"
+          ]
+        },
+        "rtol": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Relative tolerance for torch.allclose-style comparison."
+        },
+        "atol": {
+          "type": "number",
+          "minimum": 0,
+          "description": "Absolute tolerance for torch.allclose-style comparison."
+        },
+        "max_ulp": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Upper bound on unit-in-last-place deviation. Low-precision dtypes (FP8, FP4) use this more aggressively than rtol/atol."
+        },
+        "atomic_nondeterminism_allowance": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Extra relaxation applied when the kernel uses atomic reductions that re-order under scheduling nondeterminism.",
+          "properties": {
+            "rtol": { "type": "number", "minimum": 0 },
+            "atol": { "type": "number", "minimum": 0 }
+          }
+        },
+        "notes": {
+          "type": "string",
+          "description": "Short rationale (e.g. \"BF16 attention softmax exponent sensitivity\", \"FP8 E4M3 saturating cast ULP\")."
+        }
+      }
+    }
+  }
+}

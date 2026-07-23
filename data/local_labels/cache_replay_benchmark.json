@@ -1,0 +1,213 @@
+{
+  "cohort_size": 30,
+  "cpu_model": "AMD Ryzen 9 9955HX 16-Core Processor",
+  "fenwick_sectors_per_sec": 560607.9365003649,
+  "fenwick_wall_time_s": 52.060964713047724,
+  "gating": true,
+  "hundred_million_bar": 100000000,
+  "input_bytes_per_sec": 43642374.06822805,
+  "l2_capacity_provenance": {
+    "capacity_bytes": 33554432,
+    "capacity_source": "static_device_card",
+    "compute_capability": "12.0",
+    "geometry_source": "constant",
+    "line_size_bytes": 128,
+    "num_l2_slices_source": "constant",
+    "resolver": "tools.hrd_profiler.cache_model_spec.resolve_cache_model_spec + run_suite static card",
+    "resolver_evidence": [],
+    "sector_size_bytes": 32
+  },
+  "n_accesses_benchmarked": 29185790,
+  "n_cells_benchmarked": 30,
+  "nvbit_trace_collection_time": "reported_separately_not_in_replay_rate",
+  "passed": false,
+  "per_cell": [
+    {
+      "cell_id": "l2_prefetch_hint_sweep/trace_l2_accuracy_xl",
+      "fenwick_sectors_per_sec": 523479.8818231289,
+      "n_accesses": 4456353,
+      "replay_sectors_per_sec": 5570578.801543053
+    },
+    {
+      "cell_id": "carveout_sensitivity_probe/trace_l2_accuracy_xl",
+      "fenwick_sectors_per_sec": 543325.4339709573,
+      "n_accesses": 2920065,
+      "replay_sectors_per_sec": 5467026.827707877
+    },
+    {
+      "cell_id": "working_set_capacity_sweep/trace_l2_accuracy_xl",
+      "fenwick_sectors_per_sec": 538812.8959427752,
+      "n_accesses": 2658241,
+      "replay_sectors_per_sec": 5395300.575951977
+    },
+    {
+      "cell_id": "l2_persisting_window_sweep/trace_l2_accuracy_xl",
+      "fenwick_sectors_per_sec": 539416.8433251118,
+      "n_accesses": 2146273,
+      "replay_sectors_per_sec": 5615386.378260373
+    },
+    {
+      "cell_id": "embedding_gather_int32_sm80/timing_shape",
+      "fenwick_sectors_per_sec": 532260.3539317735,
+      "n_accesses": 2097152,
+      "replay_sectors_per_sec": 5240349.0161463125
+    },
+    {
+      "cell_id": "embedding_gather_int32_sm80/trace_l2_accuracy_xl",
+      "fenwick_sectors_per_sec": 534641.8494681497,
+      "n_accesses": 2097152,
+      "replay_sectors_per_sec": 5316453.671061265
+    },
+    {
+      "cell_id": "rmsnorm_bwd_bf16_sm80/timing_shape",
+      "fenwick_sectors_per_sec": 568492.5923080222,
+      "n_accesses": 1835008,
+      "replay_sectors_per_sec": 5209060.428680079
+    },
+    {
+      "cell_id": "layernorm_fwd_bf16_sm80/timing_shape",
+      "fenwick_sectors_per_sec": 589599.469489604,
+      "n_accesses": 1310720,
+      "replay_sectors_per_sec": 5652657.976508975
+    },
+    {
+      "cell_id": "layernorm_fwd_bf16_sm80/trace_l2_accuracy_xl",
+      "fenwick_sectors_per_sec": 585703.0064966915,
+      "n_accesses": 1310720,
+      "replay_sectors_per_sec": 5564989.75421676
+    },
+    {
+      "cell_id": "rmsnorm_fwd_bf16_sm80/timing_shape",
+      "fenwick_sectors_per_sec": 574096.5324887322,
+      "n_accesses": 1048576,
+      "replay_sectors_per_sec": 5480589.986084703
+    },
+    {
+      "cell_id": "rmsnorm_fwd_bf16_sm80/trace_l2_accuracy_xl",
+      "fenwick_sectors_per_sec": 578821.9406644985,
+      "n_accesses": 1048576,
+      "replay_sectors_per_sec": 5453790.85478408
+    },
+    {
+      "cell_id": "warm_cold_pair_relaunch/trace_l2_accuracy_xl",
+      "fenwick_sectors_per_sec": 620855.8316299799,
+      "n_accesses": 1048482,
+      "replay_sectors_per_sec": 5615603.223706946
+    },
+    {
+      "cell_id": "softmax_safe_bf16_sm80/timing_shape",
+      "fenwick_sectors_per_sec": 616694.0270831351,
+      "n_accesses": 786432,
+      "replay_sectors_per_sec": 5628700.594105501
+    },
+    {
+      "cell_id": "softmax_safe_bf16_sm80/trace_l2_accuracy_xl",
+      "fenwick_sectors_per_sec": 608933.1711528517,
+      "n_accesses": 786432,
+      "replay_sectors_per_sec": 5102874.475026133
+    },
+    {
+      "cell_id": "swiglu_fwd_bf16_sm80/timing_shape",
+      "fenwick_sectors_per_sec": 617064.8543495677,
+      "n_accesses": 786432,
+      "replay_sectors_per_sec": 5745397.768741282
+    },
+    {
+      "cell_id": "swiglu_fwd_bf16_sm80/trace_l2_accuracy_xl",
+      "fenwick_sectors_per_sec": 615001.5214673369,
+      "n_accesses": 786432,
+      "replay_sectors_per_sec": 5604205.029535048
+    },
+    {
+      "cell_id": "cross_entropy_fwd_fp32_sm80/timing_shape",
+      "fenwick_sectors_per_sec": 609459.3048344997,
+      "n_accesses": 524480,
+      "replay_sectors_per_sec": 5368866.999627142
+    },
+    {
+      "cell_id": "cross_entropy_fwd_fp32_sm80/trace_l2_accuracy_xl",
+      "fenwick_sectors_per_sec": 612886.7709972749,
+      "n_accesses": 524480,
+      "replay_sectors_per_sec": 5355593.026535987
+    },
+    {
+      "cell_id": "silu_fwd_bf16_sm80/timing_shape",
+      "fenwick_sectors_per_sec": 615741.845805487,
+      "n_accesses": 524288,
+      "replay_sectors_per_sec": 5356209.518688222
+    },
+    {
+      "cell_id": "gemm_hmma_bf16_sm80/timing_shape",
+      "fenwick_sectors_per_sec": 703192.7909162663,
+      "n_accesses": 65536,
+      "replay_sectors_per_sec": 5677289.395086373
+    },
+    {
+      "cell_id": "gemm_hmma_bf16_sm80/trace_l2_accuracy_lg",
+      "fenwick_sectors_per_sec": 738394.357920718,
+      "n_accesses": 65536,
+      "replay_sectors_per_sec": 5313023.398052171
+    },
+    {
+      "cell_id": "gemm_hmma_bf16_sm80/trace_l2_accuracy_xl",
+      "fenwick_sectors_per_sec": 707444.5511211668,
+      "n_accesses": 65536,
+      "replay_sectors_per_sec": 5535920.6362535255
+    },
+    {
+      "cell_id": "gemm_hmma_fp16_sm80/timing_shape",
+      "fenwick_sectors_per_sec": 707023.8364434785,
+      "n_accesses": 65536,
+      "replay_sectors_per_sec": 5672105.440789501
+    },
+    {
+      "cell_id": "gemm_hmma_fp16_sm80/trace_l2_accuracy_xl",
+      "fenwick_sectors_per_sec": 678143.8568809333,
+      "n_accesses": 65536,
+      "replay_sectors_per_sec": 5027904.90508905
+    },
+    {
+      "cell_id": "gemm_imma_int8_sm80/timing_shape",
+      "fenwick_sectors_per_sec": 688000.6498497104,
+      "n_accesses": 65536,
+      "replay_sectors_per_sec": 5108015.328015272
+    },
+    {
+      "cell_id": "gemm_imma_int8_sm80/trace_l2_accuracy_xl",
+      "fenwick_sectors_per_sec": 676798.380442335,
+      "n_accesses": 65536,
+      "replay_sectors_per_sec": 5313290.87634604
+    },
+    {
+      "cell_id": "gemm_sparse_2to4_bf16_sm80/timing_shape",
+      "fenwick_sectors_per_sec": 759488.2019940952,
+      "n_accesses": 16384,
+      "replay_sectors_per_sec": 5351562.089887618
+    },
+    {
+      "cell_id": "conv2d_implicit_gemm_bf16_sm80/timing_shape",
+      "fenwick_sectors_per_sec": 802517.2711814183,
+      "n_accesses": 8192,
+      "replay_sectors_per_sec": 3958319.739934483
+    },
+    {
+      "cell_id": "flash_attn_fwd_bf16_sm80/timing_shape",
+      "fenwick_sectors_per_sec": 759347.4750125116,
+      "n_accesses": 4096,
+      "replay_sectors_per_sec": 4975976.65468418
+    },
+    {
+      "cell_id": "cross_entropy_fwd_fp32_sm80/correctness_shape",
+      "fenwick_sectors_per_sec": 1007046.4145670931,
+      "n_accesses": 2072,
+      "replay_sectors_per_sec": 5570971.061942753
+    }
+  ],
+  "replay_sectors_per_sec": 5455296.758528506,
+  "replay_wall_time_s": 5.349991263879929,
+  "schema_version": 1,
+  "separation_note": "Replay rate denominator is replay wall time only. NVBit trace collection and trace decode are excluded from the replay rate; the ultrafast claim is scoped to replay, not to NVBit tracing.",
+  "source_commit": "ee7c5ab43e23ca4d9a8ecb7a730e8bd2b24ca13f",
+  "speedup_bar": 10.0,
+  "speedup_vs_fenwick": 9.731037331693136
+}

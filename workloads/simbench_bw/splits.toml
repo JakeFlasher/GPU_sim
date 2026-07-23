@@ -1,0 +1,386 @@
+# SimBench-BW calibration / validation / holdout splits.
+#
+# Stratified 46 / 17 / 16 across the 79 rows by (domain, level, primary_precision).
+# Downstream prediction models use only calibration for tuning; validation is
+# for mid-loop checks; holdout is reserved for final evaluation. R44 admitted
+# `working_set_capacity_sweep` and `warm_cold_pair_relaunch`; R46 admitted
+# `l2_prefetch_hint_sweep`; R47 admitted `l2_persisting_window_sweep`; R48
+# admitted `carveout_sensitivity_probe` (the final residual microbenchmark-
+# suite-coverage family) into calibration, expanding from 44 to 45 rows. The
+# sm86 cohort regen loop's task3 admitted `dram_streaming_dot_product`
+# into calibration, growing it to 46 rows. The atomics ATOM-vs-RED pairing
+# added `global_atomic_return_used` (the atomic-with-return partner of the
+# return-ignored `global_atomic_histogram`) to validation, growing it from 16
+# to 17 (78 -> 79 rows). The vector-width request/sector-formation family then
+# added `global_vectorized_128b_copy` (float4 -> LDG.E.128/STG.E.128) and
+# `global_scalar_32b_copy` (scalar -> LDG.E/STG.E) to validation, growing it
+# from 17 to 19 (79 -> 81 rows), and then the 64-bit member
+# `global_vectorized_64b_copy` (float2 -> LDG.E.64/STG.E.64) grew it from 19 to
+# 20 (81 -> 82 rows). The opcode-distinct atomic-MAX pair then added
+# `global_atomic_max_histogram` (REDG.E.MAX.S32) and
+# `global_atomic_max_return_used` (ATOMG.E.MAX.S32) to validation, growing it
+# from 20 to 22 (82 -> 84 rows), and the bitwise atomic-AND pair
+# (`global_atomic_and_histogram` REDG.E.AND + `global_atomic_and_return_used`
+# ATOMG.E.AND) grew it from 22 to 24 (84 -> 86 rows). Counts are frozen
+# until the next suite-expansion round.
+
+schema_version = 1
+stratification_keys = ["domain", "level", "primary_precision"]
+
+[counts]
+calibration = 48
+validation = 24
+holdout = 16
+
+[[assignments]]
+slug = "bf16_hmma_gemm_traceable"
+split = "holdout"
+
+[[assignments]]
+slug = "chunk_gated_delta_rule_bf16"
+split = "validation"
+
+[[assignments]]
+slug = "clip_text_image_cross_attn_bf16"
+split = "calibration"
+
+[[assignments]]
+slug = "cluster_remote_reduction"
+split = "holdout"
+
+[[assignments]]
+slug = "cluster_rmsnorm_dsmem_bf16"
+split = "validation"
+
+[[assignments]]
+slug = "conformer_depthwise_glu_bf16"
+split = "calibration"
+
+[[assignments]]
+slug = "cp_async_shared_tile_copy"
+split = "validation"
+
+[[assignments]]
+slug = "diffusion_cross_attn_video_bf16"
+split = "calibration"
+
+[[assignments]]
+slug = "diffusion_resnet_time_block_bf16"
+split = "validation"
+
+[[assignments]]
+slug = "dram_stream_stride_mix"
+split = "calibration"
+
+[[assignments]]
+slug = "dram_streaming_dot_product"
+split = "calibration"
+
+[[assignments]]
+slug = "dsmem_pairwise_latency"
+split = "calibration"
+
+[[assignments]]
+slug = "dsmem_ring_bandwidth"
+split = "validation"
+
+[[assignments]]
+slug = "embedding_bag_scatter_atomic"
+split = "calibration"
+
+[[assignments]]
+slug = "embedding_gather_vocab128k"
+split = "validation"
+
+[[assignments]]
+slug = "flash_attn_bwd_bf16"
+split = "calibration"
+
+[[assignments]]
+slug = "flash_attn_bwd_fp8"
+split = "validation"
+
+[[assignments]]
+slug = "flash_attn_fwd_bf16_causal"
+split = "holdout"
+
+[[assignments]]
+slug = "flash_attn_fwd_bf16_noncausal"
+split = "calibration"
+
+[[assignments]]
+slug = "flash_attn_fwd_fp8_causal"
+split = "calibration"
+
+[[assignments]]
+slug = "flux_adaln_zero_mod_bf16"
+split = "holdout"
+
+[[assignments]]
+slug = "fp16_hmma_gemm_traceable"
+split = "holdout"
+
+[[assignments]]
+slug = "fp32_fma_dep_chain"
+split = "calibration"
+
+[[assignments]]
+slug = "fp4_e2m1_mma_dep_chain"
+split = "calibration"
+
+[[assignments]]
+slug = "fp6_e2m3_saturation"
+split = "validation"
+
+[[assignments]]
+slug = "fp6_e3m2_mma_dep_chain"
+split = "holdout"
+
+[[assignments]]
+slug = "fp8_e4m3_qmma_dep_chain"
+split = "calibration"
+
+[[assignments]]
+slug = "fp8_e5m2_saturation"
+split = "holdout"
+
+[[assignments]]
+slug = "geglu_ffn_fused_bf16"
+split = "holdout"
+
+[[assignments]]
+slug = "global_atomic_histogram"
+split = "validation"
+
+[[assignments]]
+slug = "global_atomic_return_used"
+split = "validation"
+
+[[assignments]]
+slug = "global_atomic_max_histogram"
+split = "validation"
+
+[[assignments]]
+slug = "global_atomic_max_return_used"
+split = "validation"
+
+[[assignments]]
+slug = "global_atomic_and_histogram"
+split = "validation"
+
+[[assignments]]
+slug = "global_atomic_and_return_used"
+split = "validation"
+
+
+[[assignments]]
+slug = "global_vectorized_128b_copy"
+split = "validation"
+
+[[assignments]]
+slug = "global_scalar_32b_copy"
+split = "validation"
+
+[[assignments]]
+slug = "global_vectorized_64b_copy"
+split = "validation"
+
+[[assignments]]
+slug = "groupnorm_fwd_bwd_bf16"
+split = "calibration"
+
+[[assignments]]
+slug = "hyena_fft_conv_block_fp32"
+split = "calibration"
+
+[[assignments]]
+slug = "int8_imma_gemm_traceable"
+split = "calibration"
+
+[[assignments]]
+slug = "kv_cache_update_rope_bf16"
+split = "holdout"
+
+[[assignments]]
+slug = "l2_thrash_pointer_chase"
+split = "calibration"
+
+[[assignments]]
+slug = "layernorm_fwd_bwd_bf16"
+split = "calibration"
+
+[[assignments]]
+slug = "mamba2_discretize_chunk_bf16"
+split = "holdout"
+
+[[assignments]]
+slug = "mamba_selective_scan_bf16"
+split = "calibration"
+
+[[assignments]]
+slug = "moe_grouped_gemm_bf16"
+split = "holdout"
+
+[[assignments]]
+slug = "moe_grouped_gemm_fp8"
+split = "validation"
+
+[[assignments]]
+slug = "moe_layer_residual_norm_pipeline"
+split = "calibration"
+
+[[assignments]]
+slug = "moe_router_topk_softmax"
+split = "calibration"
+
+[[assignments]]
+slug = "nvfp4_blockscale_gemm"
+split = "validation"
+
+[[assignments]]
+slug = "nvfp4_grouped_gemm_moe"
+split = "calibration"
+
+[[assignments]]
+slug = "paged_mla_decode_bf16"
+split = "calibration"
+
+[[assignments]]
+slug = "pagedkv_decode_gqa_bf16"
+split = "validation"
+
+[[assignments]]
+slug = "pagedkv_decode_mqa_bf16"
+split = "calibration"
+
+[[assignments]]
+slug = "prefill_then_decode_pagedkv_pipeline"
+split = "calibration"
+
+[[assignments]]
+slug = "qkv_rope_standard_bf16"
+split = "calibration"
+
+[[assignments]]
+slug = "qkv_rope_yarn_bf16"
+split = "holdout"
+
+[[assignments]]
+slug = "ragged_attention_prefill_bf16"
+split = "calibration"
+
+[[assignments]]
+slug = "register_spill_local_mem"
+split = "holdout"
+
+[[assignments]]
+slug = "local_dynamic_index_array"
+split = "calibration"
+
+[[assignments]]
+slug = "local_volatile_array"
+split = "calibration"
+
+[[assignments]]
+slug = "rmsnorm_bwd_bf16"
+split = "validation"
+
+[[assignments]]
+slug = "rmsnorm_fwd_bf16"
+split = "calibration"
+
+[[assignments]]
+slug = "rope2d_mm_qkv_bf16"
+split = "calibration"
+
+[[assignments]]
+slug = "sam_mask_decoder_cross_attn_bf16"
+split = "validation"
+
+[[assignments]]
+slug = "sampling_topk_temperature_bf16"
+split = "validation"
+
+[[assignments]]
+slug = "shared_bank_conflict_stride"
+split = "validation"
+
+[[assignments]]
+slug = "sparse_2to4_bf16_gemm"
+split = "calibration"
+
+[[assignments]]
+slug = "sparse_2to4_fp8_gemm"
+split = "calibration"
+
+[[assignments]]
+slug = "sparse_2to4_int8_gemm"
+split = "holdout"
+
+[[assignments]]
+slug = "speculative_decode_draft_verify_pipeline"
+split = "holdout"
+
+[[assignments]]
+slug = "swiglu_ffn_fused_bf16"
+split = "calibration"
+
+[[assignments]]
+slug = "tf32_hmma_gemm_traceable"
+split = "calibration"
+
+[[assignments]]
+slug = "tma_tensor_copy_2d"
+split = "calibration"
+
+[[assignments]]
+slug = "tts_duration_predictor_ln_bf16"
+split = "calibration"
+
+[[assignments]]
+slug = "tts_vocoder_upsample_silu_bf16"
+split = "holdout"
+
+[[assignments]]
+slug = "vae_conv_gn_silu_residual_bf16"
+split = "calibration"
+
+[[assignments]]
+slug = "vit_encoder_block_bf16"
+split = "calibration"
+
+[[assignments]]
+slug = "warp_divergence_reconvergence"
+split = "calibration"
+
+[[assignments]]
+slug = "wgmma_bf16_saturation"
+split = "calibration"
+
+[[assignments]]
+slug = "wgmma_fp8_saturation"
+split = "calibration"
+
+[[assignments]]
+slug = "whisper_encoder_block_bf16"
+split = "calibration"
+
+[[assignments]]
+slug = "working_set_capacity_sweep"
+split = "calibration"
+
+[[assignments]]
+slug = "warm_cold_pair_relaunch"
+split = "calibration"
+
+[[assignments]]
+slug = "l2_prefetch_hint_sweep"
+split = "calibration"
+
+[[assignments]]
+slug = "l2_persisting_window_sweep"
+split = "calibration"
+
+[[assignments]]
+slug = "carveout_sensitivity_probe"
+split = "calibration"

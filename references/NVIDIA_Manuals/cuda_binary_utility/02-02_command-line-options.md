@@ -1,0 +1,31 @@
+---
+title: "2.2. Command-line Options"
+section: "2.2"
+source: "https://docs.nvidia.com/cuda/cuda-binary-utilities/#command-line-options"
+---
+
+## [2.2. Command-line Options](https://docs.nvidia.com/cuda/cuda-binary-utilities#command-line-options)[](https://docs.nvidia.com/cuda/cuda-binary-utilities/#command-line-options "Permalink to this headline")
+
+[Table 2](https://docs.nvidia.com/cuda/cuda-binary-utilities/#cuobjdump-options-table) contains supported command-line options of `cuobjdump`, along with a description of what each option does. Each option has a long name and a short name, which can be used interchangeably.
+
+| Option (long) | Option (short) | Description |
+| --- | --- | --- |
+| `--all-fatbin` | `-all` | Dump all fatbin sections. By default will only dump contents of executable fatbin (if exists), else relocatable fatbin if no executable fatbin. |
+| `--dump-elf` | `-elf` | Dump ELF Object sections. |
+| `--dump-elf-symbols` | `-symbols` | Dump ELF symbol names. |
+| `--dump-ptx` | `-ptx` | Dump PTX for all listed device functions. |
+| `--dump-sass` | `-sass` | Dump CUDA assembly for a single cubin file or all cubin files embedded in the binary. |
+| `--dump-resource-usage` | `-res-usage` | Dump resource usage for each ELF. Useful in getting all the resource usage information at one place. |
+| `--extract-elf <partial file name>,...` | `-xelf` | Extract ELF file(s) name containing <partial file name> and save as file(s). Use `all` to extract all files. To get the list of ELF files use -lelf option. Works with host executable/object/library and external fatbin. All `dump` and `list` options are ignored with this option. |
+| `--extract-ptx <partial file name>,...` | `-xptx` | Extract PTX file(s) name containing <partial file name> and save as file(s). Use `all` to extract all files. To get the list of PTX files use -lptx option. Works with host executable/object/library and external fatbin. All `dump` and `list` options are ignored with this option. |
+| `--extract-text <partial file name>,...` | `-xtext` | Extract text binary encoding file(s) name containing <partial file name> and save as file(s). Use ‘all’ to extract all files. To get the list of text binary encoding use -ltext option. All ‘dump’ and ‘list’ options are ignored with this option. |
+| `--function <function name>,...` | `-fun` | Specify names of device functions whose fat binary structures must be dumped. |
+| `--function-index <function index>,...` | `-findex` | Specify symbol table index of the function whose fat binary structures must be dumped. |
+| `--gpu-architecture <gpu architecture name>` | `-arch` | Specify GPU Architecture for which information should be dumped. Allowed values for this option: `sm_75`, `sm_80`, `sm_86`, `sm_87`, `sm_88`, `sm_89`, `sm_90`, `sm_90a`, `sm_100`, `sm_100a`, `sm_100f`, `sm_103`, `sm_103a`, `sm_103f`, `sm_110`, `sm_110a`, `sm_110f`, `sm_120`, `sm_120a`, `sm_120f`, `sm_121`, `sm_121a`, `sm_121f`. |
+| `--help` | `-h` | Print this help information on this tool. |
+| `--list-elf` | `-lelf` | List all the ELF files available in the fatbin. Works with host executable/object/library and external fatbin. All other options are ignored with this flag. This can be used to select particular ELF with -xelf option later. |
+| `--list-ptx` | `-lptx` | List all the PTX files available in the fatbin. Works with host executable/object/library and external fatbin. All other options are ignored with this flag. This can be used to select particular PTX with -xptx option later. |
+| `--list-text` | `-ltext` | List all the text binary function names available in the fatbin. All other options are ignored with the flag. This can be used to select particular function with -xtext option later. |
+| `--options-file <file>,...` | `-optf` | Include command line options from specified file. |
+| `--sort-functions` | `-sort` | Sort functions when dumping sass. |
+| `--version` | `-V` | Print version information on this tool. |

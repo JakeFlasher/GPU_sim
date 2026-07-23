@@ -1,0 +1,507 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "simbench_bw/schemas/hrd_profile.schema.json",
+  "title": "Conditional HRD Profile Bundle (per-kernel-per-launch)",
+  "description": "One bundle per (slug, shape_point, binary_sha256, source_commit, kernel_signature_sha256) tuple. Implements the R16 task10 / the HRD-profiler clause conditional HRD profiler specification. Carries a per-bin reuse-distance distribution under a four-layer hierarchy (sector / line / allocation / region) with conditional descent (consult a coarser layer only when the finer layer reuse distance is unavailable because it is cold or infinity), a per-bin percentile-bootstrap CI half-width gate, and a bundle-level cache_model_underconfigured refusal annotation when any reported bin's CI half-width exceeds 0.05 OR sample count falls below 50. Every closed branch uses additionalProperties: false. The producer-side typed-reason set lives at tools/hrd_profiler/profiler.py HRD_PROFILE_TYPED_REASONS; the C-AC-C parity inventory pins lockstep at both surfaces.",
+  "schema_version": 1,
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "result_kind",
+    "manifest_pairing_index",
+    "device",
+    "cache_model_spec",
+    "binning",
+    "resampling",
+    "bins",
+    "bundle_underconfigured",
+    "evidence"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1,
+      "description": "Bundle schema major version. Pinned to 1; a deliberate schema bump must update both this constant and consumers in lockstep."
+    },
+    "result_kind": {
+      "type": "string",
+      "enum": [
+        "ok"
+      ],
+      "description": "Top-level discriminator. Pinned to 'ok' today; future round-added top-level rejection arms (e.g., a hard cache-model-spec validation failure) would extend this enum."
+    },
+    "manifest_pairing_index": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "slug",
+        "shape_point",
+        "binary_sha256",
+        "source_commit",
+        "kernel_signature_sha256"
+      ],
+      "properties": {
+        "slug": {
+          "type": "string",
+          "minLength": 1
+        },
+        "shape_point": {
+          "type": "string",
+          "minLength": 1
+        },
+        "binary_sha256": {
+          "type": "string"
+        },
+        "source_commit": {
+          "type": "string"
+        },
+        "kernel_signature_sha256": {
+          "type": "string"
+        },
+        "source_commit_override_from": {
+          "type": "string",
+          "description": "Audit annotation: the MPI source_commit value BEFORE refresh_predictor_trace_source_commit.py overwrote it. Optional; present only when the refresh utility actually rewrote the source_commit. Distinct from the bundle's top-level source_commit_override_from (which audits the trace JSON's source_commit, not the MPI's)."
+        }
+      },
+      "description": "simbench manifest-pairing index. Bootstrap pools must never mix records with different values for any of these fields."
+    },
+    "device": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "device_name",
+        "compute_capability_major",
+        "compute_capability_minor",
+        "sm_count",
+        "total_global_mem_bytes",
+        "l2_cache_size_bytes"
+      ],
+      "properties": {
+        "device_name": {
+          "type": "string"
+        },
+        "compute_capability_major": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "compute_capability_minor": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sm_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "total_global_mem_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "l2_cache_size_bytes": {
+          "type": "integer",
+          "minimum": 0
+        }
+      },
+      "description": "Live device attributes captured at run time."
+    },
+    "cache_model_spec": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "capacity_bytes",
+        "sector_size_bytes",
+        "line_size_bytes",
+        "sectors_per_line",
+        "associativity_policy",
+        "fill_policy",
+        "write_policy",
+        "l1_bypass_cases",
+        "capacity_source",
+        "geometry_source"
+      ],
+      "properties": {
+        "capacity_bytes": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "sector_size_bytes": {
+          "type": "integer",
+          "const": 32
+        },
+        "line_size_bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "sectors_per_line": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "associativity_policy": {
+          "type": "string",
+          "enum": [
+            "fully_associative_lru_approximation"
+          ]
+        },
+        "fill_policy": {
+          "type": "string",
+          "enum": [
+            "write_allocate_on_global_load"
+          ]
+        },
+        "write_policy": {
+          "type": "string",
+          "enum": [
+            "write_back_approximation"
+          ]
+        },
+        "l1_bypass_cases": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "capacity_source": {
+          "type": "string",
+          "enum": [
+            "cuda_device_prop",
+            "static_device_card",
+            "typed_unavailable"
+          ]
+        },
+        "geometry_source": {
+          "type": "string",
+          "enum": [
+            "cuda_device_prop",
+            "static_device_card",
+            "constant",
+            "typed_unavailable"
+          ]
+        },
+        "num_l2_slices": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "Slice-aware L2 cache geometry. Each sector maps to slice (sector_id % num_l2_slices); each slice carries capacity_bytes // num_l2_slices // 32 sectors. 1 = fully-associative pool (back-compat default when no device-properties slice geometry is known)."
+        },
+        "num_l2_slices_source": {
+          "type": "string",
+          "enum": [
+            "cuda_device_prop",
+            "static_device_card",
+            "constant",
+            "typed_unavailable"
+          ],
+          "description": "Provenance of the num_l2_slices field. `constant` is the fully-associative fallback when CUDA + static-card both absent."
+        }
+      },
+      "description": "Resolved cache-model spec. capacity_bytes / line_size_bytes / num_l2_slices follow the CUDA-attribute-wins resolution rule (see R16 task10 artifact Section 7)."
+    },
+    "binning": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "unit",
+        "rd_infinity_sentinel",
+        "ci_method",
+        "bootstrap_resamples",
+        "ci_confidence",
+        "ci_half_width_target",
+        "minimum_bin_sample_count"
+      ],
+      "properties": {
+        "unit": {
+          "type": "string",
+          "const": "sector_32b"
+        },
+        "rd_infinity_sentinel": {
+          "type": "integer",
+          "const": 9223372036854775807
+        },
+        "ci_method": {
+          "type": "string",
+          "const": "percentile_bootstrap"
+        },
+        "bootstrap_resamples": {
+          "type": "integer",
+          "const": 2000
+        },
+        "ci_confidence": {
+          "type": "number",
+          "const": 0.95
+        },
+        "ci_half_width_target": {
+          "type": "number",
+          "const": 0.05
+        },
+        "minimum_bin_sample_count": {
+          "type": "integer",
+          "const": 50
+        }
+      }
+    },
+    "resampling": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "unit"
+      ],
+      "properties": {
+        "unit": {
+          "type": "string",
+          "const": "kernel_launch"
+        }
+      }
+    },
+    "bins": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/bin_record"
+      }
+    },
+    "bundle_underconfigured": {
+      "type": "boolean",
+      "description": "Operator-facing fast path: true iff evidence[] contains a bundle-level annotation whose typed_reason is either `cache_model_underconfigured` (the original underconfigured-bin signal: at least one reported bin's CI half-width exceeds 0.05 OR sample count falls below 50, with `bins[]` populated) or `hrd_compute_budget_exceeded` (the budget arm: the producer's HRD compute budget was exceeded so the reuse-distance computation was skipped, with `bins[]` empty). Verifier recomputes from `evidence[]` contents and rejects any cached-vs-recomputed disagreement; the strict-recomputation pattern is the project's standard fail-closed discipline."
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/evidence_record"
+      }
+    }
+  },
+  "$defs": {
+    "bin_record": {
+      "oneOf": [
+        {
+          "title": "Admitted per-bin record",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "result_kind",
+            "hierarchy_layer",
+            "rd_sector_units_min",
+            "rd_sector_units_max",
+            "observation_count",
+            "hit_count",
+            "hit_rate",
+            "ci_low",
+            "ci_high",
+            "ci_half_width",
+            "low_confidence"
+          ],
+          "properties": {
+            "result_kind": {
+              "type": "string",
+              "const": "ok"
+            },
+            "hierarchy_layer": {
+              "type": "string",
+              "enum": [
+                "sector",
+                "line",
+                "allocation",
+                "region"
+              ]
+            },
+            "rd_sector_units_min": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "rd_sector_units_max": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "observation_count": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "hit_count": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "hit_rate": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "ci_low": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "ci_high": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "ci_half_width": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1
+            },
+            "low_confidence": {
+              "type": "boolean"
+            }
+          }
+        },
+        {
+          "title": "Typed-unavailable per-bin record",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "result_kind",
+            "typed_reason",
+            "hierarchy_layer",
+            "observation_count"
+          ],
+          "properties": {
+            "result_kind": {
+              "type": "string",
+              "const": "typed_unavailable"
+            },
+            "typed_reason": {
+              "$ref": "#/$defs/typed_reason"
+            },
+            "hierarchy_layer": {
+              "type": "string",
+              "enum": [
+                "sector",
+                "line",
+                "allocation",
+                "region"
+              ]
+            },
+            "rd_sector_units_min": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "rd_sector_units_max": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "observation_count": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "hit_count": {
+              "type": "null"
+            },
+            "hit_rate": {
+              "type": "null"
+            },
+            "ci_low": {
+              "type": "null"
+            },
+            "ci_high": {
+              "type": "null"
+            },
+            "ci_half_width": {
+              "type": "null"
+            },
+            "low_confidence": {
+              "type": "null"
+            }
+          }
+        }
+      ]
+    },
+    "evidence_record": {
+      "oneOf": [
+        {
+          "title": "Bundle-level typed-unavailable annotation",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "result_kind",
+            "typed_reason",
+            "scope"
+          ],
+          "properties": {
+            "result_kind": {
+              "type": "string",
+              "const": "typed_unavailable"
+            },
+            "typed_reason": {
+              "$ref": "#/$defs/typed_reason"
+            },
+            "scope": {
+              "type": "string",
+              "const": "bundle"
+            },
+            "underconfigured_bin_count": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "scalar_hit_rate_refusal": {
+              "type": "boolean"
+            }
+          }
+        },
+        {
+          "title": "Informational note",
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "result_kind",
+            "note_kind"
+          ],
+          "properties": {
+            "result_kind": {
+              "type": "string",
+              "const": "info"
+            },
+            "note_kind": {
+              "type": "string",
+              "enum": [
+                "cache_model_capacity_static_card_disagreement",
+                "cache_model_geometry_static_card_disagreement"
+              ]
+            },
+            "cuda_value": {
+              "type": [
+                "integer",
+                "number",
+                "string",
+                "null"
+              ]
+            },
+            "static_card_value": {
+              "type": [
+                "integer",
+                "number",
+                "string",
+                "null"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    "typed_reason": {
+      "type": "string",
+      "enum": [
+        "sector_reuse_cold",
+        "sector_reuse_infinite",
+        "line_reuse_cold",
+        "line_reuse_infinite",
+        "allocation_reuse_cold",
+        "allocation_reuse_infinite",
+        "region_reuse_cold",
+        "region_reuse_infinite",
+        "reuse_distance_unobservable",
+        "cache_model_capacity_missing",
+        "cache_model_capacity_inconsistent",
+        "cache_model_capacity_static_card_disagreement",
+        "cache_model_geometry_missing",
+        "cache_model_geometry_inconsistent",
+        "cache_model_geometry_static_card_disagreement",
+        "cache_model_underconfigured",
+        "hrd_compute_budget_exceeded"
+      ],
+      "description": "Member of the hrd_profile typed-reason taxonomy family. Three reasons (cache_model_capacity_missing, cache_model_capacity_inconsistent, cache_model_underconfigured) are pinned in the original-plan exclusion-taxonomy enumeration; the other 14 are round-added per the C-AC-C lockstep discipline. R54 added `hrd_compute_budget_exceeded` as the typed-unavailable arm fired when the HRD producer's `HRD_MAX_SECTOR_STREAM_RECORDS` budget is exceeded \u2014 defense-in-depth above the R53 Fenwick-tree complexity fix."
+    }
+  }
+}

@@ -1,0 +1,4 @@
+# Compiled host-side test binaries (built from test_*.cc via this
+# directory's Makefile). Keep the .cc sources and Makefile tracked;
+# ignore the ELF outputs so they do not pollute the tree.
+test_opcode_map
