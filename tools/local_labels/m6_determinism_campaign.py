@@ -440,6 +440,30 @@ def _read_regular_cached(
     )
 
 
+def _verify_existing_source_snapshot(
+    path: Path,
+    expected_payload: bytes,
+    *,
+    cache: InputSnapshotCache,
+) -> None:
+    """Pin and verify a previously published source witness.
+
+    The witness itself is derived from the invocation's source cache, so the
+    retained output is tracked in a separate cache to avoid self-reference.
+    Reusing that cache across DONE inventory and final construction detects an
+    inode or generation change even when replacement bytes are identical.
+    """
+    retained = _read_regular_cached(
+        path,
+        role="published source snapshot",
+        cache=cache,
+        expected_sha256=sha256_bytes(expected_payload),
+        expected_size=len(expected_payload),
+    )
+    if retained != expected_payload:
+        _fail("M6_SOURCE_SNAPSHOT_MISMATCH", "published witness differs")
+
+
 def _validate_json_domain(
     value: Any,
     *,
@@ -6021,6 +6045,7 @@ def _done_inventory(
     analysis_payload: bytes | None = None,
     repo_root: Path = REPO_ROOT,
     input_cache: InputSnapshotCache | None = None,
+    source_snapshot_cache: InputSnapshotCache | None = None,
     recovery_path: Path | None = None,
     m4_receipt_path: Path | None = None,
     source_snapshot_path: Path | None = None,
@@ -6038,6 +6063,7 @@ def _done_inventory(
     mistaken for retained evidence and closure could never be exact.
     """
     cache = input_cache or InputSnapshotCache()
+    source_cache = source_snapshot_cache or InputSnapshotCache()
     if evidence_root is None:
         _fail(
             "M6_EVIDENCE_ROOT_REQUIRED",
@@ -6405,12 +6431,11 @@ def _done_inventory(
         )
     snapshot_payload = cache.witness_payload()
     if source_snapshot_path is not None and os.path.lexists(source_snapshot_path):
-        retained_snapshot = _read_regular(
+        _verify_existing_source_snapshot(
             source_snapshot_path,
-            role="published source snapshot",
+            snapshot_payload,
+            cache=source_cache,
         )
-        if retained_snapshot != snapshot_payload:
-            _fail("M6_SOURCE_SNAPSHOT_MISMATCH", "published witness differs")
     add(
         "source_snapshot_identity",
         "source_snapshot/identity.json",
@@ -6440,6 +6465,7 @@ def build_done(
     generated_at_utc: str | None = None,
     repo_root: Path = REPO_ROOT,
     _input_cache: InputSnapshotCache | None = None,
+    _source_snapshot_cache: InputSnapshotCache | None = None,
     m4_receipt_path: Path | None = None,
     source_snapshot_path: Path | None = None,
     recovery_path: Path | None = None,
@@ -6592,6 +6618,7 @@ def build_done(
     if not analysis["analysis_policy"]["reference_oor_zero_confirmed"]:
         _fail("M6_DONE_REFERENCE_OOR", "host-locked reference has OOR observations")
     input_cache = _input_cache or InputSnapshotCache()
+    source_snapshot_cache = _source_snapshot_cache or InputSnapshotCache()
     if recovery_path is not None:
         recovery_payload = _read_regular_cached(
             recovery_path,
@@ -6711,6 +6738,7 @@ def build_done(
         analysis_payload=analysis_payload,
         repo_root=repo_root,
         input_cache=input_cache,
+        source_snapshot_cache=source_snapshot_cache,
         m4_receipt_path=m4_receipt_path,
         source_snapshot_path=source_snapshot_path,
         recovery_path=recovery_path,
@@ -6727,12 +6755,11 @@ def build_done(
         repo_root=repo_root,
     )
     if source_snapshot_path is not None and os.path.lexists(source_snapshot_path):
-        retained_snapshot = _read_regular(
+        _verify_existing_source_snapshot(
             source_snapshot_path,
-            role="published source snapshot",
+            snapshot_payload,
+            cache=source_snapshot_cache,
         )
-        if retained_snapshot != snapshot_payload:
-            _fail("M6_SOURCE_SNAPSHOT_MISMATCH", "published witness differs")
     inventory_entries = inventory.get("entries")
     if not isinstance(inventory_entries, list):
         _fail("M6_FINAL_INVENTORY_INCOMPLETE", "inventory entries are absent")

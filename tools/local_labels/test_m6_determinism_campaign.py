@@ -460,6 +460,31 @@ def test_anchored_input_snapshot_rejects_ancestor_symlink_and_same_size_mutation
     assert mutation_error.value.code == "M6_INPUT_SNAPSHOT"
 
 
+def test_done_source_snapshot_replacement_between_checks_is_rejected(
+    tmp_path: Path,
+) -> None:
+    source_snapshot = tmp_path / "source_snapshot.json"
+    expected = b'{"witness":true}\n'
+    source_snapshot.write_bytes(expected)
+    cache = campaign.InputSnapshotCache()
+
+    campaign._verify_existing_source_snapshot(
+        source_snapshot,
+        expected,
+        cache=cache,
+    )
+    source_snapshot.unlink()
+    source_snapshot.write_bytes(expected)
+
+    with pytest.raises(campaign.M6Error) as error:
+        campaign._verify_existing_source_snapshot(
+            source_snapshot,
+            expected,
+            cache=cache,
+        )
+    assert error.value.code == "M6_INPUT_SNAPSHOT_MIXED"
+
+
 def test_single_file_publication_handles_zero_write_and_preserves_replacement(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
