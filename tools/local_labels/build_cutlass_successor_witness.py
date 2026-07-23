@@ -25,10 +25,13 @@ from typing import Any
 
 import jsonschema
 
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
 from tools.local_labels import verify_cutlass_successor_artifact as artifact_guard
 
 
-REPO_ROOT = Path(__file__).resolve().parents[2]
 WORKLOAD_REL = Path("workloads/simbench_bw/l1/vendor_gemm_cutlass")
 WORKLOAD_DIR = REPO_ROOT / WORKLOAD_REL
 BINARY_REL = WORKLOAD_REL / "vendor_gemm_cutlass_run"
@@ -41,6 +44,8 @@ BASE_AUTHORITY_REL = Path("data/local_labels/campaign/capture_roster_authority_s
 SCHEMA_REL = Path(
     "workloads/simbench_bw/schemas/cutlass_successor_build_witness.schema.json"
 )
+BUILDER_REL = Path("tools/local_labels/build_cutlass_successor_witness.py")
+GUARD_REL = Path("tools/local_labels/verify_cutlass_successor_artifact.py")
 DEFAULT_EVIDENCE_REL = Path("data/annex/cutlass_successor_sm86_20260723")
 DEFAULT_OUT_REL = DEFAULT_EVIDENCE_REL / "vendor_gemm_cutlass.build_witness.json"
 SASS_NAME = "vendor_gemm_cutlass.sass"
@@ -289,13 +294,18 @@ def source_contract(source_commit: str) -> dict[str, Any]:
         WORKLOAD_DIR / "main.cu",
     ]
     guarded = artifact_guard.verify_source_inputs(paths, repo_root=REPO_ROOT)
-    records = guarded["files"]
+    records = dict(guarded["files"])
+    for contract_rel in (BUILDER_REL, GUARD_REL, SCHEMA_REL):
+        contract_path = REPO_ROOT / contract_rel
+        _regular(contract_path, label="successor contract input")
+        records[contract_rel.as_posix()] = sha256_file(contract_path)
+    records = dict(sorted(records.items()))
     for path, expected in records.items():
         if sha256_bytes(git_blob(source_commit, path)) != expected:
             raise WitnessError(f"source input differs from producer commit: {path}")
     return {
         "files": records,
-        "input_set_sha256": guarded["input_set_sha256"],
+        "input_set_sha256": canonical_sha256(records),
         "policy": "source_and_makefile_no_cublas_references",
     }
 
@@ -304,12 +314,13 @@ def build_command() -> list[str]:
     return [
         "make", "-B", "-C", WORKLOAD_REL.as_posix(), "run-bin",
         f"NVCC={NVCC}", f"NVCC_CCBIN={HOST_CXX}",
-        f"CUOBJDUMP={CUOBJDUMP}", f"CUTLASS_DIR={CUTLASS_REL}",
+        f"CUOBJDUMP={CUOBJDUMP}",
+        f"CUTLASS_DIR={(REPO_ROOT / CUTLASS_REL).resolve()}",
     ]
 
 
 def cubin_inventory(binary: Path) -> dict[str, Any]:
-    command = [str(CUOBJDUMP), "--list-elf", str(binary)]
+    command = [str(CUOBJDUMP), "--list-elf", relative(binary)]
     rc, stdout, stderr = run_command(command, timeout=120)
     if rc != 0 or stderr:
         raise WitnessError(f"cuobjdump --list-elf failed: {stderr[-300:]!r}")
@@ -335,7 +346,7 @@ def cubin_inventory(binary: Path) -> dict[str, Any]:
 
 
 def record_sass(binary: Path, evidence_dir: Path) -> dict[str, Any]:
-    command = [str(CUOBJDUMP), "--dump-sass", str(binary)]
+    command = [str(CUOBJDUMP), "--dump-sass", relative(binary)]
     rc, stdout, stderr = run_command(command, timeout=600)
     if rc != 0 or stderr:
         raise WitnessError(f"cuobjdump --dump-sass failed: {stderr[-300:]!r}")
@@ -353,12 +364,13 @@ def record_control_bits(binary: Path, evidence_dir: Path) -> dict[str, Any]:
     path = evidence_dir / CONTROL_NAME
     with tempfile.TemporaryDirectory(prefix="cutlass-control-") as temporary:
         temporary_output = Path(temporary) / CONTROL_NAME
-        command = [
+        execution_command = [
             str(PYTHON), "tools/sass_control/emit_control_bits_sidecar.py",
-            "--binary", str(binary), "--arch", ARCH, "--out", str(temporary_output),
+            "--binary", relative(binary), "--arch", ARCH,
+            "--out", str(temporary_output),
             "--toolkit-bindir", str(NVCC.parent),
         ]
-        rc, stdout, stderr = run_command(command, timeout=600)
+        rc, stdout, stderr = run_command(execution_command, timeout=600)
         if rc != 0:
             raise WitnessError(
                 f"control-bit extraction failed rc={rc}: "
@@ -381,6 +393,14 @@ def record_control_bits(binary: Path, evidence_dir: Path) -> dict[str, Any]:
     if summary.get("total_unknown_encoding") != 0 or summary.get("total_decoded") != len(records):
         raise WitnessError("control sidecar summary does not match records")
     _write_or_match(path, payload)
+    command = [
+        str(PYTHON), "tools/sass_control/emit_control_bits_sidecar.py",
+        "--binary", relative(binary), "--arch", ARCH,
+        "--out", relative(path), "--toolkit-bindir", str(NVCC.parent),
+    ]
+    normalized_stdout = stdout.replace(
+        str(temporary_output).encode(), relative(path).encode(),
+    )
     return {
         "path": relative(path),
         "sha256": sha256_bytes(payload),
@@ -390,13 +410,13 @@ def record_control_bits(binary: Path, evidence_dir: Path) -> dict[str, Any]:
         "toolkit_version": document["toolkit_version"],
         "function_count": len(functions),
         "command": command,
-        "command_stdout_sha256": sha256_bytes(stdout),
+        "command_stdout_sha256": sha256_bytes(normalized_stdout),
         "command_stderr_sha256": sha256_bytes(stderr),
     }
 
 
 def smoke(binary: Path, shape: dict[str, Any], args: list[str]) -> dict[str, Any]:
-    command = [str(binary), *args]
+    command = [binary.name, *args]
     rc, stdout, stderr = run_command(command, cwd=WORKLOAD_DIR, timeout=180)
     if rc != 0 or stderr:
         raise WitnessError(f"successor smoke failed: rc={rc}, stderr={stderr[-300:]!r}")
@@ -455,11 +475,17 @@ def build_witness(
 
     build = build_command()
     if execute_build:
-        rc, stdout, stderr = run_command(build, timeout=600)
-        transcript = stdout + stderr
+        try:
+            result = subprocess.run(
+                build, cwd=str(REPO_ROOT), stdout=subprocess.PIPE,
+                stderr=subprocess.STDOUT, timeout=600, check=False,
+            )
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise WitnessError(f"successor build failed to execute: {exc}") from exc
+        transcript = result.stdout
         _write_or_match(evidence_dir / BUILD_LOG_NAME, transcript)
-        if rc != 0:
-            raise WitnessError(f"successor build failed rc={rc}")
+        if result.returncode != 0:
+            raise WitnessError(f"successor build failed rc={result.returncode}")
     else:
         raise WitnessError("build witness requires --build")
 
