@@ -416,7 +416,7 @@ def record_control_bits(binary: Path, evidence_dir: Path) -> dict[str, Any]:
 
 
 def smoke(binary: Path, shape: dict[str, Any], args: list[str]) -> dict[str, Any]:
-    command = [binary.name, *args]
+    command = [f"./{binary.name}", *args]
     rc, stdout, stderr = run_command(command, cwd=WORKLOAD_DIR, timeout=180)
     if rc != 0 or stderr:
         raise WitnessError(f"successor smoke failed: rc={rc}, stderr={stderr[-300:]!r}")
