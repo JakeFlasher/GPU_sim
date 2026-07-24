@@ -19,7 +19,7 @@
     "capture_admitted"
   ],
   "properties": {
-    "schema_version": {"type": "integer", "const": 1},
+    "schema_version": {"type": "integer", "const": 2},
     "arch": {"type": "string"},
     "sku": {"type": ["string", "null"]},
     "captured_at_utc": {"type": "string"},
@@ -42,7 +42,7 @@
       ],
       "properties": {
         "worktree": {"$ref": "#/$defs/probe"},
-        "ncu": {"$ref": "#/$defs/probe"},
+        "ncu": {"$ref": "#/$defs/ncuProbe"},
         "driver": {"$ref": "#/$defs/probe"},
         "nvcc": {"$ref": "#/$defs/probe"},
         "nvbit": {"$ref": "#/$defs/probe"},
@@ -67,6 +67,68 @@
           "enum": ["ok", "mismatch", "unavailable", "failed"]
         }
       }
+    },
+    "ncuProbe": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status", "expected", "observed", "resolved_path",
+        "executable_sha256", "version_line"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["ok", "mismatch", "unavailable", "failed"]
+        },
+        "expected": {"type": ["string", "null"]},
+        "observed": {"type": ["string", "null"]},
+        "resolved_path": {"type": ["string", "null"]},
+        "executable_sha256": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "version_line": {"type": ["string", "null"]},
+        "detail": {"type": "string", "minLength": 1}
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"status": {"const": "ok"}},
+            "required": ["status"]
+          },
+          "then": {
+            "properties": {
+              "expected": {"const": "2026.1.0"},
+              "observed": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^Version\\s+2026\\.1\\.0(?:$|[.\\s(+-])"
+              },
+              "resolved_path": {
+                "type": "string",
+                "pattern": "^/"
+              },
+              "executable_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "version_line": {
+                "type": "string",
+                "minLength": 1,
+                "pattern": "^Version\\s+2026\\.1\\.0(?:$|[.\\s(+-])"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "observed": {"type": "null"},
+              "resolved_path": {"type": "null"},
+              "executable_sha256": {"type": "null"},
+              "version_line": {"type": "null"}
+            }
+          }
+        }
+      ]
     },
     "injection_probe": {
       "description": "The injection_runtime probe. When admitted (status=ok) it MUST carry the evidence that the smoke actually ran and yielded a nonzero contract-valid trace: admitted instruction records >= 1, a passing contract validator, and the dynamic_trace.pb + stats.csv identity hashes. ldd resolution alone can never satisfy this.",

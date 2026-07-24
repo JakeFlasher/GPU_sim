@@ -27,6 +27,109 @@ def _replace_file_with_same_bytes(root: Path, relative_path: str, payload: bytes
         parent.chmod(0o555)
 
 
+def _executable(path: Path, payload: bytes = b"fixture executable") -> Path:
+    path.write_bytes(payload)
+    path.chmod(0o755)
+    return path
+
+
+def test_retained_executable_binds_descriptor_path_snapshot_and_hash(
+    tmp_path: Path,
+) -> None:
+    executable = _executable(tmp_path / "ncu")
+    with immutable.open_retained_executable(executable) as retained:
+        assert retained.path == executable.absolute()
+        assert retained.sha256 == immutable.sha256_bytes(b"fixture executable")
+        assert len(retained.snapshot) == 7
+        assert retained.descriptor >= 0
+        assert os.read(retained.descriptor, 7) == b"fixture"
+        retained.verify_unchanged()
+        assert os.read(retained.descriptor, 7) == b"fixture"
+    with pytest.raises(
+        immutable.ImmutableArtifactError, match="retained executable is closed",
+    ):
+        _ = retained.descriptor
+
+
+@pytest.mark.parametrize("kind", ["leaf", "ancestor"])
+def test_retained_executable_rejects_symlink_components(
+    tmp_path: Path, kind: str,
+) -> None:
+    real_dir = tmp_path / "real"
+    real_dir.mkdir()
+    executable = _executable(real_dir / "ncu")
+    if kind == "leaf":
+        candidate = tmp_path / "ncu"
+        candidate.symlink_to(executable)
+    else:
+        linked_dir = tmp_path / "linked"
+        linked_dir.symlink_to(real_dir, target_is_directory=True)
+        candidate = linked_dir / "ncu"
+    with pytest.raises(immutable.ImmutableArtifactError):
+        immutable.open_retained_executable(candidate)
+
+
+@pytest.mark.parametrize("kind", ["non_executable", "directory", "hardlink"])
+def test_retained_executable_rejects_invalid_leaf(
+    tmp_path: Path, kind: str,
+) -> None:
+    if kind == "non_executable":
+        candidate = tmp_path / "ncu"
+        candidate.write_bytes(b"fixture")
+        candidate.chmod(0o644)
+    elif kind == "directory":
+        candidate = tmp_path / "ncu"
+        candidate.mkdir()
+    else:
+        candidate = _executable(tmp_path / "ncu")
+        os.link(candidate, tmp_path / "ncu-hardlink")
+    with pytest.raises(immutable.ImmutableArtifactError):
+        immutable.open_retained_executable(candidate)
+
+
+@pytest.mark.parametrize(
+    "mutation", ["bytes", "replacement", "ancestor", "mode", "hardlink"],
+)
+def test_retained_executable_rejects_post_open_identity_drift(
+    tmp_path: Path, mutation: str,
+) -> None:
+    directory = tmp_path / "bin"
+    directory.mkdir()
+    executable = _executable(directory / "ncu")
+    with pytest.raises(immutable.ImmutableArtifactError):
+        with immutable.open_retained_executable(executable):
+            if mutation == "bytes":
+                executable.write_bytes(b"mutated executable")
+                executable.chmod(0o755)
+            elif mutation == "replacement":
+                executable.unlink()
+                _executable(executable)
+            elif mutation == "ancestor":
+                moved = tmp_path / "moved"
+                directory.rename(moved)
+                directory.mkdir()
+                _executable(directory / "ncu")
+            elif mutation == "mode":
+                executable.chmod(0o644)
+            else:
+                os.link(executable, tmp_path / "ncu-hardlink")
+
+
+def test_retained_executable_preserves_body_error_when_revalidation_fails(
+    tmp_path: Path,
+) -> None:
+    executable = _executable(tmp_path / "ncu")
+    with pytest.raises(RuntimeError, match="primary body failure") as caught:
+        with immutable.open_retained_executable(executable):
+            executable.write_bytes(b"mutated executable")
+            executable.chmod(0o755)
+            raise RuntimeError("primary body failure")
+    assert any(
+        "retained executable revalidation failed" in note
+        for note in getattr(caught.value, "__notes__", [])
+    )
+
+
 def test_directory_publication_rechecks_after_authorization_callback(
     tmp_path: Path,
 ) -> None:

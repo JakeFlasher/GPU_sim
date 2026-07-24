@@ -587,6 +587,14 @@ def test_select_chunk_refuses_excluded_or_unready():
 
 def _preflight(root: Path) -> dict:
     checks = {name: {"status": "ok"} for name in cc.preflight._BLOCKING_CHECKS}
+    version = "Version 2026.1.0.0 (public-release)"
+    checks["ncu"].update({
+        "expected": "2026.1.0",
+        "observed": version,
+        "resolved_path": "/opt/nvidia/nsight-compute/2026.1.0/ncu",
+        "executable_sha256": "5" * 64,
+        "version_line": version,
+    })
     checks["trace_budget"].update({
         "output_root": str(root), "budget_sha256": "9" * 64,
     })
@@ -640,7 +648,7 @@ def _preflight(root: Path) -> dict:
     })
     generated_at = datetime.now(timezone.utc).isoformat()
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "captured_at_utc": generated_at,
         "generated_at_utc": generated_at,
         "arch": "sm_86",
@@ -666,6 +674,7 @@ def test_preflight_refuses_stale_timestamp(tmp_path):
         cc.validate_preflight_manifest(
             manifest, expected_head=HEAD, expected_pins_sha256=SHA,
             expected_output_root=tmp_path,
+            expected_ncu_version_prefix="2026.1.0",
         )
 
 
@@ -678,7 +687,9 @@ def test_preflight_freshness_inclusive_boundary_admits(tmp_path, age_seconds):
     manifest["generated_at_utc"] = generated
     cc.validate_preflight_manifest(
         manifest, expected_head=HEAD, expected_pins_sha256=SHA,
-        expected_output_root=tmp_path, admitted_at_utc=admitted,
+        expected_output_root=tmp_path,
+        expected_ncu_version_prefix="2026.1.0",
+        admitted_at_utc=admitted,
     )
 
 
@@ -691,7 +702,9 @@ def test_preflight_900_001_seconds_old_refuses(tmp_path):
     with pytest.raises(cc.ChunkRefusal, match="PREFLIGHT_EXPIRED"):
         cc.validate_preflight_manifest(
             manifest, expected_head=HEAD, expected_pins_sha256=SHA,
-            expected_output_root=tmp_path, admitted_at_utc=admitted,
+            expected_output_root=tmp_path,
+            expected_ncu_version_prefix="2026.1.0",
+            admitted_at_utc=admitted,
         )
 
 
@@ -704,7 +717,9 @@ def test_preflight_more_than_two_seconds_in_future_refuses_clock_skew(tmp_path):
     with pytest.raises(cc.ChunkRefusal, match="PREFLIGHT_CLOCK_SKEW"):
         cc.validate_preflight_manifest(
             manifest, expected_head=HEAD, expected_pins_sha256=SHA,
-            expected_output_root=tmp_path, admitted_at_utc=admitted,
+            expected_output_root=tmp_path,
+            expected_ncu_version_prefix="2026.1.0",
+            admitted_at_utc=admitted,
         )
 
 
@@ -712,6 +727,7 @@ def test_preflight_requires_exact_head_pins_and_output_root(tmp_path):
     cc.validate_preflight_manifest(
         _preflight(tmp_path), expected_head=HEAD, expected_pins_sha256=SHA,
         expected_output_root=tmp_path,
+        expected_ncu_version_prefix="2026.1.0",
     )
     bad = _preflight(tmp_path)
     bad["git_head"] = "c" * 40
@@ -719,6 +735,57 @@ def test_preflight_requires_exact_head_pins_and_output_root(tmp_path):
         cc.validate_preflight_manifest(
             bad, expected_head=HEAD, expected_pins_sha256=SHA,
             expected_output_root=tmp_path,
+            expected_ncu_version_prefix="2026.1.0",
+        )
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "legacy_schema", "missing_hash", "expected", "observed", "relative_path",
+        "hash", "version", "unexpected",
+    ],
+)
+def test_preflight_refuses_invalid_ncu_executable_authority(tmp_path, mutation):
+    manifest = _preflight(tmp_path)
+    ncu = manifest["checks"]["ncu"]
+    if mutation == "legacy_schema":
+        manifest["schema_version"] = 1
+    elif mutation == "missing_hash":
+        ncu.pop("executable_sha256")
+    elif mutation == "expected":
+        ncu["expected"] = "2026.2.0"
+    elif mutation == "observed":
+        ncu["observed"] = "Version 2026.1.0.1 (different)"
+    elif mutation == "relative_path":
+        ncu["resolved_path"] = "relative/ncu"
+    elif mutation == "hash":
+        ncu["executable_sha256"] = "not-a-hash"
+    elif mutation == "version":
+        ncu["observed"] = "Version 2026.10.0"
+        ncu["version_line"] = "Version 2026.10.0"
+    else:
+        ncu["self_attested"] = True
+    with pytest.raises(cc.ChunkRefusal, match="preflight_invalid"):
+        cc.validate_preflight_manifest(
+            manifest,
+            expected_head=HEAD,
+            expected_pins_sha256=SHA,
+            expected_output_root=tmp_path,
+            expected_ncu_version_prefix="2026.1.0",
+        )
+
+
+def test_preflight_refuses_invalid_independent_ncu_version_pin(tmp_path):
+    with pytest.raises(
+        cc.ChunkRefusal, match="expected NCU version authority is invalid",
+    ):
+        cc.validate_preflight_manifest(
+            _preflight(tmp_path),
+            expected_head=HEAD,
+            expected_pins_sha256=SHA,
+            expected_output_root=tmp_path,
+            expected_ncu_version_prefix="2026.1.beta",
         )
 
 
@@ -734,6 +801,7 @@ def test_preflight_refuses_self_asserted_blocked_state(tmp_path, field, value):
         cc.validate_preflight_manifest(
             manifest, expected_head=HEAD, expected_pins_sha256=SHA,
             expected_output_root=tmp_path,
+            expected_ncu_version_prefix="2026.1.0",
         )
 
 
@@ -744,6 +812,7 @@ def test_preflight_refuses_one_non_ok_probe(tmp_path):
         cc.validate_preflight_manifest(
             manifest, expected_head=HEAD, expected_pins_sha256=SHA,
             expected_output_root=tmp_path,
+            expected_ncu_version_prefix="2026.1.0",
         )
 
 
@@ -758,6 +827,7 @@ def test_preflight_rederives_and_rejects_contradictory_coverage(tmp_path):
         cc.validate_preflight_manifest(
             manifest, expected_head=HEAD, expected_pins_sha256=SHA,
             expected_output_root=tmp_path,
+            expected_ncu_version_prefix="2026.1.0",
         )
 
 

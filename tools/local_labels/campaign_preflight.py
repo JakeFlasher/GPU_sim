@@ -64,6 +64,7 @@ DEFAULT_MATRIX = (
 from tools.local_labels import sol_capture_environment as sol_environment  # noqa: E402
 from tools.local_labels import build_sol_representative_execution_matrix as representative_execution  # noqa: E402
 from tools.local_labels import capture_toolchain_contract as toolchain_contract  # noqa: E402
+from tools.local_labels import immutable_artifact as immutable  # noqa: E402
 from tools.local_labels.protected_paths import (  # noqa: E402
     ProtectedPathError,
     assert_external_output,
@@ -1040,29 +1041,129 @@ def probe_worktree(repo_root: Path, ignore_relpaths: list[str]) -> dict:
     }
 
 
-def probe_ncu(pins: dict) -> dict:
+def _run_retained_ncu_version(descriptor: int) -> tuple[int, str, str]:
+    environment = dict(os.environ)
+    environment.update({"LANG": "C", "LC_ALL": "C", "LANGUAGE": "C"})
+    command = [f"/proc/self/fd/{descriptor}", "--version"]
+    completed = subprocess.run(
+        command,
+        capture_output=True,
+        text=True,
+        check=False,
+        pass_fds=(descriptor,),
+        env=environment,
+        timeout=30,
+    )
+    return completed.returncode, completed.stdout, completed.stderr
+
+
+def _ncu_probe_result(
+    *, status: str, expected: str | None, detail: str | None = None,
+    resolved_path: str | None = None, executable_sha256: str | None = None,
+    version_line: str | None = None,
+) -> dict:
+    result = {
+        "status": status,
+        "expected": expected,
+        "observed": version_line,
+        "resolved_path": resolved_path,
+        "executable_sha256": executable_sha256,
+        "version_line": version_line,
+    }
+    if detail:
+        result["detail"] = detail
+    return result
+
+
+def probe_ncu(
+    pins: dict, *, resolve_command=None, open_executable=None,
+    run_version=None,
+) -> dict:
+    raw_expected = pins.get("toolchain", {}).get("ncu_version_prefix")
+    expected_for_failure = raw_expected if isinstance(raw_expected, str) else None
     try:
-        expected = toolchain_contract.normalized_ncu_version_prefix(
-            pins["toolchain"]["ncu_version_prefix"]
-        )
+        expected = toolchain_contract.normalized_ncu_version_prefix(raw_expected)
     except toolchain_contract.CaptureToolchainContractError as exc:
-        return {
-            "status": STATUS_FAILED,
-            "expected": pins.get("toolchain", {}).get("ncu_version_prefix"),
-            "detail": str(exc),
-        }
-    rc, out, err = _run(["ncu", "--version"])
-    if rc != 0:
-        return {"status": STATUS_UNAVAILABLE, "expected": expected,
-                "detail": f"ncu --version failed: {err.strip()}"}
-    observed_line = None
-    for line in out.splitlines():
-        if re.match(r"^\s*Version\s+", line):
-            observed_line = line.strip()
-            break
-    ok = toolchain_contract.ncu_version_matches(observed_line, expected)
-    return {"status": STATUS_OK if ok else STATUS_MISMATCH,
-            "observed": observed_line, "expected": expected}
+        return _ncu_probe_result(
+            status=STATUS_FAILED,
+            expected=expected_for_failure,
+            detail=str(exc),
+        )
+
+    resolver = resolve_command or shutil.which
+    opener = open_executable or immutable.open_retained_executable
+    runner = run_version or _run_retained_ncu_version
+    try:
+        resolved = resolver("ncu")
+    except OSError as exc:
+        return _ncu_probe_result(
+            status=STATUS_UNAVAILABLE,
+            expected=expected,
+            detail=f"cannot resolve ncu through PATH: {exc}",
+        )
+    if not isinstance(resolved, str) or not resolved:
+        return _ncu_probe_result(
+            status=STATUS_UNAVAILABLE,
+            expected=expected,
+            detail="ncu is unresolved on PATH",
+        )
+    if not Path(resolved).is_absolute() or os.path.normpath(resolved) != resolved:
+        return _ncu_probe_result(
+            status=STATUS_FAILED,
+            expected=expected,
+            detail=f"resolved ncu path is not canonical absolute: {resolved!r}",
+        )
+
+    try:
+        with opener(Path(resolved)) as retained:
+            rc, out, err = runner(retained.descriptor)
+            if (
+                type(rc) is not int
+                or not isinstance(out, str)
+                or not isinstance(err, str)
+            ):
+                raise ValueError("NCU version runner returned an invalid result")
+            if rc != 0:
+                return _ncu_probe_result(
+                    status=STATUS_UNAVAILABLE,
+                    expected=expected,
+                    detail=f"retained ncu --version failed: {err.strip()}",
+                )
+            observed_line = next(
+                (
+                    line.strip() for line in out.splitlines()
+                    if re.match(r"^\s*Version\s+", line)
+                ),
+                None,
+            )
+            if not toolchain_contract.ncu_version_matches(
+                observed_line, expected,
+            ):
+                return _ncu_probe_result(
+                    status=STATUS_MISMATCH,
+                    expected=expected,
+                    detail=f"NCU version line mismatch: {observed_line!r}",
+                )
+            resolved_path = str(retained.path)
+            executable_sha256 = retained.sha256
+        return _ncu_probe_result(
+            status=STATUS_OK,
+            expected=expected,
+            resolved_path=resolved_path,
+            executable_sha256=executable_sha256,
+            version_line=observed_line,
+        )
+    except (
+        OSError,
+        ValueError,
+        subprocess.TimeoutExpired,
+        immutable.ImmutableArtifactError,
+    ) as exc:
+        return _ncu_probe_result(
+            status=STATUS_FAILED,
+            expected=expected,
+            detail=f"NCU executable identity is invalid: {exc}",
+        )
 
 
 def probe_driver(pins: dict) -> dict:
@@ -1944,7 +2045,7 @@ def build_manifest(
                 if checks[name].get("status") != STATUS_OK]
     generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "arch": pins.get("arch"),
         "sku": pins.get("sku"),
         "captured_at_utc": generated_at,

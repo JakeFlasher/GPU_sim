@@ -592,6 +592,10 @@ def _is_sha40(value: Any) -> bool:
     return isinstance(value, str) and len(value) == 40 and set(value) <= _SHA40
 
 
+def _is_sha256(value: Any) -> bool:
+    return type(value) is str and len(value) == 64 and set(value) <= _SHA40
+
+
 def _parse_utc_timestamp(value: Any, *, field: str) -> datetime:
     try:
         parsed = datetime.fromisoformat(
@@ -612,7 +616,8 @@ def _parse_utc_timestamp(value: Any, *, field: str) -> datetime:
 
 def validate_preflight_manifest(
     manifest: dict, *, expected_head: str, expected_pins_sha256: str,
-    expected_output_root: Path, expected_budget_sha256: str | None = None,
+    expected_output_root: Path, expected_ncu_version_prefix: str,
+    expected_budget_sha256: str | None = None,
     expected_arch: str = "sm_86", expected_sku: str = "rtx_3090_ti",
     expected_protocol: str = "v2.1",
     expected_matrix_sha256: str | None = None,
@@ -622,6 +627,15 @@ def validate_preflight_manifest(
 ) -> None:
     problems: list[str] = []
     try:
+        normalized_ncu_version = (
+            toolchain_contract.normalized_ncu_version_prefix(
+                expected_ncu_version_prefix
+            )
+        )
+    except toolchain_contract.CaptureToolchainContractError as exc:
+        normalized_ncu_version = None
+        problems.append(f"expected NCU version authority is invalid: {exc}")
+    try:
         import jsonschema
         schema = json.loads(
             (REPO_ROOT / "workloads" / "simbench_bw" / "schemas"
@@ -630,6 +644,8 @@ def validate_preflight_manifest(
         jsonschema.validate(manifest, schema)
     except Exception as exc:
         problems.append(f"schema validation failed: {exc}")
+    if manifest.get("schema_version") != 2:
+        problems.append("schema_version is not 2")
     if manifest.get("capture_admitted") is not True:
         problems.append("capture_admitted is not true")
     if manifest.get("working_tree_clean") is not True:
@@ -668,6 +684,36 @@ def validate_preflight_manifest(
             probe = checks.get(name)
             if not isinstance(probe, dict) or probe.get("status") != preflight.STATUS_OK:
                 problems.append(f"checks.{name}.status is not ok")
+        ncu = checks.get("ncu")
+        if not isinstance(ncu, dict):
+            problems.append("checks.ncu is not an object")
+        else:
+            version_line = ncu.get("version_line")
+            resolved_path = ncu.get("resolved_path")
+            if (
+                normalized_ncu_version is not None
+                and ncu.get("expected") != normalized_ncu_version
+            ):
+                problems.append("checks.ncu.expected does not match the pins")
+            if ncu.get("observed") != version_line:
+                problems.append("checks.ncu.observed and version_line differ")
+            if (
+                type(resolved_path) is not str
+                or not Path(resolved_path).is_absolute()
+                or os.path.normpath(resolved_path) != resolved_path
+            ):
+                problems.append("checks.ncu.resolved_path is not canonical absolute")
+            if not _is_sha256(ncu.get("executable_sha256")):
+                problems.append("checks.ncu.executable_sha256 is invalid")
+            if (
+                type(version_line) is not str
+                or version_line != version_line.strip()
+                or normalized_ncu_version is None
+                or not toolchain_contract.ncu_version_matches(
+                    version_line, normalized_ncu_version,
+                )
+            ):
+                problems.append("checks.ncu.version_line does not match the pins")
         budget_root = (checks.get("trace_budget") or {}).get("output_root")
         budget_sha = (checks.get("trace_budget") or {}).get("budget_sha256")
         if expected_budget_sha256 is not None and budget_sha != expected_budget_sha256:
@@ -9175,6 +9221,9 @@ def _validate_referenced_preflight(
         manifest, expected_head=expected_head,
         expected_pins_sha256=sha256_file(pins_path),
         expected_output_root=output_root,
+        expected_ncu_version_prefix=pins.get("toolchain", {}).get(
+            "ncu_version_prefix"
+        ),
         expected_budget_sha256=sha256_file(aggregate_budget_path),
         expected_arch=matrix["arch"], expected_sku=matrix["sku"],
         expected_protocol=pins["measurement_protocol"]["version"],

@@ -87,6 +87,18 @@ def _ok_sol_environment_probe() -> dict:
     }
 
 
+def _ok_ncu_probe() -> dict:
+    version = "Version 2026.1.0.0 (public-release)"
+    return {
+        "status": "ok",
+        "expected": "2026.1.0",
+        "observed": version,
+        "resolved_path": "/opt/nvidia/nsight-compute/2026.1.0/ncu",
+        "executable_sha256": "5" * 64,
+        "version_line": version,
+    }
+
+
 # ---- pure logic (no GPU) --------------------------------------------------- #
 def test_version_matches_modes():
     assert cp.version_matches("2026.1.0.0", "2026.1.0", mode="prefix")
@@ -97,21 +109,19 @@ def test_version_matches_modes():
 
 
 def test_toolchain_probes_use_structured_release_and_component_boundaries(
-    monkeypatch,
+    monkeypatch, tmp_path,
 ):
     commands = []
 
     def run(command, **_kwargs):
         commands.append(command)
-        if command[-1] == "--version" and "nvcc" in command[0]:
-            return 0, "Cuda compilation tools, release 13.2, V13.2.0\n", ""
-        return 0, "Version 2026.1.0.0 (public-release)\n", ""
+        return 0, "Cuda compilation tools, release 13.2, V13.2.0\n", ""
 
     monkeypatch.setattr(cp, "_run", run)
     pins = {
         "toolchain": {
             "nvcc_release": "13.2",
-            "ncu_version_prefix": "2026.1",
+            "ncu_version_prefix": "2026.1.0",
         }
     }
     nvcc = cp.probe_nvcc(
@@ -123,15 +133,136 @@ def test_toolchain_probes_use_structured_release_and_component_boundaries(
         "expected": {"major": 13, "minor": 2},
         "executable": "/usr/local/cuda-13.2/bin/nvcc",
     }
-    assert commands[0] == ["/usr/local/cuda-13.2/bin/nvcc", "--version"]
-    assert cp.probe_ncu(pins)["status"] == cp.STATUS_OK
+    assert commands == [["/usr/local/cuda-13.2/bin/nvcc", "--version"]]
 
-    monkeypatch.setattr(
-        cp, "_run", lambda *_args, **_kwargs: (
-            0, "Version 2026.10.0.0 (public-release)\n", ""
+    executable = tmp_path / "ncu"
+    executable.write_bytes(b"synthetic ncu")
+    executable.chmod(0o755)
+    result = cp.probe_ncu(
+        pins,
+        resolve_command=lambda _name: str(executable),
+        run_version=lambda _descriptor: (
+            0, "Version 2026.1.0.0 (public-release)\n", "",
         ),
     )
-    assert cp.probe_ncu(pins)["status"] == cp.STATUS_MISMATCH
+    assert result == {
+        "status": cp.STATUS_OK,
+        "expected": "2026.1.0",
+        "observed": "Version 2026.1.0.0 (public-release)",
+        "resolved_path": str(executable),
+        "executable_sha256": cp.immutable.sha256_bytes(b"synthetic ncu"),
+        "version_line": "Version 2026.1.0.0 (public-release)",
+    }
+
+    mismatch = cp.probe_ncu(
+        pins,
+        resolve_command=lambda _name: str(executable),
+        run_version=lambda _descriptor: (
+            0, "Version 2026.10.0.0 (public-release)\n", "",
+        ),
+    )
+    assert mismatch["status"] == cp.STATUS_MISMATCH
+    assert mismatch["observed"] is None
+    assert mismatch["resolved_path"] is None
+    assert mismatch["executable_sha256"] is None
+
+
+def test_retained_ncu_version_runner_uses_fd_and_c_locale(monkeypatch):
+    observed = {}
+
+    def run(command, **kwargs):
+        observed["command"] = command
+        observed["kwargs"] = kwargs
+        return subprocess.CompletedProcess(command, 0, "Version 2026.1.0\n", "")
+
+    monkeypatch.setattr(cp.subprocess, "run", run)
+    assert cp._run_retained_ncu_version(17) == (
+        0, "Version 2026.1.0\n", "",
+    )
+    assert observed["command"] == ["/proc/self/fd/17", "--version"]
+    assert observed["kwargs"]["pass_fds"] == (17,)
+    assert observed["kwargs"]["capture_output"] is True
+    assert observed["kwargs"]["text"] is True
+    assert observed["kwargs"]["check"] is False
+    assert observed["kwargs"]["timeout"] == 30
+    assert observed["kwargs"]["env"]["LANG"] == "C"
+    assert observed["kwargs"]["env"]["LC_ALL"] == "C"
+    assert observed["kwargs"]["env"]["LANGUAGE"] == "C"
+
+
+@pytest.mark.parametrize(
+    ("pins", "resolved", "version", "status"),
+    [
+        ({"toolchain": {"ncu_version_prefix": True}}, None, None, "failed"),
+        ({"toolchain": {"ncu_version_prefix": "2026.1.0"}}, None, None,
+         "unavailable"),
+        ({"toolchain": {"ncu_version_prefix": "2026.1.0"}}, "relative/ncu",
+         None, "failed"),
+        ({"toolchain": {"ncu_version_prefix": "2026.1.0"}}, "fixture",
+         "no version banner\n", "mismatch"),
+    ],
+)
+def test_ncu_probe_failures_never_retain_partial_identity(
+    tmp_path, pins, resolved, version, status,
+):
+    executable = tmp_path / "ncu"
+    executable.write_bytes(b"synthetic ncu")
+    executable.chmod(0o755)
+    candidate = str(executable) if resolved == "fixture" else resolved
+    result = cp.probe_ncu(
+        pins,
+        resolve_command=lambda _name: candidate,
+        run_version=lambda _descriptor: (0, version or "", ""),
+    )
+    assert result["status"] == status
+    assert result["observed"] is None
+    assert result["resolved_path"] is None
+    assert result["executable_sha256"] is None
+    assert result["version_line"] is None
+
+
+def test_ncu_probe_rejects_executable_mutation_during_version_observation(
+    tmp_path,
+):
+    executable = tmp_path / "ncu"
+    executable.write_bytes(b"synthetic ncu")
+    executable.chmod(0o755)
+
+    def mutate(_descriptor):
+        executable.write_bytes(b"mutated ncu")
+        executable.chmod(0o755)
+        return 0, "Version 2026.1.0.0 (public-release)\n", ""
+
+    result = cp.probe_ncu(
+        {"toolchain": {"ncu_version_prefix": "2026.1.0"}},
+        resolve_command=lambda _name: str(executable),
+        run_version=mutate,
+    )
+    assert result["status"] == cp.STATUS_FAILED
+    assert result["resolved_path"] is None
+    assert result["executable_sha256"] is None
+    assert "metadata changed" in result["detail"]
+
+
+def test_ncu_probe_converts_version_timeout_to_failed_null_identity(tmp_path):
+    executable = tmp_path / "ncu"
+    executable.write_bytes(b"synthetic ncu")
+    executable.chmod(0o755)
+
+    def timeout(_descriptor):
+        raise subprocess.TimeoutExpired(["retained-ncu", "--version"], 30)
+
+    result = cp.probe_ncu(
+        {"toolchain": {"ncu_version_prefix": "2026.1.0"}},
+        resolve_command=lambda _name: str(executable),
+        run_version=timeout,
+    )
+    assert result["status"] == cp.STATUS_FAILED
+    assert result["observed"] is None
+    assert result["resolved_path"] is None
+    assert result["executable_sha256"] is None
+    assert result["version_line"] is None
+    assert "timed out after 30 seconds" in result["detail"]
 
 
 def test_version_matches_bad_mode():
@@ -1264,7 +1395,7 @@ def test_preflight_dispatches_supplemental_matrix_without_canonical_fallback(
 # ---- schema enforces smoke evidence on an admitted injection probe --------- #
 def _minimal_manifest(injection_probe):
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "arch": "sm_86",
         "captured_at_utc": "2026-07-10T12:00:00+00:00",
         "generated_at_utc": "2026-07-10T12:00:00+00:00",
@@ -1274,7 +1405,7 @@ def _minimal_manifest(injection_probe):
         "capture_matrix_sha256": "3" * 64,
         "checks": {
             "worktree": {"status": "ok"},
-            "ncu": {"status": "ok"},
+            "ncu": _ok_ncu_probe(),
             "driver": {"status": "ok"},
             "nvcc": {"status": "ok"},
             "nvbit": {"status": "ok"},
@@ -1334,6 +1465,37 @@ def test_schema_accepts_ok_injection_with_full_smoke_evidence():
         "dynamic_trace_pb_sha256": "a" * 64, "stats_csv_sha256": "b" * 64,
     })
     jsonschema.validate(good, _SCHEMA)  # must not raise
+
+    legacy = copy.deepcopy(good)
+    legacy["schema_version"] = 1
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(legacy, _SCHEMA)
+
+    ncu_mutations = []
+    missing_hash = copy.deepcopy(good)
+    missing_hash["checks"]["ncu"].pop("executable_sha256")
+    ncu_mutations.append(missing_hash)
+    null_path = copy.deepcopy(good)
+    null_path["checks"]["ncu"]["resolved_path"] = None
+    ncu_mutations.append(null_path)
+    relative_path = copy.deepcopy(good)
+    relative_path["checks"]["ncu"]["resolved_path"] = "relative/ncu"
+    ncu_mutations.append(relative_path)
+    malformed_hash = copy.deepcopy(good)
+    malformed_hash["checks"]["ncu"]["executable_sha256"] = "not-a-hash"
+    ncu_mutations.append(malformed_hash)
+    wrong_version = copy.deepcopy(good)
+    wrong_version["checks"]["ncu"]["version_line"] = "Version 2026.10.0"
+    ncu_mutations.append(wrong_version)
+    unexpected = copy.deepcopy(good)
+    unexpected["checks"]["ncu"]["self_attested"] = True
+    ncu_mutations.append(unexpected)
+    failed_with_identity = copy.deepcopy(good)
+    failed_with_identity["checks"]["ncu"]["status"] = "failed"
+    ncu_mutations.append(failed_with_identity)
+    for invalid in ncu_mutations:
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(invalid, _SCHEMA)
 
     missing_compiler_evidence = copy.deepcopy(good)
     del missing_compiler_evidence["checks"]["sol_environment"][
@@ -1450,7 +1612,7 @@ def test_build_manifest_never_runs_kernel_when_process_hygiene_fails(
     ok = {"status": cp.STATUS_OK}
     monkeypatch.setattr(cp, "probe_worktree", lambda *_: ok | {
         "git_head": "0" * 40, "working_tree_clean": True})
-    monkeypatch.setattr(cp, "probe_ncu", lambda *_: ok)
+    monkeypatch.setattr(cp, "probe_ncu", lambda *_: _ok_ncu_probe())
     monkeypatch.setattr(cp, "probe_driver", lambda *_: ok)
     monkeypatch.setattr(cp, "probe_nvcc", lambda *_, **__: ok)
     monkeypatch.setattr(cp, "probe_nvbit", lambda *_: ok)
@@ -1489,7 +1651,7 @@ def test_build_manifest_sol_environment_refusal_blocks_before_smoke(
     monkeypatch.setattr(cp, "probe_worktree", lambda *_: ok | {
         "git_head": "0" * 40, "working_tree_clean": True,
     })
-    monkeypatch.setattr(cp, "probe_ncu", lambda *_: ok)
+    monkeypatch.setattr(cp, "probe_ncu", lambda *_: _ok_ncu_probe())
     monkeypatch.setattr(cp, "probe_driver", lambda *_: ok)
     monkeypatch.setattr(cp, "probe_nvcc", lambda *_, **__: ok)
     monkeypatch.setattr(cp, "probe_nvbit", lambda *_: ok)
@@ -1766,6 +1928,7 @@ def test_preflight_main_emits_one_machine_parseable_storage_marker(
 _HAVE_GPU = shutil.which("nvidia-smi") and shutil.which("ncu")
 
 
+@pytest.mark.hardware_evidence
 @pytest.mark.skipif(not _HAVE_GPU, reason="no live NVIDIA toolchain on this host")
 def test_environment_probes_ok_on_reference_host(tmp_path):
     manifest = cp.build_manifest(
