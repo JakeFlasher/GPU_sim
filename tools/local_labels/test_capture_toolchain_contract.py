@@ -8,6 +8,7 @@ from pathlib import Path
 import pytest
 
 from tools.local_labels import capture_toolchain_contract as contract
+from tools.local_labels import ncu_capture_contract as ncu_contract
 from tools.local_labels import sol_capture_environment as sol_environment
 
 
@@ -226,6 +227,134 @@ def test_frozen_v1_certification_keeps_explicit_release_compatibility(
     assert probe["nvcc_release"] == {"major": 13, "minor": 3}
 
 
+def _explicit_ncu_protocol() -> dict[str, object]:
+    return {
+        "ncu_target_processes": "all",
+        "ncu_filter_mode": "global",
+        "ncu_replay_mode": "kernel",
+        "ncu_cache_control": "all",
+        "ncu_clock_control": "none",
+        "ncu_profile_from_start": False,
+        "ncu_launch_skip": 0,
+        "ncu_launch_count": 3,
+    }
+
+
+def test_explicit_ncu_launch_protocol_accepts_complete_tuple():
+    ncu_contract.validate_measurement_protocol(_explicit_ncu_protocol())
+
+
+@pytest.mark.parametrize("missing", sorted(_explicit_ncu_protocol()))
+def test_explicit_ncu_launch_protocol_rejects_every_partial_tuple(missing):
+    protocol = _explicit_ncu_protocol()
+    del protocol[missing]
+    with pytest.raises(ValueError, match="partial NCU launch controls"):
+        ncu_contract.validate_measurement_protocol(protocol)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("ncu_target_processes", "application-only"),
+        ("ncu_filter_mode", "per-process"),
+        ("ncu_replay_mode", "application"),
+        ("ncu_cache_control", "flush"),
+        ("ncu_clock_control", "default"),
+    ],
+)
+def test_explicit_ncu_launch_protocol_rejects_incompatible_modes(field, value):
+    protocol = _explicit_ncu_protocol()
+    protocol[field] = value
+    with pytest.raises(ValueError, match=field):
+        ncu_contract.validate_measurement_protocol(protocol)
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("ncu_profile_from_start", "off", "must be boolean"),
+        ("ncu_launch_skip", "0", "outside the signed 32-bit range"),
+        ("ncu_launch_skip", True, "outside the signed 32-bit range"),
+        ("ncu_launch_skip", -1, "outside the signed 32-bit range"),
+        (
+            "ncu_launch_skip",
+            ncu_contract.MAX_NCU_SELECTOR + 1,
+            "outside the signed 32-bit range",
+        ),
+        ("ncu_launch_count", "3", "outside the signed 32-bit range"),
+        ("ncu_launch_count", True, "outside the signed 32-bit range"),
+        ("ncu_launch_count", 0, "outside the signed 32-bit range"),
+        (
+            "ncu_launch_count",
+            ncu_contract.MAX_NCU_SELECTOR + 1,
+            "outside the signed 32-bit range",
+        ),
+    ],
+)
+def test_explicit_ncu_launch_protocol_rejects_invalid_selector_types_and_bounds(
+    field, value, message,
+):
+    protocol = _explicit_ncu_protocol()
+    protocol[field] = value
+    with pytest.raises(ValueError, match=message):
+        ncu_contract.validate_measurement_protocol(protocol)
+
+
+def test_explicit_ncu_launch_protocol_rejects_skip_count_overflow():
+    protocol = _explicit_ncu_protocol()
+    protocol["ncu_launch_skip"] = ncu_contract.MAX_NCU_SELECTOR
+    protocol["ncu_launch_count"] = 1
+    with pytest.raises(ValueError, match="skip plus count exceeds"):
+        ncu_contract.validate_measurement_protocol(protocol)
+
+
+@pytest.mark.parametrize(
+    "protocol",
+    [
+        None,
+        {},
+        {"ncu_replay_mode": "kernel"},
+        {"ncu_cache_control": "all", "ncu_clock_control": "none"},
+    ],
+)
+def test_legacy_ncu_protocol_without_selector_triggers_remains_valid(protocol):
+    ncu_contract.validate_measurement_protocol(protocol)
+
+
+def test_ncu_control_cli_rejects_replay_only_explicit_mode(capsys):
+    assert ncu_contract.main(["--replay-mode", "kernel"]) == 2
+    error = capsys.readouterr().err
+    assert "NCU_LAUNCH_CONTROL_INVALID" in error
+    assert "partial NCU launch controls" in error
+
+
+def test_ncu_control_cli_rejects_duplicate_explicit_option(capsys):
+    assert ncu_contract.main([
+        "--launch-count", "3", "--launch-count", "4",
+    ]) == 2
+    error = capsys.readouterr().err
+    assert "NCU_LAUNCH_CONTROL_INVALID" in error
+    assert "duplicate explicit launch control: --launch-count" in error
+
+
+@pytest.mark.parametrize("value", ["00", "01", "+1", "-1", "", "2147483648"])
+def test_ncu_control_cli_rejects_noncanonical_or_unbounded_selectors(
+    value, capsys,
+):
+    argv = [
+        "--target-processes", "all",
+        "--filter-mode", "global",
+        "--replay-mode", "kernel",
+        "--cache-control", "all",
+        "--clock-control", "none",
+        "--profile-from-start", "off",
+        "--launch-skip", "0",
+        "--launch-count", value,
+    ]
+    assert ncu_contract.main(argv) == 2
+    assert "NCU_LAUNCH_CONTROL_INVALID" in capsys.readouterr().err
+
+
 def _write_executable(path: Path, text: str) -> Path:
     path.write_text(text)
     path.chmod(0o700)
@@ -235,10 +364,12 @@ def _write_executable(path: Path, text: str) -> Path:
 def _label_boundary_command(
     tmp_path: Path, *, cuda_release: str = "13.2",
     ncu_release: str = "2026.1.0.0", include_cycles: bool = True,
+    ncu_exit: int = 7,
 ) -> tuple[list[str], dict[str, str], Path, Path]:
     fake_bin = tmp_path / "bin"
     fake_bin.mkdir()
     ncu_marker = tmp_path / "ncu-target-invoked"
+    ncu_argv = tmp_path / "ncu-argv"
     nvcc = _write_executable(
         fake_bin / "nvcc",
         "#!/usr/bin/env bash\n"
@@ -253,8 +384,20 @@ def _label_boundary_command(
         f"  printf 'Version {ncu_release} (public-release)\\n'\n"
         "  exit 0\n"
         "fi\n"
+        f"printf '%s\\n' \"$@\" > {str(ncu_argv)!r}\n"
         f"touch {str(ncu_marker)!r}\n"
-        "exit 7\n",
+        "report=''\n"
+        "previous=''\n"
+        "for argument in \"$@\"; do\n"
+        "  if [[ $previous == --export ]]; then report=$argument; fi\n"
+        "  previous=$argument\n"
+        "done\n"
+        + (
+            "[[ -n $report ]] || exit 8\n"
+            "printf 'fake report\\n' > \"$report\"\n"
+            if ncu_exit == 0 else ""
+        )
+        + f"exit {ncu_exit}\n",
     )
     _write_executable(
         fake_bin / "nvidia-smi",
@@ -296,6 +439,129 @@ def _label_boundary_command(
     # the production campaign never carries this test-only override.
     environment["LABEL_DRIVER_SKIP_ARCH_CHECK"] = "1"
     return command, environment, output, ncu_marker
+
+
+def _with_explicit_ncu_controls(
+    command: list[str], *, launch_count: str = "3",
+    omit: frozenset[str] = frozenset(),
+    extra_controls: tuple[str, ...] = (),
+) -> list[str]:
+    controls = [
+        ("--target-processes", "all"),
+        ("--filter-mode", "global"),
+        ("--replay-mode", "kernel"),
+        ("--cache-control", "all"),
+        ("--clock-control", "none"),
+        ("--profile-from-start", "off"),
+        ("--launch-skip", "0"),
+        ("--launch-count", launch_count),
+    ]
+    explicit = [
+        value for option, argument in controls if option not in omit
+        for value in (option, argument)
+    ]
+    explicit.extend(extra_controls)
+    result = list(command)
+    separator = result.index("--")
+    result[separator:separator] = explicit
+    return result
+
+
+def _option_value(argv: list[str], option: str) -> str:
+    assert argv.count(option) == 1
+    return argv[argv.index(option) + 1]
+
+
+def test_label_driver_explicit_launch_set_reaches_ncu_then_stops_postprocessing(
+    tmp_path,
+):
+    command, environment, output, marker = _label_boundary_command(
+        tmp_path, ncu_exit=0,
+    )
+    command = _with_explicit_ncu_controls(command)
+    result = subprocess.run(
+        command, env=environment, text=True, capture_output=True, check=False,
+    )
+    assert result.returncode == 3
+    assert "NCU_LAUNCH_SET_POSTPROCESSING_UNIMPLEMENTED" in result.stderr
+    assert marker.is_file()
+
+    argv = (tmp_path / "ncu-argv").read_text().splitlines()
+    assert argv[:16] == [
+        "--target-processes", "all",
+        "--filter-mode", "global",
+        "--replay-mode", "kernel",
+        "--cache-control", "all",
+        "--clock-control", "none",
+        "--profile-from-start", "off",
+        "--launch-skip", "0",
+        "--launch-count", "3",
+    ]
+    cell = output / "sm_86" / "boundary-fixture" / "row_0"
+    assert (cell / "run_0_0.ncu-rep").read_text() == "fake report\n"
+    assert not (cell / "label_0_0.json").exists()
+    assert not (cell / "run_0_0.launch_observation.json").exists()
+
+
+@pytest.mark.parametrize(
+    "command_mutator",
+    [
+        lambda command: _with_explicit_ncu_controls(
+            command,
+            omit=frozenset({
+                "--filter-mode", "--replay-mode", "--cache-control",
+                "--clock-control", "--profile-from-start", "--launch-skip",
+                "--launch-count",
+            }),
+        ),
+        lambda command: _with_explicit_ncu_controls(
+            command,
+            omit=frozenset({
+                "--target-processes", "--filter-mode", "--cache-control",
+                "--clock-control", "--profile-from-start", "--launch-skip",
+                "--launch-count",
+            }),
+        ),
+        lambda command: _with_explicit_ncu_controls(
+            command, extra_controls=("--launch-count", "4"),
+        ),
+        lambda command: _with_explicit_ncu_controls(
+            command, launch_count="03",
+        ),
+    ],
+)
+def test_label_driver_refuses_invalid_launch_set_before_output_or_ncu(
+    tmp_path, command_mutator,
+):
+    command, environment, output, marker = _label_boundary_command(tmp_path)
+    result = subprocess.run(
+        command_mutator(command), env=environment, text=True,
+        capture_output=True, check=False,
+    )
+    assert result.returncode == 2
+    assert "NCU_LAUNCH_CONTROL_INVALID" in result.stderr
+    assert not output.exists()
+    assert not marker.exists()
+    assert not (tmp_path / "ncu-argv").exists()
+
+
+def test_label_driver_legacy_ncu_arguments_remain_single_launch(tmp_path):
+    command, environment, output, marker = _label_boundary_command(tmp_path)
+    result = subprocess.run(
+        command, env=environment, text=True, capture_output=True, check=False,
+    )
+    assert result.returncode == 7
+    assert output.is_dir()
+    assert marker.is_file()
+    argv = (tmp_path / "ncu-argv").read_text().splitlines()
+    assert _option_value(argv, "--target-processes") == "all"
+    assert _option_value(argv, "--replay-mode") == "kernel"
+    assert _option_value(argv, "--launch-skip") == "0"
+    assert _option_value(argv, "--launch-count") == "1"
+    assert _option_value(argv, "--clock-control") == "none"
+    assert _option_value(argv, "--profile-from-start") == "off"
+    assert "--filter-mode" not in argv
+    assert "--cache-control" not in argv
 
 
 def test_label_driver_refuses_cuda_release_before_output_or_ncu(

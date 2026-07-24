@@ -31,8 +31,11 @@
 # forbidden in the target argv because the adapter consumes its own pinned
 # workload contract.
 #
-# Every NCU collection invocation passes:
+# Legacy NCU collection invocations pass:
 #   --launch-skip <launch> --launch-count 1   (R4 launch filter)
+# Explicit launch-set invocations require a complete validated selector tuple
+# and stop before the still-single-launch parser and sidecar emitter.
+# Every invocation passes:
 #   --clock-control none                      (Rule 2: no clock locking)
 # and uses the safe Python parser at parse_ncu_metrics.py to extract
 # percentage metrics from the documented "Metric Value" column of the
@@ -54,6 +57,14 @@ NCU_BIN="ncu"
 OUT_DIR="data/local_labels"
 KERNEL_NAME=""
 CACHE_CONTROL=""
+NCU_TARGET_PROCESSES=""
+NCU_FILTER_MODE=""
+NCU_REPLAY_MODE=""
+NCU_PROFILE_FROM_START=""
+NCU_LAUNCH_SKIP=""
+NCU_LAUNCH_COUNT=""
+EXPLICIT_NCU_LAUNCH_CONTROLS=0
+EXPLICIT_NCU_CONTROL_ARGS=()
 EXPECTED_CUDA_RELEASE=""
 EXPECTED_NCU_VERSION_PREFIX=""
 PUBLICATION_METRIC_SCOPE=""
@@ -94,6 +105,15 @@ Optional arguments:
   --ncu <path>              Path to the Nsight Compute CLI (default: 'ncu' on PATH).
   --out-dir <path>          Quarantine root (default: data/local_labels).
   --kernel-name <name>      Forward an exact mangled NCU kernel-name filter.
+  --target-processes <mode> Explicit launch-set NCU target process mode.
+  --filter-mode <mode>      Explicit launch-set NCU filter mode.
+  --replay-mode <mode>      Explicit launch-set NCU replay mode.
+  --profile-from-start <on|off>
+                            Explicit launch-set profiler start mode.
+  --launch-skip <int>       Explicit launch-set NCU launch skip.
+  --launch-count <int>      Explicit launch-set NCU launch count.
+                            Supplying any of these six controls requires the
+                            complete explicit tuple, including cache and clock.
   --cache-control <mode>    Forward as NCU --cache-control flag
                             (mode in {all, none}). Optional;
                             omit to defer to NCU's default behavior.
@@ -217,8 +237,45 @@ while (("$#")); do
             KERNEL_NAME="$2"
             shift 2
             ;;
+        --target-processes)
+            NCU_TARGET_PROCESSES="$2"
+            EXPLICIT_NCU_CONTROL_ARGS+=(--target-processes "$2")
+            EXPLICIT_NCU_LAUNCH_CONTROLS=1
+            shift 2
+            ;;
+        --filter-mode)
+            NCU_FILTER_MODE="$2"
+            EXPLICIT_NCU_CONTROL_ARGS+=(--filter-mode "$2")
+            EXPLICIT_NCU_LAUNCH_CONTROLS=1
+            shift 2
+            ;;
+        --replay-mode)
+            NCU_REPLAY_MODE="$2"
+            EXPLICIT_NCU_CONTROL_ARGS+=(--replay-mode "$2")
+            EXPLICIT_NCU_LAUNCH_CONTROLS=1
+            shift 2
+            ;;
+        --profile-from-start)
+            NCU_PROFILE_FROM_START="$2"
+            EXPLICIT_NCU_CONTROL_ARGS+=(--profile-from-start "$2")
+            EXPLICIT_NCU_LAUNCH_CONTROLS=1
+            shift 2
+            ;;
+        --launch-skip)
+            NCU_LAUNCH_SKIP="$2"
+            EXPLICIT_NCU_CONTROL_ARGS+=(--launch-skip "$2")
+            EXPLICIT_NCU_LAUNCH_CONTROLS=1
+            shift 2
+            ;;
+        --launch-count)
+            NCU_LAUNCH_COUNT="$2"
+            EXPLICIT_NCU_CONTROL_ARGS+=(--launch-count "$2")
+            EXPLICIT_NCU_LAUNCH_CONTROLS=1
+            shift 2
+            ;;
         --cache-control)
             CACHE_CONTROL="$2"
+            EXPLICIT_NCU_CONTROL_ARGS+=(--cache-control "$2")
             case "$CACHE_CONTROL" in
                 all|none)
                     ;;
@@ -231,6 +288,7 @@ while (("$#")); do
             ;;
         --clock-control)
             NCU_CLOCK_CONTROL="$2"
+            EXPLICIT_NCU_CONTROL_ARGS+=(--clock-control "$2")
             case "$NCU_CLOCK_CONTROL" in
                 base|boost|none)
                     ;;
@@ -313,6 +371,14 @@ require "--binary" "$BINARY_PATH"
 if [[ "$KERNEL_NAME" == regex:* ]]; then
     echo "label_driver: --kernel-name requires an exact name, not regex: syntax" >&2
     exit 2
+fi
+
+if [[ "$EXPLICIT_NCU_LAUNCH_CONTROLS" -eq 1 ]]; then
+    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    if ! python3 "$SCRIPT_DIR/ncu_capture_contract.py" \
+            "${EXPLICIT_NCU_CONTROL_ARGS[@]}"; then
+        exit 2
+    fi
 fi
 
 # Architecture capability gate (C-AC-E). Translate the legacy local
@@ -1099,10 +1165,12 @@ with open(os.environ["LD_RUN_MANIFEST_PATH"], "w", encoding="utf-8") as fh:
 PY
 
 # AC2 (R4-B, R4-C) + v2 protocol: launch filtering + EXPLICIT clock control.
-# Launch filtering locks the profiled launch to exactly the index recorded in
-# the sidecar's launch_index field. Clock control is always passed explicitly
-# (new Rule 2 — the NCU default changed base->boost in 2026.1): "none" when the
-# host clocks are externally locked, base/boost to delegate locking to NCU.
+# Legacy launch filtering locks the profiled launch to exactly the index recorded
+# in the sidecar. Explicit launch-set mode decouples NCU selection from that
+# legacy filename identity but remains fail-closed before single-launch parsing.
+# Clock control is always passed explicitly (new Rule 2 — the NCU default changed
+# base->boost in 2026.1): "none" when the host clocks are externally locked,
+# base/boost to delegate locking to NCU.
 # The raw lookup-hit / lookup-miss counter pairs for each .pct ratio
 # enable the parser's raw-counter ratio fallback when NCU emits an
 # out-of-range .pct value (observed on sm_120 / Blackwell consumer
@@ -1119,27 +1187,43 @@ if ((${#UNIT_METRICS[@]} > 0)); then
     UNIT_METRICS_JOINED="$(IFS=,; echo "${UNIT_METRICS[*]}")"
     NCU_METRICS="${NCU_METRICS},${UNIT_METRICS_JOINED}"
 fi
-NCU_COLLECT_ARGS=(
-    --target-processes all
-    --replay-mode kernel
-    --metrics "$NCU_METRICS"
-    --section MemoryWorkloadAnalysis
-    --launch-skip "$LAUNCH_INDEX"
-    --launch-count 1
-    --clock-control "$NCU_CLOCK_CONTROL"
-    --export "$REPORT_PATH"
-)
-if [[ "$SHAPE_BINDING" == "logical-workload" ]]; then
-    # Adapter-backed programs perform setup/reference work before the selected
-    # candidate.  Their capture driver opens one explicit cudaProfiler range;
-    # profiling from process start would attribute launch 0 to setup instead.
-    NCU_COLLECT_ARGS+=(--profile-from-start off)
+if [[ "$EXPLICIT_NCU_LAUNCH_CONTROLS" -eq 1 ]]; then
+    NCU_COLLECT_ARGS=(
+        --target-processes "$NCU_TARGET_PROCESSES"
+        --filter-mode "$NCU_FILTER_MODE"
+        --replay-mode "$NCU_REPLAY_MODE"
+        --cache-control "$CACHE_CONTROL"
+        --clock-control "$NCU_CLOCK_CONTROL"
+        --profile-from-start "$NCU_PROFILE_FROM_START"
+        --launch-skip "$NCU_LAUNCH_SKIP"
+        --launch-count "$NCU_LAUNCH_COUNT"
+        --metrics "$NCU_METRICS"
+        --section MemoryWorkloadAnalysis
+        --export "$REPORT_PATH"
+    )
+else
+    NCU_COLLECT_ARGS=(
+        --target-processes all
+        --replay-mode kernel
+        --metrics "$NCU_METRICS"
+        --section MemoryWorkloadAnalysis
+        --launch-skip "$LAUNCH_INDEX"
+        --launch-count 1
+        --clock-control "$NCU_CLOCK_CONTROL"
+        --export "$REPORT_PATH"
+    )
+    if [[ "$SHAPE_BINDING" == "logical-workload" ]]; then
+        # Adapter-backed programs perform setup/reference work before the selected
+        # candidate. Their capture driver opens one explicit cudaProfiler range;
+        # profiling from process start would attribute launch 0 to setup instead.
+        NCU_COLLECT_ARGS+=(--profile-from-start off)
+    fi
+    if [[ -n "$CACHE_CONTROL" ]]; then
+        NCU_COLLECT_ARGS+=(--cache-control "$CACHE_CONTROL")
+    fi
 fi
 if [[ -n "$KERNEL_NAME" ]]; then
     NCU_COLLECT_ARGS+=(--kernel-name-base mangled --kernel-name "$KERNEL_NAME")
-fi
-if [[ -n "$CACHE_CONTROL" ]]; then
-    NCU_COLLECT_ARGS+=(--cache-control "$CACHE_CONTROL")
 fi
 
 "$NCU_BIN" \
@@ -1147,6 +1231,11 @@ fi
     "$BINARY_PATH" \
     "${APP_ARGS[@]}" \
     >/dev/null
+
+if [[ "$EXPLICIT_NCU_LAUNCH_CONTROLS" -eq 1 ]]; then
+    echo "label_driver: NCU_LAUNCH_SET_POSTPROCESSING_UNIMPLEMENTED: explicit launch-set report retained without a sidecar" >&2
+    exit 3
+fi
 
 # AC2 (R4-D): safe metric extraction. The Python helper imports the
 # .ncu-rep* report and parses the raw-page CSV via Python's csv module,
