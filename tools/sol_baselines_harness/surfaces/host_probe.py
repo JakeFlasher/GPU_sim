@@ -20,7 +20,7 @@ import subprocess
 from pathlib import Path
 from typing import List, Tuple
 
-from baselines_harness.surfaces.base import HostInfo
+from sol_baselines_harness.surfaces.base import HostInfo
 
 
 def _run(cmd: List[str], timeout: float = 10.0) -> Tuple[int, str, str]:

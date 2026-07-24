@@ -53,7 +53,7 @@ import math
 from dataclasses import dataclass, field
 from typing import Mapping
 
-from baselines_harness.metrics.framework_contract import (
+from sol_baselines_harness.metrics.framework_contract import (
     CI_CONFIDENCE,
     CellJoinKey,
     FrameworkContractError,
@@ -62,7 +62,7 @@ from baselines_harness.metrics.framework_contract import (
     validate_input_sidecar_digests,
     validate_sha256_digest,
 )
-from baselines_harness.metrics.predictor_design_coverage import (
+from sol_baselines_harness.metrics.predictor_design_coverage import (
     PREDICTOR_BUCKETS,
 )
 

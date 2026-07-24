@@ -38,13 +38,13 @@ _SCRIPTS_DIR = _HARNESS_DIR.parent
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
-from baselines_harness.surfaces import (  # noqa: E402
+from sol_baselines_harness.surfaces import (  # noqa: E402
     SurfaceOrchestrator,
     UnknownSurfaceError,
     VALID_SURFACES,
     default_surface_plugins,
 )
-from baselines_harness.surfaces.host_probe import probe_host  # noqa: E402
+from sol_baselines_harness.surfaces.host_probe import probe_host  # noqa: E402
 
 REPO_ROOT = _SCRIPTS_DIR.parent
 
@@ -218,7 +218,7 @@ def _cmd_run(args: argparse.Namespace) -> int:
         # arch-aware default. Guard against the sm_86-writes-into-
         # locked-sm_120-bundle scenario before the orchestrator
         # touches the path.
-        from baselines_harness.trace_layout import (
+        from sol_baselines_harness.trace_layout import (
             assert_no_sm120_overwrite,
         )
         try:
@@ -275,7 +275,7 @@ def _default_bundle_dir(
     the routing logic lives in that module so ``report.py``, the
     surfaces CLI, and the tests share one source of truth.
     """
-    from baselines_harness.trace_layout import default_bundle_dir
+    from sol_baselines_harness.trace_layout import default_bundle_dir
     traces_root = (
         REPO_ROOT / "scripts" / "baselines_harness" / ".harness_traces"
     )

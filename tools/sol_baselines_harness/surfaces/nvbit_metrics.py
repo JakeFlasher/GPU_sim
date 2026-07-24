@@ -46,7 +46,7 @@ import subprocess
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from baselines_harness.surfaces.base import (
+from sol_baselines_harness.surfaces.base import (
     HostInfo,
     Surface,
     SurfaceParseResult,
@@ -57,9 +57,9 @@ from baselines_harness.surfaces.base import (
     SURFACE_STATUS_OK,
     SURFACE_STATUS_UNAVAILABLE,
 )
-from baselines_harness.surfaces.manifest import now_utc_iso
-from baselines_harness.surfaces.profiling_build import reduced_config_overrides
-from baselines_harness.surfaces.subprocess_env import (
+from sol_baselines_harness.surfaces.manifest import now_utc_iso
+from sol_baselines_harness.surfaces.profiling_build import reduced_config_overrides
+from sol_baselines_harness.surfaces.subprocess_env import (
     BUILD_TOOLCHAIN_ALLOWED,
     build_subprocess_env,
 )
@@ -982,7 +982,7 @@ def _parse_launches(launches_path: Path):
     ``baselines_harness.metric_extractor`` package does not poison the
     surface plugin's module-load path.
     """
-    from baselines_harness.metric_extractor.launches_parser import (
+    from sol_baselines_harness.metric_extractor.launches_parser import (
         parse_launches_jsonl,
     )
     return parse_launches_jsonl(launches_path)

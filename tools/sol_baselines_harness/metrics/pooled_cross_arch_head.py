@@ -30,7 +30,7 @@ import math
 from dataclasses import dataclass
 from typing import Any, Final, Sequence
 
-from baselines_harness.metrics.hardware_descriptor import (
+from sol_baselines_harness.metrics.hardware_descriptor import (
     HardwareDescriptor,
     descriptor_field_names,
 )

@@ -43,15 +43,15 @@ from typing import Callable, Iterable
 
 import numpy as np
 
-from baselines_harness.metrics.framework_contract import (
+from sol_baselines_harness.metrics.framework_contract import (
     BOOTSTRAP_RESAMPLES,
     CI_CONFIDENCE,
 )
-from baselines_harness.metrics.isotonic_calibrator import (
+from sol_baselines_harness.metrics.isotonic_calibrator import (
     LOOCVResidual,
     LOOCVResult,
 )
-from baselines_harness.metrics.predictor_design_coverage import (
+from sol_baselines_harness.metrics.predictor_design_coverage import (
     PREDICTOR_BUCKET_FRIENDLY,
     PREDICTOR_BUCKET_HOSTILE,
     PREDICTOR_BUCKET_TYPED_UNAVAILABLE,

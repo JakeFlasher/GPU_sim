@@ -33,13 +33,13 @@ _SCRIPTS_DIR = _THIS_DIR.parents[1]
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
-from baselines_harness.cache import sol_execbench_source_hash  # noqa: E402
-from baselines_harness.normalise_benchmark import (  # noqa: E402
+from sol_baselines_harness.cache import sol_execbench_source_hash  # noqa: E402
+from sol_baselines_harness.normalise_benchmark import (  # noqa: E402
     needs_staging,
     stage_benchmark,
 )
-from baselines_harness.surfaces.base import HostInfo
-from baselines_harness.surfaces.profiling_build import (
+from sol_baselines_harness.surfaces.base import HostInfo
+from sol_baselines_harness.surfaces.profiling_build import (
     reduced_config_overrides,
     stage_profiling_solution,
     stage_reduced_config,

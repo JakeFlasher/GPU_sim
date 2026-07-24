@@ -60,7 +60,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any, Iterable, Mapping
 
-from baselines_harness.metrics.predictor_design_coverage import (
+from sol_baselines_harness.metrics.predictor_design_coverage import (
     PREDICTOR_BUCKET_TYPED_UNAVAILABLE,
     PREDICTOR_TYPED_UNAVAILABLE_REASONS,
     PredictorDesignCoverageError,

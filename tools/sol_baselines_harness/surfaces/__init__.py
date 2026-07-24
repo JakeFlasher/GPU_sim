@@ -41,7 +41,7 @@ native end-to-end — the upstream evaluator runs as a host subprocess
 with no container runtime in the loop.
 """
 
-from baselines_harness.surfaces.base import (  # noqa: F401
+from sol_baselines_harness.surfaces.base import (  # noqa: F401
     HostInfo,
     Surface,
     SurfaceParseResult,
@@ -55,20 +55,20 @@ from baselines_harness.surfaces.base import (  # noqa: F401
     SURFACE_STATUS_UNAVAILABLE,
     VALID_SURFACES,
 )
-from baselines_harness.surfaces.manifest import (  # noqa: F401
+from sol_baselines_harness.surfaces.manifest import (  # noqa: F401
     ManifestBuilder,
     ManifestLintError,
     lint_manifest,
 )
-from baselines_harness.surfaces.orchestrator import (  # noqa: F401
+from sol_baselines_harness.surfaces.orchestrator import (  # noqa: F401
     SurfaceOrchestrator,
     UnknownSurfaceError,
     assert_b200_fanout_ready,
 )
-from baselines_harness.surfaces.cache_prediction import (  # noqa: F401
+from sol_baselines_harness.surfaces.cache_prediction import (  # noqa: F401
     CachePredictionSurface,
 )
-from baselines_harness.surfaces.cache_prediction_sidecar import (  # noqa: F401
+from sol_baselines_harness.surfaces.cache_prediction_sidecar import (  # noqa: F401
     CACHE_PREDICTION_SIDECAR_BASENAME,
     CACHE_PREDICTION_SIDECAR_SUBDIR,
     CACHE_PREDICTION_SIDECAR_TYPED_REASONS,
@@ -77,15 +77,15 @@ from baselines_harness.surfaces.cache_prediction_sidecar import (  # noqa: F401
     read_cache_prediction_sidecar,
     write_cache_prediction_sidecar,
 )
-from baselines_harness.surfaces.cupti_activity import (  # noqa: F401
+from sol_baselines_harness.surfaces.cupti_activity import (  # noqa: F401
     CUPTIActivitySurface,
 )
-from baselines_harness.surfaces.nsys import NsysSurface  # noqa: F401
-from baselines_harness.surfaces.nvbit_metrics import (  # noqa: F401
+from sol_baselines_harness.surfaces.nsys import NsysSurface  # noqa: F401
+from sol_baselines_harness.surfaces.nvbit_metrics import (  # noqa: F401
     NVBitMetricsSurface,
 )
-from baselines_harness.surfaces.sanitizer import SanitizerSurface  # noqa: F401
-from baselines_harness.surfaces.static import StaticSurface  # noqa: F401
+from sol_baselines_harness.surfaces.sanitizer import SanitizerSurface  # noqa: F401
+from sol_baselines_harness.surfaces.static import StaticSurface  # noqa: F401
 
 
 def default_surface_plugins() -> dict:

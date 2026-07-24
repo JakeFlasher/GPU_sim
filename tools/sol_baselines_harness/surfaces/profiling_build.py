@@ -28,7 +28,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from baselines_harness.surfaces.base import HostInfo
+from sol_baselines_harness.surfaces.base import HostInfo
 
 PROFILING_MACRO = "-DSOLBENCH_PROFILING"
 NVTX_MACRO = "-DSOLBENCH_HAS_NVTX"

@@ -83,51 +83,51 @@ _REPO_ROOT = Path(__file__).resolve().parents[4]
 if str(_REPO_ROOT / "scripts") not in sys.path:
     sys.path.insert(0, str(_REPO_ROOT / "scripts"))
 
-from baselines_harness.calibration.cache_prediction.calibration_sweep import (  # noqa: E402
+from sol_baselines_harness.calibration.cache_prediction.calibration_sweep import (  # noqa: E402
     LabelLedger,
     LedgerEntry,
     load_ledger_from_toml,
 )
-from baselines_harness.metrics.cache_geometry import (  # noqa: E402
+from sol_baselines_harness.metrics.cache_geometry import (  # noqa: E402
     resolve_cache_geometry,
 )
-from baselines_harness.metrics.cache_predictor import (  # noqa: E402
+from sol_baselines_harness.metrics.cache_predictor import (  # noqa: E402
     compose_predictor_bundle,
     predict_from_launch_frame,
     predict_warmed_launch_sequence,
 )
-from baselines_harness.metrics.framework_contract import (  # noqa: E402
+from sol_baselines_harness.metrics.framework_contract import (  # noqa: E402
     CellJoinKey,
     FrameworkContractError,
     InputSidecarDigest,
 )
-from baselines_harness.metrics.isotonic_calibrator import (  # noqa: E402
+from sol_baselines_harness.metrics.isotonic_calibrator import (  # noqa: E402
     CalibrationInputRecord,
     IsotonicCalibrator,
     IsotonicCalibratorError,
     LOOCVResult,
     run_loocv,
 )
-from baselines_harness.metrics.predictor_bundle_schema import (  # noqa: E402
+from sol_baselines_harness.metrics.predictor_bundle_schema import (  # noqa: E402
     ManifestPairingIndex,
     PredictorBundle,
     PredictorBundleSchemaError,
 )
-from baselines_harness.metrics.predictor_design_coverage import (  # noqa: E402
+from sol_baselines_harness.metrics.predictor_design_coverage import (  # noqa: E402
     PREDICTOR_BUCKET_FRIENDLY,
     PREDICTOR_BUCKET_HOSTILE,
     PREDICTOR_BUCKET_TYPED_UNAVAILABLE,
     lookup_predictor_design_coverage,
 )
-from baselines_harness.metrics.cache_access_policy import (  # noqa: E402
+from sol_baselines_harness.metrics.cache_access_policy import (  # noqa: E402
     audit_l2_read_denominator,
 )
-from baselines_harness.metrics.tier2_sidecar_parser import (  # noqa: E402
+from sol_baselines_harness.metrics.tier2_sidecar_parser import (  # noqa: E402
     LaunchFrame,
     Tier2ParserError,
     parse_launch_frames,
 )
-from baselines_harness.metrics.tiered_gate_evaluator import (  # noqa: E402
+from sol_baselines_harness.metrics.tiered_gate_evaluator import (  # noqa: E402
     BOOTSTRAP_CONFIDENCE,
     BOOTSTRAP_RESAMPLES,
     CACHE_LEVEL_L1,
@@ -138,10 +138,10 @@ from baselines_harness.metrics.tiered_gate_evaluator import (  # noqa: E402
     TieredGateReport,
     evaluate_tiered_gate,
 )
-from baselines_harness.metrics.typed_unavailable_bundle import (  # noqa: E402
+from sol_baselines_harness.metrics.typed_unavailable_bundle import (  # noqa: E402
     COVERAGE_FLOOR_SMOKE,
 )
-from baselines_harness.surfaces.cache_prediction import (  # noqa: E402
+from sol_baselines_harness.surfaces.cache_prediction import (  # noqa: E402
     CACHE_PREDICTION_SURFACE_ARTIFACT_RELPATH,
     CachePredictionSurfaceEntry,
     CachePredictionSurfaceError,
@@ -2696,7 +2696,7 @@ def _serialize_accuracy_diagnostic_sections(
     layered analytic surface.
     """
 
-    from baselines_harness.calibration.cache_prediction.accuracy_diagnostic import (
+    from sol_baselines_harness.calibration.cache_prediction.accuracy_diagnostic import (
         build_accuracy_diagnostic_report,
         predictor_callback_from_smoke_records,
         serialize_diagnostic_sections_for_smoke_report,

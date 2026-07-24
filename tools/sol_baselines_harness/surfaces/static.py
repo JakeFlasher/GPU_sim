@@ -60,7 +60,7 @@ import subprocess
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from baselines_harness.surfaces.base import (
+from sol_baselines_harness.surfaces.base import (
     HostInfo,
     Surface,
     SurfaceParseResult,
@@ -70,8 +70,8 @@ from baselines_harness.surfaces.base import (
     SURFACE_STATUS_OK,
     SURFACE_STATUS_UNAVAILABLE,
 )
-from baselines_harness.surfaces.manifest import now_utc_iso
-from baselines_harness.surfaces.subprocess_env import (
+from sol_baselines_harness.surfaces.manifest import now_utc_iso
+from sol_baselines_harness.surfaces.subprocess_env import (
     BUILD_TOOLCHAIN_ALLOWED,
     build_subprocess_env,
 )

@@ -35,7 +35,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
-from baselines_harness.calibration.cache_prediction.label_parser import (
+from sol_baselines_harness.calibration.cache_prediction.label_parser import (
     NCU_LABEL_PARSER_TYPED_REASONS,
     NcuLabelParserError,
     NcuLabelRecord,

@@ -113,15 +113,15 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping, Sequence, TypedDict
 
-from baselines_harness.metrics.predictor_design_coverage import (
+from sol_baselines_harness.metrics.predictor_design_coverage import (
     PREDICTOR_BUCKET_TYPED_UNAVAILABLE,
     PREDICTOR_DESIGN_COVERAGE_BY_CELL,
     partition_size,
 )
-from baselines_harness.metrics.typed_unavailable_bundle import (
+from sol_baselines_harness.metrics.typed_unavailable_bundle import (
     PREDICTOR_ABSTENTION_REASONS,
 )
-from baselines_harness.calibration.cache_prediction.calibration_validation_split import (
+from sol_baselines_harness.calibration.cache_prediction.calibration_validation_split import (
     CalibrationValidationSplit,
     CalibrationValidationSplitError,
     load_calibration_validation_split_manifest,

@@ -34,18 +34,18 @@ from pathlib import Path
 from typing import Any, Dict, FrozenSet, List, Optional, Sequence
 
 # Add the parent scripts/ to sys.path so the orchestrator can import
-# from baselines_harness.native_dispatch when invoked as a module from CLI.
+# from sol_baselines_harness.native_dispatch when invoked as a module from CLI.
 _THIS_PARENT = Path(__file__).resolve().parents[2]
 if str(_THIS_PARENT) not in sys.path:
     sys.path.insert(0, str(_THIS_PARENT))
 
-from baselines_harness.native_env import (  # noqa: E402
+from sol_baselines_harness.native_env import (  # noqa: E402
     DegradedNativeEnvError,
     compute_native_env_hash,
     missing_components,
     native_env_components,
 )
-from baselines_harness.surfaces.base import (  # noqa: E402
+from sol_baselines_harness.surfaces.base import (  # noqa: E402
     HostInfo,
     Surface,
     SurfaceParseResult,
@@ -53,7 +53,7 @@ from baselines_harness.surfaces.base import (  # noqa: E402
     SURFACE_STATUS_SKIPPED,
     VALID_SURFACES,
 )
-from baselines_harness.surfaces.manifest import (  # noqa: E402
+from sol_baselines_harness.surfaces.manifest import (  # noqa: E402
     ManifestBuilder,
     SurfaceManifestEntry,
     now_utc_iso,
@@ -272,7 +272,7 @@ def _emit_trace_json(
         sys.path.insert(0, str(_SCRIPTS_DIR_HERE.parent))
     if str(_SCRIPTS_DIR_HERE) not in sys.path:
         sys.path.insert(0, str(_SCRIPTS_DIR_HERE))
-    from baselines_harness.parse_trace import parse_jsonl_lines
+    from sol_baselines_harness.parse_trace import parse_jsonl_lines
 
     trace_path = bundle_dir / "trace.json"
     if not enabled_surfaces & _EVAL_DRIVING_SURFACES:
@@ -300,7 +300,7 @@ def _emit_trace_json(
             encoding="utf-8",
         )
         return False
-    from baselines_harness.surfaces.subprocess_env import (
+    from sol_baselines_harness.surfaces.subprocess_env import (
         BUILD_TOOLCHAIN_ALLOWED,
         build_subprocess_env,
     )
@@ -511,7 +511,7 @@ class SurfaceOrchestrator:
         selected, the orchestrator writes a marker ``trace.json`` with
         an empty rows list so the bundle dir is consistently shaped.
         """
-        from baselines_harness.surfaces.dispatch_plan import (
+        from sol_baselines_harness.surfaces.dispatch_plan import (
             assert_landed_solution_bytes_unchanged,
             build_dispatch_plan,
         )
@@ -874,7 +874,7 @@ class SurfaceOrchestrator:
             metric-extractor-tunable env-var.
         """
         import hashlib
-        from baselines_harness.surfaces.nvbit_metrics import (
+        from sol_baselines_harness.surfaces.nvbit_metrics import (
             NVBIT_METRICS_USER_ENV_VARS,
             compute_env_filter_hash as compute_metrics_env_filter_hash,
         )

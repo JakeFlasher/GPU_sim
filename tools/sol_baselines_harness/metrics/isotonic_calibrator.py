@@ -56,16 +56,16 @@ from typing import Any, Iterable, Mapping, Sequence
 
 from sklearn.isotonic import IsotonicRegression
 
-from baselines_harness.metrics.framework_contract import (
+from sol_baselines_harness.metrics.framework_contract import (
     CellJoinKey,
 )
-from baselines_harness.metrics.predictor_design_coverage import (
+from sol_baselines_harness.metrics.predictor_design_coverage import (
     PREDICTOR_BUCKET_TYPED_UNAVAILABLE,
     PREDICTOR_BUCKETS,
     PredictorDesignCoverageError,
     lookup_predictor_design_coverage,
 )
-from baselines_harness.metrics.typed_unavailable_bundle import (
+from sol_baselines_harness.metrics.typed_unavailable_bundle import (
     evaluate_coverage_tier,
 )
 

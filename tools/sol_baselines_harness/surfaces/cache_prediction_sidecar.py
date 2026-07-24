@@ -38,16 +38,16 @@ import json
 from pathlib import Path
 from typing import Iterable, List, Mapping, Optional, Sequence, Tuple
 
-from baselines_harness.metrics.framework_contract import (
+from sol_baselines_harness.metrics.framework_contract import (
     InputSidecarDigest,
 )
-from baselines_harness.metrics.predictor_bundle_schema import (
+from sol_baselines_harness.metrics.predictor_bundle_schema import (
     ManifestPairingIndex,
     PredictorBundle,
     PredictorBundleSchemaError,
     validate_predictor_bundle,
 )
-from baselines_harness.surfaces.cache_prediction import (
+from sol_baselines_harness.surfaces.cache_prediction import (
     CachePredictionSurfaceEntry,
     _validate_cache_prediction_surface_entry_pre_attach,
 )

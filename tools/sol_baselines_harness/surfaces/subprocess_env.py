@@ -36,7 +36,7 @@ _SCRIPTS_DIR = _THIS_DIR.parent.parent
 if str(_SCRIPTS_DIR) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS_DIR))
 
-from baselines_harness.native_env import default_cutlass_dir  # noqa: E402
+from sol_baselines_harness.native_env import default_cutlass_dir  # noqa: E402
 
 
 ALLOW_LIST = (

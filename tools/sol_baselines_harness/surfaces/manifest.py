@@ -47,7 +47,7 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Set
 
-from baselines_harness.surfaces.base import (
+from sol_baselines_harness.surfaces.base import (
     HostInfo,
     SURFACE_STATUSES,
     SURFACE_STATUS_FAILED,
@@ -282,7 +282,7 @@ def _host_arch_token(kind: str) -> str:
     other compute capability the host probe classifies; unknown
     inputs return ``sm_unknown``.
     """
-    from baselines_harness.arch_resolver import arch_tag_from_host_kind
+    from sol_baselines_harness.arch_resolver import arch_tag_from_host_kind
     return arch_tag_from_host_kind(kind)
 
 

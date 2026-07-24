@@ -32,19 +32,19 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, List, Optional, Sequence
 
-from baselines_harness.metrics.framework_contract import (
+from sol_baselines_harness.metrics.framework_contract import (
     CellJoinKey,
 )
-from baselines_harness.metrics.pooled_cross_arch_head import (
+from sol_baselines_harness.metrics.pooled_cross_arch_head import (
     PooledHeadFitResult,
 )
-from baselines_harness.metrics.predictor_bundle_schema import (
+from sol_baselines_harness.metrics.predictor_bundle_schema import (
     ManifestPairingIndex,
     PredictorBundle,
     PredictorBundleSchemaError,
     validate_predictor_bundle,
 )
-from baselines_harness.surfaces.base import (
+from sol_baselines_harness.surfaces.base import (
     HostInfo,
     Surface,
     SurfaceParseResult,
@@ -773,7 +773,7 @@ def emit_cache_prediction_surface_entry(
     # for the entry dataclass, so a top-level
     # import here would create a circular import
     # at module load time.
-    from baselines_harness.surfaces.cache_prediction_sidecar import (
+    from sol_baselines_harness.surfaces.cache_prediction_sidecar import (
         CachePredictionSidecarError,
         attach_sidecar_to_surface_entry,
         write_cache_prediction_sidecar,

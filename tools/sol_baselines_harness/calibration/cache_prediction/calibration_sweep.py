@@ -48,32 +48,32 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Sequence
 
-from baselines_harness.calibration.cache_prediction.corpus_manifest import (
+from sol_baselines_harness.calibration.cache_prediction.corpus_manifest import (
     CalibrationCorpusManifest,
     load_calibration_corpus_manifest,
 )
-from baselines_harness.calibration.cache_prediction.label_parser import (
+from sol_baselines_harness.calibration.cache_prediction.label_parser import (
     NcuLabelParserError,
     NcuLabelRecord,
 )
-from baselines_harness.calibration.cache_prediction.ncu_harvester import (
+from sol_baselines_harness.calibration.cache_prediction.ncu_harvester import (
     NcuHarvesterError,
     _run_checked_ncu,
     harvest_ncu_label_with_provenance,
     validate_ncu_label_provenance,
 )
-from baselines_harness.metrics.framework_contract import (
+from sol_baselines_harness.metrics.framework_contract import (
     FrameworkContractError,
     cell_join_key_from_ledger_entry,
 )
-from baselines_harness.metrics.predictor_design_coverage import (
+from sol_baselines_harness.metrics.predictor_design_coverage import (
     PREDICTOR_BUCKET_TYPED_UNAVAILABLE,
     PREDICTOR_BUCKETS,
     PREDICTOR_DESIGN_COVERAGE_BY_CELL,
     PredictorDesignCoverageError,
     lookup_predictor_design_coverage,
 )
-from baselines_harness.metrics.warmup_protocol import (
+from sol_baselines_harness.metrics.warmup_protocol import (
     CACHE_INITIAL_STATE_COLD,
     CACHE_INITIAL_STATE_WARM,
     WARMUP_PROTOCOL_NCU_LAUNCH_SKIP_N_COUNT_1,
