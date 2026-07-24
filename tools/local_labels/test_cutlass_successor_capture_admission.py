@@ -24,10 +24,20 @@ ROSTER_ROWS = {
 }
 
 
-_REPORT_CSV = """ID,Kernel Name,Metric Name,Metric Value
-0,_Zsynthetic_kernel,gpc__cycles_elapsed.max,1
-0,_Zsynthetic_kernel,gpu__time_duration.sum,1
-"""
+_REPORT_CSV = '''ID,Kernel Name,Block Size,Grid Size,Device,Metric Name,Metric Value
+0,_Zsynthetic_kernel,"32,1,1","1,1,1",NVIDIA GeForce RTX 3090 Ti,gpc__cycles_elapsed.max,1
+0,_Zsynthetic_kernel,"32,1,1","1,1,1",NVIDIA GeForce RTX 3090 Ti,gpu__time_duration.sum,1
+'''
+_REPORT_IDENTITY_COLUMNS = [
+    "ID", "Device", "Kernel Name", "Block Size", "Grid Size",
+]
+_REPORT_IDENTITY = {
+    "ID": "0",
+    "Device": "NVIDIA GeForce RTX 3090 Ti",
+    "Kernel Name": "_Zsynthetic_kernel",
+    "Block Size": "32,1,1",
+    "Grid Size": "1,1,1",
+}
 
 
 @pytest.fixture(autouse=True)
@@ -48,8 +58,8 @@ def _report_sidecar() -> dict:
 
 def _report_observation() -> dict:
     observation = {
-        "identity_columns": ["ID", "Kernel Name"],
-        "identity": {"ID": "0", "Kernel Name": "_Zsynthetic_kernel"},
+        "identity_columns": list(_REPORT_IDENTITY_COLUMNS),
+        "identity": dict(_REPORT_IDENTITY),
         "report_sha256": "unused",
     }
     return observation
@@ -77,7 +87,12 @@ def test_ncu_report_metric_disagreement_is_rejected(tmp_path: Path, monkeypatch)
 def test_ncu_report_multiple_launches_are_rejected(tmp_path: Path, monkeypatch):
     report = tmp_path / "run.ncu-rep"
     report.write_bytes(b"report")
-    csv = "ID,Kernel Name,Metric Name,Metric Value\n0,_Zsynthetic_kernel,gpc__cycles_elapsed.max,1\n1,_Zsynthetic_kernel,gpc__cycles_elapsed.max,1\n0,_Zsynthetic_kernel,gpu__time_duration.sum,1\n1,_Zsynthetic_kernel,gpu__time_duration.sum,1\n"
+    csv = '''ID,Kernel Name,Block Size,Grid Size,Device,Metric Name,Metric Value
+0,_Zsynthetic_kernel,"32,1,1","1,1,1",NVIDIA GeForce RTX 3090 Ti,gpc__cycles_elapsed.max,1
+1,_Zsynthetic_kernel,"32,1,1","1,1,1",NVIDIA GeForce RTX 3090 Ti,gpc__cycles_elapsed.max,1
+0,_Zsynthetic_kernel,"32,1,1","1,1,1",NVIDIA GeForce RTX 3090 Ti,gpu__time_duration.sum,1
+1,_Zsynthetic_kernel,"32,1,1","1,1,1",NVIDIA GeForce RTX 3090 Ti,gpu__time_duration.sum,1
+'''
     monkeypatch.setattr(admit, "_import_ncu_report_csv", lambda path: (csv, None))
     with pytest.raises(admit.AdmissionError, match="metric extraction failed"):
         admit._verify_ncu_report(report, admit.sha256_bytes(report.read_bytes()), _report_sidecar(), _report_observation())
@@ -255,7 +270,8 @@ def _receipt(root: Path, row: dict, kind: str, index: int) -> Path:
                 "schema_version": 1, "kind": "ncu_details_csv_launch_observation",
                 "kernel_name_base": "mangled", "requested_launch_skip": 0,
                 "requested_launch_count": 1, "report_sha256": hashlib.sha256(report_payload).hexdigest(),
-                "identity_columns": ["ID", "Kernel Name"], "identity": {"ID": "0", "Kernel Name": "_Zsynthetic_kernel"},
+                "identity_columns": list(_REPORT_IDENTITY_COLUMNS),
+                "identity": dict(_REPORT_IDENTITY),
             }
             observation["observation_sha256"] = admit.canonical_sha(observation)
             payload = json.dumps(observation, sort_keys=True).encode()
