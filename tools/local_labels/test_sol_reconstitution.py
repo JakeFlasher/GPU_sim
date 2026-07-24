@@ -160,11 +160,22 @@ def test_real_sol_execution_identity_is_repo_local_and_cuda_132():
     )
 
 
-def test_real_native_environment_matches_certified_torch_212_stack():
-    fingerprint = sr.native_env_fingerprint({"PATH": os.environ.get("PATH", "")})
-    assert fingerprint["degraded"] is False
-    assert fingerprint["hash"] == sr.CERTIFIED_NATIVE_ENV_HASH
-    assert fingerprint["components"]["torch_version"] == "2.12.0+cu130"
+def test_certified_native_environment_authority_is_fail_closed(monkeypatch):
+    authority = json.loads(sr.SOL_NATIVE_ENV_FINGERPRINT.read_text(encoding="utf-8"))
+    certified = "91e4f753cc8a4c3a7a53f3217d9a89fcd00a13b47678295dd8952934aad10363"
+    assert sr.CERTIFIED_NATIVE_ENV_HASH == certified
+    assert authority["native_env_hash"] == certified
+    assert authority["components"]["torch_version"] == "2.12.0+cu130"
+
+    def downstream_prerequisite():
+        raise AssertionError("downstream prerequisite reached")
+
+    monkeypatch.setattr(sr, "verify_probe_config", downstream_prerequisite)
+    with pytest.raises(sr.EnvironmentContractError, match="uncertified SOL native"):
+        sr.build_probe_contract(
+            native_env_hash="0" * 64,
+            outer_timeout=sr.MIN_OUTER_TIMEOUT_SECONDS,
+        )
 
 
 def test_sol_execution_identity_rejects_external_package_source(monkeypatch):
