@@ -1089,6 +1089,236 @@ def _generated_sol_cell(
     return matrix, cell
 
 
+def _fixture_only_launch_set_plan(tmp_path, *, cardinality=3):
+    matrix, cell = _generated_sol_cell()
+    pins = json.loads(cc.DEFAULT_PINS.read_text())
+    pins["toolchain"]["nvcc_release"] = "13.2"
+    invocation = cell["invocation"]
+    binary = cc.REPO_ROOT / invocation["executable_path"]
+    cell_dir = tmp_path / "must-not-exist"
+    plan = cc.build_fixture_only_launch_set_plan(
+        cell=cell, binary=binary, invocation=invocation,
+        cell_dir=cell_dir, matrix=matrix, pins=pins,
+        trace_inventory_cardinality=cardinality,
+    )
+    return plan, matrix, cell, pins, binary, cell_dir
+
+
+def test_fixture_only_launch_set_plan_has_exact_command_and_artifacts(tmp_path):
+    plan, matrix, cell, pins, binary, cell_dir = (
+        _fixture_only_launch_set_plan(tmp_path)
+    )
+    invocation = cell["invocation"]
+    identity = cell["identity"]
+    shape = invocation["logical_workload"]["value"]
+    metrics = matrix["metric_registry"]["collection"][
+        "selected_unit_metrics"
+    ]
+    expected = [
+        str(cc.LABEL_DRIVER), "--device", matrix["arch"],
+        "--slug", identity["slug"],
+        "--shape-point", shape,
+        "--shape-binding", "logical-workload",
+        "--repeat", "0", "--launch", "0",
+        "--binary", str(binary),
+        "--warmup", "1",
+        "--target-processes", "all",
+        "--filter-mode", "global",
+        "--replay-mode", "kernel",
+        "--cache-control", "all",
+        "--clock-control", "none",
+        "--profile-from-start", "off",
+        "--launch-skip", "0",
+        "--launch-count", "4",
+        "--out-dir", str(cell_dir / "labels"),
+        "--expected-cuda-release", "13.2",
+        "--expected-ncu-version-prefix",
+        pins["toolchain"]["ncu_version_prefix"],
+        "--publication-metric-scope", "cycles_only_binding",
+    ]
+    for metric in metrics:
+        expected += ["--unit-metric", metric]
+    expected += ["--", *invocation["label_app_args"]]
+    assert plan["command"] == expected
+    assert plan["trace_inventory_cardinality"] == 3
+    assert plan["driver_selector_count"] == 4
+    assert plan["ncu_launch_protocol"] == {
+        "ncu_target_processes": "all",
+        "ncu_filter_mode": "global",
+        "ncu_replay_mode": "kernel",
+        "ncu_cache_control": "all",
+        "ncu_clock_control": "none",
+        "ncu_profile_from_start": False,
+        "ncu_launch_skip": 0,
+        "ncu_launch_count": 4,
+    }
+    for _field, option in cc._EXPLICIT_NCU_DRIVER_FIELDS:
+        assert plan["command"].count(option) == 1
+    separator = plan["command"].index("--")
+    assert plan["command"][separator + 1:] == invocation["label_app_args"]
+    observed_metrics = [
+        plan["command"][index + 1]
+        for index, value in enumerate(plan["command"])
+        if value == "--unit-metric"
+    ]
+    assert observed_metrics == metrics
+
+    assert [path.name for path in plan["fixed_artifacts"]] == [
+        "run_0_launch_set.ncu-rep",
+        "run_0_launch_set.details.csv",
+        "run_0_launch_set.details.stderr",
+        "run_0_launch_set.launch_metrics.json",
+        "run_0_launch_set.details_export_receipt.json",
+        "run_0_launch_set.launch_inventory.json",
+        "run_0_launch_set.execution_identity.json",
+        "label_run_manifest_0_launch_set.json",
+        "label_launch_set_capture_manifest.json",
+    ]
+    assert [path.name for path in plan["label_sidecars"]] == [
+        "label_0_0.json", "label_0_1.json", "label_0_2.json",
+    ]
+    assert all(path.parent == plan["cell_root"] for path in (
+        *plan["fixed_artifacts"], *plan["label_sidecars"],
+    ))
+    assert "run_0_0.ncu-rep" not in {
+        path.name for path in plan["fixed_artifacts"]
+    }
+    assert not cell_dir.exists()
+
+
+@pytest.mark.parametrize(
+    "cardinality",
+    [None, True, False, "3", 0, -1, cc.ncu_capture_contract.MAX_NCU_SELECTOR],
+)
+def test_fixture_only_launch_set_plan_rejects_invalid_cardinality(
+    tmp_path, cardinality,
+):
+    matrix, cell = _generated_sol_cell()
+    pins = json.loads(cc.DEFAULT_PINS.read_text())
+    pins["toolchain"]["nvcc_release"] = "13.2"
+    invocation = cell["invocation"]
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        cc.build_fixture_only_launch_set_plan(
+            cell=cell,
+            binary=cc.REPO_ROOT / invocation["executable_path"],
+            invocation=invocation, cell_dir=tmp_path / "absent",
+            matrix=matrix, pins=pins,
+            trace_inventory_cardinality=cardinality,
+        )
+    assert caught.value.code == (
+        "label_launch_set_inventory_cardinality_invalid"
+    )
+    assert not (tmp_path / "absent").exists()
+
+
+def test_fixture_only_launch_set_plan_accepts_upper_selector_boundary(tmp_path):
+    cardinality = cc.ncu_capture_contract.MAX_NCU_SELECTOR - 1
+    plan, *_rest = _fixture_only_launch_set_plan(
+        tmp_path, cardinality=cardinality,
+    )
+    assert plan["driver_selector_count"] == (
+        cc.ncu_capture_contract.MAX_NCU_SELECTOR
+    )
+    sidecars = plan["label_sidecars"]
+    assert len(sidecars) == cardinality
+    assert sidecars[0].name == "label_0_0.json"
+    assert sidecars[-1].name == f"label_0_{cardinality - 1}.json"
+    full_slice = sidecars[:]
+    assert isinstance(full_slice, cc._PlannedLabelSidecars)
+    assert len(full_slice) == cardinality
+    assert full_slice[0] == sidecars[0]
+    assert full_slice[-1] == sidecars[-1]
+    with pytest.raises(TypeError):
+        sidecars[0.0]
+
+
+def test_fixture_only_launch_set_plan_accepts_one_inventory_row(tmp_path):
+    plan, *_rest = _fixture_only_launch_set_plan(tmp_path, cardinality=1)
+    assert plan["driver_selector_count"] == 2
+    assert [path.name for path in plan["label_sidecars"]] == [
+        "label_0_0.json",
+    ]
+
+
+@pytest.mark.parametrize("mutation", ["missing", "duplicate", "unknown"])
+def test_fixture_only_launch_set_plan_reuses_metric_contract(
+    tmp_path, mutation,
+):
+    matrix, cell = _generated_sol_cell()
+    pins = json.loads(cc.DEFAULT_PINS.read_text())
+    pins["toolchain"]["nvcc_release"] = "13.2"
+    metrics = matrix["metric_registry"]["collection"][
+        "selected_unit_metrics"
+    ]
+    if mutation == "missing":
+        metrics.pop()
+    elif mutation == "duplicate":
+        metrics[-1] = metrics[0]
+    else:
+        metrics[-1] = "synthetic__unknown.sum"
+    invocation = cell["invocation"]
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        cc.build_fixture_only_launch_set_plan(
+            cell=cell,
+            binary=cc.REPO_ROOT / invocation["executable_path"],
+            invocation=invocation, cell_dir=tmp_path / "absent",
+            matrix=matrix, pins=pins, trace_inventory_cardinality=1,
+        )
+    assert caught.value.code == "matrix_metric_selection_drift"
+
+
+def test_fixture_only_launch_set_plan_reuses_toolchain_and_shape_refusals(
+    tmp_path,
+):
+    matrix, cell = _generated_sol_cell()
+    pins = json.loads(cc.DEFAULT_PINS.read_text())
+    pins["toolchain"]["nvcc_release"] = "13.3"
+    invocation = cell["invocation"]
+    kwargs = {
+        "cell": cell,
+        "binary": cc.REPO_ROOT / invocation["executable_path"],
+        "invocation": invocation,
+        "cell_dir": tmp_path / "absent",
+        "matrix": matrix,
+        "pins": pins,
+        "trace_inventory_cardinality": 1,
+    }
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        cc.build_fixture_only_launch_set_plan(**kwargs)
+    assert caught.value.code == "label_toolchain_contract_invalid"
+
+    pins["toolchain"]["nvcc_release"] = "13.2"
+    invocation["label_app_args"] += ["--shape-point", "forged"]
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        cc.build_fixture_only_launch_set_plan(**kwargs)
+    assert caught.value.code == "sol_shape_token_forwarded"
+
+
+def test_fixture_only_launch_set_plan_is_pure(tmp_path, monkeypatch):
+    def unexpected(*_args, **_kwargs):
+        pytest.fail("fixture-only launch-set planning executed a process")
+
+    monkeypatch.setattr(cc, "_run_logged", unexpected)
+    monkeypatch.setattr(cc.subprocess, "run", unexpected)
+    plan, *_rest, cell_dir = _fixture_only_launch_set_plan(tmp_path)
+    assert plan["command"]
+    assert not cell_dir.exists()
+
+
+def test_fixture_only_launch_set_plan_types_control_contract_failure(
+    tmp_path, monkeypatch,
+):
+    def refuse(_protocol):
+        raise ValueError("synthetic protocol refusal")
+
+    monkeypatch.setattr(
+        cc.ncu_capture_contract, "validate_measurement_protocol", refuse,
+    )
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        _fixture_only_launch_set_plan(tmp_path)
+    assert caught.value.code == "label_launch_set_control_contract_invalid"
+
+
 def _certified_sol_env(cell: dict) -> dict[str, str]:
     """Construct the exact runner-facing environment without probing a GPU."""
     environment = cell["invocation"]["adapter_contract"]["environment"]
@@ -4008,6 +4238,28 @@ def test_sol_label_consumer_keeps_shape_metadata_out_of_target_argv(
         bind_supplemental_toolchain=True,
     )
     command = observed["command"]
+    expected = [
+        str(cc.LABEL_DRIVER), "--device", matrix["arch"],
+        "--slug", slug,
+        "--shape-point", shape,
+        "--shape-binding", "logical-workload",
+        "--repeat", "0", "--launch", "0",
+        "--binary", str(binary),
+        "--warmup", "1",
+        "--cache-control", "all",
+        "--clock-control", "none",
+        "--out-dir", str(cell_dir / "labels"),
+        "--expected-cuda-release", "13.2",
+        "--expected-ncu-version-prefix",
+        pins["toolchain"]["ncu_version_prefix"],
+        "--publication-metric-scope", "cycles_only_binding",
+    ]
+    for metric in matrix["metric_registry"]["collection"][
+        "selected_unit_metrics"
+    ]:
+        expected += ["--unit-metric", metric]
+    expected += ["--", *invocation["label_app_args"]]
+    assert command == expected
     separator = command.index("--")
     assert command[command.index("--shape-binding") + 1] == "logical-workload"
     assert command[command.index("--expected-cuda-release") + 1] == "13.2"

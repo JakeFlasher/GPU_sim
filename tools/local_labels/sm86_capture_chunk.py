@@ -31,6 +31,7 @@ import subprocess
 import sys
 import time
 import uuid
+from collections.abc import Sequence
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable
@@ -47,6 +48,7 @@ import archive_preparation_failure as prep_archive  # noqa: E402
 import archive_capture_defect_attempt as capture_defect_archive  # noqa: E402
 import capture_budget_route as budget_route  # noqa: E402
 import capture_toolchain_contract as toolchain_contract  # noqa: E402
+import ncu_capture_contract  # noqa: E402
 import sol_capture_environment as sol_env  # noqa: E402
 import sol_definition_equivalence as sol_def  # noqa: E402
 import sol_reconstitution as sol_recon  # noqa: E402
@@ -3833,17 +3835,87 @@ def validate_sol_phase_env(
     }
 
 
-def capture_label(
+class _PlannedLabelSidecars(Sequence[Path]):
+    """Immutable lazy sidecar paths for large valid selector cardinalities."""
+
+    __slots__ = ("_cell_root", "_ordinals")
+
+    def __init__(self, cell_root: Path, ordinals: int | range) -> None:
+        self._cell_root = cell_root
+        self._ordinals = (
+            range(ordinals) if type(ordinals) is int else ordinals
+        )
+
+    def __len__(self) -> int:
+        return len(self._ordinals)
+
+    def __getitem__(
+        self, index: int | slice,
+    ) -> Path | _PlannedLabelSidecars:
+        if isinstance(index, slice):
+            return _PlannedLabelSidecars(
+                self._cell_root, self._ordinals[index],
+            )
+        ordinal = self._ordinals[index]
+        return self._cell_root / f"label_0_{ordinal}.json"
+
+
+_EXPLICIT_NCU_DRIVER_FIELDS = (
+    ("ncu_target_processes", "--target-processes"),
+    ("ncu_filter_mode", "--filter-mode"),
+    ("ncu_replay_mode", "--replay-mode"),
+    ("ncu_cache_control", "--cache-control"),
+    ("ncu_clock_control", "--clock-control"),
+    ("ncu_profile_from_start", "--profile-from-start"),
+    ("ncu_launch_skip", "--launch-skip"),
+    ("ncu_launch_count", "--launch-count"),
+)
+_LAUNCH_SET_FIXED_ARTIFACT_NAMES = (
+    "run_0_launch_set.ncu-rep",
+    "run_0_launch_set.details.csv",
+    "run_0_launch_set.details.stderr",
+    "run_0_launch_set.launch_metrics.json",
+    "run_0_launch_set.details_export_receipt.json",
+    "run_0_launch_set.launch_inventory.json",
+    "run_0_launch_set.execution_identity.json",
+    "label_run_manifest_0_launch_set.json",
+    "label_launch_set_capture_manifest.json",
+)
+
+
+def _explicit_ncu_driver_args(protocol: dict[str, Any]) -> list[str]:
+    try:
+        ncu_capture_contract.validate_measurement_protocol(protocol)
+    except ValueError as exc:
+        raise ChunkRefusal(
+            "label_launch_set_control_contract_invalid", str(exc)
+        ) from exc
+    expected_fields = {field for field, _option in _EXPLICIT_NCU_DRIVER_FIELDS}
+    if set(protocol) != expected_fields:
+        raise ChunkRefusal(
+            "label_launch_set_control_contract_invalid",
+            f"unexpected explicit NCU fields: {sorted(set(protocol) - expected_fields)!r}",
+        )
+    result: list[str] = []
+    for field, option in _EXPLICIT_NCU_DRIVER_FIELDS:
+        value = protocol[field]
+        if field == "ncu_profile_from_start":
+            value = "on" if value else "off"
+        result += [option, str(value)]
+    return result
+
+
+def _prepare_label_capture_command(
     *, cell: dict, binary: Path, invocation: dict, cell_dir: Path,
-    matrix: dict, pins: dict, timeout_s: float, runtime_cwd: Path | None = None,
-    runtime_env: dict[str, str] | None = None,
-    phase_result_validator: Callable[[dict[str, str], str], dict] | None = None,
-    label_launch_index_override: int | None = None,
-    kernel_name_selector: str | None = None,
-    artifact_tag: str = "label",
-    execution_source_commit: str | None = None,
-    bind_supplemental_toolchain: bool = False,
-) -> dict:
+    matrix: dict, pins: dict,
+    label_launch_index_override: int | None,
+    kernel_name_selector: str | None,
+    artifact_tag: str,
+    execution_source_commit: str | None,
+    bind_supplemental_toolchain: bool,
+    explicit_ncu_protocol: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Validate and construct a label-driver command without side effects."""
     identity = cell["identity"]
     source_commit = (
         matrix["source_commit"]
@@ -3854,7 +3926,9 @@ def capture_label(
             "label_source_commit_invalid", repr(source_commit)
         )
     labels_root = cell_dir / "labels"
-    unit_metrics = tuple(matrix["metric_registry"]["collection"]["selected_unit_metrics"])
+    unit_metrics = tuple(
+        matrix["metric_registry"]["collection"]["selected_unit_metrics"]
+    )
     expected_metrics = tuple(registry_unit_metrics(matrix["arch"]))
     if set(unit_metrics) != set(expected_metrics) or len(unit_metrics) != len(
         expected_metrics
@@ -3947,9 +4021,13 @@ def capture_label(
         "--shape-binding", shape_binding,
         "--repeat", "0", "--launch", str(label_launch_index),
         "--binary", str(binary),
-        "--warmup", str(label_driver_warmup), "--cache-control", "all",
-        "--clock-control", "none", "--out-dir", str(labels_root),
+        "--warmup", str(label_driver_warmup),
     ]
+    if explicit_ncu_protocol is None:
+        command += ["--cache-control", "all", "--clock-control", "none"]
+    else:
+        command += _explicit_ncu_driver_args(explicit_ncu_protocol)
+    command += ["--out-dir", str(labels_root)]
     if bind_supplemental_toolchain:
         assert expected_cuda_release is not None
         assert expected_ncu_prefix is not None
@@ -3977,6 +4055,117 @@ def capture_label(
         raise ChunkRefusal(
             "label_driver_identity_invalid", repr(command[0])
         )
+    return {
+        "command": command,
+        "identity": identity,
+        "source_commit": source_commit,
+        "labels_root": labels_root,
+        "unit_metrics": unit_metrics,
+        "publication_scope": publication_scope,
+        "expected_cuda_release": expected_cuda_release,
+        "expected_ncu_prefix": expected_ncu_prefix,
+        "label_shape_point": label_shape_point,
+        "logical_workload": logical_workload,
+        "launch_contract": launch_contract,
+        "shape_binding": shape_binding,
+        "label_launch_index": label_launch_index,
+    }
+
+
+def build_fixture_only_launch_set_plan(
+    *, cell: dict, binary: Path, invocation: dict, cell_dir: Path,
+    matrix: dict, pins: dict, trace_inventory_cardinality: int,
+) -> dict[str, Any]:
+    """Plan one supplemental launch-set command; execute and emit nothing."""
+    if (
+        type(trace_inventory_cardinality) is not int
+        or not 1 <= trace_inventory_cardinality
+        < ncu_capture_contract.MAX_NCU_SELECTOR
+    ):
+        raise ChunkRefusal(
+            "label_launch_set_inventory_cardinality_invalid",
+            repr(trace_inventory_cardinality),
+        )
+    identity = cell.get("identity")
+    if (
+        not isinstance(identity, dict)
+        or identity.get("roster_source") != "sol_execbench"
+        or invocation.get("adapter_kind") != "sol_execbench"
+        or invocation.get("shape_delivery")
+        != "adapter_consumes_logical_shape"
+    ):
+        raise ChunkRefusal(
+            "label_launch_request_invalid",
+            "fixture-only launch-set plans require an SOL logical workload",
+        )
+    driver_selector_count = trace_inventory_cardinality + 1
+    protocol = {
+        "ncu_target_processes": "all",
+        "ncu_filter_mode": "global",
+        "ncu_replay_mode": "kernel",
+        "ncu_cache_control": "all",
+        "ncu_clock_control": "none",
+        "ncu_profile_from_start": False,
+        "ncu_launch_skip": 0,
+        "ncu_launch_count": driver_selector_count,
+    }
+    prepared = _prepare_label_capture_command(
+        cell=cell, binary=binary, invocation=invocation, cell_dir=cell_dir,
+        matrix=matrix, pins=pins, label_launch_index_override=0,
+        kernel_name_selector=None, artifact_tag="label_launch_set",
+        execution_source_commit=None, bind_supplemental_toolchain=True,
+        explicit_ncu_protocol=protocol,
+    )
+    cell_root = (
+        prepared["labels_root"] / matrix["arch"] / identity["slug"]
+        / prepared["label_shape_point"]
+    )
+    return {
+        "command": prepared["command"],
+        "trace_inventory_cardinality": trace_inventory_cardinality,
+        "driver_selector_count": driver_selector_count,
+        "ncu_launch_protocol": protocol,
+        "cell_root": cell_root,
+        "fixed_artifacts": tuple(
+            cell_root / name for name in _LAUNCH_SET_FIXED_ARTIFACT_NAMES
+        ),
+        "label_sidecars": _PlannedLabelSidecars(
+            cell_root, trace_inventory_cardinality,
+        ),
+    }
+
+
+def capture_label(
+    *, cell: dict, binary: Path, invocation: dict, cell_dir: Path,
+    matrix: dict, pins: dict, timeout_s: float, runtime_cwd: Path | None = None,
+    runtime_env: dict[str, str] | None = None,
+    phase_result_validator: Callable[[dict[str, str], str], dict] | None = None,
+    label_launch_index_override: int | None = None,
+    kernel_name_selector: str | None = None,
+    artifact_tag: str = "label",
+    execution_source_commit: str | None = None,
+    bind_supplemental_toolchain: bool = False,
+) -> dict:
+    prepared = _prepare_label_capture_command(
+        cell=cell, binary=binary, invocation=invocation, cell_dir=cell_dir,
+        matrix=matrix, pins=pins,
+        label_launch_index_override=label_launch_index_override,
+        kernel_name_selector=kernel_name_selector, artifact_tag=artifact_tag,
+        execution_source_commit=execution_source_commit,
+        bind_supplemental_toolchain=bind_supplemental_toolchain,
+    )
+    command = prepared["command"]
+    identity = prepared["identity"]
+    source_commit = prepared["source_commit"]
+    labels_root = prepared["labels_root"]
+    unit_metrics = prepared["unit_metrics"]
+    publication_scope = prepared["publication_scope"]
+    expected_cuda_release = prepared["expected_cuda_release"]
+    label_shape_point = prepared["label_shape_point"]
+    logical_workload = prepared["logical_workload"]
+    launch_contract = prepared["launch_contract"]
+    shape_binding = prepared["shape_binding"]
+    label_launch_index = prepared["label_launch_index"]
     label_env = (
         dict(runtime_env) if runtime_env is not None else dict(os.environ)
     )
