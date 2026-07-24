@@ -45,11 +45,32 @@ def test_campaign_gate_pins_interpreter_and_exact_owner_tests():
     assert "${PYTHON" not in script
     assert '"$@"' not in script
     assert "-m campaign_evidence" not in script
+    assert 'export SM86_REFERENCE_CAPTURE_ROOT="$archive_root"' in script
     assert "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1" in script
-    for node_id in (
-        "test_archive_interrupted_sol_runnability.py::"
+
+    expected_node_ids = (
+        "tools/local_labels/test_archive_interrupted_sol_runnability.py::"
         "test_fixed_production_archive_is_still_verified",
-        "test_campaign_done_manifest.py::"
+        "tools/local_labels/test_campaign_done_manifest.py::"
         "test_only_exact_historical_bootstrap_receives_schema_compatibility",
-    ):
-        assert script.count(node_id) == 1
+        "tools/local_labels/test_sm86_capture_matrix.py::"
+        "test_committed_artifact_is_exact_deterministic_rebuild",
+        "tools/local_labels/test_sm86_capture_matrix.py::"
+        "test_external_authority_path_is_pinned_and_rederivable",
+        "tools/local_labels/test_sm86_capture_matrix.py::"
+        "test_sol_static_control_toolchain_is_host_verified",
+        "tools/local_labels/test_sm86_capture_matrix.py::"
+        "test_strided_batched_vendor_control_dispatches_post_trace",
+        "tools/local_labels/test_sm86_capture_matrix.py::"
+        "test_sol_logical_workload_hashes_and_counts_rederive",
+        "tools/local_labels/test_sm86_capture_matrix.py::"
+        "test_sol_bridge_rejects_wrong_definition_binding",
+        "tools/local_labels/test_sm86_capture_matrix.py::"
+        "test_sol_bridge_rejects_reduced_to_native_misroute",
+    )
+    observed_node_ids = tuple(
+        line.rstrip().removesuffix("\\").strip()
+        for line in script.splitlines()
+        if "::" in line
+    )
+    assert observed_node_ids == expected_node_ids

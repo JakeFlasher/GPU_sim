@@ -29,7 +29,7 @@ _COMMITTED = (
 
 @pytest.fixture(scope="module")
 def matrix() -> dict:
-    return bcm.build_matrix(_REPO, require_head_match=False)
+    return _committed_matrix()
 
 
 def _committed_matrix() -> dict:
@@ -171,6 +171,8 @@ def test_frozen_v1_rejects_valid_registry_with_wrong_projection_or_pin() -> None
 
     projection_mutation = _committed_matrix()
     projection_mutation["metric_registry"]["metric_count"] += 1
+    projection_mutation["input_pins"]["metric_registry"]["sha256"] = digest
+    _reseal(projection_mutation)
     problems = bcm.validate_matrix(
         projection_mutation,
         _REPO,
@@ -230,12 +232,13 @@ def _reseal(matrix: dict) -> None:
     })
 
 
-def test_schema_is_valid_and_generated_matrix_conforms(matrix):
+def test_schema_is_valid_and_committed_frozen_matrix_conforms(matrix):
     jsonschema.Draft202012Validator.check_schema(_SCHEMA)
     jsonschema.validate(matrix, _SCHEMA)
-    assert bcm.validate_matrix(matrix, _REPO) == []
+    assert bcm.validate_matrix(matrix, _REPO, validation_mode="frozen_v1") == []
 
 
+@pytest.mark.campaign_evidence
 def test_committed_artifact_is_exact_deterministic_rebuild(matrix):
     assert _COMMITTED.is_file(), "generate the committed matrix artifact"
     committed = json.loads(_COMMITTED.read_text())
@@ -243,6 +246,7 @@ def test_committed_artifact_is_exact_deterministic_rebuild(matrix):
     assert bcm.build_matrix(_REPO, require_head_match=False) == matrix
 
 
+@pytest.mark.campaign_evidence
 def test_external_authority_path_is_pinned_and_rederivable(tmp_path):
     external = tmp_path / "capture_roster_authority_sm86.json"
     external.write_bytes((_REPO / bcm.AUTHORITY_PATH).read_bytes())
@@ -444,14 +448,19 @@ def test_simbench_capture_overrides_and_launch_contracts_are_closed(matrix):
         )
 
 
-def test_sol_static_control_toolchain_is_closed_and_host_verified():
+@pytest.mark.campaign_evidence
+def test_sol_static_control_toolchain_is_host_verified():
     bcm._verify_static_control_toolchain(bcm.SOL_STATIC_CONTROL_REBIND)
+
+
+def test_sol_static_control_toolchain_rejects_contract_drift():
     drifted = copy.deepcopy(bcm.SOL_STATIC_CONTROL_REBIND)
     drifted["allowed_code_arches"].reverse()
     with pytest.raises(bcm.MatrixBuildError, match="rebind contract drift"):
         bcm._verify_static_control_toolchain(drifted)
 
 
+@pytest.mark.campaign_evidence
 def test_strided_batched_vendor_control_dispatches_post_trace(matrix):
     cell = next(
         row for row in matrix["cells"]
@@ -606,6 +615,7 @@ def test_sol_bridge_binds_exact_native_and_reduced_workloads(matrix):
     ]
 
 
+@pytest.mark.campaign_evidence
 def test_sol_logical_workload_hashes_and_counts_rederive(matrix):
     sol = [
         cell for cell in matrix["cells"]
@@ -741,8 +751,8 @@ def test_full_registry_identity_has_no_silent_metric_omission(matrix):
     omitted = reg["collection"]["not_collected_registry_metrics"]
     assert len(selected) == reg["collection"]["selected_registry_metric_count"]
     assert len(selected) + len(omitted) == 61
-    assert matrix["input_pins"]["metric_registry"]["sha256"] == bcm.sha256_file(
-        _REPO / bcm.METRIC_REGISTRY_PATH
+    assert matrix["input_pins"]["metric_registry"]["sha256"] == (
+        bcm.FROZEN_V1_REGISTRY_SHA256
     )
 
 
@@ -907,6 +917,7 @@ def test_sol_bridge_rejects_missing_shape_and_stale_solution_hash():
         )
 
 
+@pytest.mark.campaign_evidence
 def test_sol_bridge_rejects_wrong_definition_binding(monkeypatch):
     authority = json.loads((_REPO / bcm.AUTHORITY_PATH).read_text())
     native = next(
@@ -936,7 +947,8 @@ def test_sol_bridge_rejects_wrong_definition_binding(monkeypatch):
         bcm._sol_invocation(native, _REPO, shrink_contract=contract)
 
 
-def test_sol_bridge_rejects_reduced_to_native_misroute_and_fake_shape_token():
+@pytest.mark.campaign_evidence
+def test_sol_bridge_rejects_reduced_to_native_misroute():
     authority = json.loads((_REPO / bcm.AUTHORITY_PATH).read_text())
     reduced = next(
         cell for cell in authority["cells"]
@@ -949,6 +961,8 @@ def test_sol_bridge_rejects_reduced_to_native_misroute_and_fake_shape_token():
     with pytest.raises(bcm.MatrixBuildError, match="misrouted from shrink provenance"):
         bcm._sol_invocation(misrouted, _REPO, shrink_contract=contract)
 
+
+def test_sol_forwarded_argv_rejects_fake_shape_token():
     with pytest.raises(bcm.MatrixBuildError, match="fabricated shape token"):
         bcm._validate_sol_forwarded_argv(
             ["benchmark", "--shape-point", "workloads"],
@@ -1059,7 +1073,7 @@ def test_schema_and_semantics_reject_missing_or_faked_invocation(matrix):
     warm["invocation"]["capture_launch_contract"]["trace_launch_sequence"].reverse()
     _reseal(bad_sequence)
     assert "matrix_content_stale_or_tampered" in bcm.validate_matrix(
-        bad_sequence, _REPO
+        bad_sequence, _REPO, validation_mode="frozen_v1"
     )
 
     mislabeled_vendor_shape = copy.deepcopy(matrix)
@@ -1072,7 +1086,7 @@ def test_schema_and_semantics_reject_missing_or_faked_invocation(matrix):
     vendor["invocation"]["logical_workload"]["value"] = "trace_00"
     _reseal(mislabeled_vendor_shape)
     assert "matrix_content_stale_or_tampered" in bcm.validate_matrix(
-        mislabeled_vendor_shape, _REPO
+        mislabeled_vendor_shape, _REPO, validation_mode="frozen_v1"
     )
 
     missing_fingerprint_pin = copy.deepcopy(matrix)
@@ -1120,7 +1134,9 @@ def test_resealed_pin_or_chunk_tamper_is_detected(matrix):
     stale = copy.deepcopy(matrix)
     stale["authority"]["sha256"] = "f" * 64
     _reseal(stale)
-    assert "matrix_content_stale_or_tampered" in bcm.validate_matrix(stale, _REPO)
+    assert "matrix_content_stale_or_tampered" in bcm.validate_matrix(
+        stale, _REPO, validation_mode="frozen_v1"
+    )
 
     stale_fingerprint = copy.deepcopy(matrix)
     stale_fingerprint["input_pins"]["sol_native_env_fingerprint"][
@@ -1128,7 +1144,7 @@ def test_resealed_pin_or_chunk_tamper_is_detected(matrix):
     ] = "e" * 64
     _reseal(stale_fingerprint)
     assert "matrix_content_stale_or_tampered" in bcm.validate_matrix(
-        stale_fingerprint, _REPO
+        stale_fingerprint, _REPO, validation_mode="frozen_v1"
     )
 
     duplicate = copy.deepcopy(matrix)
@@ -1140,6 +1156,8 @@ def test_resealed_pin_or_chunk_tamper_is_detected(matrix):
         member for chunk in duplicate["chunks"] for member in chunk["cells"]
     ])
     _reseal(duplicate)
-    problems = bcm.validate_matrix(duplicate, _REPO)
+    problems = bcm.validate_matrix(
+        duplicate, _REPO, validation_mode="frozen_v1"
+    )
     assert "chunk_membership_uniqueness" in problems
     assert "chunk_runnable_set_equality" in problems
