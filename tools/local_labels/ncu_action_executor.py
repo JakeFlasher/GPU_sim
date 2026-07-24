@@ -15,7 +15,7 @@ import signal
 import stat
 import subprocess
 import time
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from pathlib import Path
 from typing import NoReturn
@@ -61,6 +61,126 @@ class NcuActionResult:
     returncode: int
     stdout: bytes
     stderr: bytes
+
+
+class _AuthorizedNcuProcPath:
+    __slots__ = ()
+
+
+AUTHORIZED_NCU_PROC_PATH = _AuthorizedNcuProcPath()
+
+_REQUIRED_COLLECTION_ENVIRONMENT = {
+    "LANG": "C",
+    "LANGUAGE": "C",
+    "LC_ALL": "C",
+    "PWD": "/",
+    "PYTHONNOUSERSITE": "1",
+    "LABEL_DRIVER_PRESERVE_FAILED_EVIDENCE": "1",
+}
+_OPTIONAL_COLLECTION_ENVIRONMENT_NAMES = frozenset({
+    "CC",
+    "CUDAHOSTCXX",
+    "CUDA_HOME",
+    "CUTLASS_DIR",
+    "CXX",
+    "FLASHINFER_TRACE_DIR",
+    "HOME",
+    "NVCC_CCBIN",
+    "PYTORCH_ALLOC_CONF",
+    "SOL_EXECBENCH_CAPTURE_REQUEST",
+    "TMPDIR",
+    "XDG_CACHE_HOME",
+    "XDG_CONFIG_HOME",
+})
+_MAX_ENVIRONMENT_VALUE_BYTES = 64 * 1024
+_COLLECTION_PATH = "/usr/local/cuda-13.2/bin:/usr/bin:/bin"
+
+
+@dataclass(frozen=True, init=False)
+class NcuCollectionEnvironment:
+    """One closed, name-allowlisted environment for NCU collection."""
+
+    _items: tuple[tuple[str, str], ...]
+
+    def __init__(self, values: Mapping[str, str]) -> None:
+        if type(values) is not dict:
+            _fail(
+                NCU_ACTION_REQUEST_INVALID,
+                "collection environment is not an exact dictionary",
+            )
+        if any(type(name) is not str for name in values):
+            _fail(
+                NCU_ACTION_REQUEST_INVALID,
+                "collection environment contains a non-string name",
+            )
+        allowed_names = (
+            frozenset(_REQUIRED_COLLECTION_ENVIRONMENT)
+            | _OPTIONAL_COLLECTION_ENVIRONMENT_NAMES
+            | {"PATH"}
+        )
+        names = set(values)
+        unexpected = sorted(names - allowed_names)
+        if unexpected:
+            _fail(
+                NCU_ACTION_REQUEST_INVALID,
+                "collection environment contains non-allowlisted names: "
+                + ", ".join(unexpected),
+            )
+        missing = sorted(
+            (set(_REQUIRED_COLLECTION_ENVIRONMENT) | {"PATH"}) - names
+        )
+        if missing:
+            _fail(
+                NCU_ACTION_REQUEST_INVALID,
+                "collection environment is missing required names: "
+                + ", ".join(missing),
+            )
+        for name, required in _REQUIRED_COLLECTION_ENVIRONMENT.items():
+            if values[name] != required:
+                _fail(
+                    NCU_ACTION_REQUEST_INVALID,
+                    f"collection environment {name} must equal {required!r}",
+                )
+        normalized: list[tuple[str, str]] = []
+        for name in sorted(names):
+            value = values[name]
+            if (
+                type(value) is not str
+                or not value
+                or "\x00" in value
+                or value.splitlines() != [value]
+                or _strict_utf8_size(
+                    value,
+                    code=NCU_ACTION_REQUEST_INVALID,
+                    label=f"collection environment {name}",
+                ) > _MAX_ENVIRONMENT_VALUE_BYTES
+            ):
+                _fail(
+                    NCU_ACTION_REQUEST_INVALID,
+                    f"collection environment {name} is not one bounded value",
+                )
+            normalized.append((name, value))
+        if values["PATH"] != _COLLECTION_PATH:
+            _fail(
+                NCU_ACTION_REQUEST_INVALID,
+                f"collection PATH must equal {_COLLECTION_PATH!r}",
+            )
+        path_parts = values["PATH"].split(os.pathsep)
+        if any(
+            not part
+            or not Path(part).is_absolute()
+            or part.startswith("//")
+            or os.path.normpath(part) != part
+            for part in path_parts
+        ):
+            _fail(
+                NCU_ACTION_REQUEST_INVALID,
+                "collection PATH is not a canonical absolute search list",
+            )
+        object.__setattr__(self, "_items", tuple(normalized))
+
+    def as_dict(self) -> dict[str, str]:
+        return dict(self._items)
 
 
 @dataclass(frozen=True)
@@ -229,6 +349,81 @@ def _validate_action(
             f"timeout_seconds must be finite and in (0, {_MAX_TIMEOUT_SECONDS}]",
         )
     return tuple(action)
+
+
+def _validate_supervised_command(
+    command: Sequence[object], timeout_seconds: float,
+) -> tuple[object, ...]:
+    if isinstance(command, (str, bytes)) or not isinstance(command, Sequence):
+        _fail(
+            NCU_ACTION_REQUEST_INVALID,
+            "supervised command is not a sequence",
+        )
+    try:
+        item_count = len(command)
+    except Exception as exc:
+        raise NcuActionExecutorError(
+            NCU_ACTION_REQUEST_INVALID,
+            f"supervised command count is unavailable: {exc}",
+        ) from exc
+    if not 1 <= item_count <= _MAX_ARGUMENTS:
+        _fail(
+            NCU_ACTION_REQUEST_INVALID,
+            f"supervised command count must be in [1, {_MAX_ARGUMENTS}]",
+        )
+    rendered: list[str] = []
+    template: list[object] = []
+    placeholder_count = 0
+    for index in range(item_count):
+        try:
+            item = command[index]
+        except Exception as exc:
+            raise NcuActionExecutorError(
+                NCU_ACTION_REQUEST_INVALID,
+                f"supervised command item {index} is unavailable: {exc}",
+            ) from exc
+        if item is AUTHORIZED_NCU_PROC_PATH:
+            if index == 0:
+                _fail(
+                    NCU_ACTION_REQUEST_INVALID,
+                    "authorized NCU path cannot be the supervised executable",
+                )
+            placeholder_count += 1
+            rendered.append("/proc/self/fd/3")
+            template.append(item)
+        else:
+            rendered.append(item)
+            template.append(item)
+    validated = _validate_action(rendered, timeout_seconds)
+    if placeholder_count != 1:
+        _fail(
+            NCU_ACTION_REQUEST_INVALID,
+            "supervised command must contain one authorized NCU path placeholder",
+        )
+    executable = validated[0]
+    if (
+        not Path(executable).is_absolute()
+        or executable.startswith("//")
+        or os.path.normpath(executable) != executable
+    ):
+        _fail(
+            NCU_ACTION_REQUEST_INVALID,
+            "supervised executable is not a canonical absolute path",
+        )
+    return tuple(
+        original if original is AUTHORIZED_NCU_PROC_PATH else value
+        for original, value in zip(template, validated, strict=True)
+    )
+
+
+def _render_supervised_command(
+    template: tuple[object, ...], retained: immutable.RetainedExecutable,
+) -> tuple[str, ...]:
+    retained_path = proc_fd_path(retained.descriptor)
+    return tuple(
+        retained_path if item is AUTHORIZED_NCU_PROC_PATH else item
+        for item in template
+    )
 
 
 def _descriptor_identity(descriptor: int) -> tuple[int, int, int]:
@@ -503,6 +698,10 @@ def _collect_bounded(
                 pass
         raise
     finally:
+        # A successful direct child may still leave a descendant holding inherited
+        # capabilities after closing its pipes. The dedicated process group never
+        # survives this synchronous boundary.
+        _signal_group(process, signal.SIGKILL)
         close_errors = _close_monitor_resources(selector, process)
         if close_errors:
             detail = "; ".join(str(error) for error in close_errors)
@@ -520,30 +719,31 @@ def _collect_bounded(
                 ) from close_errors[0]
 
 
-def _run_bounded(
-    descriptor: int,
-    arguments: tuple[str, ...],
+def _run_command_bounded(
+    command: tuple[str, ...],
     *,
-    inherited_descriptors: tuple[int, ...] = (),
+    environment: dict[str, str],
+    working_directory: str,
+    inherited_descriptors: tuple[int, ...],
     timeout_seconds: float,
     max_output_bytes: int,
     timeout_code: str,
     launch_code: str,
 ) -> NcuActionResult:
-    command = [f"/proc/self/fd/{descriptor}", *arguments]
     try:
         process = subprocess.Popen(
             command,
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            env=ncu_action_environment(),
-            pass_fds=(descriptor, *inherited_descriptors),
+            env=environment,
+            cwd=working_directory,
+            pass_fds=inherited_descriptors,
             start_new_session=True,
         )
     except (OSError, ValueError) as exc:
         raise NcuActionExecutorError(
-            launch_code, f"cannot launch retained NCU executable: {exc}"
+            launch_code, f"cannot launch supervised process: {exc}"
         ) from exc
     try:
         return _collect_bounded(
@@ -560,6 +760,29 @@ def _run_bounded(
         raise NcuActionExecutorError(
             launch_code, exc.detail,
         ) from exc
+
+
+def _run_bounded(
+    descriptor: int,
+    arguments: tuple[str, ...],
+    *,
+    inherited_descriptors: tuple[int, ...] = (),
+    timeout_seconds: float,
+    max_output_bytes: int,
+    timeout_code: str,
+    launch_code: str,
+) -> NcuActionResult:
+    command = (f"/proc/self/fd/{descriptor}", *arguments)
+    return _run_command_bounded(
+        command,
+        environment=ncu_action_environment(),
+        working_directory="/",
+        inherited_descriptors=(descriptor, *inherited_descriptors),
+        timeout_seconds=timeout_seconds,
+        max_output_bytes=max_output_bytes,
+        timeout_code=timeout_code,
+        launch_code=launch_code,
+    )
 
 
 def _identity_error(detail: str, cause: BaseException) -> NcuActionExecutorError:
@@ -666,13 +889,11 @@ def _run_and_reverify(
     return result
 
 
-def _execute_opened(
+def _authorize_opened(
     retained: immutable.RetainedExecutable,
     expected: ExpectedNcuIdentity,
-    action: tuple[str, ...],
-    timeout_seconds: float,
     borrowed: _BorrowedActionDescriptors,
-) -> NcuActionResult:
+) -> None:
     if str(retained.path) != expected.resolved_path:
         _fail(
             NCU_EXECUTABLE_IDENTITY_INVALID,
@@ -733,6 +954,16 @@ def _execute_opened(
             ),
         )
     _reverify(retained, borrowed)
+
+
+def _execute_opened(
+    retained: immutable.RetainedExecutable,
+    expected: ExpectedNcuIdentity,
+    action: tuple[str, ...],
+    timeout_seconds: float,
+    borrowed: _BorrowedActionDescriptors,
+) -> NcuActionResult:
+    _authorize_opened(retained, expected, borrowed)
     return _run_and_reverify(
         retained,
         borrowed,
@@ -768,6 +999,63 @@ def execute_ncu_action(
         result = _execute_opened(
             retained, expected, action, timeout_seconds, borrowed,
         )
+    except BaseException as active_error:
+        try:
+            retained.close()
+        except BaseException as close_error:
+            try:
+                active_error.add_note(
+                    f"retained executable close failed: {close_error}"
+                )
+            except (AttributeError, TypeError):
+                pass
+        raise
+    try:
+        retained.close()
+    except BaseException as exc:
+        raise _identity_error("cannot close retained executable", exc) from exc
+    return result
+
+
+def execute_ncu_supervised_child(
+    expected: ExpectedNcuIdentity,
+    command: Sequence[object],
+    *,
+    timeout_seconds: float,
+    environment: NcuCollectionEnvironment,
+) -> NcuActionResult:
+    """Run one bounded child with exactly one inherited authorized NCU path."""
+
+    path = _validate_expected(expected)
+    template = _validate_supervised_command(command, timeout_seconds)
+    if type(environment) is not NcuCollectionEnvironment:
+        _fail(
+            NCU_ACTION_REQUEST_INVALID,
+            "collection environment is not an authorized environment value",
+        )
+    borrowed = _BorrowedActionDescriptors(None, (), (), ())
+    try:
+        retained = immutable.open_retained_executable(path)
+    except (OSError, immutable.ImmutableArtifactError) as exc:
+        raise _identity_error("cannot retain expected executable", exc) from exc
+    try:
+        _authorize_opened(retained, expected, borrowed)
+        rendered = _render_supervised_command(template, retained)
+        try:
+            result = _run_command_bounded(
+                rendered,
+                environment=environment.as_dict(),
+                working_directory="/",
+                inherited_descriptors=(retained.descriptor,),
+                timeout_seconds=timeout_seconds,
+                max_output_bytes=_MAX_ACTION_OUTPUT_BYTES,
+                timeout_code=NCU_ACTION_TIMEOUT,
+                launch_code=NCU_ACTION_LAUNCH_FAILED,
+            )
+        except BaseException as action_error:
+            _reverify(retained, borrowed, pending=action_error)
+            raise AssertionError("unreachable")
+        _reverify(retained, borrowed)
     except BaseException as active_error:
         try:
             retained.close()

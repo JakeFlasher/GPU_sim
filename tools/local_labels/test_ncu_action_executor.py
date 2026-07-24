@@ -96,6 +96,19 @@ def _identity(path: Path, *, version: str = _VERSION, sha: str | None = None):
     return executor.ExpectedNcuIdentity(str(path), sha or digest, version)
 
 
+def _collection_environment(**overrides) -> executor.NcuCollectionEnvironment:
+    return executor.NcuCollectionEnvironment({
+        "LANG": "C",
+        "LANGUAGE": "C",
+        "LC_ALL": "C",
+        "PATH": "/usr/local/cuda-13.2/bin:/usr/bin:/bin",
+        "PWD": "/",
+        "PYTHONNOUSERSITE": "1",
+        "LABEL_DRIVER_PRESERVE_FAILED_EVIDENCE": "1",
+        **overrides,
+    })
+
+
 def _assert_code(code: str):
     return pytest.raises(executor.NcuActionExecutorError, match=code)
 
@@ -153,6 +166,231 @@ exit 64
 """)
     path.chmod(0o555)
     return path
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "LD_PRELOAD",
+        "LD_LIBRARY_PATH",
+        "LD_AUDIT",
+        "CUDA_INJECTION64_PATH",
+        "PYTHONPATH",
+        "BASH_ENV",
+        "CUDA_VISIBLE_DEVICES",
+        "NCU_CONFIG_FILE",
+    ],
+)
+def test_collection_environment_rejects_non_allowlisted_names(name: str) -> None:
+    with _assert_code(executor.NCU_ACTION_REQUEST_INVALID):
+        _collection_environment(**{name: "hostile"})
+
+
+def test_collection_environment_rejects_canonical_hostile_path(
+    tmp_path: Path,
+) -> None:
+    hostile = tmp_path / "hostile"
+    hostile.mkdir()
+    with _assert_code(executor.NCU_ACTION_REQUEST_INVALID):
+        _collection_environment(
+            PATH=f"{hostile}:/usr/local/cuda-13.2/bin:/usr/bin:/bin"
+        )
+
+
+@pytest.mark.parametrize("name", [None, 1, ("LD_PRELOAD",)])
+def test_collection_environment_rejects_non_string_names(name) -> None:
+    values = _collection_environment().as_dict()
+    values[name] = "hostile"
+    with _assert_code(executor.NCU_ACTION_REQUEST_INVALID):
+        executor.NcuCollectionEnvironment(values)
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"LANG": "en_US.UTF-8"},
+        {"PYTHONNOUSERSITE": "0"},
+        {"PATH": "relative:/bin"},
+        {"PATH": "/bin::/usr/bin"},
+        {"PATH": "//bin:/usr/bin"},
+    ],
+)
+def test_collection_environment_rejects_required_or_path_drift(overrides) -> None:
+    with _assert_code(executor.NCU_ACTION_REQUEST_INVALID):
+        _collection_environment(**overrides)
+
+
+def test_supervised_child_inherits_one_authorized_ncu_descriptor(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    ncu = _fixture_ncu(tmp_path / "ncu")
+    driver = tmp_path / "driver"
+    driver.write_text("#!/bin/sh\nexec \"$1\" --echo \"$2\"\n")
+    driver.chmod(0o555)
+    observed = []
+    original_popen = executor.subprocess.Popen
+
+    def popen(*args, **kwargs):
+        observed.append((
+            tuple(args[0]), tuple(kwargs["pass_fds"]), kwargs["env"],
+            kwargs["cwd"],
+        ))
+        return original_popen(*args, **kwargs)
+
+    monkeypatch.setattr(executor.subprocess, "Popen", popen)
+    environment = _collection_environment()
+    result = executor.execute_ncu_supervised_child(
+        _identity(ncu),
+        [str(driver), executor.AUTHORIZED_NCU_PROC_PATH, "inherited"],
+        timeout_seconds=2,
+        environment=environment,
+    )
+    assert result.returncode == 0
+    observed_target = json.loads(result.stdout)
+    assert observed_target["arguments"] == ["inherited"]
+    target_environment = observed_target["environment"]
+    assert target_environment.pop("SHLVL") == "0"
+    assert target_environment == environment.as_dict()
+    assert result.stderr == b"synthetic stderr\n"
+    assert len(observed) == 2
+    descriptor = observed[1][1][0]
+    assert observed[0][0] == (f"/proc/self/fd/{descriptor}", "--version")
+    assert observed[0][1] == (descriptor,)
+    assert observed[0][2] == executor.ncu_action_environment()
+    assert observed[0][3] == "/"
+    assert observed[1][0] == (
+        str(driver), f"/proc/self/fd/{descriptor}", "inherited",
+    )
+    assert observed[1][1] == (descriptor,)
+    assert observed[1][2] == environment.as_dict()
+    assert observed[1][3] == "/"
+    with pytest.raises(OSError):
+        os.fstat(descriptor)
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        ["/bin/true"],
+        ["/bin/true", executor.AUTHORIZED_NCU_PROC_PATH,
+         executor.AUTHORIZED_NCU_PROC_PATH],
+        [executor.AUTHORIZED_NCU_PROC_PATH],
+        ["relative", executor.AUTHORIZED_NCU_PROC_PATH],
+        ["/bin/true", object()],
+    ],
+)
+def test_supervised_child_rejects_invalid_placeholder_before_open(command) -> None:
+    expected = executor.ExpectedNcuIdentity("/missing/ncu", "a" * 64, _VERSION)
+    with _assert_code(executor.NCU_ACTION_REQUEST_INVALID):
+        executor.execute_ncu_supervised_child(
+            expected,
+            command,
+            timeout_seconds=1,
+            environment=_collection_environment(),
+            )
+
+
+def test_supervised_child_rejects_oversized_sequence_without_indexing() -> None:
+    class OversizedSequence(Sequence):
+        def __len__(self):
+            return 10**12
+
+        def __getitem__(self, _index):
+            pytest.fail("oversized supervised command was indexed")
+
+    expected = executor.ExpectedNcuIdentity("/missing/ncu", "a" * 64, _VERSION)
+    with _assert_code(executor.NCU_ACTION_REQUEST_INVALID):
+        executor.execute_ncu_supervised_child(
+            expected,
+            OversizedSequence(),
+            timeout_seconds=1,
+            environment=_collection_environment(),
+        )
+
+
+def test_supervised_success_kills_descendant_retaining_ncu_descriptor(
+    tmp_path: Path,
+) -> None:
+    ncu = _fixture_ncu(tmp_path / "ncu")
+    pid_path = tmp_path / "descendant.pid"
+    driver = tmp_path / "driver"
+    child_source = (
+        "import os,sys,time; from pathlib import Path; "
+        "fd=int(sys.argv[1]); os.fstat(fd); "
+        "Path(sys.argv[2]).write_text(str(os.getpid())); time.sleep(60)"
+    )
+    driver.write_text(f"""#!{sys.executable}
+import os
+import subprocess
+import sys
+import time
+from pathlib import Path
+
+ncu_path = sys.argv[1]
+descriptor = int(ncu_path.rsplit('/', 1)[1])
+pid_path = Path(sys.argv[2])
+subprocess.Popen(
+    [sys.executable, '-c', {child_source!r}, str(descriptor), str(pid_path)],
+    stdin=subprocess.DEVNULL,
+    stdout=subprocess.DEVNULL,
+    stderr=subprocess.DEVNULL,
+    pass_fds=(descriptor,),
+)
+deadline = time.monotonic() + 2
+while not pid_path.is_file() and time.monotonic() < deadline:
+    time.sleep(0.01)
+raise SystemExit(0 if pid_path.is_file() else 9)
+""")
+    driver.chmod(0o555)
+    result = executor.execute_ncu_supervised_child(
+        _identity(ncu),
+        [str(driver), executor.AUTHORIZED_NCU_PROC_PATH, str(pid_path)],
+        timeout_seconds=3,
+        environment=_collection_environment(),
+    )
+    assert result.returncode == 0
+    descendant_pid = int(pid_path.read_text())
+    deadline = time.monotonic() + 2
+    while time.monotonic() < deadline:
+        try:
+            os.kill(descendant_pid, 0)
+        except ProcessLookupError:
+            break
+        time.sleep(0.02)
+    else:
+        pytest.fail(
+            f"successful supervised child leaked descendant {descendant_pid}"
+        )
+
+
+def test_supervised_child_identity_drift_precedes_ordinary_result(
+    tmp_path: Path,
+) -> None:
+    ncu = _fixture_ncu(tmp_path / "ncu")
+    driver = tmp_path / "driver"
+    driver.write_text(f"""#!{sys.executable}
+import os
+import sys
+from pathlib import Path
+
+os.fstat(int(sys.argv[1].rsplit('/', 1)[1]))
+target = Path(sys.argv[2])
+payload = target.read_bytes()
+target.unlink()
+target.write_bytes(payload)
+target.chmod(0o555)
+raise SystemExit(7)
+""")
+    driver.chmod(0o555)
+    with _assert_code(executor.NCU_EXECUTABLE_IDENTITY_INVALID):
+        executor.execute_ncu_supervised_child(
+            _identity(ncu),
+            [
+                str(driver), executor.AUTHORIZED_NCU_PROC_PATH, str(ncu),
+            ],
+            timeout_seconds=2,
+            environment=_collection_environment(),
+            )
 
 
 def test_action_environment_is_closed_literal_and_fresh(
