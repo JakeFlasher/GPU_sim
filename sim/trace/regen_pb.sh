@@ -24,4 +24,6 @@ if [[ "$GOT_VERSION" != "$PINNED_VERSION" ]]; then
 fi
 # pbgen/Cargo.lock is COMMITTED so regeneration resolves the same prost-build
 # on every host; --locked refuses an accidental resolution drift.
-PROTOC="$PINNED_PROTOC" cargo run --locked --manifest-path "$HERE/pbgen/Cargo.toml" --release
+PROTOC="$PINNED_PROTOC" cargo run --locked \
+    --manifest-path "$HERE/pbgen/Cargo.toml" --release -- \
+    "$REPO_ROOT" "$HERE/src/pb"

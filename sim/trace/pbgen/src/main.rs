@@ -3,35 +3,87 @@
 //! `tools/nvbit_tracer/traces_enhanced/dynamic_trace/`.
 //!
 //! Run via `sim/trace/regen_pb.sh`, which pins PROTOC to the repo's
-//! `.toolchain/pb/bin/protoc` (34.1). The generated file is COMMITTED so the
-//! sim workspace never needs protoc at build time; prost implements the wire
-//! format itself, so the C++ exact gencode==runtime rule does not apply here.
+//! `.toolchain/pb/bin/protoc` (34.1) and supplies the runtime-resolved repository
+//! and output paths. The generated file is COMMITTED so the sim workspace never
+//! needs protoc at build time; prost implements the wire format itself, so the
+//! C++ exact gencode==runtime rule does not apply here.
 
+use std::ffi::OsString;
 use std::path::PathBuf;
 
+fn parse_paths(
+    arguments: impl IntoIterator<Item = OsString>,
+) -> Result<(PathBuf, PathBuf), String> {
+    let mut arguments = arguments.into_iter();
+    let repo_root = arguments
+        .next()
+        .ok_or_else(|| "missing runtime repository root".to_string())?;
+    let out_dir = arguments
+        .next()
+        .ok_or_else(|| "missing runtime output directory".to_string())?;
+    if arguments.next().is_some() {
+        return Err("unexpected extra generator argument".to_string());
+    }
+    Ok((PathBuf::from(repo_root), PathBuf::from(out_dir)))
+}
+
+fn canonical_paths(
+    repo_root: PathBuf,
+    out_dir: PathBuf,
+) -> Result<(PathBuf, PathBuf, PathBuf), String> {
+    if !repo_root.is_absolute() || !out_dir.is_absolute() {
+        return Err("generator paths must be absolute".to_string());
+    }
+    let repo_root = repo_root
+        .canonicalize()
+        .map_err(|error| format!("canonicalize repository root: {error}"))?;
+    let out_dir = out_dir
+        .canonicalize()
+        .map_err(|error| format!("canonicalize output directory: {error}"))?;
+    let expected_out = repo_root.join("sim/trace/src/pb");
+    if out_dir != expected_out {
+        return Err(format!(
+            "output directory is not the repository sim/trace/src/pb: {}",
+            out_dir.display()
+        ));
+    }
+    let proto_dir = repo_root
+        .join("tools/nvbit_tracer/traces_enhanced/dynamic_trace")
+        .canonicalize()
+        .map_err(|error| format!("canonicalize proto schema directory: {error}"))?;
+    if !proto_dir.is_dir() {
+        return Err(format!(
+            "proto schema path is not a directory: {}",
+            proto_dir.display()
+        ));
+    }
+    Ok((repo_root, proto_dir, out_dir))
+}
+
 fn main() {
-    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-    let repo_root = manifest_dir
-        .ancestors()
-        .nth(3)
-        .expect("pbgen sits at <repo>/sim/trace/pbgen");
-    let proto_dir = repo_root.join("tools/nvbit_tracer/traces_enhanced/dynamic_trace");
-    let out_dir = manifest_dir
-        .parent()
-        .expect("pbgen parent is sim/trace")
-        .join("src/pb");
+    let (repo_root, out_dir) =
+        parse_paths(std::env::args_os().skip(1)).unwrap_or_else(|error| panic!("{error}"));
+    let (_repo_root, proto_dir, out_dir) =
+        canonical_paths(repo_root, out_dir).unwrap_or_else(|error| panic!("{error}"));
 
     // Enumerate the schema dir instead of hardcoding a list: a new .proto
     // added upstream must be picked up, never silently omitted.
     let mut protos: Vec<PathBuf> = std::fs::read_dir(&proto_dir)
         .expect("read proto schema dir")
-        .filter_map(|e| e.ok().map(|e| e.path()))
-        .filter(|p| p.extension().is_some_and(|ext| ext == "proto"))
-        .collect();
+        .map(|entry| entry.map(|entry| entry.path()))
+        .collect::<Result<_, _>>()
+        .expect("read every proto schema directory entry");
+    protos.retain(|path| {
+        path.extension()
+            .is_some_and(|extension| extension == "proto")
+    });
     protos.sort();
-    assert!(!protos.is_empty(), "no .proto files found in {}", proto_dir.display());
+    assert!(
+        !protos.is_empty(),
+        "no .proto files found in {}",
+        proto_dir.display()
+    );
 
-    std::fs::create_dir_all(&out_dir).expect("create sim/trace/src/pb");
     let mut config = prost_build::Config::new();
     config
         .out_dir(&out_dir)
@@ -46,4 +98,32 @@ fn main() {
         out_dir.join("dynamic_trace.rs").display(),
         proto_dir.display()
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn os(value: &str) -> OsString {
+        OsString::from(value)
+    }
+
+    #[test]
+    fn runtime_paths_require_exactly_two_arguments() {
+        assert_eq!(
+            parse_paths([os("/repo"), os("/repo/sim/trace/src/pb")]),
+            Ok((
+                PathBuf::from("/repo"),
+                PathBuf::from("/repo/sim/trace/src/pb"),
+            ))
+        );
+        assert_eq!(
+            parse_paths([os("/repo")]),
+            Err("missing runtime output directory".to_string())
+        );
+        assert_eq!(
+            parse_paths([os("/repo"), os("/repo/sim/trace/src/pb"), os("extra"),]),
+            Err("unexpected extra generator argument".to_string())
+        );
+    }
 }
