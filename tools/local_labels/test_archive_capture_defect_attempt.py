@@ -21,15 +21,47 @@ def _head() -> str:
     ).stdout.strip()
 
 
-def _old_driver() -> bytes:
-    return subprocess.run(
-        [
-            "git", "show",
-            f"{archive.FIXED_ORIGINAL_HEAD}:tools/sol_execbench/src/"
-            "sol_execbench/driver/templates/eval_driver.py",
-        ],
-        cwd=archive.REPO_ROOT, capture_output=True, check=True,
-    ).stdout
+def _synthetic_driver() -> bytes:
+    # Archive mechanics bind this fixture through the contract hash below; they
+    # do not depend on historical evaluator Git object authority.
+    return (
+        b"else:\n    time_runnable = None\n"
+        b'_CRITICAL_NAMES = [\n    "time_runnable",\n]\n'
+    )
+
+
+@pytest.fixture(autouse=True)
+def _synthetic_driver_authority(monkeypatch: pytest.MonkeyPatch) -> None:
+    real_run = subprocess.run
+    expected_object = (
+        f"{archive.FIXED_ORIGINAL_HEAD}:tools/sol_execbench/src/"
+        "sol_execbench/driver/templates/eval_driver.py"
+    )
+    payload = _synthetic_driver()
+    replacement_head = real_run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=archive.REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout.strip()
+    expected_ancestry = [
+        "git",
+        "merge-base",
+        "--is-ancestor",
+        archive.FIXED_ORIGINAL_HEAD,
+        replacement_head,
+    ]
+
+    def run(command, *args, **kwargs):
+        command_list = list(command)
+        if command_list == ["git", "show", expected_object]:
+            return subprocess.CompletedProcess(command, 0, stdout=payload, stderr=b"")
+        if command_list == expected_ancestry:
+            return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+        return real_run(command, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", run)
 
 
 def _write_json(path: Path, value: dict) -> None:
@@ -65,7 +97,7 @@ def _fixture(tmp_path: Path) -> tuple[archive.ArchiveRequest, Path]:
     cell = journal / "cells" / base.cell_id
     driver = cell / "sol_stage" / "eval_driver.py"
     driver.parent.mkdir(parents=True)
-    driver.write_bytes(_old_driver())
+    driver.write_bytes(_synthetic_driver())
     _write_json(cell / "sol_stage" / "capture_prepare_manifest.json", {})
     _write_json(cell / "sol_stage" / "evidence" / "label-selection.json", {})
     _write_json(cell / "sol_stage" / "evidence" / "label-result.json", {
@@ -239,6 +271,50 @@ def test_inventory_tamper_refuses_before_any_move(tmp_path: Path):
     assert (stage / "journals").is_dir()
     defect_root = request.output_root / archive.CAPTURE_DEFECT_ROOT_NAME
     assert not defect_root.exists()
+
+
+def test_missing_driver_git_authority_refuses_before_move(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request, stage = _fixture(tmp_path)
+    authority_run = subprocess.run
+
+    def missing_driver(command, *args, **kwargs):
+        if list(command)[:2] == ["git", "show"]:
+            return subprocess.CompletedProcess(command, 128, stdout=b"", stderr=b"missing")
+        return authority_run(command, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", missing_driver)
+    with pytest.raises(
+        archive.CaptureDefectRefusal,
+        match="original capture-driver defect no longer re-proves",
+    ):
+        archive.archive_capture_defect_attempt(request)
+    assert (stage / "journals").is_dir()
+    assert not (request.output_root / archive.CAPTURE_DEFECT_ROOT_NAME).exists()
+
+
+def test_missing_ancestry_git_authority_refuses_before_move(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request, stage = _fixture(tmp_path)
+    authority_run = subprocess.run
+
+    def missing_ancestry(command, *args, **kwargs):
+        if list(command)[:3] == ["git", "merge-base", "--is-ancestor"]:
+            return subprocess.CompletedProcess(command, 128, stdout="", stderr="missing")
+        return authority_run(command, *args, **kwargs)
+
+    monkeypatch.setattr(subprocess, "run", missing_ancestry)
+    with pytest.raises(
+        archive.CaptureDefectRefusal,
+        match="replacement HEAD does not descend from original",
+    ):
+        archive.archive_capture_defect_attempt(request)
+    assert (stage / "journals").is_dir()
+    assert not (request.output_root / archive.CAPTURE_DEFECT_ROOT_NAME).exists()
 
 
 def test_pre_rename_failure_removes_only_invocation_scratch(
