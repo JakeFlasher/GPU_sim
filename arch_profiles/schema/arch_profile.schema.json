@@ -26,7 +26,7 @@
     "l1_geometry": {"$ref": "#/$defs/objOrGap"},
     "latencies_cycles": {
       "$ref": "#/$defs/objOrGap",
-      "description": "Measured load-to-use latencies in SM cycles from the counter-free tools/pchase harness (clock64-timed, boost-invariant). Microbench-derived simulator INPUTS — never NCU counter values (Rule 1). Keys: l1_hit, l2_hit, dram, shared; unresolved probes (e.g. mshr_outstanding_misses) carry research_gap objects. provenance names the pchase static card + driver + host clock-lock state."
+      "description": "Measured load-to-use latencies in SM cycles from the counter-free tools/pchase harness (clock64-timed, with clock state recorded and no boost invariance assumed). Microbench-derived simulator INPUTS — never NCU counter values (Rule 1). Keys: l1_hit, l2_hit, dram, shared; unresolved probes (e.g. mshr_outstanding_misses) carry research_gap objects. provenance names the pchase static card + driver + host clock-lock state."
     },
     "nvml_reference_operating_point": {"$ref": "#/$defs/objOrGap"},
     "duration_crosswalk": {"$ref": "#/$defs/objOrGap"},

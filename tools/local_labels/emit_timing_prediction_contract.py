@@ -1,31 +1,9 @@
-"""Emit the execution-time prediction contract artifact for the local
-RTX 3090 Ti (sm_86).
+"""Historical timing-contract producer, retired from production use.
 
-The contract fixes the execution-time prediction publication discipline: the
-DVFS-stable cycle count ``gpc__cycles_elapsed.max`` is the sole publication
-headline target; the derived wall-clock nanosecond leg is a clock-uncertainty
-interval that may not close the success terminal state on its own and is gated
-behind a CUPTI-Activity-vs-NCU agreement (crosswalk) artifact plus a cohort
-long enough to clear the measured dual-source noise floor.
-
-This producer builds the contract dict, validates it against the canonical
-schema (``workloads/simbench_bw/schemas/timing_prediction_contract.schema.json``)
-BEFORE writing, then emits canonical JSON
-(``sort_keys=True, indent=2`` + trailing newline) to
-``data/local_labels/timing_prediction_contract_sm_86.json``. Validating before
-the write is deliberate: a non-conformant contract must never reach disk, so
-the producer shares the consumer's single source of truth (the schema) instead
-of trusting hand-built field shapes.
-
-The numeric thresholds are pinned in the schema as ``const`` values; this
-producer reproduces the same literals so the emitted artifact validates. The
-nanosecond-floor and cohort-duration constants are derived from the measured
-provenanced dual-source p99 noise floor recorded in
-``workloads/simbench_bw/golden/cupti_dual_source_tolerance.json``.
-
-CLI:
-  python tools/local_labels/emit_timing_prediction_contract.py \
-    [--out-path data/local_labels/timing_prediction_contract_sm_86.json]
+The frozen v1 builder remains available for byte-exact archaeology. Production
+emission is retired because the dual-source timing path is no longer authoritative;
+active timing labels use v5 NCU-only unit-tagged metrics. Public callable and CLI
+entry points refuse before validation or filesystem activity.
 """
 
 from __future__ import annotations
@@ -42,6 +20,14 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from tools.local_labels import timing_prediction_contract as _contract  # noqa: E402
+from tools.producer_retirement import (  # noqa: E402
+    report_legacy_producer_retirement,
+    refuse_legacy_producer,
+)
+
+_RETIREMENT_REQUIREMENT = (
+    "v5 NCU-only timing labels and current comparison contracts"
+)
 
 _DEFAULT_OUT = (
     REPO_ROOT / "data" / "local_labels" / "timing_prediction_contract_sm_86.json"
@@ -94,7 +80,9 @@ def _resolve_current_source_commit() -> str:
         return "unknown"
 
 
-def build_contract(*, source_commit: str | None = None) -> dict:
+def _build_historical_v1_contract(
+    *, source_commit: str | None = None,
+) -> dict:
     """Build the contract dict. Pure (no I/O beyond an optional git lookup);
     the result is what gets schema-validated and written."""
     commit = source_commit if source_commit is not None else _resolve_current_source_commit()
@@ -185,9 +173,12 @@ def build_contract(*, source_commit: str | None = None) -> dict:
 
 
 def emit_contract(*, out_path: Path, source_commit: str | None = None) -> dict:
-    """Build, schema-validate, and write the contract artifact. Returns the
-    written dict."""
-    doc = build_contract(source_commit=source_commit)
+    """Refuse the retired timing-contract publication entry point."""
+    refuse_legacy_producer(
+        "tools/local_labels/emit_timing_prediction_contract.py:emit_contract",
+        successor_requirement=_RETIREMENT_REQUIREMENT,
+    )
+    doc = _build_historical_v1_contract(source_commit=source_commit)
     # Fail closed before touching disk: a non-conformant contract is a defect,
     # not an artifact.
     _contract.validate_contract(doc)
@@ -210,6 +201,10 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 
 
 def main(argv: list[str] | None = None) -> int:
+    return report_legacy_producer_retirement(
+        "tools/local_labels/emit_timing_prediction_contract.py:main",
+        successor_requirement=_RETIREMENT_REQUIREMENT,
+    )
     args = _parse_args(argv if argv is not None else sys.argv[1:])
     doc = emit_contract(out_path=args.out_path)
     try:

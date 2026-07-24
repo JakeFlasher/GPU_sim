@@ -13,6 +13,10 @@ import json
 import sys
 from pathlib import Path
 
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
 from tools.producer_retirement import report_legacy_producer_retirement
 
 # ArchProfile key -> pchase properties key
@@ -28,7 +32,7 @@ GAP_MAP = {
 }
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     return report_legacy_producer_retirement(
         "tools/pchase/transcribe_latencies_to_arch_card.py",
         successor_requirement="verified schema-v2 protocol metadata",

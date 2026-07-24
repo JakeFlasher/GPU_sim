@@ -18,6 +18,10 @@ import subprocess
 import sys
 from pathlib import Path
 
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
 from tools.producer_retirement import (
     report_legacy_producer_retirement,
     refuse_legacy_producer,

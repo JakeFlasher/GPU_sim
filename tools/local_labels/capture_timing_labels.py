@@ -1,50 +1,9 @@
-"""Capture execution-time labels (cycles + ns) and land them on admitted cells.
+"""Historical direct timing-label producer, retired from production use.
 
-Captures the unit-tagged execution-time metrics ``gpc__cycles_elapsed.max``
-(unit=cycles, DVFS-stable) and ``gpu__time_duration.sum`` (unit=ns) for the
-admitted sm_86 cells via the local NCU quarantine, gates them through the SAME
-per-unit repeatability machinery the label pipeline uses
-(``repeatability_aggregator._aggregate_unit_tagged_metrics`` →
-``_dispersion_for_rule``, coefficient-of-variation ≤ registry threshold over
-``n_repeats`` ≥ floor), and SPLICES the surviving ``unit_tagged_metrics`` block
-into each matching committed admitted cell IN PLACE — preserving every other
-field (L2/L1 hit rates, join keys, ``source_commit``, repeatability metadata)
-byte-for-byte so the frozen L2 v5 head / its byte-identity regression guard is
-not perturbed.
-
-Why in-place splice (not re-aggregate): the committed ``label_admitted.json`` was
-produced by a multi-pass supersession/repair/restamp pipeline; re-running the bare
-aggregator on the current per-repeat sidecars admits ZERO of the 20 committed sm_86
-cells (provenance duplicates / repeatability state differ), so re-aggregation would
-destroy the committed store. The unit-tagged timing block is purely ADDITIVE (no
-admitted cell carries it yet), so splicing it onto the existing cells is the only
-path that adds the timing labels while keeping the L2/L1/provenance fields exactly
-as committed.
-
-CLAUDE.md compliance (binding):
-  - Rule 1 (NCU quarantine + local-label exception): NCU invoked ONLY here under
-    ``tools/local_labels/``; the optional intermediate ``.ncu-rep`` and the
-    committed label store live under ``data/local_labels/``. This is metric
-    capture (``--metrics``), not a profiling section sweep.
-  - Rule 2 (no driver-root): ``ncu --metrics`` does NOT lock clocks; no
-    persistence / power / MIG / compute-mode mutation, no nvidia-smi clock-lock.
-  - Rule 3 (no privileged CUPTI): NCU command-line metric capture, not our own
-    privileged CUPTI Events/Metrics/Range/PM/PerfWorks.
-  - sm_86-only: captures only arch==sm_86 admitted cells, and binds a timing
-    label ONLY when the on-disk binary's sha256 MATCHES the cell's committed
-    ``binary_sha256`` (so the timing label provenance agrees with the L2/L1 label
-    provenance); a mismatch is a typed exclusion, never a silent bind.
-
-CLI:
-  python tools/local_labels/capture_timing_labels.py \
-    [--label-admitted data/local_labels/label_admitted.json] \
-    [--ncu /usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu] \
-    [--repeats 5] [--arch sm_86] \
-    [--exclusions-out data/local_labels/timing_label_exclusions_sm_86.json] \
-    [--dry-run]
-
-  Exit 3 (no write) when ncu is not on the host (offline/CI), so a non-3090-Ti
-  host never overwrites the committed timing labels.
+The former producer mutated admitted labels from a direct NCU timing pass. Active
+timing labels now travel only through the v5 NCU campaign as unit-tagged metrics.
+Its callable and CLI entry points refuse before reading inputs, launching NCU, or
+writing outputs; analysis helpers remain for archaeology only.
 """
 
 from __future__ import annotations
@@ -68,6 +27,14 @@ if str(_LOCAL_LABELS) not in sys.path:
     sys.path.insert(0, str(_LOCAL_LABELS))
 
 from corpus_cell_identity import cell_variant_id  # noqa: E402
+from tools.producer_retirement import (  # noqa: E402
+    report_legacy_producer_retirement,
+    refuse_legacy_producer,
+)
+
+_RETIREMENT_REQUIREMENT = (
+    "v5 NCU-only unit-tagged timing evidence through the active local-label campaign"
+)
 
 DEFAULT_LABEL_ADMITTED = "data/local_labels/label_admitted.json"
 DEFAULT_EXCLUSIONS_OUT = "data/local_labels/timing_label_exclusions_sm_86.json"
@@ -188,6 +155,10 @@ def capture_and_land(
 
     Returns ``(updated_admitted_dict, exclusions)``. Raises FileNotFoundError if
     ncu is absent (caller maps to exit 3)."""
+    refuse_legacy_producer(
+        "tools/local_labels/capture_timing_labels.py:capture_and_land",
+        successor_requirement=_RETIREMENT_REQUIREMENT,
+    )
     from repeatability_aggregator import (
         DEFAULT_REPEATS_REQUIRED,
         _aggregate_unit_tagged_metrics,
@@ -302,6 +273,10 @@ def capture_and_land(
 
 
 def main(argv: list[str] | None = None) -> int:
+    return report_legacy_producer_retirement(
+        "tools/local_labels/capture_timing_labels.py:main",
+        successor_requirement=_RETIREMENT_REQUIREMENT,
+    )
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--label-admitted", default=DEFAULT_LABEL_ADMITTED)
     parser.add_argument("--ncu", default=DEFAULT_NCU)

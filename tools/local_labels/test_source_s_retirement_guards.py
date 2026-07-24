@@ -18,9 +18,6 @@ if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
 from tools.local_labels import build_sm86_capture_matrix as matrix_builder  # noqa: E402
-from tools.local_labels.test_sm86_capture_matrix import (  # noqa: E402
-    _permit_offline_successor_build,
-)
 from tools.local_labels import capture_long_timing_cohort as long_cohort  # noqa: E402
 from tools.local_labels import capture_timing_labels as timing_labels  # noqa: E402
 from tools.local_labels import emit_timing_prediction_contract as timing_contract  # noqa: E402
@@ -189,6 +186,38 @@ def test_v1_transcriber_retires_before_card_reads_or_writes(
     assert "verified schema-v2 protocol metadata" in diagnostic
 
 
+@pytest.mark.parametrize(
+    ("relative_script", "successor_requirement"),
+    (
+        (
+            "tools/pchase/run_pchase_card.py",
+            "schema-v2 external immutable evidence",
+        ),
+        (
+            "tools/pchase/transcribe_latencies_to_arch_card.py",
+            "verified schema-v2 protocol metadata",
+        ),
+    ),
+)
+def test_retired_pchase_direct_cli_reports_typed_refusal(
+    relative_script: str,
+    successor_requirement: str,
+) -> None:
+    completed = subprocess.run(
+        [sys.executable, relative_script, "--help"],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+
+    assert completed.returncode == RETIRED_PRODUCER_EXIT_CODE
+    assert completed.stdout == ""
+    assert LEGACY_PRODUCER_RETIRED_IMMUTABLE_EVIDENCE in completed.stderr
+    assert successor_requirement in completed.stderr
+    assert "Traceback" not in completed.stderr
+
+
 def test_historical_v1_contract_builder_remains_exact_and_isolated(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -219,9 +248,7 @@ def test_frozen_historical_artifact_bytes_remain_exact() -> None:
         assert _sha256(REPO_ROOT / relative) == expected, relative
 
 
-def test_registry_annotation_transition_preserves_matrix_v1_pin(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
+def test_registry_annotation_transition_preserves_matrix_v1_pin() -> None:
     registry_path = REPO_ROOT / matrix_builder.METRIC_REGISTRY_PATH
     matrix_path = (
         REPO_ROOT
@@ -238,15 +265,12 @@ def test_registry_annotation_transition_preserves_matrix_v1_pin(
         _OLD_REGISTRY_SHA256
     )
 
-    _permit_offline_successor_build(monkeypatch)
-    future_matrix = matrix_builder.build_matrix(
+    assert matrix_builder.validate_matrix(
+        frozen_matrix,
         REPO_ROOT,
-        require_head_match=False,
-    )
-    assert future_matrix["input_pins"]["metric_registry"]["sha256"] == (
-        _ACTIVE_REGISTRY_SHA256
-    )
-    assert future_matrix != frozen_matrix
+        validation_mode="frozen_v1",
+    ) == []
+    assert _ACTIVE_REGISTRY_SHA256 != _OLD_REGISTRY_SHA256
     print(f"active_metric_registry_sha256={_ACTIVE_REGISTRY_SHA256}")
 
 
@@ -265,6 +289,8 @@ _ACTIVE_CLAIM_PATHS = (
     "tools/pchase/run_pchase_card.py",
     "tools/pchase/transcribe_latencies_to_arch_card.py",
     "arch_profiles/cards/sm_86.json",
+    "docs/predictors.md",
+    "plans/micro2027_ncu_sim_execution_plan.md",
     "sim/calib/src/lib.rs",
 )
 _HISTORICAL_FUNCTION_EXCLUSIONS = {

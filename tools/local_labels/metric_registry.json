@@ -199,7 +199,7 @@
     "sm_86": "available",
     "sm_120": "sm_120_deferred_no_live_evidence"
    },
-   "notes": "Primary execution-time target (DVFS-stable cycle count).",
+   "notes": "Primary execution-time target measured in GPC cycles. The value is not invariant under DVFS or boost; comparisons and cycle-to-time interpretations are bound to the recorded operating state, capture protocol, and core:memory clock relationship.",
    "model_io_role": "target"
   },
   {

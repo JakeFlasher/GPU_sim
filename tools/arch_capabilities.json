@@ -295,7 +295,7 @@
       "supported_arches": [
         "sm_86"
       ],
-      "notes": "Read-only NCU timing-cohort capture CLI for the scoped sm_86 long-duration same-binary cohort. Captures cycles, deploy-ns, L1, and L2 labels through the local-label NCU exception and writes the scoped timing cohort artifact plus typed exclusions under data/local_labels/timing_cohort/. sm_86 only: defaults, output names, and cohort contract are tied to the RTX 3090 Ti timing closure."
+      "notes": "Historical direct NCU timing-cohort producer retained for archaeology. Its callable and CLI refuse before reading inputs, launching tools, or writing outputs; active timing evidence uses the v5 NCU campaign."
     },
     {
       "path": "tools/local_labels/capture_observed_state.py",
@@ -320,7 +320,7 @@
       "supported_arches": [
         "sm_86"
       ],
-      "notes": "Captures execution-time labels gpc__cycles_elapsed.max (unit=cycles, DVFS-stable) + gpu__time_duration.sum (unit=ns) for the admitted sm_86 cells via the local NCU quarantine (CLAUDE.md Rule 1 local-label exception: ncu invoked only here, --metrics --csv to stdout so no .ncu-rep is written; no clock-lock per Rule 2; not privileged CUPTI per Rule 3), gates each metric through the SAME per-unit repeatability machinery the label pipeline uses (repeatability_aggregator._aggregate_unit_tagged_metrics -> coefficient_of_variation CV<=registry threshold over n_repeats>=floor), and SPLICES the surviving unit_tagged_metrics block into each matching committed admitted cell IN PLACE -- preserving every other field (L2/L1 hit rates, join keys, source_commit) byte-for-byte so the frozen L2 v5 head / AC-2 byte-identity is not perturbed (re-aggregation is unsafe: the bare aggregator admits zero of the committed cells). Binds a timing label ONLY when the on-disk binary sha256 MATCHES the cell's committed binary_sha256 (else typed exclusion timing_binary_sha256_mismatch -> data/local_labels/timing_label_exclusions_sm_86.json); a CV-gate failure is timing_repeatability_failed. sm_86-only. Exit 3 (no write) when ncu is absent so an offline/CI host never overwrites the committed timing labels."
+      "notes": "Historical direct timing-label producer retained for archaeology. Its callable and CLI refuse before reading labels, launching NCU, or writing outputs; active timing labels travel through the v5 NCU campaign as unit-tagged metrics."
     },
     {
       "path": "tools/local_labels/check_admission_floor.py",
@@ -379,7 +379,7 @@
       "supported_arches": [
         "sm_86"
       ],
-      "notes": "Execution-time prediction contract emitter. Builds the cycles-headline timing contract, validates it against workloads/simbench_bw/schemas/timing_prediction_contract.schema.json before writing, and emits data/local_labels/timing_prediction_contract_sm_86.json (canonical JSON). Pure offline producer: no NCU, no GPU access, no driver state. Scoped to sm_86 because the contract it writes is sm_86-only; the cross-arch leg is deferred to a separate Blackwell-laptop session."
+      "notes": "Historical timing-contract producer retained for byte-exact archaeology. Production emission refuses before validation or filesystem activity because the dual-source path is retired; active timing labels use v5 NCU-only unit-tagged metrics."
     },
     {
       "path": "tools/local_labels/emit_v5_closure_artifacts.py",
@@ -892,7 +892,7 @@
       "supported_arches": [
         "sm_86"
       ],
-      "notes": "P-chase static-card orchestrator (counter-free by construction): builds the clock64 dependent-chase probe binary (nvcc, host-local build dir, never committed) and runs the latency/capacity/carveout/conflict/MSHR/replacement probe matrix on the live device. Cycles come from clock64() inside the kernels (boost-invariant to first order; NO clock locking per Rule 2); the only telemetry is read-only NVML covariates recorded per invocation under the calibrated policy (HW faults/power-cap reject; SW thermal is recorded as the Ampere boost equilibrium, never rejected). Step detection merges smeared capacity transitions into brackets under an explicit confidence rule; unresolvable properties are typed geometry_unresolved with the raw curve evidence. Emits data/pchase/sm_86_static_card.json. No profiler of any kind. sm_86 only this loop."
+      "notes": "Historical p-chase v1 producer retained for archaeology and analysis helpers. Collection, build, probe, and publication entry points refuse before side effects; any successor requires independently reviewed schema-v2 protocol metadata and external immutable evidence."
     },
     {
       "path": "tools/perturbation_harness/build.py",

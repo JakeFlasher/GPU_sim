@@ -189,9 +189,9 @@ sm_120 coverage defers to a cross-arch follow-up. See
 
 ## Lane C — wall-clock (cycles-first target, ns as a derived interval)
 
-**Target metric:** `gpc__cycles_elapsed.max` — the **DVFS-stable** elapsed cycle
-count, declared the *sole* publication headline. Nanoseconds are a **derived
-interval**, never a co-equal point.
+**Target metric:** `gpc__cycles_elapsed.max` — the **operating-state-bound**
+elapsed cycle count, declared the *sole* publication headline. Nanoseconds are a
+**derived interval**, never a co-equal point.
 **Model:** roofline prior + ridge residual (`pedestal_roofline_ridge_residual`).
 **Merge policy:** **labels + refutation only** — no positive wall-clock claim ships.
 
@@ -203,7 +203,9 @@ OLS-on-`log10(duration_ns)` is **refuted** in
 the strongest baseline (`shape_size_only`) **0.891** — and the NVML clock
 covariates are the *entire harmful delta* (`predictor_smape_without_nvml` equals
 the baseline exactly). The clock spanned **180–2762 MHz (15.34×)** across the
-cohort. Cycles factor that out by construction.
+cohort. Cycles avoid treating nanoseconds as an independent target, but they are
+not invariant under DVFS or boost; comparisons remain bound to the recorded
+operating state and capture protocol.
 
 ### Pipeline
 

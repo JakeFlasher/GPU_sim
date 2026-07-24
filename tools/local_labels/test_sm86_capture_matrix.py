@@ -54,7 +54,7 @@ def test_legacy_two_argument_validation_keeps_live_rederivation(
     }]
 
 
-def test_frozen_v1_validation_does_not_rederive_live_inputs(
+def test_frozen_v1_validation_does_not_rederive_live_inputs_and_rejects_active_registry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     matrix = _committed_matrix()
@@ -79,7 +79,7 @@ def test_frozen_v1_validation_does_not_rederive_live_inputs(
         registry_payload=registry_payload,
         registry_sha256=hashlib.sha256(registry_payload).hexdigest(),
         validation_mode="frozen_v1",
-    ) == []
+    ) == ["registry_pin_sha256"]
 
 
 @pytest.mark.parametrize(

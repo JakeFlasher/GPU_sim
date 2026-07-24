@@ -1,50 +1,9 @@
-"""Capture the long-duration (>= ~552 us) timing cohort (read-only NCU).
+"""Historical direct long-timing cohort producer, retired from production use.
 
-Builds a SCOPED, additive timing-cohort artifact of >= 10 sm_86 cells, ALL against
-ONE binary identity (one ``binary_sha256`` / ``kernel_signature`` family / one
-``source_commit``), each carrying the four NCU labels
-
-  - ``gpc__cycles_elapsed.max``     (cycles; the DVFS-stable publication target)
-  - ``gpu__time_duration.sum``      (ns; the gated diagnostic)
-  - ``l1tex__t_sector_hit_rate.pct``(L1 hit rate)
-  - ``lts__t_sector_hit_rate.pct``  (L2 hit rate)
-
-over ``n_repeats`` repeats, gated by the SAME per-unit repeatability machinery the
-label pipeline uses (cycles/ns coefficient-of-variation <= 0.05; the two hit-rate
-fractions stddev <= 0.03). A cell is admitted ONLY when every label clears its CV
-gate AND the median ``gpu__time_duration.sum`` clears the ``--floor-ns`` floor
-(default 551760 ns). Everything else is a TYPED exclusion (never a silent drop or
-a partial cell).
-
-The distinct cells are produced by running the SAME binary at different timing
-shape overrides (e.g. GEMM ``--m/--n/--k``) so the binary identity is invariant
-while the launch geometry (hence the per-cell ``kernel_signature_sha256``,
-computed via the production ``compute_kernel_signature_sha256``) varies. The
-result is written to a SCOPED artifact under ``data/local_labels/timing_cohort/``,
-kept OUT of root ``label_admitted.json`` until closure (DEC-5), so the root
-timing-invariant and the frozen-L2 / sm_120 freeze are never perturbed during
-iteration.
-
-CLAUDE.md compliance (binding):
-  - Rule 1 (NCU quarantine + local-label exception): NCU invoked ONLY here under
-    ``tools/local_labels/`` writing under ``data/local_labels/``. ``--metrics``
-    capture, not a profiling section sweep.
-  - Rule 2 (no driver-root): ``ncu --metrics`` does NOT lock clocks; no
-    persistence / power / MIG / compute-mode mutation, no nvidia-smi clock-lock.
-  - Rule 3 (no privileged CUPTI): NCU command-line metric capture only.
-  - sm_86-only: the cohort is named/scoped sm_86; the manifest binds each cell to
-    the on-disk binary's sha256 and refuses to emit if it drifts.
-
-Exit 3 (no write) when ncu is absent (offline/CI), so a non-3090-Ti host never
-overwrites the committed cohort.
-
-CLI:
-  python tools/local_labels/capture_long_timing_cohort.py \
-    [--manifest data/local_labels/timing_cohort/ac4_long_cohort_manifest.json] \
-    [--output data/local_labels/timing_cohort/ac4_long_duration_cohort_sm_86.json] \
-    [--exclusions-out data/local_labels/timing_cohort/ac4_long_cohort_exclusions_sm_86.json] \
-    [--ncu /usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu] \
-    [--repeats 5] [--floor-ns 551760]
+The former producer emitted a scoped cohort from direct NCU timing capture. Active
+timing evidence is produced only by the v5 NCU campaign. Its callable and CLI
+entry points refuse before reading inputs, launching tools, or writing outputs;
+analysis helpers remain for archaeology only.
 """
 
 from __future__ import annotations
@@ -74,6 +33,14 @@ from tools.local_labels.emit_long_timing_feature_artifacts import (  # noqa: E40
     DEFAULT_STATIC_FEATURES,
     DEFAULT_STATIC_WORK,
     attach_feature_artifacts_to_cohort,
+)
+from tools.producer_retirement import (  # noqa: E402
+    report_legacy_producer_retirement,
+    refuse_legacy_producer,
+)
+
+_RETIREMENT_REQUIREMENT = (
+    "v5 NCU-only timing evidence through the active local-label campaign"
 )
 
 _ARCH = "sm_86"
@@ -212,6 +179,10 @@ def capture_cohort(
     source_commit: str,
 ) -> tuple[dict, list[dict]]:
     """Capture every manifest cell; return (cohort_artifact, exclusions)."""
+    refuse_legacy_producer(
+        "tools/local_labels/capture_long_timing_cohort.py:capture_cohort",
+        successor_requirement=_RETIREMENT_REQUIREMENT,
+    )
     if not Path(ncu).is_file():
         raise FileNotFoundError(f"ncu not found at {ncu}")
 
@@ -345,6 +316,10 @@ def _write_canonical(path: Path, obj: Any) -> None:
 
 
 def main(argv: list[str] | None = None) -> int:
+    return report_legacy_producer_retirement(
+        "tools/local_labels/capture_long_timing_cohort.py:main",
+        successor_requirement=_RETIREMENT_REQUIREMENT,
+    )
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", default=DEFAULT_MANIFEST)
     parser.add_argument("--output", default=DEFAULT_OUTPUT)
