@@ -41,6 +41,53 @@
    "required": [
     "ncu_clock_control"
    ],
+   "dependentRequired": {
+    "ncu_target_processes": [
+     "ncu_filter_mode",
+     "ncu_replay_mode",
+     "ncu_cache_control",
+     "ncu_clock_control",
+     "ncu_profile_from_start",
+     "ncu_launch_skip",
+     "ncu_launch_count"
+    ],
+    "ncu_filter_mode": [
+     "ncu_target_processes",
+     "ncu_replay_mode",
+     "ncu_cache_control",
+     "ncu_clock_control",
+     "ncu_profile_from_start",
+     "ncu_launch_skip",
+     "ncu_launch_count"
+    ],
+    "ncu_profile_from_start": [
+     "ncu_target_processes",
+     "ncu_filter_mode",
+     "ncu_replay_mode",
+     "ncu_cache_control",
+     "ncu_clock_control",
+     "ncu_launch_skip",
+     "ncu_launch_count"
+    ],
+    "ncu_launch_skip": [
+     "ncu_target_processes",
+     "ncu_filter_mode",
+     "ncu_replay_mode",
+     "ncu_cache_control",
+     "ncu_clock_control",
+     "ncu_profile_from_start",
+     "ncu_launch_count"
+    ],
+    "ncu_launch_count": [
+     "ncu_target_processes",
+     "ncu_filter_mode",
+     "ncu_replay_mode",
+     "ncu_cache_control",
+     "ncu_clock_control",
+     "ncu_profile_from_start",
+     "ncu_launch_skip"
+    ]
+   },
    "description": "OPTIONAL v2/v2.1-protocol provenance block (CLAUDE.md Rule 2, 2026-07-06 re-founding): the EXPLICIT NCU clock-control / cache-control / replay-mode used for this capture plus the observed host clock, persistence, power and temperature state. SEMANTICS: the host fields are ONE read-only nvidia-smi sample taken at sidecar-emission time (post-capture) on the device selected by LABEL_DRIVER_GPU_INDEX \u2014 a mid-capture excursion that clears before emission is not visible here. Absent on pre-v2 sidecars; the aggregator treats absence as protocol-unpinned legacy evidence.",
    "properties": {
     "ncu_clock_control": {
@@ -51,6 +98,32 @@
       "none"
      ],
      "description": "The --clock-control mode passed EXPLICITLY to NCU (never defaulted; the NCU default changed base->boost in 2026.1). `none` is the correct mode when host clocks are externally locked via nvidia-smi -lgc."
+    },
+    "ncu_target_processes": {
+     "type": "string",
+     "const": "all",
+     "description": "The explicit --target-processes all launch-set control."
+    },
+    "ncu_filter_mode": {
+     "type": "string",
+     "const": "global",
+     "description": "The explicit --filter-mode global launch-set control."
+    },
+    "ncu_profile_from_start": {
+     "type": "boolean",
+     "description": "False when launch selection begins only after the profiled application enables collection."
+    },
+    "ncu_launch_skip": {
+     "type": "integer",
+     "minimum": 0,
+     "maximum": 2147483647,
+     "description": "The explicit --launch-skip selector, bounded to the signed 32-bit NCU range."
+    },
+    "ncu_launch_count": {
+     "type": "integer",
+     "minimum": 1,
+     "maximum": 2147483647,
+     "description": "The explicit --launch-count selector, including any launch-set insertion sentinel."
     },
     "host_persistence_mode": {
      "type": "string",

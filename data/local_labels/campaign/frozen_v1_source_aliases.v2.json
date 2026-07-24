@@ -12,7 +12,7 @@
       "source_commit": "124ce358733f97ba6e0af808d10ab69ffe4d5a78"
     },
     {
-      "canonical_path": "workloads/simbench_bw/schemas/local_label_sidecar.schema.json",
+      "canonical_path": "data/local_labels/campaign/frozen_v1_local_label_sidecar.schema.json",
       "historical_path": "workloads/simbench_bw/schemas/local_label_sidecar.schema.json",
       "match": "exact",
       "requires_sha256_match": true,

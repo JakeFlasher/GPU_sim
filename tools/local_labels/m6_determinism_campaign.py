@@ -30,6 +30,7 @@ try:
     from . import import_label as label_import
     from . import immutable_artifact as immutable
     from . import metric_registry as metric_registry_lib
+    from . import ncu_capture_contract
     from . import parse_ncu_metrics as ncu_parser
     from .m6_determinism_stats import (
         DETERMINISM_CLASSES,
@@ -50,6 +51,7 @@ except ImportError:  # direct script execution
     import import_label as label_import  # type: ignore[no-redef]
     import immutable_artifact as immutable  # type: ignore[no-redef]
     import metric_registry as metric_registry_lib  # type: ignore[no-redef]
+    import ncu_capture_contract  # type: ignore[no-redef]
     import parse_ncu_metrics as ncu_parser  # type: ignore[no-redef]
     from m6_determinism_stats import (  # type: ignore[no-redef]
         DETERMINISM_CLASSES,
@@ -74,13 +76,17 @@ REGISTRY_PATH = REPO_ROOT / "tools/local_labels/metric_registry.json"
 FROZEN_REGISTRY_PATH = (
     REPO_ROOT / "data/local_labels/campaign/frozen_v1_metric_registry.json"
 )
+FROZEN_SIDECAR_SCHEMA_PATH = (
+    REPO_ROOT
+    / "data/local_labels/campaign/frozen_v1_local_label_sidecar.schema.json"
+)
 PROBE_PATH = REPO_ROOT / "data/local_labels/ncu_metric_availability_probe_sm_86.json"
 SIDECAR_SCHEMA_PATH = REPO_ROOT / "workloads/simbench_bw/schemas/local_label_sidecar.schema.json"
 FROZEN_SOURCE_ALIAS_PATH = (
     REPO_ROOT / "data/local_labels/campaign/frozen_v1_source_aliases.v2.json"
 )
 FROZEN_SOURCE_ALIAS_SHA256 = (
-    "87092c09313f033120f1b0d711cdf0082bb77d24423e66a36a4c15d994f4a58b"
+    "e4e46c1a77e855e8858dbdb27876738d61b0fc28227297a3470e83b2a9df2014"
 )
 FROZEN_SOURCE_ALIAS_SCHEMA_VERSION = 2
 FROZEN_V1_SOURCE_COMMIT = "124ce358733f97ba6e0af808d10ab69ffe4d5a78"
@@ -704,7 +710,7 @@ def _load_frozen_source_alias(
             FROZEN_REGISTRY_PATH.relative_to(REPO_ROOT).as_posix()
         ),
         SIDECAR_SCHEMA_PATH.relative_to(REPO_ROOT).as_posix(): (
-            SIDECAR_SCHEMA_PATH.relative_to(REPO_ROOT).as_posix()
+            FROZEN_SIDECAR_SCHEMA_PATH.relative_to(REPO_ROOT).as_posix()
         ),
     }
     aliases: dict[str, dict[str, Any]] = {}
@@ -3581,6 +3587,10 @@ def _sidecar_ref_and_observations(
     if any(sidecar.get(key) != value for key, value in expected_identity.items()):
         _fail("M6_SIDECAR_SLOT_IDENTITY", slot["slot_id"])
     protocol = sidecar.get("measurement_protocol")
+    try:
+        ncu_capture_contract.validate_measurement_protocol(protocol)
+    except ValueError as exc:
+        _fail("M6_SIDECAR_CONFIG_IDENTITY", f"{slot['slot_id']}: {exc}")
     required_protocol = {
         "ncu_clock_control": config["clock_control"],
         "ncu_cache_control": config["cache_control"],
@@ -3588,6 +3598,8 @@ def _sidecar_ref_and_observations(
         "ncu_target_processes": "all",
         "ncu_filter_mode": "global",
         "ncu_profile_from_start": False,
+        "ncu_launch_skip": sidecar["launch_index"],
+        "ncu_launch_count": 1,
     }
     if not isinstance(protocol, dict) or any(protocol.get(k) != v for k, v in required_protocol.items()):
         _fail("M6_SIDECAR_CONFIG_IDENTITY", slot["slot_id"])
@@ -5949,7 +5961,7 @@ def _source_authority_rows(
                 expected_historical = SIDECAR_SCHEMA_PATH.relative_to(REPO_ROOT).as_posix()
                 if path != expected_historical:
                     _fail("M6_SOURCE_SNAPSHOT_INCOMPLETE", f"source:{key}")
-                path = expected_historical
+                path = FROZEN_SIDECAR_SCHEMA_PATH.relative_to(REPO_ROOT).as_posix()
             if (
                 not isinstance(path, str)
                 or not path

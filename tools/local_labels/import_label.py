@@ -42,6 +42,7 @@ if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
 from metric_registry import load_registry, validate_unit_tag  # noqa: E402
+from ncu_capture_contract import validate_measurement_protocol  # noqa: E402
 
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
@@ -288,7 +289,8 @@ def validate(sidecar: Any, schema: dict | None = None) -> ValidationResult:
     """Validate a parsed local-label sidecar.
 
     Order of checks: forbidden-field denylist (whole JSON tree) -> JSON
-    Schema -> confidence-interval ordering. The forbidden-field check
+    Schema -> explicit NCU protocol semantics -> confidence-interval ordering.
+    The forbidden-field check
     runs first so a sidecar that smuggles in a raw HW-counter event
     identifier fails with a specific typed reason even before structural
     schema validation reaches the offending field.
@@ -320,6 +322,15 @@ def validate(sidecar: Any, schema: dict | None = None) -> ValidationResult:
             ok=False,
             typed_reason="schema_validation_failed",
             detail="sidecar root must be a JSON object",
+        )
+
+    try:
+        validate_measurement_protocol(sidecar.get("measurement_protocol"))
+    except ValueError as exc:
+        return ValidationResult(
+            ok=False,
+            typed_reason="schema_validation_failed",
+            detail=f"measurement_protocol: {exc}",
         )
 
     ordering = _check_confidence_interval_ordering(sidecar)

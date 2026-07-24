@@ -12,7 +12,7 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SCHEMA_PATH = (
     REPO_ROOT / "workloads/simbench_bw/schemas/local_label_sidecar.schema.json"
 )
-SCHEMA_SHA256 = "d8c06d477050d5522b967fa5e6fc5bdb9e3b6637989ea6fe60bc1c235d741564"
+SCHEMA_SHA256 = "e145f3e74177e28c7cb860b42817170fa84c8dad5609ec5c5774aac8617d7673"
 SCHEMA_ID = "simbench_bw/schemas/local_label_sidecar.schema.json"
 SCHEMA_VERSION = 5
 

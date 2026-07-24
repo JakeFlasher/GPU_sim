@@ -27,6 +27,7 @@ _HERE = Path(__file__).resolve().parent
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 import import_label  # noqa: E402
+import sidecar_schema_authority  # noqa: E402
 
 
 _VALID_SHA256_A = "a" * 64
@@ -78,6 +79,61 @@ def _valid_sidecar() -> dict:
             "aggregation": "kernel",
         },
     }
+
+
+def _explicit_ncu_protocol() -> dict:
+    return {
+        "ncu_target_processes": "all",
+        "ncu_filter_mode": "global",
+        "ncu_replay_mode": "kernel",
+        "ncu_cache_control": "all",
+        "ncu_clock_control": "none",
+        "ncu_profile_from_start": False,
+        "ncu_launch_skip": 0,
+        "ncu_launch_count": 2,
+    }
+
+
+class ActiveSchemaAuthorityTest(unittest.TestCase):
+    def test_active_schema_bytes_match_pinned_authority(self) -> None:
+        raw, schema = sidecar_schema_authority.load_authoritative_schema()
+        self.assertEqual(schema["schema_version"], 5)
+        self.assertEqual(
+            schema["properties"]["measurement_protocol"]["properties"]
+            ["ncu_target_processes"]["const"],
+            "all",
+        )
+        with self.assertRaisesRegex(ValueError, "pinned authority"):
+            sidecar_schema_authority.parse_authoritative_schema_bytes(raw + b" ")
+
+
+class ExplicitNcuProtocolTest(unittest.TestCase):
+    def test_complete_launch_controls_pass(self) -> None:
+        sidecar = _valid_sidecar()
+        sidecar["measurement_protocol"] = _explicit_ncu_protocol()
+        result = import_label.validate(sidecar)
+        self.assertTrue(result.ok, msg=result.detail)
+
+    def test_partial_launch_controls_fail_schema_validation(self) -> None:
+        sidecar = _valid_sidecar()
+        protocol = _explicit_ncu_protocol()
+        del protocol["ncu_launch_count"]
+        sidecar["measurement_protocol"] = protocol
+        result = import_label.validate(sidecar)
+        self.assertFalse(result.ok)
+        self.assertEqual(result.typed_reason, "schema_validation_failed")
+        self.assertIn("ncu_launch_count", result.detail)
+
+    def test_skip_count_sum_overflow_fails_semantic_validation(self) -> None:
+        sidecar = _valid_sidecar()
+        protocol = _explicit_ncu_protocol()
+        protocol["ncu_launch_skip"] = 2_147_483_647
+        protocol["ncu_launch_count"] = 1
+        sidecar["measurement_protocol"] = protocol
+        result = import_label.validate(sidecar)
+        self.assertFalse(result.ok)
+        self.assertEqual(result.typed_reason, "schema_validation_failed")
+        self.assertIn("skip plus count exceeds", result.detail)
 
 
 class ValidSidecarTest(unittest.TestCase):

@@ -98,7 +98,7 @@ def test_frozen_source_alias_resolves_exact_registry_and_sidecar_bytes() -> None
             campaign.FROZEN_REGISTRY_PATH
         ),
         campaign.SIDECAR_SCHEMA_PATH.relative_to(campaign.REPO_ROOT).as_posix(): (
-            campaign.SIDECAR_SCHEMA_PATH
+            campaign.FROZEN_SIDECAR_SCHEMA_PATH
         ),
     }
     assert set(aliases) == set(expected)
@@ -770,6 +770,37 @@ def test_event_transaction_rejects_generation_mixing(
     assert error.value.code == "M6_TREE_CHANGED"
 
 
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (("ncu_launch_skip", 1), ("ncu_launch_count", 2)),
+)
+def test_event_sidecar_selectors_bind_single_launch_identity(
+    schedule: dict,
+    tmp_path: Path,
+    field: str,
+    value: int,
+) -> None:
+    slot = next(
+        item for item in schedule["slots"]
+        if item["config_id"] == campaign.REFERENCE_CONFIG
+    )
+    sidecar = _sidecar_for_slot(schedule, slot)
+    sidecar["measurement_protocol"][field] = value
+    sidecar_path = tmp_path / f"{field}.json"
+    _write_json(sidecar_path, sidecar)
+
+    with pytest.raises(campaign.M6Error) as error:
+        campaign.build_observed_event(
+            schedule,
+            slot,
+            [sidecar_path],
+            journal_dir=tmp_path,
+            observed_at_utc=FIXED_TIME,
+            ncu_replay_pass_count=1,
+        )
+    assert error.value.code == "M6_SIDECAR_CONFIG_IDENTITY"
+
+
 def _artifact(path: Path, root: Path, kind: str) -> dict:
     payload = path.read_bytes()
     return {
@@ -1249,7 +1280,9 @@ def test_snapshot_source_binding_deduplicates_frozen_alias_payloads(
             schedule["source_identity"]["frozen_metric_registry"]["sha256"],
         ),
         (
-            campaign.SIDECAR_SCHEMA_PATH.relative_to(campaign.REPO_ROOT).as_posix(),
+            campaign.FROZEN_SIDECAR_SCHEMA_PATH.relative_to(
+                campaign.REPO_ROOT
+            ).as_posix(),
             schedule["source_identity"]["frozen_sidecar_schema"]["sha256"],
         ),
     }

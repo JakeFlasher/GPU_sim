@@ -364,6 +364,63 @@ class SidecarUnitTaggedFailClosedTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             sidecar_emitter.build_sidecar(self._env(), unit_tagged_metrics_path=bad)
 
+    def test_complete_explicit_ncu_controls_emit_and_validate(self) -> None:
+        env = self._env()
+        env.update({
+            "SIDECAR_NCU_CLOCK_CONTROL": "none",
+            "SIDECAR_NCU_CACHE_CONTROL": "all",
+            "SIDECAR_NCU_REPLAY_MODE": "kernel",
+            "SIDECAR_NCU_TARGET_PROCESSES": "all",
+            "SIDECAR_NCU_FILTER_MODE": "global",
+            "SIDECAR_NCU_PROFILE_FROM_START": "off",
+            "SIDECAR_NCU_LAUNCH_SKIP": "0",
+            "SIDECAR_NCU_LAUNCH_COUNT": "2",
+        })
+        sidecar = sidecar_emitter.build_sidecar(env)
+        self.assertEqual(sidecar["measurement_protocol"]["ncu_launch_count"], 2)
+        result = import_label.validate(sidecar)
+        self.assertTrue(result.ok, msg=result.detail)
+
+    def test_explicit_control_without_clock_control_refuses_emission(self) -> None:
+        for field, value in (
+            ("SIDECAR_NCU_CACHE_CONTROL", "all"),
+            ("SIDECAR_NCU_REPLAY_MODE", "kernel"),
+            ("SIDECAR_NCU_TARGET_PROCESSES", "all"),
+        ):
+            with self.subTest(field=field):
+                env = self._env()
+                env[field] = value
+                with self.assertRaisesRegex(
+                    ValueError, "require SIDECAR_NCU_CLOCK_CONTROL"
+                ):
+                    sidecar_emitter.build_sidecar(env)
+
+    def test_partial_explicit_ncu_controls_refuse_emission(self) -> None:
+        env = self._env()
+        env.update({
+            "SIDECAR_NCU_CLOCK_CONTROL": "none",
+            "SIDECAR_NCU_CACHE_CONTROL": "all",
+            "SIDECAR_NCU_REPLAY_MODE": "kernel",
+            "SIDECAR_NCU_TARGET_PROCESSES": "all",
+        })
+        with self.assertRaisesRegex(ValueError, "partial explicit NCU"):
+            sidecar_emitter.build_sidecar(env)
+
+    def test_noncanonical_ncu_selector_refuses_emission(self) -> None:
+        env = self._env()
+        env.update({
+            "SIDECAR_NCU_CLOCK_CONTROL": "none",
+            "SIDECAR_NCU_CACHE_CONTROL": "all",
+            "SIDECAR_NCU_REPLAY_MODE": "kernel",
+            "SIDECAR_NCU_TARGET_PROCESSES": "all",
+            "SIDECAR_NCU_FILTER_MODE": "global",
+            "SIDECAR_NCU_PROFILE_FROM_START": "off",
+            "SIDECAR_NCU_LAUNCH_SKIP": "00",
+            "SIDECAR_NCU_LAUNCH_COUNT": "2",
+        })
+        with self.assertRaisesRegex(ValueError, "canonical unsigned decimal"):
+            sidecar_emitter.build_sidecar(env)
+
     def test_unset_path_omits_field(self) -> None:
         sidecar = sidecar_emitter.build_sidecar(self._env())
         self.assertNotIn("unit_tagged_metrics", sidecar)

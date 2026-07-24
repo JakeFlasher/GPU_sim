@@ -33,6 +33,7 @@ from typing import Any, Mapping
 _HERE = Path(__file__).resolve().parent
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
+from ncu_capture_contract import validate_measurement_protocol  # noqa: E402
 from variant_identity import variant_identity as _variant_identity  # noqa: E402
 
 
@@ -122,6 +123,19 @@ def build_sidecar(
     # this block; only direct build_sidecar() callers without the env remain
     # byte-compatible with pre-v2 output.
     ncu_clock_control = env.get("SIDECAR_NCU_CLOCK_CONTROL", "")
+    explicit_ncu_env_names = (
+        "SIDECAR_NCU_CACHE_CONTROL",
+        "SIDECAR_NCU_REPLAY_MODE",
+        "SIDECAR_NCU_TARGET_PROCESSES",
+        "SIDECAR_NCU_FILTER_MODE",
+        "SIDECAR_NCU_PROFILE_FROM_START",
+        "SIDECAR_NCU_LAUNCH_SKIP",
+        "SIDECAR_NCU_LAUNCH_COUNT",
+    )
+    if any(env.get(name, "") for name in explicit_ncu_env_names) and not ncu_clock_control:
+        raise ValueError(
+            "explicit NCU sidecar controls require SIDECAR_NCU_CLOCK_CONTROL"
+        )
     if ncu_clock_control:
         if ncu_clock_control not in ("base", "boost", "none"):
             raise ValueError(
@@ -138,6 +152,43 @@ def build_sidecar(
             raw = env.get(env_name, "")
             if raw:
                 protocol[field] = raw
+
+        selector_values = {
+            "ncu_target_processes": env.get("SIDECAR_NCU_TARGET_PROCESSES", ""),
+            "ncu_filter_mode": env.get("SIDECAR_NCU_FILTER_MODE", ""),
+            "ncu_profile_from_start": env.get("SIDECAR_NCU_PROFILE_FROM_START", ""),
+            "ncu_launch_skip": env.get("SIDECAR_NCU_LAUNCH_SKIP", ""),
+            "ncu_launch_count": env.get("SIDECAR_NCU_LAUNCH_COUNT", ""),
+        }
+        if any(selector_values.values()):
+            missing = sorted(
+                field for field, raw in selector_values.items() if not raw
+            )
+            if missing:
+                raise ValueError(
+                    "partial explicit NCU sidecar controls; missing "
+                    f"{missing!r}"
+                )
+            protocol["ncu_target_processes"] = selector_values[
+                "ncu_target_processes"
+            ]
+            protocol["ncu_filter_mode"] = selector_values["ncu_filter_mode"]
+            profile_from_start = selector_values["ncu_profile_from_start"]
+            if profile_from_start not in {"on", "off"}:
+                raise ValueError(
+                    "SIDECAR_NCU_PROFILE_FROM_START must be on|off"
+                )
+            protocol["ncu_profile_from_start"] = profile_from_start == "on"
+            for field in ("ncu_launch_skip", "ncu_launch_count"):
+                raw = selector_values[field]
+                if not raw.isascii() or not raw.isdecimal() or (
+                    len(raw) > 1 and raw.startswith("0")
+                ):
+                    raise ValueError(
+                        f"SIDECAR_{field.upper()} must be a canonical unsigned decimal"
+                    )
+                protocol[field] = int(raw)
+
         for env_name, field in (
             ("SIDECAR_HOST_GPU_INDEX", "host_gpu_index"),
             ("SIDECAR_HOST_SM_CLOCK_MHZ", "host_sm_clock_mhz"),
@@ -151,6 +202,7 @@ def build_sidecar(
         raw = env.get("SIDECAR_HOST_POWER_W", "")
         if raw:
             protocol["host_power_draw_w"] = float(raw)
+        validate_measurement_protocol(protocol)
         sidecar["measurement_protocol"] = protocol
 
     diagnostics_obj = _load_diagnostics(diagnostics_path)
