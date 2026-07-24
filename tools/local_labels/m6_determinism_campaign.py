@@ -71,15 +71,18 @@ MATRIX_SCHEMA_PATH = (
     REPO_ROOT / "workloads/simbench_bw/schemas/sm86_capture_matrix.schema.json"
 )
 REGISTRY_PATH = REPO_ROOT / "tools/local_labels/metric_registry.json"
+FROZEN_REGISTRY_PATH = (
+    REPO_ROOT / "data/local_labels/campaign/frozen_v1_metric_registry.json"
+)
 PROBE_PATH = REPO_ROOT / "data/local_labels/ncu_metric_availability_probe_sm_86.json"
 SIDECAR_SCHEMA_PATH = REPO_ROOT / "workloads/simbench_bw/schemas/local_label_sidecar.schema.json"
 FROZEN_SOURCE_ALIAS_PATH = (
-    REPO_ROOT / "data/local_labels/campaign/frozen_v1_source_aliases.v1.json"
+    REPO_ROOT / "data/local_labels/campaign/frozen_v1_source_aliases.v2.json"
 )
 FROZEN_SOURCE_ALIAS_SHA256 = (
-    "f74ac4e8750f970ab3bb5d7da54ec9db2df0f4ef0f5fb22b5f0f6f90898790ff"
+    "87092c09313f033120f1b0d711cdf0082bb77d24423e66a36a4c15d994f4a58b"
 )
-FROZEN_SOURCE_ALIAS_SCHEMA_VERSION = 1
+FROZEN_SOURCE_ALIAS_SCHEMA_VERSION = 2
 FROZEN_V1_SOURCE_COMMIT = "124ce358733f97ba6e0af808d10ab69ffe4d5a78"
 STATS_PATH = Path(__file__).resolve().with_name("m6_determinism_stats.py")
 IMMUTABLE_HELPER_PATH = Path(__file__).resolve().with_name("immutable_artifact.py")
@@ -687,9 +690,9 @@ def _load_frozen_source_alias(
     expected_top_level = {"$id", "alias_id", "entries", "schema_version"}
     if set(value) != expected_top_level:
         _fail("M6_SOURCE_ALIAS_SHAPE", "alias table keys differ")
-    if value.get("$id") != "simbench_bw/data/frozen_v1_source_aliases.v1.json":
+    if value.get("$id") != "simbench_bw/data/frozen_v1_source_aliases.v2.json":
         _fail("M6_SOURCE_ALIAS_IDENTITY", "alias table $id differs")
-    if value.get("alias_id") != "sm86_reference_capture_matrix_v1_source_aliases":
+    if value.get("alias_id") != "sm86_reference_capture_matrix_v1_source_aliases_v2":
         _fail("M6_SOURCE_ALIAS_IDENTITY", "alias table id differs")
     if value.get("schema_version") != FROZEN_SOURCE_ALIAS_SCHEMA_VERSION:
         _fail("M6_SOURCE_ALIAS_VERSION", repr(value.get("schema_version")))
@@ -697,8 +700,12 @@ def _load_frozen_source_alias(
     if not isinstance(rows, list) or len(rows) != 2:
         _fail("M6_SOURCE_ALIAS_SHAPE", "exactly two frozen source aliases are required")
     expected_paths = {
-        REGISTRY_PATH.relative_to(REPO_ROOT).as_posix(),
-        SIDECAR_SCHEMA_PATH.relative_to(REPO_ROOT).as_posix(),
+        REGISTRY_PATH.relative_to(REPO_ROOT).as_posix(): (
+            FROZEN_REGISTRY_PATH.relative_to(REPO_ROOT).as_posix()
+        ),
+        SIDECAR_SCHEMA_PATH.relative_to(REPO_ROOT).as_posix(): (
+            SIDECAR_SCHEMA_PATH.relative_to(REPO_ROOT).as_posix()
+        ),
     }
     aliases: dict[str, dict[str, Any]] = {}
     for row in rows:
@@ -720,8 +727,7 @@ def _load_frozen_source_alias(
         if (
             not isinstance(historical, str)
             or not isinstance(canonical, str)
-            or historical != canonical
-            or historical not in expected_paths
+            or expected_paths.get(historical) != canonical
         ):
             _fail("M6_SOURCE_ALIAS_PATH", repr((historical, canonical)))
         if row.get("match") != "exact" or row.get("requires_sha256_match") is not True:
@@ -735,7 +741,7 @@ def _load_frozen_source_alias(
         if historical in aliases:
             _fail("M6_SOURCE_ALIAS_DUPLICATE", historical)
         aliases[historical] = dict(row)
-    if set(aliases) != expected_paths:
+    if set(aliases) != set(expected_paths):
         _fail("M6_SOURCE_ALIAS_COVERAGE", "registry and sidecar aliases are required")
     return aliases, alias_payload
 
@@ -5913,9 +5919,8 @@ def _source_authority_rows(
         "matrix_schema",
         "roster_authority",
         "matrix_input_pins",
-        # Frozen identities reuse the exact canonical registry/schema bytes and
-        # are retained separately in the final inventory.  Their canonical
-        # files already have snapshot witness rows through the active entries.
+        "frozen_metric_registry",
+        "frozen_sidecar_schema",
         "metric_registry",
         "sidecar_schema",
         "availability_probe",
@@ -5935,6 +5940,16 @@ def _source_authority_rows(
             path = item.get("path")
             digest = item.get("sha256")
             size = item.get("size_bytes")
+            if key == "frozen_metric_registry":
+                expected_historical = REGISTRY_PATH.relative_to(REPO_ROOT).as_posix()
+                if path != expected_historical:
+                    _fail("M6_SOURCE_SNAPSHOT_INCOMPLETE", f"source:{key}")
+                path = FROZEN_REGISTRY_PATH.relative_to(REPO_ROOT).as_posix()
+            elif key == "frozen_sidecar_schema":
+                expected_historical = SIDECAR_SCHEMA_PATH.relative_to(REPO_ROOT).as_posix()
+                if path != expected_historical:
+                    _fail("M6_SOURCE_SNAPSHOT_INCOMPLETE", f"source:{key}")
+                path = expected_historical
             if (
                 not isinstance(path, str)
                 or not path

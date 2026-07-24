@@ -58,20 +58,32 @@ def test_canonical_matrix_uses_supported_frozen_validation_contract(
         campaign.matrix_builder.FROZEN_V1_MATRIX_SHA256
     )
     assert len(runnable) == campaign.EXPECTED_RUNNABLE
-    registry_path = campaign.REGISTRY_PATH
-    registry_document, registry_payload = campaign.load_json(
-        registry_path,
-        role="metric registry",
+    frozen_registry_document, frozen_registry_payload = campaign.load_json(
+        campaign.FROZEN_REGISTRY_PATH,
+        role="frozen metric registry",
         cache=cache,
     )
     assert campaign.matrix_builder.validate_matrix(
         matrix,
         repo_root=campaign.REPO_ROOT,
-        registry_document=registry_document,
-        registry_payload=registry_payload,
-        registry_sha256=campaign.sha256_bytes(registry_payload),
+        registry_document=frozen_registry_document,
+        registry_payload=frozen_registry_payload,
+        registry_sha256=campaign.sha256_bytes(frozen_registry_payload),
         validation_mode="frozen_v1",
     ) == []
+    active_registry_document, active_registry_payload = campaign.load_json(
+        campaign.REGISTRY_PATH,
+        role="active metric registry",
+        cache=cache,
+    )
+    assert campaign.matrix_builder.validate_matrix(
+        matrix,
+        repo_root=campaign.REPO_ROOT,
+        registry_document=active_registry_document,
+        registry_payload=active_registry_payload,
+        registry_sha256=campaign.sha256_bytes(active_registry_payload),
+        validation_mode="frozen_v1",
+    ) == ["registry_pin_sha256"]
 
 
 def test_frozen_source_alias_resolves_exact_registry_and_sidecar_bytes() -> None:
@@ -83,7 +95,7 @@ def test_frozen_source_alias_resolves_exact_registry_and_sidecar_bytes() -> None
     assert campaign.sha256_bytes(alias_payload) == campaign.FROZEN_SOURCE_ALIAS_SHA256
     expected = {
         campaign.REGISTRY_PATH.relative_to(campaign.REPO_ROOT).as_posix(): (
-            campaign.REGISTRY_PATH
+            campaign.FROZEN_REGISTRY_PATH
         ),
         campaign.SIDECAR_SCHEMA_PATH.relative_to(campaign.REPO_ROOT).as_posix(): (
             campaign.SIDECAR_SCHEMA_PATH
@@ -145,7 +157,7 @@ def test_frozen_source_alias_rejects_unknown_version(
         value = original_loads(payload, role=role)
         if role == "frozen source alias table":
             value = copy.deepcopy(value)
-            value["schema_version"] = 2
+            value["schema_version"] = 3
         return value
 
     monkeypatch.setattr(campaign, "loads_strict", load_version_drift)
@@ -1233,10 +1245,13 @@ def test_snapshot_source_binding_deduplicates_frozen_alias_payloads(
     authorities = campaign._source_authority_rows(schedule)
     frozen_pairs = {
         (
-            schedule["source_identity"][key]["path"],
-            schedule["source_identity"][key]["sha256"],
-        )
-        for key in ("frozen_metric_registry", "frozen_sidecar_schema")
+            campaign.FROZEN_REGISTRY_PATH.relative_to(campaign.REPO_ROOT).as_posix(),
+            schedule["source_identity"]["frozen_metric_registry"]["sha256"],
+        ),
+        (
+            campaign.SIDECAR_SCHEMA_PATH.relative_to(campaign.REPO_ROOT).as_posix(),
+            schedule["source_identity"]["frozen_sidecar_schema"]["sha256"],
+        ),
     }
     authority_pairs = [(path, digest) for path, digest, _size in authorities]
     assert all(authority_pairs.count(pair) == 1 for pair in frozen_pairs)
