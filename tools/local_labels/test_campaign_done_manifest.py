@@ -1178,6 +1178,7 @@ def test_only_exact_historical_bootstrap_receives_schema_compatibility():
     assert any("admission" in problem for problem in dm._schema_problems(tampered))
 
 
+@pytest.mark.campaign_evidence
 def test_historical_bootstrap_strictly_loads_global_preparation_root(
     monkeypatch: pytest.MonkeyPatch,
 ):
@@ -1469,6 +1470,7 @@ def _project_manifest_definition_attestation_to_e387(
     return projected, prepare_path
 
 
+@pytest.mark.campaign_evidence
 def test_exact_e387_definition_projection_verifies_with_local_git_blobs(case):
     _upgrade_case_to_current_sol(case)
     manifest = _build(case)
@@ -1691,6 +1693,7 @@ def test_tracked_reference_can_be_rehashed_at_sealed_commit(case):
     assert origin == "sealed_commit"
 
 
+@pytest.mark.campaign_evidence
 def test_only_exact_bootstrap_relocates_former_checkout_to_sealed_git_bytes():
     manifest = json.loads(Path(
         "/home/jakeshea/sm86_reference_capture_r27/chunks/"
@@ -2051,6 +2054,7 @@ def test_schema_and_python_closed_enums_are_lockstep():
     ]
 
 
+@pytest.mark.campaign_evidence
 def test_e387_legacy_definition_context_hashes_exact_git_blobs():
     assert dm.SOL_E387_LEGACY_SOURCE_COMMIT == sol_def.E387_LEGACY_SOURCE_COMMIT
     assert dm.SOL_E387_LEGACY_COMPARATOR_SHA256 == (

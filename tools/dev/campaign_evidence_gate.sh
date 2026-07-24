@@ -29,8 +29,14 @@ export SM86_REFERENCE_CAPTURE_ROOT="$archive_root"
 export PYTEST_DISABLE_PLUGIN_AUTOLOAD=1
 cd "$repo_root"
 exec "$python" -m pytest -q -o addopts= \
+    eval/guards/test_legacy_ncu_calibration_frozen_evidence.py::test_frozen_evidence_manifest_and_historical_bytes_are_exact \
     tools/local_labels/test_archive_interrupted_sol_runnability.py::test_fixed_production_archive_is_still_verified \
     tools/local_labels/test_campaign_done_manifest.py::test_only_exact_historical_bootstrap_receives_schema_compatibility \
+    tools/local_labels/test_campaign_done_manifest.py::test_historical_bootstrap_strictly_loads_global_preparation_root \
+    tools/local_labels/test_campaign_done_manifest.py::test_exact_e387_definition_projection_verifies_with_local_git_blobs \
+    tools/local_labels/test_campaign_done_manifest.py::test_only_exact_bootstrap_relocates_former_checkout_to_sealed_git_bytes \
+    tools/local_labels/test_campaign_done_manifest.py::test_e387_legacy_definition_context_hashes_exact_git_blobs \
+    tools/local_labels/test_capture_roster_authority.py::test_committed_roster_authority_matches_regenerated \
     tools/local_labels/test_sm86_capture_matrix.py::test_committed_artifact_is_exact_deterministic_rebuild \
     tools/local_labels/test_sm86_capture_matrix.py::test_external_authority_path_is_pinned_and_rederivable \
     tools/local_labels/test_sm86_capture_matrix.py::test_sol_static_control_toolchain_is_host_verified \

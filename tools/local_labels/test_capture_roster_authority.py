@@ -20,7 +20,7 @@ _COMMITTED = _REPO / bra.CANONICAL_OUT_REL
 
 
 def _authority() -> dict:
-    return bra.build_authority(_REPO)
+    return json.loads(_COMMITTED.read_bytes())
 
 
 def test_schema_valid():
@@ -115,8 +115,9 @@ def test_simbench_resolution_consumes_durable_witness_not_binary_presence():
         assert cell["build_witness_row_sha256"] == row["row_seal_sha256"]
 
 
+@pytest.mark.campaign_evidence
 def test_committed_roster_authority_matches_regenerated():
-    fresh = _authority()
+    fresh = bra.build_authority(_REPO)
     assert _COMMITTED.read_bytes() == bra.canonical_json_bytes(fresh)
 
 

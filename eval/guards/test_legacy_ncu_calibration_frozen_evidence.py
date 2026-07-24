@@ -941,6 +941,7 @@ def _import_retirement_contract():
     )
 
 
+@pytest.mark.campaign_evidence
 def test_frozen_evidence_manifest_and_historical_bytes_are_exact() -> None:
     manifest = _load_manifest(
         MANIFEST_PATH, expected_sha256=MANIFEST_SHA256, repo_root=REPO_ROOT
