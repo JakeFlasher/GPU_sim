@@ -1974,16 +1974,16 @@ def _validate_m4_sidecar(
 ) -> None:
     try:
         parsed_registry = metric_registry_lib.parse_registry(dict(registry))
+        validation = label_import.validate_with_bound_authorities(
+            sidecar,
+            schema=dict(sidecar_schema),
+            registry=parsed_registry,
+        )
     except (TypeError, ValueError) as exc:
         _fail(
             "M6_M4_REGISTRY_AUTHORITY",
             f"{schedule_cell['cell_id']}: {exc}",
         )
-    validation = label_import.validate_with_bound_authorities(
-        sidecar,
-        schema=dict(sidecar_schema),
-        registry=parsed_registry,
-    )
     if not validation.ok:
         _fail(
             "M6_M4_SIDECAR_VALIDATION",

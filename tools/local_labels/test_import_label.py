@@ -22,11 +22,13 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 _HERE = Path(__file__).resolve().parent
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 import import_label  # noqa: E402
+import metric_registry  # noqa: E402
 import sidecar_schema_authority  # noqa: E402
 
 
@@ -134,6 +136,98 @@ class ExplicitNcuProtocolTest(unittest.TestCase):
         self.assertFalse(result.ok)
         self.assertEqual(result.typed_reason, "schema_validation_failed")
         self.assertIn("skip plus count exceeds", result.detail)
+
+
+class BoundAuthorityValidationTest(unittest.TestCase):
+    @staticmethod
+    def _sidecar_with_cycles() -> dict:
+        sidecar = _valid_sidecar()
+        sidecar["unit_tagged_metrics"] = [
+            {
+                "ncu_metric": "gpc__cycles_elapsed.max",
+                "unit": "cycles",
+                "value": 1234.0,
+            }
+        ]
+        return sidecar
+
+    def test_bound_validation_does_not_load_ambient_authorities(self) -> None:
+        schema = import_label.load_schema()
+        registry = metric_registry.parse_registry(
+            metric_registry.load_registry_raw()
+        )
+        with (
+            mock.patch.object(
+                import_label,
+                "load_schema",
+                side_effect=AssertionError("ambient schema lookup"),
+            ),
+            mock.patch.object(
+                import_label,
+                "load_registry",
+                side_effect=AssertionError("ambient registry lookup"),
+            ),
+        ):
+            result = import_label.validate_with_bound_authorities(
+                self._sidecar_with_cycles(),
+                schema=schema,
+                registry=registry,
+            )
+        self.assertTrue(result.ok, msg=result.detail)
+
+    def test_package_qualified_registry_is_accepted(self) -> None:
+        from tools.local_labels import metric_registry as package_registry
+
+        registry = package_registry.parse_registry(
+            package_registry.load_registry_raw()
+        )
+        result = import_label.validate_with_bound_authorities(
+            self._sidecar_with_cycles(),
+            schema=import_label.load_schema(),
+            registry=registry,
+        )
+        self.assertTrue(result.ok, msg=result.detail)
+
+    def test_malformed_bound_schema_is_an_authority_error(self) -> None:
+        registry = metric_registry.parse_registry(
+            metric_registry.load_registry_raw()
+        )
+        with self.assertRaisesRegex(ValueError, "bound sidecar schema is malformed"):
+            import_label.validate_with_bound_authorities(
+                self._sidecar_with_cycles(),
+                schema={"type": 42},
+                registry=registry,
+            )
+
+    def test_bound_schema_substitution_controls_validation(self) -> None:
+        schema = json.loads(json.dumps(import_label.load_schema()))
+        schema["properties"]["slug"] = {"const": "different_slug"}
+        registry = metric_registry.parse_registry(
+            metric_registry.load_registry_raw()
+        )
+        result = import_label.validate_with_bound_authorities(
+            self._sidecar_with_cycles(), schema=schema, registry=registry
+        )
+        self.assertFalse(result.ok)
+        self.assertEqual(result.typed_reason, "schema_validation_failed")
+
+    def test_bound_registry_substitution_controls_metric_validation(self) -> None:
+        raw = metric_registry.load_registry_raw()
+        raw["metrics"] = [
+            row
+            for row in raw["metrics"]
+            if row["ncu_metric"] != "gpc__cycles_elapsed.max"
+        ]
+        registry = metric_registry.parse_registry(raw)
+        result = import_label.validate_with_bound_authorities(
+            self._sidecar_with_cycles(),
+            schema=import_label.load_schema(),
+            registry=registry,
+        )
+        self.assertFalse(result.ok)
+        self.assertEqual(
+            result.typed_reason, "unit_tagged_metric_unregistered"
+        )
 
 
 class ValidSidecarTest(unittest.TestCase):

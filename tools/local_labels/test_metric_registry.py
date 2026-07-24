@@ -20,6 +20,7 @@ from metric_registry import (
     MetricRegistryError,
     load_registry,
     load_registry_raw,
+    parse_registry,
 )
 
 _REGISTRY_PATH = Path(__file__).resolve().parent / "metric_registry.json"
@@ -34,6 +35,23 @@ class MetricRegistryTest(unittest.TestCase):
         self.assertEqual(self.reg.label_schema_version, 5)
         self.assertEqual(LABEL_SCHEMA_VERSION, 5)
         self.assertEqual(self.raw["label_schema_version"], 5)
+
+    def test_parse_registry_uses_only_a_snapshot_of_caller_data(self) -> None:
+        raw = load_registry_raw()
+        parsed = parse_registry(raw)
+        first_key = parsed.entries[0].key
+        raw["metrics"][0]["key"] = "caller_mutated_after_parse"
+        self.assertEqual(parsed.entries[0].key, first_key)
+
+    def test_parse_registry_rejects_non_object_root(self) -> None:
+        with self.assertRaisesRegex(MetricRegistryError, "root must be a JSON object"):
+            parse_registry([])
+
+    def test_parse_registry_normalizes_missing_row_field(self) -> None:
+        raw = load_registry_raw()
+        del raw["metrics"][0]["sidecar_field"]
+        with self.assertRaisesRegex(MetricRegistryError, "registry is malformed"):
+            parse_registry(raw)
 
     def test_on_disk_vocabularies_match_module_constants(self) -> None:
         self.assertEqual(tuple(self.raw["units"]), UNITS)

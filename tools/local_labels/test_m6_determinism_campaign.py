@@ -136,6 +136,35 @@ def test_matrix_authority_sources_do_not_invoke_git(
     )
 
 
+def test_m4_sidecar_rejects_malformed_bound_registry_with_typed_error() -> None:
+    with pytest.raises(campaign.M6Error) as error:
+        campaign._validate_m4_sidecar(
+            {},
+            sidecar_schema={},
+            registry={},
+            matrix={},
+            matrix_cell={},
+            schedule_cell={"cell_id": "cell"},
+            launch_index=0,
+        )
+    assert error.value.code == "M6_M4_REGISTRY_AUTHORITY"
+
+
+def test_m4_sidecar_rejects_malformed_bound_schema_with_typed_error() -> None:
+    registry = json.loads(campaign.REGISTRY_PATH.read_text(encoding="utf-8"))
+    with pytest.raises(campaign.M6Error) as error:
+        campaign._validate_m4_sidecar(
+            {},
+            sidecar_schema={"type": 42},
+            registry=registry,
+            matrix={},
+            matrix_cell={},
+            schedule_cell={"cell_id": "cell"},
+            launch_index=0,
+        )
+    assert error.value.code == "M6_M4_REGISTRY_AUTHORITY"
+
+
 def test_frozen_source_alias_rejects_manifest_hash_drift(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

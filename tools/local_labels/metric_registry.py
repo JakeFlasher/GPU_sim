@@ -23,6 +23,8 @@ silently travel the percentage ``/100`` path.
 
 Public surface:
 
+- ``parse_registry(raw)`` -> parsed registry from caller-supplied data without
+  consulting the on-disk active registry.
 - ``load_registry()`` -> parsed registry dict (cached per path).
 - ``MetricRegistry`` dataclass wrapping the parsed registry with resolver
   helpers (by key, by ncu_metric, by sidecar/admitted field).
@@ -32,6 +34,7 @@ Public surface:
 
 from __future__ import annotations
 
+import copy
 import json
 from dataclasses import dataclass
 from functools import lru_cache
@@ -489,12 +492,28 @@ def validate_unit_tag(
     return True, "", ""
 
 
+def parse_registry(raw: Any) -> MetricRegistry:
+    """Validate caller-supplied registry data without reading ambient files.
+
+    The input is deep-copied before parsing so the returned registry does not
+    retain aliases to mutable nested objects owned by the caller. This is the
+    authority-bound counterpart to :func:`load_registry` for consumers that
+    have already authenticated exact registry bytes.
+    """
+    try:
+        return _parse(copy.deepcopy(raw))
+    except MetricRegistryError:
+        raise
+    except (KeyError, TypeError, ValueError, OverflowError) as exc:
+        raise MetricRegistryError(f"registry is malformed: {exc}") from exc
+
+
 @lru_cache(maxsize=4)
 def load_registry(path: str | None = None) -> MetricRegistry:
     """Load and validate the metric registry. Cached per resolved path."""
     p = Path(path) if path is not None else _REGISTRY_PATH
     raw = json.loads(p.read_text(encoding="utf-8"))
-    return _parse(raw)
+    return parse_registry(raw)
 
 
 def load_registry_raw(path: str | None = None) -> dict[str, Any]:

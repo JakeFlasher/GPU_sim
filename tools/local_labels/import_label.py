@@ -13,7 +13,10 @@ Sidecar paths follow ``data/local_labels/<device>/<slug>/<shape_point>/label_<re
 Public entry points:
 
 - ``load_schema()`` returns the bundled JSON Schema document as a dict.
-- ``validate(sidecar)`` runs all checks against an in-memory parsed dict.
+- ``validate(sidecar)`` runs all checks against an in-memory parsed dict and the
+  active schema/registry.
+- ``validate_with_bound_authorities(sidecar, schema=..., registry=...)`` runs the
+  same checks exclusively against caller-authenticated authorities.
 - ``validate_path(path)`` opens the file and forwards to ``validate``.
 - ``main(argv)`` is the CLI entry point; exits non-zero on any failure.
 """
@@ -41,7 +44,11 @@ _HERE = Path(__file__).resolve().parent
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
-from metric_registry import load_registry, validate_unit_tag  # noqa: E402
+from metric_registry import (  # noqa: E402
+    MetricRegistry,
+    load_registry,
+    validate_unit_tag,
+)
 from ncu_capture_contract import validate_measurement_protocol  # noqa: E402
 
 
@@ -188,7 +195,9 @@ def _check_confidence_interval_ordering(
     return None
 
 
-def _check_unit_tagged_metrics(sidecar: dict) -> ValidationResult | None:
+def _check_unit_tagged_metrics(
+    sidecar: dict, registry: MetricRegistry | None = None
+) -> ValidationResult | None:
     """Cross-check the optional v5 ``unit_tagged_metrics`` block against the
     committed metric registry.
 
@@ -201,7 +210,8 @@ def _check_unit_tagged_metrics(sidecar: dict) -> ValidationResult | None:
     records = sidecar.get("unit_tagged_metrics")
     if not records:
         return None
-    registry = load_registry()
+    if registry is None:
+        registry = load_registry()
     for idx, rec in enumerate(records):
         if not isinstance(rec, dict):
             continue  # schema validation already rejected this shape
@@ -285,22 +295,17 @@ def _check_value_in_registry_range(
     return None
 
 
-def validate(sidecar: Any, schema: dict | None = None) -> ValidationResult:
-    """Validate a parsed local-label sidecar.
-
-    Order of checks: forbidden-field denylist (whole JSON tree) -> JSON
-    Schema -> explicit NCU protocol semantics -> confidence-interval ordering.
-    The forbidden-field check
-    runs first so a sidecar that smuggles in a raw HW-counter event
-    identifier fails with a specific typed reason even before structural
-    schema validation reaches the offending field.
-    """
+def _validate(
+    sidecar: Any,
+    *,
+    schema: dict,
+    registry: MetricRegistry | None,
+) -> ValidationResult:
+    """Run the shared importer checks against the supplied authorities."""
     forbidden = _check_forbidden_field_names(sidecar)
     if forbidden is not None:
         return forbidden
 
-    if schema is None:
-        schema = load_schema()
     validator = jsonschema.Draft202012Validator(schema)
     errors = sorted(validator.iter_errors(sidecar), key=lambda e: list(e.path))
     if errors:
@@ -337,11 +342,52 @@ def validate(sidecar: Any, schema: dict | None = None) -> ValidationResult:
     if ordering is not None:
         return ordering
 
-    unit_tagged = _check_unit_tagged_metrics(sidecar)
+    unit_tagged = _check_unit_tagged_metrics(sidecar, registry)
     if unit_tagged is not None:
         return unit_tagged
 
     return ValidationResult(ok=True)
+
+
+def validate(sidecar: Any, schema: dict | None = None) -> ValidationResult:
+    """Validate a sidecar against the active authorities.
+
+    Order of checks: forbidden-field denylist (whole JSON tree) -> JSON Schema ->
+    explicit NCU protocol semantics -> confidence-interval ordering -> metric
+    registry consistency. Supplying ``schema`` preserves the historical schema
+    override, while metric checks continue to use the active registry.
+    """
+    return _validate(
+        sidecar,
+        schema=load_schema() if schema is None else schema,
+        registry=None,
+    )
+
+
+def validate_with_bound_authorities(
+    sidecar: Any,
+    *,
+    schema: dict,
+    registry: MetricRegistry,
+) -> ValidationResult:
+    """Validate exclusively against caller-authenticated schema and registry.
+
+    This entry point performs no schema or registry file lookup. It is intended
+    for evidence consumers that authenticated exact authority bytes before
+    parsing them and must not accidentally substitute the mutable active files.
+    """
+    if not isinstance(schema, dict):
+        raise TypeError("bound sidecar schema must be a dict")
+    try:
+        jsonschema.Draft202012Validator.check_schema(schema)
+    except (jsonschema.SchemaError, TypeError, ValueError) as exc:
+        raise ValueError(f"bound sidecar schema is malformed: {exc}") from exc
+    if not all(
+        callable(getattr(registry, method, None))
+        for method in ("get_by_ncu_metric", "by_ncu_metric")
+    ):
+        raise TypeError("bound metric registry does not implement the registry API")
+    return _validate(sidecar, schema=schema, registry=registry)
 
 
 def validate_path(path: Path) -> ValidationResult:
