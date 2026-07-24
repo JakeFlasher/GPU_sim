@@ -91,6 +91,41 @@ def _assert_code(code: str):
     return pytest.raises(executor.NcuActionExecutorError, match=code)
 
 
+def test_expected_identity_factory_returns_one_validated_authority() -> None:
+    expected = executor.build_expected_ncu_identity(
+        resolved_path="/opt/nvidia/nsight-compute/ncu",
+        executable_sha256="a" * 64,
+        version_line=_VERSION,
+    )
+    assert expected == executor.ExpectedNcuIdentity(
+        "/opt/nvidia/nsight-compute/ncu", "a" * 64, _VERSION,
+    )
+    assert executor.validate_expected_ncu_identity(expected) is expected
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"resolved_path": "//opt/ncu"},
+        {"resolved_path": "/tmp/../tmp/ncu"},
+        {"resolved_path": "/" + "x" * 4096},
+        {"executable_sha256": "A" * 64},
+        {"version_line": _VERSION + "\nsecond"},
+        {"version_line": "Version x\vsecond"},
+        {"version_line": "Version " + "x" * 4096},
+    ],
+)
+def test_expected_identity_factory_rejects_malformed_authority(overrides) -> None:
+    values = {
+        "resolved_path": "/opt/nvidia/nsight-compute/ncu",
+        "executable_sha256": "a" * 64,
+        "version_line": _VERSION,
+        **overrides,
+    }
+    with _assert_code(executor.NCU_IDENTITY_INPUT_INVALID):
+        executor.build_expected_ncu_identity(**values)
+
+
 def test_authorized_action_preserves_argv_bytes_locale_and_no_shell(
     tmp_path: Path, monkeypatch,
 ) -> None:

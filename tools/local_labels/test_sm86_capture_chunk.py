@@ -401,6 +401,7 @@ def test_capture_cell_refuses_identity_mismatch_before_control(tmp_path, monkeyp
                 "prior_capture_defect_attempts": [],
                 "source_commit": "d" * 40,
             },
+            expected_ncu_identity=_expected_ncu_identity(),
             certified_sol_env=None,
             sol_environment_probe=None,
             module_store=tmp_path / "module-store",
@@ -458,6 +459,7 @@ def test_supplemental_cell_gate_refuses_before_validation_or_capture(
                 "prior_capture_defect_attempts": [],
                 "source_commit": "d" * 40,
             },
+            expected_ncu_identity=_expected_ncu_identity(),
             certified_sol_env=None,
             sol_environment_probe=None,
             module_store=tmp_path / "module-store",
@@ -664,6 +666,35 @@ def _preflight(root: Path) -> dict:
     }
 
 
+def _expected_ncu_identity():
+    return cc.ncu_executor.ExpectedNcuIdentity(
+        resolved_path="/opt/nvidia/nsight-compute/2026.1.0/ncu",
+        executable_sha256="5" * 64,
+        version_line="Version 2026.1.0.0 (public-release)",
+    )
+
+
+def test_preflight_returns_exact_validated_ncu_identity(tmp_path):
+    observed = cc.validate_preflight_manifest(
+        _preflight(tmp_path), expected_head=HEAD, expected_pins_sha256=SHA,
+        expected_output_root=tmp_path,
+        expected_ncu_version_prefix="2026.1.0",
+    )
+    assert observed == _expected_ncu_identity()
+    assert type(observed) is cc.ncu_executor.ExpectedNcuIdentity
+
+
+def test_preflight_structure_only_validation_still_rejects_ncu_authority(tmp_path):
+    manifest = _preflight(tmp_path)
+    manifest["checks"]["ncu"]["resolved_path"] = "//opt/ncu"
+    with pytest.raises(cc.ChunkRefusal, match="preflight_invalid"):
+        cc.validate_preflight_manifest(
+            manifest, expected_head=HEAD, expected_pins_sha256=SHA,
+            expected_output_root=tmp_path,
+            expected_ncu_version_prefix="2026.1.0", require_fresh=False,
+        )
+
+
 def test_preflight_refuses_stale_timestamp(tmp_path):
     manifest = _preflight(tmp_path)
     manifest["captured_at_utc"] = (
@@ -676,6 +707,11 @@ def test_preflight_refuses_stale_timestamp(tmp_path):
             expected_output_root=tmp_path,
             expected_ncu_version_prefix="2026.1.0",
         )
+    assert cc.validate_preflight_manifest(
+        manifest, expected_head=HEAD, expected_pins_sha256=SHA,
+        expected_output_root=tmp_path,
+        expected_ncu_version_prefix="2026.1.0", require_fresh=False,
+    ) is None
 
 
 @pytest.mark.parametrize("age_seconds", [899.999, 900.0])
@@ -3462,17 +3498,20 @@ def _runner_recovery_case(tmp_path: Path, monkeypatch):
         validated.append((resolved, require_fresh))
         if require_fresh and freshness[resolved] == "expired":
             raise cc.ChunkRefusal("PREFLIGHT_EXPIRED", str(resolved))
-        return {
+        return ({
             "generated_at_utc": generated_at,
             "checks": {
                 "sol_environment": probe,
                 "injection_runtime": {"tracer_so_sha256": "4" * 64},
             },
-        }
+        }, _expected_ncu_identity())
 
     capture_counts = {"a": 0, "b": 0}
 
-    def fake_capture_cell(*, cell, cell_dir, capture_provenance, **_kwargs):
+    def fake_capture_cell(
+        *, cell, cell_dir, capture_provenance, expected_ncu_identity, **_kwargs,
+    ):
+        assert expected_ncu_identity == _expected_ncu_identity()
         slug = cell["identity"]["slug"]
         capture_counts[slug] += 1
         payload = cell_dir / "trace.pb"
@@ -4042,7 +4081,10 @@ def test_done_finalizer_derives_uniform_journal_preflight_not_cli_preflight(
 
     monkeypatch.setattr(
         cc, "_validate_referenced_preflight",
-        lambda **_kwargs: {"generated_at_utc": "2026-07-10T11:59:59Z"},
+        lambda **_kwargs: (
+            {"generated_at_utc": "2026-07-10T11:59:59Z"},
+            _expected_ncu_identity(),
+        ),
     )
     monkeypatch.setattr(cc, "_git_state", lambda: (source_commit, True, ""))
     monkeypatch.setattr(done, "_tool_versions_from_pins", lambda _pins: {})
@@ -4226,6 +4268,7 @@ def test_label_capture_stages_workload_output_and_checks_full_vector(
     result = cc.capture_label(
         cell=cell, binary=binary, invocation=cell["invocation"],
         cell_dir=cell_dir, matrix=matrix, pins=pins, timeout_s=10,
+        expected_ncu_identity=_expected_ncu_identity(),
         kernel_name_selector="_Z15syntheticKernelv",
     )
     command = commands[0]
@@ -4305,6 +4348,7 @@ def test_sol_label_consumer_keeps_shape_metadata_out_of_target_argv(
     result = cc.capture_label(
         cell=cell, binary=binary, invocation=invocation,
         cell_dir=cell_dir, matrix=matrix, pins=pins, timeout_s=10,
+        expected_ncu_identity=_expected_ncu_identity(),
         runtime_cwd=cc.REPO_ROOT, runtime_env=runtime_env,
         bind_supplemental_toolchain=True,
     )
@@ -5402,6 +5446,7 @@ def test_capture_cell_sol_typed_route_seals_full_orchestration_without_gpu(
         cell_budgets=object(),
         expected_tracer_sha256="9" * 64,
         capture_provenance=provenance,
+        expected_ncu_identity=_expected_ncu_identity(),
         certified_sol_env=certified_env,
         sol_environment_probe=probe,
         module_store=(tmp_path / "module_store").resolve(),

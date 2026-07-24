@@ -132,6 +132,27 @@ def _validate_expected(expected: ExpectedNcuIdentity) -> Path:
     return Path(path_text)
 
 
+def validate_expected_ncu_identity(
+    expected: ExpectedNcuIdentity,
+) -> ExpectedNcuIdentity:
+    """Validate and return one exact typed NCU executable authority."""
+
+    _validate_expected(expected)
+    return expected
+
+
+def build_expected_ncu_identity(
+    *, resolved_path: str, executable_sha256: str, version_line: str,
+) -> ExpectedNcuIdentity:
+    """Build one validated authority without probing or resolving ambient state."""
+
+    return validate_expected_ncu_identity(ExpectedNcuIdentity(
+        resolved_path=resolved_path,
+        executable_sha256=executable_sha256,
+        version_line=version_line,
+    ))
+
+
 def _validate_action(
     arguments: Sequence[str], timeout_seconds: float,
 ) -> tuple[str, ...]:

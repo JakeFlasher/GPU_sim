@@ -2117,6 +2117,13 @@ def _attempt_capture_kwargs(
         "preflight_manifest": {
             "checks": {"injection_runtime": {"tracer_so_sha256": "6" * 64}}
         },
+        "expected_ncu_identity": (
+            capture.canonical_capture.ncu_executor.ExpectedNcuIdentity(
+                "/opt/nvidia/nsight-compute/2026.1.0/ncu",
+                "7" * 64,
+                "Version 2026.1.0.0 (public-release)",
+            )
+        ),
         "preflight_path": tmp_path / "preflight.json",
         "matrix_sha256": "8" * 64,
         "cell_budget_sha256": "9" * 64,
@@ -2157,6 +2164,7 @@ def test_failed_attempt_is_preserved_and_next_attempt_can_complete(
     kwargs, journal = _attempt_capture_kwargs(tmp_path, binding, monkeypatch)
 
     def fail_capture(**call):
+        assert call["expected_ncu_identity"] is kwargs["expected_ncu_identity"]
         (call["cell_dir"] / "partial.bin").write_bytes(b"partial evidence")
         raise capture.canonical_capture.ChunkRefusal(
             failure_code, "synthetic limit"

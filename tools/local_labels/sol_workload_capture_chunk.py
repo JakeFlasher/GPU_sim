@@ -4886,7 +4886,9 @@ def _validate_supplemental_preflight_reference(
     supplemental_matrix_sha256: str, output_root: Path,
     expected_head: str, require_fresh: bool,
     admitted_at_utc: datetime,
-) -> dict[str, Any]:
+) -> tuple[
+    dict[str, Any], canonical_capture.ncu_executor.ExpectedNcuIdentity | None,
+]:
     """Bind preflight to the live matrix; frozen canonical bytes are context."""
     return canonical_capture._validate_referenced_preflight(
         preflight_path=preflight_path, expected_sha256=preflight_sha256,
@@ -4903,7 +4905,9 @@ def _capture_one(
     *, journal_dir: Path, cell: dict[str, Any], binding: dict[str, Any],
     supplemental_runnability_evidence: dict[str, Any] | None,
     canonical_matrix: dict[str, Any], pins: dict[str, Any], cell_budgets: Any,
-    preflight_manifest: dict[str, Any], preflight_path: Path,
+    preflight_manifest: dict[str, Any],
+    expected_ncu_identity: canonical_capture.ncu_executor.ExpectedNcuIdentity,
+    preflight_path: Path,
     preflight_sha256: str, matrix_sha256: str, cell_budget_sha256: str,
     raw_staging_margin_bytes: int, source_commit: str,
     sol_environment_probe: dict[str, Any],
@@ -5049,6 +5053,7 @@ def _capture_one(
                 "prior_preparation_failures": [],
                 "prior_capture_defect_attempts": [],
             },
+            expected_ncu_identity=expected_ncu_identity,
             certified_sol_env=certified_row_environment(
                 cell=cell, certified_sol_env=certified_sol_env,
                 flashinfer_proof=flashinfer_proof,
@@ -5572,16 +5577,21 @@ def _run_chunk_impl(
         # preflight input and enables pure environment/row validation before
         # the campaign lock or any capture directory is created.  Freshness is
         # rechecked under the lock once resume state is known.
-        preflight_manifest = _validate_supplemental_preflight_reference(
-            preflight_path=preflight_path, preflight_sha256=preflight_sha,
-            pins=pins, pins_path=pins_path,
-            aggregate_budget_path=aggregate_budget_path,
-            supplemental_matrix=matrix,
-            supplemental_matrix_path=matrix_path,
-            supplemental_matrix_sha256=matrix_sha,
-            output_root=output_root,
-            expected_head=head, require_fresh=False,
-            admitted_at_utc=admitted_at,
+        preflight_manifest, _unadmitted_ncu_identity = (
+            _validate_supplemental_preflight_reference(
+                preflight_path=preflight_path,
+                preflight_sha256=preflight_sha,
+                pins=pins,
+                pins_path=pins_path,
+                aggregate_budget_path=aggregate_budget_path,
+                supplemental_matrix=matrix,
+                supplemental_matrix_path=matrix_path,
+                supplemental_matrix_sha256=matrix_sha,
+                output_root=output_root,
+                expected_head=head,
+                require_fresh=False,
+                admitted_at_utc=admitted_at,
+            )
         )
     except canonical_capture.ChunkRefusal as exc:
         raise WorkloadCaptureRefusal(exc.code, exc.detail) from exc
@@ -5692,16 +5702,21 @@ def _run_chunk_impl(
             completed[safe_name] = loaded[1]
     all_complete = len(completed) == len(resolved)
     try:
-        preflight_manifest = _validate_supplemental_preflight_reference(
-            preflight_path=preflight_path, preflight_sha256=preflight_sha,
-            pins=pins, pins_path=pins_path,
-            aggregate_budget_path=aggregate_budget_path,
-            supplemental_matrix=matrix,
-            supplemental_matrix_path=matrix_path,
-            supplemental_matrix_sha256=matrix_sha,
-            output_root=output_root,
-            expected_head=head, require_fresh=not all_complete,
-            admitted_at_utc=admitted_at,
+        preflight_manifest, expected_ncu_identity = (
+            _validate_supplemental_preflight_reference(
+                preflight_path=preflight_path,
+                preflight_sha256=preflight_sha,
+                pins=pins,
+                pins_path=pins_path,
+                aggregate_budget_path=aggregate_budget_path,
+                supplemental_matrix=matrix,
+                supplemental_matrix_path=matrix_path,
+                supplemental_matrix_sha256=matrix_sha,
+                output_root=output_root,
+                expected_head=head,
+                require_fresh=not all_complete,
+                admitted_at_utc=admitted_at,
+            )
         )
     except canonical_capture.ChunkRefusal as exc:
         raise WorkloadCaptureRefusal(exc.code, exc.detail) from exc
@@ -5766,6 +5781,7 @@ def _run_chunk_impl(
                 ),
                 cell_budgets=cell_budgets,
                 preflight_manifest=preflight_manifest,
+                expected_ncu_identity=expected_ncu_identity,
                 preflight_path=preflight_path, preflight_sha256=preflight_sha,
                 matrix_sha256=matrix_sha,
                 cell_budget_sha256=canonical_sha256(variant["trace_budget"]),

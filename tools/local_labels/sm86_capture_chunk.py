@@ -48,6 +48,7 @@ import archive_preparation_failure as prep_archive  # noqa: E402
 import archive_capture_defect_attempt as capture_defect_archive  # noqa: E402
 import capture_budget_route as budget_route  # noqa: E402
 import capture_toolchain_contract as toolchain_contract  # noqa: E402
+import ncu_action_executor as ncu_executor  # noqa: E402
 import ncu_capture_contract  # noqa: E402
 import sol_capture_environment as sol_env  # noqa: E402
 import sol_definition_equivalence as sol_def  # noqa: E402
@@ -105,6 +106,7 @@ _SHA40 = frozenset("0123456789abcdef")
 ROUND28_PROVENANCE_REFUSAL_CODES = frozenset({
     "PREFLIGHT_CLOCK_SKEW",
     "PREFLIGHT_EXPIRED",
+    "capture_ncu_authority_invalid",
     "REFERENCED_PREFLIGHT_INVALID",
     "JOURNAL_RECOVERY_NOT_ADMITTED",
     "JOURNAL_PREFLIGHT_MISMATCH",
@@ -624,7 +626,7 @@ def validate_preflight_manifest(
     expected_sol_fingerprint_pin: dict | None = None,
     require_fresh: bool = True,
     admitted_at_utc: datetime | None = None,
-) -> None:
+) -> ncu_executor.ExpectedNcuIdentity | None:
     problems: list[str] = []
     try:
         normalized_ncu_version = (
@@ -777,11 +779,22 @@ def validate_preflight_manifest(
                 )
     if problems:
         raise ChunkRefusal("preflight_invalid", "; ".join(problems))
+    ncu_authority = manifest["checks"]["ncu"]
+    try:
+        expected_ncu_identity = ncu_executor.build_expected_ncu_identity(
+            resolved_path=ncu_authority["resolved_path"],
+            executable_sha256=ncu_authority["executable_sha256"],
+            version_line=ncu_authority["version_line"],
+        )
+    except ncu_executor.NcuActionExecutorError as exc:
+        raise ChunkRefusal(
+            "preflight_invalid", f"checks.ncu executable authority: {exc}"
+        ) from exc
     generated = _parse_utc_timestamp(
         generated_raw, field="generated_at_utc"
     )
     if not require_fresh:
-        return
+        return None
     admitted = admitted_at_utc or datetime.now(timezone.utc)
     if admitted.tzinfo is None:
         raise ChunkRefusal(
@@ -802,6 +815,7 @@ def validate_preflight_manifest(
             f"preflight age {age_s:.3f}s exceeds inclusive "
             f"{preflight.PREFLIGHT_FRESHNESS_SECONDS:.3f}s window",
         )
+    return expected_ncu_identity
 
 
 def validate_live_injection_hashes(manifest: dict, pins: dict) -> None:
@@ -4183,7 +4197,9 @@ def build_fixture_only_launch_set_plan(
 
 def capture_label(
     *, cell: dict, binary: Path, invocation: dict, cell_dir: Path,
-    matrix: dict, pins: dict, timeout_s: float, runtime_cwd: Path | None = None,
+    matrix: dict, pins: dict, timeout_s: float,
+    expected_ncu_identity: ncu_executor.ExpectedNcuIdentity,
+    runtime_cwd: Path | None = None,
     runtime_env: dict[str, str] | None = None,
     phase_result_validator: Callable[[dict[str, str], str], dict] | None = None,
     label_launch_index_override: int | None = None,
@@ -4192,6 +4208,10 @@ def capture_label(
     execution_source_commit: str | None = None,
     bind_supplemental_toolchain: bool = False,
 ) -> dict:
+    try:
+        ncu_executor.validate_expected_ncu_identity(expected_ncu_identity)
+    except ncu_executor.NcuActionExecutorError as exc:
+        raise ChunkRefusal("capture_ncu_authority_invalid", str(exc)) from exc
     prepared = _prepare_label_capture_command(
         cell=cell, binary=binary, invocation=invocation, cell_dir=cell_dir,
         matrix=matrix, pins=pins,
@@ -7404,6 +7424,7 @@ def capture_cell(
     *, cell: dict, cell_dir: Path, matrix: dict, pins: dict,
     cell_budgets: Any, expected_tracer_sha256: str,
     capture_provenance: dict[str, Any],
+    expected_ncu_identity: ncu_executor.ExpectedNcuIdentity,
     certified_sol_env: dict[str, str] | None,
     sol_environment_probe: dict[str, Any] | None,
     module_store: Path,
@@ -7414,6 +7435,10 @@ def capture_cell(
     supplemental_workload_path: Path | None = None,
     supplemental_definition_path: Path | None = None,
 ) -> dict:
+    try:
+        ncu_executor.validate_expected_ncu_identity(expected_ncu_identity)
+    except ncu_executor.NcuActionExecutorError as exc:
+        raise ChunkRefusal("capture_ncu_authority_invalid", str(exc)) from exc
     chunk_root = cell_dir.parents[1]
     capture_started_at_utc = capture_provenance.get("capture_started_at_utc")
     admission_run_id = capture_provenance.get("admission_run_id")
@@ -7661,7 +7686,9 @@ def capture_cell(
                 label_result = capture_label(
                     cell=cell, binary=binary, invocation=invocation,
                     cell_dir=cell_dir, matrix=matrix, pins=pins,
-                    timeout_s=remaining(phase_tag), runtime_cwd=runtime_cwd,
+                    timeout_s=remaining(phase_tag),
+                    expected_ncu_identity=expected_ncu_identity,
+                    runtime_cwd=runtime_cwd,
                     runtime_env=launch_label_env,
                     phase_result_validator=phase_validator,
                     label_launch_index_override=ordinal,
@@ -7710,7 +7737,9 @@ def capture_cell(
         label = capture_label(
             cell=cell, binary=binary, invocation=invocation,
             cell_dir=cell_dir, matrix=matrix, pins=pins,
-            timeout_s=remaining("label"), runtime_cwd=runtime_cwd,
+            timeout_s=remaining("label"),
+            expected_ncu_identity=expected_ncu_identity,
+            runtime_cwd=runtime_cwd,
             runtime_env=label_env, phase_result_validator=phase_validator,
             kernel_name_selector=kernel_name_selector,
             execution_source_commit=execution_source_commit,
@@ -9201,7 +9230,7 @@ def _validate_referenced_preflight(
     matrix_path: Path, matrix_sha256: str, output_root: Path,
     expected_head: str, require_fresh: bool,
     admitted_at_utc: datetime | None = None,
-) -> dict:
+) -> tuple[dict, ncu_executor.ExpectedNcuIdentity | None]:
     if (
         not preflight_path.is_absolute() or preflight_path.is_symlink()
         or not preflight_path.is_file()
@@ -9217,7 +9246,7 @@ def _validate_referenced_preflight(
             f"observed_sha256={observed_sha}",
         )
     manifest = _json(preflight_path)
-    validate_preflight_manifest(
+    expected_ncu_identity = validate_preflight_manifest(
         manifest, expected_head=expected_head,
         expected_pins_sha256=sha256_file(pins_path),
         expected_output_root=output_root,
@@ -9235,7 +9264,7 @@ def _validate_referenced_preflight(
         admitted_at_utc=admitted_at_utc,
     )
     validate_live_injection_hashes(manifest, pins)
-    return manifest
+    return manifest, expected_ncu_identity
 
 
 def _original_preflight_status(
@@ -9360,7 +9389,7 @@ def _finalize_from_journals(
         )
     preflight_sha = next(iter(preflight_hashes))
     original_preflight_path = Path(next(iter(preflight_paths)))
-    original_preflight = _validate_referenced_preflight(
+    original_preflight, _expected_ncu_identity = _validate_referenced_preflight(
         preflight_path=original_preflight_path,
         expected_sha256=preflight_sha, pins=pins, pins_path=pins_path,
         aggregate_budget_path=aggregate_budget_path, matrix=matrix,
@@ -9590,7 +9619,7 @@ def run_chunk(args: argparse.Namespace) -> Path:
 
     admitted_at = datetime.now(timezone.utc)
     preflight_sha = sha256_file(preflight_path)
-    preflight_manifest = _validate_referenced_preflight(
+    preflight_manifest, expected_ncu_identity = _validate_referenced_preflight(
         preflight_path=preflight_path, expected_sha256=preflight_sha,
         pins=pins, pins_path=pins_path,
         aggregate_budget_path=aggregate_budget_path, matrix=matrix,
@@ -9768,6 +9797,7 @@ def run_chunk(args: argparse.Namespace) -> Path:
                     ["tracer_so_sha256"]
                 ),
                 capture_provenance=capture_provenance,
+                expected_ncu_identity=expected_ncu_identity,
                 certified_sol_env=certified_sol_env,
                 sol_environment_probe=sol_environment_probe,
                 module_store=output_root / "module_store",
