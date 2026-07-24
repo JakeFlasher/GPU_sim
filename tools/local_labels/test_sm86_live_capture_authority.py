@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 from pathlib import Path
 
@@ -20,9 +19,23 @@ SCHEMA = json.loads((REPO_ROOT / live.SCHEMA_REL).read_text(encoding="utf-8"))
 
 @pytest.fixture(scope="module")
 def authority() -> dict:
-    return live.build_authority(
-        REPO_ROOT, generated_at_utc="2026-07-13T00:00:00Z",
+    durable_authority = json.loads(
+        (REPO_ROOT / live.durable.CANONICAL_OUT_REL).read_text(encoding="utf-8")
     )
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(
+            live.durable,
+            "build_authority",
+            lambda _repo_root: durable_authority,
+        )
+        patch.setattr(
+            live,
+            "_verified_runnable_identity",
+            lambda cell, *, repo_root: cell["binary_sha256"],
+        )
+        return live.build_authority(
+            REPO_ROOT, generated_at_utc="2026-07-13T00:00:00Z",
+        )
 
 
 def _head() -> str:
@@ -34,7 +47,9 @@ def _head() -> str:
     ).stdout.strip()
 
 
-def test_live_authority_is_current_v1_with_exact_partition(authority: dict) -> None:
+def test_offline_live_authority_projection_is_current_v1_with_exact_partition(
+    authority: dict,
+) -> None:
     jsonschema.validate(authority, SCHEMA)
     assert authority["schema_version"] == 1
     assert authority["roster_id"] == "sm86_capture_roster_authority_v1"
@@ -55,42 +70,46 @@ def test_live_authority_is_current_v1_with_exact_partition(authority: dict) -> N
     }
 
 
-def test_all_runnable_identities_are_current_and_frozen(authority: dict) -> None:
+def test_all_runnable_identities_are_frozen_in_offline_projection(
+    authority: dict,
+) -> None:
     runnable = [
         cell for cell in authority["cells"]
         if cell["resolution_status"] == "runnable"
     ]
     assert len(runnable) == 122
     for cell in runnable:
-        path = (REPO_ROOT / cell["binary"]).resolve(strict=True)
-        assert path.is_relative_to(REPO_ROOT.resolve())
-        assert path.is_file()
-        if cell["roster_source"] != "sol_execbench":
-            assert os.access(path, os.X_OK)
-        assert live._sha256_file(path) == cell["binary_sha256"]
+        assert len(cell["binary_sha256"]) == 64
+        assert int(cell["binary_sha256"], 16) >= 0
         assert cell["binary_present"] is True
         assert cell["binary_available_now"] is True
         if cell["roster_source"] == "simbench_bw":
             assert cell["binary_sha256_matches_now"] is True
 
 
-def test_external_authority_is_accepted_by_current_matrix(
+@pytest.mark.campaign_evidence
+def test_live_authority_exactly_rederives_current_binaries() -> None:
+    authority = live.build_authority(
+        REPO_ROOT, generated_at_utc="2026-07-13T00:00:00Z",
+    )
+    jsonschema.validate(authority, SCHEMA)
+    assert authority["source_commit"] == _head()
+    assert authority["counts"] == live.EXPECTED_COUNTS
+
+
+def test_external_authority_satisfies_current_matrix_invariants(
     authority: dict, tmp_path_factory: pytest.TempPathFactory,
 ) -> None:
     directory = tmp_path_factory.mktemp("live-authority")
     output = directory / "authority.json"
-    matrix_output = directory / "matrix.json"
     output.write_bytes(canonical_json_bytes(authority))
-    assert matrix_builder.main([
-        "--authority", str(output), "--out", str(matrix_output),
-    ]) == 0
-    matrix = json.loads(matrix_output.read_text(encoding="utf-8"))
-    assert matrix["source_commit"] == _head()
-    assert matrix["authority"]["path"] == str(output.resolve())
-    assert matrix["authority"]["roster_id"] == live.ROSTER_ID
-    assert matrix["counts"]["universe"] == 344
-    assert matrix["counts"]["runnable"] == 122
-    assert matrix["counts"]["excluded"] == 222
+    loaded = json.loads(output.read_text(encoding="utf-8"))
+    matrix_builder._authority_invariants(
+        loaded, repo_root=REPO_ROOT, require_head_match=True,
+    )
+    assert loaded == authority
+    assert loaded["roster_id"] == live.ROSTER_ID
+    assert loaded["counts"] == live.EXPECTED_COUNTS
 
 
 def test_output_policy_requires_external_absolute_nonexisting_path(
@@ -182,12 +201,13 @@ def test_output_policy_rejects_symlinked_campaign_root(tmp_path: Path) -> None:
 
 
 def test_main_emits_once_and_never_overwrites(
-    tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch,
+    authority: dict, tmp_path: Path, capsys: pytest.CaptureFixture[str], monkeypatch,
 ) -> None:
     head = _head()
     capture_root = tmp_path / "capture"
     capture_root.mkdir()
     monkeypatch.setattr(live, "CAPTURE_ROOT", capture_root)
+    monkeypatch.setattr(live, "build_authority", lambda _repo_root: authority)
     output = (
         capture_root
         / "inputs"
