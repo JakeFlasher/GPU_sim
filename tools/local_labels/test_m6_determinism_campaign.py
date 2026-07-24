@@ -1268,6 +1268,41 @@ def test_complete_m4_receipt_is_rederived_from_verified_done_artifacts(
     )
     assert len(receipt["chunk_done_manifests"]) == 18
     assert len(receipt["cell_launch_identities"]) == 122
+    campaign._validate_m4_identity(
+        receipt,
+        matrix=matrix,
+        matrix_sha256=campaign.sha256_bytes(campaign.MATRIX_PATH.read_bytes()),
+        cells=schedule["cells"],
+        repo_root=campaign.REPO_ROOT,
+        require_complete=True,
+    )
+
+    fake = copy.deepcopy(receipt)
+    fake_launch = fake["cell_launch_identities"][0]["launches"][0]
+    fake_launch["kernel_name"] += "_fake"
+    fake_launch["launch_identity_sha256"] = campaign.canonical_sha256(
+        campaign._without(fake_launch, "launch_identity_sha256")
+    )
+    fake["cell_launch_identities"][0]["launch_set_sha256"] = (
+        campaign.canonical_sha256(
+            fake["cell_launch_identities"][0]["launches"]
+        )
+    )
+    fake["identity_sha256"] = campaign.canonical_sha256(
+        campaign._without(fake, "identity_sha256")
+    )
+    with pytest.raises(campaign.M6Error) as error:
+        campaign._validate_m4_identity(
+            fake,
+            matrix=matrix,
+            matrix_sha256=campaign.sha256_bytes(
+                campaign.MATRIX_PATH.read_bytes()
+            ),
+            cells=schedule["cells"],
+            repo_root=campaign.REPO_ROOT,
+            require_complete=True,
+        )
+    assert error.value.code == "M6_M4_RECEIPT_REDERIVATION"
 
 
 def test_snapshot_source_binding_deduplicates_frozen_alias_payloads(
@@ -1384,41 +1419,6 @@ def test_recovery_receipt_admission_requires_sealed_owner_bindings() -> None:
             analysis=analysis,
         )
     assert error.value.code == "M6_RECOVERY_IDENTITY_MISMATCH"
-    campaign._validate_m4_identity(
-        receipt,
-        matrix=matrix,
-        matrix_sha256=campaign.sha256_bytes(campaign.MATRIX_PATH.read_bytes()),
-        cells=schedule["cells"],
-        repo_root=campaign.REPO_ROOT,
-        require_complete=True,
-    )
-
-    fake = copy.deepcopy(receipt)
-    fake_launch = fake["cell_launch_identities"][0]["launches"][0]
-    fake_launch["kernel_name"] += "_fake"
-    fake_launch["launch_identity_sha256"] = campaign.canonical_sha256(
-        campaign._without(fake_launch, "launch_identity_sha256")
-    )
-    fake["cell_launch_identities"][0]["launch_set_sha256"] = (
-        campaign.canonical_sha256(
-            fake["cell_launch_identities"][0]["launches"]
-        )
-    )
-    fake["identity_sha256"] = campaign.canonical_sha256(
-        campaign._without(fake, "identity_sha256")
-    )
-    with pytest.raises(campaign.M6Error) as error:
-        campaign._validate_m4_identity(
-            fake,
-            matrix=matrix,
-            matrix_sha256=campaign.sha256_bytes(
-                campaign.MATRIX_PATH.read_bytes()
-            ),
-            cells=schedule["cells"],
-            repo_root=campaign.REPO_ROOT,
-            require_complete=True,
-        )
-    assert error.value.code == "M6_M4_RECEIPT_REDERIVATION"
 
 
 def test_bind_m4_refuses_authoritative_done_verifier_failure(
