@@ -133,9 +133,9 @@ efficiency, bank conflicts and the branch active-mask histogram.
 The dissolved SOL design injected it via
 `CUDA_INJECTION64_PATH=…/metric_extractor.so` on the evaluator subprocess
 (`docs/sol_execbench/CLAUDE.md` historical Surface-1 row). The eight surviving
-SOL injector call sites remain owner-scoped historical/evaluation material; this
-document does not claim universal runtime enforcement or authorize a new
-injection. The strict historical consumer is
+SOL injector call sites remain owner-scoped historical/evaluation material and
+policy-quarantined until Stage 7; this document does not claim universal runtime enforcement
+or authorize a new injection. The strict historical consumer is
 `tools/sol_baselines_harness/metric_extractor/launches_parser.py`, and
 `tools/sol_baselines_harness/b200_preflight.py` lists the `.so` as a required
 `nvbit_metrics_tool` probe.
