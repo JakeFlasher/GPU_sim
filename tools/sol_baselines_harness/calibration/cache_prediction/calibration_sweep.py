@@ -41,6 +41,11 @@ direction is the one the NCU quarantine forbids.
 
 from __future__ import annotations
 
+from sol_baselines_harness.calibration.cache_prediction.retirement import (
+    refuse_legacy_ncu_calibration,
+    retired_legacy_ncu_calibration,
+)
+
 import hashlib
 import tomllib
 from dataclasses import dataclass, field, fields
@@ -505,6 +510,7 @@ def _default_kernel_source_hash(
     return sha256_of_file(source_path)
 
 
+@retired_legacy_ncu_calibration('sol_baselines_harness.calibration.cache_prediction.calibration_sweep.run_calibration_sweep')
 def run_calibration_sweep(
     cell_specs: Iterable[LedgerCellSpec],
     *,
@@ -561,6 +567,7 @@ def run_calibration_sweep(
     # NCU argv. The dispatch table makes the discipline data-
     # driven (per the arch dispatch table); arches added to the table
     # inherit the gate without a flow-control edit.
+    refuse_legacy_ncu_calibration('sol_baselines_harness.calibration.cache_prediction.calibration_sweep.run_calibration_sweep')
     if _PREFLIGHT_REQUIRED_BY_ARCH.get(host_arch, False):
         if probe_path is None:
             raise CalibrationSweepError(
@@ -1253,6 +1260,7 @@ def _toml_kv_float(key: str, value: float) -> str:
     return f'{key} = {float(value)!r}\n'
 
 
+@retired_legacy_ncu_calibration('sol_baselines_harness.calibration.cache_prediction.calibration_sweep.serialize_ledger_to_toml')
 def serialize_ledger_to_toml(
     ledger: LabelLedger, output_path: Path,
 ) -> None:
@@ -1290,6 +1298,7 @@ def serialize_ledger_to_toml(
       predictor_bucket = "..."
       unavailable_reason = "..."
     """
+    refuse_legacy_ncu_calibration('sol_baselines_harness.calibration.cache_prediction.calibration_sweep.serialize_ledger_to_toml')
     validate_label_ledger(ledger)
     lines: list[str] = []
     lines.append("[meta]\n")

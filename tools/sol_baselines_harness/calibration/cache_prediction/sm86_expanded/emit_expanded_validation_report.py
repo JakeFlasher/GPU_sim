@@ -27,47 +27,57 @@ calibration-only (CLAUDE.md Rule 1); this module never runs on the deployed/B200
 """
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+_TOOLS_ROOT = Path(__file__).resolve().parents[4]
+if str(_TOOLS_ROOT) not in sys.path:
+    sys.path.insert(0, str(_TOOLS_ROOT))
+
+from sol_baselines_harness.calibration.cache_prediction.retirement import (
+    refuse_legacy_ncu_calibration,
+    retired_legacy_ncu_calibration,
+)
+
 import argparse
 import hashlib
-import sys
 import tomllib
 from collections import defaultdict
-from pathlib import Path
 from typing import Final
 
 _REPO_ROOT = Path(__file__).resolve().parents[5]
-sys.path.insert(0, str(_REPO_ROOT / "scripts"))
 
 import numpy  # noqa: E402
 import scipy  # noqa: E402
 import sklearn  # noqa: E402
 
-from baselines_harness.metrics.isotonic_calibrator import (  # noqa: E402
+from sol_baselines_harness.metrics.isotonic_calibrator import (  # noqa: E402
     CalibrationInputRecord,
     CellJoinKey,
     IsotonicCalibrator,
     run_loocv,
 )
-from baselines_harness.metrics.predictor_design_coverage import (  # noqa: E402
+from sol_baselines_harness.metrics.predictor_design_coverage import (  # noqa: E402
     lookup_predictor_design_coverage,
     PredictorDesignCoverageError,
     PREDICTOR_BUCKET_TYPED_UNAVAILABLE,
 )
-from baselines_harness.calibration.cache_prediction.ncu_harvester import (  # noqa: E402
+from sol_baselines_harness.calibration.cache_prediction.ncu_harvester import (  # noqa: E402
     NCU_REQUIRED_METRICS,
 )
-from baselines_harness.calibration.cache_prediction.sm86_pilot.persist_fitted_sidecar import (  # noqa: E402
+from sol_baselines_harness.calibration.cache_prediction.sm86_pilot.persist_fitted_sidecar import (  # noqa: E402
     _SM86_GEOMETRY,
 )
-from baselines_harness.calibration.cache_prediction.sm86_geometry_sweep import (  # noqa: E402
+from sol_baselines_harness.calibration.cache_prediction.sm86_geometry_sweep import (  # noqa: E402
     run_sweep as _sweep,
 )
-from baselines_harness.calibration.cache_prediction.sm86_expanded import (  # noqa: E402
+from sol_baselines_harness.calibration.cache_prediction.sm86_expanded import (  # noqa: E402
     dense_reuse_l2_calibrator as _l2cal,
 )
 
 _CP: Final[Path] = (
-    _REPO_ROOT / "scripts" / "baselines_harness" / "calibration" / "cache_prediction"
+    _REPO_ROOT / "tools" / "sol_baselines_harness" / "calibration"
+    / "cache_prediction"
 )
 _RAW_TABLE: Final[Path] = _CP / "sm86_expanded_raw_predictions_v1.toml"
 _EXPANDED_LEDGER: Final[Path] = _CP / "label_ledger_v1_sm86_expanded.toml"
@@ -207,7 +217,9 @@ def _gate(value: float, threshold: float) -> bool:
     return (value <= threshold) if value == value else False  # NaN -> fail
 
 
+@retired_legacy_ncu_calibration('sol_baselines_harness.calibration.cache_prediction.sm86_expanded.emit_expanded_validation_report.emit')
 def emit(repo_root: Path = _REPO_ROOT) -> tuple[Path, Path]:
+    refuse_legacy_ncu_calibration('sol_baselines_harness.calibration.cache_prediction.sm86_expanded.emit_expanded_validation_report.emit')
     assoc = winning_associativity(repo_root)
     records, excluded = build_all_records(repo_root)
 

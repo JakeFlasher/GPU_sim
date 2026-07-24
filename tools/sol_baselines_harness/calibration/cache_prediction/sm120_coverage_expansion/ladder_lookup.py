@@ -13,7 +13,7 @@ import tomllib
 from functools import lru_cache
 from pathlib import Path
 
-from baselines_harness.calibration.cache_prediction.sm120_coverage_expansion.ladder_states import (
+from sol_baselines_harness.calibration.cache_prediction.sm120_coverage_expansion.ladder_states import (
     _LADDER_STATES,
 )
 

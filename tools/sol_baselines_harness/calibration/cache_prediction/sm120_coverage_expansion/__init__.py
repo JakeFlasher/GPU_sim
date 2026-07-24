@@ -20,14 +20,14 @@ any subprocess; emission is invoked explicitly through
 `emit_ladder.emit_coverage_readiness_ladder(...)`.
 """
 
-from baselines_harness.calibration.cache_prediction.sm120_coverage_expansion.ladder_states import (
+from sol_baselines_harness.calibration.cache_prediction.sm120_coverage_expansion.ladder_states import (
     LADDER_QA_TYPED_FAILURES,
     LadderQaError,
     _DIAGNOSTIC_TYPED_REASONS,
     _LADDER_STATES,
     _VALID_SIMULATOR_OOD_TYPED_REASONS,
 )
-from baselines_harness.calibration.cache_prediction.sm120_coverage_expansion.ladder_reducer import (
+from sol_baselines_harness.calibration.cache_prediction.sm120_coverage_expansion.ladder_reducer import (
     emit_ladder_state,
 )
 

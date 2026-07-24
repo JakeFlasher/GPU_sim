@@ -21,6 +21,11 @@ AND every cell binary is present; otherwise it skips cleanly.
 
 from __future__ import annotations
 
+from sol_baselines_harness.calibration.cache_prediction.retirement import (
+    refuse_legacy_ncu_calibration,
+    retired_legacy_ncu_calibration,
+)
+
 import hashlib
 import json
 import shutil
@@ -29,10 +34,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
 
-from baselines_harness.calibration.cache_prediction.label_parser import (
+from sol_baselines_harness.calibration.cache_prediction.label_parser import (
     NcuLabelRecord,
 )
-from baselines_harness.calibration.cache_prediction.ncu_harvester import (
+from sol_baselines_harness.calibration.cache_prediction.ncu_harvester import (
     _run_checked_ncu,
     harvest_ncu_label,
 )
@@ -179,9 +184,10 @@ def run_label_smoke(
     # requiring a probe, require + validate the NCU capability probe
     # BEFORE constructing any NCU argv. Data-driven: new arches
     # extend the dispatch table to inherit the gate.
+    refuse_legacy_ncu_calibration('sol_baselines_harness.calibration.cache_prediction.label_smoke.run_label_smoke')
     if _PREFLIGHT_REQUIRED_BY_ARCH.get(host_arch, False):
         if probe_path is None:
-            from baselines_harness.calibration.cache_prediction.ncu_capability_probe import (
+            from sol_baselines_harness.calibration.cache_prediction.ncu_capability_probe import (
                 CapabilityProbeError,
             )
             raise CapabilityProbeError(
@@ -191,7 +197,7 @@ def run_label_smoke(
                 "runs without a validated capability probe "
                 "artifact",
             )
-        from baselines_harness.calibration.cache_prediction.ncu_capability_probe import (
+        from sol_baselines_harness.calibration.cache_prediction.ncu_capability_probe import (
             preflight_for_arch,
         )
         preflight_for_arch(host_arch, probe_path)

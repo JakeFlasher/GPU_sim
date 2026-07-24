@@ -39,24 +39,39 @@ binary on disk).
 
 from __future__ import annotations
 
+import argparse
 import sys
 from pathlib import Path
 
+_TOOLS_ROOT = Path(__file__).resolve().parents[3]
+if str(_TOOLS_ROOT) not in sys.path:
+    sys.path.insert(0, str(_TOOLS_ROOT))
 
-def main() -> int:
+from sol_baselines_harness.calibration.cache_prediction.retirement import (
+    refuse_legacy_ncu_calibration,
+    retired_legacy_ncu_calibration,
+)
+
+
+@retired_legacy_ncu_calibration(
+    "sol_baselines_harness.calibration.cache_prediction.harvest_warm_cold_slugs.main"
+)
+def _run_legacy_workflow() -> int:
+    refuse_legacy_ncu_calibration(
+        "sol_baselines_harness.calibration.cache_prediction.harvest_warm_cold_slugs.main"
+    )
     repo_root = Path(__file__).resolve().parents[4]
 
     # Late import so the module can be imported without dragging the
     # heavy calibration package's transitive deps when only the
     # docstring is read.
-    sys.path.insert(0, str(repo_root / "scripts"))
-    from baselines_harness.calibration.cache_prediction.calibration_sweep import (
+    from sol_baselines_harness.calibration.cache_prediction.calibration_sweep import (
         run_calibration_sweep,
         load_ledger_from_toml,
         serialize_ledger_to_toml,
         LabelLedger,
     )
-    from baselines_harness.calibration.cache_prediction.run_ncu_harvest_batch import (
+    from sol_baselines_harness.calibration.cache_prediction.run_ncu_harvest_batch import (
         discover_landed_baselines,
         build_sweep_specs_from_landed_sources,
     )
@@ -191,6 +206,12 @@ def main() -> int:
         file=sys.stderr,
     )
     return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.parse_args(argv)
+    return _run_legacy_workflow()
 
 
 if __name__ == "__main__":

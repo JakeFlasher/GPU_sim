@@ -42,6 +42,11 @@ the simulator.
 
 from __future__ import annotations
 
+from sol_baselines_harness.calibration.cache_prediction.retirement import (
+    refuse_legacy_ncu_calibration,
+    retired_legacy_ncu_calibration,
+)
+
 import dataclasses
 import hashlib
 import sys
@@ -273,7 +278,7 @@ def _drive_one_pilot(
 
     # Drive simulator over each launch frame; aggregate
     # raw L1/L2 by sector-weighted average.
-    from baselines_harness.metrics.cache_predictor import (
+    from sol_baselines_harness.metrics.cache_predictor import (
         predict_from_launch_frame,
     )
 
@@ -359,6 +364,7 @@ def _drive_one_pilot(
     )
 
 
+@retired_legacy_ncu_calibration('sol_baselines_harness.calibration.cache_prediction.sm120_coverage_expansion.drive_pilot_predictor.drive_pilot_predictor_cohort')
 def drive_pilot_predictor_cohort(
     pilot_cells: list[tuple[str, str]],
     *,
@@ -392,6 +398,7 @@ def drive_pilot_predictor_cohort(
 
     Returns ASCII-sorted rows.
     """
+    refuse_legacy_ncu_calibration('sol_baselines_harness.calibration.cache_prediction.sm120_coverage_expansion.drive_pilot_predictor.drive_pilot_predictor_cohort')
     timestamp = captured_at_utc or datetime.now(
         timezone.utc
     ).replace(microsecond=0).isoformat()
@@ -417,14 +424,14 @@ def drive_pilot_predictor_cohort(
 
     if eligible:
         if calibrator_loader is None:
-            from baselines_harness.metrics.cache_predictor import (
+            from sol_baselines_harness.metrics.cache_predictor import (
                 load_calibrator_for_arch,
             )
             calibrator_loader = lambda: load_calibrator_for_arch(  # noqa: E731
                 "sm_120",
             )
         if geometry_resolver is None:
-            from baselines_harness.metrics.cache_geometry import (
+            from sol_baselines_harness.metrics.cache_geometry import (
                 resolve_cache_geometry,
             )
             geometry_resolver = lambda: resolve_cache_geometry(  # noqa: E731
@@ -432,7 +439,7 @@ def drive_pilot_predictor_cohort(
                 cuda_l2_cache_size_bytes=_SM120_L2_CAPACITY_BYTES,
             )[0]
         if parse_fn is None:
-            from baselines_harness.metrics.tier2_sidecar_parser import (
+            from sol_baselines_harness.metrics.tier2_sidecar_parser import (
                 parse_launch_frames,
             )
             parse_fn = parse_launch_frames
@@ -590,6 +597,7 @@ def render_predictor_predictions_toml(
     return "\n".join(lines).rstrip("\n") + "\n"
 
 
+@retired_legacy_ncu_calibration('sol_baselines_harness.calibration.cache_prediction.sm120_coverage_expansion.drive_pilot_predictor.emit_predictor_predictions')
 def emit_predictor_predictions(
     pilot_cells: list[tuple[str, str]],
     *,
@@ -602,6 +610,7 @@ def emit_predictor_predictions(
     geometry_resolver: Callable | None = None,
     parse_fn: Callable | None = None,
 ) -> Path:
+    refuse_legacy_ncu_calibration('sol_baselines_harness.calibration.cache_prediction.sm120_coverage_expansion.drive_pilot_predictor.emit_predictor_predictions')
     rows = drive_pilot_predictor_cohort(
         pilot_cells,
         ncu_status_path=ncu_status_path,

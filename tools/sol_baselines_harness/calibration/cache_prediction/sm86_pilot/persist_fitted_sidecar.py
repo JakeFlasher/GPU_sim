@@ -42,34 +42,43 @@ Usage:
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+_TOOLS_ROOT = Path(__file__).resolve().parents[4]
+if str(_TOOLS_ROOT) not in sys.path:
+    sys.path.insert(0, str(_TOOLS_ROOT))
+
+from sol_baselines_harness.calibration.cache_prediction.retirement import (
+    refuse_legacy_ncu_calibration,
+    retired_legacy_ncu_calibration,
+)
+
 import argparse
 import dataclasses
 import hashlib
 import json
 import statistics
-import sys
 import tomllib
 from datetime import datetime, timezone
-from pathlib import Path
 
 import numpy as np
 
 _REPO_ROOT = Path(__file__).resolve().parents[5]
-sys.path.insert(0, str(_REPO_ROOT / "scripts"))
 
-from baselines_harness.metrics.cache_predictor import (  # noqa: E402
+from sol_baselines_harness.metrics.cache_predictor import (  # noqa: E402
     predict_from_launch_frame,
     PREDICTOR_BUNDLE_RESULT_KIND_SCALAR,
 )
-from baselines_harness.metrics.isotonic_calibrator import (  # noqa: E402
+from sol_baselines_harness.metrics.isotonic_calibrator import (  # noqa: E402
     CalibrationInputRecord,
     CellJoinKey,
     IsotonicCalibrator,
 )
-from baselines_harness.metrics.tier2_sidecar_parser import (  # noqa: E402
+from sol_baselines_harness.metrics.tier2_sidecar_parser import (  # noqa: E402
     parse_launch_frames,
 )
-from baselines_harness.metrics.predictor_design_coverage import (  # noqa: E402
+from sol_baselines_harness.metrics.predictor_design_coverage import (  # noqa: E402
     lookup_predictor_design_coverage,
 )
 
@@ -336,12 +345,14 @@ def _toml_emit_section(name: str, fields: dict) -> str:
     return "\n".join(lines)
 
 
+@retired_legacy_ncu_calibration('sol_baselines_harness.calibration.cache_prediction.sm86_pilot.persist_fitted_sidecar.main')
 def main(
     *,
     output_root: Path | None = None,
     captured_at_utc: str | None = None,
     traces_root: Path | None = None,
 ) -> int:
+    refuse_legacy_ncu_calibration('sol_baselines_harness.calibration.cache_prediction.sm86_pilot.persist_fitted_sidecar.main')
     sidecar_path = (
         (output_root / "isotonic_params_sm86.toml")
         if output_root is not None

@@ -21,6 +21,11 @@ import this module.
 
 from __future__ import annotations
 
+from sol_baselines_harness.calibration.cache_prediction.retirement import (
+    refuse_legacy_ncu_calibration,
+    retired_legacy_ncu_calibration,
+)
+
 import tomllib
 from dataclasses import dataclass
 from pathlib import Path
@@ -218,6 +223,7 @@ def harvest_sm120_with_preflight(
     raises ``CapabilityProbeError`` directly so the caller sees
     the typed reason without spawning an NCU subprocess.
     """
+    refuse_legacy_ncu_calibration('sol_baselines_harness.calibration.cache_prediction.ncu_capability_probe.harvest_sm120_with_preflight')
     preflight_for_arch("sm_120", probe_path)
     from .ncu_harvester import harvest_ncu_label_with_provenance
     return harvest_ncu_label_with_provenance(

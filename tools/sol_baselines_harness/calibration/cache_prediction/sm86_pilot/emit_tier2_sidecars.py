@@ -54,14 +54,24 @@ zero-launch gates fire:
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+_TOOLS_ROOT = Path(__file__).resolve().parents[4]
+if str(_TOOLS_ROOT) not in sys.path:
+    sys.path.insert(0, str(_TOOLS_ROOT))
+
+from sol_baselines_harness.calibration.cache_prediction.retirement import (
+    refuse_legacy_ncu_calibration,
+    retired_legacy_ncu_calibration,
+)
+
 import argparse
 import hashlib
 import json
 import re
 import subprocess
-import sys
 import time
-from pathlib import Path
 from typing import Final, Iterable
 
 
@@ -179,7 +189,7 @@ def _count_benchmark_workloads(slug: str, language: str) -> int:
     """Return the number of workload entries in the benchmark's
     canonical ``workload.jsonl`` (one workload per JSON line).
     """
-    from baselines_harness.calibration.cache_prediction.sm120_coverage_expansion.harvest_tier2_pilot import (
+    from sol_baselines_harness.calibration.cache_prediction.sm120_coverage_expansion.harvest_tier2_pilot import (
         _PILOT_PATH_LOOKUP,
         _benchmark_def_name,
     )
@@ -215,11 +225,11 @@ def _run_single_workload_tier2(
     import subprocess as _subprocess
     import tempfile
 
-    from baselines_harness.calibration.cache_prediction.sm120_coverage_expansion.harvest_tier2_pilot import (
+    from sol_baselines_harness.calibration.cache_prediction.sm120_coverage_expansion.harvest_tier2_pilot import (
         _PILOT_PATH_LOOKUP,
         _benchmark_def_name,
     )
-    from baselines_harness.calibration.cache_prediction.sm120_coverage_expansion.pilot_kernel_filter import (
+    from sol_baselines_harness.calibration.cache_prediction.sm120_coverage_expansion.pilot_kernel_filter import (
         lookup_pilot_kernel_name_base,
     )
 
@@ -319,7 +329,7 @@ def _harvest_cell(
     Lazy imports so this module can be loaded without spawning
     NVBit subprocesses.
     """
-    from baselines_harness.calibration.cache_prediction.sm120_coverage_expansion.harvest_tier2_pilot import (
+    from sol_baselines_harness.calibration.cache_prediction.sm120_coverage_expansion.harvest_tier2_pilot import (
         _summarize_sidecar,
         live_tier2_harvest_fn,
     )
@@ -558,6 +568,7 @@ def _update_ledger(stamps: dict[str, str]) -> None:
 
 
 def main(slugs: Iterable[str], *, timeout_s: int = 600) -> int:
+    refuse_legacy_ncu_calibration('sol_baselines_harness.calibration.cache_prediction.sm86_pilot.emit_tier2_sidecars.main')
     stamps: dict[str, str] = {}
     overall_t0 = time.time()
     for slug in slugs:

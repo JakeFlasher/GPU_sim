@@ -404,7 +404,7 @@ def live_tier2_harvest_fn(
     # excluded from the predictor ledger via the design contract's
     # ``ncu_kernel_name_not_pinned`` token, NOT via Tier-2
     # admission.
-    from baselines_harness.calibration.cache_prediction.sm120_coverage_expansion.pilot_kernel_filter import (  # noqa: E501
+    from sol_baselines_harness.calibration.cache_prediction.sm120_coverage_expansion.pilot_kernel_filter import (  # noqa: E501
         lookup_pilot_kernel_name_base,
     )
     kernel_name_base = lookup_pilot_kernel_name_base(slug, language)
@@ -535,7 +535,7 @@ def _summarize_sidecar(sidecar_path: Path) -> _SidecarSummary:
     # Defer import: tier2_sidecar_parser pulls in struct + dataclasses;
     # keeping it off the module-level import keeps the harvest driver
     # cheap to import in tests that don't touch real sidecars.
-    from baselines_harness.metrics import tier2_sidecar_parser
+    from sol_baselines_harness.metrics import tier2_sidecar_parser
 
     try:
         frames = tier2_sidecar_parser.parse_launch_frames(sidecar_path)

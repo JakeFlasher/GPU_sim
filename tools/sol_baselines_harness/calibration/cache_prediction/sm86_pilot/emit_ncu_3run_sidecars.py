@@ -30,13 +30,23 @@ fall back to synthetic data.
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+_TOOLS_ROOT = Path(__file__).resolve().parents[4]
+if str(_TOOLS_ROOT) not in sys.path:
+    sys.path.insert(0, str(_TOOLS_ROOT))
+
+from sol_baselines_harness.calibration.cache_prediction.retirement import (
+    refuse_legacy_ncu_calibration,
+    retired_legacy_ncu_calibration,
+)
+
 import argparse
 import hashlib
 import json
 import re
-import sys
 import time
-from pathlib import Path
 from statistics import mean, stdev
 from typing import Final, Iterable
 
@@ -199,19 +209,20 @@ def _harvest_3run_full(
 
     Lazy imports so the module can be loaded without spawning NCU.
     """
-    from baselines_harness.calibration.cache_prediction.ncu_harvester import (
+    refuse_legacy_ncu_calibration('sol_baselines_harness.calibration.cache_prediction.sm86_pilot.emit_ncu_3run_sidecars._harvest_3run_full')
+    from sol_baselines_harness.calibration.cache_prediction.ncu_harvester import (
         NcuHarvesterError,
         _build_invocation,
         _run_checked_ncu,
     )
-    from baselines_harness.calibration.cache_prediction.label_parser import (
+    from sol_baselines_harness.calibration.cache_prediction.label_parser import (
         NcuLabelParserError,
         parse_ncu_csv,
     )
-    from baselines_harness.calibration.cache_prediction.sm120_coverage_expansion.pilot_kernel_filter import (
+    from sol_baselines_harness.calibration.cache_prediction.sm120_coverage_expansion.pilot_kernel_filter import (
         lookup_pilot_kernel_name_base,
     )
-    from baselines_harness.calibration.cache_prediction.sm120_coverage_expansion.harvest_tier2_pilot import (
+    from sol_baselines_harness.calibration.cache_prediction.sm120_coverage_expansion.harvest_tier2_pilot import (
         _PILOT_PATH_LOOKUP,
         _benchmark_def_name,
     )
@@ -291,6 +302,7 @@ def _harvest_cell(slug: str, language: str = "cuda_cpp") -> dict:
     6-field ``NcuLabelRecord`` shape (hit rates AND underlying
     sum counters).
     """
+    refuse_legacy_ncu_calibration('sol_baselines_harness.calibration.cache_prediction.sm86_pilot.emit_ncu_3run_sidecars._harvest_cell')
     t0 = time.time()
     records, argv, failure_reason = _harvest_3run_full(
         slug, language, launch_skip_count=1
@@ -371,6 +383,7 @@ def _harvest_cell(slug: str, language: str = "cuda_cpp") -> dict:
 
 
 def _write_sidecar(slug: str, sidecar: dict) -> str:
+    refuse_legacy_ncu_calibration('sol_baselines_harness.calibration.cache_prediction.sm86_pilot.emit_ncu_3run_sidecars._write_sidecar')
     path = _sidecar_path(slug)
     path.parent.mkdir(parents=True, exist_ok=True)
     text = json.dumps(sidecar, indent=2, sort_keys=True) + "\n"
@@ -380,6 +393,7 @@ def _write_sidecar(slug: str, sidecar: dict) -> str:
 
 
 def _update_manifest(slug: str, sha: str, sidecar: dict) -> None:
+    refuse_legacy_ncu_calibration('sol_baselines_harness.calibration.cache_prediction.sm86_pilot.emit_ncu_3run_sidecars._update_manifest')
     manifest_path = _bundle_dir(slug) / "manifest.json"
     manifest = json.loads(manifest_path.read_text())
     manifest[_NCU_3RUN_BLOCK] = {
@@ -396,6 +410,7 @@ def _update_manifest(slug: str, sha: str, sidecar: dict) -> None:
 
 
 def _update_ledger(stamps: dict[str, str]) -> None:
+    refuse_legacy_ncu_calibration('sol_baselines_harness.calibration.cache_prediction.sm86_pilot.emit_ncu_3run_sidecars._update_ledger')
     ledger_path = (
         _REPO_ROOT / "scripts" / "baselines_harness"
         / "calibration" / "cache_prediction"
@@ -436,6 +451,7 @@ def _update_ledger(stamps: dict[str, str]) -> None:
 
 
 def main(slugs: Iterable[str]) -> int:
+    refuse_legacy_ncu_calibration('sol_baselines_harness.calibration.cache_prediction.sm86_pilot.emit_ncu_3run_sidecars.main')
     stamps: dict[str, str] = {}
     overall_t0 = time.time()
     for slug in slugs:

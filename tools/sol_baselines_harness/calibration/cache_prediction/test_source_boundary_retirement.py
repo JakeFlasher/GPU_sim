@@ -364,11 +364,29 @@ _DIRECT_FIRST_REFUSAL_INVENTORY = {
 
 _CLI_PARSE_THEN_REFUSAL_INVENTORY = {
     (
+        "sm120_coverage_expansion/emit_pilot_ncu_repeatability.py",
+        "main",
+    ):
+        "sol_baselines_harness.calibration.cache_prediction."
+        "sm120_coverage_expansion.emit_pilot_ncu_repeatability.main",
+    (
         "sm120_coverage_expansion/emit_pilot_predictor_predictions.py",
         "main",
     ):
         "sol_baselines_harness.calibration.cache_prediction."
         "sm120_coverage_expansion.emit_pilot_predictor_predictions.main",
+    (
+        "sm120_l2_associativity_probe/persist_fitted_sidecar.py",
+        "main",
+    ):
+        "sol_baselines_harness.calibration.cache_prediction."
+        "sm120_l2_associativity_probe.persist_fitted_sidecar.main",
+    (
+        "sm120_l2_associativity_probe/sweep_associativity.py",
+        "main",
+    ):
+        "sol_baselines_harness.calibration.cache_prediction."
+        "sm120_l2_associativity_probe.sweep_associativity.main",
 }
 
 

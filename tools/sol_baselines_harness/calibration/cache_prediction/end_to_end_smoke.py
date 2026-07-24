@@ -67,21 +67,30 @@ Known framework gap surfaced by this harness
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+_TOOLS_ROOT = Path(__file__).resolve().parents[3]
+if str(_TOOLS_ROOT) not in sys.path:
+    sys.path.insert(0, str(_TOOLS_ROOT))
+
+from sol_baselines_harness.calibration.cache_prediction.retirement import (
+    LegacyCalibrationRetiredError,
+    refuse_legacy_ncu_calibration,
+    retired_legacy_ncu_calibration,
+)
+
 import dataclasses
 import hashlib
 import json
 import os
 import subprocess
-import sys
 import tomllib
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any, Iterable, Mapping, Optional, Sequence
 
 _REPO_ROOT = Path(__file__).resolve().parents[4]
-if str(_REPO_ROOT / "scripts") not in sys.path:
-    sys.path.insert(0, str(_REPO_ROOT / "scripts"))
 
 from sol_baselines_harness.calibration.cache_prediction.calibration_sweep import (  # noqa: E402
     LabelLedger,
@@ -1788,6 +1797,7 @@ def _check_trace_denominator_consistency(
     return ratio >= _TIER2_NCU_DENOMINATOR_RATIO_FLOOR
 
 
+@retired_legacy_ncu_calibration('end_to_end_smoke.same_cell_calibrated_publication')
 def _emit_cache_prediction_surface_for_admitted_cohort(
     records: Sequence[CapturedSmokeRecord],
     spec_by_cell: Mapping[str, SmokeCellSpec],
@@ -1840,6 +1850,7 @@ def _emit_cache_prediction_surface_for_admitted_cohort(
     abstention on any per-cell failure is the
     honest signal.
     """
+    refuse_legacy_ncu_calibration('end_to_end_smoke.same_cell_calibrated_publication')
     bundle_dir.mkdir(parents=True, exist_ok=True)
     fitted_calibrator = IsotonicCalibrator()
     fitted_calibrator.fit(calibration_inputs)
@@ -2171,6 +2182,22 @@ def run_end_to_end_smoke(
     typed reason ``coverage_below_smoke_floor``
     in lieu of cohort gate results.
     """
+    frozen_scratch = (
+        Path.home() / ".solbench_round15_tmp" / "solbench_end_to_end_smoke"
+    )
+    try:
+        targets_frozen_scratch = (
+            out_dir.resolve(strict=False)
+            == frozen_scratch.resolve(strict=False)
+        )
+    except OSError:
+        refuse_legacy_ncu_calibration(
+            "end_to_end_smoke.run_end_to_end_smoke.frozen_output"
+        )
+    if targets_frozen_scratch:
+        refuse_legacy_ncu_calibration(
+            "end_to_end_smoke.run_end_to_end_smoke.frozen_output"
+        )
     _validate_iterable("cells", cells)
     cells_seq = tuple(cells)
     if not cells_seq:
@@ -2378,6 +2405,12 @@ def run_end_to_end_smoke(
                     bundle_dir=bundle_dir,
                     out_dir=out_dir,
                 )
+            )
+        except LegacyCalibrationRetiredError as exc:
+            publication_path_rows = (
+                _abstention_surface_entry_row(
+                    waiver_reason=exc.reason,
+                ),
             )
         except (
             IsotonicCalibratorError,
@@ -2813,6 +2846,9 @@ def assert_smoke_report_commit_sha_matches(
 def dump_smoke_report_toml(
     report: EndToEndSmokeReport, path: Path,
 ) -> None:
+    refuse_legacy_ncu_calibration(
+        "end_to_end_smoke.dump_smoke_report_toml.frozen_output"
+    )
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(serialize_smoke_report_to_toml(report))
 
@@ -2884,6 +2920,10 @@ def _main_cli() -> int:
         / "solbench_end_to_end_smoke",
     )
     args = parser.parse_args()
+    if args.output == Path(__file__).with_name("end_to_end_smoke_report.toml"):
+        refuse_legacy_ncu_calibration(
+            "end_to_end_smoke._main_cli.report_output"
+        )
     ledger = load_ledger_from_toml(args.ledger)
     specs = build_smoke_specs_from_ledger(ledger, cell_names=args.cells)
     if not specs:

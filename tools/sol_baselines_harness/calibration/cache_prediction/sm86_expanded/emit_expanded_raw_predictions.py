@@ -26,24 +26,33 @@ clock-policy mutation (NVBit injection does not touch clocks).
 """
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+_TOOLS_ROOT = Path(__file__).resolve().parents[4]
+if str(_TOOLS_ROOT) not in sys.path:
+    sys.path.insert(0, str(_TOOLS_ROOT))
+
+from sol_baselines_harness.calibration.cache_prediction.retirement import (
+    refuse_legacy_ncu_calibration,
+    retired_legacy_ncu_calibration,
+)
+
 import argparse
 import dataclasses
 import hashlib
 import json
 import os
 import subprocess
-import sys
 import time
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Final
 
 _REPO_ROOT = Path(__file__).resolve().parents[5]
-sys.path.insert(0, str(_REPO_ROOT / "scripts"))
 
-from baselines_harness.metrics.tier2_sidecar_parser import parse_launch_frames  # noqa: E402
-from baselines_harness.metrics.cache_predictor import predict_from_launch_frame  # noqa: E402
-from baselines_harness.metrics.predictor_design_coverage import (  # noqa: E402
+from sol_baselines_harness.metrics.tier2_sidecar_parser import parse_launch_frames  # noqa: E402
+from sol_baselines_harness.metrics.cache_predictor import predict_from_launch_frame  # noqa: E402
+from sol_baselines_harness.metrics.predictor_design_coverage import (  # noqa: E402
     lookup_predictor_design_coverage,
 )
 
@@ -129,9 +138,11 @@ def _load_completed_cohort_b(repo_root: Path) -> list[dict]:
     ]
 
 
+@retired_legacy_ncu_calibration('sol_baselines_harness.calibration.cache_prediction.sm86_expanded.emit_expanded_raw_predictions.harvest_raw_prediction')
 def harvest_raw_prediction(slug: str, probe: Path, work_root: Path) -> dict:
     """Tier-2-trace the probe, simulate, return a raw-prediction sidecar dict.
     Never raises — unscoreable cells surface a typed reason + no raw value."""
+    refuse_legacy_ncu_calibration('sol_baselines_harness.calibration.cache_prediction.sm86_expanded.emit_expanded_raw_predictions.harvest_raw_prediction')
     captured_at = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
     base = {
         "schema_version": SIDECAR_SCHEMA_VERSION,
@@ -187,7 +198,9 @@ def harvest_raw_prediction(slug: str, probe: Path, work_root: Path) -> dict:
             "tier2_sidecar_sha256": tier2_sha}
 
 
+@retired_legacy_ncu_calibration('sol_baselines_harness.calibration.cache_prediction.sm86_expanded.emit_expanded_raw_predictions.run_raw_harvest')
 def run_raw_harvest(repo_root: Path = _REPO_ROOT, *, resume: bool = True) -> dict:
+    refuse_legacy_ncu_calibration('sol_baselines_harness.calibration.cache_prediction.sm86_expanded.emit_expanded_raw_predictions.run_raw_harvest')
     sidecar_dir = repo_root / _SIDECAR_DIR.relative_to(_REPO_ROOT)
     sidecar_dir.mkdir(parents=True, exist_ok=True)
     work_root = repo_root / ".humanize" / "rlcr" / "2026-05-29_02-41-41" / "r30_harvest" / "t2a_work"
@@ -217,7 +230,9 @@ def run_raw_harvest(repo_root: Path = _REPO_ROOT, *, resume: bool = True) -> dic
     return summary
 
 
+@retired_legacy_ncu_calibration('sol_baselines_harness.calibration.cache_prediction.sm86_expanded.emit_expanded_raw_predictions.emit_table')
 def emit_table(repo_root: Path = _REPO_ROOT) -> Path:
+    refuse_legacy_ncu_calibration('sol_baselines_harness.calibration.cache_prediction.sm86_expanded.emit_expanded_raw_predictions.emit_table')
     import tomllib
     sidecar_dir = repo_root / _SIDECAR_DIR.relative_to(_REPO_ROOT)
     ledger_path = repo_root / _EXPANDED_LEDGER.relative_to(_REPO_ROOT)

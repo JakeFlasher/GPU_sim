@@ -39,7 +39,7 @@ from __future__ import annotations
 
 from typing import Final
 
-from baselines_harness.metrics.cache_predictor import (
+from sol_baselines_harness.metrics.cache_predictor import (
     _CALIBRATOR_PARAMS_BY_ARCH,
     _LEDGER_PATH_BY_ARCH,
     _VALIDATION_SPLIT_PATH_BY_ARCH,

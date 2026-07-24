@@ -40,18 +40,23 @@ the entire batch.
 
 from __future__ import annotations
 
+from sol_baselines_harness.calibration.cache_prediction.retirement import (
+    refuse_legacy_ncu_calibration,
+    retired_legacy_ncu_calibration,
+)
+
 import json
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable, Mapping
 
-from baselines_harness.calibration.cache_prediction.accuracy_diagnostic import (
+from sol_baselines_harness.calibration.cache_prediction.accuracy_diagnostic import (
     STATUS_HOST_ARCH_UNSUPPORTED,
     HostArchAvailabilityEntry,
     PerProblemRecordSchemaError,
     load_host_arch_availability_manifest,
 )
-from baselines_harness.calibration.cache_prediction.calibration_sweep import (
+from sol_baselines_harness.calibration.cache_prediction.calibration_sweep import (
     CalibrationSweepError,
     LabelLedger,
     LedgerCellSpec,
@@ -63,7 +68,7 @@ from baselines_harness.calibration.cache_prediction.calibration_sweep import (
     serialize_ledger_to_toml,
     validate_label_ledger,
 )
-from baselines_harness.calibration.cache_prediction.corpus_manifest import (
+from sol_baselines_harness.calibration.cache_prediction.corpus_manifest import (
     load_calibration_corpus_manifest,
 )
 
@@ -465,6 +470,7 @@ def _merge_new_into_existing_ledger(
     )
 
 
+@retired_legacy_ncu_calibration('sol_baselines_harness.calibration.cache_prediction.run_ncu_harvest_batch.run_batch_harvest')
 def run_batch_harvest(
     *,
     repo_root: Path,
@@ -512,6 +518,7 @@ def run_batch_harvest(
     All probe-injection seams flow through to the underlying
     `run_calibration_sweep()` for unit testability.
     """
+    refuse_legacy_ncu_calibration('sol_baselines_harness.calibration.cache_prediction.run_ncu_harvest_batch.run_batch_harvest')
     if probe_binary_root is None:
         probe_binary_root = repo_root / _DEFAULT_PROBE_BINARY_SUBPATH
     if host_arch_manifest_path is None:
@@ -750,6 +757,7 @@ def _build_sentinel_sweep_specs(
     return tuple(by_name[cell_name] for cell_name in sentinel_cell_names)
 
 
+@retired_legacy_ncu_calibration('sol_baselines_harness.calibration.cache_prediction.run_ncu_harvest_batch.run_label_stability_rerun')
 def run_label_stability_rerun(
     *,
     repo_root: Path,
@@ -795,6 +803,7 @@ def run_label_stability_rerun(
     / sentinel cell missing from one of the ledgers in the
     comparator stage).
     """
+    refuse_legacy_ncu_calibration('sol_baselines_harness.calibration.cache_prediction.run_ncu_harvest_batch.run_label_stability_rerun')
     sentinel_specs = _build_sentinel_sweep_specs(
         repo_root=repo_root,
         sentinel_cell_names=sentinel_cell_names,

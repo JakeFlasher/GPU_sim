@@ -54,6 +54,10 @@ _SM120_ASSOC_SWEEP = (
     "sol_baselines_harness.calibration.cache_prediction."
     "sm120_l2_associativity_probe.sweep_associativity"
 )
+_SM120_ASSOC_FIT = (
+    "sol_baselines_harness.calibration.cache_prediction."
+    "sm120_l2_associativity_probe.persist_fitted_sidecar"
+)
 _VARIANT_SNAPSHOT = (
     "sol_baselines_harness.calibration.cache_prediction.sm86_pilot."
     "emit_variant_dispatch_snapshot"
@@ -343,6 +347,9 @@ def test_legacy_actions_refuse_before_side_effects(
     retirement = importlib.import_module(
         "sol_baselines_harness.calibration.cache_prediction.retirement"
     )
+    calibrator = importlib.import_module(
+        "sol_baselines_harness.metrics.isotonic_calibrator"
+    ).IsotonicCalibrator
 
     side_effects: list[str] = []
 
@@ -366,9 +373,6 @@ def test_legacy_actions_refuse_before_side_effects(
         if hasattr(module, name):
             monkeypatch.setattr(module, name, forbidden_side_effect)
 
-    calibrator = importlib.import_module(
-        "sol_baselines_harness.metrics.isotonic_calibrator"
-    ).IsotonicCalibrator
     monkeypatch.setattr(calibrator, "fit", forbidden_side_effect)
 
     with pytest.raises(retirement.LegacyCalibrationRetiredError) as caught:
@@ -466,6 +470,44 @@ def _pilot_predictor_cli_main(
         sys.argv = previous_argv
 
 
+def _sm120_assoc_sweep_cli_main(
+    module: object,
+    root: Path,
+    forbidden: Callable[..., object],
+) -> object:
+    del forbidden
+    previous_argv = sys.argv
+    sys.argv = [
+        "sweep_associativity.py",
+        "--traces-root",
+        str(root / "must-not-read-traces"),
+        "--output-dir",
+        str(root / "must-not-write-scoreboard"),
+    ]
+    try:
+        return module.main()  # type: ignore[attr-defined]
+    finally:
+        sys.argv = previous_argv
+
+
+def _sm120_assoc_fit_cli_main(
+    module: object,
+    root: Path,
+    forbidden: Callable[..., object],
+) -> object:
+    del forbidden
+    previous_argv = sys.argv
+    sys.argv = [
+        "persist_fitted_sidecar.py",
+        "--traces-root",
+        str(root / "must-not-read-traces"),
+    ]
+    try:
+        return module.main()  # type: ignore[attr-defined]
+    finally:
+        sys.argv = previous_argv
+
+
 def _l2_cells(module: object) -> list[object]:
     return [
         module.L2Cell("a", "predictor_friendly", 1.0, 0.1, 0.2),  # type: ignore[attr-defined]
@@ -556,6 +598,18 @@ _DIRECT_ACTIONS: tuple[tuple[str, str, str, DirectAction], ...] = (
         "main",
         f"{_PILOT_PREDICTOR_CLI}.main",
         _pilot_predictor_cli_main,
+    ),
+    (
+        _SM120_ASSOC_SWEEP,
+        "main",
+        f"{_SM120_ASSOC_SWEEP}.main",
+        _sm120_assoc_sweep_cli_main,
+    ),
+    (
+        _SM120_ASSOC_FIT,
+        "main",
+        f"{_SM120_ASSOC_FIT}.main",
+        _sm120_assoc_fit_cli_main,
     ),
     (
         _NCU_3RUN,
@@ -717,6 +771,12 @@ def test_direct_legacy_actions_refuse_before_injected_side_effects(
     retirement = importlib.import_module(
         "sol_baselines_harness.calibration.cache_prediction.retirement"
     )
+    project_calibrator = importlib.import_module(
+        "sol_baselines_harness.metrics.isotonic_calibrator"
+    ).IsotonicCalibrator
+    sklearn_calibrator = importlib.import_module(
+        "sklearn.isotonic"
+    ).IsotonicRegression
     side_effects: list[str] = []
 
     def forbidden_side_effect(*args: object, **kwargs: object) -> object:
@@ -764,12 +824,6 @@ def test_direct_legacy_actions_refuse_before_injected_side_effects(
     ):
         monkeypatch.setattr(Path, method, forbidden_side_effect)
 
-    project_calibrator = importlib.import_module(
-        "sol_baselines_harness.metrics.isotonic_calibrator"
-    ).IsotonicCalibrator
-    sklearn_calibrator = importlib.import_module(
-        "sklearn.isotonic"
-    ).IsotonicRegression
     monkeypatch.setattr(project_calibrator, "fit", forbidden_side_effect)
     monkeypatch.setattr(sklearn_calibrator, "fit", forbidden_side_effect)
 
@@ -963,6 +1017,42 @@ def test_manifest_bound_smoke_scratch_refuses_before_capture(
     assert side_effects == []
 
 
+def test_symlinked_smoke_scratch_refuses_before_capture(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    monkeypatch.syspath_prepend(str(_TOOLS_ROOT))
+    module = importlib.import_module(_END_TO_END)
+    retirement = importlib.import_module(
+        "sol_baselines_harness.calibration.cache_prediction.retirement"
+    )
+    output_link = tmp_path / "smoke-scratch-link"
+    output_link.symlink_to(
+        Path.home() / ".solbench_round15_tmp" / "solbench_end_to_end_smoke",
+        target_is_directory=True,
+    )
+    side_effects: list[str] = []
+
+    def forbidden(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        side_effects.append("called")
+        raise AssertionError("symlinked scratch reached capture/write")
+
+    monkeypatch.setattr(module, "_measure_one_cell", forbidden)
+    monkeypatch.setattr(subprocess, "run", forbidden)
+    monkeypatch.setattr(Path, "mkdir", forbidden)
+    monkeypatch.setattr(Path, "write_text", forbidden)
+
+    with pytest.raises(retirement.LegacyCalibrationRetiredError) as caught:
+        module.run_end_to_end_smoke((), out_dir=output_link)
+
+    assert caught.value.reason == _REASON
+    assert caught.value.surface == (
+        "end_to_end_smoke.run_end_to_end_smoke.frozen_output"
+    )
+    assert side_effects == []
+
+
 def test_smoke_cli_rejects_frozen_report_before_ledger_read(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
@@ -1030,6 +1120,20 @@ _HELP_SCRIPTS = (
     / "emit_pilot_ledger.py",
     Path("tools/sol_baselines_harness/calibration/cache_prediction/sm86_pilot/")
     / "emit_tier2_sidecars.py",
+    Path("tools/sol_baselines_harness/calibration/cache_prediction/sm86_pilot/")
+    / "emit_variant_dispatch_snapshot.py",
+    Path("tools/sol_baselines_harness/calibration/cache_prediction/sm86_pilot/")
+    / "persist_fitted_sidecar.py",
+    Path(
+        "tools/sol_baselines_harness/calibration/cache_prediction/"
+        "sm120_coverage_expansion/"
+    )
+    / "emit_diagnostics.py",
+    Path(
+        "tools/sol_baselines_harness/calibration/cache_prediction/"
+        "sm120_coverage_expansion/"
+    )
+    / "emit_ladder.py",
     Path(
         "tools/sol_baselines_harness/calibration/cache_prediction/"
         "sm120_coverage_expansion/"
@@ -1040,6 +1144,21 @@ _HELP_SCRIPTS = (
         "sm120_coverage_expansion/"
     )
     / "emit_pilot_predictor_predictions.py",
+    Path(
+        "tools/sol_baselines_harness/calibration/cache_prediction/"
+        "sm120_coverage_expansion/"
+    )
+    / "emit_pilot_tier2_harvest_status.py",
+    Path(
+        "tools/sol_baselines_harness/calibration/cache_prediction/"
+        "sm120_l2_associativity_probe/"
+    )
+    / "persist_fitted_sidecar.py",
+    Path(
+        "tools/sol_baselines_harness/calibration/cache_prediction/"
+        "sm120_l2_associativity_probe/"
+    )
+    / "sweep_associativity.py",
 )
 
 

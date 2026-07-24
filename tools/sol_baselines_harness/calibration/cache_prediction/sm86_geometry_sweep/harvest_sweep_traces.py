@@ -17,23 +17,32 @@ CLAUDE.md Rule 1 (NVBit calibration-only on sm_86); Rule 2 (no clock mutation).
 """
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+_TOOLS_ROOT = Path(__file__).resolve().parents[4]
+if str(_TOOLS_ROOT) not in sys.path:
+    sys.path.insert(0, str(_TOOLS_ROOT))
+
+from sol_baselines_harness.calibration.cache_prediction.retirement import (
+    refuse_legacy_ncu_calibration,
+    retired_legacy_ncu_calibration,
+)
+
 import argparse
 import dataclasses
 import hashlib
 import json
 import os
 import subprocess
-import sys
 import time
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Final
 
 _REPO_ROOT = Path(__file__).resolve().parents[5]
-sys.path.insert(0, str(_REPO_ROOT / "scripts"))
 
-from baselines_harness.metrics.tier2_sidecar_parser import parse_launch_frames  # noqa: E402
-from baselines_harness.metrics.cache_predictor import predict_from_launch_frame  # noqa: E402
+from sol_baselines_harness.metrics.tier2_sidecar_parser import parse_launch_frames  # noqa: E402
+from sol_baselines_harness.metrics.cache_predictor import predict_from_launch_frame  # noqa: E402
 
 _CACHE_PRED_ROOT: Final[Path] = (
     _REPO_ROOT / "scripts" / "baselines_harness" / "calibration" / "cache_prediction"
@@ -124,9 +133,11 @@ def _scored_slugs(repo_root: Path) -> list[str]:
     return sorted(e["slug"] for e in raw["entries"] if e["scored"])
 
 
+@retired_legacy_ncu_calibration('sol_baselines_harness.calibration.cache_prediction.sm86_geometry_sweep.harvest_sweep_traces.harvest_cell')
 def harvest_cell(slug: str, probe: Path, work_root: Path) -> dict:
     """One NVBit injection; replay the simulator at every candidate assoc.
     Never raises — an unscoreable cell carries a typed reason and no raws."""
+    refuse_legacy_ncu_calibration('sol_baselines_harness.calibration.cache_prediction.sm86_geometry_sweep.harvest_sweep_traces.harvest_cell')
     captured = datetime.now(timezone.utc).replace(microsecond=0).isoformat()
     base = {"schema_version": SIDECAR_SCHEMA_VERSION, "slug": slug,
             "captured_at_utc": captured, "candidates": list(CANDIDATES)}
@@ -181,7 +192,9 @@ def harvest_cell(slug: str, probe: Path, work_root: Path) -> dict:
             "dense_reuse": reuse}
 
 
+@retired_legacy_ncu_calibration('sol_baselines_harness.calibration.cache_prediction.sm86_geometry_sweep.harvest_sweep_traces.run_harvest')
 def run_harvest(repo_root: Path = _REPO_ROOT, *, resume: bool = True) -> dict:
+    refuse_legacy_ncu_calibration('sol_baselines_harness.calibration.cache_prediction.sm86_geometry_sweep.harvest_sweep_traces.run_harvest')
     sidecar_dir = repo_root / _SIDECAR_DIR.relative_to(_REPO_ROOT)
     sidecar_dir.mkdir(parents=True, exist_ok=True)
     work_root = (repo_root / ".humanize" / "rlcr" / "2026-05-29_02-41-41"

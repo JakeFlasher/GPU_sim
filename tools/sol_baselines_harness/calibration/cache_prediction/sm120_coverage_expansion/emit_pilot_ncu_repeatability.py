@@ -32,20 +32,27 @@ testing on a host without the NCU toolchain.
 
 from __future__ import annotations
 
-import argparse
 import sys
 from pathlib import Path
 
-_REPO_ROOT = Path(__file__).resolve().parents[5]
-if str(_REPO_ROOT / "scripts") not in sys.path:
-    sys.path.insert(0, str(_REPO_ROOT / "scripts"))
+_TOOLS_ROOT = Path(__file__).resolve().parents[4]
+if str(_TOOLS_ROOT) not in sys.path:
+    sys.path.insert(0, str(_TOOLS_ROOT))
 
-from baselines_harness.calibration.cache_prediction.sm120_coverage_expansion.ncu_repeatability import (  # noqa: E402
+from sol_baselines_harness.calibration.cache_prediction.retirement import (
+    refuse_legacy_ncu_calibration,
+)
+
+import argparse
+
+_REPO_ROOT = Path(__file__).resolve().parents[5]
+
+from sol_baselines_harness.calibration.cache_prediction.sm120_coverage_expansion.ncu_repeatability import (  # noqa: E402
     _stub_ncu_run_fn,
     emit_ncu_repeatability_status,
     live_ncu_run_fn,
 )
-from baselines_harness.calibration.cache_prediction.sm120_coverage_expansion.harvest_tier2_pilot import (  # noqa: E402
+from sol_baselines_harness.calibration.cache_prediction.sm120_coverage_expansion.harvest_tier2_pilot import (  # noqa: E402
     _PILOT_PATH_LOOKUP,
 )
 
@@ -99,6 +106,10 @@ def main() -> int:
         ),
     )
     args = parser.parse_args()
+    refuse_legacy_ncu_calibration(
+        "sol_baselines_harness.calibration.cache_prediction."
+        "sm120_coverage_expansion.emit_pilot_ncu_repeatability.main"
+    )
 
     pilot_cells: list[tuple[str, str]] = sorted(_PILOT_PATH_LOOKUP.keys())
     if args.cells:

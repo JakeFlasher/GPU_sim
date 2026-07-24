@@ -27,7 +27,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
-from baselines_harness.calibration.cache_prediction.sm120_coverage_expansion.ladder_states import (
+from sol_baselines_harness.calibration.cache_prediction.sm120_coverage_expansion.ladder_states import (
     _LADDER_STATES,
 )
 

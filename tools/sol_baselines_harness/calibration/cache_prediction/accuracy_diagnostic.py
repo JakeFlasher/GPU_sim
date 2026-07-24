@@ -107,6 +107,11 @@ canonical typed-unavailable cohort enforcement).
 
 from __future__ import annotations
 
+from sol_baselines_harness.calibration.cache_prediction.retirement import (
+    refuse_legacy_ncu_calibration,
+    retired_legacy_ncu_calibration,
+)
+
 import math
 import re
 from dataclasses import dataclass
@@ -4042,6 +4047,7 @@ def predictor_callback_from_smoke_records(
     truth).
     """
 
+    refuse_legacy_ncu_calibration('accuracy_diagnostic.predictor_callback_from_smoke_records')
     records_by_cell: dict[str, Any] = {}
     for record in smoke_records:
         records_by_cell[record.cell_name] = record
@@ -4284,6 +4290,8 @@ def _build_per_problem_row(
          diagnostic_failed / typed_unavailable-non-canonical).
     """
 
+    if predictor_callback is not None:
+        refuse_legacy_ncu_calibration('accuracy_diagnostic._build_per_problem_row.predictor_callback')
     row: dict[str, Any] = {
         "problem_slug": problem.problem_slug,
         "problem_category": problem.problem_category,
@@ -4623,6 +4631,8 @@ def _build_cohort_cell_payloads(
     `_aggregate_cohort_rows`.
     """
 
+    if predictor_callback is not None:
+        refuse_legacy_ncu_calibration('accuracy_diagnostic._build_cohort_cell_payloads.predictor_callback')
     payloads: list[dict] = []
     for entry in PREDICTOR_DESIGN_COVERAGE_BY_CELL.values():
         cell_name = entry.cell_name
@@ -5442,6 +5452,7 @@ def _sm86_expanded_predictor_callback(
     for capability-OOD / NCU-terminal / raw-unavailable exclusions — so the diagnostic
     leaves the stale full-partition fallback. Cells outside the expanded universe
     defer to `base_callback`."""
+    refuse_legacy_ncu_calibration('accuracy_diagnostic._sm86_expanded_predictor_callback')
     import tomllib
     if not expanded_validation_report_path.is_file():
         raise AccuracyGateError(
@@ -5515,6 +5526,16 @@ def build_accuracy_diagnostic_report(
         diagnostic_failed for admitted cells).
     """
 
+    if predictor_callback is not None:
+        refuse_legacy_ncu_calibration('accuracy_diagnostic.predictor_callback')
+    if expanded_ncu_ledger_path is not None:
+        refuse_legacy_ncu_calibration(
+            "accuracy_diagnostic.expanded_ncu_ledger_path"
+        )
+    if expanded_validation_report_path is not None:
+        refuse_legacy_ncu_calibration(
+            "accuracy_diagnostic.expanded_validation_report_path"
+        )
     import hashlib
     import tomllib
 

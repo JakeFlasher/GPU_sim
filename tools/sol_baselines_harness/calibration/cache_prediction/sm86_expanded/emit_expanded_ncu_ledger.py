@@ -28,6 +28,18 @@ mutation) hold: see the package docstring and
 """
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+_TOOLS_ROOT = Path(__file__).resolve().parents[4]
+if str(_TOOLS_ROOT) not in sys.path:
+    sys.path.insert(0, str(_TOOLS_ROOT))
+
+from sol_baselines_harness.calibration.cache_prediction.retirement import (
+    refuse_legacy_ncu_calibration,
+    retired_legacy_ncu_calibration,
+)
+
 import argparse
 import csv
 import hashlib
@@ -36,21 +48,18 @@ import json
 import os
 import shutil
 import statistics
-import sys
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Final
 
 _REPO_ROOT = Path(__file__).resolve().parents[5]
-sys.path.insert(0, str(_REPO_ROOT / "scripts"))
 
-from baselines_harness.calibration.cache_prediction.ncu_harvester import (  # noqa: E402
+from sol_baselines_harness.calibration.cache_prediction.ncu_harvester import (  # noqa: E402
     NCU_REQUIRED_METRICS,
     NcuHarvesterError,
     _build_invocation,
     _run_checked_ncu,
 )
-from baselines_harness.calibration.cache_prediction.label_parser import (  # noqa: E402
+from sol_baselines_harness.calibration.cache_prediction.label_parser import (  # noqa: E402
     NcuLabelParserError,
     parse_ncu_csv,
 )
@@ -176,7 +185,7 @@ def load_done_slugs(repo_root: Path) -> set[str]:
 def build_slug_bucket_map(repo_root: Path) -> dict[str, str]:
     """slug -> predictor_bucket from the accuracy diagnostic's per-cell
     rows (the canonical problem->cohort classification authority)."""
-    from baselines_harness.calibration.cache_prediction.accuracy_diagnostic import (
+    from sol_baselines_harness.calibration.cache_prediction.accuracy_diagnostic import (
         build_accuracy_diagnostic_report,
     )
     report = build_accuracy_diagnostic_report(repo_root=repo_root)
@@ -222,6 +231,7 @@ def _extract_metric_values(csv_text: str) -> dict[str, float]:
     return out
 
 
+@retired_legacy_ncu_calibration('sol_baselines_harness.calibration.cache_prediction.sm86_expanded.emit_expanded_ncu_ledger.harvest_cell')
 def harvest_cell(slug: str, binary: Path) -> dict:
     """Run NCU 3x on the probe binary; return a sidecar dict (written by
     the caller). Never raises — failures / terminal outcomes surface as a
@@ -229,6 +239,7 @@ def harvest_cell(slug: str, binary: Path) -> dict:
     `..._op_read.sum` denominators zero on every run) is the canonical
     terminal `ncu_label_no_read_only_traffic`, NOT a subprocess failure and
     NOT a fabricated read."""
+    refuse_legacy_ncu_calibration('sol_baselines_harness.calibration.cache_prediction.sm86_expanded.emit_expanded_ncu_ledger.harvest_cell')
     binary_sha = _sha256_file(binary)
     argv = _build_invocation(
         binary=str(binary),
@@ -355,12 +366,14 @@ def _sidecar_is_fresh(path: Path) -> bool:
     return data.get("launch_skip_count") == LAUNCH_SKIP_COUNT
 
 
+@retired_legacy_ncu_calibration('sol_baselines_harness.calibration.cache_prediction.sm86_expanded.emit_expanded_ncu_ledger.run_harvest')
 def run_harvest(repo_root: Path = _REPO_ROOT, *, resume: bool = True) -> dict:
     """Phase 1: harvest every classifiable DONE cell with a probe binary;
     write one sidecar per cell. Returns a summary dict. With ``resume`` (the
     default) a cell whose sidecar is already fresh for the current launch-skip
     protocol is skipped, so a re-run continues a cohort the NCU sweep left
     unfinished rather than re-profiling from scratch."""
+    refuse_legacy_ncu_calibration('sol_baselines_harness.calibration.cache_prediction.sm86_expanded.emit_expanded_ncu_ledger.run_harvest')
     _ensure_ncu_on_path()
     probes = discover_cohort_b_probes(repo_root)
     done = load_done_slugs(repo_root)
@@ -411,10 +424,12 @@ def _toml_s(v: str) -> str:
     return '"' + v.replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
+@retired_legacy_ncu_calibration('sol_baselines_harness.calibration.cache_prediction.sm86_expanded.emit_expanded_ncu_ledger.emit_ledger')
 def emit_ledger(repo_root: Path = _REPO_ROOT) -> Path:
     """Phase 2: read the on-disk sidecars + frozen seed, write the expanded
     ledger deterministically (one-way seed cross-stamp; full classifiable
     set with probe_binary_missing_for_slug rows for unharvested cells)."""
+    refuse_legacy_ncu_calibration('sol_baselines_harness.calibration.cache_prediction.sm86_expanded.emit_expanded_ncu_ledger.emit_ledger')
     import tomllib
     sidecar_dir = repo_root / _SIDECAR_DIR.relative_to(_REPO_ROOT)
     seed_path = repo_root / _SEED_LEDGER.relative_to(_REPO_ROOT)

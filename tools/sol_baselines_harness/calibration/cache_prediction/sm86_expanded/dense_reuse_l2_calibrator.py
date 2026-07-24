@@ -26,13 +26,18 @@ NVBit/NCU are calibration-only (CLAUDE.md Rule 1); nothing here ships to B200.
 """
 from __future__ import annotations
 
+from sol_baselines_harness.calibration.cache_prediction.retirement import (
+    refuse_legacy_ncu_calibration,
+    retired_legacy_ncu_calibration,
+)
+
 from dataclasses import dataclass
 from typing import Final
 
 from sklearn.isotonic import IsotonicRegression
 
 # Re-export the harvest schema version so the params emitter can cross-stamp it.
-from baselines_harness.calibration.cache_prediction.sm86_geometry_sweep.harvest_sweep_traces import (  # noqa: E402,F401
+from sol_baselines_harness.calibration.cache_prediction.sm86_geometry_sweep.harvest_sweep_traces import (  # noqa: E402,F401
     SIDECAR_SCHEMA_VERSION,
 )
 
@@ -51,6 +56,7 @@ class L2Cell:
 
 
 def _fit_iso(xs, ys) -> IsotonicRegression | None:
+    refuse_legacy_ncu_calibration('sm86_expanded.dense_reuse_l2_calibrator._fit_iso')
     if len({round(x, 12) for x in xs}) < 2 or not xs:
         return None
     return IsotonicRegression(out_of_bounds="clip").fit(list(xs), list(ys))
@@ -75,6 +81,7 @@ class SegmentedL2Model:
 
 
 def fit_segmented(cells: list[L2Cell], threshold: float = SEGMENT_THRESHOLD) -> SegmentedL2Model:
+    refuse_legacy_ncu_calibration('sm86_expanded.dense_reuse_l2_calibrator.fit_segmented')
     stream = [c for c in cells if c.reuse_factor < threshold]
     reuse = [c for c in cells if c.reuse_factor >= threshold]
     sh = _fit_iso([c.reuse_factor for c in stream], [c.ncu_l2_label for c in stream])
@@ -87,6 +94,7 @@ def fit_segmented(cells: list[L2Cell], threshold: float = SEGMENT_THRESHOLD) -> 
 def loocv_l2_abs_errors(cells: list[L2Cell], threshold: float = SEGMENT_THRESHOLD) -> dict[str, float]:
     """Per-cell leave-one-out absolute L2 error (fraction domain). The held-out
     estimator of the segmented model's accuracy."""
+    refuse_legacy_ncu_calibration('sm86_expanded.dense_reuse_l2_calibrator.loocv_l2_abs_errors')
     out: dict[str, float] = {}
     for i, c in enumerate(cells):
         train = [cells[j] for j in range(len(cells)) if j != i]
@@ -98,6 +106,7 @@ def loocv_l2_abs_errors(cells: list[L2Cell], threshold: float = SEGMENT_THRESHOL
 def is_identity(cells: list[L2Cell], eps: float = 1e-9) -> bool:
     """No-label-leak / non-trivial guard: the fitted L2 prediction must not equal
     the label for every cell (that would mean the feature IS the label)."""
+    refuse_legacy_ncu_calibration('sm86_expanded.dense_reuse_l2_calibrator.is_identity')
     model = fit_segmented(cells)
     gaps = [abs(model.predict(c.reuse_factor, c.raw_l2) - c.ncu_l2_label) for c in cells]
     return max(gaps, default=0.0) <= eps

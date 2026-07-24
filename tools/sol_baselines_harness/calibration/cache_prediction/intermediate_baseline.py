@@ -18,11 +18,16 @@ contract.
 
 from __future__ import annotations
 
+from sol_baselines_harness.calibration.cache_prediction.retirement import (
+    refuse_legacy_ncu_calibration,
+    retired_legacy_ncu_calibration,
+)
+
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Sequence
 
-from baselines_harness.calibration.cache_prediction.accuracy_diagnostic import (
+from sol_baselines_harness.calibration.cache_prediction.accuracy_diagnostic import (
     CanonicalSolbenchProblem,
     DiagnosticReport,
     build_accuracy_diagnostic_report,
@@ -159,6 +164,8 @@ def emit_intermediate_baseline(
     output-path, or round-trip failures.
     """
 
+    if predictor_callback is not None:
+        refuse_legacy_ncu_calibration('intermediate_baseline.predictor_callback')
     report = build_accuracy_diagnostic_report(
         repo_root=repo_root,
         baselines_root=baselines_root,

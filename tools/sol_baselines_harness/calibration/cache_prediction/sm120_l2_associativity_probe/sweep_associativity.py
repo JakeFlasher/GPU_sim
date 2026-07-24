@@ -29,34 +29,43 @@ Usage:
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+_TOOLS_ROOT = Path(__file__).resolve().parents[4]
+if str(_TOOLS_ROOT) not in sys.path:
+    sys.path.insert(0, str(_TOOLS_ROOT))
+
+from sol_baselines_harness.calibration.cache_prediction.retirement import (
+    refuse_legacy_ncu_calibration,
+    retired_legacy_ncu_calibration,
+)
+
 import argparse
 import dataclasses
 import json
-import sys
 import tomllib
 from collections import defaultdict
-from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[5]
-sys.path.insert(0, str(_REPO_ROOT / "scripts"))
 
-from baselines_harness.metrics.cache_predictor import (  # noqa: E402
+from sol_baselines_harness.metrics.cache_predictor import (  # noqa: E402
     predict_from_launch_frame,
     PREDICTOR_BUNDLE_RESULT_KIND_SCALAR,
 )
-from baselines_harness.metrics.framework_contract import (  # noqa: E402
+from sol_baselines_harness.metrics.framework_contract import (  # noqa: E402
     CellJoinKey,
 )
-from baselines_harness.metrics.isotonic_calibrator import (  # noqa: E402
+from sol_baselines_harness.metrics.isotonic_calibrator import (  # noqa: E402
     CalibrationInputRecord,
     IsotonicCalibrator,
 )
-from baselines_harness.metrics.predictor_design_coverage import (  # noqa: E402
+from sol_baselines_harness.metrics.predictor_design_coverage import (  # noqa: E402
     PREDICTOR_BUCKET_TYPED_UNAVAILABLE,
     PredictorDesignCoverageError,
     lookup_predictor_design_coverage,
 )
-from baselines_harness.metrics.tier2_sidecar_parser import (  # noqa: E402
+from sol_baselines_harness.metrics.tier2_sidecar_parser import (  # noqa: E402
     parse_launch_frames,
 )
 
@@ -191,6 +200,7 @@ def _absolute_pp_error(predicted: float, label: float) -> float:
     return abs(float(predicted) - float(label))
 
 
+@retired_legacy_ncu_calibration('sol_baselines_harness.calibration.cache_prediction.sm120_l2_associativity_probe.sweep_associativity.sweep_one_candidate')
 def sweep_one_candidate(
     associativity_l2: int,
     *,
@@ -201,6 +211,7 @@ def sweep_one_candidate(
     """Run the calibration sweep for a single associativity value.
     Returns a dict with per-cohort/per-head MAPE + gate flags.
     """
+    refuse_legacy_ncu_calibration('sol_baselines_harness.calibration.cache_prediction.sm120_l2_associativity_probe.sweep_associativity.sweep_one_candidate')
     geometry = _geometry_spec(associativity_l2)
     records: list[CalibrationInputRecord] = []
     skipped_typed_unavailable: list[dict] = []
@@ -386,10 +397,14 @@ def main() -> int:
     parser.add_argument(
         "--candidates",
         type=str,
-        default=",".join(str(c) for c in _CANDIDATES),
+        default="4,8,16,32,64",
         help="Comma-separated associativity_l2 candidates",
     )
     args = parser.parse_args()
+    refuse_legacy_ncu_calibration(
+        "sol_baselines_harness.calibration.cache_prediction."
+        "sm120_l2_associativity_probe.sweep_associativity.main"
+    )
 
     args.output_dir.mkdir(parents=True, exist_ok=True)
     candidates = tuple(int(s.strip()) for s in args.candidates.split(","))

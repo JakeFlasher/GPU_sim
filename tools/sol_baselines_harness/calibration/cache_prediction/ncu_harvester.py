@@ -28,6 +28,11 @@ execution happens only when `harvest_ncu_label` is called.
 
 from __future__ import annotations
 
+from sol_baselines_harness.calibration.cache_prediction.retirement import (
+    refuse_legacy_ncu_calibration,
+    retired_legacy_ncu_calibration,
+)
+
 import hashlib
 import shutil
 import subprocess
@@ -309,6 +314,7 @@ def _run_checked_ncu(argv: tuple[str, ...]):
     supplied. Callers that wrap this runner (e.g. for stdout
     capture) MUST preserve the typed-error contract.
     """
+    refuse_legacy_ncu_calibration('sol_baselines_harness.calibration.cache_prediction.ncu_harvester._run_checked_ncu')
     if shutil.which("ncu") is None:
         raise NcuHarvesterError(
             "ncu_label_invocation_failed",
@@ -507,6 +513,7 @@ def collect_ncu_label_provenance(
     has a sensible default (resolve via `shutil.which`, hash
     via `Path.read_bytes`, run `subprocess.run`).
     """
+    refuse_legacy_ncu_calibration('sol_baselines_harness.calibration.cache_prediction.ncu_harvester.collect_ncu_label_provenance')
     if ncu_cli_path is None:
         ncu_cli_path = _probe_ncu_cli_path()
     ncu_cli_sha256 = _probe_ncu_cli_sha256(
@@ -651,6 +658,7 @@ def harvest_ncu_label_with_provenance(
     without it the captured launch can land on the wrong
     kernel.
     """
+    refuse_legacy_ncu_calibration('sol_baselines_harness.calibration.cache_prediction.ncu_harvester.harvest_ncu_label_with_provenance')
     argv = _build_invocation(
         binary,
         launch_skip_count=launch_skip_count,
@@ -732,6 +740,7 @@ def harvest_ncu_label(
     ``_build_invocation`` so NCU only captures launches
     whose kernel name contains the given substring.
     """
+    refuse_legacy_ncu_calibration('sol_baselines_harness.calibration.cache_prediction.ncu_harvester.harvest_ncu_label')
     argv = _build_invocation(
         binary,
         launch_skip_count=launch_skip_count,

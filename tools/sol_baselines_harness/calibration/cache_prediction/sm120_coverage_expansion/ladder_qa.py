@@ -13,13 +13,13 @@ import tomllib
 from pathlib import Path
 from typing import Any
 
-from baselines_harness.calibration.cache_prediction.sm120_coverage_expansion.ladder_schema import (
+from sol_baselines_harness.calibration.cache_prediction.sm120_coverage_expansion.ladder_schema import (
     LADDER_HOST_ARCH,
     LADDER_SCHEMA_VERSION,
     LADDER_TOTAL_PROBLEMS,
     REQUIRED_META_FIELDS,
 )
-from baselines_harness.calibration.cache_prediction.sm120_coverage_expansion.ladder_states import (
+from sol_baselines_harness.calibration.cache_prediction.sm120_coverage_expansion.ladder_states import (
     LadderQaError,
     _LADDER_STATES,
 )

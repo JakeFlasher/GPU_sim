@@ -48,6 +48,11 @@ mandates read-only sector hit-rate metrics).
 
 from __future__ import annotations
 
+from sol_baselines_harness.calibration.cache_prediction.retirement import (
+    refuse_legacy_ncu_calibration,
+    retired_legacy_ncu_calibration,
+)
+
 import math
 import statistics
 import sys
@@ -323,6 +328,7 @@ def run_pilot_ncu_repeatability(
         List of ``NcuRepeatabilityStatusRow`` sorted by
         (slug, language).
     """
+    refuse_legacy_ncu_calibration('sol_baselines_harness.calibration.cache_prediction.sm120_coverage_expansion.ncu_repeatability.run_pilot_ncu_repeatability')
     rows: list[NcuRepeatabilityStatusRow] = []
     for slug, language in pilot_cells:
         timestamp = captured_at_utc or datetime.now(
@@ -524,6 +530,7 @@ def emit_ncu_repeatability_status(
     run_fn: Callable[..., NcuRepeatabilityOutcome] = _stub_ncu_run_fn,
     cv_cap: float = NCU_REPEATABILITY_CV_CAP,
 ) -> Path:
+    refuse_legacy_ncu_calibration('sol_baselines_harness.calibration.cache_prediction.sm120_coverage_expansion.ncu_repeatability.emit_ncu_repeatability_status')
     rows = run_pilot_ncu_repeatability(
         pilot_cells,
         run_fn=run_fn,
@@ -573,19 +580,20 @@ def live_ncu_run_fn(
     """
     # Re-use the Tier-2 driver's pilot lookup so the two
     # cohorts stay in lockstep on which cells are "pilot".
-    from baselines_harness.calibration.cache_prediction.sm120_coverage_expansion.harvest_tier2_pilot import (  # noqa: E402
+    refuse_legacy_ncu_calibration('sol_baselines_harness.calibration.cache_prediction.sm120_coverage_expansion.ncu_repeatability.live_ncu_run_fn')
+    from sol_baselines_harness.calibration.cache_prediction.sm120_coverage_expansion.harvest_tier2_pilot import (  # noqa: E402
         _PILOT_PATH_LOOKUP,
         _benchmark_def_name,
     )
-    from baselines_harness.calibration.cache_prediction.sm120_coverage_expansion.pilot_kernel_filter import (  # noqa: E402
+    from sol_baselines_harness.calibration.cache_prediction.sm120_coverage_expansion.pilot_kernel_filter import (  # noqa: E402
         lookup_pilot_kernel_name_base,
     )
-    from baselines_harness.calibration.cache_prediction.ncu_harvester import (  # noqa: E402
+    from sol_baselines_harness.calibration.cache_prediction.ncu_harvester import (  # noqa: E402
         NcuHarvesterError,
         _build_invocation,
         _run_checked_ncu,
     )
-    from baselines_harness.calibration.cache_prediction.label_parser import (  # noqa: E402
+    from sol_baselines_harness.calibration.cache_prediction.label_parser import (  # noqa: E402
         NcuLabelParserError,
         parse_ncu_csv,
     )

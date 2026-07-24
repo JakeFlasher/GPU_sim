@@ -19,45 +19,52 @@ Usage:
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+_TOOLS_ROOT = Path(__file__).resolve().parents[4]
+if str(_TOOLS_ROOT) not in sys.path:
+    sys.path.insert(0, str(_TOOLS_ROOT))
+
+from sol_baselines_harness.calibration.cache_prediction.retirement import (
+    refuse_legacy_ncu_calibration,
+)
+
 import argparse
 import dataclasses
 import hashlib
-import sys
 import tomllib
 from collections import defaultdict
 from datetime import datetime, timezone
-from pathlib import Path
 
 import numpy as np
 
 _REPO_ROOT = Path(__file__).resolve().parents[5]
-sys.path.insert(0, str(_REPO_ROOT / "scripts"))
 
 # Re-use the sweep driver's helpers.
-sys.path.insert(0, str(Path(__file__).parent))
-from sweep_associativity import (  # noqa: E402
+from sol_baselines_harness.calibration.cache_prediction.sm120_l2_associativity_probe.sweep_associativity import (  # noqa: E402
     _build_record,
     _geometry_spec,
     _absolute_pp_error,
     _L2_CAPACITY_BYTES_SIM_EFFECTIVE,
 )
 
-from baselines_harness.metrics.cache_predictor import (  # noqa: E402
+from sol_baselines_harness.metrics.cache_predictor import (  # noqa: E402
     predict_from_launch_frame,
     PREDICTOR_BUNDLE_RESULT_KIND_SCALAR,
 )
-from baselines_harness.metrics.isotonic_calibrator import (  # noqa: E402
+from sol_baselines_harness.metrics.isotonic_calibrator import (  # noqa: E402
     IsotonicCalibrator,
 )
-from baselines_harness.metrics.tier2_sidecar_parser import (  # noqa: E402
+from sol_baselines_harness.metrics.tier2_sidecar_parser import (  # noqa: E402
     parse_launch_frames,
 )
 
 
 _CAL_DIR = (
     _REPO_ROOT
-    / "scripts"
-    / "baselines_harness"
+    / "tools"
+    / "sol_baselines_harness"
     / "calibration"
     / "cache_prediction"
 )
@@ -103,6 +110,10 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--traces-root", type=Path, required=True)
     args = parser.parse_args()
+    refuse_legacy_ncu_calibration(
+        "sol_baselines_harness.calibration.cache_prediction."
+        "sm120_l2_associativity_probe.persist_fitted_sidecar.main"
+    )
 
     geometry = _geometry_spec(_WINNING_ASSOC)
     ledger_data = tomllib.loads(_LEDGER.read_text("utf-8"))

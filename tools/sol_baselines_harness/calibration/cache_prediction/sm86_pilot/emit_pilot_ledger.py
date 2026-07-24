@@ -36,14 +36,24 @@ seed the split is reproducible.
 
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+_TOOLS_ROOT = Path(__file__).resolve().parents[4]
+if str(_TOOLS_ROOT) not in sys.path:
+    sys.path.insert(0, str(_TOOLS_ROOT))
+
+from sol_baselines_harness.calibration.cache_prediction.retirement import (
+    refuse_legacy_ncu_calibration,
+    retired_legacy_ncu_calibration,
+)
+
 import argparse
 import hashlib
 import json
 import random
-import sys
 import tomllib
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Final
 
 
@@ -113,7 +123,7 @@ def _predictor_bucket_for(slug: str) -> str:
     operator-driven re-classification flows through here
     automatically.
     """
-    from baselines_harness.metrics.predictor_design_coverage import (
+    from sol_baselines_harness.metrics.predictor_design_coverage import (
         lookup_predictor_design_coverage,
     )
     coverage = lookup_predictor_design_coverage(slug)
@@ -331,6 +341,7 @@ def main(
     is the canonical
     ``scripts/baselines_harness/calibration/cache_prediction/``.
     """
+    refuse_legacy_ncu_calibration('sol_baselines_harness.calibration.cache_prediction.sm86_pilot.emit_pilot_ledger.main')
     if output_root is None:
         output_root = (
             _REPO_ROOT / "scripts" / "baselines_harness"

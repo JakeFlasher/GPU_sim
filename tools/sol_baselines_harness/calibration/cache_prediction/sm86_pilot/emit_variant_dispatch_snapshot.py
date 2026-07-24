@@ -42,23 +42,32 @@ Usage:
 
 from __future__ import annotations
 
-import argparse
-import dataclasses
-import hashlib
 import sys
 from pathlib import Path
 
-_REPO_ROOT = Path(__file__).resolve().parents[5]
-sys.path.insert(0, str(_REPO_ROOT / "scripts"))
+_TOOLS_ROOT = Path(__file__).resolve().parents[4]
+if str(_TOOLS_ROOT) not in sys.path:
+    sys.path.insert(0, str(_TOOLS_ROOT))
 
-from baselines_harness.calibration.cache_prediction.sm120_coverage_expansion.calibrator_dispatch_variant import (  # noqa: E402
+from sol_baselines_harness.calibration.cache_prediction.retirement import (
+    refuse_legacy_ncu_calibration,
+    retired_legacy_ncu_calibration,
+)
+
+import argparse
+import dataclasses
+import hashlib
+
+_REPO_ROOT = Path(__file__).resolve().parents[5]
+
+from sol_baselines_harness.calibration.cache_prediction.sm120_coverage_expansion.calibrator_dispatch_variant import (  # noqa: E402
     load_calibrator_for_arch_variant,
 )
-from baselines_harness.metrics.cache_predictor import (  # noqa: E402
+from sol_baselines_harness.metrics.cache_predictor import (  # noqa: E402
     predict_from_launch_frame,
     PREDICTOR_BUNDLE_RESULT_KIND_SCALAR,
 )
-from baselines_harness.metrics.tier2_sidecar_parser import (  # noqa: E402
+from sol_baselines_harness.metrics.tier2_sidecar_parser import (  # noqa: E402
     parse_launch_frames,
 )
 
@@ -306,11 +315,13 @@ def _splice_block(existing_text: str, new_block: str) -> str:
     return existing_text + new_block.rstrip("\n") + "\n"
 
 
+@retired_legacy_ncu_calibration('sol_baselines_harness.calibration.cache_prediction.sm86_pilot.emit_variant_dispatch_snapshot.main')
 def main(
     *,
     snapshot_path: Path | None = None,
     captured_at_utc: str | None = None,
 ) -> int:
+    refuse_legacy_ncu_calibration('sol_baselines_harness.calibration.cache_prediction.sm86_pilot.emit_variant_dispatch_snapshot.main')
     snap = snapshot_path or _DEFAULT_SNAPSHOT
     cap = captured_at_utc or "2026-05-28T23:45:00+00:00"
     block = _build_block(cap)

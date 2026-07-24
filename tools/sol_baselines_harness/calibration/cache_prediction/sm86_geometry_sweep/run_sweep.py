@@ -14,27 +14,37 @@ The empirical-sweep result is MODEL SELECTION, not authoritative hardware geomet
 """
 from __future__ import annotations
 
+import sys
+from pathlib import Path
+
+_TOOLS_ROOT = Path(__file__).resolve().parents[4]
+if str(_TOOLS_ROOT) not in sys.path:
+    sys.path.insert(0, str(_TOOLS_ROOT))
+
+from sol_baselines_harness.calibration.cache_prediction.retirement import (
+    refuse_legacy_ncu_calibration,
+    retired_legacy_ncu_calibration,
+)
+
+import argparse
 import dataclasses
 import json
 import statistics
-import sys
 import tomllib
 from collections import defaultdict
-from pathlib import Path
 from typing import Final
 
 _REPO_ROOT = Path(__file__).resolve().parents[5]
-sys.path.insert(0, str(_REPO_ROOT / "scripts"))
 
-from baselines_harness.metrics.cache_predictor import predict_from_launch_frame  # noqa: E402
-from baselines_harness.metrics.tier2_sidecar_parser import parse_launch_frames  # noqa: E402
-from baselines_harness.metrics.isotonic_calibrator import (  # noqa: E402
+from sol_baselines_harness.metrics.cache_predictor import predict_from_launch_frame  # noqa: E402
+from sol_baselines_harness.metrics.tier2_sidecar_parser import parse_launch_frames  # noqa: E402
+from sol_baselines_harness.metrics.isotonic_calibrator import (  # noqa: E402
     CalibrationInputRecord,
     CellJoinKey,
     IsotonicCalibrator,
     run_loocv,
 )
-from baselines_harness.metrics.predictor_design_coverage import (  # noqa: E402
+from sol_baselines_harness.metrics.predictor_design_coverage import (  # noqa: E402
     lookup_predictor_design_coverage,
     PredictorDesignCoverageError,
     PREDICTOR_BUCKET_TYPED_UNAVAILABLE,
@@ -92,7 +102,7 @@ def _record(slug: str, bucket: str, raw_l1: float, raw_l2: float,
 def reuse_factor_by_slug(repo_root: Path, slugs) -> dict:
     """Deterministic dense-reuse factor per slug: cohort_b from the sweep sidecars
     (schema v2 `dense_reuse`), seed cells re-derived from their on-disk `.t2a`."""
-    from baselines_harness.calibration.cache_prediction.sm86_geometry_sweep import (
+    from sol_baselines_harness.calibration.cache_prediction.sm86_geometry_sweep import (
         harvest_sweep_traces as _hsv,
     )
     sidecar_dir = repo_root / _SWEEP_SIDECARS.relative_to(_REPO_ROOT)
@@ -204,7 +214,9 @@ def build_records_at_assoc(repo_root: Path, assoc: int, exclude=frozenset()):
     return records, excluded
 
 
+@retired_legacy_ncu_calibration('sol_baselines_harness.calibration.cache_prediction.sm86_geometry_sweep.run_sweep.evaluate_assoc')
 def evaluate_assoc(repo_root: Path, assoc: int, exclude=frozenset()) -> dict:
+    refuse_legacy_ncu_calibration('sol_baselines_harness.calibration.cache_prediction.sm86_geometry_sweep.run_sweep.evaluate_assoc')
     records, excluded = build_records_at_assoc(repo_root, assoc, exclude)
     bucket_of = {r.cell_name: r.predictor_bucket for r in records}
     calib = IsotonicCalibrator()
@@ -252,6 +264,7 @@ def select_winner(results_excluded: list[dict]) -> dict:
     """Pick the associativity that best satisfies the tiered gate: prefer a
     gates-passing candidate; else the candidate with the lowest aggregate
     fraction-domain MAPE (deterministic; ties broken by smaller associativity)."""
+    refuse_legacy_ncu_calibration('sm86_geometry_sweep.run_sweep.select_winner')
     passing = [r for r in results_excluded if r["all_gates_pass"]]
     pool = passing or results_excluded
 
@@ -267,11 +280,13 @@ def _sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
+@retired_legacy_ncu_calibration('sol_baselines_harness.calibration.cache_prediction.sm86_geometry_sweep.run_sweep.emit_scoreboard')
 def emit_scoreboard(repo_root: Path = _REPO_ROOT) -> Path:
     """Deterministic sweep scoreboard: per-assoc MAPE both BARE (geometry-only)
     and WITH the capability ledger's typed exclusions, plus the winner. The
     evidence that geometry alone floors friendly L2, and that even with the honest
     capability exclusions the dense-kernel residual keeps friendly L2 above 0.05."""
+    refuse_legacy_ncu_calibration('sol_baselines_harness.calibration.cache_prediction.sm86_geometry_sweep.run_sweep.emit_scoreboard')
     unsup = load_capability_unsupported(repo_root)
     bare = [evaluate_assoc(repo_root, a, frozenset()) for a in CANDIDATES]
     excl = [evaluate_assoc(repo_root, a, unsup) for a in CANDIDATES]
@@ -323,7 +338,9 @@ def emit_scoreboard(repo_root: Path = _REPO_ROOT) -> Path:
     return out_path
 
 
+@retired_legacy_ncu_calibration('sol_baselines_harness.calibration.cache_prediction.sm86_geometry_sweep.run_sweep.sweep')
 def sweep(repo_root: Path = _REPO_ROOT, exclude=frozenset()) -> list[dict]:
+    refuse_legacy_ncu_calibration('sol_baselines_harness.calibration.cache_prediction.sm86_geometry_sweep.run_sweep.sweep')
     out = []
     for assoc in CANDIDATES:
         r = evaluate_assoc(repo_root, assoc, exclude)
@@ -334,9 +351,12 @@ def sweep(repo_root: Path = _REPO_ROOT, exclude=frozenset()) -> list[dict]:
     return out
 
 
-if __name__ == "__main__":
-    print("=== bare sweep ===")
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.parse_args(argv)
     sweep(_REPO_ROOT)
-    print("=== with capability exclusions ===")
-    sweep(_REPO_ROOT, load_capability_unsupported(_REPO_ROOT))
-    emit_scoreboard(_REPO_ROOT)
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

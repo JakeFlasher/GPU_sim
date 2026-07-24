@@ -69,15 +69,19 @@ import tomllib
 from datetime import datetime, timezone
 from pathlib import Path
 
-from baselines_harness.calibration.cache_prediction.sm120_coverage_expansion.disk_discovery import (
+_TOOLS_ROOT = Path(__file__).resolve().parents[4]
+if str(_TOOLS_ROOT) not in sys.path:
+    sys.path.insert(0, str(_TOOLS_ROOT))
+
+from sol_baselines_harness.calibration.cache_prediction.sm120_coverage_expansion.disk_discovery import (
     DiscoveryResult,
     build_diagnostics_and_env,
     probe_disk_state,
 )
-from baselines_harness.calibration.cache_prediction.sm120_coverage_expansion.ladder_qa import (
+from sol_baselines_harness.calibration.cache_prediction.sm120_coverage_expansion.ladder_qa import (
     compute_corpus_sha256,
 )
-from baselines_harness.calibration.cache_prediction.sm120_coverage_expansion.ladder_reducer import (
+from sol_baselines_harness.calibration.cache_prediction.sm120_coverage_expansion.ladder_reducer import (
     emit_ladder_state,
 )
 
