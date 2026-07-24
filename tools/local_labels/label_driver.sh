@@ -21,7 +21,7 @@
 #       --warmup 1 \
 #       [--ncu /usr/local/cuda/bin/ncu] \
 #       [--out-dir data/local_labels] \
-#       [--kernel-name <regex>] \
+#       [--kernel-name <exact-mangled-name>] \
 #       -- <application args ...>
 #
 # Application arguments after `--` are forwarded verbatim to the profiled
@@ -93,7 +93,7 @@ Optional arguments:
   --warmup <int>            Warmup launches before measurement (default: 1).
   --ncu <path>              Path to the Nsight Compute CLI (default: 'ncu' on PATH).
   --out-dir <path>          Quarantine root (default: data/local_labels).
-  --kernel-name <regex>     Forward as NCU --kernel-name filter.
+  --kernel-name <name>      Forward an exact mangled NCU kernel-name filter.
   --cache-control <mode>    Forward as NCU --cache-control flag
                             (mode in {all, none}). Optional;
                             omit to defer to NCU's default behavior.
@@ -309,6 +309,11 @@ require "--shape-point" "$SHAPE_POINT"
 require "--repeat" "$REPEAT_INDEX"
 require "--launch" "$LAUNCH_INDEX"
 require "--binary" "$BINARY_PATH"
+
+if [[ "$KERNEL_NAME" == regex:* ]]; then
+    echo "label_driver: --kernel-name requires an exact name, not regex: syntax" >&2
+    exit 2
+fi
 
 # Architecture capability gate (C-AC-E). Translate the legacy local
 # label `sm_120` to the manifest's `sm_120-laptop` (the bare
@@ -1131,7 +1136,7 @@ if [[ "$SHAPE_BINDING" == "logical-workload" ]]; then
     NCU_COLLECT_ARGS+=(--profile-from-start off)
 fi
 if [[ -n "$KERNEL_NAME" ]]; then
-    NCU_COLLECT_ARGS+=(--kernel-name "$KERNEL_NAME")
+    NCU_COLLECT_ARGS+=(--kernel-name-base mangled --kernel-name "$KERNEL_NAME")
 fi
 if [[ -n "$CACHE_CONTROL" ]]; then
     NCU_COLLECT_ARGS+=(--cache-control "$CACHE_CONTROL")

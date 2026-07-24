@@ -76,6 +76,339 @@ def _write_launch_observation(
     return path
 
 
+def _canonical_launch_invocation(*, selected: int = 0) -> dict:
+    return {
+        "capture_launch_contract": {
+            "schema_version": 1,
+            "label_driver_warmup_count": 1,
+            "label_effective_warmup_count": 0,
+            "label_launch_index": 0,
+            "label_measured_reps": 1,
+            "trace_launch_count": 1,
+            "label_trace_launch_index": selected,
+        },
+        "label_app_args": [],
+        "shape_delivery": "application_args",
+        "logical_workload": {"value": "synthetic_shape"},
+    }
+
+
+def _canonical_launch(
+    *, kernel_name: str = "_Z15syntheticKernelv___0",
+    block: list[int] | None = None, grid: list[int] | None = None,
+    device: int = 0, kernel_id: int = 1,
+) -> dict:
+    return {
+        "device_id": device,
+        "stream_id": 0,
+        "kernel_id": kernel_id,
+        "kernel_name": kernel_name,
+        "block_dim": [128, 1, 1] if block is None else block,
+        "grid_dim": [1, 1, 1] if grid is None else grid,
+    }
+
+
+def _canonical_observation(
+    *, kernel_name: str = "_Z15syntheticKernelv",
+    block: str = "(128, 1, 1)", grid: str = "(1, 1, 1)",
+    device: str = "0", launch_id: str = "0",
+) -> dict:
+    return {
+        "kernel_name_base": "mangled",
+        "identity_columns": [
+            "ID", "Device", "Kernel Name", "Block Size", "Grid Size",
+        ],
+        "identity": {
+            "ID": launch_id,
+            "Device": device,
+            "Kernel Name": kernel_name,
+            "Block Size": block,
+            "Grid Size": grid,
+        },
+    }
+
+
+def _canonical_label(
+    *, observation: dict | None = None, selectors: list[str] | None = None,
+) -> dict:
+    command = [str(cc.LABEL_DRIVER), "--device", "sm_86"]
+    for selector in selectors or []:
+        command += ["--kernel-name", selector]
+    command += ["--", "synthetic-target-arg"]
+    return {
+        "command": command,
+        "ncu_launch_observation_document": (
+            _canonical_observation() if observation is None else observation
+        ),
+    }
+
+
+@pytest.mark.parametrize(
+    "block,grid,device",
+    [
+        ("(128, 1, 1)", "(1, 1, 1)", "0"),
+        (" 128, 1, 1 ", "1,1,1", "NVIDIA GeForce RTX 3090 Ti (0)"),
+    ],
+)
+def test_canonical_launch_identity_join_accepts_exact_independent_tuple(
+    block, grid, device,
+):
+    observation = _canonical_observation(block=block, grid=grid, device=device)
+    binding = cc.require_canonical_label_launch_identity(
+        label=_canonical_label(observation=observation),
+        trace={"launches": [_canonical_launch()]},
+        invocation=_canonical_launch_invocation(),
+    )
+    assert binding == {
+        "launch_key": (
+            "_Z15syntheticKernelv", (128, 1, 1), (1, 1, 1), 0,
+        ),
+        "kernel_selector": None,
+    }
+
+
+@pytest.mark.parametrize("field", ["name", "block", "grid", "device"])
+def test_canonical_launch_identity_join_refuses_each_tuple_mismatch(field):
+    observation = _canonical_observation()
+    replacements = {
+        "name": ("Kernel Name", "_Z9differentv"),
+        "block": ("Block Size", "(64, 1, 1)"),
+        "grid": ("Grid Size", "(2, 1, 1)"),
+        "device": ("Device", "1"),
+    }
+    key, value = replacements[field]
+    observation["identity"][key] = value
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        cc.require_canonical_label_launch_identity(
+            label=_canonical_label(observation=observation),
+            trace={"launches": [_canonical_launch()]},
+            invocation=_canonical_launch_invocation(),
+        )
+    assert caught.value.code == "label_launch_identity_join_mismatch"
+
+
+@pytest.mark.parametrize("mutation", ["missing", "blank", "duplicate"])
+def test_canonical_launch_identity_join_requires_unambiguous_ncu_id(mutation):
+    observation = _canonical_observation()
+    if mutation == "missing":
+        observation["identity"].pop("ID")
+        observation["identity_columns"].remove("ID")
+    elif mutation == "blank":
+        observation["identity"]["ID"] = ""
+    else:
+        observation["identity_columns"].append("ID")
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        cc.require_canonical_label_launch_identity(
+            label=_canonical_label(observation=observation),
+            trace={"launches": [_canonical_launch()]},
+            invocation=_canonical_launch_invocation(),
+        )
+    assert caught.value.code == "label_launch_identity_join_mismatch"
+
+
+@pytest.mark.parametrize(
+    "kernel_name", [
+        "_Z15syntheticKernelv", "___0", "_Z15syntheticKernelv___0___0",
+        "regex:.*___0",
+    ],
+)
+def test_canonical_launch_identity_join_refuses_malformed_trace_suffix(kernel_name):
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        cc.require_canonical_label_launch_identity(
+            label=_canonical_label(),
+            trace={"launches": [_canonical_launch(kernel_name=kernel_name)]},
+            invocation=_canonical_launch_invocation(),
+        )
+    assert caught.value.code == "label_launch_identity_join_mismatch"
+
+
+def test_canonical_launch_identity_join_refuses_out_of_range_selected_row():
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        cc.require_canonical_label_launch_identity(
+            label=_canonical_label(),
+            trace={"launches": [_canonical_launch()]},
+            invocation=_canonical_launch_invocation(selected=1),
+        )
+    assert caught.value.code == "label_launch_identity_join_mismatch"
+
+
+def test_equal_ncu_and_nvbit_ordinals_do_not_override_identity_mismatch():
+    observation = _canonical_observation(launch_id="0", kernel_name="_Z9differentv")
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        cc.require_canonical_label_launch_identity(
+            label=_canonical_label(observation=observation),
+            trace={"launches": [_canonical_launch(kernel_id=0)]},
+            invocation=_canonical_launch_invocation(),
+        )
+    assert caught.value.code == "label_launch_identity_join_mismatch"
+
+
+def _warm_cold_invocation() -> dict:
+    sequence = [
+        {
+            "device_id": 0, "stream_id": 0, "kernel_id": 1,
+            "kernel_name": "warm_cold_pair_kernel___0",
+            "grid_dim": [32, 1, 1], "block_dim": [32, 1, 1],
+            "role": "cold",
+        },
+        {
+            "device_id": 0, "stream_id": 0, "kernel_id": 2,
+            "kernel_name": "warm_cold_pair_eviction_kernel___0",
+            "grid_dim": [32, 1, 1], "block_dim": [32, 1, 1],
+            "role": "evict",
+        },
+        {
+            "device_id": 0, "stream_id": 0, "kernel_id": 3,
+            "kernel_name": "warm_cold_pair_kernel___0",
+            "grid_dim": [32, 1, 1], "block_dim": [32, 1, 1],
+            "role": "warm",
+        },
+    ]
+    invocation = _canonical_launch_invocation()
+    invocation["capture_launch_contract"].update({
+        "trace_launch_count": 3,
+        "trace_launch_sequence": sequence,
+    })
+    return invocation
+
+
+def test_warm_cold_contract_derives_and_joins_exact_mangled_selector():
+    invocation = _warm_cold_invocation()
+    launches = invocation["capture_launch_contract"]["trace_launch_sequence"]
+    selector = cc._canonical_label_kernel_selector(invocation)
+    assert selector == "warm_cold_pair_kernel"
+    binding = cc.require_canonical_label_launch_identity(
+        label=_canonical_label(
+            observation=_canonical_observation(
+                kernel_name=selector,
+                block="(32, 1, 1)", grid="(32, 1, 1)",
+            ),
+            selectors=[selector],
+        ),
+        trace={"launches": launches},
+        invocation=invocation,
+    )
+    assert binding["kernel_selector"] == selector
+
+
+@pytest.mark.parametrize(
+    "selectors",
+    [[], ["warm_cold_pair_eviction_kernel"],
+     ["warm_cold_pair_kernel", "warm_cold_pair_kernel"]],
+)
+def test_warm_cold_join_refuses_missing_wrong_or_duplicate_selector(selectors):
+    invocation = _warm_cold_invocation()
+    launches = invocation["capture_launch_contract"]["trace_launch_sequence"]
+    observation = _canonical_observation(
+        kernel_name="warm_cold_pair_kernel",
+        block="(32, 1, 1)", grid="(32, 1, 1)",
+    )
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        cc.require_canonical_label_launch_identity(
+            label=_canonical_label(observation=observation, selectors=selectors),
+            trace={"launches": launches},
+            invocation=invocation,
+        )
+    assert caught.value.code == "label_launch_identity_join_mismatch"
+
+
+def test_single_launch_contract_derives_no_kernel_selector():
+    assert cc._canonical_label_kernel_selector(_canonical_launch_invocation()) is None
+
+
+def test_label_driver_forwards_exact_selector_with_mangled_name_base():
+    source = cc.LABEL_DRIVER.read_text()
+    assert (
+        'NCU_COLLECT_ARGS+=(--kernel-name-base mangled --kernel-name "$KERNEL_NAME")'
+        in source
+    )
+    assert 'if [[ "$KERNEL_NAME" == regex:* ]]' in source
+
+
+def test_label_driver_refuses_regex_selector_before_capture(tmp_path):
+    completed = subprocess.run(
+        [
+            str(cc.LABEL_DRIVER),
+            "--device", "sm_86",
+            "--slug", "synthetic",
+            "--shape-point", "synthetic_shape",
+            "--repeat", "0",
+            "--launch", "0",
+            "--binary", "/bin/true",
+            "--kernel-name", "regex:.*",
+            "--out-dir", str(tmp_path),
+        ],
+        env={**cc.os.environ, "LABEL_DRIVER_SKIP_ARCH_CHECK": "1"},
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 2
+    assert "requires an exact name, not regex: syntax" in completed.stderr
+    assert not any(tmp_path.iterdir())
+
+
+def test_capture_cell_refuses_identity_mismatch_before_control(tmp_path, monkeypatch):
+    binary = tmp_path / "synthetic-binary"
+    binary.write_bytes(b"synthetic executable")
+    invocation = _canonical_launch_invocation()
+    invocation["executable_sha256"] = cc.sha256_file(binary)
+    cell = {
+        "identity": {"roster_source": "portable_lcd", "slug": "synthetic"},
+        "control_bits": {"policy": "direct_executable"},
+    }
+    budget = SimpleNamespace(max_wall_time_s=10)
+    cell_dir = tmp_path / "chunk" / "cells" / "portable_lcd__synthetic"
+    cell_dir.mkdir(parents=True)
+    monkeypatch.setattr(
+        cc, "validate_capture_cell",
+        lambda *_args, **_kwargs: (binary, invocation, budget, None, None),
+    )
+    monkeypatch.setattr(cc, "live_capture_guard", lambda _pins: {"status": "ok"})
+
+    def fake_label(**kwargs):
+        assert kwargs["kernel_name_selector"] is None
+        return _canonical_label(
+            observation=_canonical_observation(kernel_name="_Z9differentv")
+        )
+
+    monkeypatch.setattr(cc, "capture_label", fake_label)
+    monkeypatch.setattr(
+        cc, "capture_trace",
+        lambda **_kwargs: {"launches": [_canonical_launch()]},
+    )
+    control_called = False
+
+    def unexpected_control(**_kwargs):
+        nonlocal control_called
+        control_called = True
+        pytest.fail("control capture ran after an identity mismatch")
+
+    monkeypatch.setattr(cc, "capture_control", unexpected_control)
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        cc.capture_cell(
+            cell=cell,
+            cell_dir=cell_dir,
+            matrix={},
+            pins={},
+            cell_budgets=object(),
+            expected_tracer_sha256="9" * 64,
+            capture_provenance={
+                "capture_started_at_utc": "2026-07-10T12:00:00Z",
+                "admission_run_id": "8" * 64,
+                "supersedes": None,
+                "prior_preparation_failures": [],
+                "prior_capture_defect_attempts": [],
+                "source_commit": "d" * 40,
+            },
+            certified_sol_env=None,
+            sol_environment_probe=None,
+            module_store=tmp_path / "module-store",
+        )
+    assert caught.value.code == "label_launch_identity_join_mismatch"
+    assert control_called is False
+
+
 def test_vendor_runtime_control_slug_dispatch_is_closed():
     expected = frozenset({
         "vendor_gemm_cublas",
@@ -3534,9 +3867,13 @@ def test_label_capture_stages_workload_output_and_checks_full_vector(
     result = cc.capture_label(
         cell=cell, binary=binary, invocation=cell["invocation"],
         cell_dir=cell_dir, matrix=matrix, pins=pins, timeout_s=10,
+        kernel_name_selector="_Z15syntheticKernelv",
     )
     command = commands[0]
     assert command[command.index("--launch") + 1] == "1"
+    assert command[command.index("--kernel-name") + 1] == (
+        "_Z15syntheticKernelv"
+    )
     assert command[command.index("--warmup") + 1] == "1"
     output_arg = Path(command[command.index("--output_dir") + 1])
     assert output_arg.is_relative_to(cell_dir / "logs")
@@ -4479,6 +4816,7 @@ def test_capture_cell_sol_typed_route_seals_full_orchestration_without_gpu(
 
     def fake_label(**kwargs):
         assert kwargs["execution_source_commit"] == provenance["source_commit"]
+        assert kwargs["kernel_name_selector"] is None
         context = state["context"]
         runtime_env = kwargs["runtime_env"]
         request = json.loads(
@@ -4502,6 +4840,7 @@ def test_capture_cell_sol_typed_route_seals_full_orchestration_without_gpu(
         _write_launch_observation(
             ncu_launch_observation,
             report=ncu_report, launch_index=0,
+            kernel_name="candidate_kernel",
         )
         stdout, stderr = write_log("label")
         capture_manifest = cell_dir / "logs" / "label_capture_manifest.json"
@@ -4511,10 +4850,14 @@ def test_capture_cell_sol_typed_route_seals_full_orchestration_without_gpu(
         }) + "\n")
         events.append("label")
         return {
+            "command": [str(cc.LABEL_DRIVER), "--"],
             "sidecar": sidecar,
             "run_manifest": run_manifest,
             "ncu_report": ncu_report,
             "ncu_launch_observation": ncu_launch_observation,
+            "ncu_launch_observation_document": json.loads(
+                ncu_launch_observation.read_text()
+            ),
             "stdout_log": stdout,
             "stderr_log": stderr,
             "capture_manifest": capture_manifest,
@@ -4634,6 +4977,8 @@ def test_capture_cell_sol_typed_route_seals_full_orchestration_without_gpu(
                 "stream_id": 0,
                 "kernel_id": 1,
                 "kernel_name": "candidate_kernel___0",
+                "block_dim": [128, 1, 1],
+                "grid_dim": [1, 1, 1],
             }],
         }
 

@@ -3839,6 +3839,7 @@ def capture_label(
     runtime_env: dict[str, str] | None = None,
     phase_result_validator: Callable[[dict[str, str], str], dict] | None = None,
     label_launch_index_override: int | None = None,
+    kernel_name_selector: str | None = None,
     artifact_tag: str = "label",
     execution_source_commit: str | None = None,
     bind_supplemental_toolchain: bool = False,
@@ -3920,10 +3921,23 @@ def capture_label(
         or not isinstance(artifact_tag, str)
         or not artifact_tag
         or any(not (ch.isalnum() or ch in "_-") for ch in artifact_tag)
+        or (
+            kernel_name_selector is not None
+            and (
+                not isinstance(kernel_name_selector, str)
+                or not kernel_name_selector
+                or kernel_name_selector != kernel_name_selector.strip()
+                or kernel_name_selector.startswith("regex:")
+            )
+        )
     ):
         raise ChunkRefusal(
             "label_launch_request_invalid",
-            repr({"launch_index": label_launch_index, "tag": artifact_tag}),
+            repr({
+                "launch_index": label_launch_index,
+                "kernel_name_selector": kernel_name_selector,
+                "tag": artifact_tag,
+            }),
         )
     label_driver_warmup = launch_contract["label_driver_warmup_count"]
     command = [
@@ -3945,6 +3959,8 @@ def capture_label(
             "--expected-ncu-version-prefix", expected_ncu_prefix,
             "--publication-metric-scope", "cycles_only_binding",
         ]
+    if kernel_name_selector is not None:
+        command += ["--kernel-name", kernel_name_selector]
     for metric in unit_metrics:
         command += ["--unit-metric", metric]
     effective_app_args = list(invocation["label_app_args"])
@@ -4094,13 +4110,14 @@ def capture_label(
         )
         or observation_seal != canonical_sha256(observation_unsealed)
         or not isinstance(launch_observation.get("identity"), dict)
-        or not {"Kernel Name", "Block Size", "Grid Size", "Device"}.issubset(
-            launch_observation["identity"]
-        )
     ):
         raise ChunkRefusal(
             "label_launch_observation_invalid", repr(launch_observation)
         )
+    _observation_ncu_launch_key(
+        launch_observation,
+        refusal_code="label_launch_identity_join_mismatch",
+    )
     expected_run = {
         "source_commit": source_commit,
         "binary_sha256": invocation["executable_sha256"],
@@ -6427,10 +6444,13 @@ def artifact_row(path: Path, *, root: Path, artifact_kind: str) -> dict:
     }
 
 
-def _normalize_ncu_dim(value: Any, *, field: str) -> tuple[int, int, int]:
+def _normalize_ncu_dim(
+    value: Any, *, field: str,
+    refusal_code: str = "sol_dynamic_launch_ncu_identity_mismatch",
+) -> tuple[int, int, int]:
     if not isinstance(value, str):
         raise ChunkRefusal(
-            "sol_dynamic_launch_ncu_identity_mismatch",
+            refusal_code,
             f"{field} is not a string: {value!r}",
         )
     match = re.fullmatch(
@@ -6440,22 +6460,25 @@ def _normalize_ncu_dim(value: Any, *, field: str) -> tuple[int, int, int]:
     )
     if match is None or (value.lstrip().startswith("(") != value.rstrip().endswith(")")):
         raise ChunkRefusal(
-            "sol_dynamic_launch_ncu_identity_mismatch",
+            refusal_code,
             f"invalid {field}: {value!r}",
         )
     result = tuple(int(item) for item in match.groups())
     if any(item <= 0 for item in result):
         raise ChunkRefusal(
-            "sol_dynamic_launch_ncu_identity_mismatch",
+            refusal_code,
             f"non-positive {field}: {value!r}",
         )
     return result  # type: ignore[return-value]
 
 
-def _normalize_ncu_device(value: Any) -> int:
+def _normalize_ncu_device(
+    value: Any, *,
+    refusal_code: str = "sol_dynamic_launch_ncu_identity_mismatch",
+) -> int:
     if not isinstance(value, str):
         raise ChunkRefusal(
-            "sol_dynamic_launch_ncu_identity_mismatch",
+            refusal_code,
             f"Device is not a string: {value!r}",
         )
     stripped = value.strip()
@@ -6464,7 +6487,7 @@ def _normalize_ncu_device(value: Any) -> int:
     match = re.fullmatch(r".*\((\d+)\)\s*", stripped)
     if match is None:
         raise ChunkRefusal(
-            "sol_dynamic_launch_ncu_identity_mismatch",
+            refusal_code,
             f"invalid Device: {value!r}",
         )
     return int(match.group(1))
@@ -6494,28 +6517,172 @@ def _trace_ncu_launch_key(
 
 
 def _observation_ncu_launch_key(
-    observation: dict[str, Any],
+    observation: dict[str, Any], *,
+    refusal_code: str = "sol_dynamic_launch_ncu_identity_mismatch",
 ) -> tuple[str, tuple[int, int, int], tuple[int, int, int], int]:
-    identity = observation.get("identity") or {}
-    required = {"Kernel Name", "Block Size", "Grid Size", "Device"}
+    identity = observation.get("identity")
+    required = {"ID", "Kernel Name", "Block Size", "Grid Size", "Device"}
     columns = observation.get("identity_columns")
+    if not isinstance(identity, dict):
+        raise ChunkRefusal(refusal_code, repr(observation))
     name = identity.get("Kernel Name")
     if (
         observation.get("kernel_name_base") != "mangled"
         or not isinstance(columns, list)
+        or not all(isinstance(column, str) for column in columns)
+        or len(columns) != len(set(columns))
         or not required.issubset(columns)
+        or not isinstance(identity, dict)
+        or not required.issubset(identity)
+        or any(
+            not isinstance(identity[field], str) or not identity[field].strip()
+            for field in required
+        )
         or not isinstance(name, str) or not name
     ):
         raise ChunkRefusal(
-            "sol_dynamic_launch_ncu_identity_mismatch",
+            refusal_code,
             repr(observation),
         )
     return (
         name,
-        _normalize_ncu_dim(identity.get("Block Size"), field="Block Size"),
-        _normalize_ncu_dim(identity.get("Grid Size"), field="Grid Size"),
-        _normalize_ncu_device(identity.get("Device")),
+        _normalize_ncu_dim(
+            identity.get("Block Size"), field="Block Size",
+            refusal_code=refusal_code,
+        ),
+        _normalize_ncu_dim(
+            identity.get("Grid Size"), field="Grid Size",
+            refusal_code=refusal_code,
+        ),
+        _normalize_ncu_device(
+            identity.get("Device"), refusal_code=refusal_code,
+        ),
     )
+
+
+def _canonical_trace_kernel_name(value: Any) -> str:
+    refusal_code = "label_launch_identity_join_mismatch"
+    suffix = "___0"
+    if not isinstance(value, str) or not value.endswith(suffix):
+        raise ChunkRefusal(refusal_code, f"invalid trace kernel name: {value!r}")
+    base = value[:-len(suffix)]
+    if (
+        not base or base.endswith(suffix) or base.startswith("regex:")
+    ):
+        raise ChunkRefusal(refusal_code, f"invalid exact trace kernel name: {value!r}")
+    return base
+
+
+def _canonical_trace_launch_key(
+    launch: Any,
+) -> tuple[str, tuple[int, int, int], tuple[int, int, int], int]:
+    refusal_code = "label_launch_identity_join_mismatch"
+    if not isinstance(launch, dict):
+        raise ChunkRefusal(refusal_code, f"trace launch is not an object: {launch!r}")
+    name = _canonical_trace_kernel_name(launch.get("kernel_name"))
+    block = launch.get("block_dim")
+    grid = launch.get("grid_dim")
+    device = launch.get("device_id")
+    if (
+        not isinstance(block, list) or len(block) != 3
+        or not isinstance(grid, list) or len(grid) != 3
+        or any(type(item) is not int or item <= 0 for item in [*block, *grid])
+        or type(device) is not int or device < 0
+    ):
+        raise ChunkRefusal(refusal_code, repr(launch))
+    return name, tuple(block), tuple(grid), device  # type: ignore[return-value]
+
+
+def _label_command_kernel_selectors(command: Any) -> list[str]:
+    refusal_code = "label_launch_identity_join_mismatch"
+    if not isinstance(command, list) or not all(
+        isinstance(token, str) for token in command
+    ):
+        raise ChunkRefusal(refusal_code, f"invalid label command: {command!r}")
+    driver_args = command[:command.index("--")] if "--" in command else command
+    selectors: list[str] = []
+    index = 0
+    while index < len(driver_args):
+        token = driver_args[index]
+        if token == "--kernel-name":
+            if index + 1 >= len(driver_args):
+                raise ChunkRefusal(refusal_code, "--kernel-name has no value")
+            selectors.append(driver_args[index + 1])
+            index += 2
+            continue
+        if token.startswith("--kernel-name="):
+            selectors.append(token.split("=", 1)[1])
+        index += 1
+    return selectors
+
+
+def _canonical_label_kernel_selector(invocation: dict[str, Any]) -> str | None:
+    """Derive a pre-label selector only from the sealed v1 launch sequence."""
+    contract = _require_capture_launch_contract(invocation)
+    if contract.get("schema_version") != 1:
+        return None
+    sequence = contract.get("trace_launch_sequence")
+    if sequence is None:
+        return None
+    selected = contract["label_trace_launch_index"]
+    names = [
+        _canonical_trace_kernel_name(row.get("kernel_name"))
+        if isinstance(row, dict) else _canonical_trace_kernel_name(None)
+        for row in sequence
+    ]
+    selected_name = names[selected]
+    return selected_name if names.count(selected_name) > 1 else None
+
+
+def require_canonical_label_launch_identity(
+    *, label: dict[str, Any], trace: dict[str, Any], invocation: dict[str, Any],
+) -> dict[str, Any]:
+    """Require equality of independently observed canonical NCU/NVBit launches."""
+    refusal_code = "label_launch_identity_join_mismatch"
+    contract = invocation.get("capture_launch_contract")
+    if not isinstance(contract, dict) or contract.get("schema_version") != 1:
+        raise ChunkRefusal(refusal_code, f"invalid v1 launch contract: {contract!r}")
+    selected = contract.get("label_trace_launch_index")
+    launches = trace.get("launches")
+    if (
+        type(selected) is not int or selected < 0
+        or not isinstance(launches, list)
+        or selected >= len(launches)
+    ):
+        raise ChunkRefusal(
+            refusal_code,
+            repr({"label_trace_launch_index": selected, "launches": launches}),
+        )
+    expected_key = _canonical_trace_launch_key(launches[selected])
+    normalized_names = [
+        _canonical_trace_kernel_name(launch.get("kernel_name"))
+        if isinstance(launch, dict) else _canonical_trace_kernel_name(None)
+        for launch in launches
+    ]
+    expected_selectors = (
+        [expected_key[0]] if normalized_names.count(expected_key[0]) > 1 else []
+    )
+    observed_selectors = _label_command_kernel_selectors(label.get("command"))
+    observation = label.get("ncu_launch_observation_document")
+    if not isinstance(observation, dict):
+        raise ChunkRefusal(refusal_code, repr(observation))
+    observed_key = _observation_ncu_launch_key(
+        observation, refusal_code=refusal_code,
+    )
+    if observed_key != expected_key or observed_selectors != expected_selectors:
+        raise ChunkRefusal(
+            refusal_code,
+            repr({
+                "expected_launch_key": expected_key,
+                "observed_launch_key": observed_key,
+                "expected_kernel_selectors": expected_selectors,
+                "observed_kernel_selectors": observed_selectors,
+            }),
+        )
+    return {
+        "launch_key": expected_key,
+        "kernel_selector": expected_selectors[0] if expected_selectors else None,
+    }
 
 
 def bind_unique_ncu_launch_identity(
@@ -7291,11 +7458,13 @@ def capture_cell(
         _require_hash(
             binary, invocation["executable_sha256"], "binary before label"
         )
+        kernel_name_selector = _canonical_label_kernel_selector(invocation)
         label = capture_label(
             cell=cell, binary=binary, invocation=invocation,
             cell_dir=cell_dir, matrix=matrix, pins=pins,
             timeout_s=remaining("label"), runtime_cwd=runtime_cwd,
             runtime_env=label_env, phase_result_validator=phase_validator,
+            kernel_name_selector=kernel_name_selector,
             execution_source_commit=execution_source_commit,
             bind_supplemental_toolchain=False,
         )
@@ -7323,6 +7492,9 @@ def capture_cell(
         )
         _require_hash(
             binary, invocation["executable_sha256"], "binary after trace"
+        )
+        require_canonical_label_launch_identity(
+            label=label, trace=trace, invocation=invocation,
         )
         if control_policy == "post_trace_module_or_typed":
             control = capture_sol_control(

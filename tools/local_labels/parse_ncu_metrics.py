@@ -82,6 +82,9 @@ _OBSERVATION_COLUMNS = (
     "ID", "Process ID", "Process Name", "Host Name", "Context", "Stream",
     "Device", "Kernel Name", "Block Size", "Grid Size",
 )
+_REQUIRED_OBSERVATION_COLUMNS = (
+    "ID", "Kernel Name", "Block Size", "Grid Size", "Device",
+)
 
 
 def extract_launch_observation(text: str) -> dict[str, Any]:
@@ -89,9 +92,19 @@ def extract_launch_observation(text: str) -> dict[str, Any]:
     reader = csv.DictReader(io.StringIO(text))
     if not reader.fieldnames:
         raise ValueError("NCU CSV has no header")
+    missing = [
+        name for name in _REQUIRED_OBSERVATION_COLUMNS
+        if name not in reader.fieldnames
+    ]
+    if missing:
+        raise ValueError(f"NCU CSV launch identity columns missing: {missing}")
+    duplicate = [
+        name for name in _OBSERVATION_COLUMNS
+        if reader.fieldnames.count(name) > 1
+    ]
+    if duplicate:
+        raise ValueError(f"NCU CSV launch identity columns duplicate: {duplicate}")
     columns = [name for name in _OBSERVATION_COLUMNS if name in reader.fieldnames]
-    if "Kernel Name" not in columns:
-        raise ValueError("NCU CSV has no Kernel Name identity column")
     identities = {
         tuple((row.get(name) or "").strip() for name in columns)
         for row in reader
@@ -102,9 +115,13 @@ def extract_launch_observation(text: str) -> dict[str, Any]:
             f"NCU CSV launch identity cardinality is {len(identities)}"
         )
     values = next(iter(identities))
+    identity = dict(zip(columns, values, strict=True))
+    blank = [name for name in _REQUIRED_OBSERVATION_COLUMNS if not identity[name]]
+    if blank:
+        raise ValueError(f"NCU CSV launch identity values blank: {blank}")
     return {
         "identity_columns": columns,
-        "identity": dict(zip(columns, values, strict=True)),
+        "identity": identity,
     }
 
 
