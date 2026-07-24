@@ -65,6 +65,7 @@ from tools.local_labels import sol_capture_environment as sol_environment  # noq
 from tools.local_labels import build_sol_representative_execution_matrix as representative_execution  # noqa: E402
 from tools.local_labels import capture_toolchain_contract as toolchain_contract  # noqa: E402
 from tools.local_labels import immutable_artifact as immutable  # noqa: E402
+from tools.local_labels import ncu_action_executor as ncu_executor  # noqa: E402
 from tools.local_labels.protected_paths import (  # noqa: E402
     ProtectedPathError,
     assert_external_output,
@@ -75,6 +76,10 @@ STATUS_OK = "ok"
 STATUS_MISMATCH = "mismatch"
 STATUS_UNAVAILABLE = "unavailable"
 STATUS_FAILED = "failed"
+
+NCU_EXECUTION_MODE = "direct_inner_elf_v1"
+NCU_HOST_MACHINE = "x86_64"
+NCU_LAUNCHER_TARGET_RELPATH = "target/linux-desktop-glibc_2_11_3-x64/ncu"
 
 PREFLIGHT_STORAGE_MARKER = "CAMPAIGN_PREFLIGHT_STORAGE_FAILURE:"
 PREFLIGHT_STORAGE_CAPACITY = "capacity"
@@ -1042,8 +1047,6 @@ def probe_worktree(repo_root: Path, ignore_relpaths: list[str]) -> dict:
 
 
 def _run_retained_ncu_version(descriptor: int) -> tuple[int, str, str]:
-    environment = dict(os.environ)
-    environment.update({"LANG": "C", "LC_ALL": "C", "LANGUAGE": "C"})
     command = [f"/proc/self/fd/{descriptor}", "--version"]
     completed = subprocess.run(
         command,
@@ -1051,7 +1054,7 @@ def _run_retained_ncu_version(descriptor: int) -> tuple[int, str, str]:
         text=True,
         check=False,
         pass_fds=(descriptor,),
-        env=environment,
+        env=ncu_executor.ncu_action_environment(),
         timeout=30,
     )
     return completed.returncode, completed.stdout, completed.stderr
@@ -1059,6 +1062,10 @@ def _run_retained_ncu_version(descriptor: int) -> tuple[int, str, str]:
 
 def _ncu_probe_result(
     *, status: str, expected: str | None, detail: str | None = None,
+    execution_mode: str | None = None, host_machine: str | None = None,
+    launcher_resolved_path: str | None = None,
+    launcher_sha256: str | None = None,
+    launcher_target_relpath: str | None = None,
     resolved_path: str | None = None, executable_sha256: str | None = None,
     version_line: str | None = None,
 ) -> dict:
@@ -1066,6 +1073,11 @@ def _ncu_probe_result(
         "status": status,
         "expected": expected,
         "observed": version_line,
+        "execution_mode": execution_mode,
+        "host_machine": host_machine,
+        "launcher_resolved_path": launcher_resolved_path,
+        "launcher_sha256": launcher_sha256,
+        "launcher_target_relpath": launcher_target_relpath,
         "resolved_path": resolved_path,
         "executable_sha256": executable_sha256,
         "version_line": version_line,
@@ -1075,9 +1087,41 @@ def _ncu_probe_result(
     return result
 
 
+def _validate_retained_ncu_file(
+    retained: immutable.RetainedExecutable, *, role: str,
+) -> None:
+    try:
+        writable = os.access(
+            f"/proc/self/fd/{retained.descriptor}",
+            os.W_OK,
+            effective_ids=True,
+        )
+    except (OSError, TypeError) as exc:
+        raise ValueError(f"cannot establish {role} write protection: {exc}") from exc
+    if writable:
+        raise ValueError(f"{role} is writable by the preflight process")
+
+
+def _validate_ncu_inner_elf(retained: immutable.RetainedExecutable) -> None:
+    _validate_retained_ncu_file(retained, role="NCU inner executable")
+    try:
+        header = os.pread(retained.descriptor, 20, 0)
+    except OSError as exc:
+        raise ValueError(f"cannot read NCU inner ELF header: {exc}") from exc
+    if len(header) != 20 or header[:4] != b"\x7fELF":
+        raise ValueError("NCU inner executable is not an ELF file")
+    if header[4] != 2 or header[5] != 1:
+        raise ValueError("NCU inner executable is not little-endian ELF64")
+    if int.from_bytes(header[16:18], "little") != 2:
+        raise ValueError("NCU inner executable is not ET_EXEC")
+    if int.from_bytes(header[18:20], "little") != 62:
+        raise ValueError("NCU inner executable is not EM_X86_64")
+    retained.verify_unchanged()
+
+
 def probe_ncu(
     pins: dict, *, resolve_command=None, open_executable=None,
-    run_version=None,
+    run_version=None, host_machine: str | None = None,
 ) -> dict:
     raw_expected = pins.get("toolchain", {}).get("ncu_version_prefix")
     expected_for_failure = raw_expected if isinstance(raw_expected, str) else None
@@ -1090,65 +1134,101 @@ def probe_ncu(
             detail=str(exc),
         )
 
+    machine = os.uname().machine if host_machine is None else host_machine
+    if machine != NCU_HOST_MACHINE:
+        return _ncu_probe_result(
+            status=STATUS_FAILED,
+            expected=expected,
+            detail=f"unsupported NCU host machine: {machine!r}",
+        )
     resolver = resolve_command or shutil.which
     opener = open_executable or immutable.open_retained_executable
     runner = run_version or _run_retained_ncu_version
     try:
-        resolved = resolver("ncu")
+        launcher_path_text = resolver("ncu")
     except OSError as exc:
         return _ncu_probe_result(
             status=STATUS_UNAVAILABLE,
             expected=expected,
             detail=f"cannot resolve ncu through PATH: {exc}",
         )
-    if not isinstance(resolved, str) or not resolved:
+    if not isinstance(launcher_path_text, str) or not launcher_path_text:
         return _ncu_probe_result(
             status=STATUS_UNAVAILABLE,
             expected=expected,
             detail="ncu is unresolved on PATH",
         )
-    if not Path(resolved).is_absolute() or os.path.normpath(resolved) != resolved:
+    if (
+        not Path(launcher_path_text).is_absolute()
+        or os.path.normpath(launcher_path_text) != launcher_path_text
+    ):
         return _ncu_probe_result(
             status=STATUS_FAILED,
             expected=expected,
-            detail=f"resolved ncu path is not canonical absolute: {resolved!r}",
+            detail=(
+                "resolved ncu launcher path is not canonical absolute: "
+                f"{launcher_path_text!r}"
+            ),
         )
 
+    launcher_path = Path(launcher_path_text)
+    inner_path = launcher_path.parent / NCU_LAUNCHER_TARGET_RELPATH
     try:
-        with opener(Path(resolved)) as retained:
-            rc, out, err = runner(retained.descriptor)
-            if (
-                type(rc) is not int
-                or not isinstance(out, str)
-                or not isinstance(err, str)
-            ):
-                raise ValueError("NCU version runner returned an invalid result")
-            if rc != 0:
-                return _ncu_probe_result(
-                    status=STATUS_UNAVAILABLE,
-                    expected=expected,
-                    detail=f"retained ncu --version failed: {err.strip()}",
-                )
-            observed_line = next(
-                (
-                    line.strip() for line in out.splitlines()
+        with opener(launcher_path) as launcher:
+            _validate_retained_ncu_file(launcher, role="NCU launcher")
+            with opener(inner_path) as inner:
+                _validate_ncu_inner_elf(inner)
+                rc, out, err = runner(inner.descriptor)
+                if (
+                    type(rc) is not int
+                    or not isinstance(out, str)
+                    or not isinstance(err, str)
+                ):
+                    raise ValueError("NCU version runner returned an invalid result")
+                if rc != 0:
+                    return _ncu_probe_result(
+                        status=STATUS_UNAVAILABLE,
+                        expected=expected,
+                        detail=(
+                            "retained NCU inner --version failed: "
+                            f"{err.strip()}"
+                        ),
+                    )
+                version_lines = [
+                    line.strip()
+                    for line in out.splitlines()
                     if re.match(r"^\s*Version\s+", line)
-                ),
-                None,
-            )
-            if not toolchain_contract.ncu_version_matches(
-                observed_line, expected,
-            ):
-                return _ncu_probe_result(
-                    status=STATUS_MISMATCH,
-                    expected=expected,
-                    detail=f"NCU version line mismatch: {observed_line!r}",
-                )
-            resolved_path = str(retained.path)
-            executable_sha256 = retained.sha256
+                ]
+                if len(version_lines) != 1:
+                    return _ncu_probe_result(
+                        status=STATUS_MISMATCH,
+                        expected=expected,
+                        detail=(
+                            "NCU inner version output has no unique Version line: "
+                            f"{version_lines!r}"
+                        ),
+                    )
+                observed_line = version_lines[0]
+                if not toolchain_contract.ncu_version_matches(
+                    observed_line, expected,
+                ):
+                    return _ncu_probe_result(
+                        status=STATUS_MISMATCH,
+                        expected=expected,
+                        detail=f"NCU version line mismatch: {observed_line!r}",
+                    )
+                launcher_resolved_path = str(launcher.path)
+                launcher_sha256 = launcher.sha256
+                resolved_path = str(inner.path)
+                executable_sha256 = inner.sha256
         return _ncu_probe_result(
             status=STATUS_OK,
             expected=expected,
+            execution_mode=NCU_EXECUTION_MODE,
+            host_machine=machine,
+            launcher_resolved_path=launcher_resolved_path,
+            launcher_sha256=launcher_sha256,
+            launcher_target_relpath=NCU_LAUNCHER_TARGET_RELPATH,
             resolved_path=resolved_path,
             executable_sha256=executable_sha256,
             version_line=observed_line,
@@ -2045,7 +2125,7 @@ def build_manifest(
                 if checks[name].get("status") != STATUS_OK]
     generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "arch": pins.get("arch"),
         "sku": pins.get("sku"),
         "captured_at_utc": generated_at,

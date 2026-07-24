@@ -637,17 +637,31 @@ def validate_preflight_manifest(
     except toolchain_contract.CaptureToolchainContractError as exc:
         normalized_ncu_version = None
         problems.append(f"expected NCU version authority is invalid: {exc}")
-    try:
-        import jsonschema
-        schema = json.loads(
-            (REPO_ROOT / "workloads" / "simbench_bw" / "schemas"
-             / "campaign_preflight_manifest.schema.json").read_text()
+    schema_version = manifest.get("schema_version")
+    schema_path: Path | None = None
+    if schema_version == 3:
+        schema_path = (
+            REPO_ROOT / "workloads" / "simbench_bw" / "schemas"
+            / "campaign_preflight_manifest.schema.json"
         )
-        jsonschema.validate(manifest, schema)
-    except Exception as exc:
-        problems.append(f"schema validation failed: {exc}")
-    if manifest.get("schema_version") != 2:
-        problems.append("schema_version is not 2")
+    elif schema_version == 2:
+        schema_path = (
+            REPO_ROOT / "workloads" / "simbench_bw" / "schemas"
+            / "campaign_preflight_manifest.v2.schema.json"
+        )
+        if require_fresh:
+            problems.append(
+                "schema_version 2 is historical-only and cannot authorize capture"
+            )
+    else:
+        problems.append(f"unknown preflight schema_version: {schema_version!r}")
+    if schema_path is not None:
+        try:
+            import jsonschema
+            schema = json.loads(schema_path.read_text())
+            jsonschema.validate(manifest, schema)
+        except Exception as exc:
+            problems.append(f"schema validation failed: {exc}")
     if manifest.get("capture_admitted") is not True:
         problems.append("capture_admitted is not true")
     if manifest.get("working_tree_clean") is not True:
@@ -692,6 +706,8 @@ def validate_preflight_manifest(
         else:
             version_line = ncu.get("version_line")
             resolved_path = ncu.get("resolved_path")
+            launcher_path = ncu.get("launcher_resolved_path")
+            launcher_target = ncu.get("launcher_target_relpath")
             if (
                 normalized_ncu_version is not None
                 and ncu.get("expected") != normalized_ncu_version
@@ -707,6 +723,29 @@ def validate_preflight_manifest(
                 problems.append("checks.ncu.resolved_path is not canonical absolute")
             if not _is_sha256(ncu.get("executable_sha256")):
                 problems.append("checks.ncu.executable_sha256 is invalid")
+            if schema_version == 3:
+                if ncu.get("execution_mode") != preflight.NCU_EXECUTION_MODE:
+                    problems.append("checks.ncu.execution_mode is invalid")
+                if ncu.get("host_machine") != preflight.NCU_HOST_MACHINE:
+                    problems.append("checks.ncu.host_machine is invalid")
+                if (
+                    type(launcher_path) is not str
+                    or not Path(launcher_path).is_absolute()
+                    or os.path.normpath(launcher_path) != launcher_path
+                ):
+                    problems.append(
+                        "checks.ncu.launcher_resolved_path is not canonical absolute"
+                    )
+                if not _is_sha256(ncu.get("launcher_sha256")):
+                    problems.append("checks.ncu.launcher_sha256 is invalid")
+                if launcher_target != preflight.NCU_LAUNCHER_TARGET_RELPATH:
+                    problems.append("checks.ncu.launcher_target_relpath is invalid")
+                if type(launcher_path) is str and type(launcher_target) is str:
+                    expected_inner = str(Path(launcher_path).parent / launcher_target)
+                    if resolved_path != expected_inner:
+                        problems.append(
+                            "checks.ncu inner path does not match launcher target"
+                        )
             if (
                 type(version_line) is not str
                 or version_line != version_line.strip()

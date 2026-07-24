@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "simbench_bw/schemas/campaign_preflight_manifest.schema.json",
   "title": "sm_86 capture preflight/provenance manifest",
-  "description": "Emitted by tools/local_labels/campaign_preflight.py. Records the host + toolchain + clock state observed at capture-session admission time and whether capture was admitted. A live gate artifact (embeds timestamp + NVML covariates), not a byte-stable committed pin.",
+  "description": "Emitted by tools/local_labels/campaign_preflight.py. Version 3 records the PATH-discovered NCU launcher as provenance while binding executable authority to the retained x86_64 inner ELF that actions must execute directly. Records host, toolchain, clock state, and capture-session admission. A live gate artifact (embeds timestamp + NVML covariates), not a byte-stable committed pin.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -19,7 +19,7 @@
     "capture_admitted"
   ],
   "properties": {
-    "schema_version": {"type": "integer", "const": 2},
+    "schema_version": {"type": "integer", "const": 3},
     "arch": {"type": "string"},
     "sku": {"type": ["string", "null"]},
     "captured_at_utc": {"type": "string"},
@@ -72,8 +72,9 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "status", "expected", "observed", "resolved_path",
-        "executable_sha256", "version_line"
+        "status", "expected", "observed", "execution_mode", "host_machine",
+        "launcher_resolved_path", "launcher_sha256", "launcher_target_relpath",
+        "resolved_path", "executable_sha256", "version_line"
       ],
       "properties": {
         "status": {
@@ -82,6 +83,23 @@
         },
         "expected": {"type": ["string", "null"]},
         "observed": {"type": ["string", "null"]},
+        "execution_mode": {
+          "type": ["string", "null"],
+          "enum": ["direct_inner_elf_v1", null]
+        },
+        "host_machine": {
+          "type": ["string", "null"],
+          "enum": ["x86_64", null]
+        },
+        "launcher_resolved_path": {"type": ["string", "null"]},
+        "launcher_sha256": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9a-f]{64}$"
+        },
+        "launcher_target_relpath": {
+          "type": ["string", "null"],
+          "enum": ["target/linux-desktop-glibc_2_11_3-x64/ncu", null]
+        },
         "resolved_path": {"type": ["string", "null"]},
         "executable_sha256": {
           "type": ["string", "null"],
@@ -99,6 +117,19 @@
           "then": {
             "properties": {
               "expected": {"const": "2026.1.0"},
+              "execution_mode": {"const": "direct_inner_elf_v1"},
+              "host_machine": {"const": "x86_64"},
+              "launcher_resolved_path": {
+                "type": "string",
+                "pattern": "^/"
+              },
+              "launcher_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              },
+              "launcher_target_relpath": {
+                "const": "target/linux-desktop-glibc_2_11_3-x64/ncu"
+              },
               "observed": {
                 "type": "string",
                 "minLength": 1,
@@ -122,6 +153,11 @@
           "else": {
             "properties": {
               "observed": {"type": "null"},
+              "execution_mode": {"type": "null"},
+              "host_machine": {"type": "null"},
+              "launcher_resolved_path": {"type": "null"},
+              "launcher_sha256": {"type": "null"},
+              "launcher_target_relpath": {"type": "null"},
               "resolved_path": {"type": "null"},
               "executable_sha256": {"type": "null"},
               "version_line": {"type": "null"}

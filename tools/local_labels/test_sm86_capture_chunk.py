@@ -590,10 +590,18 @@ def test_select_chunk_refuses_excluded_or_unready():
 def _preflight(root: Path) -> dict:
     checks = {name: {"status": "ok"} for name in cc.preflight._BLOCKING_CHECKS}
     version = "Version 2026.1.0.0 (public-release)"
+    launcher = "/opt/nvidia/nsight-compute/2026.1.0/ncu"
     checks["ncu"].update({
         "expected": "2026.1.0",
         "observed": version,
-        "resolved_path": "/opt/nvidia/nsight-compute/2026.1.0/ncu",
+        "execution_mode": cc.preflight.NCU_EXECUTION_MODE,
+        "host_machine": cc.preflight.NCU_HOST_MACHINE,
+        "launcher_resolved_path": launcher,
+        "launcher_sha256": "4" * 64,
+        "launcher_target_relpath": cc.preflight.NCU_LAUNCHER_TARGET_RELPATH,
+        "resolved_path": str(
+            Path(launcher).parent / cc.preflight.NCU_LAUNCHER_TARGET_RELPATH
+        ),
         "executable_sha256": "5" * 64,
         "version_line": version,
     })
@@ -650,7 +658,7 @@ def _preflight(root: Path) -> dict:
     })
     generated_at = datetime.now(timezone.utc).isoformat()
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "captured_at_utc": generated_at,
         "generated_at_utc": generated_at,
         "arch": "sm_86",
@@ -668,7 +676,10 @@ def _preflight(root: Path) -> dict:
 
 def _expected_ncu_identity():
     return cc.ncu_executor.ExpectedNcuIdentity(
-        resolved_path="/opt/nvidia/nsight-compute/2026.1.0/ncu",
+        resolved_path=(
+            "/opt/nvidia/nsight-compute/2026.1.0/"
+            "target/linux-desktop-glibc_2_11_3-x64/ncu"
+        ),
         executable_sha256="5" * 64,
         version_line="Version 2026.1.0.0 (public-release)",
     )
@@ -682,6 +693,50 @@ def test_preflight_returns_exact_validated_ncu_identity(tmp_path):
     )
     assert observed == _expected_ncu_identity()
     assert type(observed) is cc.ncu_executor.ExpectedNcuIdentity
+
+
+def _historical_v2_preflight(root: Path) -> dict:
+    manifest = _preflight(root)
+    manifest["schema_version"] = 2
+    ncu = manifest["checks"]["ncu"]
+    ncu["resolved_path"] = ncu["launcher_resolved_path"]
+    ncu["executable_sha256"] = ncu["launcher_sha256"]
+    for field in (
+        "execution_mode", "host_machine", "launcher_resolved_path",
+        "launcher_sha256", "launcher_target_relpath",
+    ):
+        del ncu[field]
+    return manifest
+
+
+def test_historical_v2_preflight_is_finalization_only(tmp_path):
+    manifest = _historical_v2_preflight(tmp_path)
+    assert cc.validate_preflight_manifest(
+        manifest, expected_head=HEAD, expected_pins_sha256=SHA,
+        expected_output_root=tmp_path,
+        expected_ncu_version_prefix="2026.1.0", require_fresh=False,
+    ) is None
+    with pytest.raises(
+        cc.ChunkRefusal, match="historical-only and cannot authorize capture",
+    ):
+        cc.validate_preflight_manifest(
+            manifest, expected_head=HEAD, expected_pins_sha256=SHA,
+            expected_output_root=tmp_path,
+            expected_ncu_version_prefix="2026.1.0", require_fresh=True,
+        )
+
+
+def test_preflight_refuses_inner_path_outside_launcher_target(tmp_path):
+    manifest = _preflight(tmp_path)
+    manifest["checks"]["ncu"]["resolved_path"] = "/opt/other/ncu"
+    with pytest.raises(
+        cc.ChunkRefusal, match="inner path does not match launcher target",
+    ):
+        cc.validate_preflight_manifest(
+            manifest, expected_head=HEAD, expected_pins_sha256=SHA,
+            expected_output_root=tmp_path,
+            expected_ncu_version_prefix="2026.1.0", require_fresh=False,
+        )
 
 
 def test_preflight_structure_only_validation_still_rejects_ncu_authority(tmp_path):

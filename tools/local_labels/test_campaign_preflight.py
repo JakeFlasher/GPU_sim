@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import copy
 import errno
+import hashlib
 import json
 import os
 import shutil
@@ -89,14 +90,37 @@ def _ok_sol_environment_probe() -> dict:
 
 def _ok_ncu_probe() -> dict:
     version = "Version 2026.1.0.0 (public-release)"
+    launcher = "/opt/nvidia/nsight-compute/2026.1.0/ncu"
     return {
         "status": "ok",
         "expected": "2026.1.0",
         "observed": version,
-        "resolved_path": "/opt/nvidia/nsight-compute/2026.1.0/ncu",
+        "execution_mode": cp.NCU_EXECUTION_MODE,
+        "host_machine": cp.NCU_HOST_MACHINE,
+        "launcher_resolved_path": launcher,
+        "launcher_sha256": "4" * 64,
+        "launcher_target_relpath": cp.NCU_LAUNCHER_TARGET_RELPATH,
+        "resolved_path": str(
+            Path(launcher).parent / cp.NCU_LAUNCHER_TARGET_RELPATH
+        ),
         "executable_sha256": "5" * 64,
         "version_line": version,
     }
+
+
+def _synthetic_ncu_install(tmp_path: Path) -> tuple[Path, Path]:
+    launcher = tmp_path / "ncu"
+    launcher.write_text("#!/bin/sh\nexit 99\n")
+    launcher.chmod(0o555)
+    inner = launcher.parent / cp.NCU_LAUNCHER_TARGET_RELPATH
+    inner.parent.mkdir(parents=True)
+    header = bytearray(64)
+    header[:6] = b"\x7fELF\x02\x01"
+    header[16:18] = (2).to_bytes(2, "little")
+    header[18:20] = (62).to_bytes(2, "little")
+    inner.write_bytes(bytes(header) + b"synthetic inner ncu")
+    inner.chmod(0o555)
+    return launcher, inner
 
 
 # ---- pure logic (no GPU) --------------------------------------------------- #
@@ -135,12 +159,10 @@ def test_toolchain_probes_use_structured_release_and_component_boundaries(
     }
     assert commands == [["/usr/local/cuda-13.2/bin/nvcc", "--version"]]
 
-    executable = tmp_path / "ncu"
-    executable.write_bytes(b"synthetic ncu")
-    executable.chmod(0o755)
+    launcher, inner = _synthetic_ncu_install(tmp_path)
     result = cp.probe_ncu(
         pins,
-        resolve_command=lambda _name: str(executable),
+        resolve_command=lambda _name: str(launcher),
         run_version=lambda _descriptor: (
             0, "Version 2026.1.0.0 (public-release)\n", "",
         ),
@@ -149,14 +171,19 @@ def test_toolchain_probes_use_structured_release_and_component_boundaries(
         "status": cp.STATUS_OK,
         "expected": "2026.1.0",
         "observed": "Version 2026.1.0.0 (public-release)",
-        "resolved_path": str(executable),
-        "executable_sha256": cp.immutable.sha256_bytes(b"synthetic ncu"),
+        "execution_mode": cp.NCU_EXECUTION_MODE,
+        "host_machine": cp.NCU_HOST_MACHINE,
+        "launcher_resolved_path": str(launcher),
+        "launcher_sha256": cp.immutable.sha256_file(launcher)[0],
+        "launcher_target_relpath": cp.NCU_LAUNCHER_TARGET_RELPATH,
+        "resolved_path": str(inner),
+        "executable_sha256": cp.immutable.sha256_file(inner)[0],
         "version_line": "Version 2026.1.0.0 (public-release)",
     }
 
     mismatch = cp.probe_ncu(
         pins,
-        resolve_command=lambda _name: str(executable),
+        resolve_command=lambda _name: str(launcher),
         run_version=lambda _descriptor: (
             0, "Version 2026.10.0.0 (public-release)\n", "",
         ),
@@ -165,6 +192,88 @@ def test_toolchain_probes_use_structured_release_and_component_boundaries(
     assert mismatch["observed"] is None
     assert mismatch["resolved_path"] is None
     assert mismatch["executable_sha256"] is None
+
+
+def test_ncu_probe_runs_retained_inner_and_never_launcher(tmp_path):
+    launcher, inner = _synthetic_ncu_install(tmp_path)
+    observed = {}
+
+    def run(descriptor):
+        metadata = os.fstat(descriptor)
+        observed["identity"] = (metadata.st_dev, metadata.st_ino)
+        observed["header"] = os.pread(descriptor, 4, 0)
+        return 0, "Version 2026.1.0.0 (public-release)\n", ""
+
+    result = cp.probe_ncu(
+        {"toolchain": {"ncu_version_prefix": "2026.1.0"}},
+        resolve_command=lambda _name: str(launcher),
+        run_version=run,
+    )
+    inner_stat = inner.stat()
+    assert result["status"] == cp.STATUS_OK
+    assert result["resolved_path"] == str(inner)
+    assert observed == {
+        "identity": (inner_stat.st_dev, inner_stat.st_ino),
+        "header": b"\x7fELF",
+    }
+
+
+def test_ncu_probe_refuses_unsupported_machine_before_resolution():
+    def resolve(_name):
+        pytest.fail("PATH resolution reached for unsupported host")
+
+    result = cp.probe_ncu(
+        {"toolchain": {"ncu_version_prefix": "2026.1.0"}},
+        resolve_command=resolve,
+        host_machine="aarch64",
+    )
+    assert result["status"] == cp.STATUS_FAILED
+    assert result["resolved_path"] is None
+    assert "unsupported NCU host machine" in result["detail"]
+
+
+@pytest.mark.parametrize(
+    ("offset", "payload", "detail"),
+    [
+        (0, b"NOPE", "not an ELF"),
+        (4, b"\x01", "not little-endian ELF64"),
+        (5, b"\x02", "not little-endian ELF64"),
+        (16, (3).to_bytes(2, "little"), "not ET_EXEC"),
+        (18, (183).to_bytes(2, "little"), "not EM_X86_64"),
+    ],
+)
+def test_ncu_probe_rejects_wrong_inner_elf_identity(
+    tmp_path, offset, payload, detail,
+):
+    launcher, inner = _synthetic_ncu_install(tmp_path)
+    inner.chmod(0o755)
+    with inner.open("r+b") as stream:
+        stream.seek(offset)
+        stream.write(payload)
+    inner.chmod(0o555)
+    result = cp.probe_ncu(
+        {"toolchain": {"ncu_version_prefix": "2026.1.0"}},
+        resolve_command=lambda _name: str(launcher),
+        run_version=lambda _descriptor: pytest.fail(
+            "version subprocess reached for invalid inner ELF"
+        ),
+    )
+    assert result["status"] == cp.STATUS_FAILED
+    assert result["resolved_path"] is None
+    assert detail in result["detail"]
+
+
+def test_ncu_probe_rejects_duplicate_version_lines_with_null_identity(tmp_path):
+    launcher, _inner = _synthetic_ncu_install(tmp_path)
+    version = "Version 2026.1.0.0 (public-release)\n"
+    result = cp.probe_ncu(
+        {"toolchain": {"ncu_version_prefix": "2026.1.0"}},
+        resolve_command=lambda _name: str(launcher),
+        run_version=lambda _descriptor: (0, version + version, ""),
+    )
+    assert result["status"] == cp.STATUS_MISMATCH
+    assert result["resolved_path"] is None
+    assert result["launcher_resolved_path"] is None
 
 
 def test_retained_ncu_version_runner_uses_fd_and_c_locale(monkeypatch):
@@ -185,9 +294,7 @@ def test_retained_ncu_version_runner_uses_fd_and_c_locale(monkeypatch):
     assert observed["kwargs"]["text"] is True
     assert observed["kwargs"]["check"] is False
     assert observed["kwargs"]["timeout"] == 30
-    assert observed["kwargs"]["env"]["LANG"] == "C"
-    assert observed["kwargs"]["env"]["LC_ALL"] == "C"
-    assert observed["kwargs"]["env"]["LANGUAGE"] == "C"
+    assert observed["kwargs"]["env"] == cp.ncu_executor.ncu_action_environment()
 
 
 @pytest.mark.parametrize(
@@ -205,10 +312,8 @@ def test_retained_ncu_version_runner_uses_fd_and_c_locale(monkeypatch):
 def test_ncu_probe_failures_never_retain_partial_identity(
     tmp_path, pins, resolved, version, status,
 ):
-    executable = tmp_path / "ncu"
-    executable.write_bytes(b"synthetic ncu")
-    executable.chmod(0o755)
-    candidate = str(executable) if resolved == "fixture" else resolved
+    launcher, _inner = _synthetic_ncu_install(tmp_path)
+    candidate = str(launcher) if resolved == "fixture" else resolved
     result = cp.probe_ncu(
         pins,
         resolve_command=lambda _name: candidate,
@@ -216,6 +321,11 @@ def test_ncu_probe_failures_never_retain_partial_identity(
     )
     assert result["status"] == status
     assert result["observed"] is None
+    assert result["execution_mode"] is None
+    assert result["host_machine"] is None
+    assert result["launcher_resolved_path"] is None
+    assert result["launcher_sha256"] is None
+    assert result["launcher_target_relpath"] is None
     assert result["resolved_path"] is None
     assert result["executable_sha256"] is None
     assert result["version_line"] is None
@@ -224,18 +334,17 @@ def test_ncu_probe_failures_never_retain_partial_identity(
 def test_ncu_probe_rejects_executable_mutation_during_version_observation(
     tmp_path,
 ):
-    executable = tmp_path / "ncu"
-    executable.write_bytes(b"synthetic ncu")
-    executable.chmod(0o755)
+    launcher, inner = _synthetic_ncu_install(tmp_path)
 
     def mutate(_descriptor):
-        executable.write_bytes(b"mutated ncu")
-        executable.chmod(0o755)
+        inner.chmod(0o755)
+        inner.write_bytes(b"mutated ncu")
+        inner.chmod(0o555)
         return 0, "Version 2026.1.0.0 (public-release)\n", ""
 
     result = cp.probe_ncu(
         {"toolchain": {"ncu_version_prefix": "2026.1.0"}},
-        resolve_command=lambda _name: str(executable),
+        resolve_command=lambda _name: str(launcher),
         run_version=mutate,
     )
     assert result["status"] == cp.STATUS_FAILED
@@ -244,17 +353,37 @@ def test_ncu_probe_rejects_executable_mutation_during_version_observation(
     assert "metadata changed" in result["detail"]
 
 
+def test_ncu_probe_rejects_launcher_mutation_during_inner_version_observation(
+    tmp_path,
+):
+    launcher, _inner = _synthetic_ncu_install(tmp_path)
+
+    def mutate(_descriptor):
+        launcher.chmod(0o755)
+        launcher.write_text("#!/bin/sh\nexit 0\n")
+        launcher.chmod(0o555)
+        return 0, "Version 2026.1.0.0 (public-release)\n", ""
+
+    result = cp.probe_ncu(
+        {"toolchain": {"ncu_version_prefix": "2026.1.0"}},
+        resolve_command=lambda _name: str(launcher),
+        run_version=mutate,
+    )
+    assert result["status"] == cp.STATUS_FAILED
+    assert result["resolved_path"] is None
+    assert result["launcher_resolved_path"] is None
+    assert "metadata changed" in result["detail"]
+
+
 def test_ncu_probe_converts_version_timeout_to_failed_null_identity(tmp_path):
-    executable = tmp_path / "ncu"
-    executable.write_bytes(b"synthetic ncu")
-    executable.chmod(0o755)
+    launcher, _inner = _synthetic_ncu_install(tmp_path)
 
     def timeout(_descriptor):
         raise subprocess.TimeoutExpired(["retained-ncu", "--version"], 30)
 
     result = cp.probe_ncu(
         {"toolchain": {"ncu_version_prefix": "2026.1.0"}},
-        resolve_command=lambda _name: str(executable),
+        resolve_command=lambda _name: str(launcher),
         run_version=timeout,
     )
     assert result["status"] == cp.STATUS_FAILED
@@ -1395,7 +1524,7 @@ def test_preflight_dispatches_supplemental_matrix_without_canonical_fallback(
 # ---- schema enforces smoke evidence on an admitted injection probe --------- #
 def _minimal_manifest(injection_probe):
     return {
-        "schema_version": 2,
+        "schema_version": 3,
         "arch": "sm_86",
         "captured_at_utc": "2026-07-10T12:00:00+00:00",
         "generated_at_utc": "2026-07-10T12:00:00+00:00",
@@ -1418,6 +1547,32 @@ def _minimal_manifest(injection_probe):
         "blockers": [],
         "capture_admitted": True,
     }
+
+
+def test_retained_preflight_v2_schema_is_byte_exact_and_separate():
+    path = (
+        _REPO / "workloads" / "simbench_bw" / "schemas"
+        / "campaign_preflight_manifest.v2.schema.json"
+    )
+    payload = path.read_bytes()
+    assert hashlib.sha256(payload).hexdigest() == (
+        "04e117bf85a52ed936942ce2f171e11bdd02581421803301884e31ad0144110e"
+    )
+    historical = json.loads(payload)
+    assert historical["properties"]["schema_version"]["const"] == 2
+    assert _SCHEMA["properties"]["schema_version"]["const"] == 3
+
+
+def test_schema_rejects_wrapper_only_success_identity():
+    manifest = _minimal_manifest({"status": "failed", "detail": "not run"})
+    ncu = manifest["checks"]["ncu"]
+    for field in (
+        "execution_mode", "host_machine", "launcher_resolved_path",
+        "launcher_sha256", "launcher_target_relpath",
+    ):
+        del ncu[field]
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(manifest, _SCHEMA)
 
 
 def test_schema_rejects_ok_injection_without_smoke_evidence():
