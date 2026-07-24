@@ -359,6 +359,38 @@ def test_all_five_schemas_are_valid_and_closed_at_object_definitions() -> None:
                 assert definition.get("additionalProperties") is False
 
 
+def test_active_schedule_avoids_quadratic_object_uniqueness() -> None:
+    schema = json.loads(
+        campaign.SCHEMA_PATHS_V2["schedule"].read_text(encoding="utf-8")
+    )
+    for field in ("slots", "tier2_candidates"):
+        assert "uniqueItems" not in schema["properties"][field]
+
+
+@pytest.mark.parametrize(
+    ("field", "seal_field"),
+    (
+        ("slots", "slots_sha256"),
+        ("tier2_candidates", "tier2_candidates_sha256"),
+    ),
+)
+def test_semantic_validation_rejects_resealed_duplicate_slots(
+    schedule: dict,
+    field: str,
+    seal_field: str,
+) -> None:
+    forged = copy.deepcopy(schedule)
+    forged[field][1] = copy.deepcopy(forged[field][0])
+    forged[seal_field] = campaign.canonical_sha256(forged[field])
+    forged["schedule_sha256"] = campaign.canonical_sha256(
+        campaign._without(forged, "schedule_sha256")
+    )
+
+    with pytest.raises(campaign.M6Error) as error:
+        campaign.validate_schedule(forged, rehash_sources=False)
+    assert error.value.code == "M6_SCHEDULE_ORDER"
+
+
 def test_plan_has_exact_configs_counts_and_seeded_sweeps(schedule: dict) -> None:
     assert [(c["clock_control"], c["cache_control"]) for c in schedule["configs"]] == [
         ("none", "all"),

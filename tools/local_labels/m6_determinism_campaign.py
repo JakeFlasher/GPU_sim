@@ -140,7 +140,7 @@ SCHEMA_SHA256_BY_VERSION = {
     },
     2: {
         "m4_binding": "d1a6338eec3ec59755b5ed769d9fac6ddcc1e790caac31091336207bb4648dc2",
-        "schedule": "2f254b4aa7440e7fc3a0e6533746d3b06dcd54605df4ab55a7b20debffd76036",
+        "schedule": "707245152841d9387d1535a57fb4d30301dcc88f6fc45f2ecd75055ffec6b473",
         "observation_journal": "58afa2fcbcc850e6bafcfb8af0027bdf349ecbfd793b9b3812914d5bae9e85c5",
         "analysis": "b78eee7430d63c74676d8d0b5b02cb15dc620c468a8993bb7ead9ae6b393dda8",
         "done": "d48725cc69fe37a040ffbbd7619cb138f1ad89fc2d171c676f069e4ab9511bcc",

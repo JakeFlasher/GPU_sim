@@ -179,8 +179,7 @@
       "maxItems": 8540,
       "items": {
         "$ref": "#/$defs/slot"
-      },
-      "uniqueItems": true
+      }
     },
     "tier2_candidates": {
       "type": "array",
@@ -188,8 +187,7 @@
       "maxItems": 1220,
       "items": {
         "$ref": "#/$defs/slot"
-      },
-      "uniqueItems": true
+      }
     },
     "counts": {
       "type": "object",
