@@ -85,6 +85,149 @@ _OBSERVATION_COLUMNS = (
 _REQUIRED_OBSERVATION_COLUMNS = (
     "ID", "Kernel Name", "Block Size", "Grid Size", "Device",
 )
+_LAUNCH_SET_IDENTITY_COLUMNS = (
+    "ID", "Process ID", "Context", "Stream", "Device", "Kernel Name",
+    "Block Size", "Grid Size",
+)
+
+
+@dataclass
+class _LaunchCsvGroup:
+    identity: dict[str, str]
+    rows: list[list[str]]
+
+
+def _split_launch_set_csv(
+    text: str, *, expected_launch_count: int,
+    requested_launch_skip: int, requested_launch_count: int,
+) -> tuple[list[str], list[_LaunchCsvGroup]]:
+    """Validate and partition one Details CSV without invoking NCU."""
+    if (
+        type(expected_launch_count) is not int
+        or expected_launch_count <= 0
+        or type(requested_launch_skip) is not int
+        or type(requested_launch_count) is not int
+    ):
+        raise ValueError(
+            "NCU launch-set selectors require strict integers and a positive "
+            "expected launch count"
+        )
+    if requested_launch_skip != 0:
+        raise ValueError("NCU launch-set requested launch skip must be 0")
+    if requested_launch_count != expected_launch_count + 1:
+        raise ValueError(
+            "NCU launch-set requested launch count must equal expected count plus one"
+        )
+
+    try:
+        csv_rows = list(csv.reader(io.StringIO(text), strict=True))
+    except csv.Error as exc:
+        raise ValueError(f"NCU launch-set CSV is malformed: {exc}") from exc
+    if not csv_rows:
+        raise ValueError("NCU launch-set CSV has no header")
+    header = csv_rows[0]
+    missing = [
+        name for name in _LAUNCH_SET_IDENTITY_COLUMNS if name not in header
+    ]
+    if missing:
+        raise ValueError(
+            f"NCU launch-set identity columns missing: {missing}"
+        )
+    duplicate = [
+        name for name in _LAUNCH_SET_IDENTITY_COLUMNS
+        if header.count(name) > 1
+    ]
+    if duplicate:
+        raise ValueError(
+            f"NCU launch-set identity columns duplicate: {duplicate}"
+        )
+    metric_columns = (DEFAULT_METRIC_NAME_COLUMN, DEFAULT_METRIC_VALUE_COLUMN)
+    missing_metrics = [name for name in metric_columns if name not in header]
+    if missing_metrics:
+        raise ValueError(
+            f"NCU launch-set metric columns missing: {missing_metrics}"
+        )
+    duplicate_metrics = [
+        name for name in metric_columns if header.count(name) > 1
+    ]
+    if duplicate_metrics:
+        raise ValueError(
+            f"NCU launch-set metric columns duplicate: {duplicate_metrics}"
+        )
+    identity_indexes = {
+        name: header.index(name) for name in _LAUNCH_SET_IDENTITY_COLUMNS
+    }
+    groups_by_id: dict[str, _LaunchCsvGroup] = {}
+    ordered_groups: list[_LaunchCsvGroup] = []
+    for row_number, row in enumerate(csv_rows[1:], start=2):
+        if not row or not any(value.strip() for value in row):
+            continue
+        if len(row) != len(header):
+            raise ValueError(
+                f"NCU launch-set CSV row {row_number} has {len(row)} columns; "
+                f"expected {len(header)}"
+            )
+        identity = {
+            name: row[index].strip()
+            for name, index in identity_indexes.items()
+        }
+        blank = [
+            name for name in _LAUNCH_SET_IDENTITY_COLUMNS
+            if not identity[name]
+        ]
+        if blank:
+            raise ValueError(
+                f"NCU launch-set identity values blank at row {row_number}: {blank}"
+            )
+        report_id = identity["ID"]
+        group = groups_by_id.get(report_id)
+        if group is None:
+            group = _LaunchCsvGroup(identity=identity, rows=[])
+            groups_by_id[report_id] = group
+            ordered_groups.append(group)
+        elif group.identity != identity:
+            drift = [
+                name for name in _LAUNCH_SET_IDENTITY_COLUMNS
+                if group.identity[name] != identity[name]
+            ]
+            raise ValueError(
+                f"NCU launch-set identity drift for ID {report_id!r}: {drift}"
+            )
+        normalized_row = list(row)
+        for name, index in identity_indexes.items():
+            normalized_row[index] = identity[name]
+        group.rows.append(normalized_row)
+
+    if len(ordered_groups) != expected_launch_count:
+        raise ValueError(
+            "NCU launch-set identity cardinality is "
+            f"{len(ordered_groups)}; expected {expected_launch_count}"
+        )
+    return header, ordered_groups
+
+
+def extract_launch_observations(
+    text: str, *, expected_launch_count: int,
+    requested_launch_skip: int, requested_launch_count: int,
+) -> dict[str, Any]:
+    """Return an ordered, unsealed inventory from one launch-set CSV."""
+    _header, groups = _split_launch_set_csv(
+        text,
+        expected_launch_count=expected_launch_count,
+        requested_launch_skip=requested_launch_skip,
+        requested_launch_count=requested_launch_count,
+    )
+    return {
+        "identity_columns": list(_LAUNCH_SET_IDENTITY_COLUMNS),
+        "launch_count": len(groups),
+        "launches": [
+            {
+                "report_launch_ordinal": ordinal,
+                "identity": dict(group.identity),
+            }
+            for ordinal, group in enumerate(groups)
+        ],
+    }
 
 
 def extract_launch_observation(text: str) -> dict[str, Any]:
@@ -845,6 +988,95 @@ def extract_unit_tagged_metrics(
     return UnitTaggedExtractionResult(
         ok=True, metrics=metrics, parser_diagnostics=diagnostics
     )
+
+
+def _unique_metric_request(
+    values: Iterable[str], *, family: str,
+) -> list[str]:
+    requested = list(values)
+    if any(not isinstance(name, str) or not name for name in requested):
+        raise ValueError(
+            f"NCU launch-set {family} metric requests must be non-empty strings"
+        )
+    if len(set(requested)) != len(requested):
+        raise ValueError(
+            f"NCU launch-set {family} metric requests contain duplicates"
+        )
+    return requested
+
+
+def _one_launch_csv(header: list[str], rows: list[list[str]]) -> str:
+    stream = io.StringIO(newline="")
+    writer = csv.writer(stream, lineterminator="\n")
+    writer.writerow(header)
+    writer.writerows(rows)
+    return stream.getvalue()
+
+
+def extract_launch_metric_observations(
+    text: str,
+    registry: Any,
+    unit_metric_names: Iterable[str],
+    *,
+    expected_launch_count: int,
+    requested_launch_skip: int,
+    requested_launch_count: int,
+    percentage_metric_names: Iterable[str] = (
+        "lts__t_sector_hit_rate.pct",
+        "l1tex__t_sector_hit_rate.pct",
+    ),
+) -> list[dict[str, Any]]:
+    """Split one launch-set CSV and parse each launch independently."""
+    percentage_requested = _unique_metric_request(
+        percentage_metric_names, family="percentage",
+    )
+    unit_requested = _unique_metric_request(
+        unit_metric_names, family="unit-tagged",
+    )
+    header, groups = _split_launch_set_csv(
+        text,
+        expected_launch_count=expected_launch_count,
+        requested_launch_skip=requested_launch_skip,
+        requested_launch_count=requested_launch_count,
+    )
+    observations: list[dict[str, Any]] = []
+    for ordinal, group in enumerate(groups):
+        report_id = group.identity["ID"]
+        launch_csv = _one_launch_csv(header, group.rows)
+        percentage_result = parse_raw_page_csv(
+            launch_csv, percentage_requested,
+        )
+        if not percentage_result.ok:
+            raise ValueError(
+                "NCU launch-set percentage metric parse failed for "
+                f"ordinal {ordinal}, ID {report_id!r}: "
+                f"{percentage_result.typed_reason}: {percentage_result.detail}"
+            )
+        unit_result = extract_unit_tagged_metrics(
+            launch_csv, registry, unit_requested,
+        )
+        if not unit_result.ok:
+            raise ValueError(
+                "NCU launch-set unit-tagged metric parse failed for "
+                f"ordinal {ordinal}, ID {report_id!r}: "
+                f"{unit_result.typed_reason}: {unit_result.detail}"
+            )
+        merged_diagnostics = _merged_parser_diagnostics_result(
+            percentage_result, unit_result,
+        )
+        merged_diagnostics.parser_diagnostics = {
+            name: list(dict.fromkeys(records))
+            for name, records in merged_diagnostics.parser_diagnostics.items()
+        }
+        diagnostics = diagnostics_to_json_shape(merged_diagnostics)
+        observations.append({
+            "report_launch_ordinal": ordinal,
+            "report_id": report_id,
+            "fraction_values": percentage_result.fraction_values,
+            "unit_tagged_metrics": unit_result.metrics,
+            "parser_diagnostics": diagnostics,
+        })
+    return observations
 
 
 def _import_report_csv(
