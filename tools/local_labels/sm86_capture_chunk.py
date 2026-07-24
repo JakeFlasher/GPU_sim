@@ -2744,11 +2744,13 @@ def live_capture_guard(pins: dict) -> dict:
 
 
 def _run_logged(
-    command: list[str], *, cwd: Path, env: dict[str, str] | None,
+    command: list[object], *, cwd: Path, env: dict[str, str] | None,
     timeout_s: float, log_dir: Path, stem: str, failure_code: str,
     monitored_tree: Path | None = None,
     tree_limit_bytes: int | None = None,
     trusted_child_storage_marker: bool = False,
+    supervised_ncu_identity: ncu_executor.ExpectedNcuIdentity | None = None,
+    supervised_ncu_environment: ncu_executor.NcuCollectionEnvironment | None = None,
 ) -> tuple[float, Path, Path]:
     _mkdir_output(
         log_dir, parents=True, exist_ok=True,
@@ -2797,6 +2799,56 @@ def _run_logged(
             f"{failure_code}_tree_limit_invalid",
             f"tree_limit_bytes={tree_limit_bytes!r}",
         )
+    if (supervised_ncu_identity is None) != (
+        supervised_ncu_environment is None
+    ):
+        raise ChunkRefusal(
+            f"{failure_code}_supervision_invalid",
+            "NCU identity and collection environment must be supplied together",
+        )
+    if supervised_ncu_identity is not None:
+        if env is not None or monitored_tree is not None:
+            raise ChunkRefusal(
+                f"{failure_code}_supervision_invalid",
+                "supervised NCU execution owns env and does not monitor a tree",
+            )
+        try:
+            result = ncu_executor.execute_ncu_supervised_child(
+                supervised_ncu_identity,
+                command,
+                timeout_seconds=timeout_s,
+                environment=supervised_ncu_environment,
+                working_directory=cwd,
+            )
+        except ncu_executor.NcuActionExecutorError as exc:
+            refuse_child_storage(exc.stderr)
+            separator = b"" if not exc.stderr or exc.stderr.endswith(b"\n") else b"\n"
+            diagnostic = exc.stderr + separator + f"{exc}\n".encode()
+            write_logs(exc.stdout, diagnostic)
+            if exc.code == ncu_executor.NCU_ACTION_TIMEOUT:
+                code = f"{failure_code}_timeout"
+            elif exc.code == ncu_executor.NCU_ACTION_OUTPUT_LIMIT:
+                code = f"{failure_code}_output_limit"
+            elif exc.code in {
+                ncu_executor.NCU_EXECUTABLE_IDENTITY_INVALID,
+                ncu_executor.NCU_VERSION_PROBE_FAILED,
+                ncu_executor.NCU_VERSION_LINE_MISMATCH,
+                ncu_executor.NCU_IDENTITY_INPUT_INVALID,
+            }:
+                code = "capture_ncu_authority_invalid"
+            else:
+                code = failure_code
+            raise ChunkRefusal(code, str(exc)) from exc
+        elapsed = time.perf_counter() - started
+        refuse_child_storage(result.stderr)
+        write_logs(result.stdout, result.stderr)
+        if result.returncode != 0:
+            tail = result.stderr.decode(errors="replace")[-1200:]
+            raise ChunkRefusal(
+                failure_code,
+                f"returncode={result.returncode}; stderr_tail={tail!r}",
+            )
+        return elapsed, stdout_path, stderr_path
     try:
         process = subprocess.Popen(
             command, cwd=cwd, env=env, stdout=subprocess.PIPE,
@@ -4250,6 +4302,42 @@ def build_fixture_only_launch_set_plan(
     }
 
 
+_LABEL_COLLECTION_ENVIRONMENT_NAMES = (
+    "CC",
+    "CUDAHOSTCXX",
+    "CUDA_HOME",
+    "CUTLASS_DIR",
+    "CXX",
+    "FLASHINFER_TRACE_DIR",
+    "NVCC_CCBIN",
+    "PYTORCH_ALLOC_CONF",
+    "SOL_EXECBENCH_CAPTURE_REQUEST",
+)
+_LABEL_COLLECTION_PATH = "/usr/local/cuda-13.2/bin:/usr/bin:/bin"
+
+
+def _label_collection_environment(
+    runtime_env: dict[str, str] | None, *, cwd: Path,
+) -> ncu_executor.NcuCollectionEnvironment:
+    source = runtime_env or {}
+    values = {
+        "LANG": "C",
+        "LANGUAGE": "C",
+        "LC_ALL": "C",
+        "PATH": _LABEL_COLLECTION_PATH,
+        "PWD": str(cwd),
+        "PYTHONNOUSERSITE": "1",
+        "LABEL_DRIVER_PRESERVE_FAILED_EVIDENCE": "1",
+    }
+    for name in _LABEL_COLLECTION_ENVIRONMENT_NAMES:
+        if name in source:
+            values[name] = source[name]
+    try:
+        return ncu_executor.NcuCollectionEnvironment(values)
+    except ncu_executor.NcuActionExecutorError as exc:
+        raise ChunkRefusal("label_collection_environment_invalid", str(exc)) from exc
+
+
 def capture_label(
     *, cell: dict, binary: Path, invocation: dict, cell_dir: Path,
     matrix: dict, pins: dict, timeout_s: float,
@@ -4277,6 +4365,16 @@ def capture_label(
         expected_ncu_identity=expected_ncu_identity,
     )
     command = prepared["command"]
+    supervised_command: list[object] = list(command)
+    try:
+        separator = supervised_command.index("--")
+    except ValueError as exc:
+        raise ChunkRefusal(
+            "label_capture_command_invalid", "missing target argument separator",
+        ) from exc
+    supervised_command[separator:separator] = [
+        "--ncu-exec-path", ncu_executor.AUTHORIZED_NCU_PROC_PATH,
+    ]
     identity = prepared["identity"]
     source_commit = prepared["source_commit"]
     labels_root = prepared["labels_root"]
@@ -4288,22 +4386,18 @@ def capture_label(
     launch_contract = prepared["launch_contract"]
     shape_binding = prepared["shape_binding"]
     label_launch_index = prepared["label_launch_index"]
-    label_env = (
-        dict(runtime_env) if runtime_env is not None else dict(os.environ)
+    label_cwd = runtime_cwd or REPO_ROOT
+    collection_environment = _label_collection_environment(
+        runtime_env, cwd=label_cwd,
     )
-    # Every supplemental attempt lives in an immutable attempt directory.
-    # Preserve a failed label driver's partial artifacts rather than letting
-    # its EXIT trap delete them: this is the robust hand-off that guarantees a
-    # typed storage stop never performs cleanup against the failed medium.
-    # Semantic failures are conservatively retained too and are sealed by the
-    # attempt journal instead of being reused as successful artifacts.
-    label_env["LABEL_DRIVER_PRESERVE_FAILED_EVIDENCE"] = "1"
     elapsed, stdout_log, stderr_log = _run_logged(
-        command, cwd=runtime_cwd or REPO_ROOT, env=label_env,
+        supervised_command, cwd=label_cwd, env=None,
         timeout_s=timeout_s,
         log_dir=cell_dir / "logs", stem=artifact_tag,
         failure_code="label_capture_failed",
         trusted_child_storage_marker=True,
+        supervised_ncu_identity=expected_ncu_identity,
+        supervised_ncu_environment=collection_environment,
     )
     phase_evidence = (
         phase_result_validator(runtime_env or {}, "label")

@@ -58,6 +58,10 @@ elif operation == \"--exit\":
     raise SystemExit(int(arguments[0]))
 elif operation == \"--sleep\":
     time.sleep(float(arguments[0]))
+elif operation == \"--print-sleep\":
+    os.write(1, b\"stdout before timeout\")
+    os.write(2, b\"stderr before timeout\")
+    time.sleep(float(arguments[0]))
 elif operation == \"--flood\":
     os.write(1, b\"x\" * int(arguments[0]))
 elif operation == \"--read-fds\":
@@ -238,12 +242,13 @@ def test_supervised_child_inherits_one_authorized_ncu_descriptor(
         return original_popen(*args, **kwargs)
 
     monkeypatch.setattr(executor.subprocess, "Popen", popen)
-    environment = _collection_environment()
+    environment = _collection_environment(PWD=str(tmp_path))
     result = executor.execute_ncu_supervised_child(
         _identity(ncu),
         [str(driver), executor.AUTHORIZED_NCU_PROC_PATH, "inherited"],
         timeout_seconds=2,
         environment=environment,
+        working_directory=tmp_path,
     )
     assert result.returncode == 0
     observed_target = json.loads(result.stdout)
@@ -263,9 +268,23 @@ def test_supervised_child_inherits_one_authorized_ncu_descriptor(
     )
     assert observed[1][1] == (descriptor,)
     assert observed[1][2] == environment.as_dict()
-    assert observed[1][3] == "/"
+    assert observed[1][3] == str(tmp_path)
     with pytest.raises(OSError):
         os.fstat(descriptor)
+
+
+def test_supervised_child_rejects_pwd_working_directory_mismatch(
+    tmp_path: Path,
+) -> None:
+    expected = executor.ExpectedNcuIdentity("/missing/ncu", "a" * 64, _VERSION)
+    with _assert_code(executor.NCU_ACTION_REQUEST_INVALID):
+        executor.execute_ncu_supervised_child(
+            expected,
+            ["/bin/true", executor.AUTHORIZED_NCU_PROC_PATH],
+            timeout_seconds=1,
+            environment=_collection_environment(),
+            working_directory=tmp_path,
+        )
 
 
 @pytest.mark.parametrize(
@@ -1200,17 +1219,29 @@ def test_version_and_action_output_are_bounded(tmp_path: Path, monkeypatch) -> N
         tmp_path / "ncu-flood-version", version_mode="flood",
     )
     monkeypatch.setattr(executor, "_MAX_VERSION_OUTPUT_BYTES", 1024)
-    with _assert_code(executor.NCU_ACTION_OUTPUT_LIMIT):
+    with _assert_code(executor.NCU_ACTION_OUTPUT_LIMIT) as version_error:
         executor.execute_ncu_action(
             _identity(flood_version_ncu), ["--echo"], timeout_seconds=1,
         )
+    assert version_error.value.stdout == b"x" * 1024
 
     ncu = _fixture_ncu(tmp_path / "ncu")
     monkeypatch.setattr(executor, "_MAX_ACTION_OUTPUT_BYTES", 1024)
-    with _assert_code(executor.NCU_ACTION_OUTPUT_LIMIT):
+    with _assert_code(executor.NCU_ACTION_OUTPUT_LIMIT) as action_error:
         executor.execute_ncu_action(
             _identity(ncu), ["--flood", "4096"], timeout_seconds=1,
         )
+    assert action_error.value.stdout == b"x" * 1024
+
+
+def test_action_timeout_preserves_partial_output(tmp_path: Path) -> None:
+    ncu = _fixture_ncu(tmp_path / "ncu")
+    with _assert_code(executor.NCU_ACTION_TIMEOUT) as caught:
+        executor.execute_ncu_action(
+            _identity(ncu), ["--print-sleep", "10"], timeout_seconds=0.05,
+        )
+    assert caught.value.stdout == b"stdout before timeout"
+    assert caught.value.stderr == b"stderr before timeout"
 
 
 def test_action_timeout_kills_process_group(tmp_path: Path) -> None:

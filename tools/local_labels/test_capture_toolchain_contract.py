@@ -475,6 +475,49 @@ def _option_value(argv: list[str], option: str) -> str:
     return argv[argv.index(option) + 1]
 
 
+def test_label_driver_executes_ncu_through_inherited_descriptor(tmp_path):
+    command, environment, output, marker = _label_boundary_command(tmp_path)
+    ncu = Path(_option_value(command, "--ncu"))
+    descriptor = os.open(ncu, os.O_RDONLY)
+    try:
+        separator = command.index("--")
+        command[separator:separator] = [
+            "--ncu-exec-path", f"/proc/self/fd/{descriptor}",
+        ]
+        result = subprocess.run(
+            command,
+            env=environment,
+            text=True,
+            capture_output=True,
+            check=False,
+            pass_fds=(descriptor,),
+        )
+    finally:
+        os.close(descriptor)
+    assert result.returncode == 7
+    assert "NCU_AUTHORITY_INVALID" not in result.stderr
+    assert output.is_dir()
+    assert marker.is_file()
+
+
+@pytest.mark.parametrize(
+    "exec_path", ["/tmp/ncu", "/proc/self/fd/03", "/proc/self/fd/999999"],
+)
+def test_label_driver_rejects_invalid_internal_ncu_path_before_output(
+    tmp_path, exec_path,
+):
+    command, environment, output, marker = _label_boundary_command(tmp_path)
+    separator = command.index("--")
+    command[separator:separator] = ["--ncu-exec-path", exec_path]
+    result = subprocess.run(
+        command, env=environment, text=True, capture_output=True, check=False,
+    )
+    assert result.returncode == 2
+    assert "NCU_AUTHORITY_INVALID" in result.stderr
+    assert not output.exists()
+    assert not marker.exists()
+
+
 def test_label_driver_explicit_launch_set_reaches_ncu_then_stops_postprocessing(
     tmp_path,
 ):

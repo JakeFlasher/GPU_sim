@@ -73,7 +73,6 @@ _REQUIRED_COLLECTION_ENVIRONMENT = {
     "LANG": "C",
     "LANGUAGE": "C",
     "LC_ALL": "C",
-    "PWD": "/",
     "PYTHONNOUSERSITE": "1",
     "LABEL_DRIVER_PRESERVE_FAILED_EVIDENCE": "1",
 }
@@ -116,7 +115,7 @@ class NcuCollectionEnvironment:
         allowed_names = (
             frozenset(_REQUIRED_COLLECTION_ENVIRONMENT)
             | _OPTIONAL_COLLECTION_ENVIRONMENT_NAMES
-            | {"PATH"}
+            | {"PATH", "PWD"}
         )
         names = set(values)
         unexpected = sorted(names - allowed_names)
@@ -127,7 +126,7 @@ class NcuCollectionEnvironment:
                 + ", ".join(unexpected),
             )
         missing = sorted(
-            (set(_REQUIRED_COLLECTION_ENVIRONMENT) | {"PATH"}) - names
+            (set(_REQUIRED_COLLECTION_ENVIRONMENT) | {"PATH", "PWD"}) - names
         )
         if missing:
             _fail(
@@ -177,6 +176,16 @@ class NcuCollectionEnvironment:
                 NCU_ACTION_REQUEST_INVALID,
                 "collection PATH is not a canonical absolute search list",
             )
+        pwd = values["PWD"]
+        if (
+            not Path(pwd).is_absolute()
+            or pwd.startswith("//")
+            or os.path.normpath(pwd) != pwd
+        ):
+            _fail(
+                NCU_ACTION_REQUEST_INVALID,
+                "collection PWD is not a canonical absolute path",
+            )
         object.__setattr__(self, "_items", tuple(normalized))
 
     def as_dict(self) -> dict[str, str]:
@@ -197,6 +206,8 @@ class NcuActionExecutorError(RuntimeError):
     def __init__(self, code: str, detail: str) -> None:
         self.code = code
         self.detail = detail
+        self.stdout = b""
+        self.stderr = b""
         super().__init__(f"{code}: {detail}")
 
 
@@ -664,13 +675,14 @@ def _collect_bounded(
                 if not chunk:
                     selector.unregister(key.fileobj)
                     continue
+                remaining_capacity = max_output_bytes - total
+                buffers[key.data].extend(chunk[:remaining_capacity])
                 total += len(chunk)
                 if total > max_output_bytes:
                     raise NcuActionExecutorError(
                         NCU_ACTION_OUTPUT_LIMIT,
                         f"retained NCU output exceeds {max_output_bytes} bytes",
                     )
-                buffers[key.data].extend(chunk)
         remaining = deadline - time.monotonic()
         if remaining <= 0:
             raise NcuActionExecutorError(
@@ -689,6 +701,9 @@ def _collect_bounded(
         )
     except BaseException as active_error:
         primary_error = active_error
+        if isinstance(active_error, NcuActionExecutorError):
+            active_error.stdout = bytes(buffers["stdout"])
+            active_error.stderr = bytes(buffers["stderr"])
         try:
             _stop_and_reap(process)
         except BaseException as cleanup_error:
@@ -757,9 +772,10 @@ def _run_command_bounded(
             raise
         if exc.code == timeout_code:
             raise
-        raise NcuActionExecutorError(
-            launch_code, exc.detail,
-        ) from exc
+        wrapped = NcuActionExecutorError(launch_code, exc.detail)
+        wrapped.stdout = exc.stdout
+        wrapped.stderr = exc.stderr
+        raise wrapped from exc
 
 
 def _run_bounded(
@@ -855,6 +871,9 @@ def _reverify(
             except (AttributeError, TypeError):
                 pass
         if pending is not None:
+            if isinstance(pending, NcuActionExecutorError):
+                primary.stdout = pending.stdout
+                primary.stderr = pending.stderr
             raise primary from pending
         raise primary from cause
     if pending is not None:
@@ -1023,6 +1042,7 @@ def execute_ncu_supervised_child(
     *,
     timeout_seconds: float,
     environment: NcuCollectionEnvironment,
+    working_directory: Path = Path("/"),
 ) -> NcuActionResult:
     """Run one bounded child with exactly one inherited authorized NCU path."""
 
@@ -1032,6 +1052,38 @@ def execute_ncu_supervised_child(
         _fail(
             NCU_ACTION_REQUEST_INVALID,
             "collection environment is not an authorized environment value",
+        )
+    if not isinstance(working_directory, Path):
+        _fail(
+            NCU_ACTION_REQUEST_INVALID,
+            "supervised working directory is not a path",
+        )
+    working_directory_text = str(working_directory)
+    if (
+        not working_directory.is_absolute()
+        or working_directory_text.startswith("//")
+        or os.path.normpath(working_directory_text) != working_directory_text
+    ):
+        _fail(
+            NCU_ACTION_REQUEST_INVALID,
+            "supervised working directory is not a canonical absolute path",
+        )
+    try:
+        metadata = os.stat(working_directory, follow_symlinks=False)
+    except OSError as exc:
+        raise NcuActionExecutorError(
+            NCU_ACTION_REQUEST_INVALID,
+            f"supervised working directory is unavailable: {exc}",
+        ) from exc
+    if not stat.S_ISDIR(metadata.st_mode):
+        _fail(
+            NCU_ACTION_REQUEST_INVALID,
+            "supervised working directory is not a no-follow directory",
+        )
+    if environment.as_dict()["PWD"] != working_directory_text:
+        _fail(
+            NCU_ACTION_REQUEST_INVALID,
+            "collection PWD differs from supervised working directory",
         )
     borrowed = _BorrowedActionDescriptors(None, (), (), ())
     try:
@@ -1045,7 +1097,7 @@ def execute_ncu_supervised_child(
             result = _run_command_bounded(
                 rendered,
                 environment=environment.as_dict(),
-                working_directory="/",
+                working_directory=working_directory_text,
                 inherited_descriptors=(retained.descriptor,),
                 timeout_seconds=timeout_seconds,
                 max_output_bytes=_MAX_ACTION_OUTPUT_BYTES,

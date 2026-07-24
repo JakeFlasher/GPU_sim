@@ -56,6 +56,7 @@ BINARY_PATH=""
 WARMUP_COUNT="1"
 WARMUP_COUNT_OVERRIDDEN=0
 NCU_BIN="ncu"
+NCU_EXEC_PATH=""
 NCU_EXECUTABLE_SHA256=""
 NCU_VERSION_LINE=""
 OUT_DIR="data/local_labels"
@@ -107,6 +108,7 @@ Required arguments:
 Optional arguments:
   --warmup <int>            Warmup launches before measurement (default: 1).
   --ncu <path>              Exact preflight-authorized inner NCU executable path.
+  --ncu-exec-path <fd-path> Internal inherited descriptor path used only to execute NCU.
   --ncu-executable-sha256 <sha256>
                             Exact preflight-authorized NCU executable hash.
   --ncu-version-line <line> Exact preflight-authorized NCU Version line.
@@ -237,6 +239,10 @@ while (("$#")); do
             ;;
         --ncu)
             NCU_BIN="$2"
+            shift 2
+            ;;
+        --ncu-exec-path)
+            NCU_EXEC_PATH="$2"
             shift 2
             ;;
         --ncu-executable-sha256)
@@ -415,6 +421,16 @@ else
         echo "label_driver: NCU_AUTHORITY_INVALID: --ncu-version-line must be one canonical Version line" >&2
         exit 2
     fi
+fi
+
+NCU_ACTION_BIN="$NCU_BIN"
+if [[ -n "$NCU_EXEC_PATH" ]]; then
+    if ! [[ "$NCU_EXEC_PATH" =~ ^/proc/self/fd/([3-9]|[1-9][0-9]+)$ ]] \
+        || [[ ! -x "$NCU_EXEC_PATH" ]]; then
+        echo "label_driver: NCU_AUTHORITY_INVALID: --ncu-exec-path must name one inherited executable descriptor" >&2
+        exit 2
+    fi
+    NCU_ACTION_BIN="$NCU_EXEC_PATH"
 fi
 
 # Architecture capability gate (C-AC-E). Translate the legacy local
@@ -705,9 +721,9 @@ safe_ncu_version() {
     printf 'unknown'
 }
 
-PROFILER_VERSION="$(safe_ncu_version "$NCU_BIN")"
+PROFILER_VERSION="$(safe_ncu_version "$NCU_ACTION_BIN")"
 if [[ "$EXPLICIT_NCU_LAUNCH_CONTROLS" -eq 0 ]]; then
-    if ! NCU_OBSERVED_SHA256="$(sha256sum -- "$NCU_BIN" 2>/dev/null)"; then
+    if ! NCU_OBSERVED_SHA256="$(sha256sum -- "$NCU_ACTION_BIN" 2>/dev/null)"; then
         echo "label_driver: NCU_AUTHORITY_INVALID: cannot hash authorized NCU executable" >&2
         exit 2
     fi
@@ -1277,7 +1293,7 @@ if [[ -n "$KERNEL_NAME" ]]; then
     NCU_COLLECT_ARGS+=(--kernel-name-base mangled --kernel-name "$KERNEL_NAME")
 fi
 
-"$NCU_BIN" \
+"$NCU_ACTION_BIN" \
     "${NCU_COLLECT_ARGS[@]}" \
     "$BINARY_PATH" \
     "${APP_ARGS[@]}" \

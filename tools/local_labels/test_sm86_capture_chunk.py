@@ -2633,6 +2633,123 @@ def test_run_logged_translates_process_start_failure(tmp_path, monkeypatch):
     ).read_text()
 
 
+def test_run_logged_routes_supervised_ncu_and_writes_logs(
+    tmp_path, monkeypatch,
+):
+    expected = _expected_ncu_identity()
+    environment = cc.ncu_executor.NcuCollectionEnvironment({
+        "LANG": "C", "LANGUAGE": "C", "LC_ALL": "C",
+        "PATH": "/usr/local/cuda-13.2/bin:/usr/bin:/bin",
+        "PWD": str(tmp_path), "PYTHONNOUSERSITE": "1",
+        "LABEL_DRIVER_PRESERVE_FAILED_EVIDENCE": "1",
+    })
+    command = [
+        "/bin/true", cc.ncu_executor.AUTHORIZED_NCU_PROC_PATH,
+    ]
+    observed = {}
+
+    def execute(identity, action, **kwargs):
+        observed.update(identity=identity, action=action, **kwargs)
+        return cc.ncu_executor.NcuActionResult(0, b"stdout", b"stderr")
+
+    monkeypatch.setattr(
+        cc.ncu_executor, "execute_ncu_supervised_child", execute,
+    )
+    elapsed, stdout, stderr = cc._run_logged(
+        command, cwd=tmp_path, env=None, timeout_s=5,
+        log_dir=tmp_path / "logs", stem="supervised", failure_code="label",
+        supervised_ncu_identity=expected,
+        supervised_ncu_environment=environment,
+    )
+    assert elapsed >= 0
+    assert stdout.read_bytes() == b"stdout"
+    assert stderr.read_bytes() == b"stderr"
+    assert observed == {
+        "identity": expected,
+        "action": command,
+        "timeout_seconds": 5,
+        "environment": environment,
+        "working_directory": tmp_path,
+    }
+
+
+def test_run_logged_types_supervised_ncu_timeout(tmp_path, monkeypatch):
+    expected = _expected_ncu_identity()
+    environment = cc.ncu_executor.NcuCollectionEnvironment({
+        "LANG": "C", "LANGUAGE": "C", "LC_ALL": "C",
+        "PATH": "/usr/local/cuda-13.2/bin:/usr/bin:/bin",
+        "PWD": str(tmp_path), "PYTHONNOUSERSITE": "1",
+        "LABEL_DRIVER_PRESERVE_FAILED_EVIDENCE": "1",
+    })
+
+    def timeout(*_args, **_kwargs):
+        error = cc.ncu_executor.NcuActionExecutorError(
+            cc.ncu_executor.NCU_ACTION_TIMEOUT, "synthetic timeout",
+        )
+        error.stdout = b"partial stdout"
+        error.stderr = b"partial stderr"
+        raise error
+
+    monkeypatch.setattr(
+        cc.ncu_executor, "execute_ncu_supervised_child", timeout,
+    )
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        cc._run_logged(
+            ["/bin/true", cc.ncu_executor.AUTHORIZED_NCU_PROC_PATH],
+            cwd=tmp_path, env=None, timeout_s=5,
+            log_dir=tmp_path / "logs", stem="timeout", failure_code="label",
+            supervised_ncu_identity=expected,
+            supervised_ncu_environment=environment,
+        )
+    assert caught.value.code == "label_timeout"
+    assert (tmp_path / "logs/timeout.stdout.log").read_bytes() == b"partial stdout"
+    stderr = (tmp_path / "logs/timeout.stderr.log").read_text()
+    assert "partial stderr" in stderr
+    assert "NCU_ACTION_TIMEOUT" in stderr
+
+
+def test_run_logged_storage_marker_precedes_supervised_timeout(
+    tmp_path, monkeypatch,
+):
+    expected = _expected_ncu_identity()
+    environment = cc.ncu_executor.NcuCollectionEnvironment({
+        "LANG": "C", "LANGUAGE": "C", "LC_ALL": "C",
+        "PATH": "/usr/local/cuda-13.2/bin:/usr/bin:/bin",
+        "PWD": str(tmp_path), "PYTHONNOUSERSITE": "1",
+        "LABEL_DRIVER_PRESERVE_FAILED_EVIDENCE": "1",
+    })
+    marker = cc.LABEL_DRIVER_STORAGE_MARKER + json.dumps({
+        "schema_version": 1,
+        "errno": errno.ENOSPC,
+        "operation": "label_driver_output_probe",
+    }, sort_keys=True, separators=(",", ":"))
+
+    def timeout(*_args, **_kwargs):
+        error = cc.ncu_executor.NcuActionExecutorError(
+            cc.ncu_executor.NCU_ACTION_TIMEOUT, "synthetic timeout",
+        )
+        error.stdout = b"partial stdout"
+        error.stderr = (marker + "\n").encode()
+        raise error
+
+    monkeypatch.setattr(
+        cc.ncu_executor, "execute_ncu_supervised_child", timeout,
+    )
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        cc._run_logged(
+            ["/bin/true", cc.ncu_executor.AUTHORIZED_NCU_PROC_PATH],
+            cwd=tmp_path, env=None, timeout_s=5,
+            log_dir=tmp_path / "logs", stem="storage", failure_code="label",
+            trusted_child_storage_marker=True,
+            supervised_ncu_identity=expected,
+            supervised_ncu_environment=environment,
+        )
+    assert caught.value.code == "label_storage_failure"
+    assert cc._storage_origin(caught.value).errno == errno.ENOSPC
+    assert not (tmp_path / "logs/storage.stdout.log").exists()
+    assert not (tmp_path / "logs/storage.stderr.log").exists()
+
+
 def test_run_logged_kills_process_group_at_tree_limit(tmp_path):
     monitored = tmp_path / "trace"
     monitored.mkdir()
@@ -4294,8 +4411,13 @@ def test_label_capture_stages_workload_output_and_checks_full_vector(
 
     def fake_run(
         command, *, cwd, env, timeout_s, log_dir, stem, failure_code,
-        trusted_child_storage_marker=False,
+        trusted_child_storage_marker=False, supervised_ncu_identity=None,
+        supervised_ncu_environment=None,
     ):
+        assert supervised_ncu_identity == _expected_ncu_identity()
+        assert isinstance(
+            supervised_ncu_environment, cc.ncu_executor.NcuCollectionEnvironment,
+        )
         commands.append(command)
         out = cell_dir / "labels" / "sm_86" / "silu_fwd_bf16_sm80" / "timing_shape"
         out.mkdir(parents=True)
@@ -4347,6 +4469,10 @@ def test_label_capture_stages_workload_output_and_checks_full_vector(
         kernel_name_selector="_Z15syntheticKernelv",
     )
     command = commands[0]
+    assert command.count(cc.ncu_executor.AUTHORIZED_NCU_PROC_PATH) == 1
+    assert command[command.index("--ncu-exec-path") + 1] is (
+        cc.ncu_executor.AUTHORIZED_NCU_PROC_PATH
+    )
     assert command[command.index("--launch") + 1] == "1"
     assert command[command.index("--kernel-name") + 1] == (
         "_Z15syntheticKernelv"
@@ -4376,13 +4502,28 @@ def test_sol_label_consumer_keeps_shape_metadata_out_of_target_argv(
     cell_dir.mkdir(parents=True)
     runtime_env = dict(cc.os.environ)
     runtime_env["CUTLASS_DIR"] = str(cc.REPO_ROOT / "third_party/cutlass")
+    runtime_env.update({
+        "LD_PRELOAD": "/hostile/injection.so",
+        "LD_LIBRARY_PATH": "/hostile/libraries",
+        "LD_AUDIT": "/hostile/audit.so",
+        "CUDA_INJECTION64_PATH": "/hostile/nvbit.so",
+        "CUDA_VISIBLE_DEVICES": "hostile",
+        "PYTHONPATH": "/hostile/python",
+        "BASH_ENV": "/hostile/bash-env",
+        "NCU_CONFIG_FILE": "/hostile/ncu-config",
+    })
     observed = {}
 
     def fake_run(
         command, *, cwd, env, timeout_s, log_dir, stem, failure_code,
-        trusted_child_storage_marker=False,
+        trusted_child_storage_marker=False, supervised_ncu_identity=None,
+        supervised_ncu_environment=None,
     ):
-        observed.update(command=command, cwd=cwd, env=env)
+        observed.update(
+            command=command, cwd=cwd, env=env,
+            supervised_ncu_identity=supervised_ncu_identity,
+            supervised_ncu_environment=supervised_ncu_environment,
+        )
         out = cell_dir / "labels" / "sm_86" / slug / shape
         out.mkdir(parents=True)
         label = json.loads(source_label.read_text())
@@ -4452,7 +4593,10 @@ def test_sol_label_consumer_keeps_shape_metadata_out_of_target_argv(
         "selected_unit_metrics"
     ]:
         expected += ["--unit-metric", metric]
-    expected += ["--", *invocation["label_app_args"]]
+    expected += [
+        "--ncu-exec-path", cc.ncu_executor.AUTHORIZED_NCU_PROC_PATH,
+        "--", *invocation["label_app_args"],
+    ]
     assert command == expected
     separator = command.index("--")
     assert command[command.index("--shape-binding") + 1] == "logical-workload"
@@ -4466,12 +4610,23 @@ def test_sol_label_consumer_keeps_shape_metadata_out_of_target_argv(
     assert command[separator + 1:] == invocation["label_app_args"]
     assert not cc._shape_tokens(command[separator + 1:])
     assert observed["cwd"] == cc.REPO_ROOT
-    assert observed["env"] is not runtime_env
-    assert {
-        key: value for key, value in observed["env"].items()
-        if key != "LABEL_DRIVER_PRESERVE_FAILED_EVIDENCE"
-    } == runtime_env
-    assert observed["env"]["LABEL_DRIVER_PRESERVE_FAILED_EVIDENCE"] == "1"
+    assert observed["env"] is None
+    assert observed["supervised_ncu_identity"] == ncu_identity
+    collection_environment = observed["supervised_ncu_environment"]
+    assert isinstance(
+        collection_environment, cc.ncu_executor.NcuCollectionEnvironment,
+    )
+    projected = collection_environment.as_dict()
+    assert projected["PATH"] == "/usr/local/cuda-13.2/bin:/usr/bin:/bin"
+    assert projected["PWD"] == str(cc.REPO_ROOT)
+    assert projected["CUTLASS_DIR"] == runtime_env["CUTLASS_DIR"]
+    assert projected["LABEL_DRIVER_PRESERVE_FAILED_EVIDENCE"] == "1"
+    for name in (
+        "LD_PRELOAD", "LD_LIBRARY_PATH", "LD_AUDIT",
+        "CUDA_INJECTION64_PATH", "CUDA_VISIBLE_DEVICES", "PYTHONPATH",
+        "BASH_ENV", "ENV", "HOME", "TMPDIR", "NCU_CONFIG_FILE",
+    ):
+        assert name not in projected
     capture_manifest = json.loads(result["capture_manifest"].read_text())
     assert capture_manifest["shape_binding"] == "logical-workload"
     assert capture_manifest["shape_forwarded_to_target"] is False
