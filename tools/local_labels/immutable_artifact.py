@@ -708,6 +708,99 @@ def open_retained_executable(path: Path) -> RetainedExecutable:
         raise
 
 
+@dataclasses.dataclass
+class RetainedRegular:
+    """One no-follow regular file retained as a caller-owned capability."""
+
+    path: Path
+    sha256: str
+    size_bytes: int
+    snapshot: _Snapshot
+    _pinned: _PinnedRegular
+
+    @property
+    def descriptor(self) -> int:
+        if self._pinned.descriptor < 0:
+            raise ImmutableArtifactError("retained regular file is closed")
+        return self._pinned.descriptor
+
+    @property
+    def proc_path(self) -> str:
+        return f"/proc/self/fd/{self.descriptor}"
+
+    def verify_unchanged(self) -> None:
+        """Rebind path, inode, metadata, size, and bytes to the initial read."""
+        descriptor = self.descriptor
+        self._pinned.verify_path()
+        if _snapshot_fields(os.fstat(descriptor)) != self.snapshot:
+            raise ImmutableArtifactError("retained regular-file metadata changed")
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        digest, size, _mode = _hash_fd(descriptor)
+        if _snapshot_fields(os.fstat(descriptor)) != self.snapshot:
+            raise ImmutableArtifactError("retained regular-file metadata changed")
+        if size != self.size_bytes:
+            raise ImmutableArtifactError("retained regular-file size changed")
+        if digest != self.sha256:
+            raise ImmutableArtifactError("retained regular-file SHA-256 changed")
+        self._pinned.verify_path()
+        os.lseek(descriptor, 0, os.SEEK_SET)
+
+    def close(self) -> None:
+        self._pinned.close()
+
+    def __enter__(self) -> RetainedRegular:
+        try:
+            self.verify_unchanged()
+        except BaseException:
+            _close_callables(
+                (self.close,), label="retained regular-file entry close"
+            )
+            raise
+        return self
+
+    def __exit__(self, exc_type, exc, traceback) -> bool:
+        if exc is not None:
+            try:
+                self.verify_unchanged()
+            except BaseException as verification_error:
+                try:
+                    exc.add_note(
+                        "retained regular-file revalidation failed: "
+                        f"{verification_error}"
+                    )
+                except (AttributeError, TypeError):
+                    pass
+            self.close()
+            return False
+        try:
+            self.verify_unchanged()
+        finally:
+            self.close()
+        return False
+
+
+def open_retained_regular(path: Path) -> RetainedRegular:
+    """Open, hash, and retain one regular file without following any symlink."""
+    absolute = Path(os.path.abspath(os.fspath(path)))
+    pinned = _open_regular(absolute)
+    try:
+        descriptor = pinned.descriptor
+        before = _snapshot_fields(os.fstat(descriptor))
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        digest, size, _mode = _hash_fd(descriptor)
+        after = _snapshot_fields(os.fstat(descriptor))
+        if after != before:
+            raise ImmutableArtifactError(
+                "regular-file metadata changed during identity read"
+            )
+        pinned.verify_path()
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        return RetainedRegular(absolute, digest, size, before, pinned)
+    except BaseException:
+        pinned.close()
+        raise
+
+
 def read_regular(path: Path, *, allow_hardlinks: bool = False) -> bytes:
     pinned = _open_regular(Path(path), allow_hardlinks=allow_hardlinks)
     try:

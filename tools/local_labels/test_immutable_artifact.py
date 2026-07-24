@@ -130,6 +130,193 @@ def test_retained_executable_preserves_body_error_when_revalidation_fails(
     )
 
 
+def _regular(path: Path, payload: bytes = b"fixture report") -> Path:
+    path.write_bytes(payload)
+    path.chmod(0o444)
+    return path
+
+
+def test_retained_regular_binds_descriptor_path_snapshot_size_and_hash(
+    tmp_path: Path,
+) -> None:
+    report = _regular(tmp_path / "report.ncu-rep")
+    with immutable.open_retained_regular(report) as retained:
+        assert retained.path == report.absolute()
+        assert retained.sha256 == immutable.sha256_bytes(b"fixture report")
+        assert retained.size_bytes == len(b"fixture report")
+        assert len(retained.snapshot) == 7
+        assert retained.proc_path == f"/proc/self/fd/{retained.descriptor}"
+        assert os.read(retained.descriptor, 7) == b"fixture"
+        retained.verify_unchanged()
+        assert os.read(retained.descriptor, 7) == b"fixture"
+    with pytest.raises(
+        immutable.ImmutableArtifactError, match="retained regular file is closed",
+    ):
+        _ = retained.descriptor
+
+
+@pytest.mark.parametrize("kind", ["leaf", "ancestor"])
+def test_retained_regular_rejects_symlink_components(
+    tmp_path: Path, kind: str,
+) -> None:
+    real_dir = tmp_path / "real"
+    real_dir.mkdir()
+    report = _regular(real_dir / "report.ncu-rep")
+    if kind == "leaf":
+        candidate = tmp_path / "report.ncu-rep"
+        candidate.symlink_to(report)
+    else:
+        linked_dir = tmp_path / "linked"
+        linked_dir.symlink_to(real_dir, target_is_directory=True)
+        candidate = linked_dir / "report.ncu-rep"
+    with pytest.raises(immutable.ImmutableArtifactError):
+        immutable.open_retained_regular(candidate)
+
+
+@pytest.mark.parametrize("kind", ["directory", "fifo", "hardlink"])
+def test_retained_regular_rejects_nonregular_or_hardlinked_leaf(
+    tmp_path: Path, kind: str,
+) -> None:
+    candidate = tmp_path / "report.ncu-rep"
+    if kind == "directory":
+        candidate.mkdir()
+    elif kind == "fifo":
+        os.mkfifo(candidate)
+    else:
+        _regular(candidate)
+        os.link(candidate, tmp_path / "report-hardlink.ncu-rep")
+    with pytest.raises(immutable.ImmutableArtifactError):
+        immutable.open_retained_regular(candidate)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "bytes", "same_byte_restore", "replacement", "ancestor", "mode",
+        "hardlink", "truncate", "grow",
+    ],
+)
+def test_retained_regular_rejects_post_open_identity_drift(
+    tmp_path: Path, mutation: str,
+) -> None:
+    directory = tmp_path / "reports"
+    directory.mkdir()
+    payload = b"fixture report"
+    report = _regular(directory / "report.ncu-rep", payload)
+    writer = None
+    if mutation in {"bytes", "same_byte_restore", "truncate", "grow"}:
+        report.chmod(0o644)
+        writer = os.open(report, os.O_WRONLY)
+        report.chmod(0o444)
+    try:
+        with pytest.raises(immutable.ImmutableArtifactError):
+            with immutable.open_retained_regular(report):
+                if mutation == "bytes":
+                    os.pwrite(writer, b"mutated report", 0)
+                elif mutation == "same_byte_restore":
+                    os.pwrite(writer, b"mutated report", 0)
+                    os.pwrite(writer, payload, 0)
+                elif mutation == "replacement":
+                    report.unlink()
+                    _regular(report, payload)
+                elif mutation == "ancestor":
+                    moved = tmp_path / "moved"
+                    directory.rename(moved)
+                    directory.mkdir()
+                    _regular(directory / "report.ncu-rep", payload)
+                elif mutation == "mode":
+                    report.chmod(0o600)
+                elif mutation == "hardlink":
+                    os.link(report, tmp_path / "report-hardlink.ncu-rep")
+                elif mutation == "truncate":
+                    os.ftruncate(writer, 4)
+                else:
+                    os.pwrite(writer, payload + b" grown", 0)
+    finally:
+        if writer is not None:
+            os.close(writer)
+
+
+
+def test_open_retained_regular_rejects_drift_during_initial_hash(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    report = _regular(tmp_path / "report.ncu-rep")
+    report.chmod(0o644)
+    writer = os.open(report, os.O_WRONLY)
+    report.chmod(0o444)
+    original = immutable._hash_fd
+
+    def mutate_after_hash(descriptor, *, allow_hardlinks=False):
+        result = original(descriptor, allow_hardlinks=allow_hardlinks)
+        os.pwrite(writer, b"changed after hash", 0)
+        return result
+
+    monkeypatch.setattr(immutable, "_hash_fd", mutate_after_hash)
+    try:
+        with pytest.raises(
+            immutable.ImmutableArtifactError,
+            match="metadata changed during identity read",
+        ):
+            immutable.open_retained_regular(report)
+    finally:
+        os.close(writer)
+
+
+def test_retained_regular_preserves_body_error_when_revalidation_fails(
+    tmp_path: Path,
+) -> None:
+    report = _regular(tmp_path / "report.ncu-rep")
+    with pytest.raises(RuntimeError, match="primary body failure") as caught:
+        with immutable.open_retained_regular(report):
+            report.chmod(0o644)
+            report.write_bytes(b"mutated report")
+            raise RuntimeError("primary body failure")
+    assert any(
+        "retained regular-file revalidation failed" in note
+        for note in getattr(caught.value, "__notes__", [])
+    )
+
+
+def test_retained_regular_entry_failure_closes_descriptors(
+    tmp_path: Path,
+) -> None:
+    report = _regular(tmp_path / "report.ncu-rep")
+    report.chmod(0o644)
+    writer = os.open(report, os.O_WRONLY)
+    report.chmod(0o444)
+    retained = immutable.open_retained_regular(report)
+    descriptor = retained.descriptor
+    try:
+        os.pwrite(writer, b"mutated report", 0)
+    finally:
+        os.close(writer)
+    with pytest.raises(
+        immutable.ImmutableArtifactError, match="metadata changed",
+    ):
+        with retained:
+            pytest.fail("body reached after failed entry verification")
+    with pytest.raises(OSError):
+        os.fstat(descriptor)
+
+
+def test_retained_regular_close_is_idempotent(
+    tmp_path: Path,
+) -> None:
+    retained = immutable.open_retained_regular(
+        _regular(tmp_path / "report.ncu-rep")
+    )
+    descriptor = retained.descriptor
+    retained.close()
+    retained.close()
+    with pytest.raises(OSError):
+        os.fstat(descriptor)
+    with pytest.raises(
+        immutable.ImmutableArtifactError, match="retained regular file is closed",
+    ):
+        retained.verify_unchanged()
+
+
 def test_directory_publication_rechecks_after_authorization_callback(
     tmp_path: Path,
 ) -> None:
