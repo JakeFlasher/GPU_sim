@@ -38,8 +38,7 @@ struct Case {
 }
 
 fn golden_path() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../tools/nvbit_tracer/lane_reconstruction_golden.json")
+    PathBuf::from("../../tools/nvbit_tracer/lane_reconstruction_golden.json")
         .canonicalize()
         .expect("golden fixture exists in-repo")
 }

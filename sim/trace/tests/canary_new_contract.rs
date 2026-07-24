@@ -12,7 +12,7 @@ use sim_trace::{TraceDir, pb, visit_memory_access};
 
 #[test]
 fn canary_new_contract_trace_passes_reader_identity_and_carries_atomic_async() {
-    let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/addr_carry_canary");
+    let fixture = Path::new("tests/fixtures/addr_carry_canary");
     let td = TraceDir::open(&fixture).expect("open canary trace dir");
 
     // The new contract id + capability list are on the wire.

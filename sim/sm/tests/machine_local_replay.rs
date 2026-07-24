@@ -32,8 +32,7 @@ use sim_trace::{ExecInfo, TraceDir};
 fn sm86_card() -> ArchCard {
     // The card is COMMITTED repo data (not machine-local evidence), so an
     // in-repo path is fine here. The M1 traces are sm_86 captures.
-    let path =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../arch_profiles/cards/sm_86.json");
+    let path = PathBuf::from("../../arch_profiles/cards/sm_86.json");
     ArchCard::load(&path).expect("committed sm_86 card loads")
 }
 
@@ -41,8 +40,7 @@ fn sm86_pchase_card() -> PchaseCard {
     // Committed P-chase static card: the L1 geometry source the Phase-1
     // walker resolves from (capacity has no default; MSHR documented
     // default when typed).
-    let path =
-        PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../data/pchase/sm_86_static_card.json");
+    let path = PathBuf::from("../../data/pchase/sm_86_static_card.json");
     PchaseCard::load(&path).expect("committed pchase card loads")
 }
 

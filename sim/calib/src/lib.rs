@@ -548,8 +548,7 @@ mod tests {
     use std::path::PathBuf;
 
     fn card_path(name: &str) -> PathBuf {
-        PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("../../arch_profiles/cards")
+        PathBuf::from("../../arch_profiles/cards")
             .join(name)
             .canonicalize()
             .expect("card exists in-repo")

@@ -34,8 +34,7 @@ fn fnv1a64(bytes: &[u8]) -> u64 {
 }
 
 fn proto_dir() -> PathBuf {
-    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../tools/nvbit_tracer/traces_enhanced/dynamic_trace")
+    PathBuf::from("../../tools/nvbit_tracer/traces_enhanced/dynamic_trace")
         .canonicalize()
         .expect("proto schema dir exists in-repo")
 }

@@ -15,8 +15,7 @@ use serde_json::Value;
 use sim_emit::{DESCRIPTORS, MetricKind, Unit};
 
 fn registry() -> Value {
-    let path = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .join("../../tools/local_labels/metric_registry.json");
+    let path = PathBuf::from("../../tools/local_labels/metric_registry.json");
     let text = std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("read registry {}: {e}", path.display()));
     serde_json::from_str(&text).expect("registry parses")
