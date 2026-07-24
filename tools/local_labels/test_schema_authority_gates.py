@@ -22,6 +22,9 @@ _SCHEMAS = _REPO_ROOT / "workloads" / "simbench_bw" / "schemas"
 _HISTORICAL = _SCHEMAS / "historical"
 _HISTORICAL_DURATION = _HISTORICAL / "duration_admitted.v1.schema.json"
 _HISTORICAL_CUPTI = _HISTORICAL / "cupti_activity_sidecar.v1.schema.json"
+_HISTORICAL_SOL_DONE = (
+    _HISTORICAL / "sol_workload_capture_chunk_done.v2.schema.json"
+)
 _HISTORICAL_MANIFEST = _HISTORICAL / "MANIFEST.sha256"
 _ACTIVE_MANIFEST = _SCHEMAS / "measurement_manifest.schema.json"
 _V5_SIDECAR = _SCHEMAS / "local_label_sidecar.schema.json"
@@ -35,11 +38,18 @@ _HISTORICAL_DURATION_SHA256 = (
 _HISTORICAL_CUPTI_SHA256 = (
     "836c0db4f6f5a2a582a9b334be02c829b40a094f709259d8008f05f200faaeb4"
 )
+_HISTORICAL_SOL_DONE_SHA256 = (
+    "5e9bbb94107541fa522e9070972e81916a7be984802493f414d0951a705f0f4c"
+)
+_HISTORICAL_MANIFEST_SHA256 = (
+    "702ef1c2b07d25cc772e7a160a3ce430910b3403a8a19a579bc7e6c03b45479e"
+)
 _HISTORICAL_FILE_SET = {
     "README.md",
     "MANIFEST.sha256",
     "cupti_activity_sidecar.v1.schema.json",
     "duration_admitted.v1.schema.json",
+    "sol_workload_capture_chunk_done.v2.schema.json",
 }
 _MANIFEST_LINE_RE = re.compile(r"^([0-9a-f]{64})  ([A-Za-z0-9._/-]+)$")
 _SHA = "a" * 64
@@ -61,7 +71,7 @@ def _load_json(path: Path) -> dict:
 
 
 def _parse_hash_manifest(path: Path) -> dict[str, str]:
-    """Parse the closed two-schema historical manifest without normalization."""
+    """Parse the closed three-schema historical manifest without normalization."""
     if path.is_symlink() or not path.is_file():
         raise HistoricalSchemaHashError(
             f"historical schema manifest is not a regular file: {path}"
@@ -77,9 +87,9 @@ def _parse_hash_manifest(path: Path) -> dict[str, str]:
         raise HistoricalSchemaHashError(
             f"historical schema manifest is not ASCII: {path}"
         ) from exc
-    if len(lines) != 2:
+    if len(lines) != 3:
         raise HistoricalSchemaHashError(
-            f"historical schema manifest must contain exactly two entries: {path}"
+            f"historical schema manifest must contain exactly three entries: {path}"
         )
 
     entries: dict[str, str] = {}
@@ -154,6 +164,7 @@ def verify_historical_schema_directory(schema_dir: Path = _HISTORICAL) -> None:
 _HISTORICAL_DISPATCH = {
     ("cupti_activity_sidecar", 1): _HISTORICAL_CUPTI,
     ("duration_admitted", 1): _HISTORICAL_DURATION,
+    ("sol_workload_capture_chunk_done", 2): _HISTORICAL_SOL_DONE,
 }
 
 
@@ -275,10 +286,15 @@ def _valid_v5_sidecar() -> dict:
 
 def test_g1_historical_manifest_and_contract_are_pinned() -> None:
     verify_historical_schema_directory()
-    assert len(_HISTORICAL_MANIFEST.read_bytes()) == 203
+    manifest_payload = _HISTORICAL_MANIFEST.read_bytes()
+    assert len(manifest_payload) == 316
+    assert hashlib.sha256(manifest_payload).hexdigest() == (
+        _HISTORICAL_MANIFEST_SHA256
+    )
     assert _parse_hash_manifest(_HISTORICAL_MANIFEST) == {
         _HISTORICAL_CUPTI.name: _HISTORICAL_CUPTI_SHA256,
         _HISTORICAL_DURATION.name: _HISTORICAL_DURATION_SHA256,
+        _HISTORICAL_SOL_DONE.name: _HISTORICAL_SOL_DONE_SHA256,
     }
     assert {path.name for path in _HISTORICAL.iterdir()} == _HISTORICAL_FILE_SET
 
@@ -298,10 +314,23 @@ def test_g1_historical_manifest_and_contract_are_pinned() -> None:
     assert cupti_schema["schema_version"] == 1
     assert cupti_schema["properties"]["schema_version"]["const"] == 1
 
+    sol_done_schema = _load_json(_HISTORICAL_SOL_DONE)
+    assert sol_done_schema["$id"] == (
+        "simbench_bw/schemas/sol_workload_capture_chunk_done.schema.json"
+    )
+    assert sol_done_schema["properties"]["schema_version"]["const"] == 2
+    assert sol_done_schema["properties"]["manifest_kind"]["const"] == (
+        "sol_workload_capture_chunk_done"
+    )
+
 
 def test_g2_one_byte_mutation_fails_hash_check(tmp_path: Path) -> None:
     for index, schema_name in enumerate(
-        (_HISTORICAL_CUPTI.name, _HISTORICAL_DURATION.name)
+        (
+            _HISTORICAL_CUPTI.name,
+            _HISTORICAL_DURATION.name,
+            _HISTORICAL_SOL_DONE.name,
+        )
     ):
         staged = tmp_path / f"mutated-{index}"
         shutil.copytree(_HISTORICAL, staged)
@@ -321,9 +350,14 @@ def test_g2_one_byte_mutation_fails_hash_check(tmp_path: Path) -> None:
         valid_manifest.replace(b"  ", b"\t", 1),
         valid_manifest.replace(b"c", b"C", 1),
         valid_manifest.replace(b"\n", b"\r\n"),
-        rows[1] + rows[0],
-        rows[0] + rows[0],
-        rows[0].split(b"  ", 1)[0] + b"  ../escape.schema.json\n" + rows[1],
+        rows[1] + rows[0] + rows[2],
+        rows[0] + rows[0] + rows[2],
+        (
+            rows[0].split(b"  ", 1)[0]
+            + b"  ../escape.schema.json\n"
+            + rows[1]
+            + rows[2]
+        ),
     )
     for index, malformed in enumerate(malformed_payloads):
         staged = tmp_path / f"manifest-{index}"
@@ -348,16 +382,27 @@ def test_g2_one_byte_mutation_fails_hash_check(tmp_path: Path) -> None:
 
 
 @pytest.mark.parametrize("version", [None, 0, 2, True])
-def test_g3_historical_dispatch_fails_closed(version: object) -> None:
+def test_g3_historical_v1_dispatch_fails_closed(version: object) -> None:
     for family in ("cupti_activity_sidecar", "duration_admitted"):
         with pytest.raises(HistoricalSchemaDispatchError):
             resolve_historical_schema(family, version)
 
 
-def test_g3_historical_dispatch_accepts_only_frozen_v1() -> None:
+@pytest.mark.parametrize("version", [None, 0, 1, 3, True])
+def test_g3_historical_sol_done_v2_dispatch_fails_closed(version: object) -> None:
+    with pytest.raises(HistoricalSchemaDispatchError):
+        resolve_historical_schema("sol_workload_capture_chunk_done", version)
+
+
+def test_g3_historical_dispatch_accepts_only_frozen_versions() -> None:
     assert resolve_historical_schema("cupti_activity_sidecar", 1) == _HISTORICAL_CUPTI
     assert resolve_historical_schema("duration_admitted", 1) == _HISTORICAL_DURATION
-    assert not any(family == "measurement_manifest" for family, _ in _HISTORICAL_DISPATCH)
+    assert resolve_historical_schema(
+        "sol_workload_capture_chunk_done", 2
+    ) == _HISTORICAL_SOL_DONE
+    assert not any(
+        family == "measurement_manifest" for family, _ in _HISTORICAL_DISPATCH
+    )
 
 
 def test_g4_frozen_v1_accepts_synthetic_cupti_record() -> None:
