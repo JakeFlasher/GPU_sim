@@ -1,0 +1,490 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "cutlass_successor_m6_observation_journal.schema.json",
+  "title": "CUTLASS successor M6 causal observation journal",
+  "description": "Closed offline Q710 contract. The predecessor-bound records array is the sole authority; replay_summary is derived and no execution, publication, M6 DONE, or M7 claim is authorized.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "artifact_kind", "journal_id", "created_at_utc",
+    "schedule_binding", "source_identity", "source_identity_sha256",
+    "metric_policy", "metric_policy_sha256", "resource_policy", "records",
+    "records_sha256",
+    "replay_summary", "claims", "journal_sha256"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "artifact_kind": {"const": "cutlass_successor_m6_observation_journal"},
+    "journal_id": {"type": "string", "pattern": "^cutlass-successor-m6-journal-[0-9a-f]{24}$"},
+    "created_at_utc": {"type": "string", "format": "date-time"},
+    "schedule_binding": {"$ref": "#/$defs/schedule_binding"},
+    "source_identity": {"$ref": "#/$defs/source_identity"},
+    "source_identity_sha256": {"$ref": "#/$defs/sha256"},
+    "metric_policy": {"$ref": "#/$defs/metric_policy"},
+    "metric_policy_sha256": {"$ref": "#/$defs/sha256"},
+    "resource_policy": {"$ref": "#/$defs/resource_policy"},
+    "records": {
+      "type": "array", "maxItems": 4096,
+      "items": {"$ref": "#/$defs/record"}
+    },
+    "records_sha256": {"$ref": "#/$defs/sha256"},
+    "replay_summary": {"$ref": "#/$defs/replay_summary"},
+    "claims": {"$ref": "#/$defs/claims"},
+    "journal_sha256": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "relative_path": {
+      "type": "string", "minLength": 1,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))(?!.*\\\\).+$"
+    },
+    "file_ref": {
+      "type": "object", "additionalProperties": false,
+      "required": ["path", "sha256", "size_bytes"],
+      "properties": {
+        "path": {"$ref": "#/$defs/relative_path"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "size_bytes": {"type": "integer", "minimum": 1}
+      }
+    },
+    "schedule_binding": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "schedule_id", "schedule_sha256", "source_identity_sha256",
+        "config_identity_sha256", "cell_identity_sha256", "cells",
+        "tier1_slots", "tier2_candidate_slots", "maximum_slots"
+      ],
+      "properties": {
+        "schedule_id": {"type": "string", "pattern": "^cutlass-successor-m6-[0-9a-f]{24}$"},
+        "schedule_sha256": {"$ref": "#/$defs/sha256"},
+        "source_identity_sha256": {"$ref": "#/$defs/sha256"},
+        "config_identity_sha256": {"$ref": "#/$defs/sha256"},
+        "cell_identity_sha256": {"$ref": "#/$defs/sha256"},
+        "cells": {"const": 3},
+        "tier1_slots": {"const": 210},
+        "tier2_candidate_slots": {"const": 30},
+        "maximum_slots": {"const": 240}
+      }
+    },
+    "source_identity": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "journal_module", "journal_schema", "canonical_matrix",
+        "metric_registry", "availability_probe", "canonical_metric_controller",
+        "statistics_module", "statistical_contract_sha256"
+      ],
+      "properties": {
+        "journal_module": {"$ref": "#/$defs/file_ref"},
+        "journal_schema": {"$ref": "#/$defs/file_ref"},
+        "canonical_matrix": {"$ref": "#/$defs/file_ref"},
+        "metric_registry": {"$ref": "#/$defs/file_ref"},
+        "availability_probe": {"$ref": "#/$defs/file_ref"},
+        "canonical_metric_controller": {"$ref": "#/$defs/file_ref"},
+        "statistics_module": {"$ref": "#/$defs/file_ref"},
+        "statistical_contract_sha256": {"const": "17ac0986bc090532ce1898eed5223e02f8e8944ca08ec134e6f58a8a6f9707b5"}
+      }
+    },
+    "metric_policy": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "policy_version", "reference_config_id", "required_reference_repeats",
+        "trigger_codes", "registry_metric_count", "trigger_eligible_count",
+        "metrics", "metric_identity_sha256"
+      ],
+      "properties": {
+        "policy_version": {"const": 1},
+        "reference_config_id": {"const": "cfg=clock_none__cache_all"},
+        "required_reference_repeats": {"const": 20},
+        "trigger_codes": {
+          "const": [
+            "boundary_proximity", "discrete_multiple_values", "modality_flag",
+            "out_of_range", "single_point_outlier"
+          ]
+        },
+        "registry_metric_count": {"const": 61},
+        "trigger_eligible_count": {"const": 55},
+        "metrics": {
+          "type": "array", "minItems": 61, "maxItems": 61, "uniqueItems": true,
+          "items": {"$ref": "#/$defs/metric"},
+          "contains": {
+            "type": "object",
+            "properties": {"capture_status": {"const": "selected"}},
+            "required": ["capture_status"]
+          },
+          "minContains": 55,
+          "maxContains": 55
+        },
+        "metric_identity_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "metric": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "key", "ncu_metric", "unit", "carrier", "sidecar_field", "family",
+        "metric_class", "parser_transform", "model_io_role", "deployability",
+        "probe_linkage", "probe_backed", "statistical_domain",
+        "resolution_semantics", "statistical_contract_sha256",
+        "repeatability_rule", "admission_threshold", "valid_min", "valid_max",
+        "absolute_resolution", "capture_status", "metric_sha256"
+      ],
+      "properties": {
+        "key": {"type": "string", "minLength": 1},
+        "ncu_metric": {"type": "string", "minLength": 1},
+        "unit": {"enum": ["count", "cycles", "ns", "pct"]},
+        "carrier": {"enum": ["flat_field", "unit_tagged_metric"]},
+        "sidecar_field": {"type": "string", "minLength": 1},
+        "family": {"type": "string", "minLength": 1},
+        "metric_class": {"type": "string", "minLength": 1},
+        "parser_transform": {"enum": ["identity_nonneg", "percent_to_fraction"]},
+        "model_io_role": {"enum": ["input", "target"]},
+        "deployability": {"enum": ["feature_eligible", "label_only"]},
+        "probe_linkage": {"enum": ["sm86_probe_unbacked", "sm86_probe_v1"]},
+        "probe_backed": {"type": "boolean"},
+        "statistical_domain": {"enum": ["continuous", "discrete"]},
+        "resolution_semantics": {"const": "m6_statistical_override_v1"},
+        "statistical_contract_sha256": {"const": "17ac0986bc090532ce1898eed5223e02f8e8944ca08ec134e6f58a8a6f9707b5"},
+        "repeatability_rule": {"enum": ["coefficient_of_variation", "relative_tolerance", "stddev_abs"]},
+        "admission_threshold": {"type": "number", "exclusiveMinimum": 0},
+        "valid_min": {"type": "number"},
+        "valid_max": {"type": ["number", "null"]},
+        "absolute_resolution": {"type": "number", "exclusiveMinimum": 0},
+        "capture_status": {
+          "enum": [
+            "requires_runtime_carveout", "selected",
+            "static_derived_not_ncu_collected", "unavailable_on_sm86"
+          ]
+        },
+        "metric_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "resource_policy": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "max_attempts_per_ordinal", "max_fresh_processes",
+        "max_interrupted_attempts", "max_exclusion_detail_bytes", "max_records"
+      ],
+      "properties": {
+        "max_attempts_per_ordinal": {"const": 2},
+        "max_fresh_processes": {"const": 480},
+        "max_interrupted_attempts": {"const": 241},
+        "max_exclusion_detail_bytes": {"const": 4096},
+        "max_records": {"const": 4096}
+      }
+    },
+    "cost": {
+      "type": "object", "additionalProperties": false,
+      "required": ["fresh_processes", "ncu_replay_passes"],
+      "properties": {
+        "fresh_processes": {"type": "integer", "minimum": 0, "maximum": 480},
+        "ncu_replay_passes": {"type": "integer", "minimum": 0}
+      }
+    },
+    "observation": {
+      "type": "object", "additionalProperties": false,
+      "required": ["metric_key", "metric_sha256", "value", "validity"],
+      "properties": {
+        "metric_key": {"type": "string", "minLength": 1},
+        "metric_sha256": {"$ref": "#/$defs/sha256"},
+        "value": {"type": "number"},
+        "validity": {"enum": ["in_range", "out_of_range_low", "out_of_range_high"]}
+      }
+    },
+    "typed_exclusion": {
+      "type": "object", "additionalProperties": false,
+      "required": ["reason", "detail"],
+      "properties": {
+        "reason": {"enum": ["identity_mismatch", "metric_missing", "profile_failed", "sidecar_missing"]},
+        "detail": {"type": "string", "minLength": 1, "maxLength": 4096}
+      }
+    },
+    "record_base": {
+      "type": "object",
+      "required": [
+        "sequence", "previous_record_sha256", "schedule_sha256", "record_kind",
+        "epoch", "record_sha256"
+      ],
+      "properties": {
+        "sequence": {"type": "integer", "minimum": 0, "maximum": 4095},
+        "previous_record_sha256": {"$ref": "#/$defs/sha256"},
+        "schedule_sha256": {"$ref": "#/$defs/sha256"},
+        "record_kind": {
+          "enum": [
+            "epoch_open", "attempt_started", "attempt_terminal", "checkpoint",
+            "epoch_closed", "tier1_closed", "trigger_decision", "tier2_activated"
+          ]
+        },
+        "epoch": {"type": "integer", "minimum": 0, "maximum": 479},
+        "record_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "attempt_fields": {
+      "type": "object",
+      "required": [
+        "ordinal", "slot_id", "slot_sha256", "attempt_index", "attempt_id",
+        "retry_of_attempt_id"
+      ],
+      "properties": {
+        "ordinal": {"type": "integer", "minimum": 0, "maximum": 239},
+        "slot_id": {"type": "string", "pattern": "^m6-t[12]-[0-9a-f]{24}$"},
+        "slot_sha256": {"$ref": "#/$defs/sha256"},
+        "attempt_index": {"type": "integer", "minimum": 0, "maximum": 1},
+        "attempt_id": {"$ref": "#/$defs/sha256"},
+        "retry_of_attempt_id": {
+          "oneOf": [{"$ref": "#/$defs/sha256"}, {"type": "null"}]
+        }
+      }
+    },
+    "record": {
+      "oneOf": [
+        {"$ref": "#/$defs/epoch_open_record"},
+        {"$ref": "#/$defs/attempt_started_record"},
+        {"$ref": "#/$defs/attempt_terminal_record"},
+        {"$ref": "#/$defs/checkpoint_record"},
+        {"$ref": "#/$defs/epoch_closed_record"},
+        {"$ref": "#/$defs/tier1_closed_record"},
+        {"$ref": "#/$defs/trigger_decision_record"},
+        {"$ref": "#/$defs/tier2_activated_record"}
+      ]
+    },
+    "epoch_open_record": {
+      "allOf": [
+        {"$ref": "#/$defs/record_base"},
+        {
+          "type": "object",
+          "properties": {"record_kind": {"const": "epoch_open"}},
+          "required": ["record_kind"]
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "attempt_started_record": {
+      "allOf": [
+        {"$ref": "#/$defs/record_base"},
+        {"$ref": "#/$defs/attempt_fields"},
+        {
+          "type": "object",
+          "properties": {
+            "record_kind": {"const": "attempt_started"},
+            "fresh_process_started": {"const": true}
+          },
+          "required": ["record_kind", "fresh_process_started"]
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "attempt_terminal_record": {
+      "allOf": [
+        {"$ref": "#/$defs/record_base"},
+        {"$ref": "#/$defs/attempt_fields"},
+        {
+          "type": "object",
+          "properties": {
+            "record_kind": {"const": "attempt_terminal"},
+            "outcome": {"enum": ["observed", "excluded_typed"]},
+            "cost": {"$ref": "#/$defs/terminal_cost"},
+            "observations": {
+              "type": "array", "maxItems": 55, "uniqueItems": true,
+              "items": {"$ref": "#/$defs/observation"}
+            },
+            "typed_exclusion": {
+              "oneOf": [{"$ref": "#/$defs/typed_exclusion"}, {"type": "null"}]
+            }
+          },
+          "required": ["record_kind", "outcome", "cost", "observations", "typed_exclusion"],
+          "allOf": [
+            {
+              "if": {"properties": {"outcome": {"const": "observed"}}, "required": ["outcome"]},
+              "then": {
+                "properties": {
+                  "observations": {"minItems": 55, "maxItems": 55},
+                  "typed_exclusion": {"type": "null"}
+                }
+              },
+              "else": {
+                "properties": {
+                  "observations": {"maxItems": 0},
+                  "typed_exclusion": {"$ref": "#/$defs/typed_exclusion"}
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "terminal_cost": {
+      "type": "object", "additionalProperties": false,
+      "required": ["fresh_processes", "ncu_replay_passes"],
+      "properties": {
+        "fresh_processes": {"const": 1},
+        "ncu_replay_passes": {"type": "integer", "minimum": 1}
+      }
+    },
+    "checkpoint_record": {
+      "allOf": [
+        {"$ref": "#/$defs/record_base"},
+        {
+          "type": "object",
+          "properties": {
+            "record_kind": {"const": "checkpoint"},
+            "epoch_cost": {"$ref": "#/$defs/cost"},
+            "cumulative_cost": {"$ref": "#/$defs/cost"},
+            "terminal_count": {"type": "integer", "minimum": 0, "maximum": 240},
+            "next_eligible_ordinal": {"type": ["integer", "null"], "minimum": 0, "maximum": 239},
+            "interrupted_attempt_id": {
+              "oneOf": [{"$ref": "#/$defs/sha256"}, {"type": "null"}]
+            }
+          },
+          "required": [
+            "record_kind", "epoch_cost", "cumulative_cost", "terminal_count",
+            "next_eligible_ordinal", "interrupted_attempt_id"
+          ]
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "epoch_closed_record": {
+      "allOf": [
+        {"$ref": "#/$defs/record_base"},
+        {
+          "type": "object",
+          "properties": {"record_kind": {"const": "epoch_closed"}},
+          "required": ["record_kind"]
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "tier1_closed_record": {
+      "allOf": [
+        {"$ref": "#/$defs/record_base"},
+        {
+          "type": "object",
+          "properties": {"record_kind": {"const": "tier1_closed"}},
+          "required": ["record_kind"]
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "trigger_decision_record": {
+      "allOf": [
+        {"$ref": "#/$defs/record_base"},
+        {
+          "type": "object",
+          "properties": {
+            "record_kind": {"const": "trigger_decision"},
+            "cell_id": {"type": "string", "pattern": "^cutlass_successor:"},
+            "cell_identity_sha256": {"$ref": "#/$defs/sha256"},
+            "triggered": {"type": "boolean"},
+            "reason_codes": {
+              "type": "array", "maxItems": 5, "uniqueItems": true,
+              "items": {"enum": [
+                "boundary_proximity", "discrete_multiple_values", "modality_flag",
+                "out_of_range", "single_point_outlier"
+              ]}
+            },
+            "evidence_metric_keys": {
+              "type": "array", "maxItems": 55, "uniqueItems": true,
+              "items": {"type": "string", "minLength": 1}
+            },
+            "decision_sha256": {"$ref": "#/$defs/sha256"}
+          },
+          "required": [
+            "record_kind", "cell_id", "cell_identity_sha256", "triggered",
+            "reason_codes", "evidence_metric_keys", "decision_sha256"
+          ],
+          "allOf": [
+            {
+              "if": {"properties": {"triggered": {"const": true}}, "required": ["triggered"]},
+              "then": {
+                "properties": {
+                  "reason_codes": {"minItems": 1},
+                  "evidence_metric_keys": {"minItems": 1}
+                }
+              },
+              "else": {
+                "properties": {
+                  "reason_codes": {"maxItems": 0},
+                  "evidence_metric_keys": {"maxItems": 0}
+                }
+              }
+            }
+          ]
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "tier2_activated_record": {
+      "allOf": [
+        {"$ref": "#/$defs/record_base"},
+        {
+          "type": "object",
+          "properties": {
+            "record_kind": {"const": "tier2_activated"},
+            "activated_cell_ids": {
+              "type": "array", "maxItems": 3, "uniqueItems": true,
+              "items": {"type": "string", "pattern": "^cutlass_successor:"}
+            },
+            "activated_ordinals": {
+              "type": "array", "maxItems": 30, "uniqueItems": true,
+              "items": {"type": "integer", "minimum": 210, "maximum": 239}
+            }
+          },
+          "required": ["record_kind", "activated_cell_ids", "activated_ordinals"]
+        }
+      ],
+      "unevaluatedProperties": false
+    },
+    "replay_summary": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "record_count", "epochs_opened", "epochs_closed", "current_epoch",
+        "open_attempt_id", "interrupted_attempt_id", "interrupted_attempt_count",
+        "terminal_slots", "tier1_terminal_slots", "tier2_terminal_slots",
+        "next_eligible_ordinal", "tier1_closed", "trigger_decisions_emitted",
+        "triggered_cell_ids", "tier2_activation_emitted", "activated_ordinals",
+        "cumulative_cost", "active_prefix_complete"
+      ],
+      "properties": {
+        "record_count": {"type": "integer", "minimum": 0, "maximum": 4096},
+        "epochs_opened": {"type": "integer", "minimum": 0, "maximum": 480},
+        "epochs_closed": {"type": "integer", "minimum": 0, "maximum": 480},
+        "current_epoch": {"type": ["integer", "null"], "minimum": 0, "maximum": 479},
+        "open_attempt_id": {"oneOf": [{"$ref": "#/$defs/sha256"}, {"type": "null"}]},
+        "interrupted_attempt_id": {"oneOf": [{"$ref": "#/$defs/sha256"}, {"type": "null"}]},
+        "interrupted_attempt_count": {"type": "integer", "minimum": 0, "maximum": 241},
+        "terminal_slots": {"type": "integer", "minimum": 0, "maximum": 240},
+        "tier1_terminal_slots": {"type": "integer", "minimum": 0, "maximum": 210},
+        "tier2_terminal_slots": {"type": "integer", "minimum": 0, "maximum": 30},
+        "next_eligible_ordinal": {"type": ["integer", "null"], "minimum": 0, "maximum": 239},
+        "tier1_closed": {"type": "boolean"},
+        "trigger_decisions_emitted": {"type": "integer", "minimum": 0, "maximum": 3},
+        "triggered_cell_ids": {
+          "type": "array", "maxItems": 3, "uniqueItems": true,
+          "items": {"type": "string", "pattern": "^cutlass_successor:"}
+        },
+        "tier2_activation_emitted": {"type": "boolean"},
+        "activated_ordinals": {
+          "type": "array", "maxItems": 30, "uniqueItems": true,
+          "items": {"type": "integer", "minimum": 210, "maximum": 239}
+        },
+        "cumulative_cost": {"$ref": "#/$defs/cost"},
+        "active_prefix_complete": {"type": "boolean"}
+      }
+    },
+    "claims": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "artifact_scope", "live_dispatch_performed", "publication_authorized",
+        "m6_done_created", "m7_handoff_ready", "hardware_values_are_targets_only"
+      ],
+      "properties": {
+        "artifact_scope": {"const": "offline_contract_only"},
+        "live_dispatch_performed": {"const": false},
+        "publication_authorized": {"const": false},
+        "m6_done_created": {"const": false},
+        "m7_handoff_ready": {"const": false},
+        "hardware_values_are_targets_only": {"const": true}
+      }
+    }
+  }
+}
