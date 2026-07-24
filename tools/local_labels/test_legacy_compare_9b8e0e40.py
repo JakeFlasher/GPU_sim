@@ -27,13 +27,25 @@ _STAGED = (
     "static/staging/sol_execbench_b2l7yo_3/definition.json"
 )
 _HEAD = "a" * 40
-_ORIGINAL_HEAD = "9b8e0e403ec0fc2acc2fcf40dbe3feb31572475a"
-_ORIGINAL_FILE_SHA256 = (
-    "1dfbe3ec5ed19d6dff234616141fbd3c601adc88d20709860055380a47ea5447"
-)
 _ORIGINAL_EXCERPT_SHA256 = (
     "cbc95368ce58e4f7454e4f39a87a85c04fce2baa83546ca5af08eb38025d124c"
 )
+_RECONSTRUCTION_ROOT = (
+    _ROOT
+    / "evidence/round28/preparation_failures/problem-070/"
+    "prep070_reconstruction"
+)
+_RETAINED_EXCERPT = (
+    _RECONSTRUCTION_ROOT / "legacy_comparator_source_excerpt.py.txt"
+)
+_RECONSTRUCTION_RECORD = (
+    _RECONSTRUCTION_ROOT / "runner_refusal_reconstruction.json"
+)
+_SESSION_LOG = (
+    _ROOT
+    / "evidence/round28/preparation_failures/problem-070/session_log.jsonl"
+)
+_EVIDENCE_MANIFEST = _ROOT / "evidence/MANIFEST.sha256"
 _SOURCE_REL = pathlib.Path(legacy.SOURCE_SCRATCH_PATH)
 _STAGED_REL = pathlib.Path(legacy.STAGED_SCRATCH_PATH)
 _EMIT_REL = pathlib.Path(
@@ -169,23 +181,35 @@ def test_tool_import_set_is_exhaustive_and_capture_free():
     assert imported == ["argparse", "datetime", "hashlib", "json", "pathlib", "sys"]
 
 
-def test_excerpt_extraction_matches_original_git_blob():
-    completed = subprocess.run(
-        [
-            "git",
-            "show",
-            f"{_ORIGINAL_HEAD}:tools/local_labels/sm86_capture_chunk.py",
-        ],
-        cwd=_ROOT,
-        capture_output=True,
-        check=True,
-    )
-    blob = completed.stdout
-    excerpt = b"".join(blob.splitlines(keepends=True)[1305:1317])
-    assert _sha(blob) == _ORIGINAL_FILE_SHA256
+def test_retained_excerpt_is_sha_bound_across_reconstruction_evidence():
+    excerpt = _RETAINED_EXCERPT.read_bytes()
     assert _sha(excerpt) == _ORIGINAL_EXCERPT_SHA256
     assert b"def normalized_definition" in excerpt
     assert b"sol_stage_source_mismatch" in excerpt
+
+    reconstruction = json.loads(_RECONSTRUCTION_RECORD.read_bytes())
+    identity = reconstruction["legacy_comparator_identity"]
+    assert identity["source_excerpt_file"] == _RETAINED_EXCERPT.name
+    assert identity["line_span_sha256"] == _ORIGINAL_EXCERPT_SHA256
+    assert identity["line_span"] == [1306, 1317]
+
+    session_rows = [
+        json.loads(line)
+        for line in _SESSION_LOG.read_text(encoding="utf-8").splitlines()
+    ]
+    assert {
+        "artifact": _RETAINED_EXCERPT.name,
+        "event": "reconstruction_record_created",
+        "sha256": _ORIGINAL_EXCERPT_SHA256,
+    } in session_rows
+
+    manifest_entry = (
+        f"{_ORIGINAL_EXCERPT_SHA256}  "
+        f"{_RETAINED_EXCERPT.relative_to(_ROOT).as_posix()}"
+    )
+    assert manifest_entry in _EVIDENCE_MANIFEST.read_text(
+        encoding="utf-8"
+    ).splitlines()
 
 
 def test_end_to_end_record_is_self_clocked_self_hashed_and_exact_argv(tmp_path):
