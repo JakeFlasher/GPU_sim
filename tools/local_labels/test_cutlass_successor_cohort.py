@@ -47,7 +47,19 @@ def test_successor_case_set_is_exact_and_namespaced():
     assert all(case.slug.startswith("vendor_") and case.slug.endswith("_cutlass") for case in cohort.CASES)
 
 
-def test_frozen_reference_rechecks_all_base_and_input_pins():
+def test_frozen_reference_rechecks_all_base_and_input_pins(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    active_registry = ROOT / cohort.FROZEN_REGISTRY_REL
+    assert cohort._sha256_file(active_registry) != cohort.FROZEN_REGISTRY_SHA256
+    real_sha256_file = cohort._sha256_file
+
+    def reject_active_registry_substitution(path: Path) -> str:
+        if path == active_registry:
+            raise AssertionError("active registry substituted for frozen v1 authority")
+        return real_sha256_file(path)
+
+    monkeypatch.setattr(cohort, "_sha256_file", reject_active_registry_substitution)
     frozen = cohort._frozen_reference()
     assert frozen["matrix_file_sha256"] == cohort.FROZEN_MATRIX_SHA256
     assert frozen["matrix_seal_sha256"] == cohort.FROZEN_MATRIX_SEAL

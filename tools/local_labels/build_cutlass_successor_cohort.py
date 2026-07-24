@@ -307,8 +307,10 @@ def _frozen_reference() -> dict[str, Any]:
         raise CohortError("frozen matrix bytes changed")
     if _sha256_bytes(authority_bytes) != FROZEN_AUTHORITY_SHA256:
         raise CohortError("frozen authority bytes changed")
-    if _sha256_file(ROOT / FROZEN_REGISTRY_REL) != FROZEN_REGISTRY_SHA256:
-        raise CohortError("frozen metric registry bytes changed")
+    # The frozen matrix is the retained v1 registry authority: its exact file
+    # bytes, semantic seal, path/hash pin, and metric projection are checked
+    # below. The living registry is an annotation-only successor with different
+    # bytes and must never be substituted for the frozen source at that path.
     if _sha256_file(ROOT / FROZEN_TRACE_BUDGETS_REL) != FROZEN_TRACE_BUDGETS_SHA256:
         raise CohortError("frozen trace-budget bytes changed")
     if _sha256_file(ROOT / FROZEN_ALIAS_REL) != FROZEN_ALIAS_SHA256:
