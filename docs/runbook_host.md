@@ -25,6 +25,58 @@ published `driver <=575.xx` line has not been formally corrected, so driver
 610.43.02 is locally verified outside the published envelope, not claimed as
 official NVBit support.
 
+## Readiness ladder
+
+Do not use “ready” without naming one of these predicates. They are separate
+conjunctions, not a promotion chain: `Pn == true` never proves `Pn+1`.
+
+| Predicate | Required evidence | Current state |
+|---|---|---|
+| P1 `offline-source-ready(bytes)` | Default Rust/Python/SimBench gates plus the capture-focused battery are green for the same bytes; exactly the live host probe is deselected; frozen-v1, durable-v2, and matrix identities close. | **Not established.** Default Python fails collection; the exact focused battery is also red (470 passed, 3 failed, 21 errors), and marker selection is not closed. Historical green receipts apply only to their recorded bytes. |
+| P2 `clean-S-ready(S)` | P1 at clean `HEAD == S`; operator-clean-S live-v1 exists at `inputs/r28_<S8>` with all 122 frozen runnable identities reverified and start/authority/final HEAD equal S; the successor matrix is emitted from it at S with the active registry. | **False.** No current clean-S output set is admitted. |
+| P3 `live-canary-ready(host,S)` | P2; live host probe passes; capture-admitted preflight is fresh within 900 seconds; on-device injection smoke is nonempty and contract-valid; three P0 samples prove persistence enabled and 1350/10501 MHz clocks. | **False / typed pending external.** An artifact or collected probe without a passing verdict is not credit. |
+| P4 `campaign-ready` | P3 immediately before dispatch; campaign lock free; no storage-fault receipt; sufficient retained/staging budget. Supplemental capture also requires the pinned live canary and closed launch-driver/exporter-authority amendments. | **False.** Supplemental dispatch remains prohibited. |
+
+There is no current hardware credit beyond the historical 1/122 canonical
+credit. Clock lock and restore cross the operator privilege boundary; Claude or
+campaign automation must never run these commands. The operator commands are:
+
+```bash
+sudo nvidia-smi -pm 1
+sudo nvidia-smi -lgc 1350
+sudo nvidia-smi -lmc 10501
+# Mandatory restore after the session:
+sudo nvidia-smi -rgc
+sudo nvidia-smi -rmc
+```
+
+Recompute the focused capture portion of P1 with the exact bounded battery:
+
+```bash
+.venv/bin/python -m pytest -q \
+  tools/local_labels/test_campaign_preflight.py \
+  tools/local_labels/test_sm86_capture_matrix.py \
+  tools/local_labels/test_sm86_capture_chunk.py \
+  tools/local_labels/test_parse_ncu_launch_identity.py \
+  tools/local_labels/test_sol_workload_capture_chunk.py \
+  tools/local_labels/test_sol_workload_capture_campaign.py
+```
+
+The result must report exactly one deselected test. A separate `--collect-only
+-q -m hardware_evidence` run over the same six files must identify exactly
+`tools/local_labels/test_campaign_preflight.py::test_environment_probes_ok_on_reference_host`.
+At this revision that marker-selection predicate is not established, so do not
+reuse the historical 685-pass/1-deselection result. Also run the repository-
+default commands from `CLAUDE.md`; a passing focused subset cannot override a
+failing default gate.
+P1 is byte-scoped; record the tested tree identity. P2 must separately record S
+and prove a clean tree. P3 and P4 require fresh live evidence and are never
+inferred from P1/P2.
+
+The authority path is frozen v1 → durable v2 → clean-S live v1 → noncanonical
+successor matrix. Every transition revalidates its predecessor; frozen evidence
+is never rewritten.
+
 Check the live host before a capture:
 
 ```bash

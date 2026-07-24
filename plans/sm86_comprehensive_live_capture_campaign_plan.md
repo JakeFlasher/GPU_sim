@@ -8,6 +8,62 @@ The organizing principle is **contract-transition-first**: land the tracer ASYNC
 
 This is a **DATA-COLLECTION campaign only**. Building the M2 eval-join, per-metric reporter, and baseline rigs is explicitly out of scope. No edits to existing validated code except (a) genuine bug fixes, (b) the sanctioned tracer flip plus its lockstep consumer widening, and (c) the sanctioned `freeze_label_bundle.py` widening (DEC-3); new files (roster JSONs, additive microbench probes, campaign-manifest + exclusion-ledger tools/schemas, SOL shape-adjust wrappers) are allowed.
 
+## Capture readiness predicates (Q805)
+
+Readiness is four distinct, non-promoting predicates. Each predicate is the
+conjunction below; satisfying one never establishes the next one. In
+particular, an offline-green byte set is not evidence that a clean capture
+commit or a hardware-ready host exists.
+
+- **P1 `offline-source-ready(bytes)`** is true only when the repository default
+  verification commands and the capture-focused Python battery are green for
+  the exact tested bytes; the battery explicitly deselects exactly
+  `tools/local_labels/test_campaign_preflight.py::test_environment_probes_ok_on_reference_host`
+  and no other test; and the frozen-v1, durable-v2, and matrix identity-closure
+  checks all pass. P1 is byte-scoped and does not assert a clean commit, live
+  hardware, or admissible capture output.
+- **P2 `clean-S-ready(S)`** is true only when P1 holds for the bytes at a clean
+  `HEAD == S`, the operator-clean-S producer emits live-v1 at the exact
+  `inputs/r28_<S8>` path after verifying all 122 frozen runnable identities,
+  producer start/authority/final HEAD all equal S, and the successor matrix is
+  built from that live authority at S using the active registry. P1 alone does
+  not imply P2.
+- **P3 `live-canary-ready(host,S)`** is true only when P2 holds and the sole
+  hardware probe passes live on that host, a capture-admitted preflight
+  manifest is no more than 900 seconds old, the on-device injection smoke is
+  nonempty and contract-valid, and all three P0 clock samples match the pinned
+  persistence/1350 MHz SM/10501 MHz memory state. Collecting a probe artifact
+  without a passing verdict does not satisfy P3; P2 alone does not imply P3.
+- **P4 `campaign-ready`** is true only when P3 holds immediately before
+  dispatch, the campaign lock is free, no storage-fault receipt exists, and
+  retained/staging budget headroom is sufficient. Supplemental dispatch also
+  requires the pinned live canary and closure of the launch-driver bridge and
+  NCU-exporter authority amendments; until then it remains prohibited. P3
+  alone does not imply P4.
+
+The authority transition is immutable frozen v1 → host-independent durable v2
+→ clean-S live v1 → noncanonical successor matrix. Later stages reverify their
+predecessors and never rewrite frozen bytes. Missing evidence leaves the
+corresponding predicate false/pending; it never inherits truth from an earlier
+predicate.
+
+Clock control remains an operator-only privilege boundary. Automation must
+never run `sudo`; the operator commands are `sudo nvidia-smi -pm 1`,
+`sudo nvidia-smi -lgc 1350`, and `sudo nvidia-smi -lmc 10501`, with mandatory
+restore commands `sudo nvidia-smi -rgc` and `sudo nvidia-smi -rmc`.
+
+**Status at this plan revision:** P1 is not established. The latest
+repository-default Python run stops during collection on the missing
+`_permit_offline_successor_build` test helper. The exact six-file focused
+capture battery is also red (470 passed, 3 failed, 21 errors), and the named
+live-host test is not currently selected by the `hardware_evidence` marker
+query. The older 685-pass/1-deselection receipt is historical evidence for its
+reviewed bytes, not current-byte credit. P2 is false because no current clean-S
+live-v1/successor output set has been admitted. P3 and P4 are typed pending
+external and therefore false. There is no current hardware credit beyond the
+historical 1/122 canonical credit, and no hardware or campaign-readiness claim
+follows from any green focused subset.
+
 ## Acceptance Criteria
 
 The `AC-*` items are the current RLCR completion gates. All accuracy/coverage claims are against real-GPU NCU under the pinned protocol v2.1; NCU values are targets/validation only and never enter model or card inputs (Rule 1).
