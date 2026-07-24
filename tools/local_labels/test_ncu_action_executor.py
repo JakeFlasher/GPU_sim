@@ -60,6 +60,15 @@ elif operation == \"--sleep\":
     time.sleep(float(arguments[0]))
 elif operation == \"--flood\":
     os.write(1, b\"x\" * int(arguments[0]))
+elif operation == \"--read-fds\":
+    Path = __import__(\"pathlib\").Path
+    print(json.dumps([Path(value).read_bytes().decode(\"utf-8\") for value in arguments]))
+elif operation == \"--mutate-report-restore\":
+    Path = __import__(\"pathlib\").Path
+    target = Path(arguments[0])
+    payload = target.read_bytes()
+    target.write_bytes(b\"mutated report\")
+    target.write_bytes(payload)
 elif operation == \"--mutate-restore\":
     Path = __import__(\"pathlib\").Path
     target = Path(arguments[0])
@@ -245,6 +254,414 @@ def test_authorized_action_returns_ordinary_nonzero_result(tmp_path: Path) -> No
     )
 
 
+def test_retained_report_and_auxiliary_use_exact_proc_paths_and_pass_fds(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    ncu = _fixture_ncu(tmp_path / "ncu")
+    report_path = tmp_path / "report.ncu-rep"
+    report_path.write_bytes(b"report bytes")
+    report_path.chmod(0o444)
+    auxiliary_path = tmp_path / "auxiliary.txt"
+    auxiliary_path.write_bytes(b"auxiliary bytes")
+    auxiliary = os.open(auxiliary_path, os.O_RDONLY)
+    observed = []
+    original_popen = executor.subprocess.Popen
+
+    def popen(*args, **kwargs):
+        observed.append((tuple(args[0]), tuple(kwargs["pass_fds"])))
+        return original_popen(*args, **kwargs)
+
+    monkeypatch.setattr(executor.subprocess, "Popen", popen)
+    try:
+        with immutable.open_retained_regular(report_path) as report:
+            report_descriptor = report.descriptor
+            result = executor.execute_ncu_action(
+                _identity(ncu),
+                [
+                    "--read-fds",
+                    report.proc_path,
+                    executor.proc_fd_path(auxiliary),
+                ],
+                timeout_seconds=2,
+                retained_report=report,
+                auxiliary_descriptors=(auxiliary,),
+            )
+            assert json.loads(result.stdout) == [
+                "report bytes", "auxiliary bytes",
+            ]
+            assert observed[0][0][1:] == ("--version",)
+            assert observed[0][1] == (observed[0][1][0],)
+            executable_descriptor = observed[0][1][0]
+            assert observed[1][0] == (
+                f"/proc/self/fd/{executable_descriptor}",
+                "--read-fds",
+                f"/proc/self/fd/{report_descriptor}",
+                f"/proc/self/fd/{auxiliary}",
+            )
+            assert observed[1][1] == (
+                executable_descriptor, report_descriptor, auxiliary,
+            )
+            os.fstat(report_descriptor)
+            os.fstat(auxiliary)
+    finally:
+        os.close(auxiliary)
+
+
+@pytest.mark.parametrize(
+    "auxiliary_descriptors", [None, "3", (True,), (2,), (10**1000,)],
+)
+def test_rejects_invalid_auxiliary_descriptor_declaration_before_open(
+    auxiliary_descriptors,
+) -> None:
+    expected = executor.ExpectedNcuIdentity("/missing/ncu", "a" * 64, _VERSION)
+    with _assert_code(executor.NCU_ACTION_REQUEST_INVALID):
+        executor.execute_ncu_action(
+            expected,
+            ["--echo"],
+            timeout_seconds=1,
+            auxiliary_descriptors=auxiliary_descriptors,
+        )
+
+
+def test_proc_fd_path_rejects_oversized_descriptor() -> None:
+    with _assert_code(executor.NCU_ACTION_REQUEST_INVALID):
+        executor.proc_fd_path(10**1000)
+
+
+def test_rejects_closed_or_wrong_retained_report_before_open(
+    tmp_path: Path,
+) -> None:
+    expected = executor.ExpectedNcuIdentity("/missing/ncu", "a" * 64, _VERSION)
+    with _assert_code(executor.NCU_ACTION_REQUEST_INVALID):
+        executor.execute_ncu_action(
+            expected,
+            ["--echo"],
+            timeout_seconds=1,
+            retained_report=object(),
+        )
+    path = tmp_path / "report.ncu-rep"
+    path.write_bytes(b"report")
+    report = immutable.open_retained_regular(path)
+    proc_path = report.proc_path
+    report.close()
+    with _assert_code(executor.NCU_ACTION_REQUEST_INVALID):
+        executor.execute_ncu_action(
+            expected,
+            ["--echo", proc_path],
+            timeout_seconds=1,
+            retained_report=report,
+        )
+
+
+def test_rejects_closed_duplicate_and_report_auxiliary_descriptors(
+    tmp_path: Path,
+) -> None:
+    expected = executor.ExpectedNcuIdentity("/missing/ncu", "a" * 64, _VERSION)
+    auxiliary_path = tmp_path / "auxiliary.txt"
+    auxiliary_path.write_bytes(b"auxiliary")
+    descriptor = os.open(auxiliary_path, os.O_RDONLY)
+    os.close(descriptor)
+    with _assert_code(executor.NCU_ACTION_REQUEST_INVALID):
+        executor.execute_ncu_action(
+            expected,
+            ["--echo", f"/proc/self/fd/{descriptor}"],
+            timeout_seconds=1,
+            auxiliary_descriptors=(descriptor,),
+        )
+
+    descriptor = os.open(auxiliary_path, os.O_RDONLY)
+    try:
+        with _assert_code(executor.NCU_ACTION_REQUEST_INVALID):
+            executor.execute_ncu_action(
+                expected,
+                ["--echo", executor.proc_fd_path(descriptor)],
+                timeout_seconds=1,
+                auxiliary_descriptors=(descriptor, descriptor),
+            )
+        report_path = tmp_path / "report.ncu-rep"
+        report_path.write_bytes(b"report")
+        with immutable.open_retained_regular(report_path) as report:
+            with _assert_code(executor.NCU_ACTION_REQUEST_INVALID):
+                executor.execute_ncu_action(
+                    expected,
+                    ["--echo", report.proc_path],
+                    timeout_seconds=1,
+                    retained_report=report,
+                    auxiliary_descriptors=(report.descriptor,),
+                )
+    finally:
+        os.close(descriptor)
+
+
+@pytest.mark.parametrize(
+    "argument",
+    [
+        "/proc/self/fd/{descriptor}",
+        "/proc/self/fd/0{descriptor}",
+        "/proc/self/fd/{descriptor}/",
+        "/proc/{pid}/fd/{descriptor}",
+        "prefix=/proc/self/fd/{descriptor}",
+    ],
+)
+def test_rejects_unregistered_or_noncanonical_proc_fd_argument(
+    tmp_path: Path, argument: str,
+) -> None:
+    path = tmp_path / "auxiliary.txt"
+    path.write_bytes(b"auxiliary")
+    descriptor = os.open(path, os.O_RDONLY)
+    expected = executor.ExpectedNcuIdentity("/missing/ncu", "a" * 64, _VERSION)
+    try:
+        rendered = argument.format(descriptor=descriptor, pid=os.getpid())
+        declared = () if argument == "/proc/self/fd/{descriptor}" else (descriptor,)
+        with _assert_code(executor.NCU_ACTION_REQUEST_INVALID):
+            executor.execute_ncu_action(
+                expected,
+                ["--echo", rendered],
+                timeout_seconds=1,
+                auxiliary_descriptors=declared,
+            )
+    finally:
+        os.close(descriptor)
+
+
+def test_retained_report_drift_after_probe_prevents_action(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    ncu = _fixture_ncu(tmp_path / "ncu")
+    report_path = tmp_path / "report.ncu-rep"
+    report_path.write_bytes(b"report bytes")
+    writer = os.open(report_path, os.O_WRONLY)
+    report_path.chmod(0o444)
+    report = immutable.open_retained_regular(report_path)
+    original = executor._run_bounded
+    calls = 0
+
+    def run(*args, **kwargs):
+        nonlocal calls
+        result = original(*args, **kwargs)
+        calls += 1
+        if calls == 1:
+            os.pwrite(writer, b"changed bytes", 0)
+        return result
+
+    monkeypatch.setattr(executor, "_run_bounded", run)
+    try:
+        with _assert_code(executor.NCU_ACTION_INPUT_IDENTITY_INVALID):
+            executor.execute_ncu_action(
+                _identity(ncu),
+                ["--read-fds", report.proc_path],
+                timeout_seconds=2,
+                retained_report=report,
+            )
+        assert calls == 1
+    finally:
+        report.close()
+        os.close(writer)
+
+
+def test_real_in_action_report_aba_byte_restore_is_detected(
+    tmp_path: Path,
+) -> None:
+    ncu = _fixture_ncu(tmp_path / "ncu")
+    report_path = tmp_path / "report.ncu-rep"
+    report_path.write_bytes(b"report bytes")
+    report = immutable.open_retained_regular(report_path)
+    try:
+        with _assert_code(executor.NCU_ACTION_INPUT_IDENTITY_INVALID):
+            executor.execute_ncu_action(
+                _identity(ncu),
+                ["--mutate-report-restore", report.proc_path],
+                timeout_seconds=2,
+                retained_report=report,
+            )
+    finally:
+        report.close()
+
+
+@pytest.mark.parametrize("pending", ["ordinary", "timeout"])
+def test_action_failure_cannot_mask_report_identity_drift(
+    tmp_path: Path, monkeypatch, pending: str,
+) -> None:
+    ncu = _fixture_ncu(tmp_path / "ncu")
+    report_path = tmp_path / "report.ncu-rep"
+    report_path.write_bytes(b"report bytes")
+    writer = os.open(report_path, os.O_WRONLY)
+    report_path.chmod(0o444)
+    report = immutable.open_retained_regular(report_path)
+    original = executor._run_bounded
+    calls = 0
+
+    def run(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return original(*args, **kwargs)
+        os.pwrite(writer, b"changed bytes", 0)
+        if pending == "timeout":
+            raise executor.NcuActionExecutorError(
+                executor.NCU_ACTION_TIMEOUT, "synthetic timeout",
+            )
+        return executor.NcuActionResult(7, b"", b"action failed")
+
+    monkeypatch.setattr(executor, "_run_bounded", run)
+    try:
+        with _assert_code(executor.NCU_ACTION_INPUT_IDENTITY_INVALID):
+            executor.execute_ncu_action(
+                _identity(ncu),
+                ["--read-fds", report.proc_path],
+                timeout_seconds=2,
+                retained_report=report,
+            )
+        assert calls == 2
+    finally:
+        report.close()
+        os.close(writer)
+
+
+def test_untyped_boundary_failure_cannot_mask_report_identity_drift(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    ncu = _fixture_ncu(tmp_path / "ncu")
+    report_path = tmp_path / "report.ncu-rep"
+    report_path.write_bytes(b"report bytes")
+    writer = os.open(report_path, os.O_WRONLY)
+    report_path.chmod(0o444)
+    report = immutable.open_retained_regular(report_path)
+    original = executor._run_bounded
+    calls = 0
+
+    def run(*args, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            return original(*args, **kwargs)
+        os.pwrite(writer, b"changed bytes", 0)
+        raise OSError("synthetic wait failure")
+
+    monkeypatch.setattr(executor, "_run_bounded", run)
+    try:
+        with _assert_code(executor.NCU_ACTION_INPUT_IDENTITY_INVALID) as caught:
+            executor.execute_ncu_action(
+                _identity(ncu),
+                ["--read-fds", report.proc_path],
+                timeout_seconds=2,
+                retained_report=report,
+            )
+        assert isinstance(caught.value.__cause__, OSError)
+        assert calls == 2
+    finally:
+        report.close()
+        os.close(writer)
+
+
+def test_executable_identity_precedes_report_identity_when_both_drift(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    ncu = _fixture_ncu(tmp_path / "ncu")
+    report_path = tmp_path / "report.ncu-rep"
+    report_path.write_bytes(b"report bytes")
+    writer = os.open(report_path, os.O_WRONLY)
+    report_path.chmod(0o444)
+    report = immutable.open_retained_regular(report_path)
+    original = executor._run_bounded
+    calls = 0
+
+    def run(*args, **kwargs):
+        nonlocal calls
+        result = original(*args, **kwargs)
+        calls += 1
+        if calls == 2:
+            ncu.chmod(0o755)
+            ncu.write_bytes(b"mutated executable")
+            ncu.chmod(0o555)
+            os.pwrite(writer, b"changed bytes", 0)
+        return result
+
+    monkeypatch.setattr(executor, "_run_bounded", run)
+    try:
+        with _assert_code(executor.NCU_EXECUTABLE_IDENTITY_INVALID) as caught:
+            executor.execute_ncu_action(
+                _identity(ncu),
+                ["--read-fds", report.proc_path],
+                timeout_seconds=2,
+                retained_report=report,
+            )
+        assert any(
+            executor.NCU_ACTION_INPUT_IDENTITY_INVALID in note
+            for note in getattr(caught.value, "__notes__", [])
+        )
+    finally:
+        report.close()
+        os.close(writer)
+
+
+def test_auxiliary_descriptor_identity_drift_after_probe_prevents_action(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    ncu = _fixture_ncu(tmp_path / "ncu")
+    first = tmp_path / "first.txt"
+    second = tmp_path / "second.txt"
+    first.write_bytes(b"first")
+    second.write_bytes(b"second")
+    auxiliary = os.open(first, os.O_RDONLY)
+    original = executor._run_bounded
+    calls = 0
+
+    def run(*args, **kwargs):
+        nonlocal calls
+        result = original(*args, **kwargs)
+        calls += 1
+        if calls == 1:
+            replacement = os.open(second, os.O_RDONLY)
+            try:
+                os.dup2(replacement, auxiliary)
+            finally:
+                if replacement != auxiliary:
+                    os.close(replacement)
+        return result
+
+    monkeypatch.setattr(executor, "_run_bounded", run)
+    try:
+        with _assert_code(executor.NCU_ACTION_INPUT_IDENTITY_INVALID):
+            executor.execute_ncu_action(
+                _identity(ncu),
+                ["--read-fds", executor.proc_fd_path(auxiliary)],
+                timeout_seconds=2,
+                auxiliary_descriptors=(auxiliary,),
+            )
+        assert calls == 1
+    finally:
+        os.close(auxiliary)
+
+
+def test_borrowed_descriptors_remain_open_after_executor_failure(
+    tmp_path: Path,
+) -> None:
+    ncu = _fixture_ncu(tmp_path / "ncu")
+    report_path = tmp_path / "report.ncu-rep"
+    report_path.write_bytes(b"report bytes")
+    auxiliary_path = tmp_path / "auxiliary.txt"
+    auxiliary_path.write_bytes(b"auxiliary bytes")
+    auxiliary = os.open(auxiliary_path, os.O_RDONLY)
+    try:
+        with immutable.open_retained_regular(report_path) as report:
+            with _assert_code(executor.NCU_VERSION_LINE_MISMATCH):
+                executor.execute_ncu_action(
+                    _identity(ncu, version="Version 2026.1.0.1 (different)"),
+                    [
+                        "--read-fds", report.proc_path,
+                        executor.proc_fd_path(auxiliary),
+                    ],
+                    timeout_seconds=2,
+                    retained_report=report,
+                    auxiliary_descriptors=(auxiliary,),
+                )
+            os.fstat(report.descriptor)
+            os.fstat(auxiliary)
+    finally:
+        os.close(auxiliary)
+
+
 @pytest.mark.parametrize(
     "identity",
     [
@@ -415,12 +832,12 @@ def test_version_semantic_failure_cannot_mask_late_identity_drift(
     monkeypatch.setattr(executor, "_run_bounded", lambda *_args, **_kwargs: probe)
     original_reverify = executor._reverify
 
-    def reverify(retained, *, pending=None):
+    def reverify(retained, borrowed, *, pending=None):
         if pending is not None:
             ncu.chmod(0o755)
             ncu.write_bytes(b"late mutation")
             ncu.chmod(0o555)
-        return original_reverify(retained, pending=pending)
+        return original_reverify(retained, borrowed, pending=pending)
 
     monkeypatch.setattr(executor, "_reverify", reverify)
     with _assert_code(executor.NCU_EXECUTABLE_IDENTITY_INVALID):

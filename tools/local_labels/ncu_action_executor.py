@@ -12,6 +12,7 @@ import os
 import re
 import selectors
 import signal
+import stat
 import subprocess
 import time
 from collections.abc import Sequence
@@ -25,6 +26,7 @@ from tools.local_labels import immutable_artifact as immutable
 NCU_IDENTITY_INPUT_INVALID = "NCU_IDENTITY_INPUT_INVALID"
 NCU_ACTION_REQUEST_INVALID = "NCU_ACTION_REQUEST_INVALID"
 NCU_EXECUTABLE_IDENTITY_INVALID = "NCU_EXECUTABLE_IDENTITY_INVALID"
+NCU_ACTION_INPUT_IDENTITY_INVALID = "NCU_ACTION_INPUT_IDENTITY_INVALID"
 NCU_VERSION_PROBE_FAILED = "NCU_VERSION_PROBE_FAILED"
 NCU_VERSION_LINE_MISMATCH = "NCU_VERSION_LINE_MISMATCH"
 NCU_ACTION_LAUNCH_FAILED = "NCU_ACTION_LAUNCH_FAILED"
@@ -39,6 +41,7 @@ _MAX_ARGUMENT_BYTES = 1024 * 1024
 _MAX_VERSION_OUTPUT_BYTES = 1024 * 1024
 _MAX_ACTION_OUTPUT_BYTES = 64 * 1024 * 1024
 _MAX_TIMEOUT_SECONDS = 24 * 60 * 60
+_MAX_DESCRIPTOR = (1 << 31) - 1
 _VERSION_TIMEOUT_SECONDS = 30
 _TERMINATION_GRACE_SECONDS = 1
 _IO_CHUNK_BYTES = 64 * 1024
@@ -58,6 +61,14 @@ class NcuActionResult:
     returncode: int
     stdout: bytes
     stderr: bytes
+
+
+@dataclass(frozen=True)
+class _BorrowedActionDescriptors:
+    report: immutable.RetainedRegular | None
+    inherited: tuple[int, ...]
+    auxiliary: tuple[int, ...]
+    auxiliary_identities: tuple[tuple[int, int, int], ...]
 
 
 class NcuActionExecutorError(RuntimeError):
@@ -218,6 +229,130 @@ def _validate_action(
             f"timeout_seconds must be finite and in (0, {_MAX_TIMEOUT_SECONDS}]",
         )
     return tuple(action)
+
+
+def _descriptor_identity(descriptor: int) -> tuple[int, int, int]:
+    try:
+        metadata = os.fstat(descriptor)
+    except (OSError, OverflowError) as exc:
+        raise NcuActionExecutorError(
+            NCU_ACTION_REQUEST_INVALID,
+            "borrowed descriptor is not an open platform descriptor",
+        ) from exc
+    return metadata.st_dev, metadata.st_ino, stat.S_IFMT(metadata.st_mode)
+
+
+def proc_fd_path(descriptor: int) -> str:
+    """Return the canonical child-visible path for one open borrowed descriptor."""
+
+    if (
+        type(descriptor) is not int
+        or not 3 <= descriptor <= _MAX_DESCRIPTOR
+    ):
+        _fail(
+            NCU_ACTION_REQUEST_INVALID,
+            "borrowed descriptor is not an integer greater than stderr",
+        )
+    _descriptor_identity(descriptor)
+    return f"/proc/self/fd/{descriptor}"
+
+
+def _validate_borrowed_descriptors(
+    action: tuple[str, ...],
+    retained_report: immutable.RetainedRegular | None,
+    auxiliary_descriptors: Sequence[int],
+) -> _BorrowedActionDescriptors:
+    if retained_report is not None and type(retained_report) is not immutable.RetainedRegular:
+        _fail(
+            NCU_ACTION_REQUEST_INVALID,
+            "retained_report is not an exact retained regular-file capability",
+        )
+    if (
+        isinstance(auxiliary_descriptors, (str, bytes))
+        or not isinstance(auxiliary_descriptors, Sequence)
+    ):
+        _fail(
+            NCU_ACTION_REQUEST_INVALID,
+            "auxiliary_descriptors is not a sequence of integers",
+        )
+    try:
+        auxiliary_count = len(auxiliary_descriptors)
+    except Exception as exc:
+        raise NcuActionExecutorError(
+            NCU_ACTION_REQUEST_INVALID,
+            f"auxiliary descriptor count is unavailable: {exc}",
+        ) from exc
+    if auxiliary_count > _MAX_ARGUMENTS:
+        _fail(
+            NCU_ACTION_REQUEST_INVALID,
+            f"auxiliary descriptor count exceeds {_MAX_ARGUMENTS}",
+        )
+    auxiliary: list[int] = []
+    identities: list[tuple[int, int, int]] = []
+    for index in range(auxiliary_count):
+        try:
+            descriptor = auxiliary_descriptors[index]
+        except Exception as exc:
+            raise NcuActionExecutorError(
+                NCU_ACTION_REQUEST_INVALID,
+                f"auxiliary descriptor {index} is unavailable: {exc}",
+            ) from exc
+        if (
+            type(descriptor) is not int
+            or not 3 <= descriptor <= _MAX_DESCRIPTOR
+        ):
+            _fail(
+                NCU_ACTION_REQUEST_INVALID,
+                f"auxiliary descriptor {index} is not an integer greater than stderr",
+            )
+        auxiliary.append(descriptor)
+        identities.append(_descriptor_identity(descriptor))
+    if len(set(auxiliary)) != len(auxiliary):
+        _fail(NCU_ACTION_REQUEST_INVALID, "auxiliary descriptors are not unique")
+
+    report_descriptor: int | None = None
+    if retained_report is not None:
+        try:
+            report_descriptor = retained_report.descriptor
+        except immutable.ImmutableArtifactError as exc:
+            raise NcuActionExecutorError(
+                NCU_ACTION_REQUEST_INVALID,
+                f"retained report descriptor is unavailable: {exc}",
+            ) from exc
+        if not 3 <= report_descriptor <= _MAX_DESCRIPTOR:
+            _fail(
+                NCU_ACTION_REQUEST_INVALID,
+                "retained report descriptor is not greater than stderr",
+            )
+        if report_descriptor in auxiliary:
+            _fail(
+                NCU_ACTION_REQUEST_INVALID,
+                "retained report descriptor is duplicated as an auxiliary",
+            )
+
+    inherited = (
+        (() if report_descriptor is None else (report_descriptor,))
+        + tuple(auxiliary)
+    )
+    registered_paths = {f"/proc/self/fd/{descriptor}" for descriptor in inherited}
+    for argument in action:
+        if "/proc/self/fd/" in argument and argument not in registered_paths:
+            _fail(
+                NCU_ACTION_REQUEST_INVALID,
+                f"action contains an unregistered or noncanonical descriptor path: {argument!r}",
+            )
+    for path in registered_paths:
+        if action.count(path) != 1:
+            _fail(
+                NCU_ACTION_REQUEST_INVALID,
+                f"borrowed descriptor path must occur exactly once: {path}",
+            )
+    return _BorrowedActionDescriptors(
+        retained_report,
+        inherited,
+        tuple(auxiliary),
+        tuple(identities),
+    )
 
 
 _ACTION_ENVIRONMENT_ITEMS = (
@@ -389,6 +524,7 @@ def _run_bounded(
     descriptor: int,
     arguments: tuple[str, ...],
     *,
+    inherited_descriptors: tuple[int, ...] = (),
     timeout_seconds: float,
     max_output_bytes: int,
     timeout_code: str,
@@ -402,7 +538,7 @@ def _run_bounded(
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             env=ncu_action_environment(),
-            pass_fds=(descriptor,),
+            pass_fds=(descriptor, *inherited_descriptors),
             start_new_session=True,
         )
     except (OSError, ValueError) as exc:
@@ -432,26 +568,82 @@ def _identity_error(detail: str, cause: BaseException) -> NcuActionExecutorError
     )
 
 
+def _input_identity_error(
+    detail: str, cause: BaseException,
+) -> NcuActionExecutorError:
+    return NcuActionExecutorError(
+        NCU_ACTION_INPUT_IDENTITY_INVALID, f"{detail}: {cause}"
+    )
+
+
+def _verify_auxiliary_descriptors(
+    borrowed: _BorrowedActionDescriptors,
+) -> None:
+    for descriptor, expected in zip(
+        borrowed.auxiliary, borrowed.auxiliary_identities, strict=True,
+    ):
+        try:
+            observed = os.fstat(descriptor)
+        except OSError as exc:
+            raise _input_identity_error(
+                f"auxiliary descriptor {descriptor} is no longer open", exc,
+            ) from exc
+        identity = (
+            observed.st_dev,
+            observed.st_ino,
+            stat.S_IFMT(observed.st_mode),
+        )
+        if identity != expected:
+            cause = RuntimeError(
+                f"expected={expected!r}, observed={identity!r}"
+            )
+            raise _input_identity_error(
+                f"auxiliary descriptor {descriptor} changed identity", cause,
+            ) from cause
+
+
 def _reverify(
     retained: immutable.RetainedExecutable,
+    borrowed: _BorrowedActionDescriptors,
     *,
-    pending: NcuActionExecutorError | None = None,
+    pending: BaseException | None = None,
 ) -> None:
+    failures: list[tuple[NcuActionExecutorError, BaseException]] = []
     try:
         retained.verify_unchanged()
     except (OSError, immutable.ImmutableArtifactError) as exc:
-        error = _identity_error("retained executable changed", exc)
+        failures.append((_identity_error("retained executable changed", exc), exc))
+    if borrowed.report is not None:
+        try:
+            borrowed.report.verify_unchanged()
+        except (OSError, immutable.ImmutableArtifactError) as exc:
+            failures.append((
+                _input_identity_error("retained report changed", exc), exc,
+            ))
+    try:
+        _verify_auxiliary_descriptors(borrowed)
+    except NcuActionExecutorError as exc:
+        failures.append((exc, exc.__cause__ or exc))
+    if failures:
+        primary, cause = failures[0]
+        for secondary, _secondary_cause in failures[1:]:
+            try:
+                primary.add_note(f"additional identity failure: {secondary}")
+            except (AttributeError, TypeError):
+                pass
         if pending is not None:
-            raise error from pending
-        raise error from exc
+            raise primary from pending
+        raise primary from cause
     if pending is not None:
         raise pending
 
 
 def _run_and_reverify(
     retained: immutable.RetainedExecutable,
+    borrowed: _BorrowedActionDescriptors,
     arguments: tuple[str, ...],
     *,
+    inherited_descriptors: tuple[int, ...] = (),
     timeout_seconds: float,
     max_output_bytes: int,
     timeout_code: str,
@@ -461,15 +653,16 @@ def _run_and_reverify(
         result = _run_bounded(
             retained.descriptor,
             arguments,
+            inherited_descriptors=inherited_descriptors,
             timeout_seconds=timeout_seconds,
             max_output_bytes=max_output_bytes,
             timeout_code=timeout_code,
             launch_code=launch_code,
         )
-    except NcuActionExecutorError as exc:
-        _reverify(retained, pending=exc)
+    except BaseException as exc:
+        _reverify(retained, borrowed, pending=exc)
         raise AssertionError("unreachable")
-    _reverify(retained)
+    _reverify(retained, borrowed)
     return result
 
 
@@ -478,6 +671,7 @@ def _execute_opened(
     expected: ExpectedNcuIdentity,
     action: tuple[str, ...],
     timeout_seconds: float,
+    borrowed: _BorrowedActionDescriptors,
 ) -> NcuActionResult:
     if str(retained.path) != expected.resolved_path:
         _fail(
@@ -504,8 +698,10 @@ def _execute_opened(
             NCU_EXECUTABLE_IDENTITY_INVALID,
             "retained executable is writable by the capture process",
         )
+    _reverify(retained, borrowed)
     probe = _run_and_reverify(
         retained,
+        borrowed,
         ("--version",),
         timeout_seconds=_VERSION_TIMEOUT_SECONDS,
         max_output_bytes=_MAX_VERSION_OUTPUT_BYTES,
@@ -515,6 +711,7 @@ def _execute_opened(
     if probe.returncode != 0:
         _reverify(
             retained,
+            borrowed,
             pending=NcuActionExecutorError(
                 NCU_VERSION_PROBE_FAILED,
                 f"retained NCU --version exited {probe.returncode}",
@@ -529,15 +726,18 @@ def _execute_opened(
     if len(version_lines) != 1 or version_lines[0] != expected.version_line:
         _reverify(
             retained,
+            borrowed,
             pending=NcuActionExecutorError(
                 NCU_VERSION_LINE_MISMATCH,
                 "retained NCU version line differs from independent authority",
             ),
         )
-    _reverify(retained)
+    _reverify(retained, borrowed)
     return _run_and_reverify(
         retained,
+        borrowed,
         action,
+        inherited_descriptors=borrowed.inherited,
         timeout_seconds=timeout_seconds,
         max_output_bytes=_MAX_ACTION_OUTPUT_BYTES,
         timeout_code=NCU_ACTION_TIMEOUT,
@@ -550,17 +750,24 @@ def execute_ncu_action(
     arguments: Sequence[str],
     *,
     timeout_seconds: float,
+    retained_report: immutable.RetainedRegular | None = None,
+    auxiliary_descriptors: Sequence[int] = (),
 ) -> NcuActionResult:
-    """Run one bounded NCU action through an independently authorized inode."""
+    """Run one bounded NCU action through independently retained capabilities."""
     path = _validate_expected(expected)
     action = _validate_action(arguments, timeout_seconds)
+    borrowed = _validate_borrowed_descriptors(
+        action, retained_report, auxiliary_descriptors,
+    )
     try:
         retained = immutable.open_retained_executable(path)
     except (OSError, immutable.ImmutableArtifactError) as exc:
         raise _identity_error("cannot retain expected executable", exc) from exc
 
     try:
-        result = _execute_opened(retained, expected, action, timeout_seconds)
+        result = _execute_opened(
+            retained, expected, action, timeout_seconds, borrowed,
+        )
     except BaseException as active_error:
         try:
             retained.close()
