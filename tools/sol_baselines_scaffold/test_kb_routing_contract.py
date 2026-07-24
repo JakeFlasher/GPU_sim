@@ -95,9 +95,19 @@ def test_retired_measurement_skill_is_labeled_as_non_authoritative() -> None:
 
 
 def test_only_unique_sol_authoring_tools_remain() -> None:
-    files = {
+    root_files = {
         path.name
         for path in (ROOT / "tools/sol_kb").iterdir()
         if path.is_file() and path.suffix in {".py", ".yaml"}
     }
-    assert files == {"generate_dossiers.py", "generate_patterns.py", "lint_cards.py"}
+    test_files = {name for name in root_files if name.startswith("test_")}
+    assert test_files == {
+        "test_canonical_router_parity.py",
+        "test_generate_dossiers.py",
+        "test_lint_cards.py",
+    }
+    assert root_files - test_files == {
+        "generate_dossiers.py",
+        "generate_patterns.py",
+        "lint_cards.py",
+    }
