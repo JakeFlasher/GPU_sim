@@ -7,9 +7,11 @@ from pathlib import Path
 
 import pytest
 
+from tools.local_labels import build_preserved_binaries as preserved_builder
 from tools.local_labels.build_preserved_binaries import (
     MANIFEST_REL,
     MARKDOWN_REL,
+    PreservationPrerequisiteError,
     PreservationValidationError,
     _safe_repo_relative,
     build_output_bytes,
@@ -29,8 +31,15 @@ from tools.local_labels.protected_paths import ProtectedPathError
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
+def _committed_bytes() -> tuple[bytes, bytes]:
+    return (
+        (REPO_ROOT / MANIFEST_REL).read_bytes(),
+        (REPO_ROOT / MARKDOWN_REL).read_bytes(),
+    )
+
+
 def _generated() -> tuple[dict, str]:
-    manifest_bytes, markdown_bytes = build_output_bytes(repo_root=REPO_ROOT)
+    manifest_bytes, markdown_bytes = _committed_bytes()
     return json.loads(manifest_bytes), markdown_bytes.decode("utf-8")
 
 
@@ -87,23 +96,34 @@ def test_only_conv2d_and_gemm_receive_local_source_attribution() -> None:
     )
 
 
-def test_markdown_regeneration_is_byte_deterministic_and_exactly_fifteen_rows() -> None:
-    first_manifest, first_markdown = build_output_bytes(repo_root=REPO_ROOT)
-    second_manifest, second_markdown = build_output_bytes(repo_root=REPO_ROOT)
-    assert (first_manifest, first_markdown) == (second_manifest, second_markdown)
-    text = first_markdown.decode("utf-8")
+def test_committed_markdown_is_exactly_fifteen_rows() -> None:
+    _manifest_bytes, markdown_bytes = _committed_bytes()
+    text = markdown_bytes.decode("utf-8")
     assert text.startswith("# Preserved portable LCD binaries\n\n")
     assert text.endswith("|\n")
     assert sum(line.startswith("| `workloads/") for line in text.splitlines()) == 15
     assert "<br>" in text
 
 
+@pytest.mark.campaign_evidence
+def test_committed_preserved_authorities_are_exact_deterministic_rebuild() -> None:
+    first = build_output_bytes(repo_root=REPO_ROOT)
+    second = build_output_bytes(repo_root=REPO_ROOT)
+    assert first == second == _committed_bytes()
+
+
 def test_explicit_generation_writes_only_paired_external_outputs(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     manifest_out = tmp_path / "manifest.json"
     markdown_out = tmp_path / "manifest.md"
-    expected = build_output_bytes(repo_root=REPO_ROOT)
+    expected = _committed_bytes()
+    monkeypatch.setattr(
+        preserved_builder,
+        "build_output_bytes",
+        lambda **_kwargs: expected,
+    )
     assert emit_outputs(
         repo_root=REPO_ROOT,
         manifest_out=manifest_out,
@@ -120,9 +140,34 @@ def test_explicit_generation_writes_only_paired_external_outputs(
         )
 
 
-def test_canonical_generation_refuses_the_primary_worktree() -> None:
+def test_canonical_generation_refuses_the_primary_worktree(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        preserved_builder,
+        "build_output_bytes",
+        lambda **_kwargs: _committed_bytes(),
+    )
     with pytest.raises(PreservationValidationError, match="detached linked C1"):
         emit_outputs(repo_root=REPO_ROOT, manifest_out=None, markdown_out=None)
+
+
+def test_generation_fails_closed_when_source_baseline_is_unavailable(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class MissingCommit:
+        returncode = 1
+
+    monkeypatch.setattr(
+        preserved_builder,
+        "_git",
+        lambda *_args: MissingCommit(),
+    )
+    with pytest.raises(
+        PreservationPrerequisiteError,
+        match="source baseline commit is unavailable",
+    ):
+        build_output_bytes(repo_root=REPO_ROOT)
 
 
 def test_local_gate_accepts_all_fifteen_canonical_binary_pins() -> None:

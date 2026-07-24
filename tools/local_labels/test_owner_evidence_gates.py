@@ -65,6 +65,8 @@ def test_campaign_gate_pins_interpreter_and_exact_owner_tests():
         "test_e387_legacy_definition_context_hashes_exact_git_blobs",
         "tools/local_labels/test_capture_roster_authority.py::"
         "test_committed_roster_authority_matches_regenerated",
+        "tools/local_labels/test_preserved_binaries.py::"
+        "test_committed_preserved_authorities_are_exact_deterministic_rebuild",
         "tools/local_labels/test_sm86_capture_matrix.py::"
         "test_committed_artifact_is_exact_deterministic_rebuild",
         "tools/local_labels/test_sm86_capture_matrix.py::"
