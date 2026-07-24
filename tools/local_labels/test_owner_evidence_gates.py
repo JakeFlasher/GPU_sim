@@ -69,6 +69,8 @@ def test_campaign_gate_pins_interpreter_and_exact_owner_tests():
         "test_committed_witness_historical_admission",
         "tools/local_labels/test_preserved_binaries.py::"
         "test_committed_preserved_authorities_are_exact_deterministic_rebuild",
+        "tools/local_labels/test_sm120_cohort_frozen_at_b1646ef7.py::"
+        "test_retained_sm120_projection_exactly_rederives_from_b1646ef7",
         "tools/local_labels/test_sm86_capture_chunk.py::"
         "test_consumer_rederives_external_matrix_and_rejects_resealed_invocation_tamper",
         "tools/local_labels/test_sm86_live_capture_authority.py::"

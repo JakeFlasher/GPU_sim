@@ -1,36 +1,17 @@
-"""Freeze regression guard for the 30 sm_120 admitted artifacts at
-the v5 calibration-head pin commit b1646ef7.
+"""Freeze guards for the retained 30-cell sm_120 cohort projection.
 
-The v5 footprint-aware per-bucket monotonic L2 hit-rate calibration
-head was fit at this commit; the 30 sm_120 cells in
-``data/local_labels/label_admitted.json`` are the FROZEN reference
-against which the cross-arch same-74 closure lane is evaluated. The
-regeneration lane on the originating-arch host (RTX 3090 Ti) MUST
-NOT mutate any sm_120 derived artifact — neither the bundle path,
-nor the bundle's sha256, nor the bundle's ``manifest_pairing_index``
-5-tuple identity.
-
-This module captures the b1646ef7 reference values via
-``git show`` and asserts each sm_120 cell's predictor bundle is
-byte-equivalent at HEAD. It is invoked at TWO points in the
-regeneration lane:
-
-1. As part of the host-only pytest sweep BEFORE the regen wrapper
-   runs (pre-wrapper baseline).
-2. As a dedicated post-wrapper invocation
-   ``uv run --with-requirements requirements.txt --with protobuf
-   python -m pytest tools/local_labels/test_sm120_cohort_frozen_at_b1646ef7.py -q``
-   immediately AFTER the regen wrapper completes.
-
-Drift in any sm_120 cell at either invocation lifts the typed
-defect token ``sm_120_cohort_frozen_violation``.
+Default tests compare checked-in cohort bytes with a direct-path retained
+projection.  The exact temporal claim against Git commit ``b1646ef7`` is a
+campaign-evidence owner test and fails closed when that history is unavailable.
 """
 from __future__ import annotations
 
 import hashlib
 import json
 import subprocess
+from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import pytest
 
@@ -38,16 +19,23 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 _FROZEN_COMMIT = "b1646ef7"
 _STAGING_MANIFEST = "data/local_labels/v5_cohort_staging_manifest.json"
 _LABEL_ADMITTED = "data/local_labels/label_admitted.json"
+_RETAINED_PROJECTION = (
+    "tools/local_labels/authorities/"
+    "sm120_cohort_frozen_at_b1646ef7.v1.json"
+)
 _DEFECT_TOKEN = "sm_120_cohort_frozen_violation"
 _EXPECTED_SM120_COUNT = 30
+_EXPECTED_BUNDLE_COUNT = 35
+_IDENTITY_KEYS = (
+    "slug",
+    "shape_point",
+    "binary_sha256",
+    "source_commit",
+    "kernel_signature_sha256",
+)
 
 
 def _git_show(commit: str, path: str) -> bytes | None:
-    """Return file contents at ``<commit>:<path>`` or ``None`` when
-    git or the ref is unavailable. The test fails closed on a
-    missing reference rather than skipping silently — a freeze
-    guard with no reference is worse than no guard at all.
-    """
     try:
         return subprocess.check_output(
             ["git", "-C", str(_REPO_ROOT), "show", f"{commit}:{path}"],
@@ -57,268 +45,282 @@ def _git_show(commit: str, path: str) -> bytes | None:
         return None
 
 
-def _sha256_of_blob(blob: bytes) -> str:
+def _sha256(blob: bytes) -> str:
     return hashlib.sha256(blob).hexdigest()
 
 
-def _read_bundle_5tuple(blob: bytes) -> tuple[str, ...] | None:
-    """Extract the canonical
-    ``manifest_pairing_index.{slug, shape_point, binary_sha256,
-    source_commit, kernel_signature_sha256}`` 5-tuple from a
-    predictor-bundle blob.
+def _canonical_json_bytes(document: Any) -> bytes:
+    return (
+        json.dumps(document, ensure_ascii=True, indent=2, sort_keys=True) + "\n"
+    ).encode("ascii")
 
-    Returns ``None`` when the blob is not parseable as JSON or
-    when any of the five fields is missing or non-string. The
-    test treats ``None`` as a drift and surfaces it.
-    """
+
+def _safe_relative_path(value: Any) -> str:
+    if (
+        not isinstance(value, str)
+        or not value
+        or value.startswith("/")
+        or "\\" in value
+        or any(part in {"", ".", ".."} for part in value.split("/"))
+    ):
+        raise AssertionError(
+            f"{_DEFECT_TOKEN}: unsafe retained predictor-bundle path: {value!r}"
+        )
+    return value
+
+
+def _identity_record(payload: Any, *, context: str) -> dict[str, str]:
+    if not isinstance(payload, dict):
+        raise AssertionError(f"{_DEFECT_TOKEN}: {context} is not an object")
+    identity: dict[str, str] = {}
+    for key in _IDENTITY_KEYS:
+        value = payload.get(key)
+        if not isinstance(value, str) or not value:
+            raise AssertionError(
+                f"{_DEFECT_TOKEN}: {context} has invalid {key}: {value!r}"
+            )
+        identity[key] = value
+    return identity
+
+
+def _json_blob(read_blob: Callable[[str], bytes], path: str) -> dict[str, Any]:
     try:
-        payload = json.loads(blob)
-    except json.JSONDecodeError:
-        return None
-    mpi = payload.get("manifest_pairing_index")
-    if not isinstance(mpi, dict):
-        return None
-    needed = (
-        "slug",
-        "shape_point",
-        "binary_sha256",
-        "source_commit",
-        "kernel_signature_sha256",
+        document = json.loads(read_blob(path))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise AssertionError(
+            f"{_DEFECT_TOKEN}: cannot load retained JSON {path}: {exc}"
+        ) from exc
+    if not isinstance(document, dict):
+        raise AssertionError(f"{_DEFECT_TOKEN}: retained JSON root is not an object: {path}")
+    return document
+
+
+def _build_projection(read_blob: Callable[[str], bytes]) -> dict[str, Any]:
+    manifest = _json_blob(read_blob, _STAGING_MANIFEST)
+    label = _json_blob(read_blob, _LABEL_ADMITTED)
+    manifest_rows = [
+        row for row in manifest.get("rows", [])
+        if isinstance(row, dict) and row.get("arch") == "sm_120"
+    ]
+    label_cells = [
+        cell for cell in label.get("cells", [])
+        if isinstance(cell, dict) and cell.get("arch") == "sm_120"
+    ]
+    if len(manifest_rows) != _EXPECTED_SM120_COUNT:
+        raise AssertionError(
+            f"{_DEFECT_TOKEN}: sm_120 staging row count "
+            f"{len(manifest_rows)} != {_EXPECTED_SM120_COUNT}"
+        )
+    if len(label_cells) != _EXPECTED_SM120_COUNT:
+        raise AssertionError(
+            f"{_DEFECT_TOKEN}: sm_120 label count "
+            f"{len(label_cells)} != {_EXPECTED_SM120_COUNT}"
+        )
+
+    labels_by_key: dict[tuple[str, str], dict[str, str]] = {}
+    for cell in label_cells:
+        identity = _identity_record(cell, context="label-admitted cell")
+        key = (identity["slug"], identity["shape_point"])
+        if key in labels_by_key:
+            raise AssertionError(f"{_DEFECT_TOKEN}: duplicate label identity: {key!r}")
+        labels_by_key[key] = identity
+
+    projected_rows: list[dict[str, Any]] = []
+    seen_rows: set[tuple[str, str]] = set()
+    bundle_count = 0
+    for row in manifest_rows:
+        slug = row.get("slug")
+        shape_point = row.get("shape_point")
+        if not isinstance(slug, str) or not isinstance(shape_point, str):
+            raise AssertionError(f"{_DEFECT_TOKEN}: invalid staging identity")
+        key = (slug, shape_point)
+        if key in seen_rows:
+            raise AssertionError(f"{_DEFECT_TOKEN}: duplicate staging identity: {key!r}")
+        seen_rows.add(key)
+        label_identity = labels_by_key.get(key)
+        if label_identity is None:
+            raise AssertionError(
+                f"{_DEFECT_TOKEN}: staging identity is absent from labels: {key!r}"
+            )
+        paths = (row.get("predictor_bundle") or {}).get("paths")
+        if not isinstance(paths, list) or not paths:
+            raise AssertionError(
+                f"{_DEFECT_TOKEN}: staging identity has no bundle paths: {key!r}"
+            )
+        projected_bundles: list[dict[str, Any]] = []
+        for raw_path in paths:
+            path = _safe_relative_path(raw_path)
+            blob = read_blob(path)
+            bundle = _json_blob(lambda _ignored, payload=blob: payload, path)
+            pairing = _identity_record(
+                bundle.get("manifest_pairing_index"),
+                context=f"bundle manifest_pairing_index {path}",
+            )
+            if pairing != label_identity:
+                raise AssertionError(
+                    f"{_DEFECT_TOKEN}: bundle/label identity drift at {path}"
+                )
+            projected_bundles.append({
+                "path": path,
+                "sha256": _sha256(blob),
+                "manifest_pairing_index": pairing,
+            })
+            bundle_count += 1
+        projected_rows.append({
+            "slug": slug,
+            "shape_point": shape_point,
+            "label_identity": label_identity,
+            "predictor_bundles": projected_bundles,
+        })
+
+    if seen_rows != set(labels_by_key):
+        raise AssertionError(
+            f"{_DEFECT_TOKEN}: staging/label sm_120 identity-set drift"
+        )
+    if bundle_count != _EXPECTED_BUNDLE_COUNT:
+        raise AssertionError(
+            f"{_DEFECT_TOKEN}: predictor-bundle count "
+            f"{bundle_count} != {_EXPECTED_BUNDLE_COUNT}"
+        )
+    projected_rows.sort(key=lambda row: (row["slug"], row["shape_point"]))
+    return {
+        "schema_version": 1,
+        "projection_id": "sm120_cohort_frozen_at_b1646ef7_v1",
+        "historical_source_commit": _FROZEN_COMMIT,
+        "row_count": _EXPECTED_SM120_COUNT,
+        "bundle_count": _EXPECTED_BUNDLE_COUNT,
+        "rows": projected_rows,
+    }
+
+
+def _head_blob(path: str) -> bytes:
+    return (_REPO_ROOT / _safe_relative_path(path)).read_bytes()
+
+
+def _retained_projection() -> dict[str, Any]:
+    path = _REPO_ROOT / _RETAINED_PROJECTION
+    raw = path.read_bytes()
+    projection = json.loads(raw)
+    assert raw == _canonical_json_bytes(projection), (
+        f"{_DEFECT_TOKEN}: retained projection is not canonical JSON"
     )
-    out: list[str] = []
-    for key in needed:
-        val = mpi.get(key)
-        if not isinstance(val, str) or not val:
-            return None
-        out.append(val)
-    return tuple(out)
+    assert isinstance(projection, dict)
+    assert set(projection) == {
+        "schema_version",
+        "projection_id",
+        "historical_source_commit",
+        "row_count",
+        "bundle_count",
+        "rows",
+    }
+    assert projection["schema_version"] == 1
+    assert projection["projection_id"] == "sm120_cohort_frozen_at_b1646ef7_v1"
+    assert projection["historical_source_commit"] == _FROZEN_COMMIT
+    assert projection["row_count"] == _EXPECTED_SM120_COUNT
+    assert projection["bundle_count"] == _EXPECTED_BUNDLE_COUNT
+    return projection
 
 
 @pytest.fixture(scope="module")
-def frozen_sm120_artifacts() -> dict[tuple[str, str], list[dict[str, object]]]:
-    """Load the 30 sm_120 frozen artifacts from the b1646ef7 tree.
+def retained_projection() -> dict[str, Any]:
+    return _retained_projection()
 
-    For each sm_120 row in the staging manifest at the frozen
-    commit, capture the row's ``predictor_bundle.paths`` list and,
-    for each path, compute the bundle blob's sha256 + extract its
-    ``manifest_pairing_index`` 5-tuple. Returns a dict keyed by
-    ``(slug, shape_point)``.
-    """
-    manifest_blob = _git_show(_FROZEN_COMMIT, _STAGING_MANIFEST)
-    if manifest_blob is None:
-        pytest.fail(
-            f"{_DEFECT_TOKEN}: git ref {_FROZEN_COMMIT!r} or "
-            f"{_STAGING_MANIFEST!r} unavailable; cannot establish "
-            f"freeze baseline"
-        )
-    manifest = json.loads(manifest_blob)
-    sm120_rows = [r for r in manifest["rows"] if r["arch"] == "sm_120"]
-    if len(sm120_rows) != _EXPECTED_SM120_COUNT:
-        pytest.fail(
-            f"{_DEFECT_TOKEN}: frozen commit {_FROZEN_COMMIT!r} has "
-            f"{len(sm120_rows)} sm_120 rows; expected "
-            f"{_EXPECTED_SM120_COUNT}"
-        )
-    frozen: dict[tuple[str, str], list[dict[str, object]]] = {}
-    for row in sm120_rows:
-        key = (row["slug"], row["shape_point"])
-        bundle_block = row.get("predictor_bundle", {})
-        paths = list(bundle_block.get("paths", []))
-        if not paths:
-            pytest.fail(
-                f"{_DEFECT_TOKEN}: sm_120 row {key!r} at frozen "
-                f"commit has no predictor_bundle.paths; freeze "
-                f"reference cannot be established"
-            )
-        entries: list[dict[str, object]] = []
-        for path in paths:
-            blob = _git_show(_FROZEN_COMMIT, path)
-            if blob is None:
-                pytest.fail(
-                    f"{_DEFECT_TOKEN}: bundle path {path!r} for "
-                    f"sm_120 row {key!r} not present in tree at "
-                    f"frozen commit {_FROZEN_COMMIT!r}"
-                )
-            entries.append({
-                "path": path,
-                "sha256": _sha256_of_blob(blob),
-                "five_tuple": _read_bundle_5tuple(blob),
-            })
-        frozen[key] = entries
-    return frozen
+
+@pytest.fixture(scope="module")
+def head_projection() -> dict[str, Any]:
+    return _build_projection(_head_blob)
+
+
+def _rows_by_key(projection: dict[str, Any]) -> dict[tuple[str, str], dict[str, Any]]:
+    rows = projection["rows"]
+    indexed = {(row["slug"], row["shape_point"]): row for row in rows}
+    assert len(indexed) == len(rows) == _EXPECTED_SM120_COUNT
+    return indexed
+
+
+def test_retained_projection_is_exact_direct_path_projection(
+    retained_projection: dict[str, Any], head_projection: dict[str, Any],
+) -> None:
+    assert retained_projection == head_projection
 
 
 def test_sm120_cohort_coverage_matches_label_admitted(
-    frozen_sm120_artifacts: dict[tuple[str, str], list[dict[str, object]]],
+    retained_projection: dict[str, Any], head_projection: dict[str, Any],
 ) -> None:
-    """The 30 frozen sm_120 keys cover every sm_120 cell currently
-    admitted in ``label_admitted.json`` at HEAD.
-    """
-    label = json.loads((_REPO_ROOT / _LABEL_ADMITTED).read_text())
-    sm120_cells = [c for c in label["cells"] if c["arch"] == "sm_120"]
-    assert len(sm120_cells) == _EXPECTED_SM120_COUNT, (
-        f"{_DEFECT_TOKEN}: HEAD sm_120 cell count {len(sm120_cells)} != "
-        f"frozen baseline {_EXPECTED_SM120_COUNT}"
-    )
-    label_keys = {(c["slug"], c["shape_point"]) for c in sm120_cells}
-    frozen_keys = set(frozen_sm120_artifacts.keys())
-    missing = label_keys - frozen_keys
-    extra = frozen_keys - label_keys
-    assert not missing and not extra, (
-        f"{_DEFECT_TOKEN}: sm_120 (slug, shape_point) coverage drift: "
-        f"missing_in_frozen={missing!r} extra_in_frozen={extra!r}"
-    )
+    assert set(_rows_by_key(retained_projection)) == set(_rows_by_key(head_projection))
 
 
-_LABEL_IDENTITY_KEYS: tuple[str, ...] = (
-    "slug",
-    "shape_point",
-    "binary_sha256",
-    "source_commit",
-    "kernel_signature_sha256",
-)
-
-
-def _label_5tuple(cell: dict) -> tuple[str, ...]:
-    return tuple(str(cell[k]) for k in _LABEL_IDENTITY_KEYS)
-
-
-def test_sm120_label_admitted_5tuples_unchanged_from_frozen_commit() -> None:
-    """Every sm_120 cell's identity 5-tuple at HEAD's
-    ``label_admitted.json`` matches the b1646ef7 baseline.
-
-    Coverage drift on ``(slug, shape_point)`` alone is insufficient:
-    a cell can keep the same name pair while drifting on
-    ``binary_sha256`` (post-rebuild), ``source_commit`` (recapture),
-    or ``kernel_signature_sha256`` (kernel-source edit). All five
-    identity fields must remain byte-equivalent or the bundle
-    binding established at b1646ef7 is no longer load-bearing.
-    """
-    frozen_blob = _git_show(_FROZEN_COMMIT, _LABEL_ADMITTED)
-    if frozen_blob is None:
-        pytest.fail(
-            f"{_DEFECT_TOKEN}: git ref {_FROZEN_COMMIT!r} or "
-            f"{_LABEL_ADMITTED!r} unavailable; cannot verify 5-tuple "
-            f"identity drift"
-        )
-    frozen_label = json.loads(frozen_blob)
-    frozen_sm120 = {
-        (c["slug"], c["shape_point"]): _label_5tuple(c)
-        for c in frozen_label["cells"]
-        if c["arch"] == "sm_120"
+def test_sm120_label_admitted_5tuples_match_retained_projection(
+    retained_projection: dict[str, Any], head_projection: dict[str, Any],
+) -> None:
+    retained = _rows_by_key(retained_projection)
+    head = _rows_by_key(head_projection)
+    assert {
+        key: row["label_identity"] for key, row in retained.items()
+    } == {
+        key: row["label_identity"] for key, row in head.items()
     }
-    if len(frozen_sm120) != _EXPECTED_SM120_COUNT:
-        pytest.fail(
-            f"{_DEFECT_TOKEN}: frozen label_admitted.json has "
-            f"{len(frozen_sm120)} sm_120 cells; expected "
-            f"{_EXPECTED_SM120_COUNT}"
-        )
-    head_label = json.loads((_REPO_ROOT / _LABEL_ADMITTED).read_text())
-    head_sm120 = {
-        (c["slug"], c["shape_point"]): _label_5tuple(c)
-        for c in head_label["cells"]
-        if c["arch"] == "sm_120"
+
+
+def test_sm120_bundle_paths_match_retained_projection(
+    retained_projection: dict[str, Any], head_projection: dict[str, Any],
+) -> None:
+    retained = _rows_by_key(retained_projection)
+    head = _rows_by_key(head_projection)
+    assert {
+        key: [bundle["path"] for bundle in row["predictor_bundles"]]
+        for key, row in retained.items()
+    } == {
+        key: [bundle["path"] for bundle in row["predictor_bundles"]]
+        for key, row in head.items()
     }
-    missing = set(frozen_sm120) - set(head_sm120)
-    extra = set(head_sm120) - set(frozen_sm120)
-    drifted: list[str] = []
-    if missing:
-        drifted.append(f"missing_at_head={missing!r}")
-    if extra:
-        drifted.append(f"extra_at_head={extra!r}")
-    for key, frozen_id in frozen_sm120.items():
-        head_id = head_sm120.get(key)
-        if head_id is None:
-            continue  # caught above
-        if head_id != frozen_id:
-            drifted.append(
-                f"row {key!r}: 5-tuple frozen={frozen_id!r} "
-                f"head={head_id!r}"
+
+
+def test_sm120_bundle_sha256s_match_retained_projection(
+    retained_projection: dict[str, Any], head_projection: dict[str, Any],
+) -> None:
+    retained = _rows_by_key(retained_projection)
+    head = _rows_by_key(head_projection)
+    assert {
+        key: [bundle["sha256"] for bundle in row["predictor_bundles"]]
+        for key, row in retained.items()
+    } == {
+        key: [bundle["sha256"] for bundle in row["predictor_bundles"]]
+        for key, row in head.items()
+    }
+
+
+def test_sm120_bundle_mpi_5tuples_match_retained_projection(
+    retained_projection: dict[str, Any], head_projection: dict[str, Any],
+) -> None:
+    retained = _rows_by_key(retained_projection)
+    head = _rows_by_key(head_projection)
+    assert {
+        key: [
+            bundle["manifest_pairing_index"]
+            for bundle in row["predictor_bundles"]
+        ]
+        for key, row in retained.items()
+    } == {
+        key: [
+            bundle["manifest_pairing_index"]
+            for bundle in row["predictor_bundles"]
+        ]
+        for key, row in head.items()
+    }
+
+
+@pytest.mark.campaign_evidence
+def test_retained_sm120_projection_exactly_rederives_from_b1646ef7() -> None:
+    def historical_blob(path: str) -> bytes:
+        blob = _git_show(_FROZEN_COMMIT, path)
+        if blob is None:
+            raise AssertionError(
+                f"{_DEFECT_TOKEN}: git ref {_FROZEN_COMMIT!r} or "
+                f"path {path!r} is unavailable"
             )
-    assert not drifted, (
-        f"{_DEFECT_TOKEN}: sm_120 label identity 5-tuple drift:\n  "
-        + "\n  ".join(drifted)
-    )
+        return blob
 
-
-def test_sm120_bundle_paths_unchanged_from_frozen_commit(
-    frozen_sm120_artifacts: dict[tuple[str, str], list[dict[str, object]]],
-) -> None:
-    """The ``predictor_bundle.paths`` list for each sm_120 row at
-    HEAD's staging manifest matches the b1646ef7 baseline exactly,
-    in order.
-    """
-    head_manifest = json.loads((_REPO_ROOT / _STAGING_MANIFEST).read_text())
-    head_sm120 = [r for r in head_manifest["rows"] if r["arch"] == "sm_120"]
-    head_lookup = {(r["slug"], r["shape_point"]): r for r in head_sm120}
-    drifted: list[str] = []
-    for key, frozen_entries in frozen_sm120_artifacts.items():
-        frozen_paths = [str(e["path"]) for e in frozen_entries]
-        head_row = head_lookup.get(key)
-        if head_row is None:
-            drifted.append(f"row {key!r} absent at HEAD")
-            continue
-        head_paths = list(head_row.get("predictor_bundle", {}).get("paths", []))
-        if head_paths != frozen_paths:
-            drifted.append(
-                f"row {key!r}: frozen_paths={frozen_paths!r} != "
-                f"head_paths={head_paths!r}"
-            )
-    assert not drifted, (
-        f"{_DEFECT_TOKEN}: predictor_bundle.paths drift:\n  "
-        + "\n  ".join(drifted)
-    )
-
-
-def test_sm120_bundle_sha256_unchanged_from_frozen_commit(
-    frozen_sm120_artifacts: dict[tuple[str, str], list[dict[str, object]]],
-) -> None:
-    """Each frozen bundle file's sha256 at HEAD matches the
-    b1646ef7 baseline.
-    """
-    drifted: list[str] = []
-    for key, frozen_entries in frozen_sm120_artifacts.items():
-        for entry in frozen_entries:
-            on_disk = _REPO_ROOT / str(entry["path"])
-            if not on_disk.is_file():
-                drifted.append(
-                    f"row {key!r}: frozen bundle {entry['path']!r} "
-                    f"missing on disk at HEAD"
-                )
-                continue
-            head_sha = _sha256_of_blob(on_disk.read_bytes())
-            if head_sha != entry["sha256"]:
-                drifted.append(
-                    f"row {key!r}: bundle {entry['path']!r} sha drift "
-                    f"frozen={entry['sha256']!r} head={head_sha!r}"
-                )
-    assert not drifted, (
-        f"{_DEFECT_TOKEN}: predictor bundle sha256 drift:\n  "
-        + "\n  ".join(drifted)
-    )
-
-
-def test_sm120_bundle_mpi_5tuple_unchanged_from_frozen_commit(
-    frozen_sm120_artifacts: dict[tuple[str, str], list[dict[str, object]]],
-) -> None:
-    """Each frozen bundle's ``manifest_pairing_index`` 5-tuple at
-    HEAD matches the b1646ef7 baseline. Identity drift is the
-    sharpest signal of a sm_120 frozen-cohort violation.
-    """
-    drifted: list[str] = []
-    for key, frozen_entries in frozen_sm120_artifacts.items():
-        for entry in frozen_entries:
-            on_disk = _REPO_ROOT / str(entry["path"])
-            if not on_disk.is_file():
-                continue  # path drift already surfaced upstream
-            head_5tuple = _read_bundle_5tuple(on_disk.read_bytes())
-            if head_5tuple != entry["five_tuple"]:
-                drifted.append(
-                    f"row {key!r}: bundle {entry['path']!r} 5-tuple "
-                    f"drift frozen={entry['five_tuple']!r} "
-                    f"head={head_5tuple!r}"
-                )
-    assert not drifted, (
-        f"{_DEFECT_TOKEN}: predictor bundle manifest_pairing_index "
-        f"5-tuple drift:\n  " + "\n  ".join(drifted)
+    assert _build_projection(historical_blob) == _retained_projection(), (
+        f"{_DEFECT_TOKEN}: retained projection differs from {_FROZEN_COMMIT}"
     )
