@@ -1,0 +1,191 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "simbench_bw/schemas/ncu_launch_inventory.schema.json",
+  "title": "NCU Details CSV full-launch inventory v3",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "kernel_name_base",
+    "requested_launch_skip",
+    "requested_launch_count",
+    "insertion_sentinel",
+    "ncu_controls",
+    "report_sha256",
+    "identity_columns",
+    "launch_count",
+    "launches",
+    "launch_inventory_sha256",
+    "observation_sha256"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 3
+    },
+    "kind": {
+      "type": "string",
+      "const": "ncu_details_csv_launch_inventory_v3"
+    },
+    "kernel_name_base": {
+      "type": "string",
+      "const": "mangled"
+    },
+    "requested_launch_skip": {
+      "type": "integer",
+      "const": 0
+    },
+    "requested_launch_count": {
+      "type": "integer",
+      "minimum": 2,
+      "maximum": 2147483647
+    },
+    "insertion_sentinel": {
+      "$ref": "#/$defs/insertionSentinel"
+    },
+    "ncu_controls": {
+      "$ref": "#/$defs/ncuControls"
+    },
+    "report_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "identity_columns": {
+      "type": "array",
+      "minItems": 8,
+      "maxItems": 8,
+      "prefixItems": [
+        {"const": "ID"},
+        {"const": "Process ID"},
+        {"const": "Context"},
+        {"const": "Stream"},
+        {"const": "Device"},
+        {"const": "Kernel Name"},
+        {"const": "Block Size"},
+        {"const": "Grid Size"}
+      ],
+      "items": false
+    },
+    "launch_count": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 2147483646
+    },
+    "launches": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 2147483646,
+      "items": {
+        "$ref": "#/$defs/launch"
+      }
+    },
+    "launch_inventory_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "observation_sha256": {
+      "$ref": "#/$defs/sha256"
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "nonblank": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "\\S"
+    },
+    "insertionSentinel": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "policy",
+        "expected_launch_count",
+        "requested_launch_count"
+      ],
+      "properties": {
+        "policy": {
+          "type": "string",
+          "const": "request_expected_plus_one_reject_any_extra"
+        },
+        "expected_launch_count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 2147483646
+        },
+        "requested_launch_count": {
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 2147483647
+        }
+      }
+    },
+    "ncuControls": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target_processes",
+        "filter_mode",
+        "replay_mode",
+        "cache_control",
+        "clock_control",
+        "profile_from_start"
+      ],
+      "properties": {
+        "target_processes": {"const": "all"},
+        "filter_mode": {"const": "global"},
+        "replay_mode": {"const": "kernel"},
+        "cache_control": {"const": "all"},
+        "clock_control": {"const": "none"},
+        "profile_from_start": {"const": false}
+      }
+    },
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "ID",
+        "Process ID",
+        "Context",
+        "Stream",
+        "Device",
+        "Kernel Name",
+        "Block Size",
+        "Grid Size"
+      ],
+      "properties": {
+        "ID": {"$ref": "#/$defs/nonblank"},
+        "Process ID": {"$ref": "#/$defs/nonblank"},
+        "Context": {"$ref": "#/$defs/nonblank"},
+        "Stream": {"$ref": "#/$defs/nonblank"},
+        "Device": {"$ref": "#/$defs/nonblank"},
+        "Kernel Name": {"$ref": "#/$defs/nonblank"},
+        "Block Size": {"$ref": "#/$defs/nonblank"},
+        "Grid Size": {"$ref": "#/$defs/nonblank"}
+      }
+    },
+    "launch": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "report_launch_ordinal",
+        "identity",
+        "identity_sha256"
+      ],
+      "properties": {
+        "report_launch_ordinal": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2147483645
+        },
+        "identity": {
+          "$ref": "#/$defs/identity"
+        },
+        "identity_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    }
+  }
+}
