@@ -607,6 +607,9 @@
         "runnable_membership_sha256": {
           "$ref": "#/$defs/sha256"
         },
+        "active_sidecar_schema": {
+          "$ref": "#/$defs/fileIdentity"
+        },
         "protocol_version": {
           "type": "string",
           "const": "2.1"

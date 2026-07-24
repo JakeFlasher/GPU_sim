@@ -290,6 +290,94 @@ def write_launch_observation(
         json.dump(payload, stream, indent=2, sort_keys=True)
         stream.write("\n")
 
+def validate_launch_observation_document(
+    document: Any,
+    *,
+    requested_launch_skip: int,
+    requested_launch_count: int,
+    report_sha256: str,
+) -> None:
+    """Validate a sealed one-launch observation against external bindings."""
+    expected_fields = {
+        "schema_version",
+        "kind",
+        "kernel_name_base",
+        "requested_launch_skip",
+        "requested_launch_count",
+        "report_sha256",
+        "identity_columns",
+        "identity",
+        "observation_sha256",
+    }
+    if not isinstance(document, dict) or set(document) != expected_fields:
+        raise ValueError("NCU launch observation fields differ from the closed contract")
+    if (
+        type(requested_launch_skip) is not int
+        or not 0 <= requested_launch_skip <= 2_147_483_647
+        or type(requested_launch_count) is not int
+        or not 1 <= requested_launch_count <= 2_147_483_647
+        or requested_launch_skip + requested_launch_count > 2_147_483_647
+    ):
+        raise ValueError("NCU launch observation selectors are invalid")
+    if (
+        not isinstance(report_sha256, str)
+        or len(report_sha256) != 64
+        or any(character not in "0123456789abcdef" for character in report_sha256)
+    ):
+        raise ValueError("NCU launch observation report SHA-256 is invalid")
+    if (
+        type(document.get("schema_version")) is not int
+        or document.get("schema_version") != 1
+        or document.get("kind") != "ncu_details_csv_launch_observation"
+        or document.get("kernel_name_base") != "mangled"
+        or type(document.get("requested_launch_skip")) is not int
+        or document.get("requested_launch_skip") != requested_launch_skip
+        or type(document.get("requested_launch_count")) is not int
+        or document.get("requested_launch_count") != requested_launch_count
+        or document.get("report_sha256") != report_sha256
+    ):
+        raise ValueError("NCU launch observation authority binding differs")
+
+    columns = document.get("identity_columns")
+    identity = document.get("identity")
+    if not isinstance(columns, list) or not all(
+        isinstance(column, str) for column in columns
+    ):
+        raise ValueError("NCU launch observation identity_columns must be strings")
+    canonical_columns = [
+        column for column in _OBSERVATION_COLUMNS if column in columns
+    ]
+    if columns != canonical_columns or not set(_REQUIRED_OBSERVATION_COLUMNS).issubset(
+        columns
+    ):
+        raise ValueError("NCU launch observation identity columns differ")
+    if not isinstance(identity, dict) or set(identity) != set(columns):
+        raise ValueError("NCU launch observation identity keys differ")
+    if any(not isinstance(identity[column], str) for column in columns):
+        raise ValueError("NCU launch observation identity values must be strings")
+    blank_required = [
+        column
+        for column in _REQUIRED_OBSERVATION_COLUMNS
+        if not identity[column].strip()
+    ]
+    if blank_required:
+        raise ValueError(
+            f"NCU launch observation identity values blank: {blank_required}"
+        )
+
+    unsigned = dict(document)
+    claimed_seal = unsigned.pop("observation_sha256")
+    try:
+        encoded = json.dumps(
+            unsigned, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+        ).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"NCU launch observation is not canonical JSON: {exc}") from exc
+    expected_seal = hashlib.sha256(encoded).hexdigest()
+    if claimed_seal != expected_seal:
+        raise ValueError("NCU launch observation seal differs")
+
+
 # Columns used to compute a launch-identity key when the canonical
 # ``ID`` column is absent. NCU emits ``ID`` for every per-launch row,
 # but if a future version drops it the parser falls back to whatever

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
+import json
 import subprocess
 
 import pytest
@@ -62,6 +64,120 @@ _REQUIRED_IDENTITY = {
     "Grid Size": "(1, 1, 1)",
     "Device": "0",
 }
+
+
+_REPORT_SHA256 = "a" * 64
+
+
+def _sealed_observation() -> dict:
+    columns = ["ID", "Device", "Kernel Name", "Block Size", "Grid Size"]
+    document = {
+        "schema_version": 1,
+        "kind": "ncu_details_csv_launch_observation",
+        "kernel_name_base": "mangled",
+        "requested_launch_skip": 0,
+        "requested_launch_count": 1,
+        "report_sha256": _REPORT_SHA256,
+        "identity_columns": columns,
+        "identity": {column: _REQUIRED_IDENTITY[column] for column in columns},
+    }
+    encoded = json.dumps(
+        document, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+    ).encode("utf-8")
+    document["observation_sha256"] = hashlib.sha256(encoded).hexdigest()
+    return document
+
+
+def _reseal_observation(document: dict) -> None:
+    unsigned = {
+        key: value
+        for key, value in document.items()
+        if key != "observation_sha256"
+    }
+    encoded = json.dumps(
+        unsigned, sort_keys=True, separators=(",", ":"), ensure_ascii=True
+    ).encode("utf-8")
+    document["observation_sha256"] = hashlib.sha256(encoded).hexdigest()
+
+
+def test_validate_launch_observation_document_accepts_bound_producer_shape():
+    parser.validate_launch_observation_document(
+        _sealed_observation(),
+        requested_launch_skip=0,
+        requested_launch_count=1,
+        report_sha256=_REPORT_SHA256,
+    )
+
+
+def test_validate_launch_observation_document_rejects_resealed_report_substitution():
+    document = _sealed_observation()
+    document["report_sha256"] = "b" * 64
+    _reseal_observation(document)
+    with pytest.raises(ValueError, match="authority binding"):
+        parser.validate_launch_observation_document(
+            document,
+            requested_launch_skip=0,
+            requested_launch_count=1,
+            report_sha256=_REPORT_SHA256,
+        )
+
+
+def test_validate_launch_observation_document_rejects_reordered_identity_columns():
+    document = _sealed_observation()
+    document["identity_columns"].reverse()
+    _reseal_observation(document)
+    with pytest.raises(ValueError, match="identity columns differ"):
+        parser.validate_launch_observation_document(
+            document,
+            requested_launch_skip=0,
+            requested_launch_count=1,
+            report_sha256=_REPORT_SHA256,
+        )
+
+
+def test_validate_launch_observation_document_rejects_invalid_seal():
+    document = _sealed_observation()
+    document["observation_sha256"] = "0" * 64
+    with pytest.raises(ValueError, match="seal differs"):
+        parser.validate_launch_observation_document(
+            document,
+            requested_launch_skip=0,
+            requested_launch_count=1,
+            report_sha256=_REPORT_SHA256,
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    (
+        ("schema_version", True),
+        ("requested_launch_skip", False),
+        ("requested_launch_count", True),
+    ),
+)
+def test_validate_launch_observation_document_rejects_resealed_boolean_fields(
+    field, value
+):
+    document = _sealed_observation()
+    document[field] = value
+    _reseal_observation(document)
+    with pytest.raises(ValueError, match="authority binding"):
+        parser.validate_launch_observation_document(
+            document,
+            requested_launch_skip=0,
+            requested_launch_count=1,
+            report_sha256=_REPORT_SHA256,
+        )
+
+
+def test_validate_launch_observation_document_rejects_boolean_selector():
+    with pytest.raises(ValueError, match="selectors are invalid"):
+        parser.validate_launch_observation_document(
+            _sealed_observation(),
+            requested_launch_skip=False,
+            requested_launch_count=1,
+            report_sha256=_REPORT_SHA256,
+        )
 
 
 def _observation_csv(*, omit: str | None = None, blank: str | None = None) -> str:
