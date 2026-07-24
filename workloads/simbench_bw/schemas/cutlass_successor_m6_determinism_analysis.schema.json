@@ -1,0 +1,498 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "cutlass_successor_m6_determinism_analysis.schema.json",
+  "title": "CUTLASS successor M6 Q712 diagnostic analysis",
+  "description": "Closed pure-analysis contract. It is diagnostic-only and cannot authorize publication, M6 DONE, M7 handoff, collection, dispatch, or a floor fallback.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version", "artifact_kind", "analysis_id", "generated_at_utc",
+    "journal_created_at_utc", "analysis_source_identity",
+    "analysis_source_identity_sha256", "bindings", "completion_state", "taxonomy",
+    "accounting", "classifications", "out_of_range_rates", "noise_floors",
+    "denominators", "analysis_policy", "claims", "analysis_sha256"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "artifact_kind": {"const": "cutlass_successor_m6_determinism_analysis"},
+    "analysis_id": {"type": "string", "pattern": "^cutlass-successor-m6-analysis-[0-9a-f]{24}$"},
+    "generated_at_utc": {"type": "string", "format": "date-time", "pattern": "Z$", "maxLength": 64},
+    "journal_created_at_utc": {"type": "string", "format": "date-time", "maxLength": 64},
+    "analysis_source_identity": {"$ref": "#/$defs/analysis_source_identity"},
+    "analysis_source_identity_sha256": {"$ref": "#/$defs/sha256"},
+    "bindings": {"$ref": "#/$defs/bindings"},
+    "completion_state": {
+      "enum": [
+        "incomplete_evidence", "trigger_decisions_required",
+        "tier2_activation_required", "tier2_required",
+        "evidence_complete_diagnostic_only"
+      ]
+    },
+    "taxonomy": {
+      "const": [
+        "vendor_defect", "insufficient_evidence", "multimodal", "deterministic",
+        "quasi_stable", "clock_noise", "noisy", "unstable"
+      ]
+    },
+    "accounting": {"$ref": "#/$defs/accounting"},
+    "classifications": {
+      "type": "array", "minItems": 990, "maxItems": 990, "uniqueItems": true,
+      "items": {"$ref": "#/$defs/classification"}
+    },
+    "out_of_range_rates": {
+      "type": "array", "minItems": 330, "maxItems": 330, "uniqueItems": true,
+      "items": {"$ref": "#/$defs/oor_rate"}
+    },
+    "noise_floors": {
+      "type": "array", "minItems": 55, "maxItems": 55, "uniqueItems": true,
+      "items": {"$ref": "#/$defs/noise_floor"}
+    },
+    "denominators": {
+      "type": "array", "minItems": 165, "maxItems": 165, "uniqueItems": true,
+      "items": {"$ref": "#/$defs/denominator"}
+    },
+    "analysis_policy": {"$ref": "#/$defs/analysis_policy"},
+    "claims": {"$ref": "#/$defs/claims"},
+    "analysis_sha256": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "number_or_null": {"type": ["number", "null"]},
+    "short_string": {"type": "string", "minLength": 1, "maxLength": 512},
+    "source_reference": {
+      "type": "object", "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": {"type": "string", "minLength": 1, "maxLength": 256},
+        "sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "analysis_source_identity": {
+      "type": "object", "additionalProperties": false,
+      "required": ["analyzer", "schema"],
+      "properties": {
+        "analyzer": {
+          "allOf": [
+            {"$ref": "#/$defs/source_reference"},
+            {"properties": {"path": {"const": "tools/local_labels/cutlass_successor_m6_determinism_analysis.py"}}}
+          ]
+        },
+        "schema": {
+          "allOf": [
+            {"$ref": "#/$defs/source_reference"},
+            {"properties": {"path": {"const": "workloads/simbench_bw/schemas/cutlass_successor_m6_determinism_analysis.schema.json"}}}
+          ]
+        }
+      }
+    },
+    "cell_id": {"type": "string", "pattern": "^cutlass_successor:", "maxLength": 256},
+    "config_id": {
+      "type": "string", "pattern": "^cfg=clock_(none|base|boost)__cache_(all|none)$",
+      "maxLength": 64
+    },
+    "metric_key": {"type": "string", "minLength": 1, "maxLength": 256},
+    "class": {
+      "enum": [
+        "vendor_defect", "insufficient_evidence", "multimodal", "deterministic",
+        "quasi_stable", "clock_noise", "noisy", "unstable"
+      ]
+    },
+    "bindings": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "schedule_id", "schedule_sha256", "journal_id", "journal_sha256",
+        "records_sha256", "source_identity_sha256", "config_identity_sha256",
+        "cell_identity_sha256", "metric_policy_sha256",
+        "statistical_contract_sha256"
+      ],
+      "properties": {
+        "schedule_id": {"type": "string", "pattern": "^cutlass-successor-m6-[0-9a-f]{24}$"},
+        "schedule_sha256": {"$ref": "#/$defs/sha256"},
+        "journal_id": {"type": "string", "pattern": "^cutlass-successor-m6-journal-[0-9a-f]{24}$"},
+        "journal_sha256": {"$ref": "#/$defs/sha256"},
+        "records_sha256": {"$ref": "#/$defs/sha256"},
+        "source_identity_sha256": {"$ref": "#/$defs/sha256"},
+        "config_identity_sha256": {"$ref": "#/$defs/sha256"},
+        "cell_identity_sha256": {"$ref": "#/$defs/sha256"},
+        "metric_policy_sha256": {"$ref": "#/$defs/sha256"},
+        "statistical_contract_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "accounting": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "cells", "configs", "selected_metrics", "strata", "oor_rate_rows",
+        "floor_rows", "denominator_rows", "tier1_slots",
+        "trigger_decisions_emitted", "triggered_cells", "tier2_contract_slots",
+        "active_tier2_slots", "active_slots", "terminal_slots", "pending_slots",
+        "observed_slots", "excluded_typed_slots", "expected_rows",
+        "observed_raw_rows", "in_range_raw_rows", "out_of_range_low_raw_rows",
+        "out_of_range_high_raw_rows", "terminal_typed_excluded_rows",
+        "pending_raw_rows", "observed_row_identity_holds",
+        "terminal_slot_identity_holds", "expected_row_identity_holds",
+        "bucket_identities_hold", "tier2_accounting_holds", "per_config_metric"
+      ],
+      "properties": {
+        "cells": {"const": 3},
+        "configs": {"const": 6},
+        "selected_metrics": {"const": 55},
+        "strata": {"const": 990},
+        "oor_rate_rows": {"const": 330},
+        "floor_rows": {"const": 55},
+        "denominator_rows": {"const": 165},
+        "tier1_slots": {"const": 210},
+        "trigger_decisions_emitted": {"type": "integer", "minimum": 0, "maximum": 3},
+        "triggered_cells": {"type": "integer", "minimum": 0, "maximum": 3},
+        "tier2_contract_slots": {"type": "integer", "minimum": 0, "maximum": 30, "multipleOf": 10},
+        "active_tier2_slots": {"type": "integer", "minimum": 0, "maximum": 30, "multipleOf": 10},
+        "active_slots": {"type": "integer", "minimum": 210, "maximum": 240},
+        "terminal_slots": {"type": "integer", "minimum": 0, "maximum": 240},
+        "pending_slots": {"type": "integer", "minimum": 0, "maximum": 240},
+        "observed_slots": {"type": "integer", "minimum": 0, "maximum": 240},
+        "excluded_typed_slots": {"type": "integer", "minimum": 0, "maximum": 240},
+        "expected_rows": {"type": "integer", "minimum": 11550, "maximum": 13200},
+        "observed_raw_rows": {"type": "integer", "minimum": 0, "maximum": 13200},
+        "in_range_raw_rows": {"type": "integer", "minimum": 0, "maximum": 13200},
+        "out_of_range_low_raw_rows": {"type": "integer", "minimum": 0, "maximum": 13200},
+        "out_of_range_high_raw_rows": {"type": "integer", "minimum": 0, "maximum": 13200},
+        "terminal_typed_excluded_rows": {"type": "integer", "minimum": 0, "maximum": 13200},
+        "pending_raw_rows": {"type": "integer", "minimum": 0, "maximum": 13200},
+        "observed_row_identity_holds": {"const": true},
+        "terminal_slot_identity_holds": {"const": true},
+        "expected_row_identity_holds": {"const": true},
+        "bucket_identities_hold": {"const": true},
+        "tier2_accounting_holds": {"const": true},
+        "per_config_metric": {
+          "type": "array", "minItems": 330, "maxItems": 330, "uniqueItems": true,
+          "items": {"$ref": "#/$defs/accounting_bucket"}
+        }
+      }
+    },
+    "accounting_bucket": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "config_id", "metric_key", "expected_rows", "observed_raw_rows",
+        "in_range_raw_rows", "out_of_range_low_raw_rows",
+        "out_of_range_high_raw_rows", "terminal_typed_excluded_rows",
+        "pending_raw_rows", "row_identity_holds"
+      ],
+      "properties": {
+        "config_id": {"$ref": "#/$defs/config_id"},
+        "metric_key": {"$ref": "#/$defs/metric_key"},
+        "expected_rows": {"type": "integer", "minimum": 30, "maximum": 90},
+        "observed_raw_rows": {"type": "integer", "minimum": 0, "maximum": 90},
+        "in_range_raw_rows": {"type": "integer", "minimum": 0, "maximum": 90},
+        "out_of_range_low_raw_rows": {"type": "integer", "minimum": 0, "maximum": 90},
+        "out_of_range_high_raw_rows": {"type": "integer", "minimum": 0, "maximum": 90},
+        "terminal_typed_excluded_rows": {"type": "integer", "minimum": 0, "maximum": 90},
+        "pending_raw_rows": {"type": "integer", "minimum": 0, "maximum": 90},
+        "row_identity_holds": {"const": true}
+      }
+    },
+    "retained_oor": {
+      "type": "object", "additionalProperties": false,
+      "required": ["ordinal", "value", "validity"],
+      "properties": {
+        "ordinal": {"type": "integer", "minimum": 0, "maximum": 239},
+        "value": {"type": "number"},
+        "validity": {"enum": ["out_of_range_low", "out_of_range_high"]}
+      }
+    },
+    "modality": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "flagged", "outlier_flag", "certified", "suspected", "split_index",
+        "gap", "reason"
+      ],
+      "properties": {
+        "flagged": {"type": "boolean"},
+        "outlier_flag": {"type": "boolean"},
+        "certified": {"type": "boolean"},
+        "suspected": {"type": "boolean"},
+        "split_index": {"type": ["integer", "null"], "minimum": 1, "maximum": 29},
+        "gap": {"$ref": "#/$defs/number_or_null"},
+        "reason": {"type": ["string", "null"], "maxLength": 128}
+      }
+    },
+    "classification": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "cell_id", "cell_identity_sha256", "config_id", "config_sha256",
+        "metric_key", "metric_sha256", "repeatability_rule", "expected_repeats",
+        "terminal_repeats", "observed_repeats", "terminal_typed_excluded_repeats",
+        "pending_repeats", "in_range_repeats", "out_of_range_repeats",
+        "out_of_range_low_repeats", "out_of_range_high_repeats",
+        "observation_identity_holds", "event_resolution", "zero_event_upper_bound",
+        "out_of_range_values", "values_sha256", "mean_in_range",
+        "dispersion_gate", "admission_threshold", "would_have_been_admitted",
+        "sigma_rel", "sigma_rel_upper_95", "determinism_class",
+        "dispersion_class", "modality", "annotations", "classification_sha256"
+      ],
+      "properties": {
+        "cell_id": {"$ref": "#/$defs/cell_id"},
+        "cell_identity_sha256": {"$ref": "#/$defs/sha256"},
+        "config_id": {"$ref": "#/$defs/config_id"},
+        "config_sha256": {"$ref": "#/$defs/sha256"},
+        "metric_key": {"$ref": "#/$defs/metric_key"},
+        "metric_sha256": {"$ref": "#/$defs/sha256"},
+        "repeatability_rule": {"enum": ["coefficient_of_variation", "relative_tolerance", "stddev_abs"]},
+        "expected_repeats": {"type": "integer", "minimum": 10, "maximum": 30},
+        "terminal_repeats": {"type": "integer", "minimum": 0, "maximum": 30},
+        "observed_repeats": {"type": "integer", "minimum": 0, "maximum": 30},
+        "terminal_typed_excluded_repeats": {"type": "integer", "minimum": 0, "maximum": 30},
+        "pending_repeats": {"type": "integer", "minimum": 0, "maximum": 30},
+        "in_range_repeats": {"type": "integer", "minimum": 0, "maximum": 30},
+        "out_of_range_repeats": {"type": "integer", "minimum": 0, "maximum": 30},
+        "out_of_range_low_repeats": {"type": "integer", "minimum": 0, "maximum": 30},
+        "out_of_range_high_repeats": {"type": "integer", "minimum": 0, "maximum": 30},
+        "observation_identity_holds": {"const": true},
+        "event_resolution": {"type": ["number", "null"], "exclusiveMinimum": 0, "maximum": 1},
+        "zero_event_upper_bound": {"type": ["number", "null"], "exclusiveMinimum": 0, "maximum": 1},
+        "out_of_range_values": {
+          "type": "array", "maxItems": 30, "items": {"$ref": "#/$defs/retained_oor"}
+        },
+        "values_sha256": {"$ref": "#/$defs/sha256"},
+        "mean_in_range": {"$ref": "#/$defs/number_or_null"},
+        "dispersion_gate": {"$ref": "#/$defs/number_or_null"},
+        "admission_threshold": {"type": "number", "exclusiveMinimum": 0},
+        "would_have_been_admitted": {"type": ["boolean", "null"]},
+        "sigma_rel": {"$ref": "#/$defs/number_or_null"},
+        "sigma_rel_upper_95": {"$ref": "#/$defs/number_or_null"},
+        "determinism_class": {"$ref": "#/$defs/class"},
+        "dispersion_class": {"$ref": "#/$defs/class"},
+        "modality": {"$ref": "#/$defs/modality"},
+        "annotations": {
+          "type": "array", "maxItems": 4, "uniqueItems": true,
+          "items": {"enum": [
+            "oor_floor_lower_bound", "suspected_multimodal", "outlier_flag",
+            "uncertain_boundary"
+          ]}
+        },
+        "classification_sha256": {"$ref": "#/$defs/sha256"}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"observed_repeats": {"const": 0}}},
+          "then": {"properties": {"event_resolution": {"type": "null"}}},
+          "else": {"properties": {"event_resolution": {"type": "number", "exclusiveMinimum": 0}}}
+        },
+        {
+          "if": {
+            "properties": {
+              "observed_repeats": {"minimum": 1},
+              "out_of_range_repeats": {"const": 0}
+            }
+          },
+          "then": {"properties": {"zero_event_upper_bound": {"type": "number", "exclusiveMinimum": 0}}},
+          "else": {"properties": {"zero_event_upper_bound": {"type": "null"}}}
+        }
+      ]
+    },
+    "oor_rate": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "config_id", "metric_key", "observed_rows", "out_of_range_rows",
+        "rate", "floor_is_lower_bound", "event_resolution",
+        "zero_event_upper_bound"
+      ],
+      "properties": {
+        "config_id": {"$ref": "#/$defs/config_id"},
+        "metric_key": {"$ref": "#/$defs/metric_key"},
+        "observed_rows": {"type": "integer", "minimum": 0, "maximum": 90},
+        "out_of_range_rows": {"type": "integer", "minimum": 0, "maximum": 90},
+        "rate": {"type": ["number", "null"], "minimum": 0, "maximum": 1},
+        "floor_is_lower_bound": {"type": "boolean"},
+        "event_resolution": {"type": ["number", "null"], "exclusiveMinimum": 0, "maximum": 1},
+        "zero_event_upper_bound": {"type": ["number", "null"], "exclusiveMinimum": 0, "maximum": 1}
+      },
+      "allOf": [
+        {
+          "if": {"properties": {"observed_rows": {"const": 0}}},
+          "then": {"properties": {"event_resolution": {"type": "null"}}},
+          "else": {"properties": {"event_resolution": {"type": "number", "exclusiveMinimum": 0}}}
+        },
+        {
+          "if": {
+            "properties": {
+              "observed_rows": {"minimum": 1},
+              "out_of_range_rows": {"const": 0}
+            }
+          },
+          "then": {"properties": {"zero_event_upper_bound": {"type": "number", "exclusiveMinimum": 0}}},
+          "else": {"properties": {"zero_event_upper_bound": {"type": "null"}}}
+        }
+      ]
+    },
+    "noise_floor": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "metric_key", "valid_cells", "required_valid_cells", "cross_cell_p90",
+        "p90_upper_90", "absolute_resolution", "floor", "lower_bound",
+        "status", "typed_reason", "fallback_authorized"
+      ],
+      "properties": {
+        "metric_key": {"$ref": "#/$defs/metric_key"},
+        "valid_cells": {"type": "integer", "minimum": 0, "maximum": 3},
+        "required_valid_cells": {"const": 30},
+        "cross_cell_p90": {"type": "null"},
+        "p90_upper_90": {"type": "null"},
+        "absolute_resolution": {"type": "number", "exclusiveMinimum": 0},
+        "floor": {"type": "null"},
+        "lower_bound": {"type": "boolean"},
+        "status": {"const": "insufficient_cells"},
+        "typed_reason": {"const": "successor_cohort_has_3_cells_below_required_30"},
+        "fallback_authorized": {"const": false}
+      }
+    },
+    "denominator": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "cell_id", "metric_key", "determinism_class", "absolute_resolution",
+        "pooled_floor", "denominator", "denominator_kind", "gate_target",
+        "gate_scope", "exact_match", "status"
+      ],
+      "properties": {
+        "cell_id": {"$ref": "#/$defs/cell_id"},
+        "metric_key": {"$ref": "#/$defs/metric_key"},
+        "determinism_class": {"$ref": "#/$defs/class"},
+        "absolute_resolution": {"type": "number", "exclusiveMinimum": 0},
+        "pooled_floor": {"type": "null"},
+        "denominator": {"$ref": "#/$defs/number_or_null"},
+        "denominator_kind": {"enum": ["absolute", "none"]},
+        "gate_target": {"enum": ["exact_value", "none"]},
+        "gate_scope": {"const": "diagnostic_only"},
+        "exact_match": {"type": "boolean"},
+        "status": {
+          "enum": [
+            "diagnostic_only_exact_resolution", "no_gate_insufficient_evidence",
+            "pending_structural_floor"
+          ]
+        }
+      },
+      "oneOf": [
+        {
+          "properties": {
+            "determinism_class": {"const": "deterministic"},
+            "denominator": {"type": "number", "exclusiveMinimum": 0},
+            "denominator_kind": {"const": "absolute"},
+            "gate_target": {"const": "exact_value"},
+            "exact_match": {"const": true},
+            "status": {"const": "diagnostic_only_exact_resolution"}
+          }
+        },
+        {
+          "properties": {
+            "determinism_class": {"const": "insufficient_evidence"},
+            "denominator": {"type": "null"},
+            "denominator_kind": {"const": "none"},
+            "gate_target": {"const": "none"},
+            "exact_match": {"const": false},
+            "status": {"const": "no_gate_insufficient_evidence"}
+          }
+        },
+        {
+          "properties": {
+            "determinism_class": {
+              "enum": ["vendor_defect", "multimodal", "quasi_stable", "clock_noise", "noisy", "unstable"]
+            },
+            "denominator": {"type": "null"},
+            "denominator_kind": {"const": "none"},
+            "gate_target": {"const": "none"},
+            "exact_match": {"const": false},
+            "status": {"const": "pending_structural_floor"}
+          }
+        }
+      ]
+    },
+    "multiplicity_policy": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "status", "method", "q", "family_definition", "hypothesis_count",
+        "discoveries", "discoveries_sha256", "policy_sha256"
+      ],
+      "properties": {
+        "status": {"const": "external_pending"},
+        "method": {"const": "BH-FDR"},
+        "q": {"const": 0.05},
+        "family_definition": {"const": "metric_family_within_config_v1"},
+        "hypothesis_count": {"const": 0},
+        "discoveries": {"type": "array", "maxItems": 0},
+        "discoveries_sha256": {"$ref": "#/$defs/sha256"},
+        "policy_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "historical_reconciliation": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "status", "dispersion_gate_replayed", "local_projection_count",
+        "historical_admitted_set_sha256", "exact_set_match", "typed_reason"
+      ],
+      "properties": {
+        "status": {"const": "external_pending"},
+        "dispersion_gate_replayed": {"const": true},
+        "local_projection_count": {"type": "integer", "minimum": 0, "maximum": 990},
+        "historical_admitted_set_sha256": {"type": "null"},
+        "exact_set_match": {"type": "null"},
+        "typed_reason": {"const": "historical_admitted_set_not_supplied"}
+      }
+    },
+    "limitations": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "censoring", "finite_n", "within_session", "multiplicity",
+        "historical_reconciliation", "fallback_authority"
+      ],
+      "properties": {
+        "censoring": {"$ref": "#/$defs/short_string"},
+        "finite_n": {"$ref": "#/$defs/short_string"},
+        "within_session": {"$ref": "#/$defs/short_string"},
+        "multiplicity": {"$ref": "#/$defs/short_string"},
+        "historical_reconciliation": {"$ref": "#/$defs/short_string"},
+        "fallback_authority": {"const": "no versioned floor fallback authority is supplied or accepted"}
+      }
+    },
+    "analysis_policy": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "minimum_floor_cells", "floor_quantile", "floor_upper_confidence",
+        "within_session_only", "raw_values_clamped",
+        "finite_out_of_range_values_retained", "floor_fallback_policy",
+        "multiplicity_policy", "historical_admission_reconciliation",
+        "limitations"
+      ],
+      "properties": {
+        "minimum_floor_cells": {"const": 30},
+        "floor_quantile": {"const": 0.9},
+        "floor_upper_confidence": {"const": 0.9},
+        "within_session_only": {"const": true},
+        "raw_values_clamped": {"const": false},
+        "finite_out_of_range_values_retained": {"const": true},
+        "floor_fallback_policy": {"const": "forbidden_without_versioned_authority"},
+        "multiplicity_policy": {"$ref": "#/$defs/multiplicity_policy"},
+        "historical_admission_reconciliation": {"$ref": "#/$defs/historical_reconciliation"},
+        "limitations": {"$ref": "#/$defs/limitations"}
+      }
+    },
+    "claims": {
+      "type": "object", "additionalProperties": false,
+      "required": [
+        "artifact_scope", "analysis_is_diagnostic_only", "publication_authorized",
+        "publication_claim", "canonical_m6_completed", "m6_done_created",
+        "m7_handoff_ready", "m7_consumable", "floor_fallback_authorized",
+        "hardware_values_are_targets_only"
+      ],
+      "properties": {
+        "artifact_scope": {"const": "diagnostic_only"},
+        "analysis_is_diagnostic_only": {"const": true},
+        "publication_authorized": {"const": false},
+        "publication_claim": {"const": false},
+        "canonical_m6_completed": {"const": false},
+        "m6_done_created": {"const": false},
+        "m7_handoff_ready": {"const": false},
+        "m7_consumable": {"const": false},
+        "floor_fallback_authorized": {"const": false},
+        "hardware_values_are_targets_only": {"const": true}
+      }
+    }
+  }
+}
