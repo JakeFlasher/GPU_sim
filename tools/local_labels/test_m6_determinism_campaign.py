@@ -115,6 +115,35 @@ def test_frozen_source_alias_resolves_exact_registry_and_sidecar_bytes() -> None
         assert len(payload) == aliases[relative]["size_bytes"]
 
 
+def test_active_sidecar_schema_authority_admits_explicit_controls() -> None:
+    schema, payload = campaign._load_active_sidecar_schema(
+        repo_root=campaign.REPO_ROOT,
+        cache=campaign.InputSnapshotCache(),
+    )
+    assert campaign.sha256_bytes(payload) == (
+        campaign.sidecar_schema_authority.SCHEMA_SHA256
+    )
+    protocol = schema["properties"]["measurement_protocol"]["properties"]
+    assert protocol["ncu_target_processes"]["const"] == "all"
+    assert protocol["ncu_launch_count"]["minimum"] == 1
+
+
+def test_active_sidecar_schema_authority_fails_closed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    def reject_schema(_payload: bytes) -> dict:
+        raise ValueError("synthetic authority rejection")
+
+    monkeypatch.setattr(
+        campaign.sidecar_schema_authority,
+        "parse_authoritative_schema_bytes",
+        reject_schema,
+    )
+    with pytest.raises(campaign.M6Error) as error:
+        campaign._load_active_sidecar_schema(repo_root=campaign.REPO_ROOT)
+    assert error.value.code == "M6_M4_SIDECAR_SCHEMA_AUTHORITY"
+
+
 def test_matrix_authority_sources_do_not_invoke_git(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -1297,6 +1326,12 @@ def test_complete_m4_receipt_is_rederived_from_verified_done_artifacts(
     )
     assert len(receipt["chunk_done_manifests"]) == 18
     assert len(receipt["cell_launch_identities"]) == 122
+    schema_payload = campaign.SIDECAR_SCHEMA_PATH.read_bytes()
+    assert receipt["active_sidecar_schema"] == {
+        "path": "workloads/simbench_bw/schemas/local_label_sidecar.schema.json",
+        "sha256": campaign.sha256_bytes(schema_payload),
+        "size_bytes": len(schema_payload),
+    }
     campaign._validate_m4_identity(
         receipt,
         matrix=matrix,
@@ -1305,6 +1340,24 @@ def test_complete_m4_receipt_is_rederived_from_verified_done_artifacts(
         repo_root=campaign.REPO_ROOT,
         require_complete=True,
     )
+
+    schema_fake = copy.deepcopy(receipt)
+    schema_fake["active_sidecar_schema"]["sha256"] = "0" * 64
+    schema_fake["identity_sha256"] = campaign.canonical_sha256(
+        campaign._without(schema_fake, "identity_sha256")
+    )
+    with pytest.raises(campaign.M6Error) as error:
+        campaign._validate_m4_identity(
+            schema_fake,
+            matrix=matrix,
+            matrix_sha256=campaign.sha256_bytes(
+                campaign.MATRIX_PATH.read_bytes()
+            ),
+            cells=schedule["cells"],
+            repo_root=campaign.REPO_ROOT,
+            require_complete=True,
+        )
+    assert error.value.code == "M6_M4_RECEIPT_REDERIVATION"
 
     fake = copy.deepcopy(receipt)
     fake_launch = fake["cell_launch_identities"][0]["launches"][0]

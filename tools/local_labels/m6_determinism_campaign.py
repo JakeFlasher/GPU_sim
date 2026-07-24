@@ -23,6 +23,7 @@ from pathlib import Path, PurePosixPath
 from typing import Any, Iterable, Mapping, Sequence
 
 from jsonschema import Draft202012Validator, FormatChecker
+from jsonschema.exceptions import SchemaError
 
 try:
     from . import build_sm86_capture_matrix as matrix_builder
@@ -32,6 +33,7 @@ try:
     from . import metric_registry as metric_registry_lib
     from . import ncu_capture_contract
     from . import parse_ncu_metrics as ncu_parser
+    from . import sidecar_schema_authority
     from .m6_determinism_stats import (
         DETERMINISM_CLASSES,
         benjamini_hochberg,
@@ -53,6 +55,7 @@ except ImportError:  # direct script execution
     import metric_registry as metric_registry_lib  # type: ignore[no-redef]
     import ncu_capture_contract  # type: ignore[no-redef]
     import parse_ncu_metrics as ncu_parser  # type: ignore[no-redef]
+    import sidecar_schema_authority  # type: ignore[no-redef]
     from m6_determinism_stats import (  # type: ignore[no-redef]
         DETERMINISM_CLASSES,
         benjamini_hochberg,
@@ -129,14 +132,14 @@ SCHEMA_IDS_BY_VERSION = {
 }
 SCHEMA_SHA256_BY_VERSION = {
     1: {
-        "m4_binding": "7dbbc92a00f42b66a949a09decb12862534d74a0e26961f7430a32cf313da27c",
+        "m4_binding": "d1a6338eec3ec59755b5ed769d9fac6ddcc1e790caac31091336207bb4648dc2",
         "schedule": "5aef059b1175d971c7d7c92f63c292a31cc206d3cb7dd458244a4382ea9efabc",
         "observation_journal": "2056ca961d70c3a8fdd773945bd09c8f6c61dab5b3f298cd152134ce135d21a0",
         "analysis": "35cd406d202f09087426144b74383490c6bf10f9b78ca11457ee7fc486636bb4",
         "done": "60b2223002710a71db483cc1f8a4d4e15929e4a4d283f044a44b04b921662e2a",
     },
     2: {
-        "m4_binding": "7dbbc92a00f42b66a949a09decb12862534d74a0e26961f7430a32cf313da27c",
+        "m4_binding": "d1a6338eec3ec59755b5ed769d9fac6ddcc1e790caac31091336207bb4648dc2",
         "schedule": "463097d014f3290cf902bb635ee4aceabf29243b5d5a6a63a519cffd8adfea6d",
         "observation_journal": "58afa2fcbcc850e6bafcfb8af0027bdf349ecbfd793b9b3812914d5bae9e85c5",
         "analysis": "b78eee7430d63c74676d8d0b5b02cb15dc620c468a8993bb7ead9ae6b393dda8",
@@ -999,6 +1002,32 @@ def _canonical_repo_file(
     ):
         _fail("M6_SOURCE_AUTHORITY", f"{role}: expected {canonical}, observed {actual}")
     return actual
+
+
+def _load_active_sidecar_schema(
+    *,
+    repo_root: Path,
+    cache: InputSnapshotCache | None = None,
+) -> tuple[dict[str, Any], bytes]:
+    """Load the pinned active schema used to validate newly captured sidecars."""
+    schema_file = _canonical_repo_file(
+        repo_root / SIDECAR_SCHEMA_PATH.relative_to(REPO_ROOT),
+        SIDECAR_SCHEMA_PATH,
+        repo_root=repo_root,
+        role="active v5 sidecar schema",
+    )
+    payload = _read_regular_cached(
+        schema_file,
+        role="active v5 sidecar schema",
+        cache=cache,
+        expected_sha256=sidecar_schema_authority.SCHEMA_SHA256,
+    )
+    try:
+        schema = sidecar_schema_authority.parse_authoritative_schema_bytes(payload)
+        Draft202012Validator.check_schema(schema)
+    except (SchemaError, TypeError, ValueError) as exc:
+        _fail("M6_M4_SIDECAR_SCHEMA_AUTHORITY", str(exc))
+    return schema, payload
 
 
 def _load_canonical_matrix(
@@ -2370,18 +2399,26 @@ def _derive_m4_binding_receipt(
         cache=input_cache,
     )
     registry = loads_strict(registry_payload, role="source metric registry")
-    sidecar_schema = loads_strict(
+    frozen_sidecar_schema = loads_strict(
         sidecar_schema_payload, role="source v5 sidecar schema",
     )
     if (
         not isinstance(registry, dict)
-        or not isinstance(sidecar_schema, dict)
+        or not isinstance(frozen_sidecar_schema, dict)
         or registry_pin.get("sha256") != sha256_bytes(registry_payload)
-        or sidecar_schema.get("schema_version") != 5
-        or sidecar_schema.get("$id")
+        or frozen_sidecar_schema.get("schema_version") != 5
+        or frozen_sidecar_schema.get("$id")
         != "simbench_bw/schemas/local_label_sidecar.schema.json"
     ):
         _fail("M6_M4_REGISTRY_AUTHORITY", "source authority mismatch")
+    active_sidecar_schema, active_sidecar_schema_payload = (
+        _load_active_sidecar_schema(repo_root=repo_root, cache=input_cache)
+    )
+    active_sidecar_schema_identity = {
+        "path": SIDECAR_SCHEMA_PATH.relative_to(REPO_ROOT).as_posix(),
+        "sha256": sha256_bytes(active_sidecar_schema_payload),
+        "size_bytes": len(active_sidecar_schema_payload),
+    }
     _registry_metrics(registry, matrix)
     chunks_root = archive_root / "chunks"
     if archive_tree.inventory.get("chunks", (None,))[0] != "directory":
@@ -2521,7 +2558,7 @@ def _derive_m4_binding_receipt(
                 matrix_cell=matrix_cells[cell_id],
                 schedule_cell=schedule_cell,
                 source_commit=source_commit,
-                sidecar_schema=sidecar_schema,
+                sidecar_schema=active_sidecar_schema,
                 registry=registry,
                 registry_payload=registry_payload,
             )
@@ -2560,6 +2597,7 @@ def _derive_m4_binding_receipt(
         "matrix_seal_sha256": matrix["matrix_seal_sha256"],
         "roster_authority_sha256": matrix["authority"]["sha256"],
         "runnable_membership_sha256": matrix["chunking"]["runnable_membership_sha256"],
+        "active_sidecar_schema": active_sidecar_schema_identity,
         "preflight_sha256s": preflight_list,
         "preflight_set_sha256": canonical_sha256(preflight_list),
         "protocol_version": "2.1",
