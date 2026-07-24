@@ -7206,6 +7206,20 @@ def capture_cell(
         raise ChunkRefusal(
             "capture_admission_invalid", repr(capture_provenance)
         )
+    supplemental_all_launches = workload_row_binding is not None
+    if supplemental_all_launches:
+        identity = cell.get("identity")
+        if (
+            not isinstance(identity, dict)
+            or identity.get("roster_source") != "sol_execbench"
+        ):
+            raise ChunkRefusal(
+                "sol_workload_row_binding_invalid", "binding on non-SOL cell"
+            )
+        raise ChunkRefusal(
+            "sol_supplemental_launch_set_v3_live_canary_required",
+            "supplemental capture remains disabled until a pinned live canary",
+        )
     binary, invocation, budget, runtime_cwd, runtime_env = validate_capture_cell(
         cell, cell_budgets=cell_budgets,
         certified_sol_env=certified_sol_env,
@@ -7342,7 +7356,6 @@ def capture_cell(
         phase_env_factory = lambda tag, timeout: sol_phase_env(
             sol_context, phase_tag=tag, capture_kind="trace", timeout_s=timeout,
         )
-    supplemental_all_launches = workload_row_binding is not None
     guard_pre = live_capture_guard(pins)
     control_policy = (cell.get("control_bits") or {}).get("policy")
     label_failures: list[dict[str, Any]] = []

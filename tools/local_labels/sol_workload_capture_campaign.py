@@ -2454,8 +2454,60 @@ def _storage_state_for_fault(output_root: Path) -> dict[str, int]:
         return {"available_bytes": 0, "available_inodes": 0}
 
 
+def _require_disabled_collect_gate(args: argparse.Namespace) -> None:
+    """Refuse supplemental live collection before any output effect."""
+    matrix_path = chunk_capture.lexical_input_path(args.matrix)
+    matrix = chunk_capture._load_object(
+        matrix_path, role="supplemental collect matrix",
+    )
+    variants = matrix.get("variants") if isinstance(matrix, dict) else None
+    rows = matrix.get("rows") if isinstance(matrix, dict) else None
+    variant_keys: set[tuple[str, str]] = set()
+    variants_are_sol = isinstance(variants, list) and bool(variants)
+    if variants_are_sol:
+        for variant in variants:
+            invocation = (
+                variant.get("invocation") if isinstance(variant, dict) else None
+            )
+            slug = variant.get("slug") if isinstance(variant, dict) else None
+            variant_id = (
+                variant.get("variant_id") if isinstance(variant, dict) else None
+            )
+            if (
+                not isinstance(invocation, dict)
+                or invocation.get("adapter_kind") != "sol_execbench"
+                or not isinstance(slug, str) or not slug.startswith("problem_")
+                or not isinstance(variant_id, str) or not variant_id
+                or (slug, variant_id) in variant_keys
+            ):
+                variants_are_sol = False
+                break
+            variant_keys.add((slug, variant_id))
+    rows_are_sol = isinstance(rows, list) and bool(rows)
+    if rows_are_sol:
+        for row in rows:
+            key = row.get("key") if isinstance(row, dict) else None
+            row_identity = (
+                (key.get("slug"), key.get("variant_id"))
+                if isinstance(key, dict) else (None, None)
+            )
+            if row_identity not in variant_keys:
+                rows_are_sol = False
+                break
+    if not variants_are_sol or not rows_are_sol:
+        raise CampaignRefusal(
+            "campaign_supplemental_source_scope_invalid",
+            "collect matrix is not exclusively SOL-ExecBench",
+        )
+    raise CampaignRefusal(
+        "sol_supplemental_launch_set_v3_live_canary_required",
+        "supplemental capture remains disabled until a pinned live canary",
+    )
+
+
 def run_campaign(args: argparse.Namespace) -> Path:
     """Run under the global lock and one fail-closed storage boundary."""
+    _require_disabled_collect_gate(args)
     output_root = Path(args.output_root)
     chunk_capture.assert_external_output_root_before_mutation(output_root)
     _gpu_lock = _global_gpu_lock()

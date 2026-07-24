@@ -16,6 +16,93 @@ from tools.local_labels import sol_workload_capture_chunk as chunk
 from tools.local_labels import test_sol_workload_capture_matrix as matrix_fixture
 
 
+@pytest.fixture
+def _permit_offline_supplemental_campaign(monkeypatch):
+    """Exercise post-gate campaign internals without a production bypass."""
+    monkeypatch.setattr(campaign, "_require_disabled_collect_gate", lambda _args: None)
+
+
+def _write_disabled_gate_matrix(path: Path) -> Path:
+    path.write_text(json.dumps({
+        "variants": [{
+            "slug": "problem_fixture",
+            "variant_id": "native",
+            "invocation": {"adapter_kind": "sol_execbench"},
+        }],
+        "rows": [{
+            "key": {"slug": "problem_fixture", "variant_id": "native"},
+        }],
+    }) + "\n")
+    return path
+
+
+def test_supplemental_campaign_gate_refuses_before_any_output_or_gpu_effect(
+    tmp_path, monkeypatch,
+):
+    matrix = _write_disabled_gate_matrix(tmp_path / "matrix.json")
+    output = tmp_path / "must-not-exist"
+
+    def unexpected(*_args, **_kwargs):
+        pytest.fail("supplemental campaign crossed the live-canary gate")
+
+    monkeypatch.setattr(
+        campaign.chunk_capture,
+        "assert_external_output_root_before_mutation",
+        unexpected,
+    )
+    monkeypatch.setattr(campaign, "_global_gpu_lock", unexpected)
+    monkeypatch.setattr(campaign, "_check_storage_fault_receipt", unexpected)
+    monkeypatch.setattr(campaign, "_run_campaign_locked", unexpected)
+    monkeypatch.setattr(campaign.subprocess, "run", unexpected)
+
+    with pytest.raises(campaign.CampaignRefusal) as caught:
+        campaign.run_campaign(Namespace(
+            matrix=str(matrix), output_root=str(output),
+        ))
+    assert caught.value.code == (
+        "sol_supplemental_launch_set_v3_live_canary_required"
+    )
+    assert not output.exists()
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda document: document["variants"][0]["invocation"].update(
+            adapter_kind="direct"
+        ),
+        lambda document: document["variants"].append(
+            json.loads(json.dumps(document["variants"][0]))
+        ),
+        lambda document: document["rows"][0]["key"].update(
+            variant_id="missing"
+        ),
+    ],
+)
+def test_supplemental_campaign_gate_refuses_mixed_or_ambiguous_scope(
+    tmp_path, mutate,
+):
+    matrix = _write_disabled_gate_matrix(tmp_path / "matrix.json")
+    document = json.loads(matrix.read_text())
+    mutate(document)
+    matrix.write_text(json.dumps(document) + "\n")
+    with pytest.raises(campaign.CampaignRefusal) as caught:
+        campaign.run_campaign(Namespace(
+            matrix=str(matrix), output_root=str(tmp_path / "output"),
+        ))
+    assert caught.value.code == "campaign_supplemental_source_scope_invalid"
+
+
+def test_supplemental_campaign_gate_preserves_malformed_input_refusal(tmp_path):
+    matrix = tmp_path / "matrix.json"
+    matrix.write_text("{malformed\n")
+    with pytest.raises(campaign.chunk_capture.WorkloadCaptureRefusal) as caught:
+        campaign.run_campaign(Namespace(
+            matrix=str(matrix), output_root=str(tmp_path / "output"),
+        ))
+    assert caught.value.code == "supplemental_input_invalid"
+
+
 def _materialize_offline_checkpoint_fixture(tmp_path, monkeypatch) -> Path:
     """Create a real retained, honestly-incomplete frontier for archive tests."""
     variants, rows, *_ = matrix_fixture._native_fixture(
@@ -489,7 +576,7 @@ def test_bounded_failure_and_resume_never_reach_beyond_selected_frontier(
 
 
 def test_storage_capacity_fault_records_external_receipt_and_gates_restart(
-    tmp_path, monkeypatch,
+    tmp_path, monkeypatch, _permit_offline_supplemental_campaign,
 ):
     output = tmp_path / "campaign"
     output.mkdir(mode=0o700)
@@ -539,7 +626,7 @@ def test_storage_capacity_fault_records_external_receipt_and_gates_restart(
 
 
 def test_storage_integrity_receipt_requires_explicit_reconciliation(
-    tmp_path, monkeypatch,
+    tmp_path, monkeypatch, _permit_offline_supplemental_campaign,
 ):
     output = tmp_path / "campaign"
     output.mkdir(mode=0o700)
@@ -581,7 +668,7 @@ def test_storage_integrity_receipt_requires_explicit_reconciliation(
     [errno.EIO, getattr(errno, "ESTALE", errno.EIO)],
 )
 def test_raw_input_storage_errno_never_creates_output_storage_receipt(
-    tmp_path, monkeypatch, error_number,
+    tmp_path, monkeypatch, error_number, _permit_offline_supplemental_campaign,
 ):
     output = tmp_path / "campaign"
     output.mkdir(mode=0o700)
@@ -640,7 +727,7 @@ def _inject_output_open_fault(monkeypatch, target: Path, error_number: int):
     "error_number", [errno.EIO, getattr(errno, "ESTALE", errno.EIO)],
 )
 def test_event_output_read_storage_fault_creates_receipt(
-    tmp_path, monkeypatch, error_number,
+    tmp_path, monkeypatch, error_number, _permit_offline_supplemental_campaign,
 ):
     output = _storage_receipt_fixture(tmp_path, monkeypatch)
     campaign.append_event(output, {
@@ -665,7 +752,7 @@ def test_event_output_read_storage_fault_creates_receipt(
     "error_number", [errno.EIO, getattr(errno, "ESTALE", errno.EIO)],
 )
 def test_published_done_output_read_storage_fault_creates_receipt(
-    tmp_path, monkeypatch, error_number,
+    tmp_path, monkeypatch, error_number, _permit_offline_supplemental_campaign,
 ):
     output = _storage_receipt_fixture(tmp_path, monkeypatch)
     done_path = output / "sol_workload_chunks/chunk-001/DONE.json"
@@ -694,7 +781,7 @@ def test_published_done_output_read_storage_fault_creates_receipt(
     "error_number", [errno.EIO, getattr(errno, "ESTALE", errno.EIO)],
 )
 def test_checkpoint_output_read_storage_fault_creates_receipt(
-    tmp_path, monkeypatch, error_number,
+    tmp_path, monkeypatch, error_number, _permit_offline_supplemental_campaign,
 ):
     output = _storage_receipt_fixture(tmp_path, monkeypatch)
     snapshot = output / campaign.SNAPSHOT_DIR / "snapshot-000001-test"
@@ -718,7 +805,7 @@ def test_checkpoint_output_read_storage_fault_creates_receipt(
 
 
 def test_event_output_fsync_eio_types_locally_and_creates_receipt(
-    tmp_path, monkeypatch,
+    tmp_path, monkeypatch, _permit_offline_supplemental_campaign,
 ):
     output = _storage_receipt_fixture(tmp_path, monkeypatch)
     real_fsync = campaign.chunk_capture.os.fsync
@@ -751,7 +838,7 @@ def test_event_output_fsync_eio_types_locally_and_creates_receipt(
 
 
 def test_snapshot_output_rename_eio_types_locally_and_creates_receipt(
-    tmp_path, monkeypatch,
+    tmp_path, monkeypatch, _permit_offline_supplemental_campaign,
 ):
     output = _storage_receipt_fixture(tmp_path, monkeypatch)
     real_replace = campaign.os.replace
@@ -809,6 +896,7 @@ def test_snapshot_output_rename_eio_types_locally_and_creates_receipt(
 )
 def test_semantic_os_backed_refusals_never_create_storage_receipt(
     tmp_path, monkeypatch, refusal, expected_code,
+    _permit_offline_supplemental_campaign,
 ):
     output = tmp_path / "campaign"
     output.mkdir(mode=0o700)
@@ -967,7 +1055,7 @@ def test_retained_restart_preflight_uses_retained_matrix_after_source_deletion(
 
 
 def test_repo_local_preflight_manifest_storage_marker_creates_no_campaign_receipt(
-    tmp_path, monkeypatch,
+    tmp_path, monkeypatch, _permit_offline_supplemental_campaign,
 ):
     repo = tmp_path / "repo"
     repo.mkdir()

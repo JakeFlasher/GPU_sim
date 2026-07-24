@@ -409,6 +409,64 @@ def test_capture_cell_refuses_identity_mismatch_before_control(tmp_path, monkeyp
     assert control_called is False
 
 
+@pytest.mark.parametrize(
+    "identity,expected_code",
+    [
+        (
+            {"roster_source": "sol_execbench", "slug": "synthetic"},
+            "sol_supplemental_launch_set_v3_live_canary_required",
+        ),
+        (
+            {"roster_source": "portable_lcd", "slug": "synthetic"},
+            "sol_workload_row_binding_invalid",
+        ),
+        (None, "sol_workload_row_binding_invalid"),
+    ],
+)
+def test_supplemental_cell_gate_refuses_before_validation_or_capture(
+    tmp_path, monkeypatch, identity, expected_code,
+):
+    cell_dir = tmp_path / "chunk" / "cells" / "must-not-exist"
+
+    def unexpected(*_args, **_kwargs):
+        pytest.fail("supplemental cell crossed the live-canary gate")
+
+    for name in (
+        "validate_capture_cell",
+        "_write_json_exclusive",
+        "live_capture_guard",
+        "capture_label",
+        "capture_trace",
+        "_run_logged",
+    ):
+        monkeypatch.setattr(cc, name, unexpected)
+    monkeypatch.setattr(cc.subprocess, "run", unexpected)
+
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        cc.capture_cell(
+            cell={"identity": identity},
+            cell_dir=cell_dir,
+            matrix={},
+            pins={},
+            cell_budgets=object(),
+            expected_tracer_sha256="9" * 64,
+            capture_provenance={
+                "capture_started_at_utc": "2026-07-10T12:00:00Z",
+                "admission_run_id": "8" * 64,
+                "supersedes": None,
+                "prior_preparation_failures": [],
+                "prior_capture_defect_attempts": [],
+                "source_commit": "d" * 40,
+            },
+            certified_sol_env=None,
+            sol_environment_probe=None,
+            module_store=tmp_path / "module-store",
+            workload_row_binding={"schema_version": 1},
+        )
+    assert caught.value.code == expected_code
+    assert not cell_dir.exists()
+
+
 def test_vendor_runtime_control_slug_dispatch_is_closed():
     expected = frozenset({
         "vendor_gemm_cublas",
