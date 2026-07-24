@@ -220,13 +220,18 @@ def _validate_action(
     return tuple(action)
 
 
-def _c_environment() -> dict[str, str]:
-    return {
-        "LANG": "C",
-        "LC_ALL": "C",
-        "LANGUAGE": "C",
-        "PATH": os.defpath,
-    }
+_ACTION_ENVIRONMENT_ITEMS = (
+    ("LANG", "C"),
+    ("LANGUAGE", "C"),
+    ("LC_ALL", "C"),
+    ("PATH", "/bin:/usr/bin"),
+)
+
+
+def ncu_action_environment() -> dict[str, str]:
+    """Return the exact launcher environment supplied to retained NCU actions."""
+
+    return dict(_ACTION_ENVIRONMENT_ITEMS)
 
 
 def _signal_group(process: subprocess.Popen[bytes], signal_number: int) -> None:
@@ -396,7 +401,7 @@ def _run_bounded(
             stdin=subprocess.DEVNULL,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            env=_c_environment(),
+            env=ncu_action_environment(),
             pass_fds=(descriptor,),
             start_new_session=True,
         )

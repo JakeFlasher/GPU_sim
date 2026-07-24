@@ -126,6 +126,86 @@ def test_expected_identity_factory_rejects_malformed_authority(overrides) -> Non
         executor.build_expected_ncu_identity(**values)
 
 
+def _fixture_shell_wrapper(path: Path) -> Path:
+    path.write_text(f"""#!/bin/sh
+set -eu
+dirname /tmp/report.ncu-rep >/dev/null
+readlink -f /tmp >/dev/null
+uname -s >/dev/null
+if [ "$#" -eq 1 ] && [ "$1" = "--version" ]; then
+    printf '%s\\n' {_VERSION!r}
+    exit 0
+fi
+if [ "$#" -eq 1 ] && [ "$1" = "--emit" ]; then
+    printf '%s\\n' 'wrapper action'
+    exit 0
+fi
+exit 64
+""")
+    path.chmod(0o555)
+    return path
+
+
+def test_action_environment_is_closed_literal_and_fresh(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    ncu = _fixture_ncu(tmp_path / "ncu")
+    hostile_names = (
+        "LD_PRELOAD", "LD_LIBRARY_PATH", "LD_AUDIT", "CUDA_INJECTION64_PATH",
+        "CUDA_VISIBLE_DEVICES", "CUDA_DEVICE_ORDER", "NV_COMPUTE_PROFILER_LOCAL_CONNECTION_OVERRIDE",
+        "NCU_CONFIG_FILE", "CUDA_HOME", "CUDA_PATH", "NVCC_CCBIN",
+        "PYTHONPATH", "PYTHONHOME", "BASH_ENV", "ENV", "HOME", "TMPDIR",
+        "XDG_CONFIG_HOME", "XDG_CACHE_HOME", "LOCPATH", "NLSPATH",
+        "LABEL_DRIVER_GPU_INDEX", "FLASHINFER_TRACE_DIR", "SOL_NATIVE_ENV_HASH",
+    )
+    for name in hostile_names:
+        monkeypatch.setenv(name, f"hostile-{name}")
+    monkeypatch.setenv("PATH", "/hostile/bin")
+    monkeypatch.setattr(executor.os, "defpath", "/hostile/default")
+    observed = []
+    original_popen = executor.subprocess.Popen
+
+    def popen(*args, **kwargs):
+        observed.append(dict(kwargs["env"]))
+        return original_popen(*args, **kwargs)
+
+    monkeypatch.setattr(executor.subprocess, "Popen", popen)
+    result = executor.execute_ncu_action(
+        _identity(ncu), ["--echo"], timeout_seconds=2,
+    )
+    expected = {
+        "LANG": "C",
+        "LANGUAGE": "C",
+        "LC_ALL": "C",
+        "PATH": "/bin:/usr/bin",
+    }
+    assert result.returncode == 0
+    assert observed == [expected, expected]
+    assert all(name not in observed[0] for name in hostile_names)
+    first = executor.ncu_action_environment()
+    first["PATH"] = "/mutated"
+    assert executor.ncu_action_environment() == expected
+
+
+def test_fixed_action_path_supports_wrapper_without_ambient_tools(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    ncu = _fixture_shell_wrapper(tmp_path / "ncu")
+    hostile = tmp_path / "hostile"
+    hostile.mkdir()
+    marker = tmp_path / "hostile-tool-ran"
+    for name in ("dirname", "readlink", "uname"):
+        tool = hostile / name
+        tool.write_text(f"#!/bin/sh\ntouch {marker}\nexit 99\n")
+        tool.chmod(0o755)
+    monkeypatch.setenv("PATH", str(hostile))
+    result = executor.execute_ncu_action(
+        _identity(ncu), ["--emit"], timeout_seconds=2,
+    )
+    assert result == executor.NcuActionResult(0, b"wrapper action\n", b"")
+    assert not marker.exists()
+
+
 def test_authorized_action_preserves_argv_bytes_locale_and_no_shell(
     tmp_path: Path, monkeypatch,
 ) -> None:
