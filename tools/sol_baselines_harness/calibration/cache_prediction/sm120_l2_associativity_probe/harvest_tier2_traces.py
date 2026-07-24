@@ -8,12 +8,13 @@ script re-harvests them via NVBit injection on the live RTX 5060
 Laptop (sm_120).
 
 Reads the ledger at
-``scripts/baselines_harness/calibration/cache_prediction/label_ledger_v1_sm120_partition.toml``,
+``tools/sol_baselines_harness/calibration/cache_prediction/label_ledger_v1_sm120_partition.toml``,
 finds every entry with a ``[entries.historical_ncu_label]`` block,
-extracts the binary path from
-``historical_ncu_provenance.command_argv[-1]`` (the path the NCU
-harvest used), and runs the binary under
-``nvbit_tracer/metric_extractor/metric_extractor.so`` with the env
+resolves the binary named by
+``historical_ncu_provenance.command_argv[-1]`` through the sealed historical
+path-alias authority with the ledger's exact binary SHA-256, and runs the
+retained binary under
+``tools/nvbit_tracer/metric_extractor/metric_extractor.so`` with the env
 tuned for sm_120 + Tier-2 dump + permissive module regex (since
 the calibration binaries are NOT under a ``sol_execbench_*`` prefix).
 
@@ -48,20 +49,29 @@ import sys
 import tomllib
 from pathlib import Path
 
-# __file__ is .../scripts/baselines_harness/calibration/cache_prediction/
+_TOOLS_ROOT = Path(__file__).resolve().parents[4]
+if str(_TOOLS_ROOT) not in sys.path:
+    sys.path.insert(0, str(_TOOLS_ROOT))
+
+from sol_baselines_harness.calibration.cache_prediction import (
+    historical_path_aliases,
+)
+
+# __file__ is .../tools/sol_baselines_harness/calibration/cache_prediction/
 #   sm120_l2_associativity_probe/harvest_tier2_traces.py
 # repo root is 5 parents up.
 _REPO_ROOT = Path(__file__).resolve().parents[5]
 _LEDGER = (
     _REPO_ROOT
-    / "scripts"
-    / "baselines_harness"
+    / "tools"
+    / "sol_baselines_harness"
     / "calibration"
     / "cache_prediction"
     / "label_ledger_v1_sm120_partition.toml"
 )
 _NVBIT_SO = (
     _REPO_ROOT
+    / "tools"
     / "nvbit_tracer"
     / "metric_extractor"
     / "metric_extractor.so"
@@ -82,16 +92,28 @@ def _ledger_historical_cells() -> list[dict]:
 
 
 def _binary_path_from_entry(entry: dict) -> Path | None:
-    """Extract the binary path from the NCU command_argv. The NCU
-    invocation is structured as
-    `[ncu, --launch-skip, N, ..., --csv, <binary_path>]`, so the
-    binary is the last argv token.
-    """
+    """Resolve the historical NCU binary through the sealed alias table."""
     prov = entry.get("historical_ncu_provenance") or {}
+    label = entry.get("historical_ncu_label") or {}
     argv = prov.get("command_argv") or []
     if not argv:
         return None
-    return Path(argv[-1])
+    label_sha256 = label.get("binary_sha256")
+    provenance_sha256 = prov.get("binary_sha256")
+    if label_sha256 != provenance_sha256:
+        raise historical_path_aliases.HistoricalPathAliasError(
+            "historical_path_alias_expected_hash_conflict",
+            f"{entry.get('cell_name', '<unknown>')}: label and provenance "
+            "binary hashes differ",
+        )
+    return historical_path_aliases.resolve_historical_file(
+        argv[-1],
+        alias_id=(
+            historical_path_aliases.SM120_CALIBRATION_BINARIES_ALIAS
+        ),
+        expected_sha256=label_sha256,
+        repo_root=_REPO_ROOT,
+    )
 
 
 def harvest_one(

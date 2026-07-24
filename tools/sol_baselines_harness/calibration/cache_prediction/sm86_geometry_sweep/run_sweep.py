@@ -36,6 +36,9 @@ from typing import Final
 
 _REPO_ROOT = Path(__file__).resolve().parents[5]
 
+from sol_baselines_harness.calibration.cache_prediction import (
+    historical_path_aliases,
+)
 from sol_baselines_harness.metrics.cache_predictor import predict_from_launch_frame  # noqa: E402
 from sol_baselines_harness.metrics.tier2_sidecar_parser import parse_launch_frames  # noqa: E402
 from sol_baselines_harness.metrics.isotonic_calibrator import (  # noqa: E402
@@ -51,12 +54,38 @@ from sol_baselines_harness.metrics.predictor_design_coverage import (  # noqa: E
 )
 
 _CP: Final[Path] = (
-    _REPO_ROOT / "scripts" / "baselines_harness" / "calibration" / "cache_prediction"
+    _REPO_ROOT / "tools" / "sol_baselines_harness" / "calibration"
+    / "cache_prediction"
 )
 _SWEEP_SIDECARS: Final[Path] = _CP / "raw_pred_sweep_sidecars_sm86"
 _EXPANDED_LEDGER: Final[Path] = _CP / "label_ledger_v1_sm86_expanded.toml"
 _SEED_LEDGER: Final[Path] = _CP / "label_ledger_v1_sm86_pilot_v1.toml"
-_TRACES_ROOT: Final[Path] = _REPO_ROOT / "scripts" / "baselines_harness" / ".harness_traces"
+
+
+def _resolve_seed_artifact(
+    repo_root: Path,
+    entry: dict,
+    filename: str,
+) -> Path:
+    expected_hash_field = {
+        "ncu_3run_v1.json": "task9_ncu_3run_v1_sha256",
+        "nvbit_metrics/tier2_address_trace.t2a": (
+            "task10_tier2_binary_sha256"
+        ),
+    }.get(filename)
+    if expected_hash_field is None:
+        raise ValueError(f"unsupported retained seed artifact: {filename}")
+    historical_path = (
+        "scripts/baselines_harness/.harness_traces/"
+        f"{entry['slug']}__cuda_cpp__sm86/{filename}"
+    )
+    return historical_path_aliases.resolve_historical_file(
+        historical_path,
+        alias_id=historical_path_aliases.SM86_HARNESS_TRACES_ALIAS,
+        expected_sha256=entry[expected_hash_field],
+        repo_root=repo_root,
+    )
+
 
 HOST_ARCH: Final[str] = "sm_86"
 FRIENDLY_GATE: Final[float] = 0.05
@@ -106,6 +135,13 @@ def reuse_factor_by_slug(repo_root: Path, slugs) -> dict:
         harvest_sweep_traces as _hsv,
     )
     sidecar_dir = repo_root / _SWEEP_SIDECARS.relative_to(_REPO_ROOT)
+    seed_document = tomllib.loads(
+        (repo_root / _SEED_LEDGER.relative_to(_REPO_ROOT)).read_text()
+    )
+    seed_entries = _index_unique_entries(
+        seed_document["entries"],
+        ledger_name="pilot sm86 seed ledger",
+    )
     out: dict = {}
     want = set(slugs)
     for slug in want:
@@ -116,11 +152,108 @@ def reuse_factor_by_slug(repo_root: Path, slugs) -> dict:
             if dr:
                 out[slug] = float(dr["reuse_factor"])
                 continue
-        t2a = (repo_root / _TRACES_ROOT.relative_to(_REPO_ROOT)
-               / f"{slug}__cuda_cpp__sm86" / "nvbit_metrics" / "tier2_address_trace.t2a")
-        if t2a.is_file():
-            out[slug] = float(_hsv.dense_reuse_feature(parse_launch_frames(t2a)[0])["reuse_factor"])
+        seed_entry = seed_entries.get(slug)
+        if seed_entry is None:
+            continue
+        t2a = _resolve_seed_artifact(
+            repo_root,
+            seed_entry,
+            "nvbit_metrics/tier2_address_trace.t2a",
+        )
+        out[slug] = float(
+            _hsv.dense_reuse_feature(parse_launch_frames(t2a)[0])[
+                "reuse_factor"
+            ]
+        )
     return out
+
+
+_COHORT_FAILURE_REASONS: Final[frozenset[str]] = frozenset({
+    "ncu_label_no_read_only_traffic",
+    "ncu_repeatability_failed",
+})
+_SEED_CROSS_STAMPS: Final[dict[str, str]] = {
+    "task10_tier2_binary_sha256": "seed_tier2_binary_sha256",
+    "task10_tier2_v1_sha256": "seed_tier2_v1_sha256",
+    "task8_full_correctness_v1_sha256": "seed_full_correctness_v1_sha256",
+    "task9_ncu_3run_v1_sha256": "seed_ncu_3run_v1_sha256",
+}
+
+
+def _index_unique_entries(entries, *, ledger_name: str) -> dict[str, dict]:
+    indexed: dict[str, dict] = {}
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise ValueError(f"{ledger_name}: ledger entry must be a table")
+        slug = entry.get("slug")
+        if not isinstance(slug, str) or not slug:
+            raise ValueError(f"{ledger_name}: ledger entry has invalid slug")
+        if slug in indexed:
+            raise ValueError(f"{ledger_name}: duplicate slug: {slug}")
+        indexed[slug] = entry
+    return indexed
+
+
+def _cohort_failure_reason(slug: str, entry: dict) -> str | None:
+    completed = entry.get("completed")
+    failure_reason = entry.get("failure_reason")
+    if type(completed) is not bool:
+        raise ValueError(
+            f"expanded sm86 ledger: {slug}: completed must be boolean"
+        )
+    if completed:
+        if failure_reason != "":
+            raise ValueError(
+                f"expanded sm86 ledger: {slug}: completed row has "
+                "failure_reason"
+            )
+        return None
+    if failure_reason not in _COHORT_FAILURE_REASONS:
+        raise ValueError(
+            f"expanded sm86 ledger: {slug}: unsupported "
+            f"failure_reason: {failure_reason!r}"
+        )
+    return failure_reason
+
+
+def _validate_seed_cross_stamps(
+    slug: str,
+    pilot_entry: dict,
+    expanded_entry: dict,
+) -> None:
+    if type(expanded_entry.get("completed")) is not bool:
+        raise ValueError(
+            f"expanded sm86 ledger: {slug}: completed must be boolean"
+        )
+    if not expanded_entry["completed"]:
+        raise ValueError(
+            f"expanded sm86 ledger: {slug}: seed row is incomplete"
+        )
+    if expanded_entry.get("failure_reason") != "":
+        raise ValueError(
+            f"expanded sm86 ledger: {slug}: completed row has "
+            "failure_reason"
+        )
+    for pilot_field, expanded_field in _SEED_CROSS_STAMPS.items():
+        pilot_sha256 = pilot_entry.get(pilot_field)
+        expanded_sha256 = expanded_entry.get(expanded_field)
+        for field, value in (
+            (pilot_field, pilot_sha256),
+            (expanded_field, expanded_sha256),
+        ):
+            if (
+                not isinstance(value, str)
+                or len(value) != 64
+                or any(ch not in "0123456789abcdef" for ch in value)
+            ):
+                raise ValueError(
+                    f"sm86 ledgers: {slug}: invalid SHA-256 field: {field}"
+                )
+        if pilot_sha256 != expanded_sha256:
+            raise ValueError(
+                f"sm86 ledgers: {slug}: seed cross-stamp mismatch: "
+                f"{pilot_field} != {expanded_field}"
+            )
 
 
 def build_records_at_assoc(repo_root: Path, assoc: int, exclude=frozenset()):
@@ -129,10 +262,35 @@ def build_records_at_assoc(repo_root: Path, assoc: int, exclude=frozenset()):
     geom = _geometry_spec(assoc)
     sidecar_dir = repo_root / _SWEEP_SIDECARS.relative_to(_REPO_ROOT)
     led = tomllib.loads((repo_root / _EXPANDED_LEDGER.relative_to(_REPO_ROOT)).read_text())
-    labels = {e["slug"]: e for e in led["entries"]
-              if e.get("source") == "cohort_b_probe" and e.get("completed")}
+    expanded_entries = _index_unique_entries(
+        led["entries"],
+        ledger_name="expanded sm86 ledger",
+    )
+    unexpected_sources = {
+        entry.get("source") for entry in expanded_entries.values()
+    } - {"cohort_b_probe", "seed"}
+    if unexpected_sources:
+        raise ValueError(
+            "expanded sm86 ledger: unsupported sources: "
+            f"{sorted(unexpected_sources, key=repr)!r}"
+        )
+    cohort_entries = {
+        slug: entry for slug, entry in expanded_entries.items()
+        if entry["source"] == "cohort_b_probe"
+    }
+    labels: dict[str, dict] = {}
     records: list[CalibrationInputRecord] = []
     excluded: list[dict] = []
+    for slug, entry in sorted(cohort_entries.items()):
+        failure_reason = _cohort_failure_reason(slug, entry)
+        if failure_reason is None:
+            labels[slug] = entry
+            continue
+        excluded.append({
+            "slug": slug,
+            "typed_reason": failure_reason,
+            "source": "cohort_b_probe",
+        })
 
     # --- cohort_b cells: per-assoc raw from the sweep sidecars ---
     for slug in sorted(labels):
@@ -175,15 +333,53 @@ def build_records_at_assoc(repo_root: Path, assoc: int, exclude=frozenset()):
 
     # --- seed cells: re-simulate the on-disk trace at this assoc ---
     seed = tomllib.loads((repo_root / _SEED_LEDGER.relative_to(_REPO_ROOT)).read_text())
-    for e in seed["entries"]:
+    seed_entries = _index_unique_entries(
+        seed["entries"],
+        ledger_name="pilot sm86 seed ledger",
+    )
+    expanded_seed_slugs = {
+        slug for slug, entry in expanded_entries.items()
+        if entry["source"] == "seed"
+    }
+    if set(seed_entries) != expanded_seed_slugs:
+        raise ValueError(
+            "sm86 ledgers: expanded and pilot seed slug sets differ"
+        )
+    if set(seed_entries) & set(cohort_entries):
+        raise ValueError("sm86 ledgers: seed and cohort slug sets overlap")
+    for slug, pilot_entry in seed_entries.items():
+        _validate_seed_cross_stamps(
+            slug,
+            pilot_entry,
+            expanded_entries[slug],
+        )
+    for e in seed_entries.values():
         slug = e["slug"]
-        bundle = (repo_root / _TRACES_ROOT.relative_to(_REPO_ROOT)
-                  / f"{slug}__cuda_cpp__sm86")
-        t2a = bundle / "nvbit_metrics" / "tier2_address_trace.t2a"
-        ncu = bundle / "ncu_3run_v1.json"
-        if not t2a.is_file() or not ncu.is_file():
-            excluded.append({"slug": slug, "typed_reason": "tier2_dump_absent",
-                             "source": "seed"})
+        t2a = _resolve_seed_artifact(
+            repo_root,
+            e,
+            "nvbit_metrics/tier2_address_trace.t2a",
+        )
+        ncu = _resolve_seed_artifact(
+            repo_root,
+            e,
+            "ncu_3run_v1.json",
+        )
+        try:
+            bucket = lookup_predictor_design_coverage(slug).predictor_bucket
+        except (PredictorDesignCoverageError, KeyError):
+            excluded.append({
+                "slug": slug,
+                "typed_reason": "cell_missing_cohort_partition",
+                "source": "seed",
+            })
+            continue
+        if bucket == PREDICTOR_BUCKET_TYPED_UNAVAILABLE:
+            excluded.append({
+                "slug": slug,
+                "typed_reason": "predictor_typed_unavailable",
+                "source": "seed",
+            })
             continue
         frames = parse_launch_frames(t2a)
         if not frames:
@@ -198,7 +394,6 @@ def build_records_at_assoc(repo_root: Path, assoc: int, exclude=frozenset()):
             excluded.append({"slug": slug, "typed_reason": "predictor_typed_unavailable",
                              "source": "seed"})
             continue
-        bucket = lookup_predictor_design_coverage(slug).predictor_bucket
         if slug in exclude:
             excluded.append({"slug": slug, "typed_reason": "predictor_typed_unavailable",
                              "source": "capability_ledger"})
