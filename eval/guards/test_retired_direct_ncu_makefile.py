@@ -92,3 +92,53 @@ def test_retired_makefile_exposes_only_read_only_inventory_actions(
         assert sentinel.read_bytes() == b"preserve me\n"
 
     assert sorted(path.name for path in tmp_path.iterdir()) == ["sentinel"]
+
+
+@pytest.mark.parametrize(
+    "arguments",
+    [
+        ("-i", "all"),
+        ("-q", "all"),
+        ("-t", "all"),
+        ("-i", "probe"),
+        ("-q", "probe"),
+        ("-t", "probe"),
+        ("-o", "probe", "probe"),
+        ("MAKEFLAGS=n", "probe"),
+        ("MAKECMDGOALS=", "all"),
+        ("MAKECMDGOALS=help", "all"),
+        ("AUTHORIZED_GOALS=all", "all"),
+        ("UNAUTHORIZED_GOALS=", "unknown-target"),
+        ("*.o",),
+        ("-n", r"probe\.o"),
+        ("probe",),
+        ("Makefile",),
+        (".SUFFIXES",),
+        ("problem_018_fused_rope_with_qk_norm_and_kv_cache_update.cu",),
+        ("problem_071_kv_cache_update_with_rope.cu",),
+    ],
+)
+def test_retired_makefile_rejects_bypass_modes_and_special_targets(
+    tmp_path: Path,
+    arguments: tuple[str, ...],
+) -> None:
+    make = shutil.which("make")
+    assert make is not None, "GNU Make is required by the repository contract"
+    (tmp_path / "probe.cc").write_text("int main() { return 0; }\n", encoding="utf-8")
+    sentinel = tmp_path / "sentinel"
+    sentinel.write_bytes(b"preserve me\n")
+
+    result = subprocess.run(
+        [make, "--no-print-directory", "-f", str(MAKEFILE), *arguments],
+        cwd=tmp_path,
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+
+    combined = result.stdout + result.stderr
+    assert result.returncode != 0, combined
+    assert "not an authorized historical inventory action" in combined
+    assert sentinel.read_bytes() == b"preserve me\n"
+    assert sorted(path.name for path in tmp_path.iterdir()) == ["probe.cc", "sentinel"]

@@ -1,49 +1,90 @@
-# Makefile for the warm/cold direct-NCU-harvest binaries.
+# Read-only tombstone for the retired direct-NCU calibration binaries.
 #
-# These are standalone calibration executables compiled from the
-# deployed `baselines/L1/<slug>/cuda_cpp/kernel.cu` kernels (per the
-# warm/cold cache-protocol design dossier section 5 — the binary IS
-# the deployed baseline, not a cohort-B surrogate). Each binary loops
-# its single target kernel 6 times so `ncu --launch-skip 5
-# --launch-count 1` deterministically lands on the 6th invocation
-# (BL-20260521-ncu-launch-index-single-target-probes). The result of
-# the NCU sweep is the read-only sector L1/L2 hit-rate row that
-# `run_ncu_harvest_batch.py` merges into
-# `scripts/baselines_harness/calibration/cache_prediction/label_ledger_v1_full_partition.toml`.
-#
-# Variables (matching the nvbit_tracer/metric_extractor/tests/
-# calibration_cohort_b/Makefile + calibration_warm_cold/Makefile
-# conventions):
-#   ARCH         GPU arch (default sm_86 for the local 3090 Ti host;
-#                sm_100a when cross-compiling for the cloud B200).
-#   NVCC         nvcc binary (default `nvcc`).
-#   NVCC_CCBIN   Host C++ compiler nvcc invokes (default g++-14).
-#
-# Targets:
-#   make ARCH=sm_86       — local build for the 3090 Ti.
-#   make ARCH=sm_100a     — cross-compile for the cloud B200 target.
-#   make clean            — drop the binaries.
+# The two CUDA sources are retained as historical evidence. This Makefile must
+# not compile, capture, merge, clean, or otherwise mutate that evidence.
 
-ARCH ?= sm_86
-NVCC ?= nvcc
-NVCC_CCBIN ?= g++-14
+override MAKEFLAGS_INPUT_ORIGIN := $(origin MAKEFLAGS)
+override MAKEFLAGS += -rR
+.SUFFIXES:
+override .DEFAULT_GOAL := help
 
-NVCC_FLAGS = \
-	-ccbin $(NVCC_CCBIN) \
-	-O3 \
-	-std=c++17 \
-	-arch=$(ARCH) \
-	-Xcompiler -Wall
+override HISTORICAL_SOURCES := \
+	problem_018_fused_rope_with_qk_norm_and_kv_cache_update.cu \
+	problem_071_kv_cache_update_with_rope.cu
 
-KERNELS = \
+override RETIRED_TARGETS := \
+	all \
+	build \
+	clean \
+	capture \
+	harvest \
+	merge \
 	problem_018_fused_rope_with_qk_norm_and_kv_cache_update \
 	problem_071_kv_cache_update_with_rope
 
-.PHONY: all clean
-all: $(KERNELS)
+override AUTHORIZED_GOALS := help inventory list
+override MAKECMDGOALS_INPUT_ORIGIN := $(origin MAKECMDGOALS)
+ifeq ($(filter undefined default,$(MAKECMDGOALS_INPUT_ORIGIN)),)
+$(error command-line MAKECMDGOALS is not an authorized historical inventory action)
+endif
+override REQUESTED_GOALS := $(strip $(MAKECMDGOALS))
+override NON_INVENTORY_GOALS := $(filter-out $(AUTHORIZED_GOALS),$(REQUESTED_GOALS))
+override SOURCE_REFUSAL_GOALS := $(foreach goal,$(NON_INVENTORY_GOALS),\
+	$(if $(or \
+		$(findstring %,$(goal)),\
+		$(findstring *,$(goal)),\
+		$(findstring ?,$(goal)),\
+		$(findstring [,$(goal)),\
+		$(findstring \,$(goal))),,\
+		$(if $(or \
+			$(wildcard $(patsubst %.o,%,$(goal)).cc),\
+			$(wildcard $(patsubst %.o,%,$(goal)).cu)),\
+			$(goal))))
+override UNAUTHORIZED_GOALS := $(filter-out $(SOURCE_REFUSAL_GOALS),$(NON_INVENTORY_GOALS))
+
+ifneq ($(UNAUTHORIZED_GOALS),)
+$(error target set "$(UNAUTHORIZED_GOALS)" is not an authorized historical inventory action)
+endif
+
+ifneq ($(SOURCE_REFUSAL_GOALS),)
+ifneq ($(MAKEFLAGS_INPUT_ORIGIN),file)
+$(error command-line MAKEFLAGS is not an authorized historical inventory action)
+endif
+ifeq ($(findstring n,$(firstword $(MAKEFLAGS))),)
+$(error source-shaped target set is not an authorized historical inventory action)
+endif
+ifneq ($(or $(findstring i,$(firstword $(MAKEFLAGS))),$(findstring q,$(firstword $(MAKEFLAGS))),$(findstring t,$(firstword $(MAKEFLAGS)))),)
+$(error source-shaped target set is not an authorized historical inventory action under ignore, question, or touch modes)
+endif
+endif
+
+.PHONY: help inventory list $(RETIRED_TARGETS)
+
+help:
+	@printf '%s\n' \
+		'This direct-NCU workflow is retired and non-executable.' \
+		'Authorized read-only actions: help inventory list'
+
+inventory:
+	@printf '%s\n' $(HISTORICAL_SOURCES)
+
+list:
+	@printf '%s\n' help inventory list
+
+$(RETIRED_TARGETS):
+	@printf '%s\n' 'target "$@" is retired and non-executable' >&2; exit 2
+
+%.o: %.cc
+	@printf '%s\n' 'target "$@" is not an authorized historical inventory action' >&2; exit 2
+
+%: %.cc
+	@printf '%s\n' 'target "$@" is not an authorized historical inventory action' >&2; exit 2
+
+%.o: %.cu
+	@printf '%s\n' 'target "$@" is retired and non-executable' >&2; exit 2
 
 %: %.cu
-	$(NVCC) $(NVCC_FLAGS) -o $@ $<
+	@printf '%s\n' 'target "$@" is retired and non-executable' >&2; exit 2
 
-clean:
-	rm -f $(KERNELS)
+.DEFAULT:
+	@printf '%s\n' 'target "$@" is not an authorized historical inventory action' >&2; exit 2
