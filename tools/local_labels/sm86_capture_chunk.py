@@ -4012,6 +4012,7 @@ def _prepare_label_capture_command(
     artifact_tag: str,
     execution_source_commit: str | None,
     bind_supplemental_toolchain: bool,
+    expected_ncu_identity: ncu_executor.ExpectedNcuIdentity | None,
     explicit_ncu_protocol: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Validate and construct a label-driver command without side effects."""
@@ -4123,7 +4124,21 @@ def _prepare_label_capture_command(
         "--warmup", str(label_driver_warmup),
     ]
     if explicit_ncu_protocol is None:
-        command += ["--cache-control", "all", "--clock-control", "none"]
+        try:
+            expected_ncu_identity = ncu_executor.validate_expected_ncu_identity(
+                expected_ncu_identity
+            )
+        except ncu_executor.NcuActionExecutorError as exc:
+            raise ChunkRefusal(
+                "capture_ncu_authority_invalid", str(exc)
+            ) from exc
+        command += [
+            "--ncu", expected_ncu_identity.resolved_path,
+            "--ncu-executable-sha256",
+            expected_ncu_identity.executable_sha256,
+            "--ncu-version-line", expected_ncu_identity.version_line,
+            "--cache-control", "all", "--clock-control", "none",
+        ]
     else:
         command += _explicit_ncu_driver_args(explicit_ncu_protocol)
     command += ["--out-dir", str(labels_root)]
@@ -4213,6 +4228,7 @@ def build_fixture_only_launch_set_plan(
         matrix=matrix, pins=pins, label_launch_index_override=0,
         kernel_name_selector=None, artifact_tag="label_launch_set",
         execution_source_commit=None, bind_supplemental_toolchain=True,
+        expected_ncu_identity=None,
         explicit_ncu_protocol=protocol,
     )
     cell_root = (
@@ -4258,6 +4274,7 @@ def capture_label(
         kernel_name_selector=kernel_name_selector, artifact_tag=artifact_tag,
         execution_source_commit=execution_source_commit,
         bind_supplemental_toolchain=bind_supplemental_toolchain,
+        expected_ncu_identity=expected_ncu_identity,
     )
     command = prepared["command"]
     identity = prepared["identity"]

@@ -69,11 +69,17 @@ import csv
 import hashlib
 import io
 import json
-import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Iterable
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from tools.local_labels import immutable_artifact as immutable
+from tools.local_labels import ncu_action_executor as ncu_executor
 
 
 DEFAULT_METRIC_NAME_COLUMN = "Metric Name"
@@ -269,7 +275,7 @@ def extract_launch_observation(text: str) -> dict[str, Any]:
 
 
 def write_launch_observation(
-    *, csv_text: str, report_path: Path, output_path: Path,
+    *, csv_text: str, report_sha256: str, output_path: Path,
     requested_launch_skip: int, requested_launch_count: int,
 ) -> None:
     observation = extract_launch_observation(csv_text)
@@ -279,7 +285,7 @@ def write_launch_observation(
         "kernel_name_base": "mangled",
         "requested_launch_skip": requested_launch_skip,
         "requested_launch_count": requested_launch_count,
-        "report_sha256": hashlib.sha256(report_path.read_bytes()).hexdigest(),
+        "report_sha256": report_sha256,
         **observation,
     }
     encoded_for_seal = json.dumps(
@@ -457,10 +463,10 @@ class MetricExtractionResult:
 
     On success ``fraction_values`` carries one float per requested
     metric, all in ``[0, 1]``. On failure ``typed_reason`` carries
-    one of: ``ncu_csv_empty``, ``ncu_csv_header_missing_columns``,
-    ``ncu_csv_duplicate_metric_rows``, ``ncu_csv_metric_missing``,
-    ``ncu_csv_metric_non_numeric``, ``ncu_csv_metric_out_of_range``,
-    ``ncu_import_failed``.
+    one of the ``ncu_csv_*`` parser reasons or an import-boundary reason:
+    ``ncu_import_failed``, ``ncu_import_authority_invalid``,
+    ``ncu_import_report_identity_invalid``, ``ncu_import_timeout``, or
+    ``ncu_import_output_limit``.
 
     ``parser_diagnostics`` carries non-fatal observations the parser
     wishes the audit trail to retain. Two diagnostic keys are
@@ -1167,30 +1173,117 @@ def extract_launch_metric_observations(
     return observations
 
 
-def _import_report_csv(
-    ncu_bin: str, report_path: Path
-) -> tuple[str | None, MetricExtractionResult | None]:
-    """Invoke ``ncu --import <report> --page details --csv`` ONCE and return
-    ``(csv_text, None)`` on success or ``(None, error_result)`` on a typed
-    ``ncu_import_failed`` failure. Factored out so a caller can import the
-    report a single time and feed the CSV to both the percentage parser and
-    the registry-driven unit-tagged extractor (the report import is the
-    expensive step).
+_NCU_IMPORT_TIMEOUT_SECONDS = 600.0
 
-    NCU 2026.1.1.0 restricts ``--print-metric-name name`` to the details page
-    (it errors out with "only supported for the details page" on
-    ``--page raw``); this uses ``--page details``. The same-value
-    multi-section repetition that page produces is tolerated by
-    :func:`_select_named_rows`.
+
+@dataclass(frozen=True)
+class ImportedReportCsv:
+    """One Details CSV bound to the retained report bytes used for import."""
+
+    text: str
+    report_sha256: str
+    report_size_bytes: int
+
+
+def _import_error(
+    *, typed_reason: str, detail: str,
+) -> tuple[None, MetricExtractionResult]:
+    return None, MetricExtractionResult(
+        ok=False, typed_reason=typed_reason, detail=detail,
+    )
+
+
+def _executor_import_error(
+    exc: ncu_executor.NcuActionExecutorError,
+) -> tuple[None, MetricExtractionResult]:
+    if exc.code == ncu_executor.NCU_ACTION_INPUT_IDENTITY_INVALID:
+        typed_reason = "ncu_import_report_identity_invalid"
+    elif exc.code in {
+        ncu_executor.NCU_IDENTITY_INPUT_INVALID,
+        ncu_executor.NCU_EXECUTABLE_IDENTITY_INVALID,
+        ncu_executor.NCU_VERSION_PROBE_FAILED,
+        ncu_executor.NCU_VERSION_LINE_MISMATCH,
+    }:
+        typed_reason = "ncu_import_authority_invalid"
+    elif exc.code == ncu_executor.NCU_ACTION_TIMEOUT:
+        typed_reason = "ncu_import_timeout"
+    elif exc.code == ncu_executor.NCU_ACTION_OUTPUT_LIMIT:
+        typed_reason = "ncu_import_output_limit"
+    else:
+        typed_reason = "ncu_import_failed"
+    return _import_error(typed_reason=typed_reason, detail=str(exc))
+
+
+def _details_csv_payload(output: str) -> str:
+    """Return the unique Details CSV after a closed NCU warning preamble."""
+    lines = output.splitlines(keepends=True)
+    required = {
+        DEFAULT_METRIC_NAME_COLUMN,
+        DEFAULT_METRIC_VALUE_COLUMN,
+        *_REQUIRED_OBSERVATION_COLUMNS,
+    }
+    candidates: list[int] = []
+    for index, line in enumerate(lines):
+        try:
+            rows = list(csv.reader([line], strict=True))
+        except csv.Error:
+            continue
+        if len(rows) == 1 and required.issubset(rows[0]):
+            candidates.append(index)
+    if len(candidates) != 1:
+        raise ValueError(
+            "retained NCU output has no unique Details CSV header"
+        )
+    header_index = candidates[0]
+    unexpected = [
+        line.rstrip("\r\n")
+        for line in lines[:header_index]
+        if line.strip() and not line.startswith("==WARNING==")
+    ]
+    if unexpected:
+        raise ValueError(
+            "retained NCU output has unexpected text before Details CSV: "
+            f"{unexpected!r}"
+        )
+    return "".join(lines[header_index:])
+
+
+def _import_report_csv(
+    expected_ncu_identity: ncu_executor.ExpectedNcuIdentity,
+    report_path: Path,
+    *,
+    timeout_seconds: float = _NCU_IMPORT_TIMEOUT_SECONDS,
+) -> tuple[ImportedReportCsv | None, MetricExtractionResult | None]:
+    """Import one retained report through independently authorized NCU.
+
+    The executable and report are both descriptor-bound for the complete action.
+    ``ImportedReportCsv.report_sha256`` is the hash observed through the retained
+    report capability and is the only report hash downstream launch-observation
+    emission may bind.
     """
-    cmd = [
-        ncu_bin,
+    try:
+        expected = ncu_executor.validate_expected_ncu_identity(
+            expected_ncu_identity
+        )
+    except ncu_executor.NcuActionExecutorError as exc:
+        return _executor_import_error(exc)
+    try:
+        retained_report = immutable.open_retained_regular(report_path)
+    except (OSError, immutable.ImmutableArtifactError) as exc:
+        return _import_error(
+            typed_reason="ncu_import_report_identity_invalid",
+            detail=f"could not retain NCU report {report_path}: {exc}",
+        )
+
+    imported: ImportedReportCsv | None = None
+    error: MetricExtractionResult | None = None
+    arguments = [
         "--import",
-        str(report_path),
+        retained_report.proc_path,
         "--page",
         "details",
         "--csv",
-        # NVBit records mangled function symbols.  NCU's Details export
+        # NVBit records mangled function symbols. NCU's Details export
         # demangles by default, so the explicit base is part of the join
         # contract rather than presentation formatting.
         "--print-kernel-base",
@@ -1199,50 +1292,66 @@ def _import_report_csv(
         "name",
         "--print-units",
         "base",
-        # --print-fp forces NCU to render numeric metric values as
-        # floating point instead of locale-aware strings. NCU's CLI
-        # guide documents this flag at
-        # references/NVIDIA_Manuals/ncu_guide/04_nsight-compute-cli.md;
-        # without it, certain locales emit "73,5" instead of "73.5",
-        # which would trip the parser's float() with a typed
-        # ncu_csv_metric_non_numeric reason.
+        # Force numeric values to floating point in the closed C locale.
         "--print-fp",
     ]
     try:
-        proc = subprocess.run(
-            cmd, capture_output=True, text=True, check=False
+        action = ncu_executor.execute_ncu_action(
+            expected,
+            arguments,
+            timeout_seconds=timeout_seconds,
+            retained_report=retained_report,
         )
-    except OSError as exc:
-        return None, MetricExtractionResult(
-            ok=False,
-            typed_reason="ncu_import_failed",
-            detail=f"could not execute {ncu_bin!r}: {exc}",
-        )
-    if proc.returncode != 0:
-        return None, MetricExtractionResult(
-            ok=False,
-            typed_reason="ncu_import_failed",
-            detail=(
-                f"{ncu_bin} --import exited {proc.returncode}; "
-                f"stderr={proc.stderr.strip()!r}"
-            ),
-        )
-    return proc.stdout, None
+        if action.returncode != 0:
+            stderr = action.stderr.decode("utf-8", errors="surrogateescape")
+            _unused, error = _import_error(
+                typed_reason="ncu_import_failed",
+                detail=(
+                    f"retained NCU --import exited {action.returncode}; "
+                    f"stderr={stderr.strip()!r}"
+                ),
+            )
+        else:
+            try:
+                decoded = action.stdout.decode("utf-8", errors="strict")
+                text = _details_csv_payload(decoded)
+            except (UnicodeDecodeError, ValueError) as exc:
+                _unused, error = _import_error(
+                    typed_reason="ncu_import_failed",
+                    detail=f"retained NCU --import stdout is not Details CSV: {exc}",
+                )
+            else:
+                imported = ImportedReportCsv(
+                    text=text,
+                    report_sha256=retained_report.sha256,
+                    report_size_bytes=retained_report.size_bytes,
+                )
+    except ncu_executor.NcuActionExecutorError as exc:
+        _unused, error = _executor_import_error(exc)
+    finally:
+        try:
+            retained_report.close()
+        except (OSError, immutable.ImmutableArtifactError) as exc:
+            if error is None:
+                imported = None
+                _unused, error = _import_error(
+                    typed_reason="ncu_import_report_identity_invalid",
+                    detail=f"could not close retained NCU report: {exc}",
+                )
+    return imported, error
 
 
 def import_and_parse(
-    ncu_bin: str,
+    expected_ncu_identity: ncu_executor.ExpectedNcuIdentity,
     report_path: Path,
     metric_names: Iterable[str],
 ) -> MetricExtractionResult:
-    """Import the report and parse the requested metrics through the
-    percentage path. Preserved behavior: failure to launch / non-zero exit
-    yields a typed ``ncu_import_failed`` result; otherwise delegates to
-    :func:`parse_raw_page_csv`."""
-    csv_text, error = _import_report_csv(ncu_bin, report_path)
+    """Import an authorized report and parse requested percentage metrics."""
+    imported, error = _import_report_csv(expected_ncu_identity, report_path)
     if error is not None:
         return error
-    return parse_raw_page_csv(csv_text or "", metric_names)
+    assert imported is not None
+    return parse_raw_page_csv(imported.text, metric_names)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1254,7 +1363,9 @@ def main(argv: list[str] | None = None) -> int:
             "extraction failure."
         )
     )
-    parser.add_argument("--ncu", required=True)
+    parser.add_argument("--ncu-resolved-path", required=True)
+    parser.add_argument("--ncu-executable-sha256", required=True)
+    parser.add_argument("--ncu-version-line", required=True)
     parser.add_argument("--report", required=True, type=Path)
     parser.add_argument(
         "--metric",
@@ -1303,14 +1414,28 @@ def main(argv: list[str] | None = None) -> int:
         ),
     )
     args = parser.parse_args(argv)
+    try:
+        expected_ncu_identity = ncu_executor.build_expected_ncu_identity(
+            resolved_path=args.ncu_resolved_path,
+            executable_sha256=args.ncu_executable_sha256,
+            version_line=args.ncu_version_line,
+        )
+    except ncu_executor.NcuActionExecutorError as exc:
+        sys.stderr.write(
+            f"parse_ncu_metrics: ncu_import_authority_invalid: {exc}\n"
+        )
+        return 1
 
     # Legacy percentage-only path: no --unit-metric requested.
     if not args.unit_metric:
-        csv_text, import_error = _import_report_csv(args.ncu, args.report)
+        imported, import_error = _import_report_csv(
+            expected_ncu_identity, args.report
+        )
         if import_error is not None:
             result = import_error
         else:
-            result = parse_raw_page_csv(csv_text or "", args.metric)
+            assert imported is not None
+            result = parse_raw_page_csv(imported.text, args.metric)
         if not result.ok:
             sys.stderr.write(
                 f"parse_ncu_metrics: {result.typed_reason}: {result.detail}\n"
@@ -1332,7 +1457,8 @@ def main(argv: list[str] | None = None) -> int:
                 return 1
             try:
                 write_launch_observation(
-                    csv_text=csv_text or "", report_path=args.report,
+                    csv_text=imported.text,
+                    report_sha256=imported.report_sha256,
                     output_path=args.launch_observation_json,
                     requested_launch_skip=args.requested_launch_skip,
                     requested_launch_count=args.requested_launch_count,
@@ -1356,13 +1482,14 @@ def main(argv: list[str] | None = None) -> int:
         return 1
     from metric_registry import load_registry
 
-    csv_text, error = _import_report_csv(args.ncu, args.report)
+    imported, error = _import_report_csv(expected_ncu_identity, args.report)
     if error is not None:
         sys.stderr.write(
             f"parse_ncu_metrics: {error.typed_reason}: {error.detail}\n"
         )
         return 1
-    assert csv_text is not None
+    assert imported is not None
+    csv_text = imported.text
     pct_result = parse_raw_page_csv(csv_text, args.metric)
     if not pct_result.ok:
         sys.stderr.write(
@@ -1396,7 +1523,8 @@ def main(argv: list[str] | None = None) -> int:
             return 1
         try:
             write_launch_observation(
-                csv_text=csv_text, report_path=args.report,
+                csv_text=csv_text,
+                report_sha256=imported.report_sha256,
                 output_path=args.launch_observation_json,
                 requested_launch_skip=args.requested_launch_skip,
                 requested_launch_count=args.requested_launch_count,

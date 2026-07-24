@@ -258,9 +258,11 @@ def _verify_launch(launch: dict[str, Any], identity: dict[str, Any], row: dict[s
 
 
 def _import_ncu_report_csv(report_path: Path) -> tuple[str | None, Any]:
-    from tools.local_labels import parse_ncu_metrics
-
-    return parse_ncu_metrics._import_report_csv("ncu", report_path)
+    del report_path
+    raise AdmissionError(
+        "NCU_REPORT_EXPORTER_AUTHORITY_UNAVAILABLE: the frozen successor-v1 "
+        "preflight records no independently authorized NCU path and SHA-256"
+    )
 
 
 def _verify_ncu_report(

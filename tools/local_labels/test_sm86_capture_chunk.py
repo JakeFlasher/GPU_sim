@@ -2522,6 +2522,24 @@ def test_capture_dispatch_threads_retained_runnability_path(monkeypatch, tmp_pat
     ) is sentinel
 
 
+def _label_driver_ncu_identity_args(tmp_path: Path) -> list[str]:
+    ncu = tmp_path / "ncu"
+    ncu.write_text(
+        "#!/usr/bin/env bash\n"
+        "if [[ ${1:-} == --version ]]; then\n"
+        "  printf 'Version 2026.1.0.0 (public-release)\\n'\n"
+        "  exit 0\n"
+        "fi\n"
+        "exit 99\n"
+    )
+    ncu.chmod(0o700)
+    return [
+        "--ncu", str(ncu),
+        "--ncu-executable-sha256", hashlib.sha256(ncu.read_bytes()).hexdigest(),
+        "--ncu-version-line", "Version 2026.1.0.0 (public-release)",
+    ]
+
+
 def test_label_driver_logical_binding_accepts_adapter_argv_before_ncu(tmp_path):
     missing_manifest = tmp_path / "missing.json"
     result = subprocess.run([
@@ -2530,7 +2548,8 @@ def test_label_driver_logical_binding_accepts_adapter_argv_before_ncu(tmp_path):
         "--shape-point", "workloads",
         "--shape-binding", "logical-workload",
         "--repeat", "0", "--launch", "0",
-        "--binary", "/bin/true", "--ncu", "/bin/true",
+        "--binary", "/bin/true",
+        *_label_driver_ncu_identity_args(tmp_path),
         "--out-dir", str(tmp_path / "labels"),
         "--measurement-manifest", str(missing_manifest),
         "--", "benchmark_dir", "--solution", "solution.json", "--json",
@@ -2547,7 +2566,8 @@ def test_label_driver_logical_binding_refuses_fake_shape_token(tmp_path):
         "--shape-point", "workloads",
         "--shape-binding", "logical-workload",
         "--repeat", "0", "--launch", "0",
-        "--binary", "/bin/true", "--ncu", "/bin/true",
+        "--binary", "/bin/true",
+        *_label_driver_ncu_identity_args(tmp_path),
         "--out-dir", str(tmp_path / "labels"),
         "--", "benchmark_dir", "--shape-point", "workloads",
     ], cwd=cc.REPO_ROOT, capture_output=True, text=True, timeout=30)
@@ -4400,10 +4420,11 @@ def test_sol_label_consumer_keeps_shape_metadata_out_of_target_argv(
         return 1.0, stdout, stderr
 
     monkeypatch.setattr(cc, "_run_logged", fake_run)
+    ncu_identity = _expected_ncu_identity()
     result = cc.capture_label(
         cell=cell, binary=binary, invocation=invocation,
         cell_dir=cell_dir, matrix=matrix, pins=pins, timeout_s=10,
-        expected_ncu_identity=_expected_ncu_identity(),
+        expected_ncu_identity=ncu_identity,
         runtime_cwd=cc.REPO_ROOT, runtime_env=runtime_env,
         bind_supplemental_toolchain=True,
     )
@@ -4416,6 +4437,9 @@ def test_sol_label_consumer_keeps_shape_metadata_out_of_target_argv(
         "--repeat", "0", "--launch", "0",
         "--binary", str(binary),
         "--warmup", "1",
+        "--ncu", ncu_identity.resolved_path,
+        "--ncu-executable-sha256", ncu_identity.executable_sha256,
+        "--ncu-version-line", ncu_identity.version_line,
         "--cache-control", "all",
         "--clock-control", "none",
         "--out-dir", str(cell_dir / "labels"),

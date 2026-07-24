@@ -40,10 +40,21 @@ _REPORT_IDENTITY = {
 }
 
 
+_REAL_IMPORT_NCU_REPORT_CSV = admit._import_ncu_report_csv
+
+
 @pytest.fixture(autouse=True)
 def _mock_ncu_report_import(monkeypatch):
     monkeypatch.setattr(admit, "_import_ncu_report_csv", lambda path: (_REPORT_CSV, None))
 
+def test_frozen_successor_v1_refuses_unbound_ncu_reimport(tmp_path: Path):
+    report = tmp_path / "run.ncu-rep"
+    report.write_bytes(b"report")
+    with pytest.raises(
+        admit.AdmissionError,
+        match="NCU_REPORT_EXPORTER_AUTHORITY_UNAVAILABLE",
+    ):
+        _REAL_IMPORT_NCU_REPORT_CSV(report)
 
 
 

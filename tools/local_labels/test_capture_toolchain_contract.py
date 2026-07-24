@@ -1,6 +1,7 @@
 """Pure tests for the strict CUDA/NCU live-capture boundary."""
 from __future__ import annotations
 
+import hashlib
 import os
 import subprocess
 from pathlib import Path
@@ -423,6 +424,8 @@ def _label_boundary_command(
         "--launch", "0",
         "--binary", str(binary),
         "--ncu", str(ncu),
+        "--ncu-executable-sha256", hashlib.sha256(ncu.read_bytes()).hexdigest(),
+        "--ncu-version-line", f"Version {ncu_release} (public-release)",
         "--out-dir", str(output),
         "--expected-cuda-release", "13.2",
         "--expected-ncu-version-prefix", "2026.1.0",
@@ -501,6 +504,27 @@ def test_label_driver_explicit_launch_set_reaches_ncu_then_stops_postprocessing(
     assert (cell / "run_0_0.ncu-rep").read_text() == "fake report\n"
     assert not (cell / "label_0_0.json").exists()
     assert not (cell / "run_0_0.launch_observation.json").exists()
+
+
+@pytest.mark.parametrize(
+    "option",
+    ["--ncu", "--ncu-executable-sha256", "--ncu-version-line"],
+)
+def test_label_driver_requires_complete_import_authority_before_output_or_ncu(
+    tmp_path, option,
+):
+    command, environment, output, marker = _label_boundary_command(tmp_path)
+    index = command.index(option)
+    del command[index:index + 2]
+    result = subprocess.run(
+        command, env=environment, text=True, capture_output=True, check=False,
+    )
+    assert result.returncode == 2
+    assert "NCU_AUTHORITY_INVALID" in result.stderr or (
+        "missing required argument" in result.stderr
+    )
+    assert not output.exists()
+    assert not marker.exists()
 
 
 @pytest.mark.parametrize(

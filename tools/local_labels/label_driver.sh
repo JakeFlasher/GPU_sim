@@ -19,7 +19,9 @@
 #       --binary path/to/kernel.elf \
 #       [--shape-binding application-args|logical-workload] \
 #       --warmup 1 \
-#       [--ncu /usr/local/cuda/bin/ncu] \
+#       --ncu /usr/local/cuda/bin/ncu \
+#       --ncu-executable-sha256 <lowercase-64-hex> \
+#       --ncu-version-line 'Version ...' \
 #       [--out-dir data/local_labels] \
 #       [--kernel-name <exact-mangled-name>] \
 #       -- <application args ...>
@@ -54,6 +56,8 @@ BINARY_PATH=""
 WARMUP_COUNT="1"
 WARMUP_COUNT_OVERRIDDEN=0
 NCU_BIN="ncu"
+NCU_EXECUTABLE_SHA256=""
+NCU_VERSION_LINE=""
 OUT_DIR="data/local_labels"
 KERNEL_NAME=""
 CACHE_CONTROL=""
@@ -102,7 +106,13 @@ Required arguments:
 
 Optional arguments:
   --warmup <int>            Warmup launches before measurement (default: 1).
-  --ncu <path>              Path to the Nsight Compute CLI (default: 'ncu' on PATH).
+  --ncu <path>              Exact preflight-authorized inner NCU executable path.
+  --ncu-executable-sha256 <sha256>
+                            Exact preflight-authorized NCU executable hash.
+  --ncu-version-line <line> Exact preflight-authorized NCU Version line.
+                            All three are required for single-launch import.
+                            Explicit fixture-only launch-set planning stops before
+                            import and does not consume these fields.
   --out-dir <path>          Quarantine root (default: data/local_labels).
   --kernel-name <name>      Forward an exact mangled NCU kernel-name filter.
   --target-processes <mode> Explicit launch-set NCU target process mode.
@@ -227,6 +237,14 @@ while (("$#")); do
             ;;
         --ncu)
             NCU_BIN="$2"
+            shift 2
+            ;;
+        --ncu-executable-sha256)
+            NCU_EXECUTABLE_SHA256="$2"
+            shift 2
+            ;;
+        --ncu-version-line)
+            NCU_VERSION_LINE="$2"
             shift 2
             ;;
         --out-dir)
@@ -377,6 +395,24 @@ if [[ "$EXPLICIT_NCU_LAUNCH_CONTROLS" -eq 1 ]]; then
     SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
     if ! python3 "$SCRIPT_DIR/ncu_capture_contract.py" \
             "${EXPLICIT_NCU_CONTROL_ARGS[@]}"; then
+        exit 2
+    fi
+else
+    require "--ncu" "$NCU_BIN"
+    require "--ncu-executable-sha256" "$NCU_EXECUTABLE_SHA256"
+    require "--ncu-version-line" "$NCU_VERSION_LINE"
+    if [[ "$NCU_BIN" != /* ]] \
+        || [[ "$(realpath -- "$NCU_BIN" 2>/dev/null || true)" != "$NCU_BIN" ]]; then
+        echo "label_driver: NCU_AUTHORITY_INVALID: --ncu must be one canonical absolute regular-file path" >&2
+        exit 2
+    fi
+    if ! [[ "$NCU_EXECUTABLE_SHA256" =~ ^[0-9a-f]{64}$ ]]; then
+        echo "label_driver: NCU_AUTHORITY_INVALID: --ncu-executable-sha256 must be lowercase 64-hex" >&2
+        exit 2
+    fi
+    if [[ "$NCU_VERSION_LINE" == *$'\n'* ]] \
+        || ! [[ "$NCU_VERSION_LINE" =~ ^Version[[:space:]]+[^[:space:]] ]]; then
+        echo "label_driver: NCU_AUTHORITY_INVALID: --ncu-version-line must be one canonical Version line" >&2
         exit 2
     fi
 fi
@@ -670,6 +706,21 @@ safe_ncu_version() {
 }
 
 PROFILER_VERSION="$(safe_ncu_version "$NCU_BIN")"
+if [[ "$EXPLICIT_NCU_LAUNCH_CONTROLS" -eq 0 ]]; then
+    if ! NCU_OBSERVED_SHA256="$(sha256sum -- "$NCU_BIN" 2>/dev/null)"; then
+        echo "label_driver: NCU_AUTHORITY_INVALID: cannot hash authorized NCU executable" >&2
+        exit 2
+    fi
+    NCU_OBSERVED_SHA256="${NCU_OBSERVED_SHA256%% *}"
+    if [[ "$NCU_OBSERVED_SHA256" != "$NCU_EXECUTABLE_SHA256" ]]; then
+        echo "label_driver: NCU_AUTHORITY_INVALID: executable SHA-256 differs from preflight" >&2
+        exit 2
+    fi
+    if [[ "$PROFILER_VERSION" != "$NCU_VERSION_LINE" ]]; then
+        echo "label_driver: NCU_AUTHORITY_INVALID: Version line differs from preflight" >&2
+        exit 2
+    fi
+fi
 # nvcc --version output is a multiline banner — we want only the
 # canonical "release X.Y" token. The R5 implementation chained
 # grep|head|awk under `set -euo pipefail`, which aborted the entire
@@ -1258,7 +1309,9 @@ LAUNCH_OBSERVATION_PATH="${REPORT_PATH%.ncu-rep}.launch_observation.json"
 # emitter, which then omits the optional unit_tagged_metrics field).
 UNIT_TAGGED_PATH=""
 PARSER_ARGS=(
-    --ncu "$NCU_BIN"
+    --ncu-resolved-path "$NCU_BIN"
+    --ncu-executable-sha256 "$NCU_EXECUTABLE_SHA256"
+    --ncu-version-line "$NCU_VERSION_LINE"
     --report "$REPORT_PATH"
     --metric "lts__t_sector_hit_rate.pct"
     --metric "l1tex__t_sector_hit_rate.pct"

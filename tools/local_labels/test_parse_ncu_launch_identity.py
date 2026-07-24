@@ -6,43 +6,68 @@ import csv
 import hashlib
 import io
 import json
+import os
 import subprocess
+import sys
+from pathlib import Path
 
 import pytest
 
 from tools.local_labels import metric_registry
+from tools.local_labels import ncu_action_executor as ncu_executor
 from tools.local_labels import parse_ncu_metrics as parser
+
+
+def _expected_ncu_identity() -> ncu_executor.ExpectedNcuIdentity:
+    return ncu_executor.build_expected_ncu_identity(
+        resolved_path="/opt/ncu",
+        executable_sha256="a" * 64,
+        version_line="Version 2026.1.0.0 (public-release)",
+    )
 
 
 def test_report_import_requests_mangled_kernel_names(monkeypatch, tmp_path):
     report = tmp_path / "launch.ncu-rep"
     report.write_bytes(b"synthetic report bytes")
-    observed: dict[str, list[str]] = {}
+    observed: dict[str, object] = {}
     csv_text = (
-        '"ID","Kernel Name","Block Size","Grid Size","Device"\n'
+        '"ID","Kernel Name","Block Size","Grid Size","Device",'
+        '"Metric Name","Metric Value"\n'
         '"0","_Z15syntheticKernelv","(128, 1, 1)",'
-        '"(1, 1, 1)","0"\n'
+        '"(1, 1, 1)","0","gpc__cycles_elapsed.max","123"\n'
     )
+    expected = _expected_ncu_identity()
 
-    def fake_run(command, **kwargs):
-        observed["command"] = list(command)
-        assert kwargs == {
-            "capture_output": True,
-            "text": True,
-            "check": False,
-        }
-        return subprocess.CompletedProcess(command, 0, csv_text, "")
+    def fake_execute(identity, arguments, **kwargs):
+        retained = kwargs["retained_report"]
+        observed["identity"] = identity
+        observed["arguments"] = list(arguments)
+        observed["report_path"] = retained.path
+        observed["report_proc_path"] = retained.proc_path
+        observed["report_sha256"] = retained.sha256
+        assert kwargs["timeout_seconds"] == parser._NCU_IMPORT_TIMEOUT_SECONDS
+        return ncu_executor.NcuActionResult(0, csv_text.encode(), b"")
 
-    monkeypatch.setattr(parser.subprocess, "run", fake_run)
-    imported, error = parser._import_report_csv("/opt/ncu", report)
+    monkeypatch.setattr(ncu_executor, "execute_ncu_action", fake_execute)
+    imported, error = parser._import_report_csv(expected, report)
 
     assert error is None
-    assert imported == csv_text
-    command = observed["command"]
+    assert imported == parser.ImportedReportCsv(
+        text=csv_text,
+        report_sha256=hashlib.sha256(report.read_bytes()).hexdigest(),
+        report_size_bytes=len(report.read_bytes()),
+    )
+    assert observed["identity"] == expected
+    assert observed["report_path"] == report.absolute()
+    assert observed["report_sha256"] == imported.report_sha256
+    command = observed["arguments"]
+    assert isinstance(command, list)
+    assert command[0:2] == ["--import", observed["report_proc_path"]]
+    assert command[1] != str(report)
     assert command.count("--print-kernel-base") == 1
     option = command.index("--print-kernel-base")
     assert command[option + 1] == "mangled"
-    observation = parser.extract_launch_observation(imported)
+    observation = parser.extract_launch_observation(imported.text)
     assert observation == {
         "identity_columns": [
             "ID", "Device", "Kernel Name", "Block Size", "Grid Size",
@@ -55,6 +80,173 @@ def test_report_import_requests_mangled_kernel_names(monkeypatch, tmp_path):
             "Grid Size": "(1, 1, 1)",
         },
     }
+
+
+def test_report_import_strips_only_closed_ncu_warning_preamble(
+    monkeypatch, tmp_path,
+):
+    report = tmp_path / "launch.ncu-rep"
+    report.write_bytes(b"synthetic report bytes")
+    csv_text = (
+        '"ID","Kernel Name","Block Size","Grid Size","Device",'
+        '"Metric Name","Metric Value"\n'
+        '"0","_Z15syntheticKernelv","(128, 1, 1)",'
+        '"(1, 1, 1)","0","gpc__cycles_elapsed.max","123"\n'
+    )
+    output = (
+        "==WARNING== Could not determine user home directory for section "
+        "deployment.\n"
+        "==WARNING== Falling back to stock installation sections.\n\n"
+        + csv_text
+    )
+    monkeypatch.setattr(
+        ncu_executor,
+        "execute_ncu_action",
+        lambda *_args, **_kwargs: ncu_executor.NcuActionResult(
+            0, output.encode(), b""
+        ),
+    )
+    imported, error = parser._import_report_csv(
+        _expected_ncu_identity(), report
+    )
+    assert error is None
+    assert imported is not None
+    assert imported.text == csv_text
+
+
+@pytest.mark.parametrize(
+    "prefix",
+    [
+        "unexpected banner\n",
+        "==ERROR== synthetic error\n",
+        '"Metric Name","Metric Value"\n',
+    ],
+)
+def test_report_import_rejects_unclosed_stdout_preamble(
+    monkeypatch, tmp_path, prefix,
+):
+    report = tmp_path / "launch.ncu-rep"
+    report.write_bytes(b"synthetic report bytes")
+    csv_text = (
+        '"ID","Kernel Name","Block Size","Grid Size","Device",'
+        '"Metric Name","Metric Value"\n'
+        '"0","kernel","1","1","0","metric","1"\n'
+    )
+    monkeypatch.setattr(
+        ncu_executor,
+        "execute_ncu_action",
+        lambda *_args, **_kwargs: ncu_executor.NcuActionResult(
+            0, (prefix + csv_text).encode(), b""
+        ),
+    )
+    imported, error = parser._import_report_csv(
+        _expected_ncu_identity(), report
+    )
+    assert imported is None
+    assert error is not None
+    assert error.typed_reason == "ncu_import_failed"
+
+
+def test_parser_cli_bootstraps_repository_imports_without_pythonpath(tmp_path):
+    environment = {
+        "PATH": os.environ.get("PATH", os.defpath),
+        "LC_ALL": "C",
+    }
+    result = subprocess.run(
+        [sys.executable, str(Path(parser.__file__).resolve()), "--help"],
+        cwd=tmp_path,
+        env=environment,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "--ncu-resolved-path" in result.stdout
+    assert "--ncu-executable-sha256" in result.stdout
+    assert "--ncu-version-line" in result.stdout
+
+
+def test_report_import_rejects_malformed_authority_before_report_open(
+    monkeypatch, tmp_path,
+):
+    report = tmp_path / "launch.ncu-rep"
+    report.write_bytes(b"synthetic report bytes")
+
+    def unexpected(*_args, **_kwargs):
+        pytest.fail("malformed NCU authority reached report retention or execution")
+
+    monkeypatch.setattr(parser.immutable, "open_retained_regular", unexpected)
+    imported, error = parser._import_report_csv(
+        ncu_executor.ExpectedNcuIdentity(
+            resolved_path="ncu",
+            executable_sha256="not-a-sha",
+            version_line="not a Version line",
+        ),
+        report,
+    )
+    assert imported is None
+    assert error is not None
+    assert error.typed_reason == "ncu_import_authority_invalid"
+
+
+@pytest.mark.parametrize(
+    ("code", "reason"),
+    [
+        (
+            ncu_executor.NCU_ACTION_INPUT_IDENTITY_INVALID,
+            "ncu_import_report_identity_invalid",
+        ),
+        (
+            ncu_executor.NCU_EXECUTABLE_IDENTITY_INVALID,
+            "ncu_import_authority_invalid",
+        ),
+        (ncu_executor.NCU_VERSION_LINE_MISMATCH, "ncu_import_authority_invalid"),
+        (ncu_executor.NCU_ACTION_TIMEOUT, "ncu_import_timeout"),
+        (ncu_executor.NCU_ACTION_OUTPUT_LIMIT, "ncu_import_output_limit"),
+        (ncu_executor.NCU_ACTION_LAUNCH_FAILED, "ncu_import_failed"),
+    ],
+)
+def test_report_import_preserves_executor_failure_classification(
+    monkeypatch, tmp_path, code, reason,
+):
+    report = tmp_path / "launch.ncu-rep"
+    report.write_bytes(b"synthetic report bytes")
+
+    def fail(*_args, **_kwargs):
+        raise ncu_executor.NcuActionExecutorError(code, "synthetic failure")
+
+    monkeypatch.setattr(ncu_executor, "execute_ncu_action", fail)
+    imported, error = parser._import_report_csv(_expected_ncu_identity(), report)
+    assert imported is None
+    assert error is not None
+    assert error.typed_reason == reason
+    assert code in error.detail
+
+
+def test_report_path_replacement_is_typed_as_input_identity_failure(
+    monkeypatch, tmp_path,
+):
+    report = tmp_path / "launch.ncu-rep"
+    report.write_bytes(b"original report")
+
+    def replace_then_fail(_identity, _arguments, **_kwargs):
+        retained = _kwargs["retained_report"]
+        report.rename(tmp_path / "moved.ncu-rep")
+        report.write_bytes(b"replacement report")
+        with pytest.raises(parser.immutable.ImmutableArtifactError):
+            retained.verify_unchanged()
+        raise ncu_executor.NcuActionExecutorError(
+            ncu_executor.NCU_ACTION_INPUT_IDENTITY_INVALID,
+            "retained report changed",
+        )
+
+    monkeypatch.setattr(
+        ncu_executor, "execute_ncu_action", replace_then_fail,
+    )
+    imported, error = parser._import_report_csv(_expected_ncu_identity(), report)
+    assert imported is None
+    assert error is not None
+    assert error.typed_reason == "ncu_import_report_identity_invalid"
 
 
 _REQUIRED_IDENTITY = {
@@ -638,7 +830,7 @@ def test_launch_set_parser_is_process_and_filesystem_pure(monkeypatch, tmp_path)
     def unexpected(*_args, **_kwargs):
         pytest.fail("pure launch-set parsing reached process or filesystem I/O")
 
-    monkeypatch.setattr(parser.subprocess, "run", unexpected)
+    monkeypatch.setattr(ncu_executor, "execute_ncu_action", unexpected)
     monkeypatch.setattr(parser.Path, "open", unexpected)
     monkeypatch.setattr(parser.Path, "write_text", unexpected)
     monkeypatch.setattr(parser.Path, "write_bytes", unexpected)
