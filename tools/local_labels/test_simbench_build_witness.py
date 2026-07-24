@@ -121,27 +121,103 @@ def _assert_has(result: list[str], token: str, *coemitted: str) -> None:
     assert result == sorted({token, *coemitted})
 
 
-def _fake_phase5(monkeypatch, witness: dict, overrides: dict[str, bytes | None] | None = None,
-                 *, fail_tree: bool = False) -> list[str]:
-    original = sbw._git
+def _phase5_fixture() -> tuple[dict, dict[str, bytes]]:
+    witness = _committed()
+    witness["source_commit"] = "a" * 40
+    paths = {path for row in witness["rows"] for path in row["build_inputs"]}
+    paths.update(sbw.TOP_INPUTS.values())
+    blobs = {path: (_REPO / path).read_bytes() for path in sorted(paths)}
+    for row in witness["rows"]:
+        row["build_inputs"] = {
+            path: hashlib.sha256(blobs[path]).hexdigest()
+            for path in row["build_inputs"]
+        }
+        row["build_input_set_sha256"] = sbw.canonical_sha256(
+            row["build_inputs"]
+        )
+        row["shape_file_sha256"] = row["build_inputs"][row["shape_file"]]
+    for field, path in sbw.TOP_INPUTS.items():
+        witness[field] = hashlib.sha256(blobs[path]).hexdigest()
+    _reseal(witness, *range(len(witness["rows"])))
+    return witness, blobs
+
+
+def _fake_phase5(
+    monkeypatch,
+    witness: dict,
+    blobs: dict[str, bytes],
+    overrides: dict[str, bytes | None] | None = None,
+    *,
+    fail_tree: bool = False,
+) -> list[str]:
+    synthetic_commit = witness["source_commit"]
+    tree_paths = {
+        path.relative_to(_REPO).as_posix()
+        for path in (_REPO / "workloads/simbench_bw").rglob("*")
+        if path.is_file()
+    }
     overrides = overrides or {}
 
     def fake(repo_root, arguments, *, text=False):
+        assert repo_root == _REPO
+        assert text is False
         if arguments[:2] == ["cat-file", "blob"]:
-            path = arguments[2].split(":", 1)[1]
+            assert len(arguments) == 3
+            prefix = f"{synthetic_commit}:"
+            assert arguments[2].startswith(prefix)
+            path = arguments[2][len(prefix):]
             if path in overrides:
                 payload = overrides[path]
-                return subprocess.CompletedProcess(
-                    arguments, 0 if payload is not None else 1,
-                    payload or b"", b"missing")
-        if arguments[:3] == ["ls-tree", "-rz", "--name-only"] and fail_tree:
-            return subprocess.CompletedProcess(arguments, 1, b"", b"failed")
-        return original(repo_root, arguments, text=text)
+            else:
+                assert path in blobs, f"unexpected synthetic Git blob: {path}"
+                payload = blobs[path]
+            return subprocess.CompletedProcess(
+                arguments,
+                0 if payload is not None else 1,
+                payload or b"",
+                b"missing" if payload is None else b"",
+            )
+        expected_tree_command = [
+            "ls-tree", "-rz", "--name-only", synthetic_commit, "--",
+            "workloads/simbench_bw",
+        ]
+        if arguments == expected_tree_command:
+            if fail_tree:
+                return subprocess.CompletedProcess(arguments, 1, b"", b"failed")
+            payload = b"\0".join(
+                path.encode("utf-8") for path in sorted(tree_paths)
+            ) + b"\0"
+            return subprocess.CompletedProcess(arguments, 0, payload, b"")
+        raise AssertionError(f"unsupported synthetic Git command: {arguments!r}")
 
     monkeypatch.setattr(sbw, "_git", fake)
     result = sbw._phase5(witness, _REPO)
     assert result == sorted(set(result))
     return result
+
+
+def _bind_synthetic_historical_input(
+    witness: dict,
+    entry: dict,
+    path: str,
+    payload: bytes,
+) -> None:
+    digest = hashlib.sha256(payload).hexdigest()
+    changed_rows = []
+    for index, row in enumerate(witness["rows"]):
+        if path not in row["build_inputs"]:
+            continue
+        row["build_inputs"][path] = digest
+        row["build_input_set_sha256"] = sbw.canonical_sha256(
+            row["build_inputs"]
+        )
+        changed_rows.append(index)
+    migration = next(
+        item for item in entry["migrated_paths"] if item["path"] == path
+    )
+    migration["witness_sha256"] = digest
+    _reseal(witness, *changed_rows)
+    entry["witness_seal_sha256"] = witness["witness_seal_sha256"]
 
 
 def _current_root(tmp_path: Path) -> tuple[Path, dict, dict]:
@@ -182,16 +258,20 @@ def test_shape_adapter_is_non_vacuous_and_handles_timing_name_collision():
     assert binding == "legacy_timing_alias"
 
 
-def test_committed_witness_schema_and_semantic_validation():
+def test_committed_witness_schema_and_offline_semantics():
     assert len(sbw.REGISTERED_TOKEN_FORMS) == 76
     registry_bytes = _REGISTRY.read_bytes()
     assert registry_bytes == sbw.canonical_json_bytes(json.loads(registry_bytes))
     assert hashlib.sha256(registry_bytes).hexdigest() == (
         "dca69afbf87d4e7b00a8fbac06ac7192949f1eb995bee7e58dd051af8e83ca78")
     jsonschema.validate(_committed(), _SCHEMA)
-    assert sbw.validate_witness_file(_WITNESS_REL, repo_root=_REPO) == []
     assert sbw.validate_witness(_committed()) == [
         "row_inputs:dram_stream_stride_mix", "row_inputs:rmsnorm_fwd_bf16"]
+
+
+@pytest.mark.campaign_evidence
+def test_committed_witness_historical_admission():
+    assert sbw.validate_witness_file(_WITNESS_REL, repo_root=_REPO) == []
 
 
 def test_empty_or_duplicate_witness_never_passes():
@@ -577,113 +657,118 @@ def test_p4_commit_unresolvable_shallow_clone(monkeypatch):
         f"witness_commit_unresolvable:{'0' * 40}:shallow_clone"]
 
 
+def test_p5_complete_synthetic_git_fixture_passes(monkeypatch):
+    witness, blobs = _phase5_fixture()
+    assert _fake_phase5(monkeypatch, witness, blobs) == []
+
+
 def test_p5_row_input_missing_at_commit(monkeypatch):
-    witness = _committed(); row = witness["rows"][0]; path = next(
+    witness, blobs = _phase5_fixture(); row = witness["rows"][0]; path = next(
         path for path in row["build_inputs"] if path != "workloads/simbench_bw/common.mk")
-    assert _fake_phase5(monkeypatch, witness, {path: None}) == [
+    assert _fake_phase5(monkeypatch, witness, blobs, {path: None}) == [
         f"row_inputs_at_commit:{row['slug']}:{path}:missing_at_commit"]
 
 
 def test_p5_row_input_blob_mismatch(monkeypatch):
-    witness = _committed(); row = witness["rows"][0]; path = next(
+    witness, blobs = _phase5_fixture(); row = witness["rows"][0]; path = next(
         path for path in row["build_inputs"] if path != "workloads/simbench_bw/common.mk")
-    assert _fake_phase5(monkeypatch, witness, {path: b"changed"}) == [
+    assert _fake_phase5(monkeypatch, witness, blobs, {path: b"changed"}) == [
         f"row_inputs_at_commit:{row['slug']}:{path}:blob_mismatch"]
 
 
 def test_p5_top_input_missing_at_commit(monkeypatch):
-    witness = _committed(); path = sbw.TOP_INPUTS["roster_sha256"]
-    assert _fake_phase5(monkeypatch, witness, {path: None}) == [
+    witness, blobs = _phase5_fixture(); path = sbw.TOP_INPUTS["roster_sha256"]
+    assert _fake_phase5(monkeypatch, witness, blobs, {path: None}) == [
         f"witness_top_input_at_commit:{path}:missing_at_commit"]
 
 
 def test_p5_top_input_blob_mismatch(monkeypatch):
-    witness = _committed(); path = sbw.TOP_INPUTS["roster_sha256"]
-    assert _fake_phase5(monkeypatch, witness, {path: b"changed"}) == [
+    witness, blobs = _phase5_fixture(); path = sbw.TOP_INPUTS["roster_sha256"]
+    assert _fake_phase5(monkeypatch, witness, blobs, {path: b"changed"}) == [
         f"witness_top_input_at_commit:{path}:blob_mismatch"]
 
 
 def test_p5_source_roster_invalid(monkeypatch):
-    witness = _committed(); path = sbw.TOP_INPUTS["roster_sha256"]; bad = b"not = [toml"
+    witness, blobs = _phase5_fixture(); path = sbw.TOP_INPUTS["roster_sha256"]; bad = b"not = [toml"
     witness["roster_sha256"] = hashlib.sha256(bad).hexdigest()
-    assert _fake_phase5(monkeypatch, witness, {path: bad}) == [
+    assert _fake_phase5(monkeypatch, witness, blobs, {path: bad}) == [
         "witness_source_at_commit:roster_invalid"]
 
 
 def test_p5_source_slug_set_mismatch(monkeypatch):
-    witness = _committed(); path = sbw.TOP_INPUTS["roster_sha256"]
-    original = subprocess.run(["git", "cat-file", "blob", f"{witness['source_commit']}:{path}"], capture_output=True, check=True).stdout
-    changed = original.replace(b'arch_gate = ["sm_86",', b'arch_gate = [', 1)
+    witness, blobs = _phase5_fixture(); path = sbw.TOP_INPUTS["roster_sha256"]
+    changed = blobs[path].replace(b'arch_gate = ["sm_86",', b'arch_gate = [', 1)
     witness["roster_sha256"] = hashlib.sha256(changed).hexdigest()
-    result = _fake_phase5(monkeypatch, witness, {path: changed})
+    result = _fake_phase5(monkeypatch, witness, blobs, {path: changed})
     _assert_has(result, "witness_source_at_commit:slug_set_mismatch")
 
 
 def test_p5_source_input_scan_failed(monkeypatch):
-    assert _fake_phase5(monkeypatch, _committed(), fail_tree=True) == [
+    witness, blobs = _phase5_fixture()
+    assert _fake_phase5(monkeypatch, witness, blobs, fail_tree=True) == [
         "witness_source_at_commit:input_scan_failed"]
 
 
 def test_p5_row_source_shape_invalid(monkeypatch):
-    witness = _committed(); row = witness["rows"][0]; path = row["shape_file"]; bad = b"bad = ["
+    witness, blobs = _phase5_fixture(); row = witness["rows"][0]; path = row["shape_file"]; bad = b"bad = ["
     row["build_inputs"][path] = hashlib.sha256(bad).hexdigest(); row["shape_file_sha256"] = row["build_inputs"][path]
     row["build_input_set_sha256"] = sbw.canonical_sha256(row["build_inputs"])
-    assert _fake_phase5(monkeypatch, witness, {path: bad}) == [
+    assert _fake_phase5(monkeypatch, witness, blobs, {path: bad}) == [
         f"row_source_at_commit:{row['slug']}:shape_invalid"]
 
 
 def test_p5_row_source_level_mismatch(monkeypatch):
-    witness = _committed(); witness["rows"][0]["level"] = "l2"; witness["rows"][0]["binary"] = f"workloads/simbench_bw/l2/{witness['rows'][0]['slug']}/{witness['rows'][0]['slug']}_run"
-    result = _fake_phase5(monkeypatch, witness)
+    witness, blobs = _phase5_fixture(); witness["rows"][0]["level"] = "l2"; witness["rows"][0]["binary"] = f"workloads/simbench_bw/l2/{witness['rows'][0]['slug']}/{witness['rows'][0]['slug']}_run"
+    result = _fake_phase5(monkeypatch, witness, blobs)
     slug = witness["rows"][0]["slug"]
     _assert_has(result, f"row_source_at_commit:{slug}:level_mismatch",
                 f"row_source_at_commit:{slug}:binary_path_mismatch")
 
 
 def test_p5_row_source_shape_mismatch(monkeypatch):
-    witness = _committed(); witness["rows"][0]["shape"]["fabricated"] = True
-    result = _fake_phase5(monkeypatch, witness)
+    witness, blobs = _phase5_fixture(); witness["rows"][0]["shape"]["fabricated"] = True
+    result = _fake_phase5(monkeypatch, witness, blobs)
     _assert_has(result, f"row_source_at_commit:{witness['rows'][0]['slug']}:shape_mismatch")
 
 
 def test_p5_row_source_shape_binding_kind_mismatch(monkeypatch):
-    witness = _committed(); witness["rows"][0]["shape_binding_kind"] = "legacy_timing_alias"
-    result = _fake_phase5(monkeypatch, witness)
+    witness, blobs = _phase5_fixture(); witness["rows"][0]["shape_binding_kind"] = "legacy_timing_alias"
+    result = _fake_phase5(monkeypatch, witness, blobs)
     _assert_has(result, f"row_source_at_commit:{witness['rows'][0]['slug']}:shape_binding_kind_mismatch")
 
 
 def test_p5_row_source_app_args_mismatch(monkeypatch):
-    witness = _committed(); witness["rows"][0]["app_args"] = ["--fabricated", "1", "x"]
-    result = _fake_phase5(monkeypatch, witness)
+    witness, blobs = _phase5_fixture(); witness["rows"][0]["app_args"] = ["--fabricated", "1", "x"]
+    result = _fake_phase5(monkeypatch, witness, blobs)
     _assert_has(result, f"row_source_at_commit:{witness['rows'][0]['slug']}:app_args_mismatch")
 
 
 def test_p5_row_source_binary_path_mismatch(monkeypatch):
-    witness = _committed(); witness["rows"][0]["level"] = "l2"; witness["rows"][0]["binary"] = f"workloads/simbench_bw/l2/{witness['rows'][0]['slug']}/{witness['rows'][0]['slug']}_run"
-    result = _fake_phase5(monkeypatch, witness)
+    witness, blobs = _phase5_fixture(); witness["rows"][0]["level"] = "l2"; witness["rows"][0]["binary"] = f"workloads/simbench_bw/l2/{witness['rows'][0]['slug']}/{witness['rows'][0]['slug']}_run"
+    result = _fake_phase5(monkeypatch, witness, blobs)
     slug = witness["rows"][0]["slug"]
     _assert_has(result, f"row_source_at_commit:{slug}:binary_path_mismatch",
                 f"row_source_at_commit:{slug}:level_mismatch")
 
 
 def test_p5_missing_recorded_input(monkeypatch):
-    witness = _committed(); row = witness["rows"][0]
+    witness, blobs = _phase5_fixture(); row = witness["rows"][0]
     path = next(path for path in row["build_inputs"] if path not in {row["shape_file"], "workloads/simbench_bw/common.mk"})
     row["build_inputs"].pop(path); row["build_input_set_sha256"] = sbw.canonical_sha256(row["build_inputs"])
-    result = _fake_phase5(monkeypatch, witness)
+    result = _fake_phase5(monkeypatch, witness, blobs)
     _assert_has(result, f"row_inputs_at_commit:{row['slug']}:{path}:missing_recorded_input")
 
 
 def test_p5_unexpected_recorded_input(monkeypatch):
-    witness = _committed(); row = witness["rows"][0]; path = sbw.TOP_INPUTS["roster_sha256"]
+    witness, blobs = _phase5_fixture(); row = witness["rows"][0]; path = sbw.TOP_INPUTS["roster_sha256"]
     row["build_inputs"][path] = witness["roster_sha256"]; row["build_input_set_sha256"] = sbw.canonical_sha256(row["build_inputs"])
-    result = _fake_phase5(monkeypatch, witness)
+    result = _fake_phase5(monkeypatch, witness, blobs)
     _assert_has(result, f"row_inputs_at_commit:{row['slug']}:{path}:unexpected_recorded_input")
 
 
 def test_p5_shared_common_mk_mismatch_co_triggers_all_rows_and_top_level(monkeypatch):
-    witness = _committed(); path = sbw.TOP_INPUTS["common_mk_sha256"]
-    result = _fake_phase5(monkeypatch, witness, {path: b"changed"})
+    witness, blobs = _phase5_fixture(); path = sbw.TOP_INPUTS["common_mk_sha256"]
+    result = _fake_phase5(monkeypatch, witness, blobs, {path: b"changed"})
     expected = sorted([
         f"row_inputs_at_commit:{row['slug']}:{path}:blob_mismatch" for row in witness["rows"]
     ] + [f"witness_top_input_at_commit:{path}:blob_mismatch"])
@@ -714,7 +799,9 @@ def test_p6_migration_pin_mismatch(tmp_path):
 
 def test_p6_migration_pin_stale(tmp_path):
     root, witness, entry = _current_root(tmp_path); migration = entry["migrated_paths"][0]; path = migration["path"]
-    payload = subprocess.run(["git", "cat-file", "blob", f"{witness['source_commit']}:{path}"], capture_output=True, check=True).stdout
+    payload = b"synthetic historical migration bytes\n"
+    _bind_synthetic_historical_input(witness, entry, path, payload)
+    assert sbw._phase3(witness, entry) == []
     (root / path).write_bytes(payload)
     _assert_has(_p6(root, witness, entry), f"migration_pin_stale:{path}",
                 f"migration_pin_mismatch:{path}")
