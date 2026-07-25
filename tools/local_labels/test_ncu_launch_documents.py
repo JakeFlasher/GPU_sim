@@ -18,7 +18,9 @@ from tools.local_labels import metric_registry
 from tools.local_labels import ncu_action_executor
 from tools.local_labels import ncu_details_export_receipt
 from tools.local_labels import ncu_launch_documents as documents
+from tools.local_labels import ncu_launch_sidecars as sidecars
 from tools.local_labels import parse_ncu_metrics
+from tools.local_labels import sidecar_schema_authority
 
 
 _REPORT_SHA256 = "a" * 64
@@ -165,6 +167,62 @@ def _build_documents():
         unit_metric_names=_UNIT_METRICS,
     )
     return inventory, metrics, registry
+
+
+def _sidecar_provenance() -> sidecars.LaunchSidecarProvenance:
+    return sidecars.LaunchSidecarProvenance(
+        device="sm_86",
+        slug="fixture_launch_set",
+        shape_point="shape-a",
+        binary_sha256=_TARGET_EXECUTABLE_SHA256,
+        profiler_version=(
+            "Version 2026.1.0.0 (build 1) (public-release)"
+        ),
+        cuda_version="13.2",
+        driver_version="610.43.02",
+        gpu_uuid_sha256="f" * 64,
+        warmup_count=1,
+    )
+
+
+def _build_sidecars():
+    inventory, metrics, registry = _build_documents()
+    _schema_bytes, schema = (
+        sidecar_schema_authority.load_authoritative_schema()
+    )
+    built = sidecars.build_launch_sidecar_documents(
+        inventory=inventory,
+        launch_metrics=metrics,
+        csv_text=_csv_text(),
+        report_sha256=_REPORT_SHA256,
+        expected_launch_count=2,
+        protocol=_protocol(),
+        registry=registry,
+        percentage_metric_names=_PERCENTAGES,
+        unit_metric_names=_UNIT_METRICS,
+        sidecar_schema=schema,
+        provenance=_sidecar_provenance(),
+    )
+    return built, inventory, metrics, registry, schema
+
+
+def _validate_sidecars(
+    observed, inventory, metrics, registry, schema,
+):
+    return sidecars.validate_launch_sidecar_documents(
+        observed,
+        inventory=inventory,
+        launch_metrics=metrics,
+        csv_text=_csv_text(),
+        report_sha256=_REPORT_SHA256,
+        expected_launch_count=2,
+        protocol=_protocol(),
+        registry=registry,
+        percentage_metric_names=_PERCENTAGES,
+        unit_metric_names=_UNIT_METRICS,
+        sidecar_schema=schema,
+        provenance=_sidecar_provenance(),
+    )
 
 
 def _reseal_inventory(inventory: dict) -> None:
@@ -462,6 +520,196 @@ def test_builders_are_deterministic_and_preserve_order_diagnostics_and_seals():
         ],
     }
     assert first_metrics[1]["parser_diagnostics"] == {}
+
+
+def test_launch_sidecars_map_ordered_metrics_and_q809_protocol():
+    built, inventory, metrics, registry, schema = _build_sidecars()
+    assert type(built) is tuple
+    assert len(built) == inventory["launch_count"] == 2
+    assert [row["launch_index"] for row in built] == [0, 1]
+    assert [row["cache_hit_rate_l2_sector"] for row in built] == [
+        1.0, 0.88,
+    ]
+    assert [row["cache_hit_rate_l1tex_sector"] for row in built] == [
+        0.7, 0.7,
+    ]
+    assert built[0]["confidence_interval_l2_sector"] == {
+        "lower": 1.0,
+        "upper": 1.0,
+        "confidence_level": 0.95,
+        "units": "sector_hit_rate_fraction",
+        "aggregation": "kernel",
+    }
+    assert built[0]["unit_tagged_metrics"] == [{
+        "ncu_metric": "gpc__cycles_elapsed.max",
+        "unit": "cycles",
+        "value": 123.0,
+    }]
+    assert built[1]["unit_tagged_metrics"][0]["value"] == 456.0
+    assert built[0]["parser_diagnostics"] == metrics[0][
+        "parser_diagnostics"
+    ]
+    assert "parser_diagnostics" not in built[1]
+    assert built[0]["measurement_protocol"] == _protocol()
+    assert built[1]["measurement_protocol"] == _protocol()
+    assert all("ncu_launch_set_context" not in row for row in built)
+    assert all(row["binary_sha256"] == _TARGET_EXECUTABLE_SHA256 for row in built)
+    assert _validate_sidecars(
+        list(built), inventory, metrics, registry, schema,
+    ) == built
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "cardinality",
+        "ordinal",
+        "binary",
+        "protocol_type",
+        "flat_metric",
+        "unit",
+        "diagnostics",
+        "extra_context",
+    ],
+)
+def test_launch_sidecars_reject_persisted_cross_document_tampering(mutation):
+    built, inventory, metrics, registry, schema = _build_sidecars()
+    observed = copy.deepcopy(list(built))
+    if mutation == "cardinality":
+        observed.pop()
+    elif mutation == "ordinal":
+        observed[1]["launch_index"] = 2
+    elif mutation == "binary":
+        observed[0]["binary_sha256"] = "0" * 64
+    elif mutation == "protocol_type":
+        observed[0]["measurement_protocol"][
+            "ncu_profile_from_start"
+        ] = 0
+    elif mutation == "flat_metric":
+        observed[0]["cache_hit_rate_l2_sector"] = 0.99
+    elif mutation == "unit":
+        observed[0]["unit_tagged_metrics"][0]["unit"] = "ns"
+    elif mutation == "diagnostics":
+        observed[0].pop("parser_diagnostics")
+    else:
+        observed[0]["ncu_launch_set_context"] = {}
+    with pytest.raises(sidecars.LaunchSidecarError):
+        _validate_sidecars(
+            observed, inventory, metrics, registry, schema,
+        )
+
+
+@pytest.mark.parametrize(
+    ("changes", "message"),
+    [
+        ({"binary_sha256": "bad"}, "binary SHA-256"),
+        ({"gpu_uuid_sha256": "bad"}, "GPU UUID SHA-256"),
+        ({"warmup_count": True}, "warmup count"),
+        ({"device": ""}, "device"),
+    ],
+)
+def test_launch_sidecars_reject_malformed_provenance(changes, message):
+    inventory, metrics, registry = _build_documents()
+    _raw, schema = sidecar_schema_authority.load_authoritative_schema()
+    provenance = _sidecar_provenance()
+    values = {
+        field: getattr(provenance, field)
+        for field in provenance.__dataclass_fields__
+    }
+    values.update(changes)
+    with pytest.raises(sidecars.LaunchSidecarError, match=message):
+        sidecars.build_launch_sidecar_documents(
+            inventory=inventory,
+            launch_metrics=metrics,
+            csv_text=_csv_text(),
+            report_sha256=_REPORT_SHA256,
+            expected_launch_count=2,
+            protocol=_protocol(),
+            registry=registry,
+            percentage_metric_names=_PERCENTAGES,
+            unit_metric_names=_UNIT_METRICS,
+            sidecar_schema=schema,
+            provenance=sidecars.LaunchSidecarProvenance(**values),
+        )
+
+
+def test_launch_sidecar_builder_rejects_count_before_arithmetic():
+    inventory, metrics, registry = _build_documents()
+    _raw, schema = sidecar_schema_authority.load_authoritative_schema()
+
+    class StatefulCount:
+        added = False
+
+        def __add__(self, _other):
+            self.added = True
+            return 3
+
+    count = StatefulCount()
+    with pytest.raises(sidecars.LaunchSidecarError, match="selector range"):
+        sidecars.build_launch_sidecar_documents(
+            inventory=inventory,
+            launch_metrics=metrics,
+            csv_text=_csv_text(),
+            report_sha256=_REPORT_SHA256,
+            expected_launch_count=count,
+            protocol=_protocol(),
+            registry=registry,
+            percentage_metric_names=_PERCENTAGES,
+            unit_metric_names=_UNIT_METRICS,
+            sidecar_schema=schema,
+            provenance=_sidecar_provenance(),
+        )
+    assert count.added is False
+
+
+def test_launch_sidecar_builder_rejects_unordered_metric_authority():
+    inventory, metrics, registry = _build_documents()
+    _raw, schema = sidecar_schema_authority.load_authoritative_schema()
+    with pytest.raises(sidecars.LaunchSidecarError, match="ordered list or tuple"):
+        sidecars.build_launch_sidecar_documents(
+            inventory=inventory,
+            launch_metrics=metrics,
+            csv_text=_csv_text(),
+            report_sha256=_REPORT_SHA256,
+            expected_launch_count=2,
+            protocol=_protocol(),
+            registry=registry,
+            percentage_metric_names=set(_PERCENTAGES),
+            unit_metric_names=_UNIT_METRICS,
+            sidecar_schema=schema,
+            provenance=_sidecar_provenance(),
+        )
+
+
+def test_launch_sidecar_builder_is_pure_and_does_not_mutate_inputs(monkeypatch):
+    inventory, metrics, registry = _build_documents()
+    _raw, schema = sidecar_schema_authority.load_authoritative_schema()
+    inventory_before = copy.deepcopy(inventory)
+    metrics_before = copy.deepcopy(metrics)
+    protocol = _protocol()
+    protocol_before = copy.deepcopy(protocol)
+
+    def unexpected(*_args, **_kwargs):
+        pytest.fail("pure launch sidecar builder reached filesystem I/O")
+
+    monkeypatch.setattr(builtins, "open", unexpected)
+    built = sidecars.build_launch_sidecar_documents(
+        inventory=inventory,
+        launch_metrics=metrics,
+        csv_text=_csv_text(),
+        report_sha256=_REPORT_SHA256,
+        expected_launch_count=2,
+        protocol=protocol,
+        registry=registry,
+        percentage_metric_names=list(_PERCENTAGES),
+        unit_metric_names=list(_UNIT_METRICS),
+        sidecar_schema=schema,
+        provenance=_sidecar_provenance(),
+    )
+    assert built
+    assert inventory == inventory_before
+    assert metrics == metrics_before
+    assert protocol == protocol_before
 
 
 def test_builders_reject_observed_insertion_sentinel_launch():
