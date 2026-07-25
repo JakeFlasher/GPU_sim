@@ -1577,7 +1577,27 @@ def _fixture_launch_set_execution(tmp_path, monkeypatch, *, csv_text: str):
     return plan, artifact_root, identity, action_log
 
 
-def _execute_fixture_plan(plan, artifact_root, identity):
+def _fixture_launch_target_authorities(plan):
+    target = Path(
+        plan["command"][plan["command"].index("--binary") + 1]
+    )
+    target_sha256 = hashlib.sha256(target.read_bytes()).hexdigest()
+    runtime_module_sha256s = tuple(
+        hashlib.sha256(f"fixture-runtime-module-{index}".encode()).hexdigest()
+        for index in range(plan["trace_inventory_cardinality"])
+    )
+    return target_sha256, runtime_module_sha256s
+
+
+def _execute_fixture_plan(
+    plan, artifact_root, identity, *,
+    target_executable_sha256=None, runtime_module_sha256s=None,
+):
+    default_target, default_modules = _fixture_launch_target_authorities(plan)
+    if target_executable_sha256 is None:
+        target_executable_sha256 = default_target
+    if runtime_module_sha256s is None:
+        runtime_module_sha256s = default_modules
     return cc.execute_fixture_only_launch_set_plan(
         plan=plan,
         expected_plan_sha256=plan["plan_sha256"],
@@ -1586,6 +1606,8 @@ def _execute_fixture_plan(plan, artifact_root, identity):
         ),
         artifact_root=artifact_root,
         expected_ncu_identity=identity,
+        expected_target_executable_sha256=target_executable_sha256,
+        expected_runtime_module_sha256s=runtime_module_sha256s,
         expected_preflight_sha256="0" * 64,
         expected_source_commit="1" * 40,
         expected_capture_identity_sha256="2" * 64,
@@ -1617,11 +1639,15 @@ def test_fixture_launch_set_execution_composes_import_and_persistence(
             tmp_path, monkeypatch, csv_text=csv_text,
         )
     )
+    target_sha256, runtime_module_sha256s = (
+        _fixture_launch_target_authorities(plan)
+    )
     paths = _execute_fixture_plan(plan, artifact_root, identity)
 
     assert set(paths) == {
         "report", "run_manifest", "details_csv", "details_stderr",
         "launch_inventory", "launch_metrics", "details_export_receipt",
+        "execution_identity", "capture_manifest",
     }
     assert paths["details_csv"].read_text() == csv_text
     assert paths["details_stderr"].read_bytes() == b""
@@ -1631,6 +1657,7 @@ def test_fixture_launch_set_execution_composes_import_and_persistence(
         "executable_sha256": identity.executable_sha256,
         "version_line": identity.version_line,
     }
+    assert target_sha256 != identity.executable_sha256
     assert [row["role"] for row in receipt["products"]] == [
         "ncu_report", "details_csv", "details_stderr",
         "launch_inventory", "launch_metrics",
@@ -1638,13 +1665,177 @@ def test_fixture_launch_set_execution_composes_import_and_persistence(
     assert action_log.read_text().splitlines().count("collect") == 1
     assert action_log.read_text().splitlines().count("import") == 1
     assert not any(plan["label_sidecars"][index].exists() for index in range(1))
+    execution = json.loads(paths["execution_identity"].read_text())
+    assert execution == {
+        "schema_version": 1,
+        "kind": "ncu_launch_set_execution_identity_v1",
+        "executable_sha256": target_sha256,
+        "runtime_module_sha256s": list(runtime_module_sha256s),
+        "process_context_stream_policy": (
+            "report_local_first_occurrence_equivalence_v1"
+        ),
+        "identity_sha256": execution["identity_sha256"],
+    }
+    inventory = json.loads(paths["launch_inventory"].read_text())
+    capture_manifest = json.loads(paths["capture_manifest"].read_text())
+    assert capture_manifest == {
+        "command": plan["command"],
+        "ncu_controls": {
+            "target_processes": "all",
+            "filter_mode": "global",
+            "replay_mode": "kernel",
+            "cache_control": "all",
+            "clock_control": "none",
+            "profile_from_start": False,
+        },
+        "ncu_launch_observation_sha256": inventory[
+            "observation_sha256"
+        ],
+        "ncu_execution_identity_sha256": execution["identity_sha256"],
+    }
+    assert paths["execution_identity"].read_bytes() == (
+        cc.immutable.pretty_json_bytes(execution)
+    )
+    assert paths["capture_manifest"].read_bytes() == (
+        cc.ncu_launch_documents.launch_set_capture_manifest_bytes(
+            capture_manifest,
+            expected_command=plan["command"],
+            expected_launch_count=1,
+            protocol=plan["ncu_launch_protocol"],
+            expected_launch_observation_sha256=(
+                inventory["observation_sha256"]
+            ),
+            expected_execution_identity_sha256=execution[
+                "identity_sha256"
+            ],
+        )
+    )
+    assert paths["execution_identity"].stat().st_mode & 0o222 == 0
+    assert paths["capture_manifest"].stat().st_mode & 0o222 == 0
+    assert not (plan["cell_root"] / "DONE.json").exists()
+
+
+def test_fixture_launch_set_execution_rejects_target_identity_before_capture(
+    tmp_path, monkeypatch,
+):
+    plan, artifact_root, identity, action_log = (
+        _fixture_launch_set_execution(
+            tmp_path, monkeypatch, csv_text="unused\n",
+        )
+    )
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        _execute_fixture_plan(
+            plan, artifact_root, identity,
+            target_executable_sha256="f" * 64,
+        )
+    assert caught.value.code == "label_launch_set_target_authority_invalid"
+    assert not action_log.exists()
+    assert not plan["cell_root"].exists()
+
+
+@pytest.mark.parametrize(
+    "runtime_module_sha256s",
+    [(), {"4" * 64}],
+)
+def test_fixture_launch_set_execution_rejects_module_authority_before_capture(
+    tmp_path, monkeypatch, runtime_module_sha256s,
+):
+    plan, artifact_root, identity, action_log = (
+        _fixture_launch_set_execution(
+            tmp_path, monkeypatch, csv_text="unused\n",
+        )
+    )
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        _execute_fixture_plan(
+            plan, artifact_root, identity,
+            runtime_module_sha256s=runtime_module_sha256s,
+        )
+    assert caught.value.code == "label_launch_set_authority_invalid"
+    assert not action_log.exists()
+    assert not plan["cell_root"].exists()
+
+
+@pytest.mark.parametrize(
+    "schema_kind", ["execution_identity", "capture_manifest"],
+)
+def test_fixture_launch_set_execution_requires_pinned_authority_schemas(
+    tmp_path, monkeypatch, schema_kind,
+):
+    plan, artifact_root, identity, action_log = (
+        _fixture_launch_set_execution(
+            tmp_path, monkeypatch, csv_text="unused\n",
+        )
+    )
+    real_load = cc.ncu_launch_documents.load_schema
+
+    def refuse_schema(kind):
+        if kind == schema_kind:
+            raise cc.ncu_launch_documents.LaunchDocumentError(
+                "synthetic schema authority drift"
+            )
+        return real_load(kind)
+
+    monkeypatch.setattr(
+        cc.ncu_launch_documents, "load_schema", refuse_schema,
+    )
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        _execute_fixture_plan(plan, artifact_root, identity)
+    assert caught.value.code == "label_launch_set_authority_invalid"
+    assert not action_log.exists()
+    assert not plan["cell_root"].exists()
+
+
+@pytest.mark.parametrize(
+    "artifact_name",
+    [
+        "run_0_launch_set.launch_metrics.json",
+        "label_run_manifest_0_launch_set.json",
+        "DONE.json",
+    ],
+)
+def test_fixture_launch_set_execution_rejects_between_stage_authority_drift(
+    tmp_path, monkeypatch, artifact_name,
+):
+    csv_text = (
+        '"Metric Value","Stream","ID","Grid Size","Metric Name","Context",'
+        '"Device","Block Size","Process ID","Kernel Name"\n'
+        '"88","2","9","(4, 1, 1)","lts__t_sector_hit_rate.pct",'
+        '"1","0","(128, 1, 1)","100","_Z7kernelAv"\n'
+        '"77","2","9","(4, 1, 1)","l1tex__t_sector_hit_rate.pct",'
+        '"1","0","(128, 1, 1)","100","_Z7kernelAv"\n'
+        '"123","2","9","(4, 1, 1)","gpc__cycles_elapsed.max",'
+        '"1","0","(128, 1, 1)","100","_Z7kernelAv"\n'
+    )
+    plan, artifact_root, identity, _action_log = (
+        _fixture_launch_set_execution(
+            tmp_path, monkeypatch, csv_text=csv_text,
+        )
+    )
+    real_persist = cc.details_persistence.persist_details_export_products
+
+    def mutate_authority_after_persistence(*args, **kwargs):
+        receipt = real_persist(*args, **kwargs)
+        artifact = plan["cell_root"] / artifact_name
+        if artifact.exists():
+            artifact.chmod(0o600)
+        artifact.write_bytes(b"{}\n")
+        artifact.chmod(0o444)
+        return receipt
+
+    monkeypatch.setattr(
+        cc.details_persistence,
+        "persist_details_export_products",
+        mutate_authority_after_persistence,
+    )
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        _execute_fixture_plan(plan, artifact_root, identity)
+    assert caught.value.code == "label_launch_set_postprocessing_failed"
     assert not (
         plan["cell_root"] / "run_0_launch_set.execution_identity.json"
     ).exists()
     assert not (
         plan["cell_root"] / "label_launch_set_capture_manifest.json"
     ).exists()
-    assert not (plan["cell_root"] / "DONE.json").exists()
 
 
 def test_fixture_launch_set_execution_rejects_nonexact_handoff(

@@ -4075,6 +4075,7 @@ _LAUNCH_SET_FIXED_ARTIFACT_NAMES = (
     "label_run_manifest_0_launch_set.json",
     "label_launch_set_capture_manifest.json",
 )
+_LAUNCH_SET_AUTHORITY_PARTIAL_SUFFIX = ".ncu-details-partial"
 _LAUNCH_SET_HANDOFF_STDERR = (
     b"label_driver: NCU_LAUNCH_SET_POSTPROCESSING_UNIMPLEMENTED: "
     b"explicit launch-set report retained without a sidecar\n"
@@ -4595,6 +4596,7 @@ def _bounded_launch_set_output(payload: bytes) -> dict[str, Any]:
 
 def _validate_fixture_launch_set_manifest(
     document: dict[str, Any], *, command: Sequence[str], source_commit: str,
+    expected_target_executable_sha256: str,
     expected_kernel_signature_sha256: str,
     expected_kernel_signature_source: str,
 ) -> None:
@@ -4616,11 +4618,10 @@ def _validate_fixture_launch_set_manifest(
             "label_launch_set_manifest_invalid",
             "launch-set run manifest fields differ",
         )
-    binary = Path(_launch_set_option(command, "--binary"))
     expected = {
         "schema_version": 1,
         "source_commit": source_commit,
-        "binary_sha256": sha256_file(binary),
+        "binary_sha256": expected_target_executable_sha256,
         "kernel_signature_sha256": expected_kernel_signature_sha256,
         "kernel_signature_source": expected_kernel_signature_source,
         "arch": _launch_set_option(command, "--device"),
@@ -4631,6 +4632,7 @@ def _validate_fixture_launch_set_manifest(
     }
     if (
         not required.issubset(document)
+        or not _is_sha256(expected_target_executable_sha256)
         or any(document.get(name) != value for name, value in expected.items())
         or not _is_sha256(document.get("kernel_signature_sha256"))
         or type(document.get("kernel_signature_source")) is not str
@@ -4679,6 +4681,311 @@ def _require_fixture_launch_set_namespace(cell_root: Path) -> None:
         )
 
 
+def _require_fixture_launch_set_authority_namespace(
+    cell_root: Path, *, expected_names: frozenset[str],
+) -> None:
+    try:
+        metadata = os.lstat(cell_root)
+        if not stat.S_ISDIR(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode):
+            raise OSError(None, "launch-set cell root is not a directory")
+        observed_names: list[str] = []
+        with os.scandir(cell_root) as iterator:
+            for entry in iterator:
+                observed_names.append(entry.name)
+                if len(observed_names) > len(expected_names):
+                    break
+        observed = frozenset(observed_names)
+    except OSError as exc:
+        raise ncu_launch_documents.LaunchDocumentError(
+            f"cannot inspect authority publication namespace: {exc}"
+        ) from exc
+    if observed != expected_names:
+        raise ncu_launch_documents.LaunchDocumentError(
+            "authority publication namespace differs: "
+            f"{sorted(observed)!r}"
+        )
+
+
+def _persist_fixture_launch_set_authorities(
+    *, cell_root: Path, artifacts: dict[str, Path], command: Sequence[str],
+    protocol: dict[str, Any], expected_launch_count: int,
+    expected_target_executable_sha256: str,
+    expected_runtime_module_sha256s: tuple[str, ...],
+    execution_identity_document: dict[str, Any],
+    products: ncu_launch_documents.DetailsExportProducts,
+    details_export_receipt: Path,
+    expected_run_manifest_document: dict[str, Any],
+    expected_run_manifest_sha256: str,
+    expected_run_manifest_size_bytes: int,
+) -> tuple[Path, Path]:
+    """Publish fixture authority documents after retained Details products."""
+    execution_identity_path = artifacts[
+        "run_0_launch_set.execution_identity.json"
+    ]
+    capture_manifest_path = artifacts[
+        "label_launch_set_capture_manifest.json"
+    ]
+    inventory_path = artifacts["run_0_launch_set.launch_inventory.json"]
+    report_path = artifacts["run_0_launch_set.ncu-rep"]
+    run_manifest_path = artifacts[
+        "label_run_manifest_0_launch_set.json"
+    ]
+    generated_product_paths = {
+        "details_csv": artifacts["run_0_launch_set.details.csv"],
+        "details_stderr": artifacts["run_0_launch_set.details.stderr"],
+        "launch_inventory": inventory_path,
+        "launch_metrics": artifacts["run_0_launch_set.launch_metrics.json"],
+    }
+    generated_product_bytes = {
+        "details_csv": products.csv_bytes,
+        "details_stderr": products.stderr_bytes,
+        "launch_inventory": products.inventory_bytes,
+        "launch_metrics": products.metrics_bytes,
+    }
+    expected_receipt_path = artifacts[
+        "run_0_launch_set.details_export_receipt.json"
+    ]
+    complete_namespace = frozenset(_LAUNCH_SET_FIXED_ARTIFACT_NAMES)
+    prepublication_namespace = complete_namespace - {
+        execution_identity_path.name,
+        capture_manifest_path.name,
+    }
+    if (
+        details_export_receipt != expected_receipt_path
+        or not _is_sha256(expected_run_manifest_sha256)
+        or type(expected_run_manifest_size_bytes) is not int
+        or expected_run_manifest_size_bytes <= 0
+        or type(expected_run_manifest_document) is not dict
+        or any(
+            path.parent != cell_root
+            for path in (
+                execution_identity_path,
+                capture_manifest_path,
+                report_path,
+                run_manifest_path,
+                *generated_product_paths.values(),
+                expected_receipt_path,
+            )
+        )
+    ):
+        raise ncu_launch_documents.LaunchDocumentError(
+            "fixture launch-set authority paths differ from the plan"
+        )
+    ncu_launch_documents.validate_launch_execution_identity_document(
+        execution_identity_document,
+        expected_launch_count=expected_launch_count,
+        expected_target_executable_sha256=(
+            expected_target_executable_sha256
+        ),
+        expected_runtime_module_sha256s=(
+            expected_runtime_module_sha256s
+        ),
+    )
+    ncu_launch_documents.validate_schema(
+        "execution_identity", execution_identity_document,
+    )
+    execution_identity_bytes = immutable.pretty_json_bytes(
+        execution_identity_document
+    )
+    launch_observation_sha256 = products.inventory_document.get(
+        "observation_sha256"
+    )
+    execution_identity_sha256 = execution_identity_document.get(
+        "identity_sha256"
+    )
+    capture_manifest_document = (
+        ncu_launch_documents.build_launch_set_capture_manifest_document(
+            expected_command=command,
+            expected_launch_count=expected_launch_count,
+            protocol=protocol,
+            launch_observation_sha256=launch_observation_sha256,
+            execution_identity_sha256=execution_identity_sha256,
+        )
+    )
+    ncu_launch_documents.validate_schema(
+        "capture_manifest", capture_manifest_document,
+    )
+    capture_manifest_bytes = (
+        ncu_launch_documents.launch_set_capture_manifest_bytes(
+            capture_manifest_document,
+            expected_command=command,
+            expected_launch_count=expected_launch_count,
+            protocol=protocol,
+            expected_launch_observation_sha256=(
+                launch_observation_sha256
+            ),
+            expected_execution_identity_sha256=(
+                execution_identity_sha256
+            ),
+        )
+    )
+
+    with contextlib.ExitStack() as retained_stack:
+        pinned_parent = retained_stack.enter_context(
+            immutable.PinnedDirectoryReader(cell_root)
+        )
+        retained_report = retained_stack.enter_context(
+            immutable.open_retained_regular(report_path)
+        )
+        retained_run_manifest = retained_stack.enter_context(
+            immutable.open_retained_regular(run_manifest_path)
+        )
+        retained_products = {
+            role: retained_stack.enter_context(
+                immutable.open_retained_regular(path)
+            )
+            for role, path in generated_product_paths.items()
+        }
+        retained_inventory = retained_products["launch_inventory"]
+        retained_receipt = retained_stack.enter_context(
+            immutable.open_retained_regular(expected_receipt_path)
+        )
+        if (
+            retained_run_manifest.sha256 != expected_run_manifest_sha256
+            or retained_run_manifest.size_bytes
+            != expected_run_manifest_size_bytes
+            or any(
+                retained_products[role].sha256
+                != immutable.sha256_bytes(payload)
+                or retained_products[role].size_bytes != len(payload)
+                or os.fstat(retained_products[role].descriptor).st_mode & 0o222
+                for role, payload in generated_product_bytes.items()
+            )
+            or retained_receipt.sha256
+            != immutable.sha256_bytes(products.receipt_bytes)
+            or retained_receipt.size_bytes != len(products.receipt_bytes)
+            or os.fstat(retained_receipt.descriptor).st_mode & 0o222
+        ):
+            raise ncu_launch_documents.LaunchDocumentError(
+                "retained launch-set authority files differ from producer bytes"
+            )
+        retained_run_manifest_document = _retained_json_model(
+            retained_run_manifest, role="launch_set_run_manifest",
+        )
+        retained_inventory_document = _retained_json_model(
+            retained_inventory, role="launch_set_inventory",
+        )
+        retained_receipt_document = _retained_json_model(
+            retained_receipt, role="details_export_receipt",
+        )
+        if (
+            retained_run_manifest_document
+            != expected_run_manifest_document
+            or retained_inventory_document != products.inventory_document
+            or retained_receipt_document != products.receipt_document
+        ):
+            raise ncu_launch_documents.LaunchDocumentError(
+                "retained launch-set authority models differ from producer models"
+            )
+        ncu_launch_documents.validate_launch_inventory_document(
+            retained_inventory_document,
+            expected_launch_count=expected_launch_count,
+            report_sha256=retained_report.sha256,
+            protocol=protocol,
+        )
+        _require_fixture_launch_set_authority_namespace(
+            cell_root, expected_names=prepublication_namespace,
+        )
+
+        published_execution_identity = immutable.publish_regular_file(
+            cell_root,
+            execution_identity_path.name,
+            execution_identity_bytes,
+            partial_suffix=_LAUNCH_SET_AUTHORITY_PARTIAL_SUFFIX,
+            pinned_parent=pinned_parent,
+        )
+        retained_execution_identity = retained_stack.enter_context(
+            immutable.open_retained_regular(published_execution_identity)
+        )
+        if (
+            retained_execution_identity.sha256
+            != immutable.sha256_bytes(execution_identity_bytes)
+            or retained_execution_identity.size_bytes
+            != len(execution_identity_bytes)
+            or os.fstat(retained_execution_identity.descriptor).st_mode & 0o222
+        ):
+            raise ncu_launch_documents.LaunchDocumentError(
+                "published execution identity bytes differ"
+            )
+        retained_execution_document = _retained_json_model(
+            retained_execution_identity, role="launch_set_execution_identity",
+        )
+        ncu_launch_documents.validate_launch_execution_identity_document(
+            retained_execution_document,
+            expected_launch_count=expected_launch_count,
+            expected_target_executable_sha256=(
+                expected_target_executable_sha256
+            ),
+            expected_runtime_module_sha256s=(
+                expected_runtime_module_sha256s
+            ),
+        )
+        ncu_launch_documents.validate_schema(
+            "execution_identity", retained_execution_document,
+        )
+        if retained_execution_document != execution_identity_document:
+            raise ncu_launch_documents.LaunchDocumentError(
+                "published execution identity model differs"
+            )
+
+        published_capture_manifest = immutable.publish_regular_file(
+            cell_root,
+            capture_manifest_path.name,
+            capture_manifest_bytes,
+            partial_suffix=_LAUNCH_SET_AUTHORITY_PARTIAL_SUFFIX,
+            pinned_parent=pinned_parent,
+        )
+        retained_capture_manifest = retained_stack.enter_context(
+            immutable.open_retained_regular(published_capture_manifest)
+        )
+        if (
+            retained_capture_manifest.sha256
+            != immutable.sha256_bytes(capture_manifest_bytes)
+            or retained_capture_manifest.size_bytes
+            != len(capture_manifest_bytes)
+            or os.fstat(retained_capture_manifest.descriptor).st_mode & 0o222
+        ):
+            raise ncu_launch_documents.LaunchDocumentError(
+                "published capture manifest bytes differ"
+            )
+        retained_capture_document = _retained_json_model(
+            retained_capture_manifest, role="launch_set_capture_manifest",
+        )
+        ncu_launch_documents.validate_launch_set_capture_manifest_document(
+            retained_capture_document,
+            expected_command=command,
+            expected_launch_count=expected_launch_count,
+            protocol=protocol,
+            expected_launch_observation_sha256=(
+                retained_inventory_document["observation_sha256"]
+            ),
+            expected_execution_identity_sha256=(
+                retained_execution_document["identity_sha256"]
+            ),
+        )
+        ncu_launch_documents.validate_schema(
+            "capture_manifest", retained_capture_document,
+        )
+        if retained_capture_document != capture_manifest_document:
+            raise ncu_launch_documents.LaunchDocumentError(
+                "published capture manifest model differs"
+            )
+        for retained in (
+            retained_report,
+            retained_run_manifest,
+            *retained_products.values(),
+            retained_receipt,
+            retained_execution_identity,
+            retained_capture_manifest,
+        ):
+            retained.verify_unchanged()
+        _require_fixture_launch_set_authority_namespace(
+            cell_root, expected_names=complete_namespace,
+        )
+        pinned_parent.verify_path()
+    return published_execution_identity, published_capture_manifest
+
+
 def execute_fixture_only_launch_set_plan(
     *,
     plan: dict[str, Any],
@@ -4686,6 +4993,8 @@ def execute_fixture_only_launch_set_plan(
     fixture_execution_authority: object,
     artifact_root: Path,
     expected_ncu_identity: ncu_executor.ExpectedNcuIdentity,
+    expected_target_executable_sha256: str,
+    expected_runtime_module_sha256s: tuple[str, ...],
     expected_preflight_sha256: str,
     expected_source_commit: str,
     expected_capture_identity_sha256: str,
@@ -4730,6 +5039,36 @@ def execute_fixture_only_launch_set_plan(
             expected_plan_sha256=expected_plan_sha256,
         )
     )
+    try:
+        execution_identity_document = (
+            ncu_launch_documents.build_launch_execution_identity_document(
+                target_executable_sha256=(
+                    expected_target_executable_sha256
+                ),
+                runtime_module_sha256s=(
+                    expected_runtime_module_sha256s
+                ),
+                expected_launch_count=plan[
+                    "trace_inventory_cardinality"
+                ],
+            )
+        )
+        immutable.pretty_json_bytes(execution_identity_document)
+        ncu_launch_documents.validate_schema(
+            "execution_identity", execution_identity_document,
+        )
+        ncu_launch_documents.load_schema("capture_manifest")
+    except (
+        immutable.ImmutableArtifactError,
+        ncu_launch_documents.LaunchDocumentError,
+        TypeError,
+        ValueError,
+        RecursionError,
+    ) as exc:
+        raise ChunkRefusal(
+            "label_launch_set_authority_invalid",
+            f"target execution identity authority is invalid: {exc}",
+        ) from exc
     planned_unit_metrics = tuple(
         command[index + 1]
         for index, argument in enumerate(command[:-1])
@@ -4750,21 +5089,36 @@ def execute_fixture_only_launch_set_plan(
         "--ncu-exec-path", ncu_executor.AUTHORIZED_NCU_PROC_PATH,
     ]
     environment = _label_collection_environment(runtime_env, cwd=runtime_cwd)
+    target_executable = Path(_launch_set_option(command, "--binary"))
     try:
-        with immutable.PinnedDirectoryReader(artifact_root) as pinned_root:
-            if os.listdir(pinned_root.descriptor):
+        retained_target = immutable.open_retained_executable(target_executable)
+    except (OSError, immutable.ImmutableArtifactError) as exc:
+        raise ChunkRefusal(
+            "label_launch_set_target_authority_invalid",
+            f"cannot retain profiled target executable: {exc}",
+        ) from exc
+    try:
+        with retained_target:
+            if retained_target.sha256 != expected_target_executable_sha256:
                 raise ChunkRefusal(
-                    "label_launch_set_fixture_boundary_invalid",
-                    "fixture artifact root is not empty",
+                    "label_launch_set_target_authority_invalid",
+                    "profiled target executable SHA-256 differs",
                 )
-            result = ncu_executor.execute_ncu_supervised_child(
-                expected_ncu_identity,
-                supervised_command,
-                timeout_seconds=timeout_s,
-                environment=environment,
-                working_directory=runtime_cwd,
-            )
-            pinned_root.verify_path()
+            with immutable.PinnedDirectoryReader(artifact_root) as pinned_root:
+                if os.listdir(pinned_root.descriptor):
+                    raise ChunkRefusal(
+                        "label_launch_set_fixture_boundary_invalid",
+                        "fixture artifact root is not empty",
+                    )
+                result = ncu_executor.execute_ncu_supervised_child(
+                    expected_ncu_identity,
+                    supervised_command,
+                    timeout_seconds=timeout_s,
+                    environment=environment,
+                    working_directory=runtime_cwd,
+                )
+                pinned_root.verify_path()
+            retained_target.verify_unchanged()
     except ncu_executor.NcuActionExecutorError as exc:
         raise ChunkRefusal(
             f"label_launch_set_collection_{exc.code.lower()}", str(exc),
@@ -4810,6 +5164,9 @@ def execute_fixture_only_launch_set_plan(
                 manifest_document,
                 command=command,
                 source_commit=expected_source_commit,
+                expected_target_executable_sha256=(
+                    expected_target_executable_sha256
+                ),
                 expected_kernel_signature_sha256=(
                     expected_kernel_signature_sha256
                 ),
@@ -4817,6 +5174,8 @@ def execute_fixture_only_launch_set_plan(
                     expected_kernel_signature_source
                 ),
             )
+            run_manifest_sha256 = retained_manifest.sha256
+            run_manifest_size_bytes = retained_manifest.size_bytes
             imported, import_error = parse_ncu_metrics._import_report_csv(
                 expected_ncu_identity, report,
             )
@@ -4880,12 +5239,40 @@ def execute_fixture_only_launch_set_plan(
             percentage_metric_names=percentage_metric_names,
             unit_metric_names=unit_metric_names,
         )
+        execution_identity, capture_manifest = (
+            _persist_fixture_launch_set_authorities(
+                cell_root=cell_root,
+                artifacts=artifacts,
+                command=command,
+                protocol=protocol,
+                expected_launch_count=plan[
+                    "trace_inventory_cardinality"
+                ],
+                expected_target_executable_sha256=(
+                    expected_target_executable_sha256
+                ),
+                expected_runtime_module_sha256s=(
+                    expected_runtime_module_sha256s
+                ),
+                execution_identity_document=(
+                    execution_identity_document
+                ),
+                products=products,
+                details_export_receipt=receipt,
+                expected_run_manifest_document=manifest_document,
+                expected_run_manifest_sha256=run_manifest_sha256,
+                expected_run_manifest_size_bytes=(
+                    run_manifest_size_bytes
+                ),
+            )
+        )
     except (
         OSError,
         immutable.ImmutableArtifactError,
         collection_receipt.CollectionReceiptError,
         ncu_launch_documents.LaunchDocumentError,
         details_persistence.DetailsExportPersistenceError,
+        KeyError,
         TypeError,
         ValueError,
         RecursionError,
@@ -4903,6 +5290,8 @@ def execute_fixture_only_launch_set_plan(
         ],
         "launch_metrics": artifacts["run_0_launch_set.launch_metrics.json"],
         "details_export_receipt": receipt,
+        "execution_identity": execution_identity,
+        "capture_manifest": capture_manifest,
     }
 
 
