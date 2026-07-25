@@ -1174,6 +1174,7 @@ def extract_launch_metric_observations(
 
 
 _NCU_IMPORT_TIMEOUT_SECONDS = 600.0
+RETAINED_REPORT_ARGUMENT = "<RETAINED_REPORT_FD>"
 
 
 @dataclass(frozen=True)
@@ -1183,6 +1184,19 @@ class ImportedReportCsv:
     text: str
     report_sha256: str
     report_size_bytes: int
+    csv_bytes: bytes = field(default=b"", compare=False, repr=False)
+    stderr_bytes: bytes = field(default=b"", compare=False, repr=False)
+    normalized_arguments: tuple[str, ...] = field(
+        default=(), compare=False, repr=False,
+    )
+    action_environment: tuple[tuple[str, str], ...] = field(
+        default=(), compare=False, repr=False,
+    )
+    working_directory: str = field(default="/", compare=False)
+    exit_status: int = field(default=0, compare=False)
+    ncu_identity: ncu_executor.ExpectedNcuIdentity | None = field(
+        default=None, compare=False,
+    )
 
 
 def _import_error(
@@ -1295,6 +1309,11 @@ def _import_report_csv(
         # Force numeric values to floating point in the closed C locale.
         "--print-fp",
     ]
+    normalized_arguments = tuple(
+        RETAINED_REPORT_ARGUMENT
+        if argument == retained_report.proc_path else argument
+        for argument in arguments
+    )
     try:
         action = ncu_executor.execute_ncu_action(
             expected,
@@ -1321,10 +1340,20 @@ def _import_report_csv(
                     detail=f"retained NCU --import stdout is not Details CSV: {exc}",
                 )
             else:
+                csv_bytes = text.encode("utf-8", errors="strict")
                 imported = ImportedReportCsv(
                     text=text,
                     report_sha256=retained_report.sha256,
                     report_size_bytes=retained_report.size_bytes,
+                    csv_bytes=csv_bytes,
+                    stderr_bytes=action.stderr,
+                    normalized_arguments=normalized_arguments,
+                    action_environment=tuple(
+                        ncu_executor.ncu_action_environment().items()
+                    ),
+                    working_directory="/",
+                    exit_status=action.returncode,
+                    ncu_identity=expected,
                 )
     except ncu_executor.NcuActionExecutorError as exc:
         _unused, error = _executor_import_error(exc)

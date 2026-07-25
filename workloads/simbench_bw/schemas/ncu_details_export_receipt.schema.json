@@ -1,0 +1,173 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "simbench_bw/schemas/ncu_details_export_receipt.schema.json",
+  "title": "NCU Details export receipt",
+  "description": "Unsigned process-and-product integrity receipt for one descriptor-bound NCU Details export. This receipt does not admit campaign DONE evidence.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "kind",
+    "trust_scope",
+    "status",
+    "preflight_sha256",
+    "source_commit",
+    "capture_identity_sha256",
+    "ncu_identity",
+    "import_arguments",
+    "import_arguments_sha256",
+    "environment",
+    "environment_sha256",
+    "working_directory",
+    "exit_status",
+    "products",
+    "receipt_seal_sha256"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "kind": {"const": "ncu_details_export_receipt_v1"},
+    "trust_scope": {"const": "capture_process_integrity_only_unsigned"},
+    "status": {"const": "pass"},
+    "preflight_sha256": {"$ref": "#/$defs/sha256"},
+    "source_commit": {"type": "string", "pattern": "^[0-9a-f]{40}$"},
+    "capture_identity_sha256": {"$ref": "#/$defs/sha256"},
+    "ncu_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["resolved_path", "executable_sha256", "version_line"],
+      "properties": {
+        "resolved_path": {"$ref": "#/$defs/absolute_path"},
+        "executable_sha256": {"$ref": "#/$defs/sha256"},
+        "version_line": {
+          "type": "string",
+          "minLength": 9,
+          "maxLength": 4096,
+          "pattern": "^Version[ ]+\\S(?:.*\\S)?$"
+        }
+      }
+    },
+    "import_arguments": {
+      "type": "array",
+      "minItems": 2,
+      "maxItems": 64,
+      "items": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 131071,
+        "pattern": "^[^\\u0000]*$"
+      }
+    },
+    "import_arguments_sha256": {"$ref": "#/$defs/sha256"},
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["LANG", "LANGUAGE", "LC_ALL", "PATH"],
+      "properties": {
+        "LANG": {"const": "C"},
+        "LANGUAGE": {"const": "C"},
+        "LC_ALL": {"const": "C"},
+        "PATH": {"const": "/bin:/usr/bin"}
+      }
+    },
+    "environment_sha256": {"$ref": "#/$defs/sha256"},
+    "working_directory": {"const": "/"},
+    "exit_status": {"const": 0},
+    "products": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "prefixItems": [
+        {"$ref": "#/$defs/ncu_report"},
+        {"$ref": "#/$defs/details_csv"},
+        {"$ref": "#/$defs/details_stderr"},
+        {"$ref": "#/$defs/launch_inventory"},
+        {"$ref": "#/$defs/launch_metrics"}
+      ],
+      "items": false
+    },
+    "receipt_seal_sha256": {"$ref": "#/$defs/sha256"}
+  },
+  "$defs": {
+    "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+    "absolute_path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096,
+      "pattern": "^/(?!/)(?!.*(?:^|/)\\.\\.?(?:/|$))(?!.*\\\\)(?!.*[\\u0000\\r\\n]).+$"
+    },
+    "relative_path": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 4096,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.?(?:/|$))(?!.*\\\\)(?!.*[\\u0000\\r\\n]).+$"
+    },
+    "product": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "relative_path", "sha256", "size_bytes"],
+      "properties": {
+        "role": {"type": "string"},
+        "relative_path": {"$ref": "#/$defs/relative_path"},
+        "sha256": {"$ref": "#/$defs/sha256"},
+        "size_bytes": {"type": "integer", "minimum": 0}
+      }
+    },
+    "ncu_report": {
+      "allOf": [
+        {"$ref": "#/$defs/product"},
+        {
+          "type": "object",
+          "properties": {
+            "role": {"const": "ncu_report"},
+            "size_bytes": {"type": "integer", "minimum": 1}
+          }
+        }
+      ]
+    },
+    "details_csv": {
+      "allOf": [
+        {"$ref": "#/$defs/product"},
+        {
+          "type": "object",
+          "properties": {
+            "role": {"const": "details_csv"},
+            "size_bytes": {"type": "integer", "minimum": 1}
+          }
+        }
+      ]
+    },
+    "details_stderr": {
+      "allOf": [
+        {
+          "$ref": "#/$defs/product",
+          "properties": {"size_bytes": {"type": "integer", "minimum": 0}}
+        },
+        {"type": "object", "properties": {"role": {"const": "details_stderr"}}}
+      ]
+    },
+    "launch_inventory": {
+      "allOf": [
+        {"$ref": "#/$defs/product"},
+        {
+          "type": "object",
+          "properties": {
+            "role": {"const": "launch_inventory"},
+            "size_bytes": {"type": "integer", "minimum": 1}
+          }
+        }
+      ]
+    },
+    "launch_metrics": {
+      "allOf": [
+        {"$ref": "#/$defs/product"},
+        {
+          "type": "object",
+          "properties": {
+            "role": {"const": "launch_metrics"},
+            "size_bytes": {"type": "integer", "minimum": 1}
+          }
+        }
+      ]
+    }
+  }
+}

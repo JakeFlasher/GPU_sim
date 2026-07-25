@@ -5,13 +5,16 @@ from __future__ import annotations
 import copy
 import stat
 from collections.abc import Iterable, Mapping
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 from jsonschema import Draft202012Validator
 
 from tools.local_labels import immutable_artifact as immutable
+from tools.local_labels import ncu_action_executor
 from tools.local_labels import ncu_capture_contract
+from tools.local_labels import ncu_details_export_receipt
 from tools.local_labels import parse_ncu_metrics
 
 
@@ -74,6 +77,20 @@ _SCHEMA_SPECS = {
         "root_type": "array",
     },
 }
+
+
+@dataclass(frozen=True)
+class DetailsExportProducts:
+    """One pure, mutually bound Details export product set."""
+
+    csv_bytes: bytes
+    stderr_bytes: bytes
+    inventory_document: dict[str, Any]
+    inventory_bytes: bytes
+    metrics_document: list[dict[str, Any]]
+    metrics_bytes: bytes
+    receipt_document: dict[str, Any]
+    receipt_bytes: bytes
 
 
 class LaunchDocumentError(ValueError):
@@ -639,3 +656,128 @@ def build_launch_metrics_document(
         unit_metric_names=unit_metrics,
     )
     return document
+
+
+def build_details_export_products(
+    *,
+    imported: parse_ncu_metrics.ImportedReportCsv,
+    preflight_sha256: str,
+    source_commit: str,
+    capture_identity_sha256: str,
+    expected_ncu_identity: ncu_action_executor.ExpectedNcuIdentity,
+    report_relative_path: str,
+    csv_relative_path: str,
+    stderr_relative_path: str,
+    inventory_relative_path: str,
+    metrics_relative_path: str,
+    expected_launch_count: int,
+    protocol: Mapping[str, Any],
+    registry: Any,
+    percentage_metric_names: Iterable[str],
+    unit_metric_names: Iterable[str],
+) -> DetailsExportProducts:
+    """Build one byte-exact Details product set without filesystem access."""
+
+    if type(imported) is not parse_ncu_metrics.ImportedReportCsv:
+        _fail("Details export import has the wrong authority type")
+    if (
+        type(imported.csv_bytes) is not bytes
+        or not imported.csv_bytes
+        or type(imported.text) is not str
+    ):
+        _fail("Details export CSV bytes are absent")
+    try:
+        decoded_csv = imported.csv_bytes.decode("utf-8", errors="strict")
+    except UnicodeDecodeError as exc:
+        raise LaunchDocumentError(
+            f"Details export CSV bytes are not strict UTF-8: {exc}"
+        ) from exc
+    if decoded_csv != imported.text:
+        _fail("Details export CSV text differs from retained normalized bytes")
+    if type(imported.stderr_bytes) is not bytes:
+        _fail("Details export stderr is not exact bytes")
+    if imported.ncu_identity != expected_ncu_identity:
+        _fail("Details export NCU identity differs from independent authority")
+    if imported.normalized_arguments != tuple(
+        ncu_details_export_receipt.EXPECTED_IMPORT_ARGUMENTS
+    ):
+        _fail("Details export normalized arguments differ from authority")
+    if imported.action_environment != tuple(
+        ncu_details_export_receipt.EXPECTED_ACTION_ENVIRONMENT
+    ):
+        _fail("Details export action environment differs from authority")
+
+    inventory = build_launch_inventory_document(
+        csv_text=imported.text,
+        report_sha256=imported.report_sha256,
+        expected_launch_count=expected_launch_count,
+        protocol=protocol,
+    )
+    metrics = build_launch_metrics_document(
+        csv_text=imported.text,
+        inventory=inventory,
+        registry=registry,
+        percentage_metric_names=percentage_metric_names,
+        unit_metric_names=unit_metric_names,
+    )
+    try:
+        inventory_bytes = immutable.pretty_json_bytes(inventory)
+        metrics_bytes = immutable.pretty_json_bytes(metrics)
+    except immutable.ImmutableArtifactError as exc:
+        raise LaunchDocumentError(str(exc)) from exc
+    try:
+        products = [
+            ncu_details_export_receipt.product_binding(
+                role="ncu_report",
+                relative_path=report_relative_path,
+                sha256=imported.report_sha256,
+                size_bytes=imported.report_size_bytes,
+            ),
+            ncu_details_export_receipt.product_from_bytes(
+                role="details_csv",
+                relative_path=csv_relative_path,
+                payload=imported.csv_bytes,
+            ),
+            ncu_details_export_receipt.product_from_bytes(
+                role="details_stderr",
+                relative_path=stderr_relative_path,
+                payload=imported.stderr_bytes,
+            ),
+            ncu_details_export_receipt.product_from_bytes(
+                role="launch_inventory",
+                relative_path=inventory_relative_path,
+                payload=inventory_bytes,
+            ),
+            ncu_details_export_receipt.product_from_bytes(
+                role="launch_metrics",
+                relative_path=metrics_relative_path,
+                payload=metrics_bytes,
+            ),
+        ]
+        receipt = ncu_details_export_receipt.build_receipt(
+            preflight_sha256=preflight_sha256,
+            source_commit=source_commit,
+            capture_identity_sha256=capture_identity_sha256,
+            expected_ncu_identity=expected_ncu_identity,
+            import_arguments=imported.normalized_arguments,
+            environment=dict(imported.action_environment),
+            working_directory=imported.working_directory,
+            exit_status=imported.exit_status,
+            products=products,
+        )
+        receipt_bytes = immutable.pretty_json_bytes(receipt)
+    except (
+        immutable.ImmutableArtifactError,
+        ncu_details_export_receipt.DetailsExportReceiptError,
+    ) as exc:
+        raise LaunchDocumentError(str(exc)) from exc
+    return DetailsExportProducts(
+        csv_bytes=imported.csv_bytes,
+        stderr_bytes=imported.stderr_bytes,
+        inventory_document=inventory,
+        inventory_bytes=inventory_bytes,
+        metrics_document=metrics,
+        metrics_bytes=metrics_bytes,
+        receipt_document=receipt,
+        receipt_bytes=receipt_bytes,
+    )

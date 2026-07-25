@@ -15,7 +15,10 @@ from jsonschema import Draft202012Validator
 
 from tools.local_labels import immutable_artifact as immutable
 from tools.local_labels import metric_registry
+from tools.local_labels import ncu_action_executor
+from tools.local_labels import ncu_details_export_receipt
 from tools.local_labels import ncu_launch_documents as documents
+from tools.local_labels import parse_ncu_metrics
 
 
 _REPORT_SHA256 = "a" * 64
@@ -577,3 +580,136 @@ def test_builders_do_not_mutate_inputs_or_reach_process_or_filesystem(
     assert unit_metrics == unit_metrics_before
     assert metrics
     assert list(tmp_path.iterdir()) == []
+
+
+def _ncu_identity() -> ncu_action_executor.ExpectedNcuIdentity:
+    return ncu_action_executor.build_expected_ncu_identity(
+        resolved_path="/opt/nvidia/ncu",
+        executable_sha256="b" * 64,
+        version_line="Version 2026.1.0.0 (build 1) (public-release)",
+    )
+
+
+def _imported_report() -> parse_ncu_metrics.ImportedReportCsv:
+    identity = _ncu_identity()
+    csv_bytes = _csv_text().encode("utf-8")
+    return parse_ncu_metrics.ImportedReportCsv(
+        text=_csv_text(),
+        report_sha256=_REPORT_SHA256,
+        report_size_bytes=321,
+        csv_bytes=csv_bytes,
+        stderr_bytes=b"",
+        normalized_arguments=ncu_details_export_receipt.EXPECTED_IMPORT_ARGUMENTS,
+        action_environment=(
+            ncu_details_export_receipt.EXPECTED_ACTION_ENVIRONMENT
+        ),
+        working_directory="/",
+        exit_status=0,
+        ncu_identity=identity,
+    )
+
+
+def _export_kwargs() -> dict[str, object]:
+    return {
+        "imported": _imported_report(),
+        "preflight_sha256": "0" * 64,
+        "source_commit": "1" * 40,
+        "capture_identity_sha256": "2" * 64,
+        "expected_ncu_identity": _ncu_identity(),
+        "report_relative_path": "raw/run_0_launch_set.ncu-rep",
+        "csv_relative_path": "raw/run_0_launch_set.details.csv",
+        "stderr_relative_path": "raw/run_0_launch_set.details.stderr",
+        "inventory_relative_path": (
+            "raw/run_0_launch_set.launch_inventory.json"
+        ),
+        "metrics_relative_path": "raw/run_0_launch_set.launch_metrics.json",
+        "expected_launch_count": 2,
+        "protocol": _protocol(),
+        "registry": metric_registry.load_registry(),
+        "percentage_metric_names": _PERCENTAGES,
+        "unit_metric_names": _UNIT_METRICS,
+    }
+
+
+def test_details_export_products_bind_one_import_and_canonical_documents():
+    kwargs = _export_kwargs()
+    result = documents.build_details_export_products(
+        **kwargs,  # type: ignore[arg-type]
+    )
+    imported = kwargs["imported"]
+    assert result.csv_bytes == imported.csv_bytes
+    assert result.stderr_bytes == b""
+    assert result.inventory_bytes == immutable.pretty_json_bytes(
+        result.inventory_document
+    )
+    assert result.metrics_bytes == immutable.pretty_json_bytes(
+        result.metrics_document
+    )
+    assert result.receipt_bytes == immutable.pretty_json_bytes(
+        result.receipt_document
+    )
+    assert result.inventory_document["report_sha256"] == _REPORT_SHA256
+    products = result.receipt_document["products"]
+    assert [product["role"] for product in products] == [
+        "ncu_report",
+        "details_csv",
+        "details_stderr",
+        "launch_inventory",
+        "launch_metrics",
+    ]
+    assert products[0]["sha256"] == _REPORT_SHA256
+    assert products[1]["sha256"] == immutable.sha256_bytes(
+        imported.csv_bytes
+    )
+    assert products[2]["sha256"] == immutable.sha256_bytes(b"")
+    assert products[3]["sha256"] == immutable.sha256_bytes(
+        result.inventory_bytes
+    )
+    assert products[4]["sha256"] == immutable.sha256_bytes(
+        result.metrics_bytes
+    )
+
+    ncu_details_export_receipt.validate_receipt(
+        result.receipt_document,
+        expected_preflight_sha256=kwargs["preflight_sha256"],
+        expected_source_commit=kwargs["source_commit"],
+        expected_capture_identity_sha256=kwargs[
+            "capture_identity_sha256"
+        ],
+        expected_ncu_identity=kwargs["expected_ncu_identity"],
+        expected_import_arguments=imported.normalized_arguments,
+        expected_environment=dict(imported.action_environment),
+        expected_working_directory=imported.working_directory,
+        expected_exit_status=imported.exit_status,
+        expected_products=products,
+    )  # type: ignore[arg-type]
+
+
+@pytest.mark.parametrize(
+    ("changes", "message"),
+    [
+        ({"csv_bytes": b"replacement"}, "CSV text differs"),
+        ({"stderr_bytes": "not-bytes"}, "stderr is not exact bytes"),
+        ({"normalized_arguments": ("--import", "/proc/self/fd/9")},
+         "normalized arguments differ"),
+        ({"action_environment": (("LANG", "C"),)},
+         "action environment differs"),
+        ({"ncu_identity": None}, "NCU identity differs"),
+    ],
+)
+def test_details_export_products_reject_import_binding_drift(changes, message):
+    kwargs = _export_kwargs()
+    kwargs["imported"] = replace(kwargs["imported"], **changes)
+    with pytest.raises(documents.LaunchDocumentError, match=message):
+        documents.build_details_export_products(
+            **kwargs,  # type: ignore[arg-type]
+        )
+
+
+def test_details_export_products_translate_product_binding_failures():
+    kwargs = _export_kwargs()
+    kwargs["report_relative_path"] = "raw/../forged.ncu-rep"
+    with pytest.raises(documents.LaunchDocumentError, match="product path"):
+        documents.build_details_export_products(
+            **kwargs,  # type: ignore[arg-type]
+        )

@@ -60,6 +60,32 @@ def test_report_import_requests_mangled_kernel_names(monkeypatch, tmp_path):
     assert observed["identity"] == expected
     assert observed["report_path"] == report.absolute()
     assert observed["report_sha256"] == imported.report_sha256
+    assert imported.csv_bytes == csv_text.encode()
+    assert imported.stderr_bytes == b""
+    assert imported.normalized_arguments == (
+        "--import",
+        parser.RETAINED_REPORT_ARGUMENT,
+        "--page",
+        "details",
+        "--csv",
+        "--print-kernel-base",
+        "mangled",
+        "--print-metric-name",
+        "name",
+        "--print-units",
+        "base",
+        "--print-fp",
+    )
+    assert imported.action_environment == tuple(
+        ncu_executor.ncu_action_environment().items()
+    )
+    assert imported.working_directory == "/"
+    assert imported.exit_status == 0
+    assert imported.ncu_identity == expected
+    assert all(
+        "/proc/self/fd/" not in argument
+        for argument in imported.normalized_arguments
+    )
     command = observed["arguments"]
     assert isinstance(command, list)
     assert command[0:2] == ["--import", observed["report_proc_path"]]
@@ -103,7 +129,7 @@ def test_report_import_strips_only_closed_ncu_warning_preamble(
         ncu_executor,
         "execute_ncu_action",
         lambda *_args, **_kwargs: ncu_executor.NcuActionResult(
-            0, output.encode(), b""
+            0, output.encode(), b"export diagnostic"
         ),
     )
     imported, error = parser._import_report_csv(
@@ -112,6 +138,9 @@ def test_report_import_strips_only_closed_ncu_warning_preamble(
     assert error is None
     assert imported is not None
     assert imported.text == csv_text
+    assert imported.csv_bytes == csv_text.encode()
+    assert imported.stderr_bytes == b"export diagnostic"
+    assert b"WARNING" not in imported.csv_bytes
 
 
 @pytest.mark.parametrize(
