@@ -807,3 +807,30 @@ def test_regular_publication_rejects_post_rename_hardlink(
     assert output.read_bytes() == b"payload"
     assert alias.read_bytes() == b"payload"
     assert output.stat().st_nlink == 2
+
+
+def test_ncu_details_partial_suffix_is_reserved_for_regular_publication(
+    tmp_path: Path,
+) -> None:
+    with pytest.raises(
+        immutable.ImmutableArtifactError,
+        match=immutable.NAMESPACE_RESERVED_COMPONENT,
+    ):
+        immutable.publish_regular_file(
+            tmp_path, "evidence.ncu-details-partial", b"payload",
+        )
+
+
+def test_ncu_details_partial_suffix_is_reserved_for_tree_material(
+    tmp_path: Path,
+) -> None:
+    material = (
+        immutable.ImmutableFile.from_bytes(
+            "evidence.ncu-details-partial", b"payload",
+        ),
+    )
+    with pytest.raises(
+        immutable.ImmutableArtifactError,
+        match=immutable.NAMESPACE_RESERVED_COMPONENT,
+    ):
+        immutable.publish_directory(tmp_path, "artifact", material)

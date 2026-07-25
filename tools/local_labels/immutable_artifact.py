@@ -27,7 +27,9 @@ _MAX_FINAL_NAME_BYTES = 246
 _MAX_REGULAR_LEAF_BYTES = 243
 _SNAPSHOT_CLOSURE_THRESHOLD = 512
 _PARTIAL_SUFFIX = ".m5-partial"
-_PARTIAL_SUFFIXES = frozenset({".m5-partial", ".m6-partial"})
+_PARTIAL_SUFFIXES = frozenset({
+    ".m5-partial", ".m6-partial", ".ncu-details-partial",
+})
 _MAX_SAFE_JSON_INTEGER = (1 << 53) - 1
 
 # Publication failures are deliberately stable strings: callers map these
@@ -1236,10 +1238,15 @@ def publish_regular_file(
             descriptor = os.open(
                 partial_name,
                 os.O_RDONLY
+                | os.O_NONBLOCK
                 | getattr(os, "O_CLOEXEC", 0)
                 | _nofollow_flag(),
                 dir_fd=parent_descriptor,
             )
+            if not stat.S_ISREG(os.fstat(descriptor).st_mode):
+                raise ImmutableArtifactError(
+                    f"unrecognized partial stage entry: {partial_name}"
+                )
             _lock_partial(descriptor, partial_name)
             if not _verify_open_file(descriptor, material):
                 raise ImmutableArtifactError(
@@ -1500,7 +1507,9 @@ def _material_component_error(part: str, *, relative: str, leaf: bool) -> None:
         raise ImmutableArtifactError(
             f"{NAMESPACE_RESERVED_COMPONENT}: {relative}"
         )
-    if part.endswith((".staging", ".m5-partial", ".m6-partial")) or ".partial-" in part:
+    if part.endswith(
+        (".staging", ".m5-partial", ".m6-partial", ".ncu-details-partial")
+    ) or ".partial-" in part:
         raise ImmutableArtifactError(
             f"{NAMESPACE_RESERVED_COMPONENT}: {relative}"
         )
@@ -1923,7 +1932,9 @@ def _validate_publication_name(name: str) -> None:
         or not encoded
         or encoded.startswith(b".")
         or any(byte < 0x20 or byte == 0x7F for byte in encoded)
-        or name.endswith((".staging", ".m5-partial", ".m6-partial"))
+        or name.endswith(
+            (".staging", ".m5-partial", ".m6-partial", ".ncu-details-partial")
+        )
         or ".partial-" in name
     ):
         raise ImmutableArtifactError(
