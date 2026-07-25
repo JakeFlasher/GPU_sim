@@ -185,8 +185,12 @@ Optional arguments:
                             shape_point as --shape-point above.
 
 Output paths:
-  <out-dir>/<device>/<slug>/<shape_point>/label_<repeat>_<launch>.json
-  <out-dir>/<device>/<slug>/<shape_point>/run_<repeat>_<launch>.ncu-rep
+  Legacy single-launch mode:
+    <out-dir>/<device>/<slug>/<shape_point>/label_<repeat>_<launch>.json
+    <out-dir>/<device>/<slug>/<shape_point>/run_<repeat>_<launch>.ncu-rep
+  Explicit launch-set handoff (exit 3; no label sidecar):
+    <out-dir>/<device>/<slug>/<shape_point>/run_<repeat>_launch_set.ncu-rep
+    <out-dir>/<device>/<slug>/<shape_point>/label_run_manifest_<repeat>_launch_set.json
 EOF
 }
 
@@ -658,10 +662,15 @@ case "$SHAPE_POINT" in
         ;;
 esac
 
-# Path helpers.
+# Path helpers. Explicit launch-set capture has one set-level identity rather than
+# inheriting the legacy single-launch selector used only to satisfy the CLI.
 CELL_DIR="${OUT_DIR}/${DEVICE}/${SLUG}/${SHAPE_POINT}"
+ARTIFACT_LAUNCH_TAG="$LAUNCH_INDEX"
+if [[ "$EXPLICIT_NCU_LAUNCH_CONTROLS" -eq 1 ]]; then
+    ARTIFACT_LAUNCH_TAG="launch_set"
+fi
 SIDECAR_PATH="${CELL_DIR}/label_${REPEAT_INDEX}_${LAUNCH_INDEX}.json"
-REPORT_PATH="${CELL_DIR}/run_${REPEAT_INDEX}_${LAUNCH_INDEX}.ncu-rep"
+REPORT_PATH="${CELL_DIR}/run_${REPEAT_INDEX}_${ARTIFACT_LAUNCH_TAG}.ncu-rep"
 
 # Provenance gathering. Every value below feeds the JSON sidecar that
 # the importer (tools/local_labels/import_label.py) validates.
@@ -1071,7 +1080,7 @@ fi
 # enriches the admitted-cell record with the runner-joinable 7-field
 # key. Use the same safe Python-heredoc emitter the sidecar uses so
 # shell-captured strings cannot break the JSON.
-RUN_MANIFEST_PATH="${CELL_DIR}/label_run_manifest_${REPEAT_INDEX}_${LAUNCH_INDEX}.json"
+RUN_MANIFEST_PATH="${CELL_DIR}/label_run_manifest_${REPEAT_INDEX}_${ARTIFACT_LAUNCH_TAG}.json"
 # Orphan-manifest cleanup discipline: under `set -euo pipefail`
 # any failure between this manifest emission and the sidecar
 # emission below (NCU collection failure, metric-extraction
@@ -1300,6 +1309,9 @@ fi
     >/dev/null
 
 if [[ "$EXPLICIT_NCU_LAUNCH_CONTROLS" -eq 1 ]]; then
+    # Exit 3 is the deliberate set-level handoff, not a failed single-launch
+    # parse. Preserve the manifest that binds the retained launch-set report.
+    _RUN_MANIFEST_NEEDS_CLEANUP=0
     echo "label_driver: NCU_LAUNCH_SET_POSTPROCESSING_UNIMPLEMENTED: explicit launch-set report retained without a sidecar" >&2
     exit 3
 fi
