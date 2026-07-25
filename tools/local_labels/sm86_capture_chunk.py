@@ -52,6 +52,9 @@ import capture_toolchain_contract as toolchain_contract  # noqa: E402
 from tools.local_labels import immutable_artifact as immutable  # noqa: E402
 from tools.local_labels import ncu_action_executor as ncu_executor  # noqa: E402
 from tools.local_labels import ncu_collection_receipt as collection_receipt  # noqa: E402
+from tools.local_labels import ncu_details_export_persistence as details_persistence  # noqa: E402
+from tools.local_labels import ncu_launch_documents  # noqa: E402
+from tools.local_labels import parse_ncu_metrics  # noqa: E402
 import ncu_capture_contract  # noqa: E402
 import sol_capture_environment as sol_env  # noqa: E402
 import sol_definition_equivalence as sol_def  # noqa: E402
@@ -4072,6 +4075,26 @@ _LAUNCH_SET_FIXED_ARTIFACT_NAMES = (
     "label_run_manifest_0_launch_set.json",
     "label_launch_set_capture_manifest.json",
 )
+_LAUNCH_SET_HANDOFF_STDERR = (
+    b"label_driver: NCU_LAUNCH_SET_POSTPROCESSING_UNIMPLEMENTED: "
+    b"explicit launch-set report retained without a sidecar\n"
+)
+_LAUNCH_SET_PERCENTAGE_METRICS = (
+    "lts__t_sector_hit_rate.pct",
+    "l1tex__t_sector_hit_rate.pct",
+)
+_PRODUCTION_LABEL_DRIVER = LABEL_DRIVER
+_FIXTURE_LAUNCH_SET_EXECUTION_AUTHORITY = object()
+_LAUNCH_SET_PLAN_FIELDS = frozenset({
+    "command",
+    "trace_inventory_cardinality",
+    "driver_selector_count",
+    "ncu_launch_protocol",
+    "cell_root",
+    "fixed_artifacts",
+    "label_sidecars",
+    "plan_sha256",
+})
 
 
 def _explicit_ncu_driver_args(protocol: dict[str, Any]) -> list[str]:
@@ -4278,6 +4301,23 @@ def _prepare_label_capture_command(
     }
 
 
+def _launch_set_plan_sha256(plan: dict[str, Any]) -> str:
+    model = {
+        "command": plan.get("command"),
+        "trace_inventory_cardinality": plan.get(
+            "trace_inventory_cardinality"
+        ),
+        "driver_selector_count": plan.get("driver_selector_count"),
+        "ncu_launch_protocol": plan.get("ncu_launch_protocol"),
+        "cell_root": str(plan.get("cell_root")),
+        "fixed_artifacts": [
+            str(path) for path in plan.get("fixed_artifacts", ())
+        ],
+        "label_sidecar_count": len(plan.get("label_sidecars", ())),
+    }
+    return immutable.sha256_bytes(immutable.canonical_json_bytes(model))
+
+
 def build_fixture_only_launch_set_plan(
     *, cell: dict, binary: Path, invocation: dict, cell_dir: Path,
     matrix: dict, pins: dict, trace_inventory_cardinality: int,
@@ -4327,7 +4367,7 @@ def build_fixture_only_launch_set_plan(
         prepared["labels_root"] / matrix["arch"] / identity["slug"]
         / prepared["label_shape_point"]
     )
-    return {
+    plan = {
         "command": prepared["command"],
         "trace_inventory_cardinality": trace_inventory_cardinality,
         "driver_selector_count": driver_selector_count,
@@ -4340,6 +4380,8 @@ def build_fixture_only_launch_set_plan(
             cell_root, trace_inventory_cardinality,
         ),
     }
+    plan["plan_sha256"] = _launch_set_plan_sha256(plan)
+    return plan
 
 
 _LABEL_COLLECTION_ENVIRONMENT_NAMES = (
@@ -4359,6 +4401,11 @@ _LABEL_COLLECTION_PATH = "/usr/local/cuda-13.2/bin:/usr/bin:/bin"
 def _label_collection_environment(
     runtime_env: dict[str, str] | None, *, cwd: Path,
 ) -> ncu_executor.NcuCollectionEnvironment:
+    if runtime_env is not None and type(runtime_env) is not dict:
+        raise ChunkRefusal(
+            "label_collection_environment_invalid",
+            "runtime environment is not an exact dictionary",
+        )
     source = runtime_env or {}
     values = {
         "LANG": "C",
@@ -4376,6 +4423,487 @@ def _label_collection_environment(
         return ncu_executor.NcuCollectionEnvironment(values)
     except ncu_executor.NcuActionExecutorError as exc:
         raise ChunkRefusal("label_collection_environment_invalid", str(exc)) from exc
+
+
+def _launch_set_option(command: Sequence[str], option: str) -> str:
+    if command.count(option) != 1:
+        raise ChunkRefusal(
+            "label_launch_set_plan_invalid",
+            f"launch-set command requires exactly one {option}",
+        )
+    index = command.index(option)
+    if index + 1 >= len(command) or command[index + 1] == "--":
+        raise ChunkRefusal(
+            "label_launch_set_plan_invalid",
+            f"launch-set command has no value for {option}",
+        )
+    return command[index + 1]
+
+
+def _validate_fixture_launch_set_plan(
+    plan: dict[str, Any], *, artifact_root: Path,
+    expected_plan_sha256: str,
+) -> tuple[list[str], dict[str, Any], Path, dict[str, Path]]:
+    if type(plan) is not dict or set(plan) != _LAUNCH_SET_PLAN_FIELDS:
+        raise ChunkRefusal(
+            "label_launch_set_plan_invalid", "launch-set plan fields differ",
+        )
+    try:
+        observed_plan_sha256 = _launch_set_plan_sha256(plan)
+    except (TypeError, ValueError, RecursionError, immutable.ImmutableArtifactError) as exc:
+        raise ChunkRefusal(
+            "label_launch_set_plan_invalid", f"launch-set plan is malformed: {exc}",
+        ) from exc
+    if (
+        not _is_sha256(expected_plan_sha256)
+        or plan.get("plan_sha256") != expected_plan_sha256
+        or observed_plan_sha256 != expected_plan_sha256
+    ):
+        raise ChunkRefusal(
+            "label_launch_set_plan_invalid", "launch-set plan seal differs",
+        )
+    command = plan.get("command")
+    trace_count = plan.get("trace_inventory_cardinality")
+    selector_count = plan.get("driver_selector_count")
+    protocol = plan.get("ncu_launch_protocol")
+    cell_root = plan.get("cell_root")
+    fixed_artifacts = plan.get("fixed_artifacts")
+    sidecars = plan.get("label_sidecars")
+    if (
+        type(command) is not list
+        or not command
+        or any(type(argument) is not str or "\x00" in argument for argument in command)
+        or type(trace_count) is not int
+        or trace_count < 1
+        or type(selector_count) is not int
+        or selector_count != trace_count + 1
+        or type(protocol) is not dict
+        or not isinstance(cell_root, Path)
+        or type(fixed_artifacts) is not tuple
+        or type(sidecars) is not _PlannedLabelSidecars
+        or not isinstance(artifact_root, Path)
+    ):
+        raise ChunkRefusal(
+            "label_launch_set_plan_invalid", "launch-set plan types differ",
+        )
+    expected_protocol = {
+        "ncu_target_processes": "all",
+        "ncu_filter_mode": "global",
+        "ncu_replay_mode": "kernel",
+        "ncu_cache_control": "all",
+        "ncu_clock_control": "none",
+        "ncu_profile_from_start": False,
+        "ncu_launch_skip": 0,
+        "ncu_launch_count": selector_count,
+    }
+    if protocol != expected_protocol:
+        raise ChunkRefusal(
+            "label_launch_set_plan_invalid", "launch-set protocol differs",
+        )
+    _explicit_ncu_driver_args(protocol)
+    if (
+        command[0] != str(LABEL_DRIVER)
+        or command.count("--") != 1
+        or "--ncu-exec-path" in command
+        or any(argument.startswith("--ncu-exec-path=") for argument in command)
+        or _launch_set_option(command, "--repeat") != "0"
+        or _launch_set_option(command, "--launch") != "0"
+        or _launch_set_option(command, "--out-dir") != str(artifact_root)
+    ):
+        raise ChunkRefusal(
+            "label_launch_set_plan_invalid", "launch-set command differs",
+        )
+    for field, option in _EXPLICIT_NCU_DRIVER_FIELDS:
+        value: Any = protocol[field]
+        if field == "ncu_profile_from_start":
+            value = "on" if value else "off"
+        if _launch_set_option(command, option) != str(value):
+            raise ChunkRefusal(
+                "label_launch_set_plan_invalid",
+                f"launch-set command differs at {option}",
+            )
+    device = _launch_set_option(command, "--device")
+    slug = _launch_set_option(command, "--slug")
+    shape = _launch_set_option(command, "--shape-point")
+    binary = Path(_launch_set_option(command, "--binary"))
+    for label, component in (("device", device), ("slug", slug), ("shape", shape)):
+        if (
+            not component
+            or component in {".", ".."}
+            or "/" in component
+            or "\\" in component
+            or any(ord(character) < 0x20 for character in component)
+        ):
+            raise ChunkRefusal(
+                "label_launch_set_plan_invalid",
+                f"launch-set {label} path component is unsafe",
+            )
+    if (
+        not artifact_root.is_absolute()
+        or str(artifact_root).startswith("//")
+        or os.path.normpath(str(artifact_root)) != str(artifact_root)
+        or not cell_root.is_absolute()
+        or str(cell_root).startswith("//")
+        or os.path.normpath(str(cell_root)) != str(cell_root)
+        or not binary.is_absolute()
+        or str(binary).startswith("//")
+        or os.path.normpath(str(binary)) != str(binary)
+        or cell_root != artifact_root / device / slug / shape
+    ):
+        raise ChunkRefusal(
+            "label_launch_set_plan_invalid", "launch-set paths are not canonical",
+        )
+    try:
+        cell_relative = cell_root.relative_to(artifact_root)
+    except ValueError as exc:
+        raise ChunkRefusal(
+            "label_launch_set_plan_invalid", "cell root escaped artifact root",
+        ) from exc
+    if cell_relative == Path("."):
+        raise ChunkRefusal(
+            "label_launch_set_plan_invalid", "cell root equals artifact root",
+        )
+    expected_artifacts = tuple(
+        cell_root / name for name in _LAUNCH_SET_FIXED_ARTIFACT_NAMES
+    )
+    if fixed_artifacts != expected_artifacts:
+        raise ChunkRefusal(
+            "label_launch_set_plan_invalid", "fixed artifact paths differ",
+        )
+    if (
+        sidecars._cell_root != cell_root
+        or sidecars._ordinals != range(trace_count)
+        or len(sidecars) != trace_count
+        or sidecars[0] != cell_root / "label_0_0.json"
+        or sidecars[-1] != cell_root / f"label_0_{trace_count - 1}.json"
+    ):
+        raise ChunkRefusal(
+            "label_launch_set_plan_invalid", "planned sidecar paths differ",
+        )
+    return command, protocol, cell_root, {
+        path.name: path for path in fixed_artifacts
+    }
+
+
+def _bounded_launch_set_output(payload: bytes) -> dict[str, Any]:
+    return {
+        "size_bytes": len(payload),
+        "sha256": hashlib.sha256(payload).hexdigest(),
+        "tail": payload[-4096:].decode("utf-8", errors="backslashreplace"),
+    }
+
+
+def _validate_fixture_launch_set_manifest(
+    document: dict[str, Any], *, command: Sequence[str], source_commit: str,
+    expected_kernel_signature_sha256: str,
+    expected_kernel_signature_source: str,
+) -> None:
+    required = {
+        "schema_version",
+        "source_commit",
+        "binary_sha256",
+        "kernel_signature_sha256",
+        "kernel_signature_source",
+        "arch",
+        "slug",
+        "shape_point",
+        "repeat_index",
+        "launch_index",
+    }
+    optional = set(document) - required
+    if optional not in (set(), {"variant_id", "register_cap"}):
+        raise ChunkRefusal(
+            "label_launch_set_manifest_invalid",
+            "launch-set run manifest fields differ",
+        )
+    binary = Path(_launch_set_option(command, "--binary"))
+    expected = {
+        "schema_version": 1,
+        "source_commit": source_commit,
+        "binary_sha256": sha256_file(binary),
+        "kernel_signature_sha256": expected_kernel_signature_sha256,
+        "kernel_signature_source": expected_kernel_signature_source,
+        "arch": _launch_set_option(command, "--device"),
+        "slug": _launch_set_option(command, "--slug"),
+        "shape_point": _launch_set_option(command, "--shape-point"),
+        "repeat_index": 0,
+        "launch_index": 0,
+    }
+    if (
+        not required.issubset(document)
+        or any(document.get(name) != value for name, value in expected.items())
+        or not _is_sha256(document.get("kernel_signature_sha256"))
+        or type(document.get("kernel_signature_source")) is not str
+        or not document["kernel_signature_source"]
+        or (
+            optional == {"variant_id", "register_cap"}
+            and (
+                type(document.get("variant_id")) is not str
+                or not document["variant_id"]
+                or type(document.get("register_cap")) is not int
+                or document["register_cap"] < 0
+            )
+        )
+    ):
+        raise ChunkRefusal(
+            "label_launch_set_manifest_invalid",
+            "launch-set run manifest authority differs",
+        )
+
+
+def _require_fixture_launch_set_namespace(cell_root: Path) -> None:
+    expected = {
+        "run_0_launch_set.ncu-rep",
+        "label_run_manifest_0_launch_set.json",
+    }
+    try:
+        metadata = os.lstat(cell_root)
+        if not stat.S_ISDIR(metadata.st_mode) or stat.S_ISLNK(metadata.st_mode):
+            raise OSError(None, "launch-set cell root is not a directory")
+        observed_names: list[str] = []
+        with os.scandir(cell_root) as iterator:
+            for entry in iterator:
+                observed_names.append(entry.name)
+                if len(observed_names) > len(expected):
+                    break
+        observed = set(observed_names)
+    except OSError as exc:
+        raise ChunkRefusal(
+            "label_launch_set_handoff_invalid",
+            f"cannot inspect fixture handoff namespace: {exc}",
+        ) from exc
+    if observed != expected:
+        raise ChunkRefusal(
+            "label_launch_set_handoff_invalid",
+            f"fixture handoff namespace differs: {sorted(observed)!r}",
+        )
+
+
+def execute_fixture_only_launch_set_plan(
+    *,
+    plan: dict[str, Any],
+    expected_plan_sha256: str,
+    fixture_execution_authority: object,
+    artifact_root: Path,
+    expected_ncu_identity: ncu_executor.ExpectedNcuIdentity,
+    expected_preflight_sha256: str,
+    expected_source_commit: str,
+    expected_capture_identity_sha256: str,
+    expected_kernel_signature_sha256: str,
+    expected_kernel_signature_source: str,
+    registry: Any,
+    percentage_metric_names: tuple[str, ...],
+    unit_metric_names: tuple[str, ...],
+    timeout_s: float,
+    runtime_cwd: Path,
+    runtime_env: dict[str, str] | None = None,
+) -> dict[str, Path]:
+    """Exercise the launch-set handoff without opening a production live gate."""
+    try:
+        expected_ncu_identity = ncu_executor.validate_expected_ncu_identity(
+            expected_ncu_identity
+        )
+    except ncu_executor.NcuActionExecutorError as exc:
+        raise ChunkRefusal("capture_ncu_authority_invalid", str(exc)) from exc
+    if (
+        not _is_sha256(expected_preflight_sha256)
+        or not _is_sha40(expected_source_commit)
+        or not _is_sha256(expected_capture_identity_sha256)
+        or not _is_sha256(expected_kernel_signature_sha256)
+        or type(expected_kernel_signature_source) is not str
+        or not expected_kernel_signature_source
+        or type(percentage_metric_names) is not tuple
+        or percentage_metric_names != _LAUNCH_SET_PERCENTAGE_METRICS
+        or type(unit_metric_names) is not tuple
+        or fixture_execution_authority is not (
+            _FIXTURE_LAUNCH_SET_EXECUTION_AUTHORITY
+        )
+    ):
+        raise ChunkRefusal(
+            "label_launch_set_authority_invalid",
+            "launch-set external authority is malformed",
+        )
+    command, protocol, cell_root, artifacts = (
+        _validate_fixture_launch_set_plan(
+            plan,
+            artifact_root=artifact_root,
+            expected_plan_sha256=expected_plan_sha256,
+        )
+    )
+    planned_unit_metrics = tuple(
+        command[index + 1]
+        for index, argument in enumerate(command[:-1])
+        if argument == "--unit-metric"
+    )
+    if (
+        Path(command[0]).resolve() == _PRODUCTION_LABEL_DRIVER.resolve()
+        or planned_unit_metrics != unit_metric_names
+        or os.path.lexists(cell_root)
+    ):
+        raise ChunkRefusal(
+            "label_launch_set_fixture_boundary_invalid",
+            "fixture execution authority or fresh output boundary differs",
+        )
+    supervised_command: list[object] = list(command)
+    separator = supervised_command.index("--")
+    supervised_command[separator:separator] = [
+        "--ncu-exec-path", ncu_executor.AUTHORIZED_NCU_PROC_PATH,
+    ]
+    environment = _label_collection_environment(runtime_env, cwd=runtime_cwd)
+    try:
+        with immutable.PinnedDirectoryReader(artifact_root) as pinned_root:
+            if os.listdir(pinned_root.descriptor):
+                raise ChunkRefusal(
+                    "label_launch_set_fixture_boundary_invalid",
+                    "fixture artifact root is not empty",
+                )
+            result = ncu_executor.execute_ncu_supervised_child(
+                expected_ncu_identity,
+                supervised_command,
+                timeout_seconds=timeout_s,
+                environment=environment,
+                working_directory=runtime_cwd,
+            )
+            pinned_root.verify_path()
+    except ncu_executor.NcuActionExecutorError as exc:
+        raise ChunkRefusal(
+            f"label_launch_set_collection_{exc.code.lower()}", str(exc),
+        ) from exc
+    except (OSError, immutable.ImmutableArtifactError) as exc:
+        raise ChunkRefusal(
+            "label_launch_set_fixture_boundary_invalid",
+            f"fixture artifact root is not pinned: {exc}",
+        ) from exc
+    if (
+        result.returncode != 3
+        or result.stdout != b""
+        or result.stderr != _LAUNCH_SET_HANDOFF_STDERR
+    ):
+        raise ChunkRefusal(
+            "label_launch_set_handoff_invalid",
+            repr({
+                "returncode": result.returncode,
+                "stdout": _bounded_launch_set_output(result.stdout),
+                "stderr": _bounded_launch_set_output(result.stderr),
+            }),
+        )
+    _require_fixture_launch_set_namespace(cell_root)
+
+    report = artifacts["run_0_launch_set.ncu-rep"]
+    run_manifest = artifacts["label_run_manifest_0_launch_set.json"]
+    try:
+        with contextlib.ExitStack() as retained_stack:
+            retained_report = retained_stack.enter_context(
+                immutable.open_retained_regular(report)
+            )
+            retained_manifest = retained_stack.enter_context(
+                immutable.open_retained_regular(run_manifest)
+            )
+            if retained_report.size_bytes <= 0 or retained_manifest.size_bytes <= 0:
+                raise immutable.ImmutableArtifactError(
+                    "launch-set handoff artifact is empty"
+                )
+            manifest_document = _retained_json_model(
+                retained_manifest, role="launch_set_run_manifest",
+            )
+            _validate_fixture_launch_set_manifest(
+                manifest_document,
+                command=command,
+                source_commit=expected_source_commit,
+                expected_kernel_signature_sha256=(
+                    expected_kernel_signature_sha256
+                ),
+                expected_kernel_signature_source=(
+                    expected_kernel_signature_source
+                ),
+            )
+            imported, import_error = parse_ncu_metrics._import_report_csv(
+                expected_ncu_identity, report,
+            )
+            if import_error is not None or imported is None:
+                raise ChunkRefusal(
+                    "label_launch_set_import_failed",
+                    repr(import_error),
+                )
+            if (
+                imported.report_sha256 != retained_report.sha256
+                or imported.report_size_bytes != retained_report.size_bytes
+            ):
+                raise ChunkRefusal(
+                    "label_launch_set_import_failed",
+                    "imported report identity differs from retained handoff",
+                )
+            relative = {
+                name: path.relative_to(artifact_root).as_posix()
+                for name, path in artifacts.items()
+            }
+            products = ncu_launch_documents.build_details_export_products(
+                imported=imported,
+                preflight_sha256=expected_preflight_sha256,
+                source_commit=expected_source_commit,
+                capture_identity_sha256=expected_capture_identity_sha256,
+                expected_ncu_identity=expected_ncu_identity,
+                report_relative_path=relative["run_0_launch_set.ncu-rep"],
+                csv_relative_path=relative["run_0_launch_set.details.csv"],
+                stderr_relative_path=relative[
+                    "run_0_launch_set.details.stderr"
+                ],
+                inventory_relative_path=relative[
+                    "run_0_launch_set.launch_inventory.json"
+                ],
+                metrics_relative_path=relative[
+                    "run_0_launch_set.launch_metrics.json"
+                ],
+                expected_launch_count=plan["trace_inventory_cardinality"],
+                protocol=protocol,
+                registry=registry,
+                percentage_metric_names=percentage_metric_names,
+                unit_metric_names=unit_metric_names,
+            )
+            retained_report.verify_unchanged()
+            retained_manifest.verify_unchanged()
+        receipt = details_persistence.persist_details_export_products(
+            artifact_root=artifact_root,
+            receipt_relative_path=relative[
+                "run_0_launch_set.details_export_receipt.json"
+            ],
+            products=products,
+            expected_preflight_sha256=expected_preflight_sha256,
+            expected_source_commit=expected_source_commit,
+            expected_capture_identity_sha256=(
+                expected_capture_identity_sha256
+            ),
+            expected_ncu_identity=expected_ncu_identity,
+            expected_launch_count=plan["trace_inventory_cardinality"],
+            protocol=protocol,
+            registry=registry,
+            percentage_metric_names=percentage_metric_names,
+            unit_metric_names=unit_metric_names,
+        )
+    except (
+        OSError,
+        immutable.ImmutableArtifactError,
+        collection_receipt.CollectionReceiptError,
+        ncu_launch_documents.LaunchDocumentError,
+        details_persistence.DetailsExportPersistenceError,
+        TypeError,
+        ValueError,
+        RecursionError,
+    ) as exc:
+        raise ChunkRefusal(
+            "label_launch_set_postprocessing_failed", str(exc),
+        ) from exc
+    return {
+        "report": report,
+        "run_manifest": run_manifest,
+        "details_csv": artifacts["run_0_launch_set.details.csv"],
+        "details_stderr": artifacts["run_0_launch_set.details.stderr"],
+        "launch_inventory": artifacts[
+            "run_0_launch_set.launch_inventory.json"
+        ],
+        "launch_metrics": artifacts["run_0_launch_set.launch_metrics.json"],
+        "details_export_receipt": receipt,
+    }
 
 
 def _retained_json_model(

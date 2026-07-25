@@ -13,6 +13,7 @@ from types import SimpleNamespace
 import pytest
 
 from tools.local_labels import build_sm86_capture_matrix as bcm
+from tools.local_labels import metric_registry
 from tools.local_labels import sm86_capture_chunk as cc
 from tools.local_labels import sol_reconstitution as sr
 from tools.local_labels import sol_workload_capture_chunk as sol_chunk
@@ -1303,6 +1304,8 @@ def test_fixture_only_launch_set_plan_has_exact_command_and_artifacts(tmp_path):
         expected += ["--unit-metric", metric]
     expected += ["--", *invocation["label_app_args"]]
     assert plan["command"] == expected
+    assert len(plan["plan_sha256"]) == 64
+    assert plan["plan_sha256"] == cc._launch_set_plan_sha256(plan)
     assert plan["trace_inventory_cardinality"] == 3
     assert plan["driver_selector_count"] == 4
     assert plan["ncu_launch_protocol"] == {
@@ -1480,6 +1483,291 @@ def test_fixture_only_launch_set_plan_types_control_contract_failure(
     with pytest.raises(cc.ChunkRefusal) as caught:
         _fixture_only_launch_set_plan(tmp_path)
     assert caught.value.code == "label_launch_set_control_contract_invalid"
+
+
+def _write_launch_set_fixture_executable(path: Path, source: str) -> Path:
+    path.write_text(source)
+    path.chmod(0o700)
+    return path
+
+
+def _fixture_launch_set_execution(tmp_path, monkeypatch, *, csv_text: str):
+    action_log = tmp_path / "ncu-actions.log"
+    ncu = _write_launch_set_fixture_executable(
+        tmp_path / "fixture-ncu",
+        "#!/usr/bin/python3\n"
+        "import pathlib, sys\n"
+        f"log = pathlib.Path({str(action_log)!r})\n"
+        "with log.open('a', encoding='utf-8') as stream:\n"
+        "    stream.write(('version' if sys.argv[1:] == ['--version'] "
+        "else ('import' if '--import' in sys.argv else 'collect')) + '\\n')\n"
+        "if sys.argv[1:] == ['--version']:\n"
+        "    print('Version 2026.1.0.0 (build 1) (public-release)')\n"
+        "    raise SystemExit(0)\n"
+        "if '--import' in sys.argv:\n"
+        f"    sys.stdout.write({csv_text!r})\n"
+        "    raise SystemExit(0)\n"
+        "export = pathlib.Path(sys.argv[sys.argv.index('--export') + 1])\n"
+        "export.parent.mkdir(parents=True, exist_ok=True)\n"
+        "export.write_bytes(b'fixture launch-set report')\n",
+    )
+    ncu.chmod(0o500)
+    driver = _write_launch_set_fixture_executable(
+        tmp_path / "fixture-label-driver",
+        "#!/usr/bin/python3\n"
+        "import hashlib, json, pathlib, subprocess, sys\n"
+        "args = sys.argv[1:]\n"
+        "def value(option): return args[args.index(option) + 1]\n"
+        "ncu_path = value('--ncu-exec-path')\n"
+        "descriptor = int(ncu_path.rsplit('/', 1)[1])\n"
+        "root = (pathlib.Path(value('--out-dir')) / value('--device') / "
+        "value('--slug') / value('--shape-point'))\n"
+        "root.mkdir(parents=True, exist_ok=True)\n"
+        "report = root / 'run_0_launch_set.ncu-rep'\n"
+        "subprocess.run([ncu_path, '--collect', '--export', str(report)], "
+        "check=True, pass_fds=(descriptor,))\n"
+        "manifest = root / 'label_run_manifest_0_launch_set.json'\n"
+        "binary = pathlib.Path(value('--binary'))\n"
+        "manifest.write_text(json.dumps({\n"
+        "    'schema_version': 1,\n"
+        f"    'source_commit': {'1' * 40!r},\n"
+        "    'binary_sha256': hashlib.sha256(binary.read_bytes()).hexdigest(),\n"
+        f"    'kernel_signature_sha256': {'3' * 64!r},\n"
+        "    'kernel_signature_source': 'fixture',\n"
+        "    'arch': value('--device'),\n"
+        "    'slug': value('--slug'),\n"
+        "    'shape_point': value('--shape-point'),\n"
+        "    'repeat_index': 0,\n"
+        "    'launch_index': 0,\n"
+        "}, sort_keys=True) + '\\n')\n"
+        "sys.stderr.write('label_driver: "
+        "NCU_LAUNCH_SET_POSTPROCESSING_UNIMPLEMENTED: explicit launch-set "
+        "report retained without a sidecar\\n')\n"
+        "raise SystemExit(3)\n",
+    )
+    monkeypatch.setattr(cc, "LABEL_DRIVER", driver)
+    monkeypatch.setattr(
+        cc, "registry_unit_metrics",
+        lambda _arch: ["gpc__cycles_elapsed.max"],
+    )
+    matrix, cell = _generated_sol_cell()
+    matrix["metric_registry"]["collection"]["selected_unit_metrics"] = [
+        "gpc__cycles_elapsed.max"
+    ]
+    pins = json.loads(cc.DEFAULT_PINS.read_text())
+    pins["toolchain"]["nvcc_release"] = "13.2"
+    invocation = cell["invocation"]
+    cell_dir = tmp_path / "cell"
+    artifact_root = cell_dir / "labels"
+    artifact_root.mkdir(parents=True)
+    plan = cc.build_fixture_only_launch_set_plan(
+        cell=cell,
+        binary=cc.REPO_ROOT / invocation["executable_path"],
+        invocation=invocation,
+        cell_dir=cell_dir,
+        matrix=matrix,
+        pins=pins,
+        trace_inventory_cardinality=1,
+    )
+    identity = cc.ncu_executor.build_expected_ncu_identity(
+        resolved_path=str(ncu),
+        executable_sha256=hashlib.sha256(ncu.read_bytes()).hexdigest(),
+        version_line="Version 2026.1.0.0 (build 1) (public-release)",
+    )
+    return plan, artifact_root, identity, action_log
+
+
+def _execute_fixture_plan(plan, artifact_root, identity):
+    return cc.execute_fixture_only_launch_set_plan(
+        plan=plan,
+        expected_plan_sha256=plan["plan_sha256"],
+        fixture_execution_authority=(
+            cc._FIXTURE_LAUNCH_SET_EXECUTION_AUTHORITY
+        ),
+        artifact_root=artifact_root,
+        expected_ncu_identity=identity,
+        expected_preflight_sha256="0" * 64,
+        expected_source_commit="1" * 40,
+        expected_capture_identity_sha256="2" * 64,
+        expected_kernel_signature_sha256="3" * 64,
+        expected_kernel_signature_source="fixture",
+        registry=metric_registry.load_registry(),
+        percentage_metric_names=cc._LAUNCH_SET_PERCENTAGE_METRICS,
+        unit_metric_names=("gpc__cycles_elapsed.max",),
+        timeout_s=10,
+        runtime_cwd=artifact_root.parents[1],
+    )
+
+
+def test_fixture_launch_set_execution_composes_import_and_persistence(
+    tmp_path, monkeypatch,
+):
+    csv_text = (
+        '"Metric Value","Stream","ID","Grid Size","Metric Name","Context",'
+        '"Device","Block Size","Process ID","Kernel Name"\n'
+        '"88","2","9","(4, 1, 1)","lts__t_sector_hit_rate.pct",'
+        '"1","0","(128, 1, 1)","100","_Z7kernelAv"\n'
+        '"77","2","9","(4, 1, 1)","l1tex__t_sector_hit_rate.pct",'
+        '"1","0","(128, 1, 1)","100","_Z7kernelAv"\n'
+        '"123","2","9","(4, 1, 1)","gpc__cycles_elapsed.max",'
+        '"1","0","(128, 1, 1)","100","_Z7kernelAv"\n'
+    )
+    plan, artifact_root, identity, action_log = (
+        _fixture_launch_set_execution(
+            tmp_path, monkeypatch, csv_text=csv_text,
+        )
+    )
+    paths = _execute_fixture_plan(plan, artifact_root, identity)
+
+    assert set(paths) == {
+        "report", "run_manifest", "details_csv", "details_stderr",
+        "launch_inventory", "launch_metrics", "details_export_receipt",
+    }
+    assert paths["details_csv"].read_text() == csv_text
+    assert paths["details_stderr"].read_bytes() == b""
+    receipt = json.loads(paths["details_export_receipt"].read_text())
+    assert receipt["ncu_identity"] == {
+        "resolved_path": str(tmp_path / "fixture-ncu"),
+        "executable_sha256": identity.executable_sha256,
+        "version_line": identity.version_line,
+    }
+    assert [row["role"] for row in receipt["products"]] == [
+        "ncu_report", "details_csv", "details_stderr",
+        "launch_inventory", "launch_metrics",
+    ]
+    assert action_log.read_text().splitlines().count("collect") == 1
+    assert action_log.read_text().splitlines().count("import") == 1
+    assert not any(plan["label_sidecars"][index].exists() for index in range(1))
+    assert not (
+        plan["cell_root"] / "run_0_launch_set.execution_identity.json"
+    ).exists()
+    assert not (
+        plan["cell_root"] / "label_launch_set_capture_manifest.json"
+    ).exists()
+    assert not (plan["cell_root"] / "DONE.json").exists()
+
+
+def test_fixture_launch_set_execution_rejects_nonexact_handoff(
+    tmp_path, monkeypatch,
+):
+    csv_text = 'unused\n'
+    plan, artifact_root, identity, _action_log = (
+        _fixture_launch_set_execution(
+            tmp_path, monkeypatch, csv_text=csv_text,
+        )
+    )
+    real_execute = cc.ncu_executor.execute_ncu_supervised_child
+
+    def alter_handoff(*args, **kwargs):
+        result = real_execute(*args, **kwargs)
+        return cc.ncu_executor.NcuActionResult(
+            returncode=result.returncode,
+            stdout=result.stdout,
+            stderr=result.stderr + b"unexpected\n",
+        )
+
+    monkeypatch.setattr(
+        cc.ncu_executor, "execute_ncu_supervised_child", alter_handoff,
+    )
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        _execute_fixture_plan(plan, artifact_root, identity)
+    assert caught.value.code == "label_launch_set_handoff_invalid"
+    assert not (
+        plan["cell_root"] / "run_0_launch_set.details_export_receipt.json"
+    ).exists()
+
+
+def test_fixture_launch_set_execution_rejects_plan_tampering(
+    tmp_path, monkeypatch,
+):
+    plan, artifact_root, identity, action_log = (
+        _fixture_launch_set_execution(
+            tmp_path, monkeypatch, csv_text="unused\n",
+        )
+    )
+    slug_index = plan["command"].index("--slug") + 1
+    plan["command"][slug_index] = "../../escaped"
+
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        _execute_fixture_plan(plan, artifact_root, identity)
+    assert caught.value.code == "label_launch_set_plan_invalid"
+    assert not action_log.exists()
+    assert not plan["cell_root"].exists()
+
+
+def test_fixture_launch_set_execution_rejects_extra_handoff_artifacts(
+    tmp_path, monkeypatch,
+):
+    plan, artifact_root, identity, _action_log = (
+        _fixture_launch_set_execution(
+            tmp_path, monkeypatch, csv_text="unused\n",
+        )
+    )
+    real_execute = cc.ncu_executor.execute_ncu_supervised_child
+
+    def add_done(*args, **kwargs):
+        result = real_execute(*args, **kwargs)
+        (plan["cell_root"] / "DONE.json").write_text("{}\n")
+        return result
+
+    monkeypatch.setattr(
+        cc.ncu_executor, "execute_ncu_supervised_child", add_done,
+    )
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        _execute_fixture_plan(plan, artifact_root, identity)
+    assert caught.value.code == "label_launch_set_handoff_invalid"
+    assert not (
+        plan["cell_root"] / "run_0_launch_set.details_export_receipt.json"
+    ).exists()
+
+
+def test_fixture_launch_set_execution_rejects_manifest_authority_drift(
+    tmp_path, monkeypatch,
+):
+    plan, artifact_root, identity, _action_log = (
+        _fixture_launch_set_execution(
+            tmp_path, monkeypatch, csv_text="unused\n",
+        )
+    )
+    real_execute = cc.ncu_executor.execute_ncu_supervised_child
+
+    def alter_manifest(*args, **kwargs):
+        result = real_execute(*args, **kwargs)
+        manifest = plan["cell_root"] / "label_run_manifest_0_launch_set.json"
+        document = json.loads(manifest.read_text())
+        document["source_commit"] = "f" * 40
+        manifest.write_text(json.dumps(document) + "\n")
+        return result
+
+    monkeypatch.setattr(
+        cc.ncu_executor, "execute_ncu_supervised_child", alter_manifest,
+    )
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        _execute_fixture_plan(plan, artifact_root, identity)
+    assert caught.value.code == "label_launch_set_manifest_invalid"
+    assert not (
+        plan["cell_root"] / "run_0_launch_set.details_export_receipt.json"
+    ).exists()
+
+
+def test_fixture_launch_set_execution_rejects_descendant_symlink(
+    tmp_path, monkeypatch,
+):
+    plan, artifact_root, identity, action_log = (
+        _fixture_launch_set_execution(
+            tmp_path, monkeypatch, csv_text="unused\n",
+        )
+    )
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    device = plan["command"][plan["command"].index("--device") + 1]
+    (artifact_root / device).symlink_to(outside, target_is_directory=True)
+
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        _execute_fixture_plan(plan, artifact_root, identity)
+    assert caught.value.code == "label_launch_set_fixture_boundary_invalid"
+    assert list(outside.iterdir()) == []
+    assert not action_log.exists()
 
 
 def _certified_sol_env(cell: dict) -> dict[str, str]:
