@@ -24,6 +24,8 @@ from tools.local_labels import parse_ncu_metrics
 _REPORT_SHA256 = "a" * 64
 _TARGET_EXECUTABLE_SHA256 = "e" * 64
 _RUNTIME_MODULE_SHA256S = ("c" * 64, "d" * 64)
+_LAUNCH_OBSERVATION_SHA256 = "1" * 64
+_EXECUTION_IDENTITY_SHA256 = "2" * 64
 _PERCENTAGES = (
     "lts__t_sector_hit_rate.pct",
     "l1tex__t_sector_hit_rate.pct",
@@ -58,6 +60,22 @@ def _protocol() -> dict[str, object]:
         "ncu_launch_skip": 0,
         "ncu_launch_count": 3,
     }
+
+
+def _capture_command() -> list[str]:
+    return [
+        "/repo/tools/local_labels/label_driver.sh",
+        "--target-processes", "all",
+        "--filter-mode", "global",
+        "--replay-mode", "kernel",
+        "--cache-control", "all",
+        "--clock-control", "none",
+        "--profile-from-start", "off",
+        "--launch-skip", "0",
+        "--launch-count", "3",
+        "--unit-metric", "gpc__cycles_elapsed.max",
+        "--", "/repo/target", "shape=μ",
+    ]
 
 
 def _row(report_id: str, metric: str, value: str) -> dict[str, str]:
@@ -118,6 +136,16 @@ def _build_execution_identity() -> dict[str, object]:
         target_executable_sha256=_TARGET_EXECUTABLE_SHA256,
         runtime_module_sha256s=_RUNTIME_MODULE_SHA256S,
         expected_launch_count=2,
+    )
+
+
+def _build_capture_manifest() -> dict[str, object]:
+    return documents.build_launch_set_capture_manifest_document(
+        expected_command=_capture_command(),
+        expected_launch_count=2,
+        protocol=_protocol(),
+        launch_observation_sha256=_LAUNCH_OBSERVATION_SHA256,
+        execution_identity_sha256=_EXECUTION_IDENTITY_SHA256,
     )
 
 
@@ -273,6 +301,112 @@ def test_execution_identity_rejects_unordered_and_stateful_module_authorities():
     assert authority.iterated is False
 
 
+def test_capture_manifest_schema_model_and_external_canonical_seal():
+    document = _build_capture_manifest()
+    schema = documents.load_schema("capture_manifest")
+    Draft202012Validator.check_schema(schema)
+    assert immutable.sha256_bytes(
+        documents.CAPTURE_MANIFEST_SCHEMA_PATH.read_bytes()
+    ) == documents.CAPTURE_MANIFEST_SCHEMA_SHA256
+    assert set(document) == documents._CAPTURE_MANIFEST_FIELDS
+    assert "label_capture_manifest_sha256" not in document
+    assert document == _build_capture_manifest()
+    assert document["command"] == _capture_command()
+    assert document["ncu_controls"] == {
+        "target_processes": "all",
+        "filter_mode": "global",
+        "replay_mode": "kernel",
+        "cache_control": "all",
+        "clock_control": "none",
+        "profile_from_start": False,
+    }
+    documents.validate_schema("capture_manifest", document)
+    payload = documents.launch_set_capture_manifest_bytes(
+        document,
+        expected_command=_capture_command(),
+        expected_launch_count=2,
+        protocol=_protocol(),
+        expected_launch_observation_sha256=_LAUNCH_OBSERVATION_SHA256,
+        expected_execution_identity_sha256=_EXECUTION_IDENTITY_SHA256,
+    )
+    assert payload == (
+        json.dumps(
+            document, allow_nan=False, ensure_ascii=True,
+            indent=2, sort_keys=True,
+        ) + "\n"
+    ).encode("utf-8")
+    assert b"\\u03bc" in payload
+    assert payload != immutable.pretty_json_bytes(document)
+    assert immutable.sha256_bytes(payload) not in document.values()
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        ("command", "semantic contract mismatch"),
+        ("command_type", "semantic contract mismatch"),
+        ("controls", "semantic contract mismatch"),
+        ("control_type", "semantic contract mismatch"),
+        ("observation", "semantic contract mismatch"),
+        ("execution", "semantic contract mismatch"),
+        ("local_seal", "root fields mismatch"),
+    ],
+)
+def test_capture_manifest_rejects_substitution_and_local_self_attestation(
+    mutation, message,
+):
+    document = _build_capture_manifest()
+    if mutation == "command":
+        document["command"][-1] = "shape=forged"
+    elif mutation == "command_type":
+        document["command"] = tuple(document["command"])
+    elif mutation == "controls":
+        document["ncu_controls"]["clock_control"] = "base"
+    elif mutation == "control_type":
+        document["ncu_controls"]["profile_from_start"] = 0
+    elif mutation == "observation":
+        document["ncu_launch_observation_sha256"] = "3" * 64
+    elif mutation == "execution":
+        document["ncu_execution_identity_sha256"] = "4" * 64
+    else:
+        document["label_capture_manifest_sha256"] = "5" * 64
+    with pytest.raises(documents.LaunchDocumentError, match=message):
+        documents.validate_launch_set_capture_manifest_document(
+            document,
+            expected_command=_capture_command(),
+            expected_launch_count=2,
+            protocol=_protocol(),
+            expected_launch_observation_sha256=_LAUNCH_OBSERVATION_SHA256,
+            expected_execution_identity_sha256=_EXECUTION_IDENTITY_SHA256,
+        )
+
+
+@pytest.mark.parametrize(
+    ("changes", "message"),
+    [
+        ({"launch_observation_sha256": "bad"}, "observation SHA-256"),
+        ({"execution_identity_sha256": "bad"}, "identity SHA-256"),
+        ({"expected_command": {"unordered", "command"}}, "ordered list or tuple"),
+        ({"expected_command": ["/target", "bad\x00arg"]}, "argument 1"),
+    ],
+)
+def test_capture_manifest_builder_rejects_malformed_external_authority(
+    changes, message,
+):
+    arguments = {
+        "expected_command": _capture_command(),
+        "expected_launch_count": 2,
+        "protocol": _protocol(),
+        "launch_observation_sha256": _LAUNCH_OBSERVATION_SHA256,
+        "execution_identity_sha256": _EXECUTION_IDENTITY_SHA256,
+    }
+    arguments.update(changes)
+    with pytest.raises(documents.LaunchDocumentError, match=message):
+        documents.build_launch_set_capture_manifest_document(
+            **arguments,  # type: ignore[arg-type]
+        )
+
+
 def test_schema_authority_and_generated_documents_validate():
     inventory, metrics, registry = _build_documents()
     inventory_schema = documents.load_schema("inventory")
@@ -381,7 +515,9 @@ def test_pretty_json_round_trip_preserves_semantics_not_object_member_order():
     )
 
 
-@pytest.mark.parametrize("kind", ["inventory", "metrics", "execution_identity"])
+@pytest.mark.parametrize(
+    "kind", ["inventory", "metrics", "execution_identity", "capture_manifest"],
+)
 def test_schema_authority_rejects_byte_and_path_drift(kind, tmp_path):
     spec = documents._SCHEMA_SPECS[kind]
     payload = spec["path"].read_bytes()
@@ -408,6 +544,15 @@ def test_schema_authority_rejects_byte_and_path_drift(kind, tmp_path):
         ("execution_identity", "version", "schema constants mismatch"),
         ("execution_identity", "kind", "schema constants mismatch"),
         ("execution_identity", "policy", "schema constants mismatch"),
+        ("capture_manifest", "draft", "draft mismatch"),
+        ("capture_manifest", "id", "\\$id mismatch"),
+        ("capture_manifest", "root", "root type mismatch"),
+        ("capture_manifest", "fields", "schema contract mismatch"),
+        ("capture_manifest", "command_bound", "schema contract mismatch"),
+        ("capture_manifest", "control", "schema contract mismatch"),
+        ("capture_manifest", "control_type", "schema contract mismatch"),
+        ("capture_manifest", "controls_required", "schema contract mismatch"),
+        ("capture_manifest", "controls_open", "schema contract mismatch"),
     ],
 )
 def test_schema_authority_rejects_identity_and_dispatch_drift(
@@ -424,6 +569,22 @@ def test_schema_authority_rejects_identity_and_dispatch_drift(
             if documents._SCHEMA_SPECS[kind]["root_type"] == "object"
             else "object"
         )
+    elif mutation == "fields":
+        schema["properties"].pop("command")
+    elif mutation == "command_bound":
+        schema["properties"]["command"]["maxItems"] = 4097
+    elif mutation == "control":
+        schema["$defs"]["ncuControls"]["properties"][
+            "clock_control"
+        ]["const"] = "base"
+    elif mutation == "control_type":
+        schema["$defs"]["ncuControls"]["properties"][
+            "profile_from_start"
+        ]["const"] = 0
+    elif mutation == "controls_required":
+        schema["$defs"]["ncuControls"]["required"].pop()
+    elif mutation == "controls_open":
+        schema["$defs"]["ncuControls"]["additionalProperties"] = True
     elif mutation == "version":
         schema["properties"]["schema_version"]["const"] += 1
     elif mutation == "kind":
@@ -691,10 +852,13 @@ def test_builders_do_not_mutate_inputs_or_reach_process_or_filesystem(
     unit_metrics_before = copy.deepcopy(unit_metrics)
     runtime_modules = list(_RUNTIME_MODULE_SHA256S)
     runtime_modules_before = copy.deepcopy(runtime_modules)
+    capture_command = _capture_command()
+    capture_command_before = copy.deepcopy(capture_command)
     registry = metric_registry.load_registry()
     documents.load_schema("inventory")
     documents.load_schema("metrics")
     documents.load_schema("execution_identity")
+    documents.load_schema("capture_manifest")
 
     def unexpected(*_args, **_kwargs):
         pytest.fail("pure launch document builder reached process or filesystem I/O")
@@ -710,6 +874,21 @@ def test_builders_do_not_mutate_inputs_or_reach_process_or_filesystem(
         target_executable_sha256=_TARGET_EXECUTABLE_SHA256,
         runtime_module_sha256s=runtime_modules,
         expected_launch_count=2,
+    )
+    capture_manifest = documents.build_launch_set_capture_manifest_document(
+        expected_command=capture_command,
+        expected_launch_count=2,
+        protocol=protocol,
+        launch_observation_sha256=_LAUNCH_OBSERVATION_SHA256,
+        execution_identity_sha256=_EXECUTION_IDENTITY_SHA256,
+    )
+    capture_manifest_bytes = documents.launch_set_capture_manifest_bytes(
+        capture_manifest,
+        expected_command=capture_command,
+        expected_launch_count=2,
+        protocol=protocol,
+        expected_launch_observation_sha256=_LAUNCH_OBSERVATION_SHA256,
+        expected_execution_identity_sha256=_EXECUTION_IDENTITY_SHA256,
     )
     inventory = documents.build_launch_inventory_document(
         csv_text=csv_text,
@@ -730,7 +909,9 @@ def test_builders_do_not_mutate_inputs_or_reach_process_or_filesystem(
     assert percentage_metrics == percentage_metrics_before
     assert unit_metrics == unit_metrics_before
     assert runtime_modules == runtime_modules_before
+    assert capture_command == capture_command_before
     assert execution_identity["identity_sha256"]
+    assert capture_manifest_bytes
     assert metrics
     assert list(tmp_path.iterdir()) == []
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import copy
+import json
 import stat
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
@@ -25,10 +26,16 @@ METRICS_SCHEMA_PATH = SCHEMA_DIR / "ncu_launch_metrics.schema.json"
 EXECUTION_IDENTITY_SCHEMA_PATH = (
     SCHEMA_DIR / "ncu_launch_execution_identity.schema.json"
 )
+CAPTURE_MANIFEST_SCHEMA_PATH = (
+    SCHEMA_DIR / "ncu_launch_set_capture_manifest.schema.json"
+)
 INVENTORY_SCHEMA_ID = "simbench_bw/schemas/ncu_launch_inventory.schema.json"
 METRICS_SCHEMA_ID = "simbench_bw/schemas/ncu_launch_metrics.schema.json"
 EXECUTION_IDENTITY_SCHEMA_ID = (
     "simbench_bw/schemas/ncu_launch_execution_identity.schema.json"
+)
+CAPTURE_MANIFEST_SCHEMA_ID = (
+    "simbench_bw/schemas/ncu_launch_set_capture_manifest.schema.json"
 )
 _SCHEMA_DRAFT = "https://json-schema.org/draft/2020-12/schema"
 INVENTORY_SCHEMA_SHA256 = (
@@ -39,6 +46,9 @@ METRICS_SCHEMA_SHA256 = (
 )
 EXECUTION_IDENTITY_SCHEMA_SHA256 = (
     "0003ae56c43843ee637818f7132950dae220d291f4db6cd9e4c60a79aeaf5ef3"
+)
+CAPTURE_MANIFEST_SCHEMA_SHA256 = (
+    "e55c8b65c3f006941d243fe9aaba59427e75a6587f9f90f2a49e78f1965d32e7"
 )
 
 EXECUTION_IDENTITY_KIND = "ncu_launch_set_execution_identity_v1"
@@ -78,6 +88,10 @@ _EXECUTION_IDENTITY_FIELDS = frozenset({
     "runtime_module_sha256s", "process_context_stream_policy",
     "identity_sha256",
 })
+_CAPTURE_MANIFEST_FIELDS = frozenset({
+    "command", "ncu_controls", "ncu_launch_observation_sha256",
+    "ncu_execution_identity_sha256",
+})
 _DIAGNOSTIC_WINDOWS = {
     "ncu_sector_hit_rate_clamped_to_100": lambda value: 100.0 < value <= 105.0,
     "ncu_lts_pct_overcount_raw_counter_ratio_used": lambda value: value > 105.0,
@@ -99,6 +113,12 @@ _SCHEMA_SPECS = {
         "path": EXECUTION_IDENTITY_SCHEMA_PATH,
         "id": EXECUTION_IDENTITY_SCHEMA_ID,
         "sha256": EXECUTION_IDENTITY_SCHEMA_SHA256,
+        "root_type": "object",
+    },
+    "capture_manifest": {
+        "path": CAPTURE_MANIFEST_SCHEMA_PATH,
+        "id": CAPTURE_MANIFEST_SCHEMA_ID,
+        "sha256": CAPTURE_MANIFEST_SCHEMA_SHA256,
         "root_type": "object",
     },
 }
@@ -208,6 +228,58 @@ def load_schema(
             != PROCESS_CONTEXT_STREAM_POLICY
         ):
             _fail("execution identity schema constants mismatch")
+    elif kind == "capture_manifest":
+        properties = schema.get("properties")
+        definitions = schema.get("$defs")
+        controls = (
+            definitions.get("ncuControls")
+            if type(definitions) is dict else None
+        )
+        control_properties = (
+            controls.get("properties") if type(controls) is dict else None
+        )
+        command_schema = (
+            properties.get("command") if type(properties) is dict else None
+        )
+        root_required = schema.get("required")
+        controls_required = (
+            controls.get("required") if type(controls) is dict else None
+        )
+        expected_controls = {
+            "target_processes": "all",
+            "filter_mode": "global",
+            "replay_mode": "kernel",
+            "cache_control": "all",
+            "clock_control": "none",
+            "profile_from_start": False,
+        }
+        if (
+            type(properties) is not dict
+            or set(properties) != _CAPTURE_MANIFEST_FIELDS
+            or type(root_required) is not list
+            or any(type(name) is not str for name in root_required)
+            or set(root_required) != _CAPTURE_MANIFEST_FIELDS
+            or schema.get("additionalProperties") is not False
+            or type(command_schema) is not dict
+            or command_schema.get("type") != "array"
+            or command_schema.get("minItems") != 1
+            or command_schema.get("maxItems") != 4096
+            or command_schema.get("items") != {"type": "string"}
+            or type(controls) is not dict
+            or controls.get("additionalProperties") is not False
+            or type(controls_required) is not list
+            or any(type(name) is not str for name in controls_required)
+            or set(controls_required) != set(expected_controls)
+            or type(control_properties) is not dict
+            or set(control_properties) != set(expected_controls)
+            or any(
+                type(control_properties[name]) is not dict
+                or type(control_properties[name].get("const")) is not type(value)
+                or control_properties[name].get("const") != value
+                for name, value in expected_controls.items()
+            )
+        ):
+            _fail("capture manifest schema contract mismatch")
     try:
         Draft202012Validator.check_schema(schema)
     except Exception as exc:
@@ -328,6 +400,135 @@ def build_launch_execution_identity_document(
         expected_runtime_module_sha256s=modules,
     )
     return document
+
+
+def _require_capture_manifest_command(command: Iterable[str]) -> list[str]:
+    if type(command) not in {list, tuple}:
+        _fail("capture manifest command is not an ordered list or tuple")
+    if not 1 <= len(command) <= 4096:
+        _fail("capture manifest command cardinality is outside the executor bound")
+    normalized: list[str] = []
+    encoded_size = 0
+    for index, argument in enumerate(command):
+        if type(argument) is not str or "\x00" in argument:
+            _fail(f"capture manifest command argument {index} is invalid")
+        try:
+            argument_size = len(argument.encode("utf-8", errors="strict"))
+        except UnicodeEncodeError as exc:
+            raise LaunchDocumentError(
+                f"capture manifest command argument {index} is not UTF-8: {exc}"
+            ) from exc
+        if argument_size > 131071:
+            _fail(f"capture manifest command argument {index} exceeds the bound")
+        encoded_size += argument_size + 1
+        if encoded_size > 1024 * 1024:
+            _fail("capture manifest command exceeds the encoded executor bound")
+        normalized.append(argument)
+    if not normalized[0]:
+        _fail("capture manifest command executable is empty")
+    return normalized
+
+
+def validate_launch_set_capture_manifest_document(
+    document: Mapping[str, Any], *, expected_command: Iterable[str],
+    expected_launch_count: int, protocol: Mapping[str, Any],
+    expected_launch_observation_sha256: str,
+    expected_execution_identity_sha256: str,
+) -> dict[str, Any]:
+    """Validate the four-field manifest against independent Q809 authorities.
+
+    The file's canonical presentation bytes and SHA-256 are its external seal;
+    this object deliberately has no self-attested manifest seal.
+    """
+
+    _require_canonical_json(document)
+    command = _require_capture_manifest_command(expected_command)
+    controls = _require_q809_protocol(protocol, expected_launch_count)
+    if not _is_sha256(expected_launch_observation_sha256):
+        _fail("launch observation SHA-256 authority is not lowercase 64-hex")
+    if not _is_sha256(expected_execution_identity_sha256):
+        _fail("execution identity SHA-256 authority is not lowercase 64-hex")
+    if type(document) is not dict or set(document) != _CAPTURE_MANIFEST_FIELDS:
+        _fail("capture manifest root fields mismatch")
+    observed_command = document.get("command")
+    observed_controls = document.get("ncu_controls")
+    if (
+        type(observed_command) is not list
+        or any(type(argument) is not str for argument in observed_command)
+        or observed_command != command
+        or type(observed_controls) is not dict
+        or set(observed_controls) != set(controls)
+        or any(
+            type(observed_controls[name]) is not type(value)
+            or observed_controls[name] != value
+            for name, value in controls.items()
+        )
+        or not _is_sha256(document.get("ncu_launch_observation_sha256"))
+        or document.get("ncu_launch_observation_sha256")
+        != expected_launch_observation_sha256
+        or not _is_sha256(document.get("ncu_execution_identity_sha256"))
+        or document.get("ncu_execution_identity_sha256")
+        != expected_execution_identity_sha256
+    ):
+        _fail("capture manifest semantic contract mismatch")
+    return document
+
+
+def build_launch_set_capture_manifest_document(
+    *, expected_command: Iterable[str], expected_launch_count: int,
+    protocol: Mapping[str, Any], launch_observation_sha256: str,
+    execution_identity_sha256: str,
+) -> dict[str, Any]:
+    """Build one exact launch-set manifest without filesystem or process access."""
+
+    command = _require_capture_manifest_command(expected_command)
+    controls = _require_q809_protocol(protocol, expected_launch_count)
+    document = {
+        "command": command,
+        "ncu_controls": controls,
+        "ncu_launch_observation_sha256": launch_observation_sha256,
+        "ncu_execution_identity_sha256": execution_identity_sha256,
+    }
+    validate_launch_set_capture_manifest_document(
+        document,
+        expected_command=command,
+        expected_launch_count=expected_launch_count,
+        protocol=protocol,
+        expected_launch_observation_sha256=launch_observation_sha256,
+        expected_execution_identity_sha256=execution_identity_sha256,
+    )
+    return document
+
+
+def launch_set_capture_manifest_bytes(
+    document: Mapping[str, Any], *, expected_command: Iterable[str],
+    expected_launch_count: int, protocol: Mapping[str, Any],
+    expected_launch_observation_sha256: str,
+    expected_execution_identity_sha256: str,
+) -> bytes:
+    """Return the canonical presentation bytes required by DONE verification."""
+
+    validated = validate_launch_set_capture_manifest_document(
+        document,
+        expected_command=expected_command,
+        expected_launch_count=expected_launch_count,
+        protocol=protocol,
+        expected_launch_observation_sha256=expected_launch_observation_sha256,
+        expected_execution_identity_sha256=expected_execution_identity_sha256,
+    )
+    try:
+        payload = json.dumps(
+            validated,
+            allow_nan=False,
+            ensure_ascii=True,
+            indent=2,
+            sort_keys=True,
+        )
+    except (TypeError, ValueError) as exc:
+        raise LaunchDocumentError(
+            f"capture manifest is not canonical presentation JSON: {exc}"
+        ) from exc
+    return (payload + "\n").encode("utf-8")
 
 
 def _require_metric_request(

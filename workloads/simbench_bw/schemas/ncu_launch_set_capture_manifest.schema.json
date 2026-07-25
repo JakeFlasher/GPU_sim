@@ -1,0 +1,58 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "simbench_bw/schemas/ncu_launch_set_capture_manifest.schema.json",
+  "title": "NCU launch-set capture manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "command",
+    "ncu_controls",
+    "ncu_launch_observation_sha256",
+    "ncu_execution_identity_sha256"
+  ],
+  "properties": {
+    "command": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 4096,
+      "items": {
+        "type": "string"
+      }
+    },
+    "ncu_controls": {
+      "$ref": "#/$defs/ncuControls"
+    },
+    "ncu_launch_observation_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "ncu_execution_identity_sha256": {
+      "$ref": "#/$defs/sha256"
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "ncuControls": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "target_processes",
+        "filter_mode",
+        "replay_mode",
+        "cache_control",
+        "clock_control",
+        "profile_from_start"
+      ],
+      "properties": {
+        "target_processes": {"const": "all"},
+        "filter_mode": {"const": "global"},
+        "replay_mode": {"const": "kernel"},
+        "cache_control": {"const": "all"},
+        "clock_control": {"const": "none"},
+        "profile_from_start": {"const": false}
+      }
+    }
+  }
+}
