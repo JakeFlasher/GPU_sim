@@ -22,6 +22,8 @@ from tools.local_labels import parse_ncu_metrics
 
 
 _REPORT_SHA256 = "a" * 64
+_TARGET_EXECUTABLE_SHA256 = "e" * 64
+_RUNTIME_MODULE_SHA256S = ("c" * 64, "d" * 64)
 _PERCENTAGES = (
     "lts__t_sector_hit_rate.pct",
     "l1tex__t_sector_hit_rate.pct",
@@ -111,6 +113,14 @@ def _csv_with_identity_override(field: str) -> str:
     return stream.getvalue()
 
 
+def _build_execution_identity() -> dict[str, object]:
+    return documents.build_launch_execution_identity_document(
+        target_executable_sha256=_TARGET_EXECUTABLE_SHA256,
+        runtime_module_sha256s=_RUNTIME_MODULE_SHA256S,
+        expected_launch_count=2,
+    )
+
+
 def _build_documents():
     registry = metric_registry.load_registry()
     inventory = documents.build_launch_inventory_document(
@@ -140,6 +150,127 @@ def _reseal_inventory(inventory: dict) -> None:
     unsigned = dict(inventory)
     unsigned.pop("observation_sha256", None)
     inventory["observation_sha256"] = documents._digest(unsigned)
+
+
+def test_execution_identity_schema_and_builder_bind_target_authorities():
+    first = _build_execution_identity()
+    second = _build_execution_identity()
+    schema = documents.load_schema("execution_identity")
+    Draft202012Validator.check_schema(schema)
+    assert immutable.sha256_bytes(
+        documents.EXECUTION_IDENTITY_SCHEMA_PATH.read_bytes()
+    ) == documents.EXECUTION_IDENTITY_SCHEMA_SHA256
+    assert first == second
+    assert set(first) == documents._EXECUTION_IDENTITY_FIELDS
+    assert first["schema_version"] == 1
+    assert first["kind"] == documents.EXECUTION_IDENTITY_KIND
+    assert first["executable_sha256"] == _TARGET_EXECUTABLE_SHA256
+    assert first["runtime_module_sha256s"] == list(_RUNTIME_MODULE_SHA256S)
+    assert (
+        first["process_context_stream_policy"]
+        == documents.PROCESS_CONTEXT_STREAM_POLICY
+    )
+    unsigned = dict(first)
+    observed_seal = unsigned.pop("identity_sha256")
+    assert observed_seal == documents._digest(unsigned)
+    documents.validate_schema("execution_identity", first)
+    documents.validate_launch_execution_identity_document(
+        first,
+        expected_launch_count=2,
+        expected_target_executable_sha256=_TARGET_EXECUTABLE_SHA256,
+        expected_runtime_module_sha256s=_RUNTIME_MODULE_SHA256S,
+    )
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ["target", "module_order", "module_count", "policy", "kind", "version"],
+)
+def test_execution_identity_rejects_freshly_resealed_semantic_tampering(mutation):
+    document = _build_execution_identity()
+    if mutation == "target":
+        document["executable_sha256"] = "f" * 64
+    elif mutation == "module_order":
+        document["runtime_module_sha256s"].reverse()
+    elif mutation == "module_count":
+        document["runtime_module_sha256s"].pop()
+    elif mutation == "policy":
+        document["process_context_stream_policy"] = "raw_pid_context_stream_v1"
+    elif mutation == "kind":
+        document["kind"] = "forged"
+    else:
+        document["schema_version"] = 2
+    unsigned = dict(document)
+    unsigned.pop("identity_sha256")
+    document["identity_sha256"] = documents._digest(unsigned)
+    with pytest.raises(
+        documents.LaunchDocumentError, match="semantic contract mismatch",
+    ):
+        documents.validate_launch_execution_identity_document(
+            document,
+            expected_launch_count=2,
+            expected_target_executable_sha256=_TARGET_EXECUTABLE_SHA256,
+            expected_runtime_module_sha256s=_RUNTIME_MODULE_SHA256S,
+        )
+
+
+def test_execution_identity_rejects_direct_seal_tampering():
+    document = _build_execution_identity()
+    document["identity_sha256"] = "0" * 64
+    with pytest.raises(
+        documents.LaunchDocumentError, match="identity_sha256 mismatch",
+    ):
+        documents.validate_launch_execution_identity_document(
+            document,
+            expected_launch_count=2,
+            expected_target_executable_sha256=_TARGET_EXECUTABLE_SHA256,
+            expected_runtime_module_sha256s=_RUNTIME_MODULE_SHA256S,
+        )
+
+
+@pytest.mark.parametrize(
+    ("target_sha256", "module_sha256s", "launch_count", "message"),
+    [
+        ("bad", _RUNTIME_MODULE_SHA256S, 2, "target executable"),
+        (_TARGET_EXECUTABLE_SHA256, ("bad", "d" * 64), 2, "module SHA-256 0"),
+        (_TARGET_EXECUTABLE_SHA256, _RUNTIME_MODULE_SHA256S, 1, "cardinality"),
+        (_TARGET_EXECUTABLE_SHA256, _RUNTIME_MODULE_SHA256S, True, "launch count"),
+    ],
+)
+def test_execution_identity_builder_rejects_invalid_external_authority(
+    target_sha256, module_sha256s, launch_count, message,
+):
+    with pytest.raises(documents.LaunchDocumentError, match=message):
+        documents.build_launch_execution_identity_document(
+            target_executable_sha256=target_sha256,
+            runtime_module_sha256s=module_sha256s,
+            expected_launch_count=launch_count,
+        )
+
+
+def test_execution_identity_rejects_unordered_and_stateful_module_authorities():
+    with pytest.raises(documents.LaunchDocumentError, match="ordered list or tuple"):
+        documents.build_launch_execution_identity_document(
+            target_executable_sha256=_TARGET_EXECUTABLE_SHA256,
+            runtime_module_sha256s=set(_RUNTIME_MODULE_SHA256S),
+            expected_launch_count=2,
+        )
+
+    class StatefulAuthority:
+        iterated = False
+
+        def __iter__(self):
+            self.iterated = True
+            return iter(_RUNTIME_MODULE_SHA256S)
+
+    authority = StatefulAuthority()
+    with pytest.raises(documents.LaunchDocumentError, match="ordered list or tuple"):
+        documents.build_launch_execution_identity_document(
+            target_executable_sha256=_TARGET_EXECUTABLE_SHA256,
+            runtime_module_sha256s=authority,
+            expected_launch_count=2,
+        )
+    assert authority.iterated is False
 
 
 def test_schema_authority_and_generated_documents_validate():
@@ -250,7 +381,7 @@ def test_pretty_json_round_trip_preserves_semantics_not_object_member_order():
     )
 
 
-@pytest.mark.parametrize("kind", ["inventory", "metrics"])
+@pytest.mark.parametrize("kind", ["inventory", "metrics", "execution_identity"])
 def test_schema_authority_rejects_byte_and_path_drift(kind, tmp_path):
     spec = documents._SCHEMA_SPECS[kind]
     payload = spec["path"].read_bytes()
@@ -271,6 +402,12 @@ def test_schema_authority_rejects_byte_and_path_drift(kind, tmp_path):
         ("metrics", "draft", "draft mismatch"),
         ("metrics", "id", "\\$id mismatch"),
         ("metrics", "root", "root type mismatch"),
+        ("execution_identity", "draft", "draft mismatch"),
+        ("execution_identity", "id", "\\$id mismatch"),
+        ("execution_identity", "root", "root type mismatch"),
+        ("execution_identity", "version", "schema constants mismatch"),
+        ("execution_identity", "kind", "schema constants mismatch"),
+        ("execution_identity", "policy", "schema constants mismatch"),
     ],
 )
 def test_schema_authority_rejects_identity_and_dispatch_drift(
@@ -282,11 +419,17 @@ def test_schema_authority_rejects_identity_and_dispatch_drift(
     elif mutation == "id":
         schema["$id"] = "simbench_bw/schemas/forged.schema.json"
     elif mutation == "root":
-        schema["type"] = "array" if kind == "inventory" else "object"
+        schema["type"] = (
+            "array"
+            if documents._SCHEMA_SPECS[kind]["root_type"] == "object"
+            else "object"
+        )
     elif mutation == "version":
-        schema["properties"]["schema_version"]["const"] = 4
-    else:
+        schema["properties"]["schema_version"]["const"] += 1
+    elif mutation == "kind":
         schema["properties"]["kind"]["const"] = "forged"
+    else:
+        schema["properties"]["process_context_stream_policy"]["const"] = "forged"
     payload = immutable.pretty_json_bytes(schema)
     monkeypatch.setitem(
         documents._SCHEMA_SPECS[kind],
@@ -546,9 +689,12 @@ def test_builders_do_not_mutate_inputs_or_reach_process_or_filesystem(
     unit_metrics = list(_UNIT_METRICS)
     percentage_metrics_before = copy.deepcopy(percentage_metrics)
     unit_metrics_before = copy.deepcopy(unit_metrics)
+    runtime_modules = list(_RUNTIME_MODULE_SHA256S)
+    runtime_modules_before = copy.deepcopy(runtime_modules)
     registry = metric_registry.load_registry()
     documents.load_schema("inventory")
     documents.load_schema("metrics")
+    documents.load_schema("execution_identity")
 
     def unexpected(*_args, **_kwargs):
         pytest.fail("pure launch document builder reached process or filesystem I/O")
@@ -560,6 +706,11 @@ def test_builders_do_not_mutate_inputs_or_reach_process_or_filesystem(
     monkeypatch.setattr(documents.Path, "write_text", unexpected)
     monkeypatch.setattr("subprocess.run", unexpected)
     monkeypatch.setattr(builtins, "open", unexpected)
+    execution_identity = documents.build_launch_execution_identity_document(
+        target_executable_sha256=_TARGET_EXECUTABLE_SHA256,
+        runtime_module_sha256s=runtime_modules,
+        expected_launch_count=2,
+    )
     inventory = documents.build_launch_inventory_document(
         csv_text=csv_text,
         report_sha256=_REPORT_SHA256,
@@ -578,6 +729,8 @@ def test_builders_do_not_mutate_inputs_or_reach_process_or_filesystem(
     assert inventory == inventory_before
     assert percentage_metrics == percentage_metrics_before
     assert unit_metrics == unit_metrics_before
+    assert runtime_modules == runtime_modules_before
+    assert execution_identity["identity_sha256"]
     assert metrics
     assert list(tmp_path.iterdir()) == []
 
@@ -588,6 +741,10 @@ def _ncu_identity() -> ncu_action_executor.ExpectedNcuIdentity:
         executable_sha256="b" * 64,
         version_line="Version 2026.1.0.0 (build 1) (public-release)",
     )
+
+
+def test_profiled_target_and_ncu_tool_authority_sentinels_are_distinct():
+    assert _TARGET_EXECUTABLE_SHA256 != _ncu_identity().executable_sha256
 
 
 def _imported_report() -> parse_ncu_metrics.ImportedReportCsv:

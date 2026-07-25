@@ -22,14 +22,28 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 SCHEMA_DIR = REPO_ROOT / "workloads" / "simbench_bw" / "schemas"
 INVENTORY_SCHEMA_PATH = SCHEMA_DIR / "ncu_launch_inventory.schema.json"
 METRICS_SCHEMA_PATH = SCHEMA_DIR / "ncu_launch_metrics.schema.json"
+EXECUTION_IDENTITY_SCHEMA_PATH = (
+    SCHEMA_DIR / "ncu_launch_execution_identity.schema.json"
+)
 INVENTORY_SCHEMA_ID = "simbench_bw/schemas/ncu_launch_inventory.schema.json"
 METRICS_SCHEMA_ID = "simbench_bw/schemas/ncu_launch_metrics.schema.json"
+EXECUTION_IDENTITY_SCHEMA_ID = (
+    "simbench_bw/schemas/ncu_launch_execution_identity.schema.json"
+)
 _SCHEMA_DRAFT = "https://json-schema.org/draft/2020-12/schema"
 INVENTORY_SCHEMA_SHA256 = (
     "9ea8f9da467f3f8db5521cf6d31926b95576f33e17e750a559d2e7d06074d04d"
 )
 METRICS_SCHEMA_SHA256 = (
     "8357781adca524bb0eedc899c24cba42f91aeec83fd46b27ce10042b4c7ced08"
+)
+EXECUTION_IDENTITY_SCHEMA_SHA256 = (
+    "0003ae56c43843ee637818f7132950dae220d291f4db6cd9e4c60a79aeaf5ef3"
+)
+
+EXECUTION_IDENTITY_KIND = "ncu_launch_set_execution_identity_v1"
+PROCESS_CONTEXT_STREAM_POLICY = (
+    "report_local_first_occurrence_equivalence_v1"
 )
 
 IDENTITY_COLUMNS = (
@@ -59,6 +73,11 @@ _METRIC_ROW_FIELDS = frozenset({
     "report_launch_ordinal", "report_id", "fraction_values",
     "unit_tagged_metrics", "parser_diagnostics",
 })
+_EXECUTION_IDENTITY_FIELDS = frozenset({
+    "schema_version", "kind", "executable_sha256",
+    "runtime_module_sha256s", "process_context_stream_policy",
+    "identity_sha256",
+})
 _DIAGNOSTIC_WINDOWS = {
     "ncu_sector_hit_rate_clamped_to_100": lambda value: 100.0 < value <= 105.0,
     "ncu_lts_pct_overcount_raw_counter_ratio_used": lambda value: value > 105.0,
@@ -75,6 +94,12 @@ _SCHEMA_SPECS = {
         "id": METRICS_SCHEMA_ID,
         "sha256": METRICS_SCHEMA_SHA256,
         "root_type": "array",
+    },
+    "execution_identity": {
+        "path": EXECUTION_IDENTITY_SCHEMA_PATH,
+        "id": EXECUTION_IDENTITY_SCHEMA_ID,
+        "sha256": EXECUTION_IDENTITY_SCHEMA_SHA256,
+        "root_type": "object",
     },
 }
 
@@ -172,6 +197,17 @@ def load_schema(
             != "ncu_details_csv_launch_inventory_v3"
         ):
             _fail("inventory schema version or kind mismatch")
+    elif kind == "execution_identity":
+        properties = schema.get("properties")
+        if (
+            type(properties) is not dict
+            or properties.get("schema_version", {}).get("const") != 1
+            or properties.get("kind", {}).get("const")
+            != EXECUTION_IDENTITY_KIND
+            or properties.get("process_context_stream_policy", {}).get("const")
+            != PROCESS_CONTEXT_STREAM_POLICY
+        ):
+            _fail("execution identity schema constants mismatch")
     try:
         Draft202012Validator.check_schema(schema)
     except Exception as exc:
@@ -193,6 +229,105 @@ def validate_schema(kind: str, value: Any) -> None:
             str(component) for component in error.absolute_path
         )
         _fail(f"{kind} schema validation failed at {location}: {error.message}")
+
+
+def _require_expected_launch_count(expected_launch_count: int) -> int:
+    if (
+        type(expected_launch_count) is not int
+        or not 1 <= expected_launch_count < ncu_capture_contract.MAX_NCU_SELECTOR
+    ):
+        _fail("expected launch count is outside the Q809 selector range")
+    return expected_launch_count
+
+
+def _require_runtime_module_sha256s(
+    values: Iterable[str], *, expected_launch_count: int,
+) -> tuple[str, ...]:
+    count = _require_expected_launch_count(expected_launch_count)
+    if type(values) not in {list, tuple}:
+        _fail("runtime module SHA-256 authority is not an ordered list or tuple")
+    if len(values) != count:
+        _fail("runtime module SHA-256 cardinality differs from launch count")
+    hashes: list[str] = []
+    for index, value in enumerate(values):
+        if not _is_sha256(value):
+            _fail(f"runtime module SHA-256 {index} is not lowercase 64-hex")
+        hashes.append(value)
+    return tuple(hashes)
+
+
+def validate_launch_execution_identity_document(
+    document: Mapping[str, Any], *, expected_launch_count: int,
+    expected_target_executable_sha256: str,
+    expected_runtime_module_sha256s: Iterable[str],
+) -> dict[str, Any]:
+    """Validate one target execution identity against independent authorities.
+
+    ``executable_sha256`` identifies the profiled workload executable, never the
+    NCU tool executable carried by :class:`ExpectedNcuIdentity`. This document
+    identifies target code in launch order; a later cross-document validator
+    must bind that order to one retained NCU inventory and report.
+    """
+
+    _require_canonical_json(document)
+    count = _require_expected_launch_count(expected_launch_count)
+    if not _is_sha256(expected_target_executable_sha256):
+        _fail("target executable SHA-256 authority is not lowercase 64-hex")
+    expected_modules = _require_runtime_module_sha256s(
+        expected_runtime_module_sha256s,
+        expected_launch_count=count,
+    )
+    if type(document) is not dict or set(document) != _EXECUTION_IDENTITY_FIELDS:
+        _fail("execution identity root fields mismatch")
+    runtime_modules = document.get("runtime_module_sha256s")
+    if (
+        type(document.get("schema_version")) is not int
+        or document["schema_version"] != 1
+        or document.get("kind") != EXECUTION_IDENTITY_KIND
+        or document.get("executable_sha256")
+        != expected_target_executable_sha256
+        or type(runtime_modules) is not list
+        or len(runtime_modules) != count
+        or runtime_modules != list(expected_modules)
+        or document.get("process_context_stream_policy")
+        != PROCESS_CONTEXT_STREAM_POLICY
+    ):
+        _fail("execution identity semantic contract mismatch")
+    unsigned = dict(document)
+    unsigned.pop("identity_sha256")
+    if document.get("identity_sha256") != _digest(unsigned):
+        _fail("execution identity_sha256 mismatch")
+    return document
+
+
+def build_launch_execution_identity_document(
+    *, target_executable_sha256: str,
+    runtime_module_sha256s: Iterable[str], expected_launch_count: int,
+) -> dict[str, Any]:
+    """Build one workload-target identity without filesystem or process access."""
+
+    count = _require_expected_launch_count(expected_launch_count)
+    if not _is_sha256(target_executable_sha256):
+        _fail("target executable SHA-256 authority is not lowercase 64-hex")
+    modules = _require_runtime_module_sha256s(
+        runtime_module_sha256s,
+        expected_launch_count=count,
+    )
+    document = {
+        "schema_version": 1,
+        "kind": EXECUTION_IDENTITY_KIND,
+        "executable_sha256": target_executable_sha256,
+        "runtime_module_sha256s": list(modules),
+        "process_context_stream_policy": PROCESS_CONTEXT_STREAM_POLICY,
+    }
+    document["identity_sha256"] = _digest(document)
+    validate_launch_execution_identity_document(
+        document,
+        expected_launch_count=count,
+        expected_target_executable_sha256=target_executable_sha256,
+        expected_runtime_module_sha256s=modules,
+    )
+    return document
 
 
 def _require_metric_request(
