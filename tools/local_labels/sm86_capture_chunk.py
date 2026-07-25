@@ -16,6 +16,7 @@ being mistaken for either the profiled launcher or a static control binary.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import copy
 import errno
 import fcntl
@@ -48,7 +49,9 @@ import archive_preparation_failure as prep_archive  # noqa: E402
 import archive_capture_defect_attempt as capture_defect_archive  # noqa: E402
 import capture_budget_route as budget_route  # noqa: E402
 import capture_toolchain_contract as toolchain_contract  # noqa: E402
-import ncu_action_executor as ncu_executor  # noqa: E402
+from tools.local_labels import immutable_artifact as immutable  # noqa: E402
+from tools.local_labels import ncu_action_executor as ncu_executor  # noqa: E402
+from tools.local_labels import ncu_collection_receipt as collection_receipt  # noqa: E402
 import ncu_capture_contract  # noqa: E402
 import sol_capture_environment as sol_env  # noqa: E402
 import sol_definition_equivalence as sol_def  # noqa: E402
@@ -252,6 +255,43 @@ def _write_output_bytes(
     except OSError as exc:
         _raise_typed_storage_failure(exc, code=code, operation=operation)
         raise
+
+
+def _write_output_bytes_exclusive(
+    path: Path, payload: bytes, *,
+    code: str = "capture_output_storage_failure", operation: str,
+    collision_code: str | None = None,
+) -> None:
+    """Create+fsync one output without following or replacing an existing leaf."""
+
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
+    descriptor = -1
+    active_error: BaseException | None = None
+    try:
+        descriptor = os.open(path, flags, 0o600)
+        remaining = memoryview(payload)
+        while remaining:
+            written = os.write(descriptor, remaining)
+            if written <= 0:
+                raise OSError(None, "short exclusive capture output write")
+            remaining = remaining[written:]
+        os.fsync(descriptor)
+    except OSError as exc:
+        active_error = exc
+        if collision_code is not None and exc.errno in {errno.EEXIST, errno.ELOOP}:
+            raise ChunkRefusal(collision_code, str(path)) from exc
+        _raise_typed_storage_failure(exc, code=code, operation=operation)
+        raise
+    finally:
+        if descriptor >= 0:
+            try:
+                os.close(descriptor)
+            except OSError as exc:
+                if active_error is None:
+                    _raise_typed_storage_failure(
+                        exc, code=code, operation=f"{operation}_close",
+                    )
+                    raise
 
 
 def _write_output_text(
@@ -4338,9 +4378,186 @@ def _label_collection_environment(
         raise ChunkRefusal("label_collection_environment_invalid", str(exc)) from exc
 
 
+def _retained_json_model(
+    retained: immutable.RetainedRegular, *, role: str,
+) -> dict[str, Any]:
+    payload = bytearray()
+    offset = 0
+    try:
+        while offset < retained.size_bytes:
+            block = os.pread(
+                retained.descriptor,
+                min(1 << 20, retained.size_bytes - offset),
+                offset,
+            )
+            if not block:
+                raise OSError(None, f"short retained {role} read")
+            payload.extend(block)
+            offset += len(block)
+    except OSError as exc:
+        _raise_typed_storage_failure(
+            exc,
+            code="label_capture_storage_failure",
+            operation=f"label_collection_receipt_{role}_read",
+        )
+        raise
+    try:
+        value = immutable.strict_json_loads(
+            bytes(payload), label=f"retained {role}",
+        )
+    except immutable.ImmutableArtifactError as exc:
+        raise collection_receipt.CollectionReceiptError(str(exc)) from exc
+    if type(value) is not dict:
+        raise collection_receipt.CollectionReceiptError(
+            f"retained {role} root is not an exact object"
+        )
+    return value
+
+
+def _write_collection_execution_receipt(
+    *,
+    cell_dir: Path,
+    artifact_tag: str,
+    preflight_sha256: str,
+    expected_ncu_identity: ncu_executor.ExpectedNcuIdentity,
+    command: Sequence[str],
+    environment: ncu_executor.NcuCollectionEnvironment,
+    working_directory: Path,
+    report: Path,
+    run_manifest: Path,
+    launch_observation_path: Path,
+    capture_manifest: Path,
+    expected_run_manifest: dict[str, Any],
+    expected_launch_observation: dict[str, Any],
+    expected_capture_manifest: dict[str, Any],
+    launch_observation_sha256: str,
+) -> Path:
+    receipt_path = (
+        cell_dir / "logs" / f"{artifact_tag}_ncu_collection_receipt.json"
+    )
+    artifact_inputs = (
+        ("ncu_report", report),
+        ("label_run_manifest", run_manifest),
+        ("ncu_launch_observation", launch_observation_path),
+        ("label_capture_manifest", capture_manifest),
+    )
+    try:
+        with contextlib.ExitStack() as retained_stack:
+            bindings = []
+            retained_by_role: dict[str, immutable.RetainedRegular] = {}
+            for role, path in artifact_inputs:
+                retained = retained_stack.enter_context(
+                    immutable.open_retained_regular(path)
+                )
+                retained_by_role[role] = retained
+                try:
+                    relative_path = path.relative_to(cell_dir).as_posix()
+                except ValueError as exc:
+                    raise collection_receipt.CollectionReceiptError(
+                        f"collection artifact is outside the cell root: {path}"
+                    ) from exc
+                bindings.append(collection_receipt.artifact_binding(
+                    role=role,
+                    relative_path=relative_path,
+                    sha256=retained.sha256,
+                    size_bytes=retained.size_bytes,
+                ))
+            if (
+                launch_observation_sha256
+                != expected_launch_observation.get("observation_sha256")
+            ):
+                raise collection_receipt.CollectionReceiptError(
+                    "launch observation seal differs from the retained model binding"
+                )
+            if (
+                retained_by_role["ncu_report"].sha256
+                != expected_launch_observation.get("report_sha256")
+            ):
+                raise collection_receipt.CollectionReceiptError(
+                    "retained NCU report differs from the validated launch observation"
+                )
+            retained_models = {
+                "label_run_manifest": _retained_json_model(
+                    retained_by_role["label_run_manifest"],
+                    role="label_run_manifest",
+                ),
+                "ncu_launch_observation": _retained_json_model(
+                    retained_by_role["ncu_launch_observation"],
+                    role="ncu_launch_observation",
+                ),
+                "label_capture_manifest": _retained_json_model(
+                    retained_by_role["label_capture_manifest"],
+                    role="label_capture_manifest",
+                ),
+            }
+            expected_models = {
+                "label_run_manifest": expected_run_manifest,
+                "ncu_launch_observation": expected_launch_observation,
+                "label_capture_manifest": expected_capture_manifest,
+            }
+            model_mismatches = [
+                role for role, expected_model in expected_models.items()
+                if immutable.canonical_json_bytes(retained_models[role])
+                != immutable.canonical_json_bytes(expected_model)
+            ]
+            if model_mismatches:
+                raise collection_receipt.CollectionReceiptError(
+                    "retained collection artifact models differ after validation: "
+                    f"{model_mismatches}"
+                )
+            document = collection_receipt.build_receipt(
+                preflight_sha256=preflight_sha256,
+                expected_ncu_identity=expected_ncu_identity,
+                command=command,
+                environment=environment,
+                working_directory=working_directory,
+                exit_status=0,
+                artifacts=bindings,
+                launch_observation_sha256=launch_observation_sha256,
+            )
+            receipt_payload = (
+                json.dumps(document, indent=2, sort_keys=True) + "\n"
+            ).encode("utf-8")
+            _write_output_bytes_exclusive(
+                receipt_path,
+                receipt_payload,
+                code="label_capture_storage_failure",
+                operation="label_collection_receipt_write",
+                collision_code="label_collection_receipt_exists",
+            )
+            retained_receipt = retained_stack.enter_context(
+                immutable.open_retained_regular(receipt_path)
+            )
+            if (
+                retained_receipt.sha256 != hashlib.sha256(receipt_payload).hexdigest()
+                or retained_receipt.size_bytes != len(receipt_payload)
+            ):
+                raise collection_receipt.CollectionReceiptError(
+                    "published collection receipt bytes differ from the producer bytes"
+                )
+            reloaded = _retained_json_model(
+                retained_receipt, role="ncu_collection_receipt",
+            )
+            collection_receipt.validate_receipt(
+                reloaded,
+                expected_preflight_sha256=preflight_sha256,
+                expected_ncu_identity=expected_ncu_identity,
+                expected_command=command,
+                expected_environment=environment,
+                expected_working_directory=working_directory,
+                expected_exit_status=0,
+                expected_artifacts=bindings,
+                expected_launch_observation_sha256=launch_observation_sha256,
+            )
+    except (immutable.ImmutableArtifactError, collection_receipt.CollectionReceiptError) as exc:
+        raise ChunkRefusal("label_collection_receipt_invalid", str(exc)) from exc
+    return receipt_path
+
+
 def capture_label(
     *, cell: dict, binary: Path, invocation: dict, cell_dir: Path,
     matrix: dict, pins: dict, timeout_s: float,
+    preflight_sha256: str,
     expected_ncu_identity: ncu_executor.ExpectedNcuIdentity,
     runtime_cwd: Path | None = None,
     runtime_env: dict[str, str] | None = None,
@@ -4355,6 +4572,10 @@ def capture_label(
         ncu_executor.validate_expected_ncu_identity(expected_ncu_identity)
     except ncu_executor.NcuActionExecutorError as exc:
         raise ChunkRefusal("capture_ncu_authority_invalid", str(exc)) from exc
+    if not _is_sha256(preflight_sha256):
+        raise ChunkRefusal(
+            "capture_preflight_authority_invalid", repr(preflight_sha256),
+        )
     prepared = _prepare_label_capture_command(
         cell=cell, binary=binary, invocation=invocation, cell_dir=cell_dir,
         matrix=matrix, pins=pins,
@@ -4543,7 +4764,7 @@ def capture_label(
     capture_manifest = (
         cell_dir / "logs" / f"{artifact_tag}_capture_manifest.json"
     )
-    _write_output_text(capture_manifest, json.dumps({
+    capture_manifest_document = {
         "schema_version": 1,
         "identity": identity,
         "command": command,
@@ -4573,8 +4794,28 @@ def capture_label(
         "shape_forwarded_to_target": False if shape_binding == "logical-workload" else True,
         "sol_phase_evidence": phase_evidence,
         "elapsed_seconds": elapsed,
-    }, indent=2, sort_keys=True) + "\n",
+    }
+    _write_output_text(
+        capture_manifest,
+        json.dumps(capture_manifest_document, indent=2, sort_keys=True) + "\n",
         operation="label_capture_manifest_write",
+    )
+    collection_execution_receipt = _write_collection_execution_receipt(
+        cell_dir=cell_dir,
+        artifact_tag=artifact_tag,
+        preflight_sha256=preflight_sha256,
+        expected_ncu_identity=expected_ncu_identity,
+        command=command,
+        environment=collection_environment,
+        working_directory=label_cwd,
+        report=report,
+        run_manifest=run_manifest,
+        launch_observation_path=launch_observation_path,
+        capture_manifest=capture_manifest,
+        expected_run_manifest=run,
+        expected_launch_observation=launch_observation,
+        expected_capture_manifest=capture_manifest_document,
+        launch_observation_sha256=observation_seal,
     )
     return {
         "elapsed_seconds": elapsed,
@@ -4587,6 +4828,7 @@ def capture_label(
         "stdout_log": stdout_log,
         "stderr_log": stderr_log,
         "capture_manifest": capture_manifest,
+        "ncu_collection_receipt": collection_execution_receipt,
         "sol_phase_evidence": phase_evidence,
         "unit_metric_count": len(unit_metrics),
         "launch_index": label_launch_index,
@@ -7517,6 +7759,9 @@ def inventory_cell_artifacts(
             elif rel.name == "sol_native_env_fingerprint.json":
                 kind = "sol_capture_evidence"
             elif rel.parts and rel.parts[0] == "logs":
+                # The process-only collection receipt remains an execution log
+                # until the later transitive DONE contract admits it as a
+                # required semantic artifact.
                 kind = "execution_log"
             else:
                 raise ChunkRefusal(
@@ -7600,6 +7845,7 @@ def capture_cell(
         "prior_capture_defect_attempts"
     )
     execution_source_commit = capture_provenance.get("source_commit")
+    preflight_sha256 = capture_provenance.get("preflight_sha256")
     _parse_utc_timestamp(
         capture_started_at_utc, field="capture_started_at_utc"
     )
@@ -7612,6 +7858,7 @@ def capture_cell(
             prior_capture_defect_attempts
         )
         or not _is_sha40(execution_source_commit)
+        or not _is_sha256(preflight_sha256)
     ):
         raise ChunkRefusal(
             "capture_admission_invalid", repr(capture_provenance)
@@ -7837,6 +8084,7 @@ def capture_cell(
                     cell=cell, binary=binary, invocation=invocation,
                     cell_dir=cell_dir, matrix=matrix, pins=pins,
                     timeout_s=remaining(phase_tag),
+                    preflight_sha256=capture_provenance["preflight_sha256"],
                     expected_ncu_identity=expected_ncu_identity,
                     runtime_cwd=runtime_cwd,
                     runtime_env=launch_label_env,
@@ -7888,6 +8136,7 @@ def capture_cell(
             cell=cell, binary=binary, invocation=invocation,
             cell_dir=cell_dir, matrix=matrix, pins=pins,
             timeout_s=remaining("label"),
+            preflight_sha256=capture_provenance["preflight_sha256"],
             expected_ncu_identity=expected_ncu_identity,
             runtime_cwd=runtime_cwd,
             runtime_env=label_env, phase_result_validator=phase_validator,

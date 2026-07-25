@@ -400,6 +400,7 @@ def test_capture_cell_refuses_identity_mismatch_before_control(tmp_path, monkeyp
                 "prior_preparation_failures": [],
                 "prior_capture_defect_attempts": [],
                 "source_commit": "d" * 40,
+                "preflight_sha256": "7" * 64,
             },
             expected_ncu_identity=_expected_ncu_identity(),
             certified_sol_env=None,
@@ -458,6 +459,7 @@ def test_supplemental_cell_gate_refuses_before_validation_or_capture(
                 "prior_preparation_failures": [],
                 "prior_capture_defect_attempts": [],
                 "source_commit": "d" * 40,
+                "preflight_sha256": "7" * 64,
             },
             expected_ncu_identity=_expected_ncu_identity(),
             certified_sol_env=None,
@@ -4389,6 +4391,122 @@ def test_consumer_rederives_external_matrix_and_rejects_resealed_invocation_tamp
                 )
 
 
+def _collection_receipt_fixture(tmp_path: Path) -> dict[str, object]:
+    cell_dir = tmp_path / "cell"
+    artifact_root = cell_dir / "raw"
+    logs = cell_dir / "logs"
+    artifact_root.mkdir(parents=True)
+    logs.mkdir()
+    report = artifact_root / "run.ncu-rep"
+    report.write_bytes(b"report bytes")
+    run_document = {"schema_version": 1, "value": "validated"}
+    observation_document = {
+        "schema_version": 1,
+        "report_sha256": cc.sha256_file(report),
+        "observation_sha256": "1" * 64,
+    }
+    capture_document = {"schema_version": 1, "command": ["canonical"]}
+    run_manifest = artifact_root / "run.json"
+    launch_observation = artifact_root / "observation.json"
+    capture_manifest = logs / "capture.json"
+    for path, document in (
+        (run_manifest, run_document),
+        (launch_observation, observation_document),
+        (capture_manifest, capture_document),
+    ):
+        path.write_text(json.dumps(document) + "\n")
+    environment = cc._label_collection_environment({}, cwd=Path("/"))
+    return {
+        "cell_dir": cell_dir,
+        "artifact_tag": "label",
+        "preflight_sha256": "0" * 64,
+        "expected_ncu_identity": _expected_ncu_identity(),
+        "command": [str(cc.LABEL_DRIVER), "--", "/capture/target"],
+        "environment": environment,
+        "working_directory": Path("/"),
+        "report": report,
+        "run_manifest": run_manifest,
+        "launch_observation_path": launch_observation,
+        "capture_manifest": capture_manifest,
+        "expected_run_manifest": run_document,
+        "expected_launch_observation": observation_document,
+        "expected_capture_manifest": capture_document,
+        "launch_observation_sha256": "1" * 64,
+    }
+
+
+@pytest.mark.parametrize(
+    "replacement",
+    [
+        {"schema_version": 1, "value": "replacement"},
+        {"schema_version": True, "value": "validated"},
+        {"schema_version": 1.0, "value": "validated"},
+    ],
+)
+def test_collection_receipt_rejects_post_validation_artifact_aba(
+    tmp_path, replacement,
+):
+    kwargs = _collection_receipt_fixture(tmp_path)
+    Path(kwargs["run_manifest"]).write_text(json.dumps(replacement) + "\n")
+
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        cc._write_collection_execution_receipt(**kwargs)
+    assert caught.value.code == "label_collection_receipt_invalid"
+    assert "models differ after validation" in caught.value.detail
+
+
+def test_collection_receipt_joins_observation_model_seal(tmp_path):
+    kwargs = _collection_receipt_fixture(tmp_path)
+    kwargs["launch_observation_sha256"] = "2" * 64
+
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        cc._write_collection_execution_receipt(**kwargs)
+    assert caught.value.code == "label_collection_receipt_invalid"
+    assert "observation seal differs" in caught.value.detail
+
+
+def test_collection_receipt_refuses_symlink_collision_without_overwrite(tmp_path):
+    kwargs = _collection_receipt_fixture(tmp_path)
+    victim = tmp_path / "victim.json"
+    victim.write_text("unique evidence\n")
+    receipt_path = (
+        Path(kwargs["cell_dir"]) / "logs"
+        / "label_ncu_collection_receipt.json"
+    )
+    receipt_path.symlink_to(victim)
+
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        cc._write_collection_execution_receipt(**kwargs)
+    assert caught.value.code == "label_collection_receipt_exists"
+    assert victim.read_text() == "unique evidence\n"
+    assert receipt_path.is_symlink()
+
+
+def test_collection_receipt_rejects_post_publish_byte_substitution(
+    tmp_path, monkeypatch,
+):
+    kwargs = _collection_receipt_fixture(tmp_path)
+    receipt_path = (
+        Path(kwargs["cell_dir"]) / "logs"
+        / "label_ncu_collection_receipt.json"
+    )
+    real_open = cc.immutable.open_retained_regular
+
+    def substitute_before_retention(path):
+        if path == receipt_path:
+            document = json.loads(path.read_text())
+            path.write_text(json.dumps(document, separators=(",", ":")) + "\n")
+        return real_open(path)
+
+    monkeypatch.setattr(
+        cc.immutable, "open_retained_regular", substitute_before_retention,
+    )
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        cc._write_collection_execution_receipt(**kwargs)
+    assert caught.value.code == "label_collection_receipt_invalid"
+    assert "producer bytes" in caught.value.detail
+
+
 def test_label_capture_stages_workload_output_and_checks_full_vector(
         tmp_path, monkeypatch):
     matrix = json.loads(cc.DEFAULT_MATRIX.read_text())
@@ -4465,6 +4583,7 @@ def test_label_capture_stages_workload_output_and_checks_full_vector(
     result = cc.capture_label(
         cell=cell, binary=binary, invocation=cell["invocation"],
         cell_dir=cell_dir, matrix=matrix, pins=pins, timeout_s=10,
+        preflight_sha256="0" * 64,
         expected_ncu_identity=_expected_ncu_identity(),
         kernel_name_selector="_Z15syntheticKernelv",
     )
@@ -4482,6 +4601,24 @@ def test_label_capture_stages_workload_output_and_checks_full_vector(
     assert output_arg.is_relative_to(cell_dir / "logs")
     assert result["unit_metric_count"] == 53
     assert result["capture_manifest"].is_file()
+    receipt_path = result["ncu_collection_receipt"]
+    assert receipt_path == cell_dir / "logs" / "label_ncu_collection_receipt.json"
+    collection_receipt = json.loads(receipt_path.read_text())
+    assert collection_receipt["preflight_sha256"] == "0" * 64
+    assert collection_receipt["command"] == [
+        item for item in command
+        if item is not cc.ncu_executor.AUTHORIZED_NCU_PROC_PATH
+        and item != "--ncu-exec-path"
+    ]
+    assert [row["role"] for row in collection_receipt["artifacts"]] == [
+        "ncu_report",
+        "label_run_manifest",
+        "ncu_launch_observation",
+        "label_capture_manifest",
+    ]
+    assert collection_receipt["trust_scope"] == (
+        "capture_process_integrity_only_unsigned"
+    )
 
 
 def test_sol_label_consumer_keeps_shape_metadata_out_of_target_argv(
@@ -4565,6 +4702,7 @@ def test_sol_label_consumer_keeps_shape_metadata_out_of_target_argv(
     result = cc.capture_label(
         cell=cell, binary=binary, invocation=invocation,
         cell_dir=cell_dir, matrix=matrix, pins=pins, timeout_s=10,
+        preflight_sha256="0" * 64,
         expected_ncu_identity=ncu_identity,
         runtime_cwd=cc.REPO_ROOT, runtime_env=runtime_env,
         bind_supplemental_toolchain=True,
