@@ -30,6 +30,7 @@ import ast
 import csv
 import errno
 import hashlib
+import io
 import json
 import os
 import re
@@ -80,6 +81,16 @@ STATUS_FAILED = "failed"
 NCU_EXECUTION_MODE = "direct_inner_elf_v1"
 NCU_HOST_MACHINE = "x86_64"
 NCU_LAUNCHER_TARGET_RELPATH = "target/linux-desktop-glibc_2_11_3-x64/ncu"
+
+DEVICE_SELECTION_POLICY = "single_nvidia_smi_device_v1"
+_DEVICE_QUERY = (
+    "nvidia-smi",
+    "--query-gpu=index,uuid",
+    "--format=csv,noheader,nounits",
+)
+_DEVICE_UUID = re.compile(
+    r"GPU-[0-9A-Fa-f]{8}(?:-[0-9A-Fa-f]{4}){3}-[0-9A-Fa-f]{12}"
+)
 
 PREFLIGHT_STORAGE_MARKER = "CAMPAIGN_PREFLIGHT_STORAGE_FAILURE:"
 PREFLIGHT_STORAGE_CAPACITY = "capacity"
@@ -314,6 +325,7 @@ _BLOCKING_CHECKS = (
     "worktree",
     "ncu",
     "driver",
+    "device",
     "nvcc",
     "nvbit",
     "capture_processes",
@@ -1259,6 +1271,63 @@ def probe_driver(pins: dict) -> dict:
             "observed": observed, "expected": expected}
 
 
+def _device_probe_result(
+    *, status: str, device_count: int | None = None,
+    gpu_uuid_sha256: str | None = None,
+) -> dict:
+    result = {
+        "status": status,
+        "selection_policy": DEVICE_SELECTION_POLICY,
+        "selected_host_gpu_index": 0 if status == STATUS_OK else None,
+        "nvidia_smi_device_count": device_count,
+        "gpu_uuid_sha256": gpu_uuid_sha256,
+    }
+    return result
+
+
+def probe_device() -> dict:
+    """Bind fresh capture to the sole host GPU without retaining its raw UUID."""
+    rc, out, _err = _run(list(_DEVICE_QUERY))
+    if rc != 0:
+        return _device_probe_result(
+            status=STATUS_UNAVAILABLE,
+        )
+    try:
+        rows = list(csv.reader(
+            io.StringIO(out, newline=""), skipinitialspace=True, strict=True,
+        ))
+    except (csv.Error, TypeError):
+        return _device_probe_result(status=STATUS_FAILED)
+    if any(len(row) != 2 for row in rows):
+        return _device_probe_result(status=STATUS_FAILED)
+    if len(rows) != 1:
+        return _device_probe_result(
+            status=STATUS_MISMATCH,
+            device_count=len(rows),
+        )
+    row = rows[0]
+    if any(
+        ord(character) < 0x20 or ord(character) == 0x7f
+        for field in row
+        for character in field
+    ):
+        return _device_probe_result(
+            status=STATUS_MISMATCH,
+            device_count=1,
+        )
+    index_text, uuid_text = row
+    if index_text != "0" or _DEVICE_UUID.fullmatch(uuid_text) is None:
+        return _device_probe_result(
+            status=STATUS_MISMATCH,
+            device_count=1,
+        )
+    return _device_probe_result(
+        status=STATUS_OK,
+        device_count=1,
+        gpu_uuid_sha256=hashlib.sha256(uuid_text.encode("utf-8")).hexdigest(),
+    )
+
+
 def probe_nvcc(pins: dict, *, executable: str = "nvcc") -> dict:
     try:
         expected = toolchain_contract.structured_nvcc_release(
@@ -2083,6 +2152,7 @@ def build_manifest(
         "worktree": probe_worktree(repo_root, ignore_relpaths),
         "ncu": probe_ncu(pins),
         "driver": probe_driver(pins),
+        "device": probe_device(),
         "nvcc": probe_nvcc(pins, executable=nvcc_executable),
         "nvbit": probe_nvbit(pins, repo_root),
         "capture_processes": probe_capture_processes(),

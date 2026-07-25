@@ -703,10 +703,36 @@ def validate_preflight_manifest(
     if schema_path is not None:
         try:
             import jsonschema
-            schema = json.loads(schema_path.read_text())
-            jsonschema.validate(manifest, schema)
-        except Exception as exc:
-            problems.append(f"schema validation failed: {exc}")
+        except Exception:
+            problems.append("schema validation could not be initialized")
+        else:
+            try:
+                schema = json.loads(schema_path.read_text())
+                jsonschema.validate(manifest, schema)
+            except jsonschema.ValidationError as exc:
+                safe_path = ".".join(
+                    str(part)
+                    for part in exc.absolute_path
+                    if (
+                        type(part) is int
+                        or (
+                            type(part) is str
+                            and re.fullmatch(r"[A-Za-z0-9_]{1,64}", part)
+                        )
+                    )
+                )
+                validator = (
+                    exc.validator
+                    if type(exc.validator) is str
+                    and re.fullmatch(r"[A-Za-z0-9_]{1,64}", exc.validator)
+                    else "unknown"
+                )
+                problems.append(
+                    "schema validation failed at "
+                    f"{safe_path or '<root>'}: {validator}"
+                )
+            except Exception:
+                problems.append("schema validation could not be completed")
     if manifest.get("capture_admitted") is not True:
         problems.append("capture_admitted is not true")
     if manifest.get("working_tree_clean") is not True:
@@ -742,9 +768,45 @@ def validate_preflight_manifest(
         problems.append("checks is not an object")
     else:
         for name in preflight._BLOCKING_CHECKS:
+            if (
+                name == "device"
+                and not require_fresh
+                and name not in checks
+            ):
+                continue
             probe = checks.get(name)
             if not isinstance(probe, dict) or probe.get("status") != preflight.STATUS_OK:
                 problems.append(f"checks.{name}.status is not ok")
+        device = checks.get("device")
+        device_required = {
+            "status",
+            "selection_policy",
+            "selected_host_gpu_index",
+            "nvidia_smi_device_count",
+            "gpu_uuid_sha256",
+        }
+        if device is None:
+            if require_fresh:
+                problems.append("checks.device authority is absent")
+        elif not isinstance(device, dict):
+            problems.append("checks.device is not an object")
+        else:
+            if set(device) != device_required:
+                problems.append("checks.device fields differ")
+            if device.get("selection_policy") != (
+                preflight.DEVICE_SELECTION_POLICY
+            ):
+                problems.append("checks.device selection policy is invalid")
+            if type(device.get("selected_host_gpu_index")) is not int or (
+                device.get("selected_host_gpu_index") != 0
+            ):
+                problems.append("checks.device selected host GPU index is invalid")
+            if type(device.get("nvidia_smi_device_count")) is not int or (
+                device.get("nvidia_smi_device_count") != 1
+            ):
+                problems.append("checks.device host GPU count is invalid")
+            if not _is_sha256(device.get("gpu_uuid_sha256")):
+                problems.append("checks.device GPU UUID SHA-256 is invalid")
         ncu = checks.get("ncu")
         if not isinstance(ncu, dict):
             problems.append("checks.ncu is not an object")
@@ -898,6 +960,20 @@ def validate_preflight_manifest(
             "PREFLIGHT_EXPIRED",
             f"preflight age {age_s:.3f}s exceeds inclusive "
             f"{preflight.PREFLIGHT_FRESHNESS_SECONDS:.3f}s window",
+        )
+    current_device = preflight.probe_device()
+    if (
+        type(current_device) is not dict
+        or set(current_device) != device_required
+        or any(
+            type(current_device.get(name)) is not type(device.get(name))
+            or current_device.get(name) != device.get(name)
+            for name in device_required
+        )
+    ):
+        raise ChunkRefusal(
+            "preflight_invalid",
+            "current host GPU authority differs from the preflight",
         )
     return expected_ncu_identity
 

@@ -28,6 +28,21 @@ LEGACY_CERTIFYING_SOL_ENVIRONMENT = dict(
 )
 
 
+def _current_device_probe() -> dict:
+    return {
+        "status": cc.preflight.STATUS_OK,
+        "selection_policy": cc.preflight.DEVICE_SELECTION_POLICY,
+        "selected_host_gpu_index": 0,
+        "nvidia_smi_device_count": 1,
+        "gpu_uuid_sha256": "6" * 64,
+    }
+
+
+@pytest.fixture(autouse=True)
+def _bind_current_device_probe(monkeypatch):
+    monkeypatch.setattr(cc.preflight, "probe_device", _current_device_probe)
+
+
 @contextmanager
 def _frozen_canonical_loader_context():
     """Read the frozen runnability blob without touching a held diagnostic."""
@@ -608,6 +623,7 @@ def _preflight(root: Path) -> dict:
         "executable_sha256": "5" * 64,
         "version_line": version,
     })
+    checks["device"] = _current_device_probe()
     checks["trace_budget"].update({
         "output_root": str(root), "budget_sha256": "9" * 64,
     })
@@ -698,9 +714,146 @@ def test_preflight_returns_exact_validated_ncu_identity(tmp_path):
     assert type(observed) is cc.ncu_executor.ExpectedNcuIdentity
 
 
+def test_preflight_retains_exact_singleton_gpu_uuid_authority(tmp_path):
+    manifest = _preflight(tmp_path)
+    cc.validate_preflight_manifest(
+        manifest,
+        expected_head=HEAD,
+        expected_pins_sha256=SHA,
+        expected_output_root=tmp_path,
+        expected_ncu_version_prefix="2026.1.0",
+    )
+    assert manifest["checks"]["device"] == {
+        "status": "ok",
+        "selection_policy": cc.preflight.DEVICE_SELECTION_POLICY,
+        "selected_host_gpu_index": 0,
+        "nvidia_smi_device_count": 1,
+        "gpu_uuid_sha256": "6" * 64,
+    }
+
+
+def test_fresh_preflight_reprobes_exact_current_gpu_authority(
+    tmp_path, monkeypatch,
+):
+    manifest = _preflight(tmp_path)
+    current = _current_device_probe()
+    current["gpu_uuid_sha256"] = "7" * 64
+    calls = []
+
+    def changed_device():
+        calls.append(True)
+        return current
+
+    monkeypatch.setattr(cc.preflight, "probe_device", changed_device)
+    with pytest.raises(
+        cc.ChunkRefusal, match="current host GPU authority differs",
+    ):
+        cc.validate_preflight_manifest(
+            manifest,
+            expected_head=HEAD,
+            expected_pins_sha256=SHA,
+            expected_output_root=tmp_path,
+            expected_ncu_version_prefix="2026.1.0",
+        )
+    assert calls == [True]
+
+
+def test_historical_preflight_never_reprobes_current_gpu(
+    tmp_path, monkeypatch,
+):
+    monkeypatch.setattr(
+        cc.preflight,
+        "probe_device",
+        lambda: pytest.fail("historical finalization probed live GPU state"),
+    )
+    assert cc.validate_preflight_manifest(
+        _preflight(tmp_path),
+        expected_head=HEAD,
+        expected_pins_sha256=SHA,
+        expected_output_root=tmp_path,
+        expected_ncu_version_prefix="2026.1.0",
+        require_fresh=False,
+    ) is None
+
+
+def test_preflight_allows_additive_device_absence_only_for_finalization(tmp_path):
+    manifest = _preflight(tmp_path)
+    manifest["checks"].pop("device")
+    assert cc.validate_preflight_manifest(
+        manifest,
+        expected_head=HEAD,
+        expected_pins_sha256=SHA,
+        expected_output_root=tmp_path,
+        expected_ncu_version_prefix="2026.1.0",
+        require_fresh=False,
+    ) is None
+    with pytest.raises(cc.ChunkRefusal, match="checks.device"):
+        cc.validate_preflight_manifest(
+            manifest,
+            expected_head=HEAD,
+            expected_pins_sha256=SHA,
+            expected_output_root=tmp_path,
+            expected_ncu_version_prefix="2026.1.0",
+        )
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ["status", "policy", "index", "count", "hash", "detail", "extra"],
+)
+def test_preflight_rejects_malformed_device_authority(tmp_path, mutation):
+    manifest = _preflight(tmp_path)
+    device = manifest["checks"]["device"]
+    if mutation == "status":
+        device["status"] = "failed"
+    elif mutation == "policy":
+        device["selection_policy"] = "first_row_v0"
+    elif mutation == "index":
+        device["selected_host_gpu_index"] = True
+    elif mutation == "count":
+        device["nvidia_smi_device_count"] = 2
+    elif mutation == "hash":
+        device["gpu_uuid_sha256"] = "not-a-hash"
+    elif mutation == "detail":
+        device["detail"] = "GPU-01234567-89ab-cdef-0123-456789abcdef"
+    else:
+        device["raw_uuid"] = "GPU-forbidden"
+    with pytest.raises(cc.ChunkRefusal, match="preflight_invalid"):
+        cc.validate_preflight_manifest(
+            manifest,
+            expected_head=HEAD,
+            expected_pins_sha256=SHA,
+            expected_output_root=tmp_path,
+            expected_ncu_version_prefix="2026.1.0",
+            require_fresh=False,
+        )
+
+
+@pytest.mark.parametrize("field", ["detail", "raw_uuid"])
+def test_preflight_schema_refusal_never_discloses_raw_gpu_uuid(
+    tmp_path, capsys, field,
+):
+    manifest = _preflight(tmp_path)
+    raw_uuid = "GPU-01234567-89ab-cdef-0123-456789abcdef"
+    manifest["checks"]["device"][field] = raw_uuid
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        cc.validate_preflight_manifest(
+            manifest,
+            expected_head=HEAD,
+            expected_pins_sha256=SHA,
+            expected_output_root=tmp_path,
+            expected_ncu_version_prefix="2026.1.0",
+            require_fresh=False,
+        )
+    assert raw_uuid not in str(caught.value)
+    print(caught.value, file=cc.sys.stderr)
+    assert raw_uuid not in capsys.readouterr().err
+
+
 def _historical_v2_preflight(root: Path) -> dict:
     manifest = _preflight(root)
     manifest["schema_version"] = 2
+    manifest["checks"].pop("device")
     ncu = manifest["checks"]["ncu"]
     ncu["resolved_path"] = ncu["launcher_resolved_path"]
     ncu["executable_sha256"] = ncu["launcher_sha256"]

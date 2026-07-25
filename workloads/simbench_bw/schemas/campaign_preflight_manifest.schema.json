@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "simbench_bw/schemas/campaign_preflight_manifest.schema.json",
   "title": "sm_86 capture preflight/provenance manifest",
-  "description": "Emitted by tools/local_labels/campaign_preflight.py. Version 3 records the PATH-discovered NCU launcher as provenance while binding executable authority to the retained x86_64 inner ELF that actions must execute directly. Records host, toolchain, clock state, and capture-session admission. A live gate artifact (embeds timestamp + NVML covariates), not a byte-stable committed pin.",
+  "description": "Emitted by tools/local_labels/campaign_preflight.py. Version 3 records the PATH-discovered NCU launcher as provenance while binding executable authority to the retained x86_64 inner ELF that actions must execute directly. Its additive device probe binds fresh capture to one host GPU at index 0 using only a SHA-256 of the physical UUID; older v3 manifests may omit that probe only for historical finalization. Records host, toolchain, clock state, and capture-session admission. A live gate artifact (embeds timestamp + NVML covariates), not a byte-stable committed pin.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -44,6 +44,7 @@
         "worktree": {"$ref": "#/$defs/probe"},
         "ncu": {"$ref": "#/$defs/ncuProbe"},
         "driver": {"$ref": "#/$defs/probe"},
+        "device": {"$ref": "#/$defs/deviceProbe"},
         "nvcc": {"$ref": "#/$defs/probe"},
         "nvbit": {"$ref": "#/$defs/probe"},
         "capture_processes": {"$ref": "#/$defs/probe"},
@@ -67,6 +68,54 @@
           "enum": ["ok", "mismatch", "unavailable", "failed"]
         }
       }
+    },
+    "deviceProbe": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status", "selection_policy", "selected_host_gpu_index",
+        "nvidia_smi_device_count", "gpu_uuid_sha256"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["ok", "mismatch", "unavailable", "failed"]
+        },
+        "selection_policy": {"const": "single_nvidia_smi_device_v1"},
+        "selected_host_gpu_index": {"type": ["integer", "null"]},
+        "nvidia_smi_device_count": {
+          "type": ["integer", "null"],
+          "minimum": 0
+        },
+        "gpu_uuid_sha256": {
+          "type": ["string", "null"],
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {"status": {"const": "ok"}},
+            "required": ["status"]
+          },
+          "then": {
+            "properties": {
+              "selected_host_gpu_index": {"const": 0},
+              "nvidia_smi_device_count": {"const": 1},
+              "gpu_uuid_sha256": {
+                "type": "string",
+                "pattern": "^[0-9a-f]{64}$"
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "selected_host_gpu_index": {"type": "null"},
+              "gpu_uuid_sha256": {"type": "null"}
+            }
+          }
+        }
+      ]
     },
     "ncuProbe": {
       "type": "object",

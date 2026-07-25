@@ -88,6 +88,16 @@ def _ok_sol_environment_probe() -> dict:
     }
 
 
+def _ok_device_probe() -> dict:
+    return {
+        "status": "ok",
+        "selection_policy": cp.DEVICE_SELECTION_POLICY,
+        "selected_host_gpu_index": 0,
+        "nvidia_smi_device_count": 1,
+        "gpu_uuid_sha256": "6" * 64,
+    }
+
+
 def _ok_ncu_probe() -> dict:
     version = "Version 2026.1.0.0 (public-release)"
     launcher = "/opt/nvidia/nsight-compute/2026.1.0/ncu"
@@ -130,6 +140,92 @@ def test_version_matches_modes():
     assert cp.version_matches("13.3", "13.3", mode="exact")
     assert not cp.version_matches("13.2", "13.3", mode="exact")
     assert not cp.version_matches(None, "13.3", mode="exact")
+
+
+def test_device_probe_binds_single_index_uuid_without_disclosure(monkeypatch):
+    raw_uuid = "GPU-01234567-89ab-cdef-0123-456789abcdef"
+    observed = []
+
+    def run(command):
+        observed.append(command)
+        return 0, f"0, {raw_uuid}\n", ""
+
+    monkeypatch.setattr(cp, "_run", run)
+    result = cp.probe_device()
+    assert observed == [list(cp._DEVICE_QUERY)]
+    assert result == {
+        "status": cp.STATUS_OK,
+        "selection_policy": cp.DEVICE_SELECTION_POLICY,
+        "selected_host_gpu_index": 0,
+        "nvidia_smi_device_count": 1,
+        "gpu_uuid_sha256": hashlib.sha256(raw_uuid.encode()).hexdigest(),
+    }
+    assert raw_uuid not in json.dumps(result, sort_keys=True)
+
+
+@pytest.mark.parametrize(
+    "returncode,stdout,expected_status,expected_count",
+    [
+        (1, "", cp.STATUS_UNAVAILABLE, None),
+        (0, "", cp.STATUS_MISMATCH, 0),
+        (
+            0,
+            "0, GPU-01234567-89ab-cdef-0123-456789abcdef\n"
+            "1, GPU-fedcba98-7654-3210-fedc-ba9876543210\n",
+            cp.STATUS_MISMATCH,
+            2,
+        ),
+        (
+            0,
+            "1, GPU-01234567-89ab-cdef-0123-456789abcdef\n",
+            cp.STATUS_MISMATCH,
+            1,
+        ),
+        (0, "0, not-a-gpu-uuid\n", cp.STATUS_MISMATCH, 1),
+        (0, "0, GPU-deadbeef\n", cp.STATUS_MISMATCH, 1),
+        (
+            0,
+            '0, "GPU-01234567-89ab-cdef-0123-\n456789abcdef"\n',
+            cp.STATUS_MISMATCH,
+            1,
+        ),
+        (
+            0,
+            "0, GPU-01234567-89ab-cdef-0123-456789abcdef\t\n",
+            cp.STATUS_MISMATCH,
+            1,
+        ),
+        (
+            0,
+            '0, "GPU-01234567-89ab-cdef-0123-456789abcdef\n',
+            cp.STATUS_FAILED,
+            None,
+        ),
+        (
+            0,
+            "0, GPU-01234567-89ab-cdef-0123-456789abcdef\n\n"
+            "\n",
+            cp.STATUS_FAILED,
+            None,
+        ),
+        (0, "0\n", cp.STATUS_FAILED, None),
+    ],
+)
+def test_device_probe_rejects_unbound_inventory_without_uuid_disclosure(
+    monkeypatch, returncode, stdout, expected_status, expected_count,
+):
+    raw_stderr = "GPU-deadbeef-dead-beef-dead-beefdeadbeef"
+    monkeypatch.setattr(
+        cp, "_run", lambda _command: (returncode, stdout, raw_stderr),
+    )
+    result = cp.probe_device()
+    assert result["status"] == expected_status
+    assert result["selected_host_gpu_index"] is None
+    assert result["nvidia_smi_device_count"] == expected_count
+    assert result["gpu_uuid_sha256"] is None
+    serialized = json.dumps(result, sort_keys=True)
+    assert raw_stderr not in serialized
+    assert "GPU-01234567-89ab-cdef-0123-456789abcdef" not in serialized
 
 
 def test_toolchain_probes_use_structured_release_and_component_boundaries(
@@ -1563,6 +1659,41 @@ def test_retained_preflight_v2_schema_is_byte_exact_and_separate():
     assert _SCHEMA["properties"]["schema_version"]["const"] == 3
 
 
+def test_active_schema_keeps_device_additive_but_closes_present_authority():
+    historical = _minimal_manifest({"status": "failed", "detail": "not run"})
+    jsonschema.validate(historical, _SCHEMA)
+
+    current = copy.deepcopy(historical)
+    current["checks"]["device"] = _ok_device_probe()
+    jsonschema.validate(current, _SCHEMA)
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ["status", "policy", "index", "count", "hash", "detail", "extra"],
+)
+def test_active_schema_rejects_malformed_device_authority(mutation):
+    manifest = _minimal_manifest({"status": "failed", "detail": "not run"})
+    device = _ok_device_probe()
+    if mutation == "status":
+        device["status"] = "failed"
+    elif mutation == "policy":
+        device["selection_policy"] = "first_row_v0"
+    elif mutation == "index":
+        device["selected_host_gpu_index"] = 1
+    elif mutation == "count":
+        device["nvidia_smi_device_count"] = 2
+    elif mutation == "hash":
+        device["gpu_uuid_sha256"] = "not-a-hash"
+    elif mutation == "detail":
+        device["detail"] = "GPU-01234567-89ab-cdef-0123-456789abcdef"
+    else:
+        device["raw_uuid"] = "GPU-forbidden"
+    manifest["checks"]["device"] = device
+    with pytest.raises(jsonschema.ValidationError):
+        jsonschema.validate(manifest, _SCHEMA)
+
+
 def test_schema_rejects_wrapper_only_success_identity():
     manifest = _minimal_manifest({"status": "failed", "detail": "not run"})
     ncu = manifest["checks"]["ncu"]
@@ -1769,6 +1900,7 @@ def test_build_manifest_never_runs_kernel_when_process_hygiene_fails(
         "git_head": "0" * 40, "working_tree_clean": True})
     monkeypatch.setattr(cp, "probe_ncu", lambda *_: _ok_ncu_probe())
     monkeypatch.setattr(cp, "probe_driver", lambda *_: ok)
+    monkeypatch.setattr(cp, "probe_device", lambda: _ok_device_probe())
     monkeypatch.setattr(cp, "probe_nvcc", lambda *_, **__: ok)
     monkeypatch.setattr(cp, "probe_nvbit", lambda *_: ok)
     monkeypatch.setattr(cp, "probe_clock_state", lambda *_: ok)
@@ -1792,6 +1924,54 @@ def test_build_manifest_never_runs_kernel_when_process_hygiene_fails(
     assert manifest["checks"]["injection_runtime"]["not_run"] is True
 
 
+def test_build_manifest_device_refusal_blocks_before_smoke(
+    monkeypatch, tmp_path,
+):
+    pins_path = tmp_path / "pins.json"
+    pins_path.write_text(json.dumps({
+        "arch": "sm_86", "measurement_protocol": {"version": "v2.1"},
+    }))
+    budget_path = tmp_path / "budget.json"
+    budget_path.write_text("{}")
+    ok = {"status": cp.STATUS_OK}
+    monkeypatch.setattr(cp, "probe_worktree", lambda *_: ok | {
+        "git_head": "0" * 40, "working_tree_clean": True,
+    })
+    monkeypatch.setattr(cp, "probe_ncu", lambda *_: _ok_ncu_probe())
+    monkeypatch.setattr(cp, "probe_driver", lambda *_: ok)
+    monkeypatch.setattr(cp, "probe_device", lambda: {
+        "status": cp.STATUS_MISMATCH,
+        "selection_policy": cp.DEVICE_SELECTION_POLICY,
+        "selected_host_gpu_index": None,
+        "nvidia_smi_device_count": 2,
+        "gpu_uuid_sha256": None,
+    })
+    monkeypatch.setattr(cp, "probe_nvcc", lambda *_, **__: ok)
+    monkeypatch.setattr(cp, "probe_nvbit", lambda *_: ok)
+    monkeypatch.setattr(cp, "probe_capture_processes", lambda: ok)
+    monkeypatch.setattr(cp, "probe_clock_state", lambda *_: ok)
+    monkeypatch.setattr(cp, "probe_trace_budget", lambda *_: ok)
+    monkeypatch.setattr(
+        cp, "probe_sol_native_environment", lambda *_: _ok_sol_environment_probe(),
+    )
+    monkeypatch.setattr(cp, "probe_covariates", lambda: ok)
+
+    def forbidden_smoke(*_args, **_kwargs):
+        raise AssertionError("injection smoke ran without device authority")
+
+    monkeypatch.setattr(cp, "probe_injection_runtime", forbidden_smoke)
+    manifest = cp.build_manifest(
+        pins_path=pins_path,
+        budget_path=budget_path,
+        output_root=tmp_path,
+        ignore_relpaths=[],
+        repo_root=_REPO,
+    )
+    assert manifest["capture_admitted"] is False
+    assert manifest["blockers"] == ["device", "injection_runtime"]
+    assert manifest["checks"]["injection_runtime"]["not_run"] is True
+
+
 def test_build_manifest_sol_environment_refusal_blocks_before_smoke(
         monkeypatch, tmp_path):
     pins_path = tmp_path / "pins.json"
@@ -1808,6 +1988,7 @@ def test_build_manifest_sol_environment_refusal_blocks_before_smoke(
     })
     monkeypatch.setattr(cp, "probe_ncu", lambda *_: _ok_ncu_probe())
     monkeypatch.setattr(cp, "probe_driver", lambda *_: ok)
+    monkeypatch.setattr(cp, "probe_device", lambda: _ok_device_probe())
     monkeypatch.setattr(cp, "probe_nvcc", lambda *_, **__: ok)
     monkeypatch.setattr(cp, "probe_nvbit", lambda *_: ok)
     monkeypatch.setattr(cp, "probe_capture_processes", lambda: ok)
@@ -2095,7 +2276,7 @@ def test_environment_probes_ok_on_reference_host(tmp_path):
     jsonschema.validate(manifest, _SCHEMA)
     # Every cheap check EXCEPT the worktree (which may be dirty while these files
     # are uncommitted) must be green on the provisioned reference host.
-    for name in ("ncu", "driver", "nvcc", "nvbit", "capture_processes",
+    for name in ("ncu", "driver", "device", "nvcc", "nvbit", "capture_processes",
                  "clock_state", "trace_budget"):
         assert manifest["checks"][name]["status"] == cp.STATUS_OK, \
             (name, manifest["checks"][name])
