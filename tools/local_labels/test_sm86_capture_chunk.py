@@ -1491,7 +1491,9 @@ def _write_launch_set_fixture_executable(path: Path, source: str) -> Path:
     return path
 
 
-def _fixture_launch_set_execution(tmp_path, monkeypatch, *, csv_text: str):
+def _fixture_launch_set_execution(
+    tmp_path, monkeypatch, *, csv_text: str, trace_count: int = 1,
+):
     action_log = tmp_path / "ncu-actions.log"
     ncu = _write_launch_set_fixture_executable(
         tmp_path / "fixture-ncu",
@@ -1567,7 +1569,7 @@ def _fixture_launch_set_execution(tmp_path, monkeypatch, *, csv_text: str):
         cell_dir=cell_dir,
         matrix=matrix,
         pins=pins,
-        trace_inventory_cardinality=1,
+        trace_inventory_cardinality=trace_count,
     )
     identity = cc.ncu_executor.build_expected_ncu_identity(
         resolved_path=str(ncu),
@@ -1592,6 +1594,8 @@ def _fixture_launch_target_authorities(plan):
 def _execute_fixture_plan(
     plan, artifact_root, identity, *,
     target_executable_sha256=None, runtime_module_sha256s=None,
+    gpu_uuid_sha256="f" * 64, cuda_version="13.2",
+    driver_version="610.43.02",
 ):
     default_target, default_modules = _fixture_launch_target_authorities(plan)
     if target_executable_sha256 is None:
@@ -1608,6 +1612,9 @@ def _execute_fixture_plan(
         expected_ncu_identity=identity,
         expected_target_executable_sha256=target_executable_sha256,
         expected_runtime_module_sha256s=runtime_module_sha256s,
+        expected_gpu_uuid_sha256=gpu_uuid_sha256,
+        expected_cuda_version=cuda_version,
+        expected_driver_version=driver_version,
         expected_preflight_sha256="0" * 64,
         expected_source_commit="1" * 40,
         expected_capture_identity_sha256="2" * 64,
@@ -1647,7 +1654,7 @@ def test_fixture_launch_set_execution_composes_import_and_persistence(
     assert set(paths) == {
         "report", "run_manifest", "details_csv", "details_stderr",
         "launch_inventory", "launch_metrics", "details_export_receipt",
-        "execution_identity", "capture_manifest",
+        "execution_identity", "sidecars", "capture_manifest",
     }
     assert paths["details_csv"].read_text() == csv_text
     assert paths["details_stderr"].read_bytes() == b""
@@ -1664,7 +1671,52 @@ def test_fixture_launch_set_execution_composes_import_and_persistence(
     ]
     assert action_log.read_text().splitlines().count("collect") == 1
     assert action_log.read_text().splitlines().count("import") == 1
-    assert not any(plan["label_sidecars"][index].exists() for index in range(1))
+    assert paths["sidecars"] == (plan["label_sidecars"][0],)
+    sidecar = json.loads(paths["sidecars"][0].read_text())
+    assert sidecar == {
+        "schema_version": 5,
+        "device": cc._launch_set_option(plan["command"], "--device"),
+        "slug": cc._launch_set_option(plan["command"], "--slug"),
+        "shape_point": cc._launch_set_option(
+            plan["command"], "--shape-point",
+        ),
+        "repeat_index": 0,
+        "launch_index": 0,
+        "binary_sha256": target_sha256,
+        "profiler_family": "nsight_compute",
+        "profiler_version": identity.version_line,
+        "cuda_version": "13.2",
+        "driver_version": "610.43.02",
+        "gpu_uuid_sha256": "f" * 64,
+        "replay_mode": "kernel",
+        "aggregation": "kernel",
+        "warmup_count": int(
+            cc._launch_set_option(plan["command"], "--warmup")
+        ),
+        "cache_hit_rate_l2_sector": 0.88,
+        "confidence_interval_l2_sector": {
+            "lower": 0.88,
+            "upper": 0.88,
+            "confidence_level": 0.95,
+            "units": "sector_hit_rate_fraction",
+            "aggregation": "kernel",
+        },
+        "cache_hit_rate_l1tex_sector": 0.77,
+        "confidence_interval_l1tex_sector": {
+            "lower": 0.77,
+            "upper": 0.77,
+            "confidence_level": 0.95,
+            "units": "sector_hit_rate_fraction",
+            "aggregation": "kernel",
+        },
+        "unit_tagged_metrics": [{
+            "ncu_metric": "gpc__cycles_elapsed.max",
+            "unit": "cycles",
+            "value": 123.0,
+        }],
+        "measurement_protocol": plan["ncu_launch_protocol"],
+    }
+    assert "ncu_launch_set_context" not in sidecar
     execution = json.loads(paths["execution_identity"].read_text())
     assert execution == {
         "schema_version": 1,
@@ -1711,8 +1763,236 @@ def test_fixture_launch_set_execution_composes_import_and_persistence(
         )
     )
     assert paths["execution_identity"].stat().st_mode & 0o222 == 0
+    assert paths["sidecars"][0].read_bytes() == (
+        cc.immutable.pretty_json_bytes(sidecar)
+    )
+    assert paths["sidecars"][0].stat().st_mode & 0o222 == 0
     assert paths["capture_manifest"].stat().st_mode & 0o222 == 0
     assert not (plan["cell_root"] / "DONE.json").exists()
+
+
+def test_fixture_launch_set_execution_publishes_every_ordinal_last(
+    tmp_path, monkeypatch,
+):
+    header = (
+        '"Metric Value","Stream","ID","Grid Size","Metric Name","Context",'
+        '"Device","Block Size","Process ID","Kernel Name"\n'
+    )
+    rows = []
+    for launch_id, l2, l1, cycles in (
+        (9, 88, 77, 123),
+        (10, 66, 55, 456),
+    ):
+        for metric, value in (
+            ("lts__t_sector_hit_rate.pct", l2),
+            ("l1tex__t_sector_hit_rate.pct", l1),
+            ("gpc__cycles_elapsed.max", cycles),
+        ):
+            rows.append(
+                f'"{value}","2","{launch_id}","(4, 1, 1)",'
+                f'"{metric}","1","0","(128, 1, 1)","100",'
+                f'"_Z7kernelA{launch_id}v"\n'
+            )
+    plan, artifact_root, identity, _action_log = (
+        _fixture_launch_set_execution(
+            tmp_path,
+            monkeypatch,
+            csv_text=header + "".join(rows),
+            trace_count=2,
+        )
+    )
+    published_names = []
+    real_publish = cc.immutable.publish_regular_file
+
+    def record_publication(*args, **kwargs):
+        published_names.append(args[1])
+        return real_publish(*args, **kwargs)
+
+    monkeypatch.setattr(
+        cc.immutable, "publish_regular_file", record_publication,
+    )
+    paths = _execute_fixture_plan(plan, artifact_root, identity)
+
+    assert paths["sidecars"] == (
+        plan["cell_root"] / "label_0_0.json",
+        plan["cell_root"] / "label_0_1.json",
+    )
+    sidecars = [json.loads(path.read_text()) for path in paths["sidecars"]]
+    assert [document["launch_index"] for document in sidecars] == [0, 1]
+    assert [document["cache_hit_rate_l2_sector"] for document in sidecars] == [
+        0.88, 0.66,
+    ]
+    assert [
+        document["unit_tagged_metrics"][0]["value"]
+        for document in sidecars
+    ] == [123.0, 456.0]
+    assert published_names[-4:] == [
+        "run_0_launch_set.execution_identity.json",
+        "label_0_0.json",
+        "label_0_1.json",
+        "label_launch_set_capture_manifest.json",
+    ]
+    assert all(path.stat().st_mode & 0o222 == 0 for path in paths["sidecars"])
+    assert not (plan["cell_root"] / "DONE.json").exists()
+
+
+def test_fixture_launch_set_execution_rejects_malformed_sidecar_provenance(
+    tmp_path, monkeypatch,
+):
+    plan, artifact_root, identity, action_log = (
+        _fixture_launch_set_execution(
+            tmp_path, monkeypatch, csv_text="unused\n",
+        )
+    )
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        _execute_fixture_plan(
+            plan, artifact_root, identity, gpu_uuid_sha256="not-a-sha",
+        )
+    assert caught.value.code == "label_launch_set_authority_invalid"
+    assert not action_log.exists()
+    assert not plan["cell_root"].exists()
+
+
+def test_fixture_launch_set_execution_binds_sidecar_cuda_to_command(
+    tmp_path, monkeypatch,
+):
+    plan, artifact_root, identity, action_log = (
+        _fixture_launch_set_execution(
+            tmp_path, monkeypatch, csv_text="unused\n",
+        )
+    )
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        _execute_fixture_plan(
+            plan, artifact_root, identity, cuda_version="13.3",
+        )
+    assert caught.value.code == "label_launch_set_authority_invalid"
+    assert not action_log.exists()
+    assert not plan["cell_root"].exists()
+
+
+def test_fixture_launch_set_execution_binds_sidecar_ncu_to_command(
+    tmp_path, monkeypatch,
+):
+    plan, artifact_root, identity, action_log = (
+        _fixture_launch_set_execution(
+            tmp_path, monkeypatch, csv_text="unused\n",
+        )
+    )
+    mismatched_identity = cc.ncu_executor.build_expected_ncu_identity(
+        resolved_path=identity.resolved_path,
+        executable_sha256=identity.executable_sha256,
+        version_line="Version 2027.1.0.0 (build 1) (public-release)",
+    )
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        _execute_fixture_plan(
+            plan, artifact_root, mismatched_identity,
+        )
+    assert caught.value.code == "label_launch_set_authority_invalid"
+    assert not action_log.exists()
+    assert not plan["cell_root"].exists()
+
+
+def test_fixture_launch_set_execution_rejects_sidecar_schema_drift(
+    tmp_path, monkeypatch,
+):
+    csv_text = (
+        '"Metric Value","Stream","ID","Grid Size","Metric Name","Context",'
+        '"Device","Block Size","Process ID","Kernel Name"\n'
+        '"88","2","9","(4, 1, 1)","lts__t_sector_hit_rate.pct",'
+        '"1","0","(128, 1, 1)","100","_Z7kernelAv"\n'
+        '"77","2","9","(4, 1, 1)","l1tex__t_sector_hit_rate.pct",'
+        '"1","0","(128, 1, 1)","100","_Z7kernelAv"\n'
+        '"123","2","9","(4, 1, 1)","gpc__cycles_elapsed.max",'
+        '"1","0","(128, 1, 1)","100","_Z7kernelAv"\n'
+    )
+    plan, artifact_root, identity, _action_log = (
+        _fixture_launch_set_execution(
+            tmp_path, monkeypatch, csv_text=csv_text,
+        )
+    )
+    real_open = cc.immutable.open_retained_regular
+
+    class DriftingRetainedSchema:
+        def __init__(self, retained):
+            self.retained = retained
+            self.verify_calls = 0
+
+        def __getattr__(self, name):
+            return getattr(self.retained, name)
+
+        def verify_unchanged(self):
+            self.verify_calls += 1
+            if self.verify_calls == 2:
+                raise cc.immutable.ImmutableArtifactError(
+                    "synthetic retained schema drift"
+                )
+            self.retained.verify_unchanged()
+
+        def __enter__(self):
+            self.verify_unchanged()
+            return self
+
+        def __exit__(self, _exc_type, _exc, _traceback):
+            self.retained.close()
+            return False
+
+    def retain_with_schema_drift(path):
+        retained = real_open(path)
+        if Path(path) == cc.sidecar_schema_authority.SCHEMA_PATH:
+            return DriftingRetainedSchema(retained)
+        return retained
+
+    monkeypatch.setattr(
+        cc.immutable,
+        "open_retained_regular",
+        retain_with_schema_drift,
+    )
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        _execute_fixture_plan(plan, artifact_root, identity)
+    assert caught.value.code == "label_launch_set_postprocessing_failed"
+    assert plan["label_sidecars"][0].exists()
+    assert not (
+        plan["cell_root"] / "label_launch_set_capture_manifest.json"
+    ).exists()
+
+
+def test_fixture_launch_set_execution_rejects_published_sidecar_tamper(
+    tmp_path, monkeypatch,
+):
+    csv_text = (
+        '"Metric Value","Stream","ID","Grid Size","Metric Name","Context",'
+        '"Device","Block Size","Process ID","Kernel Name"\n'
+        '"88","2","9","(4, 1, 1)","lts__t_sector_hit_rate.pct",'
+        '"1","0","(128, 1, 1)","100","_Z7kernelAv"\n'
+        '"77","2","9","(4, 1, 1)","l1tex__t_sector_hit_rate.pct",'
+        '"1","0","(128, 1, 1)","100","_Z7kernelAv"\n'
+        '"123","2","9","(4, 1, 1)","gpc__cycles_elapsed.max",'
+        '"1","0","(128, 1, 1)","100","_Z7kernelAv"\n'
+    )
+    plan, artifact_root, identity, _action_log = (
+        _fixture_launch_set_execution(
+            tmp_path, monkeypatch, csv_text=csv_text,
+        )
+    )
+    real_open = cc.immutable.open_retained_regular
+
+    def tamper_before_retention(path):
+        path = Path(path)
+        if path.name == "label_0_0.json":
+            path.chmod(0o600)
+            path.write_bytes(b"{}\n")
+            path.chmod(0o444)
+        return real_open(path)
+
+    monkeypatch.setattr(
+        cc.immutable, "open_retained_regular", tamper_before_retention,
+    )
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        _execute_fixture_plan(plan, artifact_root, identity)
+    assert caught.value.code == "label_launch_set_postprocessing_failed"
+    assert not (
+        plan["cell_root"] / "label_launch_set_capture_manifest.json"
+    ).exists()
 
 
 def test_fixture_launch_set_execution_rejects_target_identity_before_capture(
@@ -1790,6 +2070,7 @@ def test_fixture_launch_set_execution_requires_pinned_authority_schemas(
     [
         "run_0_launch_set.launch_metrics.json",
         "label_run_manifest_0_launch_set.json",
+        "label_0_0.json",
         "DONE.json",
     ],
 )

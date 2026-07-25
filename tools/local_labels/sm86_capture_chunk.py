@@ -54,7 +54,9 @@ from tools.local_labels import ncu_action_executor as ncu_executor  # noqa: E402
 from tools.local_labels import ncu_collection_receipt as collection_receipt  # noqa: E402
 from tools.local_labels import ncu_details_export_persistence as details_persistence  # noqa: E402
 from tools.local_labels import ncu_launch_documents  # noqa: E402
+from tools.local_labels import ncu_launch_sidecars  # noqa: E402
 from tools.local_labels import parse_ncu_metrics  # noqa: E402
+from tools.local_labels import sidecar_schema_authority  # noqa: E402
 import ncu_capture_contract  # noqa: E402
 import sol_capture_environment as sol_env  # noqa: E402
 import sol_definition_equivalence as sol_def  # noqa: E402
@@ -4717,7 +4719,15 @@ def _persist_fixture_launch_set_authorities(
     expected_run_manifest_document: dict[str, Any],
     expected_run_manifest_sha256: str,
     expected_run_manifest_size_bytes: int,
-) -> tuple[Path, Path]:
+    sidecar_documents: tuple[dict[str, Any], ...],
+    sidecar_paths: tuple[Path, ...],
+    sidecar_schema_bytes: bytes,
+    sidecar_schema: dict[str, Any],
+    sidecar_provenance: ncu_launch_sidecars.LaunchSidecarProvenance,
+    registry: Any,
+    percentage_metric_names: tuple[str, ...],
+    unit_metric_names: tuple[str, ...],
+) -> tuple[Path, Path, tuple[Path, ...]]:
     """Publish fixture authority documents after retained Details products."""
     execution_identity_path = artifacts[
         "run_0_launch_set.execution_identity.json"
@@ -4745,8 +4755,25 @@ def _persist_fixture_launch_set_authorities(
     expected_receipt_path = artifacts[
         "run_0_launch_set.details_export_receipt.json"
     ]
-    complete_namespace = frozenset(_LAUNCH_SET_FIXED_ARTIFACT_NAMES)
-    prepublication_namespace = complete_namespace - {
+    expected_sidecar_paths = tuple(
+        cell_root / f"label_0_{ordinal}.json"
+        for ordinal in range(expected_launch_count)
+    )
+    try:
+        parsed_sidecar_schema = (
+            sidecar_schema_authority.parse_authoritative_schema_bytes(
+                sidecar_schema_bytes
+            )
+        )
+    except ValueError as exc:
+        raise ncu_launch_documents.LaunchDocumentError(str(exc)) from exc
+    complete_namespace = frozenset({
+        *_LAUNCH_SET_FIXED_ARTIFACT_NAMES,
+        *(path.name for path in expected_sidecar_paths),
+    })
+    prepublication_namespace = frozenset(
+        _LAUNCH_SET_FIXED_ARTIFACT_NAMES
+    ) - {
         execution_identity_path.name,
         capture_manifest_path.name,
     }
@@ -4756,6 +4783,13 @@ def _persist_fixture_launch_set_authorities(
         or type(expected_run_manifest_size_bytes) is not int
         or expected_run_manifest_size_bytes <= 0
         or type(expected_run_manifest_document) is not dict
+        or type(sidecar_documents) is not tuple
+        or len(sidecar_documents) != expected_launch_count
+        or type(sidecar_paths) is not tuple
+        or sidecar_paths != expected_sidecar_paths
+        or type(sidecar_schema_bytes) is not bytes
+        or type(sidecar_schema) is not dict
+        or parsed_sidecar_schema != sidecar_schema
         or any(
             path.parent != cell_root
             for path in (
@@ -4819,11 +4853,45 @@ def _persist_fixture_launch_set_authorities(
             ),
         )
     )
+    sidecar_documents = ncu_launch_sidecars.validate_launch_sidecar_documents(
+        sidecar_documents,
+        inventory=products.inventory_document,
+        launch_metrics=products.metrics_document,
+        csv_text=products.csv_bytes.decode("utf-8", errors="strict"),
+        report_sha256=products.inventory_document["report_sha256"],
+        expected_launch_count=expected_launch_count,
+        protocol=protocol,
+        registry=registry,
+        percentage_metric_names=percentage_metric_names,
+        unit_metric_names=unit_metric_names,
+        sidecar_schema=sidecar_schema,
+        provenance=sidecar_provenance,
+    )
+    sidecar_bytes = tuple(
+        immutable.pretty_json_bytes(document)
+        for document in sidecar_documents
+    )
 
     with contextlib.ExitStack() as retained_stack:
         pinned_parent = retained_stack.enter_context(
             immutable.PinnedDirectoryReader(cell_root)
         )
+        retained_sidecar_schema = retained_stack.enter_context(
+            immutable.open_retained_regular(
+                sidecar_schema_authority.SCHEMA_PATH
+            )
+        )
+        if (
+            retained_sidecar_schema.sha256
+            != immutable.sha256_bytes(sidecar_schema_bytes)
+            or retained_sidecar_schema.size_bytes != len(sidecar_schema_bytes)
+            or _retained_json_model(
+                retained_sidecar_schema, role="launch_set_sidecar_schema",
+            ) != sidecar_schema
+        ):
+            raise ncu_launch_documents.LaunchDocumentError(
+                "retained sidecar schema authority differs"
+            )
         retained_report = retained_stack.enter_context(
             immutable.open_retained_regular(report_path)
         )
@@ -4928,6 +4996,51 @@ def _persist_fixture_launch_set_authorities(
                 "published execution identity model differs"
             )
 
+        retained_sidecars: list[immutable.RetainedRegular] = []
+        retained_sidecar_documents: list[dict[str, Any]] = []
+        published_sidecars: list[Path] = []
+        for ordinal, (path, payload) in enumerate(
+            zip(sidecar_paths, sidecar_bytes, strict=True)
+        ):
+            published_sidecar = immutable.publish_regular_file(
+                cell_root,
+                path.name,
+                payload,
+                partial_suffix=_LAUNCH_SET_AUTHORITY_PARTIAL_SUFFIX,
+                pinned_parent=pinned_parent,
+            )
+            retained_sidecar = retained_stack.enter_context(
+                immutable.open_retained_regular(published_sidecar)
+            )
+            if (
+                retained_sidecar.sha256 != immutable.sha256_bytes(payload)
+                or retained_sidecar.size_bytes != len(payload)
+                or os.fstat(retained_sidecar.descriptor).st_mode & 0o222
+            ):
+                raise ncu_launch_documents.LaunchDocumentError(
+                    f"published launch sidecar {ordinal} bytes differ"
+                )
+            published_sidecars.append(published_sidecar)
+            retained_sidecars.append(retained_sidecar)
+            retained_sidecar_documents.append(_retained_json_model(
+                retained_sidecar, role=f"launch_set_sidecar_{ordinal}",
+            ))
+        ncu_launch_sidecars.validate_launch_sidecar_documents(
+            retained_sidecar_documents,
+            inventory=retained_inventory_document,
+            launch_metrics=products.metrics_document,
+            csv_text=products.csv_bytes.decode("utf-8", errors="strict"),
+            report_sha256=retained_report.sha256,
+            expected_launch_count=expected_launch_count,
+            protocol=protocol,
+            registry=registry,
+            percentage_metric_names=percentage_metric_names,
+            unit_metric_names=unit_metric_names,
+            sidecar_schema=sidecar_schema,
+            provenance=sidecar_provenance,
+        )
+        retained_sidecar_schema.verify_unchanged()
+
         published_capture_manifest = immutable.publish_regular_file(
             cell_root,
             capture_manifest_path.name,
@@ -4971,11 +5084,13 @@ def _persist_fixture_launch_set_authorities(
                 "published capture manifest model differs"
             )
         for retained in (
+            retained_sidecar_schema,
             retained_report,
             retained_run_manifest,
             *retained_products.values(),
             retained_receipt,
             retained_execution_identity,
+            *retained_sidecars,
             retained_capture_manifest,
         ):
             retained.verify_unchanged()
@@ -4983,7 +5098,11 @@ def _persist_fixture_launch_set_authorities(
             cell_root, expected_names=complete_namespace,
         )
         pinned_parent.verify_path()
-    return published_execution_identity, published_capture_manifest
+    return (
+        published_execution_identity,
+        published_capture_manifest,
+        tuple(published_sidecars),
+    )
 
 
 def execute_fixture_only_launch_set_plan(
@@ -4995,6 +5114,9 @@ def execute_fixture_only_launch_set_plan(
     expected_ncu_identity: ncu_executor.ExpectedNcuIdentity,
     expected_target_executable_sha256: str,
     expected_runtime_module_sha256s: tuple[str, ...],
+    expected_gpu_uuid_sha256: str,
+    expected_cuda_version: str,
+    expected_driver_version: str,
     expected_preflight_sha256: str,
     expected_source_commit: str,
     expected_capture_identity_sha256: str,
@@ -5006,7 +5128,7 @@ def execute_fixture_only_launch_set_plan(
     timeout_s: float,
     runtime_cwd: Path,
     runtime_env: dict[str, str] | None = None,
-) -> dict[str, Path]:
+) -> dict[str, Path | tuple[Path, ...]]:
     """Exercise the launch-set handoff without opening a production live gate."""
     try:
         expected_ncu_identity = ncu_executor.validate_expected_ncu_identity(
@@ -5016,6 +5138,13 @@ def execute_fixture_only_launch_set_plan(
         raise ChunkRefusal("capture_ncu_authority_invalid", str(exc)) from exc
     if (
         not _is_sha256(expected_preflight_sha256)
+        or not _is_sha256(expected_gpu_uuid_sha256)
+        or type(expected_cuda_version) is not str
+        or not expected_cuda_version
+        or "\x00" in expected_cuda_version
+        or type(expected_driver_version) is not str
+        or not expected_driver_version
+        or "\x00" in expected_driver_version
         or not _is_sha40(expected_source_commit)
         or not _is_sha256(expected_capture_identity_sha256)
         or not _is_sha256(expected_kernel_signature_sha256)
@@ -5039,6 +5168,34 @@ def execute_fixture_only_launch_set_plan(
             expected_plan_sha256=expected_plan_sha256,
         )
     )
+    warmup_text = _launch_set_option(command, "--warmup")
+    try:
+        warmup_count = int(warmup_text, 10)
+    except ValueError as exc:
+        raise ChunkRefusal(
+            "label_launch_set_authority_invalid",
+            "launch-set warmup authority is malformed",
+        ) from exc
+    if warmup_count < 0 or warmup_text != str(warmup_count):
+        raise ChunkRefusal(
+            "label_launch_set_authority_invalid",
+            "launch-set warmup authority is not canonical",
+        )
+    sidecar_paths = tuple(
+        plan["label_sidecars"][ordinal]
+        for ordinal in range(plan["trace_inventory_cardinality"])
+    )
+    sidecar_provenance = ncu_launch_sidecars.LaunchSidecarProvenance(
+        device=_launch_set_option(command, "--device"),
+        slug=_launch_set_option(command, "--slug"),
+        shape_point=_launch_set_option(command, "--shape-point"),
+        binary_sha256=expected_target_executable_sha256,
+        profiler_version=expected_ncu_identity.version_line,
+        cuda_version=expected_cuda_version,
+        driver_version=expected_driver_version,
+        gpu_uuid_sha256=expected_gpu_uuid_sha256,
+        warmup_count=warmup_count,
+    )
     try:
         execution_identity_document = (
             ncu_launch_documents.build_launch_execution_identity_document(
@@ -5058,6 +5215,9 @@ def execute_fixture_only_launch_set_plan(
             "execution_identity", execution_identity_document,
         )
         ncu_launch_documents.load_schema("capture_manifest")
+        sidecar_schema_bytes, sidecar_schema = (
+            sidecar_schema_authority.load_authoritative_schema()
+        )
     except (
         immutable.ImmutableArtifactError,
         ncu_launch_documents.LaunchDocumentError,
@@ -5074,6 +5234,29 @@ def execute_fixture_only_launch_set_plan(
         for index, argument in enumerate(command[:-1])
         if argument == "--unit-metric"
     )
+    planned_cuda_version = _launch_set_option(
+        command, "--expected-cuda-release",
+    )
+    planned_ncu_version_prefix = _launch_set_option(
+        command, "--expected-ncu-version-prefix",
+    )
+    try:
+        ncu_version_matches = toolchain_contract.ncu_version_matches(
+            expected_ncu_identity.version_line,
+            planned_ncu_version_prefix,
+        )
+    except toolchain_contract.CaptureToolchainContractError as exc:
+        raise ChunkRefusal(
+            "label_launch_set_authority_invalid", str(exc),
+        ) from exc
+    if (
+        planned_cuda_version != expected_cuda_version
+        or not ncu_version_matches
+    ):
+        raise ChunkRefusal(
+            "label_launch_set_authority_invalid",
+            "sidecar toolchain provenance differs from the sealed command",
+        )
     if (
         Path(command[0]).resolve() == _PRODUCTION_LABEL_DRIVER.resolve()
         or planned_unit_metrics != unit_metric_names
@@ -5219,6 +5402,27 @@ def execute_fixture_only_launch_set_plan(
                 percentage_metric_names=percentage_metric_names,
                 unit_metric_names=unit_metric_names,
             )
+            sidecar_documents = (
+                ncu_launch_sidecars.build_launch_sidecar_documents(
+                    inventory=products.inventory_document,
+                    launch_metrics=products.metrics_document,
+                    csv_text=products.csv_bytes.decode(
+                        "utf-8", errors="strict",
+                    ),
+                    report_sha256=products.inventory_document[
+                        "report_sha256"
+                    ],
+                    expected_launch_count=plan[
+                        "trace_inventory_cardinality"
+                    ],
+                    protocol=protocol,
+                    registry=registry,
+                    percentage_metric_names=percentage_metric_names,
+                    unit_metric_names=unit_metric_names,
+                    sidecar_schema=sidecar_schema,
+                    provenance=sidecar_provenance,
+                )
+            )
             retained_report.verify_unchanged()
             retained_manifest.verify_unchanged()
         receipt = details_persistence.persist_details_export_products(
@@ -5239,7 +5443,7 @@ def execute_fixture_only_launch_set_plan(
             percentage_metric_names=percentage_metric_names,
             unit_metric_names=unit_metric_names,
         )
-        execution_identity, capture_manifest = (
+        execution_identity, capture_manifest, published_sidecars = (
             _persist_fixture_launch_set_authorities(
                 cell_root=cell_root,
                 artifacts=artifacts,
@@ -5264,6 +5468,14 @@ def execute_fixture_only_launch_set_plan(
                 expected_run_manifest_size_bytes=(
                     run_manifest_size_bytes
                 ),
+                sidecar_documents=sidecar_documents,
+                sidecar_paths=sidecar_paths,
+                sidecar_schema_bytes=sidecar_schema_bytes,
+                sidecar_schema=sidecar_schema,
+                sidecar_provenance=sidecar_provenance,
+                registry=registry,
+                percentage_metric_names=percentage_metric_names,
+                unit_metric_names=unit_metric_names,
             )
         )
     except (
@@ -5291,6 +5503,7 @@ def execute_fixture_only_launch_set_plan(
         "launch_metrics": artifacts["run_0_launch_set.launch_metrics.json"],
         "details_export_receipt": receipt,
         "execution_identity": execution_identity,
+        "sidecars": published_sidecars,
         "capture_manifest": capture_manifest,
     }
 
