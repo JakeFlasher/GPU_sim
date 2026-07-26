@@ -9,12 +9,11 @@ its sm_86 subset. No retained evidence is deleted or rewritten.
 Per-cell predictor bundles land at:
   data/local_labels/sweeps/<sweep_id>/predictor_bundles/<cell>.json
 
-Per CLAUDE.md Rule 1: NCU is NOT invoked here; only the predictor
-+ comparison library calls. The predictor reads NVBit traces and
-emits modeled-hit predictions. Living under ``tools/local_labels/``
-keeps this orchestrator co-located with the other label-driver
-code; it does NOT cross the local-label exception boundary
-(no NCU, no nvidia-smi mutation, no privileged CUPTI).
+The targets-never-features boundary applies here: NCU is NOT invoked; only the
+predictor + comparison library calls run. The predictor reads NVBit traces and
+emits modeled-hit predictions. Living under ``tools/local_labels/`` keeps this
+orchestrator co-located with the other label-driver code; it does NOT perform
+hardware collection (no NCU, no nvidia-smi mutation, no privileged CUPTI).
 """
 
 from __future__ import annotations

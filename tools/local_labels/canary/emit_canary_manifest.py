@@ -20,7 +20,8 @@ ASYNC_COPY, nonzero admitted atomic/async records, 0 unexpected
 `unsupported_memory_path`, and the LDGSTS global source resolving an
 allocation_id (the operand-ordering adjudication confirmed end-to-end on silicon).
 
-Rule 1: no NCU metric is read here; this is a trace-input generator + validator.
+Targets-never-features boundary: no NCU metric is read here; this is a
+trace-input generator + validator.
 
 Usage:
   tools/nvbit_tracer/pinned_build_env.sh must be sourced (or NVBIT_TRACER_* set).

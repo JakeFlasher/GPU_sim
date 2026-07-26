@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Live observation-contract microfixture sweep (sm_86 quarantine).
+"""Live observation-contract microfixture sweep (sm_86 label-evidence namespace).
 
 Pins, per replay-count metric, the counting semantic the replay-count
 producer must implement — BEFORE any corpus scoring. Each microfixture
@@ -21,9 +21,9 @@ Surface ATOM/RED have no CUDA C++ expressible fixture; their entries are
 typed ``no_expressible_fixture`` explicitly (the validator skips them
 fail-closed rather than scoring them vacuously).
 
-Outputs land ONLY under ``data/local_labels`` (Rule-1 quarantine). The
-binary is a host-local build artifact (never committed); the artifact
-records source+binary sha256 and the full device/driver/NCU identity.
+Outputs land ONLY under ``data/local_labels`` in the declared evidence
+namespace. The binary is a host-local build artifact (never committed); the
+artifact records source+binary sha256 and the full device/driver/NCU identity.
 """
 
 from __future__ import annotations

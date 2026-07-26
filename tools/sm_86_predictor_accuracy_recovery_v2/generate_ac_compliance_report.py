@@ -73,7 +73,7 @@ CRITERIA: tuple[dict, ...] = (
                   "deploy_ns_crosswalk_sm_86.json"],
      "limitation": "4-slug cohort limitation typed in the artifact"},
     {"n": 3, "title": "T1 count labels (or typed-unavailable) across "
-     "the admitted corpus under quarantine + one-touch governance",
+     "the admitted corpus in the declared evidence namespace + one-touch governance",
      "status": "met", "typing": "verified-live-sm_86",
      "evidence": ["data/local_labels/label_admitted.json",
                   "data/local_labels/holdout_touch_ledger_sm_86.json"],
@@ -212,8 +212,8 @@ BATTERY_CHECKS: tuple[dict, ...] = (
     {"check": "static_no_root_or_ncu_guard",
      "target_test": "workloads/simbench_bw/tests/"
      "test_no_root_or_ncu_static_guard.py",
-     "expectation": "no NCU / driver-root / privileged-CUPTI surface "
-     "outside the data/local_labels + tools/local_labels quarantine"},
+     "expectation": "historical compliance record for no NCU / driver-root / "
+     "privileged-CUPTI surface outside the admitted evidence namespaces"},
     {"check": "plan_token_scanner",
      "target_test": "tools/test_plan_token_scanner.py",
      "expectation": "no plan-document terminology in scanned "

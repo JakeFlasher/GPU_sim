@@ -11,9 +11,9 @@
 #   New CUPTI sidecar production and admission are retired (Stage 4, C1):
 #   this script installs no collector and defines no CUPTI workflow.
 #
-# Cloud containers here have no hardware-counter or clock-lock authority.
+# This cloud-container stage has no hardware-counter or clock-lock authority.
 # New GB202 NCU capture is deferred to its separately authorized host
-# runbook; this script installs neither NCU nor any counter workflow.
+# runbook; this bootstrap therefore installs neither NCU nor a counter workflow.
 #
 # Companion artifacts (same workspace):
 #   workloads/simbench_bw/run_suite.py -- the per-kernel orchestrator that
@@ -43,7 +43,8 @@
 #   - Reboot, shutdown, or modify the kernel command line.
 #   - Lock GPC/memory clocks (no CAP_SYS_ADMIN in containers).
 #   - Detect Secure Boot, manage MOK enrollment, or run DKMS.
-#   - Probe NCU counter availability (NCU is denied in cloud containers).
+#   - Leave NCU counter probing to the separately authorized host capture
+#     workflow; this container bootstrap does not install or invoke NCU.
 #   - Build NVBit (NVBit 1.8 driver ceiling 575.xx; cloud hosts run 580+/595+).
 #
 # Cloud-container constraints:

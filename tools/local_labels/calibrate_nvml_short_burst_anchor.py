@@ -40,8 +40,8 @@ CLAUDE.md compliance (binding):
     GetCurrentClocksThrottleReasons). NEVER mutates application clocks,
     persistence, power limit, MIG, or compute mode; never invokes nvidia-smi
     clock-lock. The spin kernel is an ordinary user-space CUDA launch.
-  - Rule 1 (NCU quarantine): no NCU; NVML telemetry only. Artifact lands under
-    data/local_labels/.
+  - Targets-never-features boundary: no NCU; NVML telemetry only. Artifact lands
+    under data/local_labels/.
   - Rule 3 (no privileged CUPTI): NVML is not CUPTI.
   - sm_86-only: fails closed if the detected device is not an RTX 3090 Ti.
 

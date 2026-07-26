@@ -21,10 +21,10 @@ shims WITHOUT editing any validated harness code:
   * benchmark data at ``tools/sol_execbench/data/benchmark`` (the default
     ``sol-execbench/data/benchmark`` is skewed)
 
-Rule 1: nothing here is an NCU metric. The native-env hash is a build identity
-(library/compiler versions + CUTLASS tree); the runnability verdict is the
-SOL-ExecBench evaluator's own compile/correctness status, never a hardware
-counter.
+Targets-never-features boundary: nothing here is an NCU metric. The native-env
+hash is a build identity (library/compiler versions + CUTLASS tree); the
+runnability verdict is the SOL-ExecBench evaluator's own compile/correctness
+status, never a hardware counter.
 
 Usage:
   .venv/bin/python tools/local_labels/sol_reconstitution.py fingerprint --out <f.json>
@@ -730,8 +730,8 @@ def native_env_fingerprint(
 ) -> dict:
     """Compute the native-env fingerprint by running the SOL harness's own
     ``native_env`` inside the SOL ``.venv`` (which carries torch/CUDA) with the
-    CUTLASS shim. Returns {components, hash, degraded, missing}. Rule-1 clean —
-    a build identity, not a metric."""
+    CUTLASS shim. Returns {components, hash, degraded, missing}; the
+    fingerprint is a build identity, not a metric."""
     script = (
         "import json,sys;"
         f"sys.path.insert(0, {str(NATIVE_ENV_MODULE_ROOT)!r});"

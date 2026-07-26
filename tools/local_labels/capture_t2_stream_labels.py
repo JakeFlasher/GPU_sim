@@ -25,11 +25,11 @@ carrying them, and this driver's exclusions artifact records them as
 standing typed fail-closed rows with the committed probe evidence —
 resurrecting an alias requires fresh probe evidence by construction.
 
-CLAUDE.md compliance (binding): identical to the count capture — NCU
-invoked ONLY under ``tools/local_labels/``; every output lands under
-``data/local_labels/`` (QuarantinePathError fail-closed); CSV-stdout
-capture, no ``.ncu-rep``; no driver-root operations; no privileged
-CUPTI; sm_86-only with sha256-pinned binary binding.
+CLAUDE.md compliance (binding): identical to the count capture — NCU-derived
+labels remain targets rather than simulator features, and every output lands
+under ``data/local_labels/`` (QuarantinePathError fail-closed); CSV-stdout
+capture, no ``.ncu-rep``; no driver-root operations; no privileged CUPTI;
+sm_86-only with sha256-pinned binary binding.
 
 CLI:
   python tools/local_labels/capture_t2_stream_labels.py \

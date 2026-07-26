@@ -34,7 +34,7 @@ Each new cell carries:
     signature when the cell is admitted), and ``source_commit``
     matching the manifest's current ``frozen_at_commit``.
 
-Per CLAUDE.md Rule 1: this script reads only on-disk JSON; it
+Offline manifest-edit boundary: this script reads only on-disk JSON; it
 never invokes NCU or any GPU runtime.
 """
 

@@ -17,9 +17,9 @@ variants:
   ``variant_id`` + the real per-cap ``binary_sha256`` + the live signature.
 
 NVBit tracing only -- this producer invokes the NVBit tracer, NEVER NCU, and
-writes no ``.ncu-rep``. Per CLAUDE.md Rule 1 the NVBit tracer is permitted
-globally; the producer lives under ``tools/local_labels/`` to stay co-located
-with the rest of the build-variant machinery.
+writes no ``.ncu-rep``. The NVBit tracer is an authorized trace input; the
+producer lives under ``tools/local_labels/`` to stay co-located with the
+rest of the build-variant machinery.
 
 Identity note: the NVBit tracer reports ``regs_per_thread = 0`` for these
 kernels (``cuFuncGetAttribute(BINARY_VERSION)`` returns 0 -> fallback), so the

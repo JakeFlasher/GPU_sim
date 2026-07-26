@@ -1,6 +1,6 @@
 """Export selected Nsight Compute report metrics to an XLSX workbook.
 
-This utility is part of the local-label quarantine. It consumes existing
+This utility is part of the local-label evidence workflow. It consumes existing
 ``.ncu-rep`` files; it does not launch NCU or capture new labels.
 """
 from __future__ import annotations

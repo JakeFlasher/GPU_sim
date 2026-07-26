@@ -8,11 +8,11 @@ any cloud budget was spent. A companion SHA-256 digest
 `preflight_manifest_sha256` on their own output so the validator can
 prove they're anchored to a real manifest.
 
-Non-root contract: the cloud GPU host denies hardware-counter access
-and denies driver-level operations (no clock control, no kernel-module
-parameter toggle). The validator therefore does not check for any
-counter-API or clock-lock fields; the manifest schema does not include
-those slots.
+Host capability scope: this cloud manifest schema does not carry hardware-counter
+or clock-control fields. Those capabilities belong to a separately authorized
+host preflight rather than this schema. This validator therefore does not check
+for counter-API or clock-lock fields; the manifest schema does not include those
+slots.
 
 Schema versioning: schema_version 4 is the current version. Adds
 `capabilities.mps_active` and `capabilities.vgpu_active` boolean

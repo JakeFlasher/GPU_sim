@@ -4,7 +4,8 @@ Captures every registry replay-count unit-tagged metric that the committed
 metric-availability probe confirmed on this device (the global ld/st/atom/red
 request counters, the global ld/st sector counters, ``l1tex__t_requests.sum``,
 ``smsp__inst_executed.sum``, plus the probe-resolved local/texture/surface
-request counters) for the admitted sm_86 cells via the local NCU quarantine,
+request counters) for the admitted sm_86 cells in the local-label evidence
+namespace,
 gates them through the SAME per-unit repeatability machinery the label
 pipeline uses (``repeatability_aggregator._aggregate_unit_tagged_metrics``
 with the registry ``relative_tolerance`` rule) AND a stricter integer-
@@ -30,9 +31,9 @@ Integer-stability contract (the count-label admission rule):
   governance trail records this).
 
 CLAUDE.md compliance (binding):
-  - Rule 1 (NCU quarantine + local-label exception): NCU invoked ONLY here
-    under ``tools/local_labels/``; every output lands under
-    ``data/local_labels/`` (enforced fail-closed by ``main`` via
+  - Targets-never-features and evidence namespace: NCU-derived count labels
+    remain label evidence rather than simulator features; every output lands
+    under ``data/local_labels/`` (enforced fail-closed by ``main`` via
     ``QuarantinePathError``). ``--metrics`` capture to CSV stdout — no
     ``.ncu-rep`` artifact is written.
   - Rule 2 (no driver-root): ``ncu --metrics`` does not lock clocks; no
@@ -119,9 +120,10 @@ _BINARY_DIRS = (
 
 
 class QuarantinePathError(ValueError):
-    """An output path escapes the data/local_labels quarantine. Count
-    labels are NCU-derived and may exist ONLY under the Rule-1 quarantine
-    path."""
+    """An output path escapes the data/local_labels evidence namespace. Count
+    labels are NCU-derived and may exist only under the recorded evidence
+    namespace.
+    """
 
     typed_reason = "count_label_output_outside_quarantine"
 
@@ -132,7 +134,8 @@ def assert_quarantine_path(path: Path) -> None:
     if quarantine not in resolved.parents and resolved != quarantine:
         raise QuarantinePathError(
             f"{QuarantinePathError.typed_reason}: {path} resolves outside "
-            f"{_QUARANTINE_ROOT}; NCU-derived count labels are quarantined."
+            f"{_QUARANTINE_ROOT}; NCU-derived count labels are confined to "
+            "the evidence namespace."
         )
 
 
@@ -614,8 +617,8 @@ def main(argv: list[str] | None = None) -> int:
     exclusions_path = Path(args.exclusions_out)
     governance_path = Path(args.governance_out)
     audit_path = Path(args.audit_out)
-    # Rule-1 quarantine: NCU-derived outputs exist only under
-    # data/local_labels (fail-closed before any capture).
+    # NCU-derived outputs exist only under the declared evidence namespace
+    # (fail-closed before any capture).
     for p in (label_path, exclusions_path, governance_path, audit_path):
         assert_quarantine_path(p)
 

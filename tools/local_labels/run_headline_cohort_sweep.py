@@ -21,9 +21,9 @@ The orchestrator preserves the existing
 labels at ``source_commit=0c16e335...`` per the
 supersession-bookkeeping discipline.
 
-Per CLAUDE.md Rule 1: NCU is invoked only via this orchestrator's
-delegation to ``sweep_repeatability_matrix.py``; both live under
-``tools/local_labels/`` (the local-label exception scope).
+The sweep's NCU collection is delegated to the authorized
+``sweep_repeatability_matrix.py`` entry point. Both components live under
+``tools/local_labels/`` and retain their evidence-namespace and receipt gates.
 """
 
 from __future__ import annotations

@@ -7,7 +7,7 @@ admitted sm_120 cell that carries a committed NVBit trace, it
   1. resolves the cell's sm_120 binary and generates the per-PC ``.ca`` / ``.cg``
      cache-op eligibility manifest from LIVE cuobjdump SASS
      (``l1_cache_op_classifier.classify_binary``; cuobjdump is a CUDA binary
-     utility, NOT NCU -- no Rule-1 surface);
+     utility, not an NCU collection surface);
   2. walks the per-threadblock protos into trace records carrying the real
      per-access ``sm_id`` (``l1_production_helper._walk_threadblock_protos``);
   3. derives the REAL per-CTA SM partition from that ``sm_id`` and replays ONLY

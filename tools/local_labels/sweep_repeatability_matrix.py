@@ -25,7 +25,7 @@ build variants of the same shape are distinct, non-collapsing cells. When
 absent, every derived value is byte-identical to the historical 3-field cell.
 
 The harness's only output prefix is ``data/local_labels/sweeps/``;
-attempting to write outside that quarantined sub-prefix produces a
+attempting to write outside that declared evidence sub-prefix produces a
 typed CLI diagnostic. Matrix iteration is sorted across all axes so
 two invocations with the same ``--seed`` produce a byte-identical
 verdict-table.
@@ -84,10 +84,9 @@ import provenance_audit as _provenance_audit  # noqa: E402
 sys.path.pop(0)
 
 # The harness's only output prefix. Any --out-root that is not under
-# this quarantined sub-prefix is rejected at parse time. CLAUDE.md's
-# Critical Rule 1 local-label exception bounds NCU artifacts to
-# ``data/local_labels/``; the sweep harness narrows further to
-# ``data/local_labels/sweeps/``.
+# this declared evidence sub-prefix is rejected at parse time. NCU artifacts
+# are confined to the declared evidence namespace, and the sweep harness
+# narrows further to ``data/local_labels/sweeps/``.
 _QUARANTINE_PREFIX = "data/local_labels/sweeps"
 _DEFAULT_OUTPUT_ROOT = Path(_QUARANTINE_PREFIX)
 
@@ -377,11 +376,11 @@ def _parse_unit_metrics(values: Sequence[str]) -> tuple[str, ...]:
 
 
 def _validate_out_root(path: Path) -> Path:
-    """Reject any --out-root not under the quarantined sub-prefix.
+    """Reject any --out-root outside the declared evidence sub-prefix.
 
     Two acceptable shapes:
       1. The path's resolved form ends with ``data/local_labels/sweeps``
-         (an absolute or relative path that points at the quarantine).
+         (an absolute or relative path under the evidence namespace).
       2. The path's resolved form contains
          ``data/local_labels/sweeps`` as an ancestor segment.
     """
@@ -395,7 +394,8 @@ def _validate_out_root(path: Path) -> Path:
         ):
             return resolved
     raise ValueError(
-        f"--out-root must be under {_QUARANTINE_PREFIX}/; got {path!s} "
+        f"--out-root must be under the declared evidence prefix "
+        f"{_QUARANTINE_PREFIX}/; got {path!s} "
         f"(resolved to {resolved!s})"
     )
 

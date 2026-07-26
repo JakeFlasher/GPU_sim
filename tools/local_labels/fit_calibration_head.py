@@ -6,12 +6,11 @@ chosen-head sidecar) AND
 head LOOCV residual + uncalibrated-baseline + chosen-head
 rationale sidecar).
 
-Per CLAUDE.md Rule 1: NCU is NOT invoked here; this script only
-reads existing label_admitted.json + predictor bundle JSONs and
-writes the two sidecars. Living under ``tools/local_labels/``
-keeps it co-located with the other label-driver scripts; it
-does NOT cross the local-label exception boundary (no NCU, no
-nvidia-smi mutation, no privileged CUPTI).
+The targets-never-features boundary applies here: NCU is NOT invoked; this
+script only reads existing label_admitted.json + predictor bundle JSONs and
+writes the two sidecars. Living under ``tools/local_labels/`` keeps it
+co-located with the other label-driver scripts; it does NOT cross into
+hardware collection (no NCU, no nvidia-smi mutation, no privileged CUPTI).
 
 ``--target-arch`` admits ``sm_86`` (the legacy default) and
 ``sm_120`` (the active sm_120-only decoupled framework target).

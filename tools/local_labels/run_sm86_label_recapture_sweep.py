@@ -23,8 +23,8 @@ Per-cell statuses follow a closed enum:
 The sweep MUST emit the ledger artifact regardless of partial
 completion so a mid-sweep interrupt still leaves a useful audit
 trail. The ledger is committed; per-launch sidecars and
-``.ncu-rep`` files land in the gitignored quarantine path per
-CLAUDE.md Rule 1.
+``.ncu-rep`` files land in the declared evidence namespace
+``data/local_labels/``.
 """
 from __future__ import annotations
 
@@ -83,7 +83,7 @@ def _ledger_entry_from_report(report: dict[str, Any]) -> dict[str, Any]:
     """Project a per-cell report onto the ledger's per-cell shape.
     The ledger omits the per-repeat stderr tails so the committed
     artifact stays compact; reviewers who need stderr inspect the
-    quarantine path directly.
+    declared evidence namespace directly.
     """
     return {
         "cell_key": report["cell_key"],

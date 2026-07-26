@@ -23,7 +23,7 @@ unique slugs. Each catalog entry binds a candidate slug to:
     present yet; ``label_missing`` when a trace is present but no
     NCU label has been generated).
 
-Per CLAUDE.md Rule 1: this script reads only on-disk files; it
+Offline inventory boundary: this script reads only on-disk files; it
 never invokes NCU, the NVBit tracer, or any GPU runtime.
 """
 

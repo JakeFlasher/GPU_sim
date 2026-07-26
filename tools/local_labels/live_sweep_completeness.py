@@ -27,8 +27,8 @@ The defaults pin the post-launch-skip-fix matrix shape
 may override ``expected_*`` parameters for a different matrix
 shape, but the default is the canonical one.
 
-Per CLAUDE.md Rule 1: this scanner is host-only Python; it does
-not invoke NCU, does not access the GPU, and does not write
+Offline evidence-completeness boundary: this scanner is host-only Python; it
+does not invoke NCU, does not access the GPU, and does not write
 outside ``data/local_labels/``.
 """
 

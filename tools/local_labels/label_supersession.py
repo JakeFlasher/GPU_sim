@@ -26,9 +26,9 @@ post-supersession corpus joins on the NEW label rows and
 correctly surfaces ``comparison_runner_join_key_unmatched`` for
 the demoted rows if any consumer still references them.
 
-Per CLAUDE.md Rule 1: this helper is host-only Python; it does
-not invoke NCU, does not access the GPU, and does not write
-outside ``data/local_labels/``.
+Offline evidence-bookkeeping boundary: this helper is host-only Python; it does
+not invoke NCU, does not access the GPU, and does not write outside
+``data/local_labels/``.
 """
 
 from __future__ import annotations

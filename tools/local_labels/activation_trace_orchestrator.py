@@ -7,8 +7,8 @@ The 5 activation cells in the headline cohort live under
 `workloads/portable_lcd/<slug>/<slug>_run` with a different CLI
 contract (binary takes `--timing_shape` / `--correctness_shape`
 flags, not `--shape-point` paired with TOML). Rather than widen
-run_suite.py, this orchestrator stays inside the local-label
-exception scope (`tools/local_labels/`) and produces the same
+run_suite.py, this orchestrator stays inside the local-label trace
+surface (`tools/local_labels/`) and produces the same
 on-disk sidecar shape the existing prereq gate
 (``test_head_coherent_retrace_prereq.py``) expects:
 
@@ -23,12 +23,11 @@ The sidecar carries the four admission-counter fields
 ``binary_sha256`` and ``source_commit`` so the prereq gate
 admits the cell as HEAD-coherent.
 
-Per CLAUDE.md Rule 1 local-label exception: NCU is invoked only
-under `tools/local_labels/` and writes only into the quarantine
-path. This orchestrator does NOT invoke NCU; it invokes the NVBit
-tracer (which is permitted globally — see Rule 1's exception
-scope). Living under `tools/local_labels/` keeps the activation
-orchestrator co-located with the other label-driver code.
+The tracer is authorized for this trace surface, while NCU label collection
+is handled separately by the descriptor-bound label driver. This orchestrator
+writes only to its declared trace-evidence paths and does not invoke NCU.
+It remains co-located with the label-driver code for the shared admission
+workflow.
 """
 
 from __future__ import annotations

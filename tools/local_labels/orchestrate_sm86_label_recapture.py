@@ -11,11 +11,11 @@ predictor bundles; refresh the ``binary_sha256`` field in
 ``label_admitted.json`` so the downstream cascade can admit
 cells.
 
-CLAUDE.md Rule 1's local-label exception authorizes Nsight
-Compute (`ncu`) invocations on local devices (RTX 3090 Ti
-sm_86) for ground-truth labels, but ONLY into the quarantine
-path ``data/local_labels/``. The driver script that wraps
-``ncu`` is ``tools/local_labels/label_driver.sh``.
+The capture workflow authorizes Nsight Compute (``ncu``) through the
+ descriptor-bound label driver on the selected device and retains ground-truth
+ labels only in the declared evidence namespace
+ ``data/local_labels/``. The driver script that wraps ``ncu`` is
+ ``tools/local_labels/label_driver.sh``.
 
 This orchestrator is the per-cell surface called by the bulk
 recapture sweep (a sibling driver to land in a subsequent round
@@ -61,7 +61,7 @@ bulk-sweep driver iterates ``data/local_labels/sm86_cohort_preflight.json``
 and calls ``recapture_cell`` per cell.
 
 This module is read-only against the repository's tracked files;
-it writes only to the quarantine path
+it writes only to the declared evidence namespace
 ``data/local_labels/sm_86/<slug>/<shape_point>/`` (per
 ``label_driver.sh``'s ``--out-dir`` contract).
 """
@@ -350,8 +350,9 @@ def recapture_cell(
     # Derive a typed failure reason when every attempted repeat
     # failed. The per-repeat stderr tails carry the root cause;
     # surface a compact token + a short failure evidence string
-    # so reviewers do not need to inspect quarantined .ncu-rep
-    # files to triage the outcome. Recognized error families:
+    # so reviewers do not need to inspect the declared evidence namespace's
+    # retained .ncu-rep files directly while triaging the outcome. Recognized
+    # error families:
     #
     #   - "CPU ISA level is lower than required" -> the binary
     #     was built on a newer-CPU host and won't launch on

@@ -18,8 +18,9 @@ typed reason and excluded from the exact-agreement gate -- absence is never
 treated as a numeric 0.
 
 This module reads an existing ``.ncu-rep`` (read-only ``ncu --import``; no
-profiling run, no replay, no clock control); it lives under ``tools/local_labels/``
-per the NCU quarantine. The comparison core is GPU-free and text-driven.
+profiling run, no replay, no clock control); it lives under
+``tools/local_labels/`` as an authorized label-evidence consumer. The comparison
+core is GPU-free and text-driven.
 
 Public surface:
 

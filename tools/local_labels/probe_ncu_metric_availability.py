@@ -12,10 +12,11 @@ head that targets an unavailable/unresolved metric can be made to fail closed
 against the committed probe.
 
 The probe writes a committed artifact to
-``data/local_labels/ncu_metric_availability_probe_sm_86.json`` (quarantine), and
-NCU is invoked ONLY here under ``tools/local_labels/`` per the CLAUDE.md Rule-1
-local-label exception. The query enumerates metric names only — no kernel
-replay, no clock-control, no ``.ncu-rep`` artifact, no privileged CUPTI.
+``data/local_labels/ncu_metric_availability_probe_sm_86.json`` in the
+label-evidence namespace. Metric-catalog probing is an independently authorized
+availability check and does not mint campaign labels; this query enumerates
+metric names only — no kernel replay, no clock-control, no ``.ncu-rep`` artifact,
+no privileged CUPTI.
 
 Provenance of the artifact is ``(device, ncu_version)``: a metric-availability
 catalog is a function of the card + the NCU release, reproducible by re-running

@@ -12,7 +12,8 @@ per-SM blocks by launch index, so this is the only reconstruction re-derivable
 from the dumped trace. Resident-blocks-per-SM is estimated from the observed
 `warpid_sm` slot occupancy (max slot + 1) / warps-per-block, floored at 1.
 
-Rule 1: no counter/label value is read; this consumes only the trace wire.
+Targets-never-features boundary: no counter/label value is read; this consumes
+only the trace wire.
 """
 from __future__ import annotations
 

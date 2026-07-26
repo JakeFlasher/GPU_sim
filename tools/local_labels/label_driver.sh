@@ -5,9 +5,10 @@
 #
 #   data/local_labels/<device>/<slug>/<shape_point>/label_<repeat>_<launch>.json
 #
-# The cloud/server contract still forbids ncu and nv-nsight-cu-cli on
-# every non-local target. This script lives under tools/local_labels/
-# and is the only path in the repository that may invoke ncu.
+# Historical repository-wide NCU restrictions are retired. Canonical label
+# admission routes through this descriptor-bound driver and its campaign
+# wrappers; other authorized invokers retain their declared scope and cannot
+# replace the canonical receipt/admission chain.
 #
 # Usage:
 #   tools/local_labels/label_driver.sh \
@@ -123,7 +124,7 @@ Optional arguments:
                             Exact preflight-authorized NCU executable hash.
   --ncu-version-line <line> Exact preflight-authorized NCU Version line.
                             All four fields are required for every collection mode.
-  --out-dir <path>          Quarantine root (default: data/local_labels).
+  --out-dir <path>          Declared evidence root (default: data/local_labels).
   --kernel-name <name>      Forward an exact mangled NCU kernel-name filter.
   --target-processes <mode> Explicit launch-set NCU target process mode.
   --filter-mode <mode>      Explicit launch-set NCU filter mode.

@@ -16,8 +16,8 @@ CLAUDE.md compliance (binding):
     application clocks, persistence, power limit, MIG, or compute mode, and never
     invokes ``nvidia-smi`` clock-lock. The sustained workload is an ordinary
     user-space CUDA matmul (no driver state change).
-  - Rule 1 (NCU quarantine): no NCU is invoked; this is NVML telemetry, not
-    profiling. The artifact lands under ``data/local_labels/``.
+  - Targets-never-features boundary: no NCU is invoked; this is NVML telemetry,
+    not profiling. The artifact lands under ``data/local_labels/``.
   - Rule 3 (no privileged CUPTI): NVML is not CUPTI.
   - sm_86-only: the artifact is named/scoped sm_86; the script fails closed if the
     detected device is not an RTX 3090 Ti.

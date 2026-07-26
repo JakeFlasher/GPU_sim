@@ -95,9 +95,9 @@ _FORBIDDEN_PATTERNS: Tuple[ForbiddenPattern, ...] = (
         pattern=re.compile(r"(?<![A-Za-z0-9_])(?:ncu|nv-nsight-cu-cli)\b"),
         rule="Rule 1",
         detail=(
-            "NCU is forbidden on every device (CLAUDE.md Rule 1). The "
-            "5060.yaml characterisation has a scoped one-time exception "
-            "that does not extend to baselines or the harness."
+            "NCU collection is not an allowed SOL-baseline or harness input. "
+            "Campaign NCU labels belong to the authorized capture workflow; "
+            "this scaffold-local forbidden-surface check remains unchanged."
         ),
     ),
     ForbiddenPattern(
