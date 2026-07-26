@@ -1118,6 +1118,9 @@ def test_inventory_hashes_complete_trace_envelope_and_logs(tmp_path):
         "ncu_launch_observation": (
             cell / "labels" / "run_0_0.launch_observation.json"
         ),
+        "ncu_collection_receipt": (
+            cell / "logs" / "label_ncu_collection_receipt.json"
+        ),
         "trace_manifest": cell / "trace_capture_manifest.json",
         "root": cell / "trace" / "dynamic_trace.pb",
         "stats": cell / "trace" / "stats.csv",
@@ -1136,7 +1139,7 @@ def test_inventory_hashes_complete_trace_envelope_and_logs(tmp_path):
         label={
             k: paths[k] for k in (
                 "sidecar", "run_manifest", "ncu_report",
-                "ncu_launch_observation",
+                "ncu_launch_observation", "ncu_collection_receipt",
             )
         },
         trace={"manifest": paths["trace_manifest"], "root_pb": paths["root"],
@@ -5897,6 +5900,11 @@ def test_label_capture_stages_workload_output_and_checks_full_vector(
         (out / "label_run_manifest_0_1.json").write_text(json.dumps({
             "schema_version": 1, "source_commit": matrix["source_commit"],
             "binary_sha256": cell["invocation"]["executable_sha256"],
+            "ncu_identity": {
+                "resolved_path": _expected_ncu_identity().resolved_path,
+                "executable_sha256": _expected_ncu_identity().executable_sha256,
+                "version_line": _expected_ncu_identity().version_line,
+            },
             "kernel_signature_sha256": "1" * 64,
             "kernel_signature_source": "fallback_legacy", "arch": "sm_86",
             "slug": "silu_fwd_bf16_sm80", "shape_point": "timing_shape",
@@ -6021,6 +6029,11 @@ def test_sol_label_consumer_keeps_shape_metadata_out_of_target_argv(
         (out / "label_run_manifest_0_0.json").write_text(json.dumps({
             "schema_version": 1, "source_commit": matrix["source_commit"],
             "binary_sha256": invocation["executable_sha256"],
+            "ncu_identity": {
+                "resolved_path": ncu_identity.resolved_path,
+                "executable_sha256": ncu_identity.executable_sha256,
+                "version_line": ncu_identity.version_line,
+            },
             "kernel_signature_sha256": "1" * 64,
             "kernel_signature_source": "fallback_legacy", "arch": "sm_86",
             "slug": slug, "shape_point": shape,
@@ -6974,6 +6987,7 @@ def test_capture_cell_sol_typed_route_seals_full_orchestration_without_gpu(
         ncu_launch_observation = (
             label_root / "run_0_0.launch_observation.json"
         )
+        receipt = cell_dir / "logs" / "label_ncu_collection_receipt.json"
         sidecar.write_text('{"synthetic":"label"}\n')
         run_manifest.write_text('{"synthetic":"run"}\n')
         ncu_report.write_bytes(b"synthetic ncu report")
@@ -6988,6 +7002,7 @@ def test_capture_cell_sol_typed_route_seals_full_orchestration_without_gpu(
             "schema_version": 1,
             "sol_phase_evidence": phase,
         }) + "\n")
+        receipt.write_text('{"synthetic":"receipt"}\n')
         events.append("label")
         return {
             "command": [str(cc.LABEL_DRIVER), "--"],
@@ -7001,6 +7016,7 @@ def test_capture_cell_sol_typed_route_seals_full_orchestration_without_gpu(
             "stdout_log": stdout,
             "stderr_log": stderr,
             "capture_manifest": capture_manifest,
+            "ncu_collection_receipt": receipt,
             "sol_phase_evidence": phase,
             "unit_metric_count": len(
                 matrix["metric_registry"]["collection"][
@@ -7245,6 +7261,7 @@ def test_capture_cell_sol_typed_route_seals_full_orchestration_without_gpu(
         "execution_log",
             "label_run_manifest",
             "label_sidecar",
+            "ncu_collection_receipt",
             "ncu_launch_observation",
             "ncu_report",
         "sol_capture_evidence",

@@ -6208,6 +6208,11 @@ def capture_label(
     expected_run = {
         "source_commit": source_commit,
         "binary_sha256": invocation["executable_sha256"],
+        "ncu_identity": {
+            "resolved_path": expected_ncu_identity.resolved_path,
+            "executable_sha256": expected_ncu_identity.executable_sha256,
+            "version_line": expected_ncu_identity.version_line,
+        },
         "arch": matrix["arch"],
         "slug": identity["slug"],
         "shape_point": label_shape_point,
@@ -6231,6 +6236,8 @@ def capture_label(
         "command": command,
         "binary_sha256": invocation["executable_sha256"],
         "source_commit": source_commit,
+        "collection_environment": collection_environment.as_dict(),
+        "working_directory": str(label_cwd),
         "selected_unit_metrics": list(unit_metrics),
         "selected_flat_metrics": matrix["metric_registry"]["collection"][
             "selected_flat_metrics"
@@ -9494,6 +9501,17 @@ def inventory_cell_artifacts(
                 operation="ncu_observation_inventory_resolve",
             )
         ] = "ncu_launch_observation"
+        receipt_path = label_row.get("ncu_collection_receipt")
+        if receipt_path is not None:
+            if not isinstance(receipt_path, Path):
+                raise ChunkRefusal(
+                    "label_collection_receipt_invalid", repr(receipt_path),
+                )
+            exact_kinds[_resolve_output_path(
+                receipt_path,
+                code="cell_inventory_storage_failure",
+                operation="ncu_collection_receipt_inventory_resolve",
+            )] = "ncu_collection_receipt"
         launch_set_artifacts = label_row.get("launch_set_artifacts")
         if launch_set_artifacts is not None:
             expected_launch_set_roles = {
@@ -9587,9 +9605,13 @@ def inventory_cell_artifacts(
     base_required = {
         "trace_manifest", "control_bits", "control_manifest", "cell_result",
     }
-    if labels:
+    if labels and not any(
+        label_row.get("launch_set_artifacts") is not None
+        for label_row in labels
+    ):
         base_required |= {
             "label_sidecar", "label_run_manifest", "ncu_report",
+            "ncu_collection_receipt",
         }
     if disposition == "admitted" and typed_reason is None:
         required = base_required | {

@@ -1236,6 +1236,9 @@ LD_REPEAT_INDEX="$REPEAT_INDEX" \
 LD_LAUNCH_INDEX="$LAUNCH_INDEX" \
 LD_REGISTER_CAP="$LD_REGISTER_CAP" \
 LD_VARIANT_ID="$LD_VARIANT_ID" \
+LD_NCU_RESOLVED_PATH="$NCU_BIN" \
+LD_NCU_EXECUTABLE_SHA256="$NCU_EXECUTABLE_SHA256" \
+LD_NCU_VERSION_LINE="$NCU_VERSION_LINE" \
 python3 - <<'PY'
 import json
 import os
@@ -1250,6 +1253,11 @@ manifest = {
     "shape_point": os.environ["LD_SHAPE_POINT"],
     "repeat_index": int(os.environ["LD_REPEAT_INDEX"]),
     "launch_index": int(os.environ["LD_LAUNCH_INDEX"]),
+    "ncu_identity": {
+        "resolved_path": os.environ["LD_NCU_RESOLVED_PATH"],
+        "executable_sha256": os.environ["LD_NCU_EXECUTABLE_SHA256"],
+        "version_line": os.environ["LD_NCU_VERSION_LINE"],
+    },
 }
 # Optional build-variant identity (validated upstream against the canonical
 # domain). Present ONLY for a variant cell; a base run manifest is unchanged.

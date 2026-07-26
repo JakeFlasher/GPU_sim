@@ -191,6 +191,7 @@
             "control_bits",
             "control_manifest",
             "cell_result",
+            "ncu_collection_receipt",
             "execution_log"
           ]
         },
@@ -304,11 +305,12 @@
             "properties": {
               "typed_reason": {"type": "null"},
               "artifacts": {
-                "minItems": 11,
+                "minItems": 12,
                 "allOf": [
                   {"contains": {"properties": {"artifact_kind": {"const": "label_sidecar"}}, "required": ["artifact_kind"]}},
                   {"contains": {"properties": {"artifact_kind": {"const": "label_run_manifest"}}, "required": ["artifact_kind"]}},
                   {"contains": {"properties": {"artifact_kind": {"const": "ncu_report"}}, "required": ["artifact_kind"]}},
+                  {"contains": {"properties": {"artifact_kind": {"const": "ncu_collection_receipt"}}, "required": ["artifact_kind"]}, "minContains": 1, "maxContains": 1},
                   {"contains": {"properties": {"artifact_kind": {"const": "ncu_launch_observation"}}, "required": ["artifact_kind"]}, "minContains": 1, "maxContains": 1},
                   {"contains": {"properties": {"artifact_kind": {"const": "trace_manifest"}}, "required": ["artifact_kind"]}},
                   {"contains": {"properties": {"artifact_kind": {"const": "trace_root"}}, "required": ["artifact_kind"]}},

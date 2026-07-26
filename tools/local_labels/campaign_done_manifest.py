@@ -29,9 +29,13 @@ from typing import Any
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 _HERE = Path(__file__).resolve().parent
-if str(_HERE) not in sys.path:
-    sys.path.insert(0, str(_HERE))
+for _import_root in (REPO_ROOT, _HERE):
+    if str(_import_root) not in sys.path:
+        sys.path.insert(0, str(_import_root))
 from campaign_exclusion_ledger import REASON_VOCABULARY  # noqa: E402
+from tools.local_labels import immutable_artifact as immutable  # noqa: E402
+from tools.local_labels import ncu_action_executor  # noqa: E402
+from tools.local_labels import ncu_collection_receipt  # noqa: E402
 
 MANIFEST_KIND = "campaign_chunk_done"
 SCHEMA_VERSION = 2
@@ -56,11 +60,12 @@ ARTIFACT_KINDS = (
     "control_bits",
     "control_manifest",
     "cell_result",
+    "ncu_collection_receipt",
     "execution_log",
 )
 _ADMITTED_REQUIRED_ARTIFACT_KINDS = frozenset({
     "label_sidecar", "label_run_manifest", "ncu_report",
-    "ncu_launch_observation", "trace_manifest",
+    "ncu_launch_observation", "ncu_collection_receipt", "trace_manifest",
     "trace_root", "trace_stats", "trace_threadblock", "control_bits",
     "control_manifest", "cell_result",
 })
@@ -912,7 +917,9 @@ def _normalize_results(
         if disposition == "admitted":
             required_kinds = _ADMITTED_REQUIRED_ARTIFACT_KINDS
             if allow_historical_bootstrap:
-                required_kinds = required_kinds - {"ncu_launch_observation"}
+                required_kinds = required_kinds - {
+                    "ncu_launch_observation", "ncu_collection_receipt",
+                }
             missing = sorted(required_kinds - kinds)
             if missing:
                 problems.append(
@@ -1255,6 +1262,18 @@ def _load_json(path: Path, label: str, problems: list[str]) -> dict | None:
         return None
     except (json.JSONDecodeError, UnicodeError) as exc:
         problems.append(f"invalid JSON in {label} {path}: {exc}")
+        return None
+    if not isinstance(value, dict):
+        problems.append(f"{label} {path} is not a JSON object")
+        return None
+    return value
+
+
+def _load_strict_json(path: Path, label: str, problems: list[str]) -> dict | None:
+    try:
+        value = immutable.strict_json_loads(path.read_bytes(), label=label)
+    except (OSError, immutable.ImmutableArtifactError) as exc:
+        problems.append(f"invalid {label} {path}: {exc}")
         return None
     if not isinstance(value, dict):
         problems.append(f"{label} {path} is not a JSON object")
@@ -3593,6 +3612,271 @@ def verify_manifest_sol_definition_attestations(
     return problems
 
 
+def _verify_ncu_collection_receipt(
+    row: dict,
+    *,
+    manifest: dict,
+    preflight: dict | None,
+    output_root: Path,
+    label: str,
+) -> list[str]:
+    """Bind an admitted collection receipt to retained preflight authority."""
+    if row.get("disposition") != "admitted":
+        return []
+    problems: list[str] = []
+    artifacts = row.get("artifacts")
+    if not isinstance(artifacts, list):
+        return [f"{label}.artifacts is not an array"]
+    receipt_artifacts = [
+        artifact for artifact in artifacts
+        if isinstance(artifact, dict)
+        and artifact.get("artifact_kind") == "ncu_collection_receipt"
+    ]
+    if len(receipt_artifacts) != 1:
+        return [
+            f"{label} requires exactly one ncu_collection_receipt artifact "
+            f"(observed={len(receipt_artifacts)})"
+        ]
+    if not isinstance(preflight, dict):
+        return [f"{label} cannot derive NCU authority from retained preflight"]
+    checks = preflight.get("checks")
+    if not isinstance(checks, dict):
+        return [f"{label} preflight lacks checks.ncu authority"]
+    ncu = checks.get("ncu")
+    if not isinstance(ncu, dict):
+        return [f"{label} preflight lacks checks.ncu authority"]
+    try:
+        expected = ncu_action_executor.build_expected_ncu_identity(
+            resolved_path=ncu["resolved_path"],
+            executable_sha256=ncu["executable_sha256"],
+            version_line=ncu["version_line"],
+        )
+    except (KeyError, ncu_action_executor.NcuActionExecutorError) as exc:
+        return [f"{label} preflight NCU authority is invalid: {exc}"]
+    relative = receipt_artifacts[0].get("relative_path")
+    if not _valid_relative_artifact_path(relative):
+        return [f"{label} NCU receipt path is invalid"]
+    receipt = _load_strict_json(
+        output_root / relative, f"{label}.ncu_collection_receipt", problems,
+    )
+    if receipt is None:
+        return problems or [f"{label} NCU receipt is unavailable"]
+    try:
+        ncu_collection_receipt.validate_schema(receipt)
+        immutable.verify_model_seal(receipt, "receipt_seal_sha256")
+    except (
+        ncu_collection_receipt.CollectionReceiptError,
+        immutable.ImmutableArtifactError,
+        TypeError,
+        UnicodeError,
+        ValueError,
+    ) as exc:
+        problems.append(f"{label} NCU receipt is invalid: {exc}")
+        return problems
+    expected_identity = {
+        "resolved_path": expected.resolved_path,
+        "executable_sha256": expected.executable_sha256,
+        "version_line": expected.version_line,
+    }
+    artifact_by_path = {
+        artifact.get("relative_path"): artifact
+        for artifact in artifacts
+        if (
+            isinstance(artifact, dict)
+            and isinstance(artifact.get("relative_path"), str)
+        )
+    }
+    receipt_cell_dir = (output_root / relative).parent.parent
+    role_kinds = {
+        "ncu_report": "ncu_report",
+        "label_run_manifest": "label_run_manifest",
+        "ncu_launch_observation": "ncu_launch_observation",
+        "label_capture_manifest": "execution_log",
+    }
+    receipt_bindings = receipt.get("artifacts")
+    external_bindings: list[dict] = []
+    launch_observation: dict | None = None
+    capture_manifest: dict | None = None
+    report_sha256: str | None = None
+    if not isinstance(receipt_bindings, list):
+        problems.append(f"{label} NCU receipt artifacts are not an array")
+    else:
+        for binding in receipt_bindings:
+            if not isinstance(binding, dict):
+                continue
+            role = binding.get("role")
+            internal_relative = binding.get("relative_path")
+            if not isinstance(role, str) or role not in role_kinds:
+                continue
+            if not _valid_relative_artifact_path(internal_relative):
+                problems.append(
+                    f"{label} NCU receipt {role} path is invalid"
+                )
+                continue
+            bound_path = receipt_cell_dir / PurePosixPath(internal_relative)
+            try:
+                bound_relative = bound_path.relative_to(output_root).as_posix()
+            except ValueError:
+                problems.append(
+                    f"{label} NCU receipt {role} path escapes output root"
+                )
+                continue
+            artifact = artifact_by_path.get(bound_relative)
+            if artifact is None:
+                problems.append(
+                    f"{label} NCU receipt {role} is absent from DONE artifacts"
+                )
+                continue
+            if artifact.get("artifact_kind") != role_kinds[role]:
+                problems.append(
+                    f"{label} NCU receipt {role} artifact kind differs from DONE"
+                )
+            if artifact.get("sha256") != binding.get("sha256"):
+                problems.append(
+                    f"{label} NCU receipt {role} hash differs from DONE"
+                )
+            if artifact.get("size_bytes") != binding.get("size_bytes"):
+                problems.append(
+                    f"{label} NCU receipt {role} size differs from DONE"
+                )
+            try:
+                external_bindings.append(ncu_collection_receipt.artifact_binding(
+                    role=role,
+                    relative_path=internal_relative,
+                    sha256=artifact.get("sha256"),
+                    size_bytes=artifact.get("size_bytes"),
+                ))
+            except ncu_collection_receipt.CollectionReceiptError as exc:
+                problems.append(
+                    f"{label} NCU receipt {role} external binding is invalid: {exc}"
+                )
+            if role == "ncu_report":
+                report_sha256 = artifact.get("sha256")
+            if role == "ncu_launch_observation":
+                observation = _load_json(
+                    output_root / bound_relative,
+                    f"{label}.ncu_launch_observation",
+                    problems,
+                )
+                if observation is not None:
+                    if (
+                        observation.get("observation_sha256")
+                        != receipt.get("launch_observation_sha256")
+                    ):
+                        problems.append(
+                            f"{label} NCU receipt launch observation seal differs"
+                        )
+                    if observation.get("report_sha256") != report_sha256:
+                        problems.append(
+                            f"{label} launch observation report differs from NCU report"
+                        )
+                    try:
+                        unsealed_observation = {
+                            key: value for key, value in observation.items()
+                            if key != "observation_sha256"
+                        }
+                        if (
+                            _canonical_sha256(unsealed_observation)
+                            != observation.get("observation_sha256")
+                        ):
+                            problems.append(
+                                f"{label} launch observation seal is not canonical"
+                            )
+                    except (TypeError, UnicodeError, ValueError) as exc:
+                        problems.append(
+                            f"{label} launch observation is not canonical: {exc}"
+                        )
+                launch_observation = observation
+            if role == "label_capture_manifest":
+                capture = _load_json(
+                    output_root / bound_relative,
+                    f"{label}.label_capture_manifest",
+                    problems,
+                )
+                if capture is not None and capture.get("command") != receipt.get(
+                    "command"
+                ):
+                    problems.append(
+                        f"{label} NCU receipt command differs from capture manifest"
+                    )
+                capture_manifest = capture
+    if receipt.get("preflight_sha256") != manifest.get("preflight_sha256"):
+        problems.append(f"{label} NCU receipt preflight identity differs")
+    if receipt.get("status") != "pass" or receipt.get("exit_status") != 0:
+        problems.append(f"{label} NCU receipt is not a successful collection")
+    if receipt.get("ncu_identity") != expected_identity:
+        problems.append(
+            f"{label} NCU receipt identity differs from retained preflight"
+        )
+    run_manifests = [
+        artifact for artifact in artifacts
+        if isinstance(artifact, dict)
+        and artifact.get("artifact_kind") == "label_run_manifest"
+    ]
+    if len(run_manifests) != 1:
+        problems.append(
+            f"{label} requires exactly one label_run_manifest artifact "
+            f"(observed={len(run_manifests)})"
+        )
+    else:
+        run_relative = run_manifests[0].get("relative_path")
+        if _valid_relative_artifact_path(run_relative):
+            run = _load_json(
+                output_root / run_relative,
+                f"{label}.label_run_manifest",
+                problems,
+            )
+            if run is not None and run.get("ncu_identity") != expected_identity:
+                problems.append(
+                    f"{label} label run manifest NCU identity differs from "
+                    "retained preflight"
+                )
+    if (
+        len(external_bindings) == 4
+        and launch_observation is not None
+        and capture_manifest is not None
+    ):
+        raw_environment = capture_manifest.get("collection_environment")
+        raw_working_directory = capture_manifest.get("working_directory")
+        if (
+            isinstance(raw_environment, dict)
+            and isinstance(raw_working_directory, str)
+        ):
+            try:
+                ncu_collection_receipt.validate_receipt(
+                    receipt,
+                    expected_preflight_sha256=manifest.get("preflight_sha256"),
+                    expected_ncu_identity=expected,
+                    expected_command=capture_manifest.get("command"),
+                    expected_environment=(
+                        ncu_action_executor.NcuCollectionEnvironment(
+                            raw_environment
+                        )
+                    ),
+                    expected_working_directory=Path(raw_working_directory),
+                    expected_exit_status=0,
+                    expected_artifacts=external_bindings,
+                    expected_launch_observation_sha256=(
+                        launch_observation.get("observation_sha256")
+                    ),
+                )
+            except (
+                ncu_collection_receipt.CollectionReceiptError,
+                ncu_action_executor.NcuActionExecutorError,
+                TypeError,
+                UnicodeError,
+                ValueError,
+            ) as exc:
+                problems.append(
+                    f"{label} NCU receipt external bindings differ: {exc}"
+                )
+        else:
+            problems.append(
+                f"{label} capture manifest lacks collection environment authority"
+            )
+    return problems
+
+
 def _verify_referenced_files(
     manifest: dict,
     repo_root: Path,
@@ -3923,6 +4207,13 @@ def _verify_referenced_files(
                         f"artifact sha256 mismatch for {rel!r}: "
                         f"manifest={artifact.get('sha256')!r} actual={actual_sha}")
             if not _is_historical_bootstrap(manifest):
+                problems.extend(_verify_ncu_collection_receipt(
+                    row,
+                    manifest=manifest,
+                    preflight=preflight,
+                    output_root=output_root,
+                    label=f"cell_results[{i}]",
+                ))
                 problems.extend(_verify_cell_capture_provenance(
                     row, manifest=manifest, output_root=output_root,
                     admission_runs=admission_runs,

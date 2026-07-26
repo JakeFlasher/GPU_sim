@@ -19,6 +19,8 @@ if str(_REPO) not in sys.path:
 from tools.local_labels import campaign_done_manifest as dm  # noqa: E402
 from tools.local_labels import campaign_exclusion_ledger as el  # noqa: E402
 from tools.local_labels import capture_budget_route as br  # noqa: E402
+from tools.local_labels import ncu_action_executor  # noqa: E402
+from tools.local_labels import ncu_collection_receipt  # noqa: E402
 from tools.local_labels import sol_definition_equivalence as sol_def  # noqa: E402
 from tools.trace_sampling.counting_pass import BlockStat, CellStats  # noqa: E402
 
@@ -416,6 +418,14 @@ def case(tmp_path: Path) -> dict:
     budget_path = inputs / "budget.json"
     _write_json(budget_path, {"retention_budget_gib": 200})
     preflight_path = inputs / "preflight.json"
+    ncu_path = inputs / "ncu"
+    ncu_path.write_bytes(b"fixture-ncu")
+    ncu_path.chmod(0o755)
+    ncu_identity = {
+        "resolved_path": str(ncu_path),
+        "executable_sha256": _sha(ncu_path),
+        "version_line": "Version 2026.1.0.0 (public-release)",
+    }
     preflight_generated_at = "2026-07-10T12:00:00Z"
     admitted_at = "2026-07-10T12:00:01Z"
     capture_started_at = "2026-07-10T12:00:02Z"
@@ -427,6 +437,7 @@ def case(tmp_path: Path) -> dict:
         "pins_sha256": _sha(pins_path),
         "capture_admitted": True,
         "blockers": [],
+        "checks": {"ncu": ncu_identity},
     })
 
     output_root = tmp_path / "capture"
@@ -445,6 +456,7 @@ def case(tmp_path: Path) -> dict:
             ("label_run_manifest", "label_run_manifest.json"),
             ("ncu_report", "profile.ncu-rep"),
             ("ncu_launch_observation", "ncu_launch_observation.json"),
+            ("execution_log", "label_capture_manifest.json"),
             ("trace_manifest", "trace_manifest.json"),
             ("trace_root", "dynamic_trace.pb.zst"),
             ("trace_stats", "stats.csv"),
@@ -472,14 +484,92 @@ def case(tmp_path: Path) -> dict:
                     "definition_equivalence": None,
                     "definition_equivalence_attestation_sha256": None,
                 })
+            elif kind == "ncu_launch_observation":
+                _write_json(path, {
+                    "report_sha256": _sha(path.parent / "profile.ncu-rep"),
+                    "observation_sha256": dm._canonical_sha256({
+                        "report_sha256": _sha(path.parent / "profile.ncu-rep"),
+                    }),
+                })
+            elif kind == "execution_log":
+                _write_json(path, {
+                    "schema_version": 1,
+                    "command": ["label-driver", "--", "fixture-binary"],
+                    "collection_environment": {
+                        "LANG": "C", "LANGUAGE": "C", "LC_ALL": "C",
+                        "PYTHONNOUSERSITE": "1",
+                        "LABEL_DRIVER_GPU_INDEX": "0",
+                        "LABEL_DRIVER_PRESERVE_FAILED_EVIDENCE": "1",
+                        "PATH": "/usr/local/cuda-13.2/bin:/usr/bin:/bin",
+                        "PWD": str(repo),
+                    },
+                    "working_directory": str(repo),
+                })
             else:
-                path.write_bytes(f"{source}:{slug}:{kind}\n".encode())
+                if kind == "label_run_manifest":
+                    _write_json(path, {
+                        "schema_version": 1,
+                        "ncu_identity": ncu_identity,
+                    })
+                else:
+                    path.write_bytes(f"{source}:{slug}:{kind}\n".encode())
             artifacts.append({
                 "artifact_kind": kind,
                 "relative_path": rel,
                 "sha256": _sha(path),
                 "size_bytes": path.stat().st_size,
             })
+        artifact_by_kind = {item["artifact_kind"]: item for item in artifacts}
+        receipt_path = output_root / source / slug / "logs" / "label_ncu_collection_receipt.json"
+        receipt_path.parent.mkdir(parents=True, exist_ok=True)
+        receipt = ncu_collection_receipt.build_receipt(
+            preflight_sha256=_sha(preflight_path),
+            expected_ncu_identity=ncu_action_executor.build_expected_ncu_identity(
+                **ncu_identity,
+            ),
+            command=["label-driver", "--", "fixture-binary"],
+            environment=ncu_action_executor.NcuCollectionEnvironment({
+                "LANG": "C", "LANGUAGE": "C", "LC_ALL": "C",
+                "PYTHONNOUSERSITE": "1", "LABEL_DRIVER_GPU_INDEX": "0",
+                "LABEL_DRIVER_PRESERVE_FAILED_EVIDENCE": "1",
+                "PATH": "/usr/local/cuda-13.2/bin:/usr/bin:/bin",
+                "PWD": str(repo),
+            }),
+            working_directory=repo,
+            exit_status=0,
+            artifacts=[
+                ncu_collection_receipt.artifact_binding(
+                    role=role,
+                    relative_path=artifact_by_kind[kind]["relative_path"].split(
+                        f"{source}/{slug}/", 1
+                    )[1],
+                    sha256=artifact_by_kind[kind]["sha256"],
+                    size_bytes=artifact_by_kind[kind]["size_bytes"],
+                )
+                for role, kind in (
+                    ("ncu_report", "ncu_report"),
+                    ("label_run_manifest", "label_run_manifest"),
+                    ("ncu_launch_observation", "ncu_launch_observation"),
+                    ("label_capture_manifest", "execution_log"),
+                )
+            ],
+            launch_observation_sha256=dm._canonical_sha256({
+                "report_sha256": _sha(
+                    output_root / source / slug / "profile.ncu-rep"
+                ),
+            }),
+        )
+        receipt_path.write_text(
+            json.dumps(receipt, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        receipt_rel = f"{source}/{slug}/logs/label_ncu_collection_receipt.json"
+        artifacts.append({
+            "artifact_kind": "ncu_collection_receipt",
+            "relative_path": receipt_rel,
+            "sha256": _sha(receipt_path),
+            "size_bytes": receipt_path.stat().st_size,
+        })
         results.append({
             "roster_source": source,
             "slug": slug,
@@ -856,6 +946,20 @@ def _upgrade_case_to_current_sol(case: dict) -> None:
     _write_json(preflight_path, preflight)
     preflight_sha = _sha(preflight_path)
     for result in case["kwargs"]["cell_results"]:
+        receipt_artifact = next(
+            artifact for artifact in result["artifacts"]
+            if artifact["artifact_kind"] == "ncu_collection_receipt"
+        )
+        receipt_path = case["output_root"] / receipt_artifact["relative_path"]
+        receipt = json.loads(receipt_path.read_text())
+        receipt.pop("receipt_seal_sha256", None)
+        receipt["preflight_sha256"] = preflight_sha
+        receipt = dm.immutable.seal_model(receipt, "receipt_seal_sha256")
+        _write_json(receipt_path, receipt)
+        receipt_artifact.update({
+            "sha256": _sha(receipt_path), "size_bytes": receipt_path.stat().st_size,
+        })
+    for result in case["kwargs"]["cell_results"]:
         result["capture_preflight_sha256"] = preflight_sha
         cell_artifact = next(
             artifact for artifact in result["artifacts"]
@@ -893,6 +997,101 @@ def test_valid_manifest_is_v2_schema_valid_and_resume_safe(case):
     assert manifest["schema_version"] == 2
     assert manifest["counts"] == {"admitted": 2, "excluded": 0, "failed": 0}
     assert dm.verify_seal(manifest, repo_root=case["repo"]) == []
+
+
+def test_done_rejects_missing_ncu_collection_receipt(case):
+    case["kwargs"]["cell_results"][0]["artifacts"] = [
+        artifact for artifact in case["kwargs"]["cell_results"][0]["artifacts"]
+        if artifact["artifact_kind"] != "ncu_collection_receipt"
+    ]
+    with pytest.raises(dm.DoneManifestError, match="ncu_collection_receipt"):
+        _build(case)
+
+
+def test_done_rejects_resealed_ncu_identity_drift(case):
+    manifest = _build(case)
+    row = manifest["cell_results"][0]
+    artifact = next(
+        item for item in row["artifacts"]
+        if item["artifact_kind"] == "ncu_collection_receipt"
+    )
+    path = case["output_root"] / artifact["relative_path"]
+    receipt = json.loads(path.read_text())
+    receipt.pop("receipt_seal_sha256", None)
+    receipt["ncu_identity"]["executable_sha256"] = "f" * 64
+    _write_and_reseal(path, artifact, dm.immutable.seal_model(
+        receipt, "receipt_seal_sha256"
+    ))
+    problems = dm.verify_seal(manifest, repo_root=case["repo"])
+    assert any("receipt identity differs" in problem for problem in problems)
+
+
+def test_done_rejects_resealed_ncu_path_substitution(case):
+    manifest = _build(case)
+    row = manifest["cell_results"][0]
+    artifact = next(
+        item for item in row["artifacts"]
+        if item["artifact_kind"] == "ncu_collection_receipt"
+    )
+    path = case["output_root"] / artifact["relative_path"]
+    receipt = json.loads(path.read_text())
+    receipt.pop("receipt_seal_sha256", None)
+    receipt["ncu_identity"]["resolved_path"] = "/substituted/ncu"
+    _write_and_reseal(path, artifact, dm.immutable.seal_model(
+        receipt, "receipt_seal_sha256"
+    ))
+    problems = dm.verify_seal(manifest, repo_root=case["repo"])
+    assert any("receipt identity differs" in problem for problem in problems)
+
+
+def test_done_rejects_resealed_ncu_artifact_hash_drift(case):
+    manifest = _build(case)
+    row = manifest["cell_results"][0]
+    artifact = next(
+        item for item in row["artifacts"]
+        if item["artifact_kind"] == "ncu_collection_receipt"
+    )
+    path = case["output_root"] / artifact["relative_path"]
+    receipt = json.loads(path.read_text())
+    receipt.pop("receipt_seal_sha256", None)
+    report_binding = next(
+        item for item in receipt["artifacts"]
+        if item["role"] == "ncu_report"
+    )
+    report_binding["sha256"] = "e" * 64
+    _write_and_reseal(path, artifact, dm.immutable.seal_model(
+        receipt, "receipt_seal_sha256"
+    ))
+    problems = dm.verify_seal(manifest, repo_root=case["repo"])
+    assert any("receipt ncu_report hash differs" in problem for problem in problems)
+
+
+def test_done_rejects_missing_run_manifest_ncu_identity(case):
+    manifest = _build(case)
+    row = manifest["cell_results"][0]
+    artifact = next(
+        item for item in row["artifacts"]
+        if item["artifact_kind"] == "label_run_manifest"
+    )
+    path = case["output_root"] / artifact["relative_path"]
+    run = json.loads(path.read_text())
+    run.pop("ncu_identity", None)
+    _write_and_reseal(path, artifact, run)
+    problems = dm.verify_seal(manifest, repo_root=case["repo"])
+    assert any("run manifest NCU identity differs" in problem for problem in problems)
+
+
+def test_done_rejects_malformed_preflight_checks(case):
+    manifest = _build(case)
+    row = manifest["cell_results"][0]
+    problems = dm._verify_ncu_collection_receipt(
+        row,
+        manifest=manifest,
+        preflight={"checks": "malformed"},
+        output_root=case["output_root"],
+        label="cell_results[0]",
+    )
+    assert problems == ["cell_results[0] preflight lacks checks.ncu authority"]
 
 
 def test_round28_schema_requires_admission_and_matrix_seal(case):
