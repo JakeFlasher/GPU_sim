@@ -455,6 +455,8 @@ def test_supplemental_cell_gate_refuses_before_validation_or_capture(
         "live_capture_guard",
         "capture_label",
         "capture_trace",
+        "build_production_launch_set_plan",
+        "execute_production_launch_set_plan",
         "_run_logged",
     ):
         monkeypatch.setattr(cc, name, unexpected)
@@ -1503,6 +1505,266 @@ def test_fixture_only_launch_set_plan_has_exact_command_and_artifacts(tmp_path):
         path.name for path in plan["fixed_artifacts"]
     }
     assert not cell_dir.exists()
+
+
+def test_production_launch_set_plan_names_repository_driver(tmp_path):
+    matrix, cell = _generated_sol_cell()
+    pins = json.loads(cc.DEFAULT_PINS.read_text())
+    pins["toolchain"]["nvcc_release"] = "13.2"
+    invocation = cell["invocation"]
+    plan = cc.build_production_launch_set_plan(
+        cell=cell,
+        binary=cc.REPO_ROOT / invocation["executable_path"],
+        invocation=invocation,
+        cell_dir=tmp_path / "absent",
+        matrix=matrix,
+        pins=pins,
+        trace_inventory_cardinality=2,
+        execution_source_commit="a" * 40,
+        registry=metric_registry.load_registry(),
+    )
+    assert plan["command"][0] == str(cc._PRODUCTION_LABEL_DRIVER)
+    assert plan["plan_sha256"] == cc._launch_set_plan_sha256(plan)
+    assert not (tmp_path / "absent").exists()
+
+
+def test_production_launch_set_plan_uses_threaded_registry(tmp_path):
+    matrix, cell = _generated_sol_cell()
+    pins = json.loads(cc.DEFAULT_PINS.read_text())
+    pins["toolchain"]["nvcc_release"] = "13.2"
+    invocation = cell["invocation"]
+    selected = matrix["metric_registry"]["collection"][
+        "selected_unit_metrics"
+    ]
+    raw = metric_registry.load_registry_raw()
+    entry = next(
+        row for row in raw["metrics"] if row["ncu_metric"] == selected[0]
+    )
+    entry["per_arch_availability"][matrix["arch"]] = "excluded"
+    threaded = metric_registry.parse_registry(raw)
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        cc.build_production_launch_set_plan(
+            cell=cell,
+            binary=cc.REPO_ROOT / invocation["executable_path"],
+            invocation=invocation,
+            cell_dir=tmp_path / "absent",
+            matrix=matrix,
+            pins=pins,
+            trace_inventory_cardinality=2,
+            execution_source_commit="a" * 40,
+            registry=threaded,
+        )
+    assert caught.value.code == "matrix_metric_selection_drift"
+    assert not (tmp_path / "absent").exists()
+
+
+def test_launch_set_runtime_module_authority_is_ordered_and_fail_closed():
+    inventory = [
+        {
+            "launch_ordinal": ordinal,
+            "module_mapping": {"module": {
+                "status": "stable_static_module",
+                "sha256": character * 64,
+            }},
+        }
+        for ordinal, character in enumerate(("a", "b"))
+    ]
+    assert cc._launch_set_runtime_module_sha256s(inventory) == (
+        "a" * 64,
+        "b" * 64,
+    )
+    inventory[1]["module_mapping"]["module"] = {
+        "status": "no_stable_static_module",
+        "sha256": None,
+    }
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        cc._launch_set_runtime_module_sha256s(inventory)
+    assert caught.value.code == (
+        "label_launch_set_runtime_module_authority_invalid"
+    )
+
+
+def test_launch_set_authorities_rederive_device_and_kernel_signature(tmp_path):
+    binary = cc.REPO_ROOT / "tools/local_labels/label_driver.sh"
+    expected = hashlib.sha256(
+        b"synthetic|tools/local_labels/label_driver.sh"
+    ).hexdigest()
+    assert cc._fallback_launch_set_kernel_signature(
+        slug="synthetic", binary=binary,
+    ) == (expected, "fallback_legacy")
+    manifest = {
+        "checks": {"device": {
+            "status": "ok",
+            "selection_policy": cc.preflight.DEVICE_SELECTION_POLICY,
+            "selected_host_gpu_index": 0,
+            "nvidia_smi_device_count": 1,
+            "gpu_uuid_sha256": "c" * 64,
+        }}
+    }
+    assert cc._launch_set_device_uuid_sha256(manifest) == "c" * 64
+    manifest["checks"]["device"]["selected_host_gpu_index"] = 1
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        cc._launch_set_device_uuid_sha256(manifest)
+    assert caught.value.code == "label_launch_set_device_authority_invalid"
+
+
+def _ordered_launch_set_adapter_fixture(tmp_path):
+    count = 2
+    kernel = "_Z16repeated_kernelv"
+    protocol = {
+        "ncu_target_processes": "all",
+        "ncu_filter_mode": "global",
+        "ncu_replay_mode": "kernel",
+        "ncu_cache_control": "all",
+        "ncu_clock_control": "none",
+        "ncu_profile_from_start": False,
+        "ncu_launch_skip": 0,
+        "ncu_launch_count": count + 1,
+    }
+    report = tmp_path / "run_0_launch_set.ncu-rep"
+    report.write_bytes(b"opaque report bytes")
+    report_sha256 = cc.sha256_file(report)
+    launches = []
+    for ordinal in range(count):
+        identity = {
+            "ID": str(ordinal + 1),
+            "Process ID": "42",
+            "Kernel Name": kernel,
+            "Context": "1",
+            "Stream": "7",
+            "Block Size": "(32, 1, 1)",
+            "Grid Size": "(4, 1, 1)",
+            "Device": "0",
+        }
+        launch = {
+            "report_launch_ordinal": ordinal,
+            "identity": identity,
+        }
+        launch["identity_sha256"] = cc.canonical_sha256(launch)
+        launches.append(launch)
+    inventory = {
+        "schema_version": 3,
+        "kind": "ncu_details_csv_launch_inventory_v3",
+        "kernel_name_base": "mangled",
+        "requested_launch_skip": 0,
+        "requested_launch_count": count + 1,
+        "insertion_sentinel": {
+            "policy": "request_expected_plus_one_reject_any_extra",
+            "expected_launch_count": count,
+            "requested_launch_count": count + 1,
+        },
+        "ncu_controls": {
+            "target_processes": "all",
+            "filter_mode": "global",
+            "replay_mode": "kernel",
+            "cache_control": "all",
+            "clock_control": "none",
+            "profile_from_start": False,
+        },
+        "report_sha256": report_sha256,
+        "identity_columns": list(
+            cc.ncu_launch_documents.IDENTITY_COLUMNS
+        ),
+        "launch_count": count,
+        "launches": launches,
+        "launch_inventory_sha256": cc.canonical_sha256(launches),
+    }
+    inventory["observation_sha256"] = cc.canonical_sha256(inventory)
+    inventory_path = tmp_path / "run_0_launch_set.launch_inventory.json"
+    inventory_path.write_text(json.dumps(inventory, sort_keys=True) + "\n")
+    sidecars = []
+    for ordinal in range(count):
+        path = tmp_path / f"label_0_{ordinal}.json"
+        path.write_text(json.dumps({
+            "launch_index": ordinal,
+            "unit_tagged_metrics": [{"ncu_metric": "fixture"}],
+        }) + "\n")
+        sidecars.append(path)
+    published = {
+        "report": report,
+        "run_manifest": tmp_path / "label_run_manifest_0_launch_set.json",
+        "details_csv": tmp_path / "run_0_launch_set.details.csv",
+        "details_stderr": tmp_path / "run_0_launch_set.details.stderr",
+        "launch_inventory": inventory_path,
+        "launch_metrics": tmp_path / "run_0_launch_set.launch_metrics.json",
+        "details_export_receipt": (
+            tmp_path / "run_0_launch_set.details_export_receipt.json"
+        ),
+        "execution_identity": (
+            tmp_path / "run_0_launch_set.execution_identity.json"
+        ),
+        "sidecars": tuple(sidecars),
+        "capture_manifest": (
+            tmp_path / "label_launch_set_capture_manifest.json"
+        ),
+    }
+    trace_inventory = []
+    for ordinal in range(count):
+        row = {
+            "launch_ordinal": ordinal,
+            "trace_launch": {
+                "block_dim": [32, 1, 1],
+                "grid_dim": [4, 1, 1],
+                "device_id": 0,
+            },
+            "module_mapping": {"kernel_name": kernel},
+        }
+        row["launch_identity_sha256"] = cc.canonical_sha256(row)
+        trace_inventory.append(row)
+    return (
+        published,
+        {"command": [str(cc.LABEL_DRIVER)], "ncu_launch_protocol": protocol},
+        trace_inventory,
+    )
+
+
+def test_launch_set_adapter_binds_repeated_tuples_by_report_ordinal(tmp_path):
+    published, plan, trace_inventory = _ordered_launch_set_adapter_fixture(
+        tmp_path
+    )
+    labels, labels_by_ordinal = cc.adapt_production_launch_set_labels(
+        published=published,
+        plan=plan,
+        trace_inventory=trace_inventory,
+    )
+    assert list(labels_by_ordinal) == [0, 1]
+    assert [label["launch_index"] for label in labels] == [0, 1]
+    assert {
+        label["ncu_launch_identity"]["report_launch_ordinal"]
+        for label in labels
+    } == {0, 1}
+    assert all(
+        label["ncu_launch_identity"]["launch_tuple_inventory_occurrences"]
+        == 2
+        for label in labels
+    )
+    trace = {
+        "dynamic_launch_inventory": trace_inventory,
+        "dynamic_launch_inventory_sha256": cc.canonical_sha256(
+            trace_inventory
+        ),
+        "outcome": "admitted",
+    }
+    control = {
+        "launch_records": [
+            {
+                "launch_ordinal": ordinal,
+                "launch_identity_sha256": row["launch_identity_sha256"],
+                "status": "complete",
+                "control_outcome": "static_module_controls_emitted",
+                "typed_reason": None,
+            }
+            for ordinal, row in enumerate(trace_inventory)
+        ]
+    }
+    completeness = cc.build_dynamic_launch_completeness(
+        trace=trace,
+        labels=labels,
+        label_failures=[],
+        control=control,
+    )
+    assert completeness["status"] == "complete_dynamic_launch_set"
+    assert completeness["trace_ncu_sequence_equal"] is True
 
 
 @pytest.mark.parametrize(

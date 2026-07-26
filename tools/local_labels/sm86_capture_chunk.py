@@ -68,7 +68,10 @@ from build_sm86_capture_matrix import (  # noqa: E402
     validate_matrix as rederive_capture_matrix,
 )
 from import_trace_contract import validate_trace_dir  # noqa: E402
-from repeatability_matrix_runner import registry_unit_metrics  # noqa: E402
+from repeatability_matrix_runner import (  # noqa: E402
+    DRIVER_ALWAYS_COLLECTED,
+    registry_unit_metrics,
+)
 from tools.cloud.trace_budgets import (  # noqa: E402
     load_trace_budgets,
     require_cell_budget,
@@ -4198,6 +4201,36 @@ def _explicit_ncu_driver_args(protocol: dict[str, Any]) -> list[str]:
     return result
 
 
+def _registry_unit_metrics_for_capture(
+    registry: Any, *, arch: str,
+) -> tuple[str, ...]:
+    if registry is None:
+        return tuple(registry_unit_metrics(arch))
+    entries = getattr(registry, "entries", None)
+    if type(entries) is not tuple:
+        raise ChunkRefusal(
+            "matrix_metric_selection_drift",
+            "threaded metric registry has no exact entry tuple",
+        )
+    result: list[str] = []
+    for entry in entries:
+        availability = getattr(entry, "per_arch_availability", None) or {}
+        metric = getattr(entry, "ncu_metric", None)
+        if (
+            getattr(entry, "carrier", None) == "unit_tagged_metric"
+            and getattr(entry, "availability", None) != "excluded"
+            and availability.get(arch) == "available"
+            and metric not in DRIVER_ALWAYS_COLLECTED
+        ):
+            if type(metric) is not str or not metric:
+                raise ChunkRefusal(
+                    "matrix_metric_selection_drift",
+                    "threaded metric registry contains an invalid NCU name",
+                )
+            result.append(metric)
+    return tuple(result)
+
+
 def _prepare_label_capture_command(
     *, cell: dict, binary: Path, invocation: dict, cell_dir: Path,
     matrix: dict, pins: dict,
@@ -4208,6 +4241,7 @@ def _prepare_label_capture_command(
     bind_supplemental_toolchain: bool,
     expected_ncu_identity: ncu_executor.ExpectedNcuIdentity | None,
     explicit_ncu_protocol: dict[str, Any] | None = None,
+    registry: Any = None,
 ) -> dict[str, Any]:
     """Validate and construct a label-driver command without side effects."""
     identity = cell["identity"]
@@ -4223,7 +4257,9 @@ def _prepare_label_capture_command(
     unit_metrics = tuple(
         matrix["metric_registry"]["collection"]["selected_unit_metrics"]
     )
-    expected_metrics = tuple(registry_unit_metrics(matrix["arch"]))
+    expected_metrics = _registry_unit_metrics_for_capture(
+        registry, arch=matrix["arch"],
+    )
     if set(unit_metrics) != set(expected_metrics) or len(unit_metrics) != len(
         expected_metrics
     ):
@@ -4400,6 +4436,8 @@ def _launch_set_plan_sha256(plan: dict[str, Any]) -> str:
 def build_fixture_only_launch_set_plan(
     *, cell: dict, binary: Path, invocation: dict, cell_dir: Path,
     matrix: dict, pins: dict, trace_inventory_cardinality: int,
+    execution_source_commit: str | None = None,
+    registry: Any = None,
 ) -> dict[str, Any]:
     """Plan one supplemental launch-set command; execute and emit nothing."""
     if (
@@ -4438,9 +4476,11 @@ def build_fixture_only_launch_set_plan(
         cell=cell, binary=binary, invocation=invocation, cell_dir=cell_dir,
         matrix=matrix, pins=pins, label_launch_index_override=0,
         kernel_name_selector=None, artifact_tag="label_launch_set",
-        execution_source_commit=None, bind_supplemental_toolchain=True,
+        execution_source_commit=execution_source_commit,
+        bind_supplemental_toolchain=True,
         expected_ncu_identity=None,
         explicit_ncu_protocol=protocol,
+        registry=registry,
     )
     cell_root = (
         prepared["labels_root"] / matrix["arch"] / identity["slug"]
@@ -4460,6 +4500,32 @@ def build_fixture_only_launch_set_plan(
         ),
     }
     plan["plan_sha256"] = _launch_set_plan_sha256(plan)
+    return plan
+
+
+def build_production_launch_set_plan(
+    *, cell: dict, binary: Path, invocation: dict, cell_dir: Path,
+    matrix: dict, pins: dict, trace_inventory_cardinality: int,
+    execution_source_commit: str,
+    registry: Any,
+) -> dict[str, Any]:
+    """Plan one production launch-set command without opening its live gate."""
+    plan = build_fixture_only_launch_set_plan(
+        cell=cell,
+        binary=binary,
+        invocation=invocation,
+        cell_dir=cell_dir,
+        matrix=matrix,
+        pins=pins,
+        trace_inventory_cardinality=trace_inventory_cardinality,
+        execution_source_commit=execution_source_commit,
+        registry=registry,
+    )
+    if plan["command"][0] != str(_PRODUCTION_LABEL_DRIVER):
+        raise ChunkRefusal(
+            "label_launch_set_production_boundary_invalid",
+            "production launch-set plan does not name the production label driver",
+        )
     return plan
 
 
@@ -8316,7 +8382,18 @@ def capture_sol_controls_all_launches(
             raise ChunkRefusal(
                 "sol_control_ncu_report_unreadable", str(exc)
             ) from exc
-        if report_bytes.count(expected_function_bytes) <= 0:
+        if ncu_identity.get("join_policy") == (
+            "ordered_report_ordinal_mangled_name_block_grid_device_tuple"
+        ):
+            report_contains_function = (
+                type(ncu_identity.get("kernel_name_report_occurrences")) is int
+                and ncu_identity["kernel_name_report_occurrences"] > 0
+            )
+        else:
+            report_contains_function = (
+                report_bytes.count(expected_function_bytes) > 0
+            )
+        if not report_contains_function:
             raise ChunkRefusal(
                 "sol_dynamic_launch_ncu_identity_mismatch",
                 repr({"ordinal": ordinal, "function": expected_function}),
@@ -8727,6 +8804,300 @@ def require_canonical_label_launch_identity(
     }
 
 
+def _launch_set_runtime_module_sha256s(
+    inventory: list[dict[str, Any]],
+) -> tuple[str, ...]:
+    """Derive one ordered static-module authority from the NVBit inventory."""
+    if not isinstance(inventory, list) or not inventory:
+        raise ChunkRefusal(
+            "label_launch_set_runtime_module_authority_invalid",
+            "dynamic launch inventory is absent",
+        )
+    result: list[str] = []
+    for ordinal, row in enumerate(inventory):
+        mapping = row.get("module_mapping") if isinstance(row, dict) else None
+        module = mapping.get("module") if isinstance(mapping, dict) else None
+        digest = module.get("sha256") if isinstance(module, dict) else None
+        if (
+            row.get("launch_ordinal") != ordinal
+            or not isinstance(module, dict)
+            or module.get("status") != "stable_static_module"
+            or not _is_sha256(digest)
+        ):
+            raise ChunkRefusal(
+                "label_launch_set_runtime_module_authority_invalid",
+                repr({"ordinal": ordinal, "module": module}),
+            )
+        result.append(digest)
+    return tuple(result)
+
+
+def _launch_set_device_uuid_sha256(
+    preflight_manifest: dict[str, Any],
+) -> str:
+    checks = (
+        preflight_manifest.get("checks")
+        if isinstance(preflight_manifest, dict) else None
+    )
+    device = checks.get("device") if isinstance(checks, dict) else None
+    if (
+        not isinstance(device, dict)
+        or device.get("status") != preflight.STATUS_OK
+        or device.get("selection_policy") != preflight.DEVICE_SELECTION_POLICY
+        or device.get("selected_host_gpu_index") != 0
+        or device.get("nvidia_smi_device_count") != 1
+        or not _is_sha256(device.get("gpu_uuid_sha256"))
+    ):
+        raise ChunkRefusal(
+            "label_launch_set_device_authority_invalid", repr(device),
+        )
+    return device["gpu_uuid_sha256"]
+
+
+def _fallback_launch_set_kernel_signature(
+    *, slug: str, binary: Path,
+) -> tuple[str, str]:
+    """Reproduce the label-driver fallback without trusting its manifest."""
+    if not isinstance(slug, str) or not slug or "\x00" in slug:
+        raise ChunkRefusal(
+            "label_launch_set_kernel_signature_invalid", repr(slug),
+        )
+    try:
+        resolved = Path(os.path.realpath(binary))
+        repo_root = REPO_ROOT.resolve(strict=True)
+        try:
+            normalized = resolved.relative_to(repo_root).as_posix()
+        except ValueError:
+            normalized = resolved.name
+    except (OSError, RuntimeError, ValueError) as exc:
+        raise ChunkRefusal(
+            "label_launch_set_kernel_signature_invalid", str(exc),
+        ) from exc
+    if not normalized:
+        raise ChunkRefusal(
+            "label_launch_set_kernel_signature_invalid", str(binary),
+        )
+    digest = hashlib.sha256(f"{slug}|{normalized}".encode()).hexdigest()
+    return digest, "fallback_legacy"
+
+
+def _launch_set_ordinal_observation(
+    inventory_document: dict[str, Any], *, ordinal: int,
+) -> dict[str, Any]:
+    launches = inventory_document.get("launches")
+    if (
+        type(ordinal) is not int
+        or not isinstance(launches, list)
+        or not 0 <= ordinal < len(launches)
+        or not isinstance(launches[ordinal], dict)
+    ):
+        raise ChunkRefusal(
+            "sol_dynamic_launch_ncu_identity_mismatch", repr(ordinal),
+        )
+    launch = launches[ordinal]
+    observation = {
+        "schema_version": 1,
+        "kind": "ncu_launch_set_ordinal_projection_v1",
+        "kernel_name_base": inventory_document.get("kernel_name_base"),
+        "identity_columns": copy.deepcopy(
+            inventory_document.get("identity_columns")
+        ),
+        "report_launch_ordinal": launch.get("report_launch_ordinal"),
+        "identity": copy.deepcopy(launch.get("identity")),
+        "identity_sha256": launch.get("identity_sha256"),
+        "report_sha256": inventory_document.get("report_sha256"),
+        "launch_inventory_sha256": inventory_document.get(
+            "launch_inventory_sha256"
+        ),
+        "launch_set_observation_sha256": inventory_document.get(
+            "observation_sha256"
+        ),
+    }
+    observation["observation_sha256"] = canonical_sha256(observation)
+    _observation_ncu_launch_key(observation)
+    if observation["report_launch_ordinal"] != ordinal:
+        raise ChunkRefusal(
+            "sol_dynamic_launch_ncu_identity_mismatch", repr(observation),
+        )
+    return observation
+
+
+def bind_ordered_launch_set_ncu_identity(
+    *, label: dict[str, Any], inventory_row: dict[str, Any],
+    trace_inventory: list[dict[str, Any]],
+    ncu_inventory: dict[str, Any],
+) -> dict[str, Any]:
+    """Bind one ordered NCU launch-set row to the same NVBit ordinal and tuple."""
+    ordinal = inventory_row.get("launch_ordinal")
+    if type(ordinal) is not int or not 0 <= ordinal < len(trace_inventory):
+        raise ChunkRefusal(
+            "sol_dynamic_launch_ncu_identity_mismatch", repr(ordinal),
+        )
+    expected_key = _trace_ncu_launch_key(inventory_row)
+    observation = label.get("ncu_launch_observation_document")
+    if not isinstance(observation, dict):
+        raise ChunkRefusal(
+            "sol_dynamic_launch_ncu_identity_mismatch", repr(observation),
+        )
+    observed_key = _observation_ncu_launch_key(observation)
+    report = label.get("ncu_report")
+    report_sha256 = (
+        _sha256_output_file(
+            report,
+            code="label_capture_storage_failure",
+            operation="sol_launch_set_report_hash",
+        )
+        if isinstance(report, Path) else None
+    )
+    ncu_launches = ncu_inventory.get("launches")
+    if not isinstance(ncu_launches, list):
+        raise ChunkRefusal(
+            "sol_dynamic_launch_ncu_identity_mismatch", repr(ncu_launches),
+        )
+    ncu_keys = [
+        _observation_ncu_launch_key(
+            _launch_set_ordinal_observation(ncu_inventory, ordinal=index)
+        )
+        for index in range(len(ncu_launches))
+    ]
+    trace_keys = [_trace_ncu_launch_key(row) for row in trace_inventory]
+    if (
+        label.get("launch_index") != ordinal
+        or observation.get("report_launch_ordinal") != ordinal
+        or observed_key != expected_key
+        or observation.get("report_sha256") != report_sha256
+        or ncu_inventory.get("report_sha256") != report_sha256
+        or ncu_keys[ordinal] != expected_key
+    ):
+        raise ChunkRefusal(
+            "sol_dynamic_launch_ncu_identity_mismatch",
+            repr({
+                "ordinal": ordinal,
+                "expected_launch_key": expected_key,
+                "observed_launch_key": observed_key,
+            }),
+        )
+    binding = {
+        "join_policy": (
+            "ordered_report_ordinal_mangled_name_block_grid_device_tuple"
+        ),
+        "launch_ordinal": ordinal,
+        "report_launch_ordinal": ordinal,
+        "launch_identity_sha256": inventory_row["launch_identity_sha256"],
+        "kernel_name": expected_key[0],
+        "block_dim": list(expected_key[1]),
+        "grid_dim": list(expected_key[2]),
+        "device_id": expected_key[3],
+        "launch_tuple_inventory_occurrences": trace_keys.count(expected_key),
+        "kernel_name_report_occurrences": sum(
+            key[0] == expected_key[0] for key in ncu_keys
+        ),
+        "ncu_report_sha256": report_sha256,
+        "ncu_launch_observation_sha256": observation.get(
+            "observation_sha256"
+        ),
+    }
+    binding["ncu_launch_identity_sha256"] = canonical_sha256(binding)
+    label["ncu_launch_identity"] = binding
+    return binding
+
+
+def adapt_production_launch_set_labels(
+    *, published: dict[str, Path | tuple[Path, ...]],
+    plan: dict[str, Any], trace_inventory: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], dict[int, dict[str, Any]]]:
+    """Adapt one immutable launch-set namespace to existing control consumers."""
+    expected_fields = {
+        "report", "run_manifest", "details_csv", "details_stderr",
+        "launch_inventory", "launch_metrics", "details_export_receipt",
+        "execution_identity", "sidecars", "capture_manifest",
+    }
+    if type(published) is not dict or set(published) != expected_fields:
+        raise ChunkRefusal(
+            "label_launch_set_adapter_invalid",
+            "published launch-set artifact fields differ",
+        )
+    expected_count = len(trace_inventory)
+    sidecars = published.get("sidecars")
+    report = published.get("report")
+    inventory_path = published.get("launch_inventory")
+    run_manifest = published.get("run_manifest")
+    if (
+        expected_count < 1
+        or type(sidecars) is not tuple
+        or len(sidecars) != expected_count
+        or not isinstance(report, Path)
+        or not isinstance(inventory_path, Path)
+        or not isinstance(run_manifest, Path)
+    ):
+        raise ChunkRefusal(
+            "label_launch_set_adapter_invalid", "launch-set paths differ",
+        )
+    protocol = plan.get("ncu_launch_protocol")
+    inventory_document = _json_output(
+        inventory_path,
+        code="label_capture_storage_failure",
+        operation="launch_set_inventory_adapter_read",
+    )
+    report_sha256 = _sha256_output_file(
+        report,
+        code="label_capture_storage_failure",
+        operation="launch_set_adapter_report_hash",
+    )
+    try:
+        ncu_launch_documents.validate_launch_inventory_document(
+            inventory_document,
+            expected_launch_count=expected_count,
+            report_sha256=report_sha256,
+            protocol=protocol,
+        )
+    except (TypeError, ValueError) as exc:
+        raise ChunkRefusal("label_launch_set_adapter_invalid", str(exc)) from exc
+    shared_artifacts = {
+        key: value for key, value in published.items()
+        if key not in {"report", "run_manifest", "sidecars"}
+    }
+    labels: list[dict[str, Any]] = []
+    labels_by_ordinal: dict[int, dict[str, Any]] = {}
+    for ordinal, sidecar_path in enumerate(sidecars):
+        if not isinstance(sidecar_path, Path):
+            raise ChunkRefusal(
+                "label_launch_set_adapter_invalid", repr(sidecar_path),
+            )
+        sidecar = _json_output(
+            sidecar_path,
+            code="label_capture_storage_failure",
+            operation="launch_set_sidecar_adapter_read",
+        )
+        if sidecar.get("launch_index") != ordinal:
+            raise ChunkRefusal(
+                "label_launch_set_adapter_invalid", repr(ordinal),
+            )
+        observation = _launch_set_ordinal_observation(
+            inventory_document, ordinal=ordinal,
+        )
+        label = {
+            "command": copy.deepcopy(plan.get("command")),
+            "launch_index": ordinal,
+            "sidecar": sidecar_path,
+            "run_manifest": run_manifest,
+            "ncu_report": report,
+            "ncu_launch_observation": inventory_path,
+            "ncu_launch_observation_document": observation,
+            "unit_metric_count": len(sidecar.get("unit_tagged_metrics") or []),
+            "launch_set_artifacts": copy.deepcopy(shared_artifacts),
+        }
+        bind_ordered_launch_set_ncu_identity(
+            label=label,
+            inventory_row=trace_inventory[ordinal],
+            trace_inventory=trace_inventory,
+            ncu_inventory=inventory_document,
+        )
+        labels.append(label)
+        labels_by_ordinal[ordinal] = label
+    return labels, labels_by_ordinal
+
+
 def bind_unique_ncu_launch_identity(
     *, label: dict[str, Any], inventory_row: dict[str, Any],
     inventory: list[dict[str, Any]],
@@ -8918,8 +9289,26 @@ def build_dynamic_launch_completeness(
         label_complete = label is not None
         if label is not None:
             launch_key = _trace_ncu_launch_key(inventory_row)
+            observed_identity = label.get("ncu_launch_identity") or {}
+            join_policy = observed_identity.get("join_policy")
+            if join_policy == "unique_mangled_name_block_grid_device_tuple":
+                expected_occurrences = 1
+                report_launch_ordinal = None
+            elif join_policy == (
+                "ordered_report_ordinal_mangled_name_block_grid_device_tuple"
+            ):
+                expected_occurrences = sum(
+                    _trace_ncu_launch_key(candidate) == launch_key
+                    for candidate in inventory
+                )
+                report_launch_ordinal = expected_ordinal
+            else:
+                raise ChunkRefusal(
+                    "sol_dynamic_launch_ncu_identity_mismatch",
+                    repr(join_policy),
+                )
             expected_identity = {
-                "join_policy": "unique_mangled_name_block_grid_device_tuple",
+                "join_policy": join_policy,
                 "launch_ordinal": expected_ordinal,
                 "launch_identity_sha256": inventory_row[
                     "launch_identity_sha256"
@@ -8928,10 +9317,10 @@ def build_dynamic_launch_completeness(
                 "block_dim": list(launch_key[1]),
                 "grid_dim": list(launch_key[2]),
                 "device_id": launch_key[3],
-                "launch_tuple_inventory_occurrences": 1,
-                "kernel_name_report_occurrences": (
-                    label.get("ncu_launch_identity") or {}
-                ).get("kernel_name_report_occurrences"),
+                "launch_tuple_inventory_occurrences": expected_occurrences,
+                "kernel_name_report_occurrences": observed_identity.get(
+                    "kernel_name_report_occurrences"
+                ),
                 "ncu_report_sha256": _sha256_output_file(
                     label["ncu_report"], code="label_capture_storage_failure",
                     operation="sol_completeness_report_hash",
@@ -8940,6 +9329,10 @@ def build_dynamic_launch_completeness(
                     label.get("ncu_launch_observation_document") or {}
                 ).get("observation_sha256"),
             }
+            if report_launch_ordinal is not None:
+                expected_identity["report_launch_ordinal"] = (
+                    report_launch_ordinal
+                )
             expected_identity["ncu_launch_identity_sha256"] = canonical_sha256(
                 expected_identity
             )
@@ -9101,6 +9494,34 @@ def inventory_cell_artifacts(
                 operation="ncu_observation_inventory_resolve",
             )
         ] = "ncu_launch_observation"
+        launch_set_artifacts = label_row.get("launch_set_artifacts")
+        if launch_set_artifacts is not None:
+            expected_launch_set_roles = {
+                "details_csv", "details_stderr", "launch_inventory",
+                "launch_metrics", "details_export_receipt",
+                "execution_identity", "capture_manifest",
+            }
+            if (
+                type(launch_set_artifacts) is not dict
+                or set(launch_set_artifacts) != expected_launch_set_roles
+                or any(
+                    not isinstance(path, Path)
+                    for path in launch_set_artifacts.values()
+                )
+            ):
+                raise ChunkRefusal(
+                    "label_launch_set_adapter_invalid",
+                    "launch-set artifact inventory fields differ",
+                )
+            for role, path in launch_set_artifacts.items():
+                exact_kinds[_resolve_output_path(
+                    path,
+                    code="cell_inventory_storage_failure",
+                    operation=f"launch_set_{role}_inventory_resolve",
+                )] = (
+                    "ncu_launch_observation"
+                    if role == "launch_inventory" else "execution_log"
+                )
     if isinstance(trace.get("root_pb"), Path):
         exact_kinds[_resolve_output_path(
             trace["root_pb"], code="cell_inventory_storage_failure",
@@ -9224,6 +9645,8 @@ def capture_cell(
     runnability_path: Path | None = None,
     supplemental_workload_path: Path | None = None,
     supplemental_definition_path: Path | None = None,
+    launch_set_preflight_manifest: dict[str, Any] | None = None,
+    launch_set_registry: Any = None,
 ) -> dict:
     try:
         ncu_executor.validate_expected_ncu_identity(expected_ncu_identity)
@@ -9437,85 +9860,117 @@ def capture_cell(
         _require_hash(
             binary, invocation["executable_sha256"], "binary after trace"
         )
-        labels_by_ordinal: dict[int, dict[str, Any]] = {}
-        between_guards: list[dict[str, Any]] = []
-        for launch_row in trace["dynamic_launch_inventory"]:
-            ordinal = launch_row["launch_ordinal"]
-            between_guards.append(live_capture_guard(pins))
-            phase_tag = f"label_launch_{ordinal:04d}"
-            launch_label_env = sol_phase_env(
-                sol_context, phase_tag=phase_tag, capture_kind="label",
-                timeout_s=remaining(f"sol_{phase_tag}_request"),
+        launch_inventory = trace["dynamic_launch_inventory"]
+        runtime_module_sha256s = _launch_set_runtime_module_sha256s(
+            launch_inventory
+        )
+        gpu_uuid_sha256 = _launch_set_device_uuid_sha256(
+            launch_set_preflight_manifest
+        )
+        kernel_signature_sha256, kernel_signature_source = (
+            _fallback_launch_set_kernel_signature(
+                slug=cell["identity"]["slug"], binary=binary,
             )
-            launch_key = _trace_ncu_launch_key(launch_row)
-            repeated_tuple = sum(
-                _trace_ncu_launch_key(candidate) == launch_key
-                for candidate in trace["dynamic_launch_inventory"]
-            ) > 1
-            if repeated_tuple:
-                failure = {
-                    "schema_version": 1,
-                    "kind": "sol_dynamic_launch_label_incomplete",
-                    "launch_ordinal": ordinal,
-                    "launch_identity_sha256": launch_row[
-                        "launch_identity_sha256"
-                    ],
-                    "typed_reason": (
-                        "ncu_launch_identity_ambiguous_repeated_tuple"
-                    ),
-                    "detail": repr(launch_key),
-                }
-                failure["failure_sha256"] = canonical_sha256(failure)
-                _write_json_exclusive(
-                    cell_dir / "logs" / f"{phase_tag}_incomplete.json",
-                    failure,
+        )
+        try:
+            cuda_version = toolchain_contract.nvcc_release_text(
+                toolchain_contract.require_sol_cuda_release(
+                    pins["toolchain"]["nvcc_release"]
                 )
-                label_failures.append(failure)
-                between_guards.append(live_capture_guard(pins))
-                continue
-            label_error: BaseException | None = None
+            )
+            driver_version = pins["toolchain"]["driver_version"]
+        except (
+            KeyError,
+            TypeError,
+            toolchain_contract.CaptureToolchainContractError,
+        ) as exc:
+            raise ChunkRefusal(
+                "label_launch_set_authority_invalid", str(exc),
+            ) from exc
+        if launch_set_registry is None:
+            raise ChunkRefusal(
+                "label_launch_set_authority_invalid",
+                "metric registry authority is absent",
+            )
+        plan = build_production_launch_set_plan(
+            cell=cell,
+            binary=binary,
+            invocation=invocation,
+            cell_dir=cell_dir,
+            matrix=matrix,
+            pins=pins,
+            trace_inventory_cardinality=len(launch_inventory),
+            execution_source_commit=execution_source_commit,
+            registry=launch_set_registry,
+        )
+        artifact_root = cell_dir / "labels"
+        _mkdir_output(
+            artifact_root,
+            parents=True,
+            exist_ok=False,
+            code="label_capture_storage_failure",
+            operation="launch_set_artifact_root_create",
+        )
+        launch_label_env = sol_phase_env(
+            sol_context,
+            phase_tag="label_launch_set",
+            capture_kind="label",
+            timeout_s=remaining("sol_label_launch_set_request"),
+        )
+        between_guards = [live_capture_guard(pins)]
+        launch_set_error: BaseException | None = None
+        try:
+            published = execute_production_launch_set_plan(
+                plan=plan,
+                expected_plan_sha256=plan["plan_sha256"],
+                artifact_root=artifact_root,
+                expected_ncu_identity=expected_ncu_identity,
+                expected_target_executable_sha256=invocation[
+                    "executable_sha256"
+                ],
+                expected_runtime_module_sha256s=runtime_module_sha256s,
+                expected_gpu_uuid_sha256=gpu_uuid_sha256,
+                expected_cuda_version=cuda_version,
+                expected_driver_version=driver_version,
+                expected_preflight_sha256=preflight_sha256,
+                expected_source_commit=execution_source_commit,
+                expected_capture_identity_sha256=admission_run_id,
+                expected_kernel_signature_sha256=(
+                    kernel_signature_sha256
+                ),
+                expected_kernel_signature_source=kernel_signature_source,
+                registry=launch_set_registry,
+                percentage_metric_names=_LAUNCH_SET_PERCENTAGE_METRICS,
+                unit_metric_names=tuple(
+                    matrix["metric_registry"]["collection"][
+                        "selected_unit_metrics"
+                    ]
+                ),
+                timeout_s=remaining("label_launch_set"),
+                runtime_cwd=runtime_cwd,
+                runtime_env=launch_label_env,
+            )
+            if phase_validator is not None:
+                phase_validator(launch_label_env, "label")
+        except BaseException as exc:
+            launch_set_error = exc
+            raise
+        finally:
             try:
-                label_result = capture_label(
-                    cell=cell, binary=binary, invocation=invocation,
-                    cell_dir=cell_dir, matrix=matrix, pins=pins,
-                    timeout_s=remaining(phase_tag),
-                    preflight_sha256=capture_provenance["preflight_sha256"],
-                    expected_ncu_identity=expected_ncu_identity,
-                    runtime_cwd=runtime_cwd,
-                    runtime_env=launch_label_env,
-                    phase_result_validator=phase_validator,
-                    label_launch_index_override=ordinal,
-                    artifact_tag=phase_tag,
-                    execution_source_commit=execution_source_commit,
-                    bind_supplemental_toolchain=True,
-                )
-            except ChunkRefusal as exc:
-                label_error = exc
-                # Capture/runtime/schema failures are retryable or integrity
-                # failures at the journal layer, never terminally downgraded.
-                raise
-            else:
-                bind_unique_ncu_launch_identity(
-                    label=label_result, inventory_row=launch_row,
-                    inventory=trace["dynamic_launch_inventory"],
-                )
-                labels_by_ordinal[ordinal] = label_result
-            finally:
-                try:
-                    post_label_guard = live_capture_guard(pins)
-                except BaseException:
-                    if not _is_explicit_output_storage_refusal(label_error):
-                        raise
-                    # The read-only guard may still run, but it must never
-                    # replace an already typed output-storage refusal.
-                else:
-                    between_guards.append(post_label_guard)
-            _require_hash(
-                binary, invocation["executable_sha256"],
-                f"binary after label ordinal {ordinal}",
-            )
-        labels = [labels_by_ordinal[key] for key in sorted(labels_by_ordinal)]
-        label = labels[0] if labels else None
+                between_guards.append(live_capture_guard(pins))
+            except BaseException:
+                if not _is_explicit_output_storage_refusal(launch_set_error):
+                    raise
+        _require_hash(
+            binary, invocation["executable_sha256"],
+            "binary after launch-set label",
+        )
+        labels, labels_by_ordinal = adapt_production_launch_set_labels(
+            published=published,
+            plan=plan,
+            trace_inventory=launch_inventory,
+        )
+        label = labels[0]
         guard_between = between_guards
         control = capture_sol_controls_all_launches(
             cell=cell, invocation=invocation,

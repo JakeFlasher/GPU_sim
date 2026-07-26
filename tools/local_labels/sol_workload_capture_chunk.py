@@ -41,6 +41,7 @@ import build_sol_workload_capture_matrix as workload_matrix  # noqa: E402
 import build_sol_representative_execution_matrix as representative_execution  # noqa: E402
 import campaign_preflight as preflight  # noqa: E402
 import sm86_capture_chunk as canonical_capture  # noqa: E402
+from tools.local_labels import metric_registry  # noqa: E402
 import sol_capture_environment as sol_environment  # noqa: E402
 import sol_live_workload_coverage_inventory as live_coverage  # noqa: E402
 import sol_reconstitution as sol_recon  # noqa: E402
@@ -4920,6 +4921,7 @@ def _capture_one(
     runnability_path: Path | None = None,
     supplemental_workload_path: Path | None = None,
     supplemental_definition_path: Path | None = None,
+    launch_set_registry: metric_registry.MetricRegistry | None = None,
 ) -> dict[str, Any]:
     safe_name = _safe_name(binding["row_key"])
     _mkdir_nofollow(journal_dir, exist_ok=True)
@@ -5068,6 +5070,8 @@ def _capture_one(
             runnability_path=runnability_path,
             supplemental_workload_path=supplemental_workload_path,
             supplemental_definition_path=supplemental_definition_path,
+            launch_set_preflight_manifest=preflight_manifest,
+            launch_set_registry=launch_set_registry,
         )
         _content_address_tree(
             source=cell_dir,
@@ -5535,10 +5539,20 @@ def _run_chunk_impl(
     aggregate_budget = _load_object(
         aggregate_budget_path, role="aggregate retention budget"
     )
+    registry_document = _load_object(
+        registry_path, role="metric registry"
+    )
+    try:
+        launch_set_registry = metric_registry.parse_registry(
+            registry_document
+        )
+    except metric_registry.MetricRegistryError as exc:
+        raise WorkloadCaptureRefusal(
+            "supplemental_metric_registry_invalid", str(exc),
+        ) from exc
     for path, role in (
         (authority_path, "capture authority"),
         (cell_budget_path, "per-cell trace budgets"),
-        (registry_path, "metric registry"),
     ):
         if path.is_symlink() or not path.is_file():
             raise WorkloadCaptureRefusal(
@@ -5782,6 +5796,7 @@ def _run_chunk_impl(
                 cell_budgets=cell_budgets,
                 preflight_manifest=preflight_manifest,
                 expected_ncu_identity=expected_ncu_identity,
+                launch_set_registry=launch_set_registry,
                 preflight_path=preflight_path, preflight_sha256=preflight_sha,
                 matrix_sha256=matrix_sha,
                 cell_budget_sha256=canonical_sha256(variant["trace_budget"]),

@@ -2162,9 +2162,15 @@ def test_failed_attempt_is_preserved_and_next_attempt_can_complete(
     path, rows, values = _literal_rows(tmp_path)
     _invocation, binding = _binding(path=path, rows=rows, values=values)
     kwargs, journal = _attempt_capture_kwargs(tmp_path, binding, monkeypatch)
+    launch_set_registry = object()
+    kwargs["launch_set_registry"] = launch_set_registry
 
     def fail_capture(**call):
         assert call["expected_ncu_identity"] is kwargs["expected_ncu_identity"]
+        assert call["launch_set_preflight_manifest"] is kwargs[
+            "preflight_manifest"
+        ]
+        assert call["launch_set_registry"] is launch_set_registry
         (call["cell_dir"] / "partial.bin").write_bytes(b"partial evidence")
         raise capture.canonical_capture.ChunkRefusal(
             failure_code, "synthetic limit"
