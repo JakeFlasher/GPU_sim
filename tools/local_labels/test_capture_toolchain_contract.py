@@ -543,16 +543,32 @@ def test_label_driver_help_distinguishes_launch_set_artifact_names():
     assert "exit 3; no label sidecar" in result.stdout
 
 
-def test_label_driver_explicit_launch_set_reaches_ncu_then_stops_postprocessing(
+def test_label_driver_explicit_launch_set_runs_through_two_descriptors(
     tmp_path,
 ):
     command, environment, output, marker = _label_boundary_command(
         tmp_path, ncu_exit=0,
     )
     command = _with_explicit_ncu_controls(command)
-    result = subprocess.run(
-        command, env=environment, text=True, capture_output=True, check=False,
-    )
+    driver_descriptor = os.open(command[0], os.O_RDONLY)
+    ncu_descriptor = os.open(_option_value(command, "--ncu"), os.O_RDONLY)
+    try:
+        command[0] = f"/proc/self/fd/{driver_descriptor}"
+        separator = command.index("--")
+        command[separator:separator] = [
+            "--ncu-exec-path", f"/proc/self/fd/{ncu_descriptor}",
+        ]
+        result = subprocess.run(
+            command,
+            env=environment,
+            text=True,
+            capture_output=True,
+            check=False,
+            pass_fds=(driver_descriptor, ncu_descriptor),
+        )
+    finally:
+        os.close(ncu_descriptor)
+        os.close(driver_descriptor)
     assert result.returncode == 3
     assert "NCU_LAUNCH_SET_POSTPROCESSING_UNIMPLEMENTED" in result.stderr
     assert marker.is_file()

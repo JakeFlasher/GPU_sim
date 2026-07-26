@@ -46,6 +46,16 @@
 
 set -euo pipefail
 
+LABEL_DRIVER_SOURCE_PATH="$(readlink -f -- "${BASH_SOURCE[0]}")" || {
+    echo "label_driver: SOURCE_PATH_INVALID: cannot resolve executing script" >&2
+    exit 2
+}
+if [[ ! -f "$LABEL_DRIVER_SOURCE_PATH" ]]; then
+    echo "label_driver: SOURCE_PATH_INVALID: executing script is not a regular file" >&2
+    exit 2
+fi
+LABEL_DRIVER_SCRIPT_DIR="$(cd "$(dirname -- "$LABEL_DRIVER_SOURCE_PATH")" && pwd -P)"
+
 DEVICE=""
 SLUG=""
 SHAPE_POINT=""
@@ -411,7 +421,7 @@ if [[ "$KERNEL_NAME" == regex:* ]]; then
 fi
 
 if [[ "$EXPLICIT_NCU_LAUNCH_CONTROLS" -eq 1 ]]; then
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    SCRIPT_DIR="$LABEL_DRIVER_SCRIPT_DIR"
     if ! python3 "$SCRIPT_DIR/ncu_capture_contract.py" \
             "${EXPLICIT_NCU_CONTROL_ARGS[@]}"; then
         exit 2
@@ -457,7 +467,7 @@ fi
 # only when `LABEL_DRIVER_SKIP_ARCH_CHECK` is set to `1` (kept as
 # an emergency override; CI / runbook flows MUST NOT set it).
 if [[ "${LABEL_DRIVER_SKIP_ARCH_CHECK:-0}" != "1" ]]; then
-    SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    SCRIPT_DIR="$LABEL_DRIVER_SCRIPT_DIR"
     REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
     HELPER_PY="$REPO_ROOT/tools/arch_capabilities.py"
     case "$DEVICE" in
@@ -841,7 +851,7 @@ mkdir -p "$CELL_DIR"
 # drive the harness with --measurement-manifest; the fallback exists
 # for unit tests and offline harness rehearsal.
 if [[ -z "${REPO_ROOT:-}" ]]; then
-    REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+    REPO_ROOT="$(cd "$LABEL_DRIVER_SCRIPT_DIR/../.." && pwd -P)"
 fi
 canonicalize_kernel_sig_binary_path() {
     local raw="$1"
@@ -880,7 +890,7 @@ if [[ -n "$MEASUREMENT_MANIFEST_PATH" ]]; then
         LD_CLI_SLUG="$SLUG" \
         LD_CLI_SHAPE_POINT="$SHAPE_POINT" \
         LD_EXPECTED_VARIANT="$EXPECTED_VARIANT" \
-        LD_SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)" \
+        LD_SCRIPT_DIR="$LABEL_DRIVER_SCRIPT_DIR" \
         python3 - <<'PY'
 import json
 import os
@@ -1073,7 +1083,7 @@ safe_git_head() {
 }
 
 if [[ -z "${REPO_ROOT:-}" ]]; then
-    REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+    REPO_ROOT="$(cd "$LABEL_DRIVER_SCRIPT_DIR/../.." && pwd -P)"
 fi
 SOURCE_COMMIT="${LD_SOURCE_COMMIT_OVERRIDE:-$(safe_git_head)}"
 if [[ -n "${LD_SOURCE_COMMIT_OVERRIDE:-}" && ! "$SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]]; then
@@ -1331,7 +1341,7 @@ fi
 # column. The old shell-awk parser silently returned the first numeric
 # token of a row, which could be a row id, PID, context id, stream id,
 # or compute capability — a class of bug the helper makes unreachable.
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SCRIPT_DIR="$LABEL_DRIVER_SCRIPT_DIR"
 
 # Persist the parser's non-fatal clamp diagnostics into a sibling JSON
 # file so the sidecar emitter can merge them into the per-launch
