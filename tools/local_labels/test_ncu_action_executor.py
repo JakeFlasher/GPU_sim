@@ -1447,3 +1447,465 @@ def test_retained_descriptor_is_closed_on_every_exit(
         immutable.ImmutableArtifactError, match="retained executable is closed",
     ):
         _ = observed["retained"].descriptor
+
+
+def _supervised_identity(path: Path, *, mode: int | None = None):
+    digest, _size = immutable.sha256_file(path)
+    return executor.ExpectedExecutableIdentity(
+        str(path),
+        digest,
+        mode if mode is not None else path.stat().st_mode & 0o7777,
+    )
+
+
+def _fixture_supervised_executable(path: Path) -> Path:
+    path.write_text(f"""#!{sys.executable}
+import json
+import os
+import sys
+
+ncu_descriptor = int(sys.argv[1].rsplit('/', 1)[1])
+os.fstat(ncu_descriptor)
+print(json.dumps({{
+    "argv": sys.argv,
+    "ncu_descriptor": ncu_descriptor,
+    "driver_descriptor": int(sys.argv[0].rsplit('/', 1)[1]),
+}}, sort_keys=True))
+raise SystemExit(int(sys.argv[2]))
+""")
+    path.chmod(0o555)
+    return path
+
+
+def test_expected_supervised_executable_factory_validates_authority() -> None:
+    expected = executor.build_expected_executable_identity(
+        resolved_path="/repo/tools/local_labels/label_driver.sh",
+        executable_sha256="a" * 64,
+        executable_mode=0o555,
+    )
+    assert expected == executor.ExpectedExecutableIdentity(
+        "/repo/tools/local_labels/label_driver.sh", "a" * 64, 0o555,
+    )
+    assert executor.validate_expected_executable_identity(expected) is expected
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [
+        {"resolved_path": "//repo/driver"},
+        {"resolved_path": "/repo/../repo/driver"},
+        {"resolved_path": "/" + "x" * 4096},
+        {"executable_sha256": "A" * 64},
+        {"executable_mode": False},
+        {"executable_mode": 0o444},
+        {"executable_mode": 0o10000},
+    ],
+)
+def test_expected_supervised_executable_factory_rejects_malformed_authority(
+    overrides,
+) -> None:
+    values = {
+        "resolved_path": "/repo/tools/local_labels/label_driver.sh",
+        "executable_sha256": "a" * 64,
+        "executable_mode": 0o555,
+        **overrides,
+    }
+    with _assert_code(executor.NCU_SUPERVISED_EXECUTABLE_IDENTITY_INVALID):
+        executor.build_expected_executable_identity(**values)
+
+
+def test_supervised_executable_requires_exact_command_path_before_open(
+    monkeypatch,
+) -> None:
+    expected_ncu = executor.ExpectedNcuIdentity(
+        "/missing/ncu", "a" * 64, _VERSION,
+    )
+    expected_driver = executor.ExpectedExecutableIdentity(
+        "/expected/driver", "b" * 64, 0o555,
+    )
+    monkeypatch.setattr(
+        executor.immutable,
+        "open_retained_executable",
+        lambda _path: pytest.fail("opened an executable after command mismatch"),
+    )
+    with _assert_code(executor.NCU_SUPERVISED_EXECUTABLE_IDENTITY_INVALID):
+        executor.execute_ncu_supervised_executable(
+            expected_ncu,
+            expected_driver,
+            ["/other/driver", executor.AUTHORIZED_NCU_PROC_PATH],
+            timeout_seconds=1,
+            environment=_collection_environment(),
+        )
+
+
+def test_supervised_executable_runs_through_two_private_descriptors(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    ncu = _fixture_ncu(tmp_path / "ncu")
+    driver = _fixture_supervised_executable(tmp_path / "driver")
+    observed = []
+    retained = []
+    original_popen = executor.subprocess.Popen
+    original_open = executor.immutable.open_retained_executable
+
+    def popen(*args, **kwargs):
+        observed.append((tuple(args[0]), tuple(kwargs["pass_fds"])))
+        return original_popen(*args, **kwargs)
+
+    def open_retained(path):
+        handle = original_open(path)
+        retained.append(handle)
+        return handle
+
+    monkeypatch.setattr(executor.subprocess, "Popen", popen)
+    monkeypatch.setattr(
+        executor.immutable, "open_retained_executable", open_retained,
+    )
+    result = executor.execute_ncu_supervised_executable(
+        _identity(ncu),
+        _supervised_identity(driver),
+        [str(driver), executor.AUTHORIZED_NCU_PROC_PATH, "0"],
+        timeout_seconds=2,
+        environment=_collection_environment(),
+    )
+
+    assert result.returncode == 0
+    payload = json.loads(result.stdout)
+    assert len(observed) == 2
+    ncu_descriptor, driver_descriptor = observed[1][1]
+    assert observed[0] == (
+        (f"/proc/self/fd/{ncu_descriptor}", "--version"),
+        (ncu_descriptor,),
+    )
+    assert observed[1] == (
+        (
+            f"/proc/self/fd/{driver_descriptor}",
+            f"/proc/self/fd/{ncu_descriptor}",
+            "0",
+        ),
+        (ncu_descriptor, driver_descriptor),
+    )
+    assert payload["ncu_descriptor"] == ncu_descriptor
+    assert payload["driver_descriptor"] == driver_descriptor
+    assert set(result.__dict__) == {"returncode", "stdout", "stderr"}
+    assert len(retained) == 2
+    for descriptor in (ncu_descriptor, driver_descriptor):
+        with pytest.raises(OSError):
+            os.fstat(descriptor)
+    for handle in retained:
+        with pytest.raises(
+            immutable.ImmutableArtifactError,
+            match="retained executable is closed",
+        ):
+            _ = handle.descriptor
+
+
+@pytest.mark.parametrize("kind", ["leaf_symlink", "ancestor_symlink", "hardlink"])
+def test_supervised_executable_rejects_linked_authority(
+    tmp_path: Path, kind: str,
+) -> None:
+    ncu = _fixture_ncu(tmp_path / "ncu")
+    driver = _fixture_supervised_executable(tmp_path / "driver")
+    driver_sha256, _size = immutable.sha256_file(driver)
+    candidate = driver
+    if kind == "leaf_symlink":
+        target = tmp_path / "driver-target"
+        driver.rename(target)
+        driver.symlink_to(target)
+    elif kind == "ancestor_symlink":
+        real = tmp_path / "real"
+        real.mkdir()
+        driver.rename(real / "driver")
+        linked = tmp_path / "linked"
+        linked.symlink_to(real, target_is_directory=True)
+        candidate = linked / "driver"
+    else:
+        os.link(driver, tmp_path / "driver-second-link")
+    expected_driver = executor.ExpectedExecutableIdentity(
+        str(candidate), driver_sha256, 0o555,
+    )
+    with _assert_code(executor.NCU_SUPERVISED_EXECUTABLE_IDENTITY_INVALID):
+        executor.execute_ncu_supervised_executable(
+            _identity(ncu),
+            expected_driver,
+            [str(candidate), executor.AUTHORIZED_NCU_PROC_PATH, "0"],
+            timeout_seconds=1,
+            environment=_collection_environment(),
+        )
+
+
+def test_supervised_executable_rejects_exact_mode_mismatch_before_probe(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    ncu = _fixture_ncu(tmp_path / "ncu")
+    driver = _fixture_supervised_executable(tmp_path / "driver")
+    monkeypatch.setattr(
+        executor.subprocess,
+        "Popen",
+        lambda *_args, **_kwargs: pytest.fail("started probe after mode mismatch"),
+    )
+    with _assert_code(executor.NCU_SUPERVISED_EXECUTABLE_IDENTITY_INVALID):
+        executor.execute_ncu_supervised_executable(
+            _identity(ncu),
+            _supervised_identity(driver, mode=0o755),
+            [str(driver), executor.AUTHORIZED_NCU_PROC_PATH, "0"],
+            timeout_seconds=1,
+            environment=_collection_environment(),
+        )
+
+
+def test_supervised_executable_drift_during_ncu_probe_prevents_child(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    ncu = _fixture_ncu(tmp_path / "ncu")
+    driver = _fixture_supervised_executable(tmp_path / "driver")
+    original = executor._run_bounded
+    calls = 0
+
+    def run(*args, **kwargs):
+        nonlocal calls
+        result = original(*args, **kwargs)
+        calls += 1
+        driver.chmod(0o755)
+        driver.write_bytes(b"mutated during NCU probe")
+        driver.chmod(0o555)
+        return result
+
+    monkeypatch.setattr(executor, "_run_bounded", run)
+    with _assert_code(executor.NCU_SUPERVISED_EXECUTABLE_IDENTITY_INVALID):
+        executor.execute_ncu_supervised_executable(
+            _identity(ncu),
+            _supervised_identity(driver),
+            [str(driver), executor.AUTHORIZED_NCU_PROC_PATH, "0"],
+            timeout_seconds=1,
+            environment=_collection_environment(),
+        )
+    assert calls == 1
+
+
+@pytest.mark.parametrize("outcome", ["success", "nonzero", "timeout"])
+def test_supervised_executable_drift_precedes_child_outcome(
+    tmp_path: Path, monkeypatch, outcome: str,
+) -> None:
+    ncu = _fixture_ncu(tmp_path / "ncu")
+    driver = _fixture_supervised_executable(tmp_path / "driver")
+    original = executor._run_command_bounded
+
+    def run_command(*args, **kwargs):
+        if args[0][1:] == ("--version",):
+            return original(*args, **kwargs)
+        driver.chmod(0o755)
+        driver.write_bytes(b"mutated during supervised child")
+        driver.chmod(0o555)
+        if outcome == "timeout":
+            error = executor.NcuActionExecutorError(
+                executor.NCU_ACTION_TIMEOUT,
+                "synthetic supervised timeout",
+            )
+            error.stdout = b"partial stdout"
+            error.stderr = b"partial stderr"
+            raise error
+        return executor.NcuActionResult(
+            0 if outcome == "success" else 7, b"ordinary", b"failure",
+        )
+
+    monkeypatch.setattr(executor, "_run_command_bounded", run_command)
+    with _assert_code(
+        executor.NCU_SUPERVISED_EXECUTABLE_IDENTITY_INVALID,
+    ) as caught:
+        executor.execute_ncu_supervised_executable(
+            _identity(ncu),
+            _supervised_identity(driver),
+            [str(driver), executor.AUTHORIZED_NCU_PROC_PATH, "0"],
+            timeout_seconds=1,
+            environment=_collection_environment(),
+        )
+    if outcome == "timeout":
+        assert caught.value.stdout == b"partial stdout"
+        assert caught.value.stderr == b"partial stderr"
+
+
+def test_ncu_identity_precedes_simultaneous_supervised_executable_drift(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    ncu = _fixture_ncu(tmp_path / "ncu")
+    driver = _fixture_supervised_executable(tmp_path / "driver")
+    original = executor._run_command_bounded
+
+    def run_command(*args, **kwargs):
+        if args[0][1:] == ("--version",):
+            return original(*args, **kwargs)
+        for path, payload in (
+            (ncu, b"mutated NCU"),
+            (driver, b"mutated supervised executable"),
+        ):
+            path.chmod(0o755)
+            path.write_bytes(payload)
+            path.chmod(0o555)
+        return executor.NcuActionResult(7, b"", b"ordinary failure")
+
+    monkeypatch.setattr(executor, "_run_command_bounded", run_command)
+    with _assert_code(executor.NCU_EXECUTABLE_IDENTITY_INVALID) as caught:
+        executor.execute_ncu_supervised_executable(
+            _identity(ncu),
+            _supervised_identity(driver),
+            [str(driver), executor.AUTHORIZED_NCU_PROC_PATH, "0"],
+            timeout_seconds=1,
+            environment=_collection_environment(),
+        )
+    assert any(
+        executor.NCU_SUPERVISED_EXECUTABLE_IDENTITY_INVALID in note
+        for note in getattr(caught.value, "__notes__", [])
+    )
+
+
+def test_supervised_executable_version_failure_revalidates_driver(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    ncu = _fixture_ncu(tmp_path / "ncu", version_mode="missing")
+    driver = _fixture_supervised_executable(tmp_path / "driver")
+    original = executor._reverify_authorities
+
+    def reverify(retained, borrowed, supervised, *, pending=None):
+        if (
+            isinstance(pending, executor.NcuActionExecutorError)
+            and pending.code == executor.NCU_VERSION_LINE_MISMATCH
+        ):
+            driver.chmod(0o755)
+            driver.write_bytes(b"mutated at version semantic failure")
+            driver.chmod(0o555)
+        return original(
+            retained, borrowed, supervised, pending=pending,
+        )
+
+    monkeypatch.setattr(executor, "_reverify_authorities", reverify)
+    with _assert_code(executor.NCU_SUPERVISED_EXECUTABLE_IDENTITY_INVALID):
+        executor.execute_ncu_supervised_executable(
+            _identity(ncu),
+            _supervised_identity(driver),
+            [str(driver), executor.AUTHORIZED_NCU_PROC_PATH, "0"],
+            timeout_seconds=1,
+            environment=_collection_environment(),
+        )
+
+
+def test_supervised_executable_authorities_must_be_distinct() -> None:
+    path = "/one/executable"
+    expected_ncu = executor.ExpectedNcuIdentity(path, "a" * 64, _VERSION)
+    expected_driver = executor.ExpectedExecutableIdentity(path, "a" * 64, 0o555)
+    with _assert_code(executor.NCU_SUPERVISED_EXECUTABLE_IDENTITY_INVALID):
+        executor.execute_ncu_supervised_executable(
+            expected_ncu,
+            expected_driver,
+            [path, executor.AUTHORIZED_NCU_PROC_PATH],
+            timeout_seconds=1,
+            environment=_collection_environment(),
+        )
+
+
+def test_supervised_executable_rejects_same_retained_inode(tmp_path: Path) -> None:
+    executable = _fixture_ncu(tmp_path / "executable")
+    retained = immutable.open_retained_executable(executable)
+    try:
+        with _assert_code(
+            executor.NCU_SUPERVISED_EXECUTABLE_IDENTITY_INVALID,
+        ):
+            executor._authorize_distinct_opened_executables(retained, retained)
+    finally:
+        retained.close()
+
+
+@pytest.mark.parametrize("descriptor_bound", [False, True])
+def test_supervised_working_directory_nul_is_typed_before_open(
+    monkeypatch, descriptor_bound: bool,
+) -> None:
+    monkeypatch.setattr(
+        executor.immutable,
+        "open_retained_executable",
+        lambda _path: pytest.fail("opened executable for malformed directory"),
+    )
+    expected_ncu = executor.ExpectedNcuIdentity(
+        "/missing/ncu", "a" * 64, _VERSION,
+    )
+    with _assert_code(executor.NCU_ACTION_REQUEST_INVALID):
+        if descriptor_bound:
+            executor.execute_ncu_supervised_executable(
+                expected_ncu,
+                executor.ExpectedExecutableIdentity(
+                    "/missing/driver", "b" * 64, 0o555,
+                ),
+                ["/missing/driver", executor.AUTHORIZED_NCU_PROC_PATH],
+                timeout_seconds=1,
+                environment=_collection_environment(),
+                working_directory=Path("/tmp/bad\x00directory"),
+            )
+        else:
+            executor.execute_ncu_supervised_child(
+                expected_ncu,
+                ["/missing/driver", executor.AUTHORIZED_NCU_PROC_PATH],
+                timeout_seconds=1,
+                environment=_collection_environment(),
+                working_directory=Path("/tmp/bad\x00directory"),
+            )
+
+
+@pytest.mark.parametrize("failed_authority", ["ncu", "driver"])
+def test_supervised_executable_closes_both_handles_on_authority_failure(
+    tmp_path: Path, monkeypatch, failed_authority: str,
+) -> None:
+    ncu = _fixture_ncu(tmp_path / "ncu")
+    driver = _fixture_supervised_executable(tmp_path / "driver")
+    retained = []
+    original = executor.immutable.open_retained_executable
+
+    def open_retained(path):
+        handle = original(path)
+        retained.append(handle)
+        return handle
+
+    monkeypatch.setattr(
+        executor.immutable, "open_retained_executable", open_retained,
+    )
+    expected_ncu = _identity(
+        ncu, sha="0" * 64 if failed_authority == "ncu" else None,
+    )
+    expected_driver = _supervised_identity(driver)
+    if failed_authority == "driver":
+        expected_driver = executor.ExpectedExecutableIdentity(
+            str(driver), "0" * 64, 0o555,
+        )
+    expected_code = (
+        executor.NCU_EXECUTABLE_IDENTITY_INVALID
+        if failed_authority == "ncu"
+        else executor.NCU_SUPERVISED_EXECUTABLE_IDENTITY_INVALID
+    )
+    with _assert_code(expected_code):
+        executor.execute_ncu_supervised_executable(
+            expected_ncu,
+            expected_driver,
+            [str(driver), executor.AUTHORIZED_NCU_PROC_PATH, "0"],
+            timeout_seconds=1,
+            environment=_collection_environment(),
+        )
+    assert len(retained) == 2
+    for handle in retained:
+        with pytest.raises(
+            immutable.ImmutableArtifactError,
+            match="retained executable is closed",
+        ):
+            _ = handle.descriptor
+
+
+def test_supervised_executable_preserves_nonzero_child_result(
+    tmp_path: Path,
+) -> None:
+    ncu = _fixture_ncu(tmp_path / "ncu")
+    driver = _fixture_supervised_executable(tmp_path / "driver")
+    result = executor.execute_ncu_supervised_executable(
+        _identity(ncu),
+        _supervised_identity(driver),
+        [str(driver), executor.AUTHORIZED_NCU_PROC_PATH, "7"],
+        timeout_seconds=1,
+        environment=_collection_environment(),
+    )
+    assert result.returncode == 7

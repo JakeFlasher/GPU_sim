@@ -26,6 +26,9 @@ from tools.local_labels import immutable_artifact as immutable
 NCU_IDENTITY_INPUT_INVALID = "NCU_IDENTITY_INPUT_INVALID"
 NCU_ACTION_REQUEST_INVALID = "NCU_ACTION_REQUEST_INVALID"
 NCU_EXECUTABLE_IDENTITY_INVALID = "NCU_EXECUTABLE_IDENTITY_INVALID"
+NCU_SUPERVISED_EXECUTABLE_IDENTITY_INVALID = (
+    "NCU_SUPERVISED_EXECUTABLE_IDENTITY_INVALID"
+)
 NCU_ACTION_INPUT_IDENTITY_INVALID = "NCU_ACTION_INPUT_IDENTITY_INVALID"
 NCU_VERSION_PROBE_FAILED = "NCU_VERSION_PROBE_FAILED"
 NCU_VERSION_LINE_MISMATCH = "NCU_VERSION_LINE_MISMATCH"
@@ -54,6 +57,13 @@ class ExpectedNcuIdentity:
     resolved_path: str
     executable_sha256: str
     version_line: str
+
+
+@dataclass(frozen=True)
+class ExpectedExecutableIdentity:
+    resolved_path: str
+    executable_sha256: str
+    executable_mode: int
 
 
 @dataclass(frozen=True)
@@ -296,6 +306,75 @@ def build_expected_ncu_identity(
     ))
 
 
+def _validate_expected_executable(
+    expected: ExpectedExecutableIdentity,
+) -> Path:
+    if type(expected) is not ExpectedExecutableIdentity:
+        _fail(
+            NCU_SUPERVISED_EXECUTABLE_IDENTITY_INVALID,
+            "expected supervised executable identity has the wrong type",
+        )
+    path_text = expected.resolved_path
+    if (
+        type(path_text) is not str
+        or not path_text
+        or "\x00" in path_text
+        or not Path(path_text).is_absolute()
+        or path_text.startswith("//")
+        or os.path.normpath(path_text) != path_text
+        or _strict_utf8_size(
+            path_text,
+            code=NCU_SUPERVISED_EXECUTABLE_IDENTITY_INVALID,
+            label="supervised executable resolved_path",
+        ) > _MAX_PATH_BYTES
+    ):
+        _fail(
+            NCU_SUPERVISED_EXECUTABLE_IDENTITY_INVALID,
+            "supervised executable resolved_path is not a bounded "
+            "canonical absolute path",
+        )
+    if (
+        type(expected.executable_sha256) is not str
+        or _SHA256_RE.fullmatch(expected.executable_sha256) is None
+    ):
+        _fail(
+            NCU_SUPERVISED_EXECUTABLE_IDENTITY_INVALID,
+            "supervised executable SHA-256 is not lowercase 64-hex",
+        )
+    mode = expected.executable_mode
+    if (
+        type(mode) is not int
+        or not 0 <= mode <= 0o7777
+        or mode & 0o111 == 0
+    ):
+        _fail(
+            NCU_SUPERVISED_EXECUTABLE_IDENTITY_INVALID,
+            "supervised executable mode is not one executable permission mode",
+        )
+    return Path(path_text)
+
+
+def validate_expected_executable_identity(
+    expected: ExpectedExecutableIdentity,
+) -> ExpectedExecutableIdentity:
+    """Validate and return one exact supervised-executable authority."""
+
+    _validate_expected_executable(expected)
+    return expected
+
+
+def build_expected_executable_identity(
+    *, resolved_path: str, executable_sha256: str, executable_mode: int,
+) -> ExpectedExecutableIdentity:
+    """Build one validated supervised-executable authority without probing."""
+
+    return validate_expected_executable_identity(ExpectedExecutableIdentity(
+        resolved_path=resolved_path,
+        executable_sha256=executable_sha256,
+        executable_mode=executable_mode,
+    ))
+
+
 def _validate_action(
     arguments: Sequence[str], timeout_seconds: float,
 ) -> tuple[str, ...]:
@@ -428,6 +507,58 @@ def _validate_supervised_command(
     )
 
 
+def _validate_supervised_context(
+    environment: NcuCollectionEnvironment,
+    working_directory: Path,
+) -> str:
+    if type(environment) is not NcuCollectionEnvironment:
+        _fail(
+            NCU_ACTION_REQUEST_INVALID,
+            "collection environment is not an authorized environment value",
+        )
+    if not isinstance(working_directory, Path):
+        _fail(
+            NCU_ACTION_REQUEST_INVALID,
+            "supervised working directory is not a path",
+        )
+    working_directory_text = str(working_directory)
+    if (
+        not working_directory_text
+        or "\x00" in working_directory_text
+        or working_directory_text.splitlines() != [working_directory_text]
+        or not working_directory.is_absolute()
+        or working_directory_text.startswith("//")
+        or os.path.normpath(working_directory_text) != working_directory_text
+        or _strict_utf8_size(
+            working_directory_text,
+            code=NCU_ACTION_REQUEST_INVALID,
+            label="supervised working directory",
+        ) > _MAX_PATH_BYTES
+    ):
+        _fail(
+            NCU_ACTION_REQUEST_INVALID,
+            "supervised working directory is not a bounded canonical absolute path",
+        )
+    try:
+        metadata = os.stat(working_directory, follow_symlinks=False)
+    except (OSError, ValueError) as exc:
+        raise NcuActionExecutorError(
+            NCU_ACTION_REQUEST_INVALID,
+            f"supervised working directory is unavailable: {exc}",
+        ) from exc
+    if not stat.S_ISDIR(metadata.st_mode):
+        _fail(
+            NCU_ACTION_REQUEST_INVALID,
+            "supervised working directory is not a no-follow directory",
+        )
+    if environment.as_dict()["PWD"] != working_directory_text:
+        _fail(
+            NCU_ACTION_REQUEST_INVALID,
+            "collection PWD differs from supervised working directory",
+        )
+    return working_directory_text
+
+
 def _render_supervised_command(
     template: tuple[object, ...], retained: immutable.RetainedExecutable,
 ) -> tuple[str, ...]:
@@ -436,6 +567,15 @@ def _render_supervised_command(
         retained_path if item is AUTHORIZED_NCU_PROC_PATH else item
         for item in template
     )
+
+
+def _render_supervised_executable_command(
+    template: tuple[object, ...],
+    retained_ncu: immutable.RetainedExecutable,
+    retained_executable: immutable.RetainedExecutable,
+) -> tuple[str, ...]:
+    rendered = _render_supervised_command(template, retained_ncu)
+    return (proc_fd_path(retained_executable.descriptor), *rendered[1:])
 
 
 def _descriptor_identity(descriptor: int) -> tuple[int, int, int]:
@@ -816,6 +956,133 @@ def _input_identity_error(
     )
 
 
+def _supervised_executable_identity_error(
+    detail: str, cause: BaseException,
+) -> NcuActionExecutorError:
+    return NcuActionExecutorError(
+        NCU_SUPERVISED_EXECUTABLE_IDENTITY_INVALID,
+        f"{detail}: {cause}",
+    )
+
+
+def _authorize_distinct_opened_executables(
+    retained_ncu: immutable.RetainedExecutable,
+    retained_executable: immutable.RetainedExecutable,
+) -> None:
+    try:
+        ncu_metadata = os.fstat(retained_ncu.descriptor)
+    except OSError as exc:
+        raise _identity_error(
+            "cannot identify retained NCU executable", exc,
+        ) from exc
+    try:
+        executable_metadata = os.fstat(retained_executable.descriptor)
+    except OSError as exc:
+        raise _supervised_executable_identity_error(
+            "cannot identify retained supervised executable", exc,
+        ) from exc
+    if (
+        ncu_metadata.st_dev,
+        ncu_metadata.st_ino,
+    ) == (
+        executable_metadata.st_dev,
+        executable_metadata.st_ino,
+    ):
+        _fail(
+            NCU_SUPERVISED_EXECUTABLE_IDENTITY_INVALID,
+            "supervised executable aliases the retained NCU executable",
+        )
+
+
+def _authorize_supervised_executable_opened(
+    retained: immutable.RetainedExecutable,
+    expected: ExpectedExecutableIdentity,
+) -> None:
+    if str(retained.path) != expected.resolved_path:
+        _fail(
+            NCU_SUPERVISED_EXECUTABLE_IDENTITY_INVALID,
+            "retained supervised executable path differs from independent authority",
+        )
+    if retained.sha256 != expected.executable_sha256:
+        _fail(
+            NCU_SUPERVISED_EXECUTABLE_IDENTITY_INVALID,
+            "retained supervised executable SHA-256 differs from independent authority",
+        )
+    try:
+        mode = stat.S_IMODE(os.fstat(retained.descriptor).st_mode)
+    except OSError as exc:
+        raise _supervised_executable_identity_error(
+            "cannot read retained supervised executable mode", exc,
+        ) from exc
+    if mode != expected.executable_mode:
+        _fail(
+            NCU_SUPERVISED_EXECUTABLE_IDENTITY_INVALID,
+            "retained supervised executable mode differs from independent authority",
+        )
+    try:
+        retained.verify_unchanged()
+    except (OSError, immutable.ImmutableArtifactError) as exc:
+        raise _supervised_executable_identity_error(
+            "retained supervised executable changed", exc,
+        ) from exc
+
+
+def _reverify_with_supervised_executable(
+    retained_ncu: immutable.RetainedExecutable,
+    borrowed: _BorrowedActionDescriptors,
+    retained_executable: immutable.RetainedExecutable,
+    *,
+    pending: BaseException | None = None,
+) -> None:
+    failures: list[tuple[NcuActionExecutorError, BaseException]] = []
+    try:
+        _reverify(retained_ncu, borrowed)
+    except NcuActionExecutorError as exc:
+        failures.append((exc, exc.__cause__ or exc))
+    try:
+        retained_executable.verify_unchanged()
+    except (OSError, immutable.ImmutableArtifactError) as exc:
+        failures.append((
+            _supervised_executable_identity_error(
+                "retained supervised executable changed", exc,
+            ),
+            exc,
+        ))
+    if failures:
+        primary, cause = failures[0]
+        for secondary, _secondary_cause in failures[1:]:
+            try:
+                primary.add_note(f"additional identity failure: {secondary}")
+            except (AttributeError, TypeError):
+                pass
+        if pending is not None:
+            if isinstance(pending, NcuActionExecutorError):
+                primary.stdout = pending.stdout
+                primary.stderr = pending.stderr
+            raise primary from pending
+        raise primary from cause
+    if pending is not None:
+        raise pending
+
+
+def _reverify_authorities(
+    retained: immutable.RetainedExecutable,
+    borrowed: _BorrowedActionDescriptors,
+    retained_supervised_executable: immutable.RetainedExecutable | None,
+    *,
+    pending: BaseException | None = None,
+) -> None:
+    if retained_supervised_executable is None:
+        _reverify(retained, borrowed, pending=pending)
+    else:
+        _reverify_with_supervised_executable(
+            retained,
+            borrowed,
+            retained_supervised_executable,
+            pending=pending,
+        )
+
+
 def _verify_auxiliary_descriptors(
     borrowed: _BorrowedActionDescriptors,
 ) -> None:
@@ -886,6 +1153,7 @@ def _run_and_reverify(
     borrowed: _BorrowedActionDescriptors,
     arguments: tuple[str, ...],
     *,
+    retained_supervised_executable: immutable.RetainedExecutable | None = None,
     inherited_descriptors: tuple[int, ...] = (),
     timeout_seconds: float,
     max_output_bytes: int,
@@ -903,9 +1171,16 @@ def _run_and_reverify(
             launch_code=launch_code,
         )
     except BaseException as exc:
-        _reverify(retained, borrowed, pending=exc)
+        _reverify_authorities(
+            retained,
+            borrowed,
+            retained_supervised_executable,
+            pending=exc,
+        )
         raise AssertionError("unreachable")
-    _reverify(retained, borrowed)
+    _reverify_authorities(
+        retained, borrowed, retained_supervised_executable,
+    )
     return result
 
 
@@ -913,6 +1188,8 @@ def _authorize_opened(
     retained: immutable.RetainedExecutable,
     expected: ExpectedNcuIdentity,
     borrowed: _BorrowedActionDescriptors,
+    *,
+    retained_supervised_executable: immutable.RetainedExecutable | None = None,
 ) -> None:
     if str(retained.path) != expected.resolved_path:
         _fail(
@@ -939,20 +1216,24 @@ def _authorize_opened(
             NCU_EXECUTABLE_IDENTITY_INVALID,
             "retained executable is writable by the capture process",
         )
-    _reverify(retained, borrowed)
+    _reverify_authorities(
+        retained, borrowed, retained_supervised_executable,
+    )
     probe = _run_and_reverify(
         retained,
         borrowed,
         ("--version",),
+        retained_supervised_executable=retained_supervised_executable,
         timeout_seconds=_VERSION_TIMEOUT_SECONDS,
         max_output_bytes=_MAX_VERSION_OUTPUT_BYTES,
         timeout_code=NCU_VERSION_PROBE_FAILED,
         launch_code=NCU_VERSION_PROBE_FAILED,
     )
     if probe.returncode != 0:
-        _reverify(
+        _reverify_authorities(
             retained,
             borrowed,
+            retained_supervised_executable,
             pending=NcuActionExecutorError(
                 NCU_VERSION_PROBE_FAILED,
                 f"retained NCU --version exited {probe.returncode}",
@@ -965,15 +1246,18 @@ def _authorize_opened(
         if re.match(r"^\s*Version\s+", line)
     ]
     if len(version_lines) != 1 or version_lines[0] != expected.version_line:
-        _reverify(
+        _reverify_authorities(
             retained,
             borrowed,
+            retained_supervised_executable,
             pending=NcuActionExecutorError(
                 NCU_VERSION_LINE_MISMATCH,
                 "retained NCU version line differs from independent authority",
             ),
         )
-    _reverify(retained, borrowed)
+    _reverify_authorities(
+        retained, borrowed, retained_supervised_executable,
+    )
 
 
 def _execute_opened(
@@ -1049,43 +1333,9 @@ def execute_ncu_supervised_child(
 
     path = _validate_expected(expected)
     template = _validate_supervised_command(command, timeout_seconds)
-    if type(environment) is not NcuCollectionEnvironment:
-        _fail(
-            NCU_ACTION_REQUEST_INVALID,
-            "collection environment is not an authorized environment value",
-        )
-    if not isinstance(working_directory, Path):
-        _fail(
-            NCU_ACTION_REQUEST_INVALID,
-            "supervised working directory is not a path",
-        )
-    working_directory_text = str(working_directory)
-    if (
-        not working_directory.is_absolute()
-        or working_directory_text.startswith("//")
-        or os.path.normpath(working_directory_text) != working_directory_text
-    ):
-        _fail(
-            NCU_ACTION_REQUEST_INVALID,
-            "supervised working directory is not a canonical absolute path",
-        )
-    try:
-        metadata = os.stat(working_directory, follow_symlinks=False)
-    except OSError as exc:
-        raise NcuActionExecutorError(
-            NCU_ACTION_REQUEST_INVALID,
-            f"supervised working directory is unavailable: {exc}",
-        ) from exc
-    if not stat.S_ISDIR(metadata.st_mode):
-        _fail(
-            NCU_ACTION_REQUEST_INVALID,
-            "supervised working directory is not a no-follow directory",
-        )
-    if environment.as_dict()["PWD"] != working_directory_text:
-        _fail(
-            NCU_ACTION_REQUEST_INVALID,
-            "collection PWD differs from supervised working directory",
-        )
+    working_directory_text = _validate_supervised_context(
+        environment, working_directory,
+    )
     borrowed = _BorrowedActionDescriptors(None, (), (), ())
     try:
         retained = immutable.open_retained_executable(path)
@@ -1122,6 +1372,131 @@ def execute_ncu_supervised_child(
         raise
     try:
         retained.close()
+    except BaseException as exc:
+        raise _identity_error("cannot close retained executable", exc) from exc
+    return result
+
+
+def execute_ncu_supervised_executable(
+    expected: ExpectedNcuIdentity,
+    expected_executable: ExpectedExecutableIdentity,
+    command: Sequence[object],
+    *,
+    timeout_seconds: float,
+    environment: NcuCollectionEnvironment,
+    working_directory: Path = Path("/"),
+) -> NcuActionResult:
+    """Run a descriptor-bound child with one descriptor-bound NCU authority."""
+
+    ncu_path = _validate_expected(expected)
+    executable_path = _validate_expected_executable(expected_executable)
+    if ncu_path == executable_path:
+        _fail(
+            NCU_SUPERVISED_EXECUTABLE_IDENTITY_INVALID,
+            "supervised executable must be distinct from NCU authority",
+        )
+    template = _validate_supervised_command(command, timeout_seconds)
+    if template[0] != expected_executable.resolved_path:
+        _fail(
+            NCU_SUPERVISED_EXECUTABLE_IDENTITY_INVALID,
+            "supervised command path differs from independent authority",
+        )
+    working_directory_text = _validate_supervised_context(
+        environment, working_directory,
+    )
+
+    borrowed = _BorrowedActionDescriptors(None, (), (), ())
+    try:
+        retained_ncu = immutable.open_retained_executable(ncu_path)
+    except (OSError, immutable.ImmutableArtifactError) as exc:
+        raise _identity_error("cannot retain expected executable", exc) from exc
+    try:
+        retained_executable = immutable.open_retained_executable(executable_path)
+    except (OSError, immutable.ImmutableArtifactError) as exc:
+        error = _supervised_executable_identity_error(
+            "cannot retain expected supervised executable", exc,
+        )
+        try:
+            retained_ncu.close()
+        except BaseException as close_error:
+            try:
+                error.add_note(f"retained NCU close failed: {close_error}")
+            except (AttributeError, TypeError):
+                pass
+        raise error from exc
+
+    try:
+        _authorize_distinct_opened_executables(
+            retained_ncu, retained_executable,
+        )
+        _authorize_supervised_executable_opened(
+            retained_executable, expected_executable,
+        )
+        _authorize_opened(
+            retained_ncu,
+            expected,
+            borrowed,
+            retained_supervised_executable=retained_executable,
+        )
+        rendered = _render_supervised_executable_command(
+            template, retained_ncu, retained_executable,
+        )
+        try:
+            result = _run_command_bounded(
+                rendered,
+                environment=environment.as_dict(),
+                working_directory=working_directory_text,
+                inherited_descriptors=(
+                    retained_ncu.descriptor,
+                    retained_executable.descriptor,
+                ),
+                timeout_seconds=timeout_seconds,
+                max_output_bytes=_MAX_ACTION_OUTPUT_BYTES,
+                timeout_code=NCU_ACTION_TIMEOUT,
+                launch_code=NCU_ACTION_LAUNCH_FAILED,
+            )
+        except BaseException as action_error:
+            _reverify_with_supervised_executable(
+                retained_ncu,
+                borrowed,
+                retained_executable,
+                pending=action_error,
+            )
+            raise AssertionError("unreachable")
+        _reverify_with_supervised_executable(
+            retained_ncu, borrowed, retained_executable,
+        )
+    except BaseException as active_error:
+        for label, retained in (
+            ("supervised executable", retained_executable),
+            ("NCU executable", retained_ncu),
+        ):
+            try:
+                retained.close()
+            except BaseException as close_error:
+                try:
+                    active_error.add_note(
+                        f"retained {label} close failed: {close_error}"
+                    )
+                except (AttributeError, TypeError):
+                    pass
+        raise
+
+    try:
+        retained_executable.close()
+    except BaseException as exc:
+        try:
+            retained_ncu.close()
+        except BaseException as close_error:
+            try:
+                exc.add_note(f"retained NCU close failed: {close_error}")
+            except (AttributeError, TypeError):
+                pass
+        raise _supervised_executable_identity_error(
+            "cannot close retained supervised executable", exc,
+        ) from exc
+    try:
+        retained_ncu.close()
     except BaseException as exc:
         raise _identity_error("cannot close retained executable", exc) from exc
     return result
