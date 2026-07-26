@@ -479,6 +479,28 @@ def _option_value(argv: list[str], option: str) -> str:
     return argv[argv.index(option) + 1]
 
 
+def _run_label_driver_with_ncu_descriptor(
+    command: list[str], *, environment: dict[str, str],
+) -> subprocess.CompletedProcess[str]:
+    supervised = list(command)
+    descriptor = os.open(_option_value(supervised, "--ncu"), os.O_RDONLY)
+    try:
+        separator = supervised.index("--")
+        supervised[separator:separator] = [
+            "--ncu-exec-path", f"/proc/self/fd/{descriptor}",
+        ]
+        return subprocess.run(
+            supervised,
+            env=environment,
+            text=True,
+            capture_output=True,
+            check=False,
+            pass_fds=(descriptor,),
+        )
+    finally:
+        os.close(descriptor)
+
+
 def _nvidia_smi_calls(path: Path) -> list[list[str]]:
     records = path.read_bytes().split(b"\0\0")
     assert records[-1] == b""
@@ -511,6 +533,57 @@ def test_label_driver_executes_ncu_through_inherited_descriptor(tmp_path):
     assert "NCU_AUTHORITY_INVALID" not in result.stderr
     assert output.is_dir()
     assert marker.is_file()
+    argv = (tmp_path / "ncu-argv").read_text().splitlines()
+    assert _option_value(argv, "--target-processes") == "all"
+    assert _option_value(argv, "--replay-mode") == "kernel"
+    assert _option_value(argv, "--launch-skip") == "0"
+    assert _option_value(argv, "--launch-count") == "1"
+    assert Path(_option_value(argv, "--export")).name == "run_0_0.ncu-rep"
+    assert _option_value(argv, "--clock-control") == "none"
+    assert _option_value(argv, "--profile-from-start") == "off"
+    assert "--filter-mode" not in argv
+    assert "--cache-control" not in argv
+
+
+@pytest.mark.parametrize("explicit_launch_controls", [False, True])
+@pytest.mark.parametrize("declared_path_kind", ["missing", "different"])
+def test_label_driver_rejects_ncu_path_descriptor_identity_mismatch(
+    tmp_path, explicit_launch_controls, declared_path_kind,
+):
+    command, environment, output, marker = _label_boundary_command(tmp_path)
+    if explicit_launch_controls:
+        command = _with_explicit_ncu_controls(command)
+    authorized_ncu = Path(_option_value(command, "--ncu"))
+    descriptor = os.open(authorized_ncu, os.O_RDONLY)
+    try:
+        if declared_path_kind == "missing":
+            declared_ncu = tmp_path / "missing-ncu"
+        else:
+            declared_ncu = tmp_path / "different-ncu"
+            declared_ncu.write_text("#!/usr/bin/env bash\nexit 99\n")
+            declared_ncu.chmod(0o755)
+        command[command.index("--ncu") + 1] = str(declared_ncu)
+        separator = command.index("--")
+        command[separator:separator] = [
+            "--ncu-exec-path", f"/proc/self/fd/{descriptor}",
+        ]
+        result = subprocess.run(
+            command,
+            env=environment,
+            text=True,
+            capture_output=True,
+            check=False,
+            pass_fds=(descriptor,),
+        )
+    finally:
+        os.close(descriptor)
+
+    assert result.returncode == 2
+    assert "NCU_AUTHORITY_INVALID" in result.stderr
+    assert not output.exists()
+    assert not marker.exists()
+    assert not (tmp_path / "ncu-argv").exists()
+    assert not (tmp_path / "nvidia-smi-argv").exists()
 
 
 @pytest.mark.parametrize(
@@ -656,28 +729,17 @@ def test_label_driver_refuses_invalid_launch_set_before_output_or_ncu(
     assert not (tmp_path / "ncu-argv").exists()
 
 
-def test_label_driver_legacy_ncu_arguments_remain_single_launch(tmp_path):
+def test_label_driver_refuses_unsupervised_legacy_collection(tmp_path):
     command, environment, output, marker = _label_boundary_command(tmp_path)
     result = subprocess.run(
         command, env=environment, text=True, capture_output=True, check=False,
     )
-    assert result.returncode == 7
-    assert output.is_dir()
-    assert marker.is_file()
-    assert _nvidia_smi_calls(tmp_path / "nvidia-smi-argv") == [
-        ["-i", "0", "--query-gpu=driver_version", "--format=csv,noheader"],
-        ["-i", "0", "--query-gpu=uuid", "--format=csv,noheader"],
-    ]
-    argv = (tmp_path / "ncu-argv").read_text().splitlines()
-    assert _option_value(argv, "--target-processes") == "all"
-    assert _option_value(argv, "--replay-mode") == "kernel"
-    assert _option_value(argv, "--launch-skip") == "0"
-    assert _option_value(argv, "--launch-count") == "1"
-    assert Path(_option_value(argv, "--export")).name == "run_0_0.ncu-rep"
-    assert _option_value(argv, "--clock-control") == "none"
-    assert _option_value(argv, "--profile-from-start") == "off"
-    assert "--filter-mode" not in argv
-    assert "--cache-control" not in argv
+    assert result.returncode == 2
+    assert "--ncu-exec-path is required" in result.stderr
+    assert not output.exists()
+    assert not marker.exists()
+    assert not (tmp_path / "ncu-argv").exists()
+    assert not (tmp_path / "nvidia-smi-argv").exists()
 
 
 def test_label_driver_rejects_nonzero_gpu_index_before_output_or_ncu(tmp_path):
@@ -702,8 +764,8 @@ def test_label_driver_refuses_cuda_release_before_output_or_ncu(
     command, environment, output, marker = _label_boundary_command(
         tmp_path, cuda_release="13.3",
     )
-    result = subprocess.run(
-        command, env=environment, text=True, capture_output=True, check=False,
+    result = _run_label_driver_with_ncu_descriptor(
+        command, environment=environment,
     )
     assert result.returncode == 2
     assert "CUDA_RELEASE_MISMATCH" in result.stderr
@@ -717,8 +779,8 @@ def test_label_driver_refuses_ncu_release_before_output_or_target(
     command, environment, output, marker = _label_boundary_command(
         tmp_path, ncu_release="2026.1.1.0",
     )
-    result = subprocess.run(
-        command, env=environment, text=True, capture_output=True, check=False,
+    result = _run_label_driver_with_ncu_descriptor(
+        command, environment=environment,
     )
     assert result.returncode == 2
     assert "NCU_VERSION_MISMATCH" in result.stderr
@@ -732,8 +794,8 @@ def test_label_driver_refuses_cycles_scope_without_binding_metric(
     command, environment, output, marker = _label_boundary_command(
         tmp_path, include_cycles=False,
     )
-    result = subprocess.run(
-        command, env=environment, text=True, capture_output=True, check=False,
+    result = _run_label_driver_with_ncu_descriptor(
+        command, environment=environment,
     )
     assert result.returncode == 2
     assert "NCU_PUBLICATION_METRIC_INVALID" in result.stderr

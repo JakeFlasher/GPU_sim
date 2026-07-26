@@ -4,6 +4,7 @@ import copy
 import errno
 import hashlib
 import json
+import os
 import subprocess
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
@@ -3857,9 +3858,30 @@ def _label_driver_ncu_identity_args(tmp_path: Path) -> list[str]:
     ]
 
 
+def _run_label_driver_with_ncu_descriptor(command: list[str]):
+    supervised = list(command)
+    ncu = Path(supervised[supervised.index("--ncu") + 1])
+    descriptor = os.open(ncu, os.O_RDONLY)
+    try:
+        separator = supervised.index("--")
+        supervised[separator:separator] = [
+            "--ncu-exec-path", f"/proc/self/fd/{descriptor}",
+        ]
+        return subprocess.run(
+            supervised,
+            cwd=cc.REPO_ROOT,
+            capture_output=True,
+            text=True,
+            timeout=30,
+            pass_fds=(descriptor,),
+        )
+    finally:
+        os.close(descriptor)
+
+
 def test_label_driver_logical_binding_accepts_adapter_argv_before_ncu(tmp_path):
     missing_manifest = tmp_path / "missing.json"
-    result = subprocess.run([
+    result = _run_label_driver_with_ncu_descriptor([
         str(cc.LABEL_DRIVER),
         "--device", "sm_86", "--slug", "sol_bridge_test",
         "--shape-point", "workloads",
@@ -3870,14 +3892,14 @@ def test_label_driver_logical_binding_accepts_adapter_argv_before_ncu(tmp_path):
         "--out-dir", str(tmp_path / "labels"),
         "--measurement-manifest", str(missing_manifest),
         "--", "benchmark_dir", "--solution", "solution.json", "--json",
-    ], cwd=cc.REPO_ROOT, capture_output=True, text=True, timeout=30)
+    ])
     assert result.returncode == 2
     assert "--measurement-manifest path does not exist" in result.stderr
     assert "do not unambiguously bind" not in result.stderr
 
 
 def test_label_driver_logical_binding_refuses_fake_shape_token(tmp_path):
-    result = subprocess.run([
+    result = _run_label_driver_with_ncu_descriptor([
         str(cc.LABEL_DRIVER),
         "--device", "sm_86", "--slug", "sol_bridge_test",
         "--shape-point", "workloads",
@@ -3887,7 +3909,7 @@ def test_label_driver_logical_binding_refuses_fake_shape_token(tmp_path):
         *_label_driver_ncu_identity_args(tmp_path),
         "--out-dir", str(tmp_path / "labels"),
         "--", "benchmark_dir", "--shape-point", "workloads",
-    ], cwd=cc.REPO_ROOT, capture_output=True, text=True, timeout=30)
+    ])
     assert result.returncode == 2
     assert "logical-workload binding requires" in result.stderr
 

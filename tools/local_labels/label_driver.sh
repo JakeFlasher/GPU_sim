@@ -65,7 +65,7 @@ LAUNCH_INDEX=""
 BINARY_PATH=""
 WARMUP_COUNT="1"
 WARMUP_COUNT_OVERRIDDEN=0
-NCU_BIN="ncu"
+NCU_BIN=""
 NCU_EXEC_PATH=""
 NCU_EXECUTABLE_SHA256=""
 NCU_VERSION_LINE=""
@@ -118,13 +118,11 @@ Required arguments:
 Optional arguments:
   --warmup <int>            Warmup launches before measurement (default: 1).
   --ncu <path>              Exact preflight-authorized inner NCU executable path.
-  --ncu-exec-path <fd-path> Internal inherited descriptor path used only to execute NCU.
+  --ncu-exec-path <fd-path> Required inherited descriptor path used to execute NCU.
   --ncu-executable-sha256 <sha256>
                             Exact preflight-authorized NCU executable hash.
   --ncu-version-line <line> Exact preflight-authorized NCU Version line.
-                            All three are required for single-launch import.
-                            Explicit fixture-only launch-set planning stops before
-                            import and does not consume these fields.
+                            All four fields are required for every collection mode.
   --out-dir <path>          Quarantine root (default: data/local_labels).
   --kernel-name <name>      Forward an exact mangled NCU kernel-name filter.
   --target-processes <mode> Explicit launch-set NCU target process mode.
@@ -426,35 +424,40 @@ if [[ "$EXPLICIT_NCU_LAUNCH_CONTROLS" -eq 1 ]]; then
             "${EXPLICIT_NCU_CONTROL_ARGS[@]}"; then
         exit 2
     fi
-else
-    require "--ncu" "$NCU_BIN"
-    require "--ncu-executable-sha256" "$NCU_EXECUTABLE_SHA256"
-    require "--ncu-version-line" "$NCU_VERSION_LINE"
-    if [[ "$NCU_BIN" != /* ]] \
-        || [[ "$(realpath -- "$NCU_BIN" 2>/dev/null || true)" != "$NCU_BIN" ]]; then
-        echo "label_driver: NCU_AUTHORITY_INVALID: --ncu must be one canonical absolute regular-file path" >&2
-        exit 2
-    fi
-    if ! [[ "$NCU_EXECUTABLE_SHA256" =~ ^[0-9a-f]{64}$ ]]; then
-        echo "label_driver: NCU_AUTHORITY_INVALID: --ncu-executable-sha256 must be lowercase 64-hex" >&2
-        exit 2
-    fi
-    if [[ "$NCU_VERSION_LINE" == *$'\n'* ]] \
-        || ! [[ "$NCU_VERSION_LINE" =~ ^Version[[:space:]]+[^[:space:]] ]]; then
-        echo "label_driver: NCU_AUTHORITY_INVALID: --ncu-version-line must be one canonical Version line" >&2
-        exit 2
-    fi
 fi
 
-NCU_ACTION_BIN="$NCU_BIN"
-if [[ -n "$NCU_EXEC_PATH" ]]; then
-    if ! [[ "$NCU_EXEC_PATH" =~ ^/proc/self/fd/([3-9]|[1-9][0-9]+)$ ]] \
-        || [[ ! -x "$NCU_EXEC_PATH" ]]; then
-        echo "label_driver: NCU_AUTHORITY_INVALID: --ncu-exec-path must name one inherited executable descriptor" >&2
-        exit 2
-    fi
-    NCU_ACTION_BIN="$NCU_EXEC_PATH"
+require "--ncu" "$NCU_BIN"
+require "--ncu-executable-sha256" "$NCU_EXECUTABLE_SHA256"
+require "--ncu-version-line" "$NCU_VERSION_LINE"
+if [[ "$NCU_BIN" != /* ]] \
+    || [[ "$(realpath -- "$NCU_BIN" 2>/dev/null || true)" != "$NCU_BIN" ]] \
+    || [[ ! -f "$NCU_BIN" || ! -x "$NCU_BIN" ]]; then
+    echo "label_driver: NCU_AUTHORITY_INVALID: --ncu must be one canonical absolute executable regular-file path" >&2
+    exit 2
 fi
+if ! [[ "$NCU_EXECUTABLE_SHA256" =~ ^[0-9a-f]{64}$ ]]; then
+    echo "label_driver: NCU_AUTHORITY_INVALID: --ncu-executable-sha256 must be lowercase 64-hex" >&2
+    exit 2
+fi
+if [[ "$NCU_VERSION_LINE" == *$'\n'* ]] \
+    || ! [[ "$NCU_VERSION_LINE" =~ ^Version[[:space:]]+[^[:space:]] ]]; then
+    echo "label_driver: NCU_AUTHORITY_INVALID: --ncu-version-line must be one canonical Version line" >&2
+    exit 2
+fi
+if [[ -z "$NCU_EXEC_PATH" ]]; then
+    echo "label_driver: NCU_AUTHORITY_INVALID: --ncu-exec-path is required for descriptor-bound collection" >&2
+    exit 2
+fi
+if ! [[ "$NCU_EXEC_PATH" =~ ^/proc/self/fd/([3-9]|[1-9][0-9]+)$ ]] \
+    || [[ ! -x "$NCU_EXEC_PATH" ]]; then
+    echo "label_driver: NCU_AUTHORITY_INVALID: --ncu-exec-path must name one inherited executable descriptor" >&2
+    exit 2
+fi
+if [[ ! "$NCU_BIN" -ef "$NCU_EXEC_PATH" ]]; then
+    echo "label_driver: NCU_AUTHORITY_INVALID: --ncu path and inherited executable descriptor differ" >&2
+    exit 2
+fi
+NCU_ACTION_BIN="$NCU_EXEC_PATH"
 
 # Architecture capability gate (C-AC-E). Translate the legacy local
 # label `sm_120` to the manifest's `sm_120-laptop` (the bare
@@ -750,20 +753,22 @@ safe_ncu_version() {
 }
 
 PROFILER_VERSION="$(safe_ncu_version "$NCU_ACTION_BIN")"
-if [[ "$EXPLICIT_NCU_LAUNCH_CONTROLS" -eq 0 ]]; then
-    if ! NCU_OBSERVED_SHA256="$(sha256sum -- "$NCU_ACTION_BIN" 2>/dev/null)"; then
-        echo "label_driver: NCU_AUTHORITY_INVALID: cannot hash authorized NCU executable" >&2
-        exit 2
-    fi
-    NCU_OBSERVED_SHA256="${NCU_OBSERVED_SHA256%% *}"
-    if [[ "$NCU_OBSERVED_SHA256" != "$NCU_EXECUTABLE_SHA256" ]]; then
-        echo "label_driver: NCU_AUTHORITY_INVALID: executable SHA-256 differs from preflight" >&2
-        exit 2
-    fi
-    if [[ "$PROFILER_VERSION" != "$NCU_VERSION_LINE" ]]; then
-        echo "label_driver: NCU_AUTHORITY_INVALID: Version line differs from preflight" >&2
-        exit 2
-    fi
+if ! NCU_OBSERVED_SHA256="$(sha256sum -- "$NCU_ACTION_BIN" 2>/dev/null)"; then
+    echo "label_driver: NCU_AUTHORITY_INVALID: cannot hash authorized NCU executable" >&2
+    exit 2
+fi
+NCU_OBSERVED_SHA256="${NCU_OBSERVED_SHA256%% *}"
+if [[ "$NCU_OBSERVED_SHA256" != "$NCU_EXECUTABLE_SHA256" ]]; then
+    echo "label_driver: NCU_AUTHORITY_INVALID: executable SHA-256 differs from preflight" >&2
+    exit 2
+fi
+if [[ "$PROFILER_VERSION" != "$NCU_VERSION_LINE" ]]; then
+    echo "label_driver: NCU_AUTHORITY_INVALID: Version line differs from preflight" >&2
+    exit 2
+fi
+if [[ ! "$NCU_BIN" -ef "$NCU_ACTION_BIN" ]]; then
+    echo "label_driver: NCU_AUTHORITY_INVALID: --ncu path identity changed during validation" >&2
+    exit 2
 fi
 # nvcc --version output is a multiline banner — we want only the
 # canonical "release X.Y" token. The R5 implementation chained
