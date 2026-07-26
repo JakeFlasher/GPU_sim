@@ -404,6 +404,12 @@ def case(tmp_path: Path) -> dict:
                 "identity": identity,
                 "disposition": "runnable",
                 "authority_cell_sha256": dm.authority_cell_sha256(authority_row),
+                "invocation": {
+                    "executable_sha256": "b" * 64,
+                    "logical_workload": {
+                        "kind": "shape_point", "value": "fixture_shape",
+                    },
+                },
             }
             for identity, authority_row in zip(compact_identities, authority_cells)
         ],
@@ -465,7 +471,11 @@ def case(tmp_path: Path) -> dict:
             ("control_manifest", "control_manifest.json"),
             ("cell_result", "cell_result.json"),
         ):
-            rel = f"{source}/{slug}/{filename}"
+            rel = (
+                f"{source}/{slug}/logs/{filename}"
+                if kind == "execution_log"
+                else f"{source}/{slug}/{filename}"
+            )
             path = output_root / rel
             path.parent.mkdir(parents=True, exist_ok=True)
             if kind == "cell_result":
@@ -485,15 +495,35 @@ def case(tmp_path: Path) -> dict:
                     "definition_equivalence_attestation_sha256": None,
                 })
             elif kind == "ncu_launch_observation":
-                _write_json(path, {
+                observation = {
+                    "schema_version": 1,
+                    "kind": "ncu_details_csv_launch_observation",
+                    "kernel_name_base": "mangled",
+                    "requested_launch_skip": 0,
+                    "requested_launch_count": 1,
                     "report_sha256": _sha(path.parent / "profile.ncu-rep"),
-                    "observation_sha256": dm._canonical_sha256({
-                        "report_sha256": _sha(path.parent / "profile.ncu-rep"),
-                    }),
-                })
+                    "identity_columns": [
+                        "ID", "Device", "Kernel Name", "Block Size", "Grid Size",
+                    ],
+                    "identity": {
+                        "ID": "0",
+                        "Device": "0",
+                        "Kernel Name": "fixture_kernel",
+                        "Block Size": "(128, 1, 1)",
+                        "Grid Size": "(1, 1, 1)",
+                    },
+                }
+                observation["observation_sha256"] = dm._canonical_sha256(
+                    observation
+                )
+                _write_json(path, observation)
             elif kind == "execution_log":
                 _write_json(path, {
                     "schema_version": 1,
+                    "identity": {"roster_source": source, "slug": slug},
+                    "source_commit": head,
+                    "binary_sha256": "b" * 64,
+                    "shape_point": "fixture_shape",
                     "command": ["label-driver", "--", "fixture-binary"],
                     "collection_environment": {
                         "LANG": "C", "LANGUAGE": "C", "LC_ALL": "C",
@@ -504,12 +534,29 @@ def case(tmp_path: Path) -> dict:
                         "PWD": str(repo),
                     },
                     "working_directory": str(repo),
+                    "requested_launch_index": 0,
                 })
             else:
-                if kind == "label_run_manifest":
+                if kind == "label_sidecar":
+                    _write_json(path, {
+                        "device": "sm_86",
+                        "slug": slug,
+                        "shape_point": "fixture_shape",
+                        "repeat_index": 0,
+                        "launch_index": 0,
+                        "binary_sha256": "b" * 64,
+                    })
+                elif kind == "label_run_manifest":
                     _write_json(path, {
                         "schema_version": 1,
                         "ncu_identity": ncu_identity,
+                        "source_commit": head,
+                        "binary_sha256": "b" * 64,
+                        "arch": "sm_86",
+                        "slug": slug,
+                        "shape_point": "fixture_shape",
+                        "repeat_index": 0,
+                        "launch_index": 0,
                     })
                 else:
                     path.write_bytes(f"{source}:{slug}:{kind}\n".encode())
@@ -553,11 +600,12 @@ def case(tmp_path: Path) -> dict:
                     ("label_capture_manifest", "execution_log"),
                 )
             ],
-            launch_observation_sha256=dm._canonical_sha256({
-                "report_sha256": _sha(
-                    output_root / source / slug / "profile.ncu-rep"
-                ),
-            }),
+            launch_observation_sha256=json.loads(
+                (
+                    output_root / source / slug
+                    / "ncu_launch_observation.json"
+                ).read_text()
+            )["observation_sha256"],
         )
         receipt_path.write_text(
             json.dumps(receipt, indent=2, sort_keys=True) + "\n",
@@ -801,6 +849,53 @@ def _upgrade_case_to_current_sol(case: dict) -> None:
         artifact["relative_path"] = artifact["relative_path"].replace(
             "simbench_bw/cell_b/", "sol_execbench/cell_b/", 1,
         )
+    for result_to_update in case["kwargs"]["cell_results"]:
+        cell_prefix = (
+            f"{result_to_update['roster_source']}/"
+            f"{result_to_update['slug']}"
+        )
+        for artifact in result_to_update["artifacts"]:
+            if artifact["artifact_kind"] not in {
+                "label_run_manifest", "execution_log",
+            }:
+                continue
+            path = case["output_root"] / artifact["relative_path"]
+            document = json.loads(path.read_text())
+            document["source_commit"] = head
+            if artifact["artifact_kind"] == "execution_log":
+                document["identity"] = {
+                    "roster_source": result_to_update["roster_source"],
+                    "slug": result_to_update["slug"],
+                }
+            _write_json(path, document)
+            artifact.update({"sha256": _sha(path), "size_bytes": path.stat().st_size})
+        receipt_artifact = next(
+            artifact for artifact in result_to_update["artifacts"]
+            if artifact["artifact_kind"] == "ncu_collection_receipt"
+        )
+        receipt_path = case["output_root"] / receipt_artifact["relative_path"]
+        receipt = json.loads(receipt_path.read_text())
+        role_kinds = {
+            "ncu_report": "ncu_report",
+            "label_run_manifest": "label_run_manifest",
+            "ncu_launch_observation": "ncu_launch_observation",
+            "label_capture_manifest": "execution_log",
+        }
+        for binding in receipt["artifacts"]:
+            target = next(
+                artifact for artifact in result_to_update["artifacts"]
+                if artifact["artifact_kind"] == role_kinds[binding["role"]]
+                and artifact["relative_path"]
+                == f"{cell_prefix}/{binding['relative_path']}"
+            )
+            binding.update({
+                "sha256": target["sha256"],
+                "size_bytes": target["size_bytes"],
+            })
+        _write_json(receipt_path, receipt)
+        receipt_artifact.update({
+            "sha256": _sha(receipt_path), "size_bytes": receipt_path.stat().st_size,
+        })
 
     pin = {
         "path": dm.SOL_NATIVE_ENV_PIN_PATH,
@@ -910,6 +1005,7 @@ def _upgrade_case_to_current_sol(case: dict) -> None:
                 "native_env_hash": dm.SOL_CERTIFIED_NATIVE_ENV_HASH,
                 "environment": dict(dm.SOL_CERTIFIED_ENVIRONMENT),
             },
+            "executable_sha256": "b" * 64,
             "logical_workload": {
                 "definition_file_sha256": _sha(source_path),
             },
@@ -999,6 +1095,187 @@ def test_valid_manifest_is_v2_schema_valid_and_resume_safe(case):
     assert dm.verify_seal(manifest, repo_root=case["repo"]) == []
 
 
+def test_done_trace_contract_binds_ncu_observation_identity(tmp_path):
+    output_root = tmp_path / "capture"
+    cell_root = output_root / "cells" / "portable_lcd__cell_a"
+    trace_path = cell_root / "trace_capture_manifest.json"
+    sidecar_path = cell_root / "labels" / "label_0_0.json"
+    observation_path = cell_root / "labels" / "run_0_0.launch_observation.json"
+    launch = {
+        "device_id": 0,
+        "stream_id": 0,
+        "kernel_id": 1,
+        "kernel_name": "fixture_kernel___0",
+        "grid_dim": [1, 1, 1],
+        "block_dim": [128, 1, 1],
+    }
+    launch_contract = {
+        "schema_version": 1,
+        "label_launch_index": 0,
+        "label_trace_launch_index": 0,
+        "trace_launch_count": 1,
+        "trace_launch_sequence": [launch],
+    }
+    _write_json(trace_path, {
+        "capture_launch_contract": launch_contract,
+        "launch_count": 1,
+        "launches": [launch],
+    })
+    _write_json(sidecar_path, {"launch_index": 0})
+    observation = {
+        "kernel_name_base": "mangled",
+        "identity": {
+            "Kernel Name": "fixture_kernel",
+            "Block Size": "(128, 1, 1)",
+            "Grid Size": "(1, 1, 1)",
+            "Device": "0",
+        },
+    }
+    _write_json(observation_path, observation)
+
+    def artifact(kind: str, path: Path) -> dict:
+        return {
+            "artifact_kind": kind,
+            "relative_path": path.relative_to(output_root).as_posix(),
+            "sha256": _sha(path),
+            "size_bytes": path.stat().st_size,
+        }
+
+    identity = {"roster_source": "portable_lcd", "slug": "cell_a"}
+    row = {
+        **identity,
+        "disposition": "admitted",
+        "artifacts": [
+            artifact("trace_manifest", trace_path),
+            artifact("label_sidecar", sidecar_path),
+            artifact("ncu_launch_observation", observation_path),
+        ],
+    }
+    matrix = {
+        "cells": [{
+            "identity": identity,
+            "invocation": {"capture_launch_contract": launch_contract},
+        }],
+    }
+    assert dm._verify_trace_manifest_launch_contract(
+        row, matrix=matrix, output_root=output_root, label="cell_results[0]",
+    ) == []
+
+    _write_json(trace_path, [])
+    problems = dm._verify_trace_manifest_launch_contract(
+        row, matrix=matrix, output_root=output_root, label="cell_results[0]",
+    )
+    assert any("trace_manifest" in problem and "JSON object" in problem
+               for problem in problems)
+    _write_json(trace_path, {
+        "capture_launch_contract": launch_contract,
+        "launch_count": 1,
+        "launches": [launch],
+    })
+    _write_json(sidecar_path, [])
+    problems = dm._verify_trace_manifest_launch_contract(
+        row, matrix=matrix, output_root=output_root, label="cell_results[0]",
+    )
+    assert any("label_sidecar" in problem and "JSON object" in problem
+               for problem in problems)
+    _write_json(sidecar_path, {"launch_index": 0})
+
+    observation["identity"]["Kernel Name"] = "other_kernel"
+    _write_json(observation_path, observation)
+    row["artifacts"][2].update({
+        "sha256": _sha(observation_path),
+        "size_bytes": observation_path.stat().st_size,
+    })
+    problems = dm._verify_trace_manifest_launch_contract(
+        row, matrix=matrix, output_root=output_root, label="cell_results[0]",
+    )
+    assert any("observation differs from the trace launch" in problem
+               for problem in problems)
+
+
+def test_done_accepts_production_label_tree_receipt_layout(case):
+    manifest = _build(case)
+    row = manifest["cell_results"][0]
+    source = row["roster_source"]
+    slug = row["slug"]
+    cell_root = case["output_root"] / "cells" / f"{source}__{slug}"
+    role_kinds = {
+        "ncu_report": "ncu_report",
+        "label_run_manifest": "label_run_manifest",
+        "ncu_launch_observation": "ncu_launch_observation",
+        "label_capture_manifest": "execution_log",
+    }
+    receipt_artifact = next(
+        artifact for artifact in row["artifacts"]
+        if artifact["artifact_kind"] == "ncu_collection_receipt"
+    )
+    old_receipt_path = case["output_root"] / receipt_artifact["relative_path"]
+    receipt = json.loads(old_receipt_path.read_text())
+    receipt.pop("receipt_seal_sha256", None)
+    for role, kind in role_kinds.items():
+        artifact = next(
+            item for item in row["artifacts"]
+            if item["artifact_kind"] == kind
+        )
+        old_path = case["output_root"] / artifact["relative_path"]
+        internal = (
+            Path("logs/label_capture_manifest.json")
+            if role == "label_capture_manifest"
+            else Path("labels") / old_path.name
+        )
+        new_path = cell_root / internal
+        new_path.parent.mkdir(parents=True, exist_ok=True)
+        new_path.write_bytes(old_path.read_bytes())
+        artifact.update({
+            "relative_path": new_path.relative_to(
+                case["output_root"]
+            ).as_posix(),
+            "sha256": _sha(new_path),
+            "size_bytes": new_path.stat().st_size,
+        })
+        binding = next(
+            item for item in receipt["artifacts"] if item["role"] == role
+        )
+        binding.update({
+            "relative_path": internal.as_posix(),
+            "sha256": artifact["sha256"],
+            "size_bytes": artifact["size_bytes"],
+        })
+    sidecar_artifact = next(
+        artifact for artifact in row["artifacts"]
+        if artifact["artifact_kind"] == "label_sidecar"
+    )
+    old_sidecar_path = case["output_root"] / sidecar_artifact["relative_path"]
+    new_sidecar_path = cell_root / "labels" / old_sidecar_path.name
+    new_sidecar_path.write_bytes(old_sidecar_path.read_bytes())
+    sidecar_artifact.update({
+        "relative_path": new_sidecar_path.relative_to(
+            case["output_root"]
+        ).as_posix(),
+        "sha256": _sha(new_sidecar_path),
+        "size_bytes": new_sidecar_path.stat().st_size,
+    })
+    receipt_path = cell_root / "logs" / "label_ncu_collection_receipt.json"
+    _write_json(receipt_path, dm.immutable.seal_model(
+        receipt, "receipt_seal_sha256"
+    ))
+    receipt_artifact.update({
+        "relative_path": receipt_path.relative_to(
+            case["output_root"]
+        ).as_posix(),
+        "sha256": _sha(receipt_path),
+        "size_bytes": receipt_path.stat().st_size,
+    })
+    problems = dm._verify_ncu_collection_receipt(
+        row,
+        manifest=manifest,
+        preflight=json.loads(case["paths"]["preflight"].read_text()),
+        output_root=case["output_root"],
+        label="cell_results[0]",
+    )
+    assert problems == []
+
+
 def test_done_rejects_missing_ncu_collection_receipt(case):
     case["kwargs"]["cell_results"][0]["artifacts"] = [
         artifact for artifact in case["kwargs"]["cell_results"][0]["artifacts"]
@@ -1044,6 +1321,53 @@ def test_done_rejects_resealed_ncu_path_substitution(case):
     assert any("receipt identity differs" in problem for problem in problems)
 
 
+def test_done_rejects_resealed_ncu_capture_manifest_path_substitution(case):
+    manifest = _build(case)
+    row = manifest["cell_results"][0]
+    artifact = next(
+        item for item in row["artifacts"]
+        if item["artifact_kind"] == "ncu_collection_receipt"
+    )
+    path = case["output_root"] / artifact["relative_path"]
+    receipt = json.loads(path.read_text())
+    receipt.pop("receipt_seal_sha256", None)
+    capture_binding = next(
+        item for item in receipt["artifacts"]
+        if item["role"] == "label_capture_manifest"
+    )
+    capture_binding["relative_path"] = "logs/decoy_capture_manifest.json"
+    _write_and_reseal(path, artifact, dm.immutable.seal_model(
+        receipt, "receipt_seal_sha256"
+    ))
+    problems = dm.verify_seal(manifest, repo_root=case["repo"])
+    assert any("capture manifest path is invalid" in problem for problem in problems)
+
+
+def test_done_rejects_missing_ncu_observation_binding_without_crashing(case):
+    manifest = _build(case)
+    row = manifest["cell_results"][0]
+    artifact = next(
+        item for item in row["artifacts"]
+        if item["artifact_kind"] == "ncu_collection_receipt"
+    )
+    path = case["output_root"] / artifact["relative_path"]
+    receipt = json.loads(path.read_text())
+    receipt.pop("receipt_seal_sha256", None)
+    observation_binding = next(
+        item for item in receipt["artifacts"]
+        if item["role"] == "ncu_launch_observation"
+    )
+    observation_binding["relative_path"] = "logs/missing_observation.json"
+    _write_and_reseal(path, artifact, dm.immutable.seal_model(
+        receipt, "receipt_seal_sha256"
+    ))
+    problems = dm.verify_seal(manifest, repo_root=case["repo"])
+    assert any(
+        "NCU receipt ncu_launch_observation path is invalid" in problem
+        for problem in problems
+    )
+
+
 def test_done_rejects_resealed_ncu_artifact_hash_drift(case):
     manifest = _build(case)
     row = manifest["cell_results"][0]
@@ -1066,6 +1390,64 @@ def test_done_rejects_resealed_ncu_artifact_hash_drift(case):
     assert any("receipt ncu_report hash differs" in problem for problem in problems)
 
 
+def test_done_rejects_cross_cell_sidecar_path(case):
+    manifest = _build(case)
+    row = manifest["cell_results"][0]
+    sidecar_artifact = next(
+        item for item in row["artifacts"]
+        if item["artifact_kind"] == "label_sidecar"
+    )
+    original_path = case["output_root"] / sidecar_artifact["relative_path"]
+    decoy_path = case["output_root"] / "simbench_bw/cell_b/decoy_sidecar.json"
+    _write_json(decoy_path, json.loads(original_path.read_text()))
+    sidecar_artifact.update({
+        "relative_path": decoy_path.relative_to(case["output_root"]).as_posix(),
+        "sha256": _sha(decoy_path),
+        "size_bytes": decoy_path.stat().st_size,
+    })
+    problems = dm.verify_seal(manifest, repo_root=case["repo"])
+    assert any("sidecar path is outside" in problem for problem in problems)
+
+
+def test_done_rejects_oversized_launch_dimension_without_crashing(case):
+    manifest = _build(case)
+    row = manifest["cell_results"][0]
+    observation_artifact = next(
+        item for item in row["artifacts"]
+        if item["artifact_kind"] == "ncu_launch_observation"
+    )
+    observation_path = case["output_root"] / observation_artifact["relative_path"]
+    observation = json.loads(observation_path.read_text())
+    observation["identity"]["Block Size"] = (
+        "(" + "9" * 5000 + ", 1, 1)"
+    )
+    observation.pop("observation_sha256", None)
+    observation["observation_sha256"] = dm._canonical_sha256(observation)
+    _write_and_reseal(observation_path, observation_artifact, observation)
+
+    receipt_artifact = next(
+        item for item in row["artifacts"]
+        if item["artifact_kind"] == "ncu_collection_receipt"
+    )
+    receipt_path = case["output_root"] / receipt_artifact["relative_path"]
+    receipt = json.loads(receipt_path.read_text())
+    receipt.pop("receipt_seal_sha256", None)
+    observation_binding = next(
+        item for item in receipt["artifacts"]
+        if item["role"] == "ncu_launch_observation"
+    )
+    observation_binding.update({
+        "sha256": observation_artifact["sha256"],
+        "size_bytes": observation_artifact["size_bytes"],
+    })
+    receipt["launch_observation_sha256"] = observation["observation_sha256"]
+    _write_and_reseal(receipt_path, receipt_artifact, dm.immutable.seal_model(
+        receipt, "receipt_seal_sha256"
+    ))
+    problems = dm.verify_seal(manifest, repo_root=case["repo"])
+    assert any("Block Size is invalid" in problem for problem in problems)
+
+
 def test_done_rejects_missing_run_manifest_ncu_identity(case):
     manifest = _build(case)
     row = manifest["cell_results"][0]
@@ -1079,6 +1461,35 @@ def test_done_rejects_missing_run_manifest_ncu_identity(case):
     _write_and_reseal(path, artifact, run)
     problems = dm.verify_seal(manifest, repo_root=case["repo"])
     assert any("run manifest NCU identity differs" in problem for problem in problems)
+
+
+@pytest.mark.parametrize(
+    ("artifact_kind", "field", "message"),
+    [
+        ("label_run_manifest", "shape_point", "run manifest shape_point is invalid"),
+        ("label_sidecar", "binary_sha256", "label sidecar binary_sha256 is invalid"),
+        (
+            "execution_log",
+            "requested_launch_index",
+            "capture manifest requested_launch_index is invalid",
+        ),
+    ],
+)
+def test_done_rejects_missing_receipt_provenance_fields(
+    case, artifact_kind: str, field: str, message: str,
+):
+    manifest = _build(case)
+    row = manifest["cell_results"][0]
+    artifact = next(
+        item for item in row["artifacts"]
+        if item["artifact_kind"] == artifact_kind
+    )
+    path = case["output_root"] / artifact["relative_path"]
+    document = json.loads(path.read_text())
+    document.pop(field, None)
+    _write_and_reseal(path, artifact, document)
+    problems = dm.verify_seal(manifest, repo_root=case["repo"])
+    assert any(message in problem for problem in problems)
 
 
 def test_done_rejects_malformed_preflight_checks(case):

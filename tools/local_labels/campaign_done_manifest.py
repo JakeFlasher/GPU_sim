@@ -33,14 +33,20 @@ for _import_root in (REPO_ROOT, _HERE):
     if str(_import_root) not in sys.path:
         sys.path.insert(0, str(_import_root))
 from campaign_exclusion_ledger import REASON_VOCABULARY  # noqa: E402
+from tools.local_labels import capture_toolchain_contract  # noqa: E402
 from tools.local_labels import immutable_artifact as immutable  # noqa: E402
 from tools.local_labels import ncu_action_executor  # noqa: E402
 from tools.local_labels import ncu_collection_receipt  # noqa: E402
+from tools.local_labels import parse_ncu_metrics  # noqa: E402
 
 MANIFEST_KIND = "campaign_chunk_done"
 SCHEMA_VERSION = 2
 SCHEMA_PATH = (REPO_ROOT / "workloads" / "simbench_bw" / "schemas"
                / "campaign_done_manifest.schema.json")
+LOCAL_LABEL_SIDECAR_SCHEMA_PATH = (
+    REPO_ROOT / "workloads" / "simbench_bw" / "schemas"
+    / "local_label_sidecar.schema.json"
+)
 
 ROSTER_SOURCES = ("portable_lcd", "simbench_bw", "sol_execbench")
 CELL_DISPOSITIONS = ("admitted", "excluded", "failed")
@@ -475,7 +481,13 @@ def git_tree_clean(repo_root: Path = REPO_ROOT) -> bool:
 
 
 def _valid_relative_artifact_path(raw: Any) -> bool:
-    if not isinstance(raw, str) or not raw or "\\" in raw:
+    if (
+        not isinstance(raw, str)
+        or not raw
+        or "\x00" in raw
+        or "\\" in raw
+        or raw.splitlines() != [raw]
+    ):
         return False
     path = PurePosixPath(raw)
     return (not path.is_absolute() and raw == path.as_posix()
@@ -2318,11 +2330,16 @@ def _verify_trace_manifest_launch_contract(
     by_kind = _artifacts_by_kind(row)
     trace_rows = by_kind.get("trace_manifest", [])
     label_rows = by_kind.get("label_sidecar", [])
-    if len(trace_rows) != 1 or len(label_rows) != 1:
+    observation_rows = by_kind.get("ncu_launch_observation", [])
+    if (
+        len(trace_rows) != 1
+        or len(label_rows) != 1
+        or len(observation_rows) != 1
+    ):
         return [
             *problems,
-            f"{label} requires one trace manifest and one label sidecar for "
-            "launch-contract verification",
+            f"{label} requires one trace manifest, one label sidecar, and one "
+            "NCU launch observation for launch-contract verification",
         ]
     trace_path = _resolve_sealed_artifact(
         trace_rows[0], output_root=output_root,
@@ -2332,13 +2349,23 @@ def _verify_trace_manifest_launch_contract(
         label_rows[0], output_root=output_root,
         label=f"{label} label sidecar", problems=problems,
     )
-    if trace_path is None or label_path is None:
+    observation_path = _resolve_sealed_artifact(
+        observation_rows[0], output_root=output_root,
+        label=f"{label} NCU launch observation", problems=problems,
+    )
+    if trace_path is None or label_path is None or observation_path is None:
         return problems
-    try:
-        trace = json.loads(trace_path.read_text())
-        sidecar = json.loads(label_path.read_text())
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
-        return [*problems, f"{label} launch evidence is unreadable: {exc}"]
+    trace = _load_strict_json(
+        trace_path, f"{label}.trace_manifest", problems,
+    )
+    sidecar = _load_strict_json(
+        label_path, f"{label}.label_sidecar", problems,
+    )
+    observation = _load_strict_json(
+        observation_path, f"{label}.ncu_launch_observation", problems,
+    )
+    if trace is None or sidecar is None or observation is None:
+        return problems
     expected_count = launch_contract.get("trace_launch_count")
     observed_launches = trace.get("launches") if isinstance(trace, dict) else None
     if trace.get("capture_launch_contract") != launch_contract:
@@ -2361,6 +2388,23 @@ def _verify_trace_manifest_launch_contract(
             problems.append(f"{label} trace launch sequence does not match the matrix")
     if sidecar.get("launch_index") != launch_contract.get("label_launch_index"):
         problems.append(f"{label} label launch index does not match the matrix")
+    trace_launch_index = launch_contract.get("label_trace_launch_index")
+    if (
+        type(trace_launch_index) is not int
+        or trace_launch_index < 0
+        or not isinstance(observed_launches, list)
+        or trace_launch_index >= len(observed_launches)
+    ):
+        problems.append(f"{label} selected trace launch is invalid")
+    else:
+        expected_launch_key = _trace_launch_key(
+            observed_launches[trace_launch_index]
+        )
+        observed_launch_key = _ncu_observation_launch_key(observation)
+        if expected_launch_key is None or observed_launch_key != expected_launch_key:
+            problems.append(
+                f"{label} NCU launch observation differs from the trace launch"
+            )
     return problems
 
 
@@ -3612,11 +3656,133 @@ def verify_manifest_sol_definition_attestations(
     return problems
 
 
+_MAX_NCU_DIMENSION = (1 << 31) - 1
+_MAX_NCU_DEVICE_ORDINAL = (1 << 31) - 1
+
+
+def _parse_ncu_dimension(value: Any) -> tuple[int, int, int] | None:
+    if not isinstance(value, str):
+        return None
+    match = re.fullmatch(
+        r"\s*(?:\(\s*)?(\d+)\s*,\s*(\d+)\s*,\s*(\d+)"
+        r"\s*(?:\)\s*)?",
+        value,
+    )
+    if (
+        match is None
+        or (value.lstrip().startswith("(") != value.rstrip().endswith(")"))
+    ):
+        return None
+    try:
+        dimensions = tuple(int(component) for component in match.groups())
+    except ValueError:
+        return None
+    if any(
+        component <= 0 or component > _MAX_NCU_DIMENSION
+        for component in dimensions
+    ):
+        return None
+    return dimensions  # type: ignore[return-value]
+
+
+def _parse_ncu_device(value: Any) -> int | None:
+    if not isinstance(value, str):
+        return None
+    stripped = value.strip()
+    raw_ordinal = stripped if stripped.isdecimal() else None
+    if raw_ordinal is None:
+        match = re.fullmatch(r".*\((\d+)\)\s*", stripped)
+        raw_ordinal = match.group(1) if match is not None else None
+    if raw_ordinal is None:
+        return None
+    try:
+        ordinal = int(raw_ordinal)
+    except ValueError:
+        return None
+    return (
+        ordinal if ordinal <= _MAX_NCU_DEVICE_ORDINAL else None
+    )
+
+
+def _ncu_observation_launch_key(
+    observation: dict,
+) -> tuple[str, tuple[int, int, int], tuple[int, int, int], int] | None:
+    identity = observation.get("identity")
+    if not isinstance(identity, dict):
+        return None
+    name = identity.get("Kernel Name")
+    block = _parse_ncu_dimension(identity.get("Block Size"))
+    grid = _parse_ncu_dimension(identity.get("Grid Size"))
+    device = _parse_ncu_device(identity.get("Device"))
+    if (
+        observation.get("kernel_name_base") != "mangled"
+        or not isinstance(name, str)
+        or not name.strip()
+        or block is None
+        or grid is None
+        or device is None
+    ):
+        return None
+    return name, block, grid, device
+
+
+def _trace_launch_key(
+    launch: Any,
+) -> tuple[str, tuple[int, int, int], tuple[int, int, int], int] | None:
+    if not isinstance(launch, dict):
+        return None
+    raw_name = launch.get("kernel_name")
+    suffix = "___0"
+    if (
+        not isinstance(raw_name, str)
+        or not raw_name.endswith(suffix)
+        or not raw_name[:-len(suffix)]
+        or raw_name[:-len(suffix)].endswith(suffix)
+        or raw_name.startswith("regex:")
+    ):
+        return None
+    block = launch.get("block_dim")
+    grid = launch.get("grid_dim")
+    device = launch.get("device_id")
+    if (
+        not isinstance(block, list)
+        or len(block) != 3
+        or not isinstance(grid, list)
+        or len(grid) != 3
+        or any(type(component) is not int or component <= 0 for component in [*block, *grid])
+        or type(device) is not int
+        or device < 0
+    ):
+        return None
+    return (
+        raw_name[:-len(suffix)],
+        tuple(block),
+        tuple(grid),
+        device,
+    )  # type: ignore[return-value]
+
+
+def _ncu_launch_observation_semantic_problems(
+    observation: dict, *, label: str,
+) -> list[str]:
+    identity = observation.get("identity")
+    if not isinstance(identity, dict):
+        return [f"{label} NCU launch observation identity is not an object"]
+    problems: list[str] = []
+    for field in ("Block Size", "Grid Size"):
+        if _parse_ncu_dimension(identity.get(field)) is None:
+            problems.append(f"{label} NCU launch observation {field} is invalid")
+    if _parse_ncu_device(identity.get("Device")) is None:
+        problems.append(f"{label} NCU launch observation Device is invalid")
+    return problems
+
+
 def _verify_ncu_collection_receipt(
     row: dict,
     *,
     manifest: dict,
     preflight: dict | None,
+    matrix: dict | None = None,
     output_root: Path,
     label: str,
 ) -> list[str]:
@@ -3656,6 +3822,31 @@ def _verify_ncu_collection_receipt(
     relative = receipt_artifacts[0].get("relative_path")
     if not _valid_relative_artifact_path(relative):
         return [f"{label} NCU receipt path is invalid"]
+    receipt_path = PurePosixPath(relative)
+    source = row.get("roster_source")
+    slug = row.get("slug")
+    if not isinstance(source, str) or not isinstance(slug, str):
+        return [f"{label} NCU receipt cell identity is invalid"]
+    expected_cell_prefixes = {
+        (source, slug),
+        ("cells", f"{source}__{slug}"),
+    }
+    expected_receipt_parents = {
+        (*prefix, "logs") for prefix in expected_cell_prefixes
+    }
+    if receipt_path.parent.parts not in expected_receipt_parents:
+        return [f"{label} NCU receipt path is outside its DONE cell"]
+    receipt_name = receipt_path.name
+    receipt_suffix = "_ncu_collection_receipt.json"
+    receipt_tag = receipt_name.removesuffix(receipt_suffix)
+    if (
+        receipt_path.parent.name != "logs"
+        or not receipt_tag
+        or not receipt_name.endswith(receipt_suffix)
+        or any(not (character.isalnum() or character in "_-")
+               for character in receipt_tag)
+    ):
+        return [f"{label} NCU receipt path is not canonical"]
     receipt = _load_strict_json(
         output_root / relative, f"{label}.ncu_collection_receipt", problems,
     )
@@ -3678,6 +3869,55 @@ def _verify_ncu_collection_receipt(
         "executable_sha256": expected.executable_sha256,
         "version_line": expected.version_line,
     }
+    tool_versions = manifest.get("tool_versions")
+    expected_ncu_version = (
+        tool_versions.get("ncu") if isinstance(tool_versions, dict) else None
+    )
+    try:
+        ncu_version_matches = capture_toolchain_contract.ncu_version_matches(
+            expected.version_line, expected_ncu_version,
+        )
+    except capture_toolchain_contract.CaptureToolchainContractError:
+        ncu_version_matches = False
+    if not ncu_version_matches:
+        problems.append(
+            f"{label} retained preflight NCU version differs from DONE pin"
+        )
+    expected_binary_sha256: str | None = None
+    expected_shape_point: str | None = None
+    if isinstance(matrix, dict):
+        matrix_row = _route_matrix_row(
+            matrix,
+            {"roster_source": source, "slug": slug},
+            label=label,
+            problems=problems,
+        )
+        invocation = (
+            matrix_row.get("invocation")
+            if isinstance(matrix_row, dict) else None
+        )
+        if not isinstance(invocation, dict):
+            problems.append(f"{label} matrix invocation is invalid")
+        else:
+            candidate_binary_sha256 = invocation.get("executable_sha256")
+            if (
+                not isinstance(candidate_binary_sha256, str)
+                or _SHA64_RE.fullmatch(candidate_binary_sha256) is None
+            ):
+                problems.append(
+                    f"{label} matrix invocation executable_sha256 is invalid"
+                )
+            else:
+                expected_binary_sha256 = candidate_binary_sha256
+            logical_workload = invocation.get("logical_workload")
+            if isinstance(logical_workload, dict):
+                candidate_shape_point = logical_workload.get("value")
+                if (
+                    logical_workload.get("kind") == "shape_point"
+                    and isinstance(candidate_shape_point, str)
+                    and candidate_shape_point
+                ):
+                    expected_shape_point = candidate_shape_point
     artifact_by_path = {
         artifact.get("relative_path"): artifact
         for artifact in artifacts
@@ -3695,6 +3935,7 @@ def _verify_ncu_collection_receipt(
     }
     receipt_bindings = receipt.get("artifacts")
     external_bindings: list[dict] = []
+    observation: dict | None = None
     launch_observation: dict | None = None
     capture_manifest: dict | None = None
     report_sha256: str | None = None
@@ -3713,6 +3954,29 @@ def _verify_ncu_collection_receipt(
                     f"{label} NCU receipt {role} path is invalid"
                 )
                 continue
+            if role == "label_capture_manifest":
+                capture_relative = PurePosixPath(internal_relative)
+                expected_capture_relative = PurePosixPath(
+                    "logs", f"{receipt_tag}_capture_manifest.json"
+                )
+                if capture_relative != expected_capture_relative:
+                    problems.append(
+                        f"{label} NCU receipt capture manifest path is invalid"
+                    )
+                    continue
+            else:
+                role_relative = PurePosixPath(internal_relative)
+                if (
+                    role_relative.parent != PurePosixPath(".")
+                    and (
+                        not role_relative.parts
+                        or role_relative.parts[0] != "labels"
+                    )
+                ):
+                    problems.append(
+                        f"{label} NCU receipt {role} path is invalid"
+                    )
+                    continue
             bound_path = receipt_cell_dir / PurePosixPath(internal_relative)
             try:
                 bound_relative = bound_path.relative_to(output_root).as_posix()
@@ -3753,7 +4017,7 @@ def _verify_ncu_collection_receipt(
             if role == "ncu_report":
                 report_sha256 = artifact.get("sha256")
             if role == "ncu_launch_observation":
-                observation = _load_json(
+                observation = _load_strict_json(
                     output_root / bound_relative,
                     f"{label}.ncu_launch_observation",
                     problems,
@@ -3775,8 +4039,14 @@ def _verify_ncu_collection_receipt(
                             key: value for key, value in observation.items()
                             if key != "observation_sha256"
                         }
+                        encoded_observation = json.dumps(
+                            unsealed_observation,
+                            sort_keys=True,
+                            separators=(",", ":"),
+                            ensure_ascii=True,
+                        ).encode("utf-8")
                         if (
-                            _canonical_sha256(unsealed_observation)
+                            hashlib.sha256(encoded_observation).hexdigest()
                             != observation.get("observation_sha256")
                         ):
                             problems.append(
@@ -3788,7 +4058,7 @@ def _verify_ncu_collection_receipt(
                         )
                 launch_observation = observation
             if role == "label_capture_manifest":
-                capture = _load_json(
+                capture = _load_strict_json(
                     output_root / bound_relative,
                     f"{label}.label_capture_manifest",
                     problems,
@@ -3813,6 +4083,13 @@ def _verify_ncu_collection_receipt(
         if isinstance(artifact, dict)
         and artifact.get("artifact_kind") == "label_run_manifest"
     ]
+    sidecar_artifacts = [
+        artifact for artifact in artifacts
+        if isinstance(artifact, dict)
+        and artifact.get("artifact_kind") == "label_sidecar"
+    ]
+    run: dict | None = None
+    sidecar: dict | None = None
     if len(run_manifests) != 1:
         problems.append(
             f"{label} requires exactly one label_run_manifest artifact "
@@ -3821,7 +4098,7 @@ def _verify_ncu_collection_receipt(
     else:
         run_relative = run_manifests[0].get("relative_path")
         if _valid_relative_artifact_path(run_relative):
-            run = _load_json(
+            run = _load_strict_json(
                 output_root / run_relative,
                 f"{label}.label_run_manifest",
                 problems,
@@ -3831,6 +4108,191 @@ def _verify_ncu_collection_receipt(
                     f"{label} label run manifest NCU identity differs from "
                     "retained preflight"
                 )
+    if len(sidecar_artifacts) != 1:
+        problems.append(
+            f"{label} requires exactly one label_sidecar artifact "
+            f"(observed={len(sidecar_artifacts)})"
+        )
+    else:
+        sidecar_relative = sidecar_artifacts[0].get("relative_path")
+        if _valid_relative_artifact_path(sidecar_relative):
+            sidecar_path = PurePosixPath(sidecar_relative)
+            is_cell_root_sidecar = sidecar_path.parent.parts in expected_cell_prefixes
+            is_label_tree_sidecar = any(
+                sidecar_path.parts[:len(prefix) + 1]
+                == (*prefix, "labels")
+                for prefix in expected_cell_prefixes
+            )
+            if not (is_cell_root_sidecar or is_label_tree_sidecar):
+                problems.append(
+                    f"{label} label sidecar path is outside its DONE cell"
+                )
+            else:
+                sidecar = _load_strict_json(
+                    output_root / sidecar_relative,
+                    f"{label}.label_sidecar",
+                    problems,
+                )
+                if sidecar is not None and "schema_version" in sidecar:
+                    if sidecar.get("schema_version") != 5:
+                        problems.append(
+                            f"{label} label sidecar schema_version is invalid"
+                        )
+                    else:
+                        try:
+                            import jsonschema
+
+                            jsonschema.validate(
+                                sidecar,
+                                json.loads(
+                                    LOCAL_LABEL_SIDECAR_SCHEMA_PATH.read_text()
+                                ),
+                            )
+                        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+                            problems.append(
+                                f"{label} label sidecar schema is unavailable: {exc}"
+                            )
+                        except jsonschema.ValidationError as exc:
+                            problems.append(
+                                f"{label} label sidecar schema is invalid: {exc.message}"
+                            )
+    if run is not None:
+        run_required_types = {
+            "schema_version": int,
+            "source_commit": str,
+            "binary_sha256": str,
+            "ncu_identity": dict,
+            "arch": str,
+            "slug": str,
+            "shape_point": str,
+            "repeat_index": int,
+            "launch_index": int,
+        }
+        for field, expected_type in run_required_types.items():
+            if type(run.get(field)) is not expected_type:
+                problems.append(
+                    f"{label} NCU run manifest {field} is invalid"
+                )
+            elif field == "binary_sha256" and _SHA64_RE.fullmatch(
+                run[field]
+            ) is None:
+                problems.append(
+                    f"{label} NCU run manifest binary_sha256 is invalid"
+                )
+        if run.get("schema_version") != 1:
+            problems.append(
+                f"{label} NCU run manifest schema_version is invalid"
+            )
+        run_expected = {
+            "source_commit": manifest.get("source_commit_pre"),
+            "arch": manifest.get("arch"),
+            "slug": slug,
+            "repeat_index": 0,
+        }
+        if expected_binary_sha256 is not None:
+            run_expected["binary_sha256"] = expected_binary_sha256
+        if expected_shape_point is not None:
+            run_expected["shape_point"] = expected_shape_point
+        for field, expected_value in run_expected.items():
+            if (
+                type(run.get(field)) is not type(expected_value)
+                or run.get(field) != expected_value
+            ):
+                problems.append(
+                    f"{label} NCU run manifest {field} differs from DONE identity"
+                )
+        if sidecar is not None:
+            sidecar_required_types = {
+                "device": str,
+                "slug": str,
+                "shape_point": str,
+                "repeat_index": int,
+                "launch_index": int,
+                "binary_sha256": str,
+            }
+            for field, expected_type in sidecar_required_types.items():
+                if type(sidecar.get(field)) is not expected_type:
+                    problems.append(
+                        f"{label} label sidecar {field} is invalid"
+                    )
+                elif field == "binary_sha256" and _SHA64_RE.fullmatch(
+                    sidecar[field]
+                ) is None:
+                    problems.append(
+                        f"{label} label sidecar binary_sha256 is invalid"
+                    )
+            sidecar_expected = {
+                "device": run.get("arch"),
+                "slug": run.get("slug"),
+                "shape_point": run.get("shape_point"),
+                "repeat_index": run.get("repeat_index"),
+                "launch_index": run.get("launch_index"),
+                "binary_sha256": run.get("binary_sha256"),
+            }
+            for field, expected_value in sidecar_expected.items():
+                if (
+                    type(sidecar.get(field)) is not type(expected_value)
+                    or sidecar.get(field) != expected_value
+                ):
+                    problems.append(
+                        f"{label} label sidecar {field} differs from NCU run"
+                    )
+        if capture_manifest is not None:
+            capture_required_types = {
+                "schema_version": int,
+                "identity": dict,
+                "source_commit": str,
+                "binary_sha256": str,
+                "command": list,
+                "collection_environment": dict,
+                "working_directory": str,
+                "requested_launch_index": int,
+            }
+            for field, expected_type in capture_required_types.items():
+                if type(capture_manifest.get(field)) is not expected_type:
+                    problems.append(
+                        f"{label} capture manifest {field} is invalid"
+                    )
+                elif field == "binary_sha256" and _SHA64_RE.fullmatch(
+                    capture_manifest[field]
+                ) is None:
+                    problems.append(
+                        f"{label} capture manifest binary_sha256 is invalid"
+                    )
+            if capture_manifest.get("schema_version") != 1:
+                problems.append(
+                    f"{label} capture manifest schema_version is invalid"
+                )
+            capture_expected = {
+                "identity": {"roster_source": source, "slug": slug},
+                "source_commit": run.get("source_commit"),
+                "binary_sha256": run.get("binary_sha256"),
+                "requested_launch_index": run.get("launch_index"),
+            }
+            for field, expected_value in capture_expected.items():
+                if (
+                    type(capture_manifest.get(field)) is not type(expected_value)
+                    or capture_manifest.get(field) != expected_value
+                ):
+                    problems.append(
+                        f"{label} capture manifest {field} differs from DONE identity"
+                    )
+    if observation is not None and run is not None:
+        try:
+            parse_ncu_metrics.validate_launch_observation_document(
+                observation,
+                requested_launch_skip=run.get("launch_index"),
+                requested_launch_count=1,
+                report_sha256=report_sha256,
+            )
+        except (TypeError, ValueError, UnicodeError) as exc:
+            problems.append(
+                f"{label} NCU launch observation contract differs: {exc}"
+            )
+        else:
+            problems.extend(_ncu_launch_observation_semantic_problems(
+                observation, label=label,
+            ))
     if (
         len(external_bindings) == 4
         and launch_observation is not None
@@ -3918,6 +4380,36 @@ def _verify_referenced_files(
     pre = manifest.get("source_commit_pre")
     arch = manifest.get("arch")
     pins_sha = manifest.get("pins_sha256")
+    pins = loaded.get("pins")
+    if not _is_historical_bootstrap(manifest) and isinstance(pins, dict):
+        toolchain = pins.get("toolchain")
+        pinned_ncu_version = (
+            toolchain.get("ncu_version_prefix")
+            if isinstance(toolchain, dict) else None
+        )
+        done_tool_versions = manifest.get("tool_versions")
+        done_ncu_version = (
+            done_tool_versions.get("ncu")
+            if isinstance(done_tool_versions, dict) else None
+        )
+        try:
+            pinned_ncu_version = (
+                capture_toolchain_contract.normalized_ncu_version_prefix(
+                    pinned_ncu_version
+                )
+            )
+            done_ncu_version = (
+                capture_toolchain_contract.normalized_ncu_version_prefix(
+                    done_ncu_version
+                )
+            )
+        except capture_toolchain_contract.CaptureToolchainContractError:
+            problems.append("DONE or pins NCU version prefix is invalid")
+        else:
+            if pinned_ncu_version != done_ncu_version:
+                problems.append(
+                    "DONE NCU tool version differs from sealed pins"
+                )
     preflight = loaded.get("preflight")
     if preflight is not None:
         if preflight.get("capture_admitted") is not True:
@@ -4211,6 +4703,7 @@ def _verify_referenced_files(
                     row,
                     manifest=manifest,
                     preflight=preflight,
+                    matrix=matrix,
                     output_root=output_root,
                     label=f"cell_results[{i}]",
                 ))
