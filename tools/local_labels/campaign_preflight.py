@@ -83,6 +83,7 @@ NCU_HOST_MACHINE = "x86_64"
 NCU_LAUNCHER_TARGET_RELPATH = "target/linux-desktop-glibc_2_11_3-x64/ncu"
 
 DEVICE_SELECTION_POLICY = "single_nvidia_smi_device_v1"
+SELECTED_HOST_GPU_INDEX = 0
 _DEVICE_QUERY = (
     "nvidia-smi",
     "--query-gpu=index,uuid",
@@ -1260,8 +1261,10 @@ def probe_ncu(
 
 def probe_driver(pins: dict) -> dict:
     expected = pins["toolchain"]["driver_version"]
-    rc, out, err = _run(
-        ["nvidia-smi", "--query-gpu=driver_version", "--format=csv,noheader"])
+    rc, out, err = _run([
+        "nvidia-smi", "-i", str(SELECTED_HOST_GPU_INDEX),
+        "--query-gpu=driver_version", "--format=csv,noheader",
+    ])
     if rc != 0:
         return {"status": STATUS_UNAVAILABLE, "expected": expected,
                 "detail": f"nvidia-smi failed: {err.strip()}"}
@@ -1278,7 +1281,9 @@ def _device_probe_result(
     result = {
         "status": status,
         "selection_policy": DEVICE_SELECTION_POLICY,
-        "selected_host_gpu_index": 0 if status == STATUS_OK else None,
+        "selected_host_gpu_index": (
+            SELECTED_HOST_GPU_INDEX if status == STATUS_OK else None
+        ),
         "nvidia_smi_device_count": device_count,
         "gpu_uuid_sha256": gpu_uuid_sha256,
     }
@@ -1316,7 +1321,10 @@ def probe_device() -> dict:
             device_count=1,
         )
     index_text, uuid_text = row
-    if index_text != "0" or _DEVICE_UUID.fullmatch(uuid_text) is None:
+    if (
+        index_text != str(SELECTED_HOST_GPU_INDEX)
+        or _DEVICE_UUID.fullmatch(uuid_text) is None
+    ):
         return _device_probe_result(
             status=STATUS_MISMATCH,
             device_count=1,
@@ -1665,7 +1673,7 @@ def probe_clock_state(pins: dict) -> dict:
     samples: list[dict] = []
     for i in range(3):
         rc, out, err = _run([
-            "nvidia-smi",
+            "nvidia-smi", "-i", str(SELECTED_HOST_GPU_INDEX),
             "--query-gpu=persistence_mode,clocks.gr,clocks.sm,clocks.mem,pstate",
             "--format=csv,noheader,nounits",
         ])
@@ -1697,7 +1705,7 @@ def probe_clock_state(pins: dict) -> dict:
             time.sleep(0.05)
     status, detail = clock_state_verdict(samples, ref)
     rc, event_out, _ = _run([
-        "nvidia-smi",
+        "nvidia-smi", "-i", str(SELECTED_HOST_GPU_INDEX),
         "--query-gpu=clocks_event_reasons.applications_clocks_setting",
         "--format=csv,noheader",
     ])
@@ -2110,7 +2118,7 @@ def probe_sol_native_environment(matrix_path: Path) -> dict:
 def probe_covariates() -> dict:
     """One read-only NVML telemetry sample (never gates; never mutates state)."""
     rc, out, _ = _run([
-        "nvidia-smi",
+        "nvidia-smi", "-i", str(SELECTED_HOST_GPU_INDEX),
         "--query-gpu=clocks.sm,clocks.mem,temperature.gpu,power.draw,"
         "clocks_event_reasons.active",
         "--format=csv,noheader,nounits",
@@ -2151,8 +2159,8 @@ def build_manifest(
     checks = {
         "worktree": probe_worktree(repo_root, ignore_relpaths),
         "ncu": probe_ncu(pins),
-        "driver": probe_driver(pins),
         "device": probe_device(),
+        "driver": probe_driver(pins),
         "nvcc": probe_nvcc(pins, executable=nvcc_executable),
         "nvbit": probe_nvbit(pins, repo_root),
         "capture_processes": probe_capture_processes(),

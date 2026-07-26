@@ -396,6 +396,15 @@ require "--repeat" "$REPEAT_INDEX"
 require "--launch" "$LAUNCH_INDEX"
 require "--binary" "$BINARY_PATH"
 
+# Fresh campaign authority admits exactly one physical host GPU at index 0.
+# Legacy direct callers may omit the variable, but an explicit value can never
+# select a different host GPU or alter the sidecar ordinal.
+if [[ -v LABEL_DRIVER_GPU_INDEX && "$LABEL_DRIVER_GPU_INDEX" != "0" ]]; then
+    echo "label_driver: GPU_INDEX_AUTHORITY_INVALID: LABEL_DRIVER_GPU_INDEX must equal 0" >&2
+    exit 2
+fi
+LABEL_DRIVER_GPU_INDEX="0"
+
 if [[ "$KERNEL_NAME" == regex:* ]]; then
     echo "label_driver: --kernel-name requires an exact name, not regex: syntax" >&2
     exit 2
@@ -768,8 +777,8 @@ safe_cuda_version() {
 }
 
 CUDA_VERSION="$(safe_cuda_version)"
-DRIVER_VERSION="$(safe_capture nvidia-smi --query-gpu=driver_version --format=csv,noheader)"
-GPU_UUID_RAW="$(safe_capture nvidia-smi --query-gpu=uuid --format=csv,noheader)"
+DRIVER_VERSION="$(safe_capture nvidia-smi -i "$LABEL_DRIVER_GPU_INDEX" --query-gpu=driver_version --format=csv,noheader)"
+GPU_UUID_RAW="$(safe_capture nvidia-smi -i "$LABEL_DRIVER_GPU_INDEX" --query-gpu=uuid --format=csv,noheader)"
 GPU_UUID_SHA256="$(printf '%s' "$GPU_UUID_RAW" | sha256sum | awk '{print $1}')"
 BINARY_SHA256="$(sha256sum "$BINARY_PATH" | awk '{print $1}')"
 
@@ -1410,11 +1419,12 @@ AGGREGATION_TAG="kernel"
 # Semantics caveat (recorded in the schema description): this is ONE sample
 # taken AFTER the capture — a mid-capture excursion that clears by emission
 # time is not visible here; the NCU metrics themselves are the in-capture
-# evidence. LABEL_DRIVER_GPU_INDEX selects the device on multi-GPU hosts
-# (default 0). The throttle field name uses the current
+# evidence. Fresh collection is bound to the singleton host authority at index 0;
+# the closed LABEL_DRIVER_GPU_INDEX value is shared by these queries and the
+# sidecar ordinal. The throttle field name uses the current
 # clocks_event_reasons spelling with fallback to the deprecated
 # clocks_throttle_reasons alias (dropped in newer drivers).
-_HOST_GPU_INDEX="${LABEL_DRIVER_GPU_INDEX:-0}"
+_HOST_GPU_INDEX="$LABEL_DRIVER_GPU_INDEX"
 _HOST_CLOCK_STATE="$(nvidia-smi -i "$_HOST_GPU_INDEX" --query-gpu=persistence_mode,clocks.sm,clocks.max.sm,clocks.mem,power.draw,temperature.gpu,clocks_event_reasons.active --format=csv,noheader 2>/dev/null | head -1)"
 if [[ -z "$_HOST_CLOCK_STATE" ]]; then
     _HOST_CLOCK_STATE="$(nvidia-smi -i "$_HOST_GPU_INDEX" --query-gpu=persistence_mode,clocks.sm,clocks.max.sm,clocks.mem,power.draw,temperature.gpu,clocks_throttle_reasons.active --format=csv,noheader 2>/dev/null | head -1)"

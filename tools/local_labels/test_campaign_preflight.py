@@ -152,7 +152,11 @@ def test_device_probe_binds_single_index_uuid_without_disclosure(monkeypatch):
 
     monkeypatch.setattr(cp, "_run", run)
     result = cp.probe_device()
-    assert observed == [list(cp._DEVICE_QUERY)]
+    assert observed == [[
+        "nvidia-smi",
+        "--query-gpu=index,uuid",
+        "--format=csv,noheader,nounits",
+    ]]
     assert result == {
         "status": cp.STATUS_OK,
         "selection_policy": cp.DEVICE_SELECTION_POLICY,
@@ -226,6 +230,64 @@ def test_device_probe_rejects_unbound_inventory_without_uuid_disclosure(
     serialized = json.dumps(result, sort_keys=True)
     assert raw_stderr not in serialized
     assert "GPU-01234567-89ab-cdef-0123-456789abcdef" not in serialized
+
+
+def test_non_inventory_nvidia_smi_queries_bind_fixed_host_index(monkeypatch):
+    commands = []
+
+    def run(command):
+        commands.append(command)
+        query = next(
+            value for value in command if value.startswith("--query-gpu=")
+        )
+        if query == "--query-gpu=driver_version":
+            return 0, "610.43.02\n", ""
+        if query.startswith("--query-gpu=persistence_mode"):
+            return 0, "Enabled, 1350, 1350, 10501, P0\n", ""
+        if query == "--query-gpu=clocks_event_reasons.applications_clocks_setting":
+            return 0, "Not Active\n", ""
+        return 0, "1350, 10501, 45, 250.5, 0x0\n", ""
+
+    monkeypatch.setattr(cp, "_run", run)
+    monkeypatch.setattr(cp.time, "sleep", lambda _seconds: None)
+    pins = {
+        "toolchain": {"driver_version": "610.43.02"},
+        "reference_clock_state": {
+            "persistence_mode": "Enabled",
+            "sm_clock_mhz": 1350,
+            "mem_clock_mhz": 10501,
+        },
+    }
+
+    assert cp.probe_driver(pins)["status"] == cp.STATUS_OK
+    assert cp.probe_clock_state(pins)["status"] == cp.STATUS_OK
+    assert cp.probe_covariates()["status"] == cp.STATUS_OK
+
+    clock_query = [
+        "nvidia-smi", "-i", "0",
+        "--query-gpu=persistence_mode,clocks.gr,clocks.sm,clocks.mem,pstate",
+        "--format=csv,noheader,nounits",
+    ]
+    assert commands == [
+        [
+            "nvidia-smi", "-i", "0",
+            "--query-gpu=driver_version", "--format=csv,noheader",
+        ],
+        clock_query,
+        clock_query,
+        clock_query,
+        [
+            "nvidia-smi", "-i", "0",
+            "--query-gpu=clocks_event_reasons.applications_clocks_setting",
+            "--format=csv,noheader",
+        ],
+        [
+            "nvidia-smi", "-i", "0",
+            "--query-gpu=clocks.sm,clocks.mem,temperature.gpu,power.draw,"
+            "clocks_event_reasons.active",
+            "--format=csv,noheader,nounits",
+        ],
+    ]
 
 
 def test_toolchain_probes_use_structured_release_and_component_boundaries(

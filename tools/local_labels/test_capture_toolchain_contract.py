@@ -400,9 +400,12 @@ def _label_boundary_command(
         )
         + f"exit {ncu_exit}\n",
     )
+    nvidia_smi_argv = tmp_path / "nvidia-smi-argv"
     _write_executable(
         fake_bin / "nvidia-smi",
         "#!/usr/bin/env bash\n"
+        f"printf '%s\\0' \"$@\" >> {str(nvidia_smi_argv)!r}\n"
+        f"printf '\\0' >> {str(nvidia_smi_argv)!r}\n"
         "case \"$*\" in\n"
         "  *driver_version*) printf '610.43.02\\n' ;;\n"
         "  *uuid*) printf 'GPU-test\\n' ;;\n"
@@ -441,6 +444,7 @@ def _label_boundary_command(
     # This unit test targets only the post-architecture toolchain boundary;
     # the production campaign never carries this test-only override.
     environment["LABEL_DRIVER_SKIP_ARCH_CHECK"] = "1"
+    environment.pop("LABEL_DRIVER_GPU_INDEX", None)
     return command, environment, output, ncu_marker
 
 
@@ -473,6 +477,15 @@ def _with_explicit_ncu_controls(
 def _option_value(argv: list[str], option: str) -> str:
     assert argv.count(option) == 1
     return argv[argv.index(option) + 1]
+
+
+def _nvidia_smi_calls(path: Path) -> list[list[str]]:
+    records = path.read_bytes().split(b"\0\0")
+    assert records[-1] == b""
+    return [
+        [argument.decode("utf-8") for argument in record.split(b"\0")]
+        for record in records[:-1]
+    ]
 
 
 def test_label_driver_executes_ncu_through_inherited_descriptor(tmp_path):
@@ -635,6 +648,10 @@ def test_label_driver_legacy_ncu_arguments_remain_single_launch(tmp_path):
     assert result.returncode == 7
     assert output.is_dir()
     assert marker.is_file()
+    assert _nvidia_smi_calls(tmp_path / "nvidia-smi-argv") == [
+        ["-i", "0", "--query-gpu=driver_version", "--format=csv,noheader"],
+        ["-i", "0", "--query-gpu=uuid", "--format=csv,noheader"],
+    ]
     argv = (tmp_path / "ncu-argv").read_text().splitlines()
     assert _option_value(argv, "--target-processes") == "all"
     assert _option_value(argv, "--replay-mode") == "kernel"
@@ -645,6 +662,22 @@ def test_label_driver_legacy_ncu_arguments_remain_single_launch(tmp_path):
     assert _option_value(argv, "--profile-from-start") == "off"
     assert "--filter-mode" not in argv
     assert "--cache-control" not in argv
+
+
+def test_label_driver_rejects_nonzero_gpu_index_before_output_or_ncu(tmp_path):
+    command, environment, output, marker = _label_boundary_command(tmp_path)
+    environment["LABEL_DRIVER_GPU_INDEX"] = "1"
+
+    result = subprocess.run(
+        command, env=environment, text=True, capture_output=True, check=False,
+    )
+
+    assert result.returncode == 2
+    assert "GPU_INDEX_AUTHORITY_INVALID" in result.stderr
+    assert not output.exists()
+    assert not marker.exists()
+    assert not (tmp_path / "ncu-argv").exists()
+    assert not (tmp_path / "nvidia-smi-argv").exists()
 
 
 def test_label_driver_refuses_cuda_release_before_output_or_ncu(

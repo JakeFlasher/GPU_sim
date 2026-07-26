@@ -19,7 +19,7 @@ SCHEMA_PATH = (
     / "ncu_collection_execution_receipt.schema.json"
 )
 SCHEMA_ID = "simbench_bw/schemas/ncu_collection_execution_receipt.schema.json"
-SCHEMA_SHA256 = "f3cdc5a0d0bf43f517fc367d695edc2563eba7234cf887a3b629165a675bd0e1"
+SCHEMA_SHA256 = "013d0c4d467f8395122d2c08c6be8ac441e8ceb7a86905ecc02f8c34c9642253"
 _SCHEMA_DRAFT = "https://json-schema.org/draft/2020-12/schema"
 _ARTIFACT_ROLES = (
     "ncu_report",

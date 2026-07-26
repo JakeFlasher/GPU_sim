@@ -3556,6 +3556,7 @@ def test_run_logged_routes_supervised_ncu_and_writes_logs(
         "LANG": "C", "LANGUAGE": "C", "LC_ALL": "C",
         "PATH": "/usr/local/cuda-13.2/bin:/usr/bin:/bin",
         "PWD": str(tmp_path), "PYTHONNOUSERSITE": "1",
+        "LABEL_DRIVER_GPU_INDEX": "0",
         "LABEL_DRIVER_PRESERVE_FAILED_EVIDENCE": "1",
     })
     command = [
@@ -3594,6 +3595,7 @@ def test_run_logged_types_supervised_ncu_timeout(tmp_path, monkeypatch):
         "LANG": "C", "LANGUAGE": "C", "LC_ALL": "C",
         "PATH": "/usr/local/cuda-13.2/bin:/usr/bin:/bin",
         "PWD": str(tmp_path), "PYTHONNOUSERSITE": "1",
+        "LABEL_DRIVER_GPU_INDEX": "0",
         "LABEL_DRIVER_PRESERVE_FAILED_EVIDENCE": "1",
     })
 
@@ -3631,6 +3633,7 @@ def test_run_logged_storage_marker_precedes_supervised_timeout(
         "LANG": "C", "LANGUAGE": "C", "LC_ALL": "C",
         "PATH": "/usr/local/cuda-13.2/bin:/usr/bin:/bin",
         "PWD": str(tmp_path), "PYTHONNOUSERSITE": "1",
+        "LABEL_DRIVER_GPU_INDEX": "0",
         "LABEL_DRIVER_PRESERVE_FAILED_EVIDENCE": "1",
     })
     marker = cc.LABEL_DRIVER_STORAGE_MARKER + json.dumps({
@@ -5518,6 +5521,7 @@ def test_label_capture_stages_workload_output_and_checks_full_vector(
     assert receipt_path == cell_dir / "logs" / "label_ncu_collection_receipt.json"
     collection_receipt = json.loads(receipt_path.read_text())
     assert collection_receipt["preflight_sha256"] == "0" * 64
+    assert collection_receipt["environment"]["LABEL_DRIVER_GPU_INDEX"] == "0"
     assert collection_receipt["command"] == [
         item for item in command
         if item is not cc.ncu_executor.AUTHORIZED_NCU_PROC_PATH
@@ -5561,6 +5565,7 @@ def test_sol_label_consumer_keeps_shape_metadata_out_of_target_argv(
         "PYTHONPATH": "/hostile/python",
         "BASH_ENV": "/hostile/bash-env",
         "NCU_CONFIG_FILE": "/hostile/ncu-config",
+        "LABEL_DRIVER_GPU_INDEX": "1",
     })
     observed = {}
 
@@ -5671,6 +5676,7 @@ def test_sol_label_consumer_keeps_shape_metadata_out_of_target_argv(
     assert projected["PATH"] == "/usr/local/cuda-13.2/bin:/usr/bin:/bin"
     assert projected["PWD"] == str(cc.REPO_ROOT)
     assert projected["CUTLASS_DIR"] == runtime_env["CUTLASS_DIR"]
+    assert projected["LABEL_DRIVER_GPU_INDEX"] == "0"
     assert projected["LABEL_DRIVER_PRESERVE_FAILED_EVIDENCE"] == "1"
     for name in (
         "LD_PRELOAD", "LD_LIBRARY_PATH", "LD_AUDIT",

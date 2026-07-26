@@ -108,6 +108,7 @@ def _collection_environment(**overrides) -> executor.NcuCollectionEnvironment:
         "PATH": "/usr/local/cuda-13.2/bin:/usr/bin:/bin",
         "PWD": "/",
         "PYTHONNOUSERSITE": "1",
+        "LABEL_DRIVER_GPU_INDEX": "0",
         "LABEL_DRIVER_PRESERVE_FAILED_EVIDENCE": "1",
         **overrides,
     })
@@ -214,6 +215,7 @@ def test_collection_environment_rejects_non_string_names(name) -> None:
     [
         {"LANG": "en_US.UTF-8"},
         {"PYTHONNOUSERSITE": "0"},
+        {"LABEL_DRIVER_GPU_INDEX": "1"},
         {"PATH": "relative:/bin"},
         {"PATH": "/bin::/usr/bin"},
         {"PATH": "//bin:/usr/bin"},
@@ -222,6 +224,13 @@ def test_collection_environment_rejects_non_string_names(name) -> None:
 def test_collection_environment_rejects_required_or_path_drift(overrides) -> None:
     with _assert_code(executor.NCU_ACTION_REQUEST_INVALID):
         _collection_environment(**overrides)
+
+
+def test_collection_environment_requires_fixed_gpu_index() -> None:
+    values = _collection_environment().as_dict()
+    del values["LABEL_DRIVER_GPU_INDEX"]
+    with _assert_code(executor.NCU_ACTION_REQUEST_INVALID):
+        executor.NcuCollectionEnvironment(values)
 
 
 def test_supervised_child_inherits_one_authorized_ncu_descriptor(
@@ -254,6 +263,7 @@ def test_supervised_child_inherits_one_authorized_ncu_descriptor(
     observed_target = json.loads(result.stdout)
     assert observed_target["arguments"] == ["inherited"]
     target_environment = observed_target["environment"]
+    assert target_environment["LABEL_DRIVER_GPU_INDEX"] == "0"
     assert target_environment.pop("SHLVL") == "0"
     assert target_environment == environment.as_dict()
     assert result.stderr == b"synthetic stderr\n"

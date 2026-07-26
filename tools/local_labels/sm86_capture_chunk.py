@@ -4493,6 +4493,7 @@ def _label_collection_environment(
         "PATH": _LABEL_COLLECTION_PATH,
         "PWD": str(cwd),
         "PYTHONNOUSERSITE": "1",
+        "LABEL_DRIVER_GPU_INDEX": "0",
         "LABEL_DRIVER_PRESERVE_FAILED_EVIDENCE": "1",
     }
     for name in _LABEL_COLLECTION_ENVIRONMENT_NAMES:

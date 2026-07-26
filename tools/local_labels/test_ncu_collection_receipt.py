@@ -35,6 +35,7 @@ def _environment() -> ncu_action_executor.NcuCollectionEnvironment:
         "PATH": "/usr/local/cuda-13.2/bin:/usr/bin:/bin",
         "PWD": "/capture/work",
         "PYTHONNOUSERSITE": "1",
+        "LABEL_DRIVER_GPU_INDEX": "0",
         "LABEL_DRIVER_PRESERVE_FAILED_EVIDENCE": "1",
         "CUTLASS_DIR": "/opt/cutlass",
     })
@@ -124,6 +125,7 @@ def test_receipt_round_trip_binds_all_expected_inputs() -> None:
     assert document["command_sha256"] == immutable.sha256_bytes(
         immutable.canonical_json_bytes(kwargs["command"])
     )
+    assert document["environment"]["LABEL_DRIVER_GPU_INDEX"] == "0"
     assert document["environment_sha256"] == immutable.sha256_bytes(
         immutable.canonical_json_bytes(_environment().as_dict())
     )
@@ -133,6 +135,57 @@ def test_receipt_round_trip_binds_all_expected_inputs() -> None:
     assert document["supervision"]["command_derivation"] == (
         "insert_authorized_ncu_proc_path_option_before_target_separator_v1"
     )
+
+
+def test_prefield_v1_receipt_remains_schema_readable_but_not_current() -> None:
+    kwargs = _kwargs()
+    document = receipt.build_receipt(**kwargs)  # type: ignore[arg-type]
+    del document["environment"]["LABEL_DRIVER_GPU_INDEX"]
+    document["environment_sha256"] = immutable.sha256_bytes(
+        immutable.canonical_json_bytes(document["environment"])
+    )
+    document = _reseal(document)
+
+    receipt.validate_schema(document)
+    with pytest.raises(receipt.CollectionReceiptError, match="bindings differ"):
+        receipt.validate_receipt(
+            document,
+            expected_preflight_sha256=kwargs["preflight_sha256"],
+            expected_ncu_identity=kwargs["expected_ncu_identity"],
+            expected_command=kwargs["command"],
+            expected_environment=kwargs["environment"],
+            expected_working_directory=kwargs["working_directory"],
+            expected_exit_status=kwargs["exit_status"],
+            expected_artifacts=kwargs["artifacts"],
+            expected_launch_observation_sha256=kwargs[
+                "launch_observation_sha256"
+            ],
+        )  # type: ignore[arg-type]
+
+
+def test_receipt_schema_rejects_resealed_nonzero_gpu_index() -> None:
+    kwargs = _kwargs()
+    document = receipt.build_receipt(**kwargs)  # type: ignore[arg-type]
+    document["environment"]["LABEL_DRIVER_GPU_INDEX"] = "1"
+    document["environment_sha256"] = immutable.sha256_bytes(
+        immutable.canonical_json_bytes(document["environment"])
+    )
+    document = _reseal(document)
+
+    with pytest.raises(receipt.CollectionReceiptError, match="schema validation"):
+        receipt.validate_receipt(
+            document,
+            expected_preflight_sha256=kwargs["preflight_sha256"],
+            expected_ncu_identity=kwargs["expected_ncu_identity"],
+            expected_command=kwargs["command"],
+            expected_environment=kwargs["environment"],
+            expected_working_directory=kwargs["working_directory"],
+            expected_exit_status=kwargs["exit_status"],
+            expected_artifacts=kwargs["artifacts"],
+            expected_launch_observation_sha256=kwargs[
+                "launch_observation_sha256"
+            ],
+        )  # type: ignore[arg-type]
 
 
 @pytest.mark.parametrize("working_directory", [Path("/"), Path("/capture/work")])

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "simbench_bw/schemas/ncu_collection_execution_receipt.schema.json",
   "title": "NCU collection execution receipt",
-  "description": "Supervisor-authored process-integrity receipt for one descriptor-bound NCU collection. This does not attest the later Details export or campaign DONE semantic closure.",
+  "description": "Supervisor-authored process-integrity receipt for one descriptor-bound NCU collection. Fresh producers bind the additive LABEL_DRIVER_GPU_INDEX field to the singleton host index 0; pre-field v1 documents remain schema-readable but cannot satisfy current external environment bindings. This does not attest the later Details export or campaign DONE semantic closure.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -92,6 +92,7 @@
         "PATH": {"const": "/usr/local/cuda-13.2/bin:/usr/bin:/bin"},
         "PWD": {"$ref": "#/$defs/absolute_path"},
         "PYTHONNOUSERSITE": {"const": "1"},
+        "LABEL_DRIVER_GPU_INDEX": {"const": "0"},
         "LABEL_DRIVER_PRESERVE_FAILED_EVIDENCE": {"const": "1"},
         "CC": {"$ref": "#/$defs/environment_value"},
         "CUDAHOSTCXX": {"$ref": "#/$defs/environment_value"},
