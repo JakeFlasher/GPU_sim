@@ -5182,13 +5182,15 @@ def _persist_fixture_launch_set_authorities(
     )
 
 
-def execute_fixture_only_launch_set_plan(
+def _execute_launch_set_plan(
     *,
     plan: dict[str, Any],
     expected_plan_sha256: str,
-    fixture_execution_authority: object,
     artifact_root: Path,
     expected_ncu_identity: ncu_executor.ExpectedNcuIdentity,
+    expected_driver_identity: ncu_executor.ExpectedExecutableIdentity,
+    production_driver_required: bool,
+    boundary_error_code: str,
     expected_target_executable_sha256: str,
     expected_runtime_module_sha256s: tuple[str, ...],
     expected_gpu_uuid_sha256: str,
@@ -5206,13 +5208,23 @@ def execute_fixture_only_launch_set_plan(
     runtime_cwd: Path,
     runtime_env: dict[str, str] | None = None,
 ) -> dict[str, Path | tuple[Path, ...]]:
-    """Exercise the launch-set handoff without opening a production live gate."""
+    """Execute and publish one validated launch-set plan."""
     try:
         expected_ncu_identity = ncu_executor.validate_expected_ncu_identity(
             expected_ncu_identity
         )
     except ncu_executor.NcuActionExecutorError as exc:
         raise ChunkRefusal("capture_ncu_authority_invalid", str(exc)) from exc
+    try:
+        expected_driver_identity = (
+            ncu_executor.validate_expected_executable_identity(
+                expected_driver_identity
+            )
+        )
+    except ncu_executor.NcuActionExecutorError as exc:
+        raise ChunkRefusal(
+            "label_launch_set_driver_authority_invalid", str(exc),
+        ) from exc
     if (
         not _is_sha256(expected_preflight_sha256)
         or not _is_sha256(expected_gpu_uuid_sha256)
@@ -5230,9 +5242,11 @@ def execute_fixture_only_launch_set_plan(
         or type(percentage_metric_names) is not tuple
         or percentage_metric_names != _LAUNCH_SET_PERCENTAGE_METRICS
         or type(unit_metric_names) is not tuple
-        or fixture_execution_authority is not (
-            _FIXTURE_LAUNCH_SET_EXECUTION_AUTHORITY
-        )
+        or type(production_driver_required) is not bool
+        or boundary_error_code not in {
+            "label_launch_set_fixture_boundary_invalid",
+            "label_launch_set_production_boundary_invalid",
+        }
     ):
         raise ChunkRefusal(
             "label_launch_set_authority_invalid",
@@ -5245,6 +5259,15 @@ def execute_fixture_only_launch_set_plan(
             expected_plan_sha256=expected_plan_sha256,
         )
     )
+    production_driver = command[0] == str(_PRODUCTION_LABEL_DRIVER)
+    if (
+        command[0] != expected_driver_identity.resolved_path
+        or production_driver != production_driver_required
+    ):
+        raise ChunkRefusal(
+            boundary_error_code,
+            "launch-set driver boundary differs from independent authority",
+        )
     warmup_text = _launch_set_option(command, "--warmup")
     try:
         warmup_count = int(warmup_text, 10)
@@ -5334,14 +5357,15 @@ def execute_fixture_only_launch_set_plan(
             "label_launch_set_authority_invalid",
             "sidecar toolchain provenance differs from the sealed command",
         )
-    if (
-        Path(command[0]).resolve() == _PRODUCTION_LABEL_DRIVER.resolve()
-        or planned_unit_metrics != unit_metric_names
-        or os.path.lexists(cell_root)
-    ):
+    if planned_unit_metrics != unit_metric_names:
         raise ChunkRefusal(
-            "label_launch_set_fixture_boundary_invalid",
-            "fixture execution authority or fresh output boundary differs",
+            "label_launch_set_authority_invalid",
+            "planned launch-set metrics differ from registry authority",
+        )
+    if os.path.lexists(cell_root):
+        raise ChunkRefusal(
+            boundary_error_code,
+            "launch-set output boundary is not fresh",
         )
     supervised_command: list[object] = list(command)
     separator = supervised_command.index("--")
@@ -5367,11 +5391,12 @@ def execute_fixture_only_launch_set_plan(
             with immutable.PinnedDirectoryReader(artifact_root) as pinned_root:
                 if os.listdir(pinned_root.descriptor):
                     raise ChunkRefusal(
-                        "label_launch_set_fixture_boundary_invalid",
-                        "fixture artifact root is not empty",
+                        boundary_error_code,
+                        "launch-set artifact root is not empty",
                     )
-                result = ncu_executor.execute_ncu_supervised_child(
+                result = ncu_executor.execute_ncu_supervised_executable(
                     expected_ncu_identity,
+                    expected_driver_identity,
                     supervised_command,
                     timeout_seconds=timeout_s,
                     environment=environment,
@@ -5385,8 +5410,8 @@ def execute_fixture_only_launch_set_plan(
         ) from exc
     except (OSError, immutable.ImmutableArtifactError) as exc:
         raise ChunkRefusal(
-            "label_launch_set_fixture_boundary_invalid",
-            f"fixture artifact root is not pinned: {exc}",
+            boundary_error_code,
+            f"launch-set artifact root is not pinned: {exc}",
         ) from exc
     if (
         result.returncode != 3
@@ -5583,6 +5608,169 @@ def execute_fixture_only_launch_set_plan(
         "sidecars": published_sidecars,
         "capture_manifest": capture_manifest,
     }
+
+
+def _expected_launch_set_driver_identity(
+    path: Path,
+) -> ncu_executor.ExpectedExecutableIdentity:
+    try:
+        with immutable.open_retained_executable(path) as retained:
+            mode = stat.S_IMODE(os.fstat(retained.descriptor).st_mode)
+            expected = ncu_executor.build_expected_executable_identity(
+                resolved_path=str(retained.path),
+                executable_sha256=retained.sha256,
+                executable_mode=mode,
+            )
+            retained.verify_unchanged()
+    except (
+        OSError,
+        immutable.ImmutableArtifactError,
+        ncu_executor.NcuActionExecutorError,
+    ) as exc:
+        raise ChunkRefusal(
+            "label_launch_set_driver_authority_invalid", str(exc),
+        ) from exc
+    return expected
+
+
+def execute_fixture_only_launch_set_plan(
+    *,
+    plan: dict[str, Any],
+    expected_plan_sha256: str,
+    fixture_execution_authority: object,
+    artifact_root: Path,
+    expected_ncu_identity: ncu_executor.ExpectedNcuIdentity,
+    expected_target_executable_sha256: str,
+    expected_runtime_module_sha256s: tuple[str, ...],
+    expected_gpu_uuid_sha256: str,
+    expected_cuda_version: str,
+    expected_driver_version: str,
+    expected_preflight_sha256: str,
+    expected_source_commit: str,
+    expected_capture_identity_sha256: str,
+    expected_kernel_signature_sha256: str,
+    expected_kernel_signature_source: str,
+    registry: Any,
+    percentage_metric_names: tuple[str, ...],
+    unit_metric_names: tuple[str, ...],
+    timeout_s: float,
+    runtime_cwd: Path,
+    runtime_env: dict[str, str] | None = None,
+) -> dict[str, Path | tuple[Path, ...]]:
+    """Exercise the launch-set handoff without a production live gate."""
+    if fixture_execution_authority is not (
+        _FIXTURE_LAUNCH_SET_EXECUTION_AUTHORITY
+    ):
+        raise ChunkRefusal(
+            "label_launch_set_authority_invalid",
+            "fixture launch-set execution authority differs",
+        )
+    command, _protocol, _cell_root, _artifacts = (
+        _validate_fixture_launch_set_plan(
+            plan,
+            artifact_root=artifact_root,
+            expected_plan_sha256=expected_plan_sha256,
+        )
+    )
+    if command[0] == str(_PRODUCTION_LABEL_DRIVER):
+        raise ChunkRefusal(
+            "label_launch_set_fixture_boundary_invalid",
+            "fixture launch-set plan names the production label driver",
+        )
+    expected_driver_identity = _expected_launch_set_driver_identity(
+        Path(command[0])
+    )
+    return _execute_launch_set_plan(
+        plan=plan,
+        expected_plan_sha256=expected_plan_sha256,
+        artifact_root=artifact_root,
+        expected_ncu_identity=expected_ncu_identity,
+        expected_driver_identity=expected_driver_identity,
+        production_driver_required=False,
+        boundary_error_code="label_launch_set_fixture_boundary_invalid",
+        expected_target_executable_sha256=expected_target_executable_sha256,
+        expected_runtime_module_sha256s=expected_runtime_module_sha256s,
+        expected_gpu_uuid_sha256=expected_gpu_uuid_sha256,
+        expected_cuda_version=expected_cuda_version,
+        expected_driver_version=expected_driver_version,
+        expected_preflight_sha256=expected_preflight_sha256,
+        expected_source_commit=expected_source_commit,
+        expected_capture_identity_sha256=expected_capture_identity_sha256,
+        expected_kernel_signature_sha256=expected_kernel_signature_sha256,
+        expected_kernel_signature_source=expected_kernel_signature_source,
+        registry=registry,
+        percentage_metric_names=percentage_metric_names,
+        unit_metric_names=unit_metric_names,
+        timeout_s=timeout_s,
+        runtime_cwd=runtime_cwd,
+        runtime_env=runtime_env,
+    )
+
+
+def execute_production_launch_set_plan(
+    *,
+    plan: dict[str, Any],
+    expected_plan_sha256: str,
+    artifact_root: Path,
+    expected_ncu_identity: ncu_executor.ExpectedNcuIdentity,
+    expected_target_executable_sha256: str,
+    expected_runtime_module_sha256s: tuple[str, ...],
+    expected_gpu_uuid_sha256: str,
+    expected_cuda_version: str,
+    expected_driver_version: str,
+    expected_preflight_sha256: str,
+    expected_source_commit: str,
+    expected_capture_identity_sha256: str,
+    expected_kernel_signature_sha256: str,
+    expected_kernel_signature_source: str,
+    registry: Any,
+    percentage_metric_names: tuple[str, ...],
+    unit_metric_names: tuple[str, ...],
+    timeout_s: float,
+    runtime_cwd: Path,
+    runtime_env: dict[str, str] | None = None,
+) -> dict[str, Path | tuple[Path, ...]]:
+    """Execute a production plan only with the repository label-driver bytes."""
+    command, _protocol, _cell_root, _artifacts = (
+        _validate_fixture_launch_set_plan(
+            plan,
+            artifact_root=artifact_root,
+            expected_plan_sha256=expected_plan_sha256,
+        )
+    )
+    if command[0] != str(_PRODUCTION_LABEL_DRIVER):
+        raise ChunkRefusal(
+            "label_launch_set_production_boundary_invalid",
+            "production launch-set plan does not name the production label driver",
+        )
+    expected_driver_identity = _expected_launch_set_driver_identity(
+        _PRODUCTION_LABEL_DRIVER
+    )
+    return _execute_launch_set_plan(
+        plan=plan,
+        expected_plan_sha256=expected_plan_sha256,
+        artifact_root=artifact_root,
+        expected_ncu_identity=expected_ncu_identity,
+        expected_driver_identity=expected_driver_identity,
+        production_driver_required=True,
+        boundary_error_code="label_launch_set_production_boundary_invalid",
+        expected_target_executable_sha256=expected_target_executable_sha256,
+        expected_runtime_module_sha256s=expected_runtime_module_sha256s,
+        expected_gpu_uuid_sha256=expected_gpu_uuid_sha256,
+        expected_cuda_version=expected_cuda_version,
+        expected_driver_version=expected_driver_version,
+        expected_preflight_sha256=expected_preflight_sha256,
+        expected_source_commit=expected_source_commit,
+        expected_capture_identity_sha256=expected_capture_identity_sha256,
+        expected_kernel_signature_sha256=expected_kernel_signature_sha256,
+        expected_kernel_signature_source=expected_kernel_signature_source,
+        registry=registry,
+        percentage_metric_names=percentage_metric_names,
+        unit_metric_names=unit_metric_names,
+        timeout_s=timeout_s,
+        runtime_cwd=runtime_cwd,
+        runtime_env=runtime_env,
+    )
 
 
 def _retained_json_model(

@@ -1781,6 +1781,146 @@ def _execute_fixture_plan(
     )
 
 
+def _production_launch_set_kwargs(plan, artifact_root, identity):
+    target_sha256, runtime_module_sha256s = (
+        _fixture_launch_target_authorities(plan)
+    )
+    return {
+        "plan": plan,
+        "expected_plan_sha256": plan["plan_sha256"],
+        "artifact_root": artifact_root,
+        "expected_ncu_identity": identity,
+        "expected_target_executable_sha256": target_sha256,
+        "expected_runtime_module_sha256s": runtime_module_sha256s,
+        "expected_gpu_uuid_sha256": "f" * 64,
+        "expected_cuda_version": "13.2",
+        "expected_driver_version": "610.43.02",
+        "expected_preflight_sha256": "0" * 64,
+        "expected_source_commit": "1" * 40,
+        "expected_capture_identity_sha256": "2" * 64,
+        "expected_kernel_signature_sha256": "3" * 64,
+        "expected_kernel_signature_source": "fixture",
+        "registry": metric_registry.load_registry(),
+        "percentage_metric_names": cc._LAUNCH_SET_PERCENTAGE_METRICS,
+        "unit_metric_names": ("gpc__cycles_elapsed.max",),
+        "timeout_s": 10,
+        "runtime_cwd": artifact_root.parents[1],
+    }
+
+
+def test_production_launch_set_wrapper_binds_repository_driver_identity(
+    tmp_path, monkeypatch,
+):
+    plan, matrix, _cell, _pins, _binary, cell_dir = (
+        _fixture_only_launch_set_plan(tmp_path, cardinality=1)
+    )
+    matrix["metric_registry"]["collection"]["selected_unit_metrics"] = [
+        "gpc__cycles_elapsed.max"
+    ]
+    identity = cc.ncu_executor.build_expected_ncu_identity(
+        resolved_path="/opt/nvidia/ncu",
+        executable_sha256="a" * 64,
+        version_line="Version 2026.1.0.0 (build 1) (public-release)",
+    )
+    observed = {}
+
+    def execute(**kwargs):
+        observed.update(kwargs)
+        return {"capture_manifest": Path("/synthetic/capture-manifest.json")}
+
+    monkeypatch.setattr(cc, "_execute_launch_set_plan", execute)
+    result = cc.execute_production_launch_set_plan(
+        **_production_launch_set_kwargs(
+            plan, cell_dir / "labels", identity,
+        )
+    )
+
+    expected_sha256 = hashlib.sha256(cc.LABEL_DRIVER.read_bytes()).hexdigest()
+    expected_mode = cc.stat.S_IMODE(cc.LABEL_DRIVER.stat().st_mode)
+    assert result == {
+        "capture_manifest": Path("/synthetic/capture-manifest.json")
+    }
+    assert observed["expected_driver_identity"] == (
+        cc.ncu_executor.ExpectedExecutableIdentity(
+            str(cc.LABEL_DRIVER), expected_sha256, expected_mode,
+        )
+    )
+    assert observed["production_driver_required"] is True
+    assert observed["boundary_error_code"] == (
+        "label_launch_set_production_boundary_invalid"
+    )
+    assert observed["plan"]["command"][0] == str(cc.LABEL_DRIVER)
+    assert plan["command"][0] == str(cc.LABEL_DRIVER)
+
+
+def test_production_launch_set_wrapper_refuses_fixture_driver_code(
+    tmp_path, monkeypatch,
+):
+    plan, artifact_root, identity, _action_log = (
+        _fixture_launch_set_execution(
+            tmp_path, monkeypatch, csv_text="unused\n",
+        )
+    )
+    monkeypatch.setattr(
+        cc,
+        "_execute_launch_set_plan",
+        lambda **_kwargs: pytest.fail("fixture driver reached production core"),
+    )
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        cc.execute_production_launch_set_plan(
+            **_production_launch_set_kwargs(plan, artifact_root, identity)
+        )
+    assert caught.value.code == "label_launch_set_production_boundary_invalid"
+    assert "fixture" not in caught.value.code
+
+
+def test_fixture_launch_set_execution_passes_private_driver_authority(
+    tmp_path, monkeypatch,
+):
+    csv_text = (
+        '"Metric Value","Stream","ID","Grid Size","Metric Name","Context",'
+        '"Device","Block Size","Process ID","Kernel Name"\n'
+        '"88","2","9","(4, 1, 1)","lts__t_sector_hit_rate.pct",'
+        '"1","0","(128, 1, 1)","100","_Z7kernelAv"\n'
+        '"77","2","9","(4, 1, 1)","l1tex__t_sector_hit_rate.pct",'
+        '"1","0","(128, 1, 1)","100","_Z7kernelAv"\n'
+        '"123","2","9","(4, 1, 1)","gpc__cycles_elapsed.max",'
+        '"1","0","(128, 1, 1)","100","_Z7kernelAv"\n'
+    )
+    plan, artifact_root, identity, _action_log = (
+        _fixture_launch_set_execution(
+            tmp_path, monkeypatch, csv_text=csv_text,
+        )
+    )
+    observed = []
+    real_execute = cc.ncu_executor.execute_ncu_supervised_executable
+
+    def execute(ncu_identity, driver_identity, command, **kwargs):
+        observed.append((driver_identity, tuple(command)))
+        return real_execute(
+            ncu_identity, driver_identity, command, **kwargs,
+        )
+
+    monkeypatch.setattr(
+        cc.ncu_executor, "execute_ncu_supervised_executable", execute,
+    )
+    _execute_fixture_plan(plan, artifact_root, identity)
+
+    assert len(observed) == 1
+    expected_driver = Path(plan["command"][0])
+    assert observed[0][0] == cc.ncu_executor.ExpectedExecutableIdentity(
+        str(expected_driver),
+        hashlib.sha256(expected_driver.read_bytes()).hexdigest(),
+        cc.stat.S_IMODE(expected_driver.stat().st_mode),
+    )
+    assert observed[0][1][0] == str(expected_driver)
+    assert cc.ncu_executor.AUTHORIZED_NCU_PROC_PATH in observed[0][1]
+    assert not any(
+        isinstance(value, str) and value.startswith("/proc/self/fd/")
+        for value in observed[0][1]
+    )
+
+
 def test_fixture_launch_set_execution_composes_import_and_persistence(
     tmp_path, monkeypatch,
 ):
@@ -2281,7 +2421,7 @@ def test_fixture_launch_set_execution_rejects_nonexact_handoff(
             tmp_path, monkeypatch, csv_text=csv_text,
         )
     )
-    real_execute = cc.ncu_executor.execute_ncu_supervised_child
+    real_execute = cc.ncu_executor.execute_ncu_supervised_executable
 
     def alter_handoff(*args, **kwargs):
         result = real_execute(*args, **kwargs)
@@ -2292,7 +2432,7 @@ def test_fixture_launch_set_execution_rejects_nonexact_handoff(
         )
 
     monkeypatch.setattr(
-        cc.ncu_executor, "execute_ncu_supervised_child", alter_handoff,
+        cc.ncu_executor, "execute_ncu_supervised_executable", alter_handoff,
     )
     with pytest.raises(cc.ChunkRefusal) as caught:
         _execute_fixture_plan(plan, artifact_root, identity)
@@ -2328,7 +2468,7 @@ def test_fixture_launch_set_execution_rejects_extra_handoff_artifacts(
             tmp_path, monkeypatch, csv_text="unused\n",
         )
     )
-    real_execute = cc.ncu_executor.execute_ncu_supervised_child
+    real_execute = cc.ncu_executor.execute_ncu_supervised_executable
 
     def add_done(*args, **kwargs):
         result = real_execute(*args, **kwargs)
@@ -2336,7 +2476,7 @@ def test_fixture_launch_set_execution_rejects_extra_handoff_artifacts(
         return result
 
     monkeypatch.setattr(
-        cc.ncu_executor, "execute_ncu_supervised_child", add_done,
+        cc.ncu_executor, "execute_ncu_supervised_executable", add_done,
     )
     with pytest.raises(cc.ChunkRefusal) as caught:
         _execute_fixture_plan(plan, artifact_root, identity)
@@ -2354,7 +2494,7 @@ def test_fixture_launch_set_execution_rejects_manifest_authority_drift(
             tmp_path, monkeypatch, csv_text="unused\n",
         )
     )
-    real_execute = cc.ncu_executor.execute_ncu_supervised_child
+    real_execute = cc.ncu_executor.execute_ncu_supervised_executable
 
     def alter_manifest(*args, **kwargs):
         result = real_execute(*args, **kwargs)
@@ -2365,7 +2505,7 @@ def test_fixture_launch_set_execution_rejects_manifest_authority_drift(
         return result
 
     monkeypatch.setattr(
-        cc.ncu_executor, "execute_ncu_supervised_child", alter_manifest,
+        cc.ncu_executor, "execute_ncu_supervised_executable", alter_manifest,
     )
     with pytest.raises(cc.ChunkRefusal) as caught:
         _execute_fixture_plan(plan, artifact_root, identity)
