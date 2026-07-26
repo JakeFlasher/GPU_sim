@@ -619,6 +619,10 @@ def main(argv: list[str] | None = None) -> int:
     for p in (label_path, exclusions_path, governance_path, audit_path):
         assert_quarantine_path(p)
 
+    if args.dry_run:
+        sys.stderr.write("[capture_counts] --dry-run: no files written\n")
+        return 0
+
     try:
         admitted, exclusions, stats = capture_and_land(
             label_admitted_path=label_path,
@@ -631,10 +635,6 @@ def main(argv: list[str] | None = None) -> int:
             f"count_capture_unavailable: {exc} (no write performed)\n"
         )
         return 3
-
-    if args.dry_run:
-        sys.stderr.write("[capture_counts] --dry-run: no files written\n")
-        return 0
 
     # indent=2 + NO sort_keys matches the committed store's formatting so
     # untouched cells stay byte-identical (frozen L2 inputs unchanged).
