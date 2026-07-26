@@ -115,6 +115,12 @@ def test_capture_timing_callable_and_cli_retire_before_side_effects(
         )
     _assert_typed_retirement(caught.value)
 
+    with pytest.raises(LegacyProducerRetiredError) as caught:
+        timing_labels._ncu_capture_once(
+            "must-not-be-checked", Path("must-not-be-read"), []
+        )
+    _assert_typed_retirement(caught.value)
+
     assert timing_labels.main(["--help"]) == RETIRED_PRODUCER_EXIT_CODE
     assert LEGACY_PRODUCER_RETIRED_IMMUTABLE_EVIDENCE in capsys.readouterr().err
 
@@ -131,6 +137,12 @@ def test_long_cohort_callable_and_cli_retire_before_side_effects(
             repeats=5,
             floor_ns=551760,
             source_commit="0" * 40,
+        )
+    _assert_typed_retirement(caught.value)
+
+    with pytest.raises(LegacyProducerRetiredError) as caught:
+        long_cohort._ncu_capture_once(
+            "must-not-be-checked", Path("must-not-be-read"), []
         )
     _assert_typed_retirement(caught.value)
 

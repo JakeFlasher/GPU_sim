@@ -91,6 +91,10 @@ def _ncu_capture_once(
 
     ``--metrics`` capture only — no clock-lock, no section sweep. Parses the CSV
     table NCU writes to stdout (thousands separators stripped)."""
+    refuse_legacy_producer(
+        "tools/local_labels/capture_timing_labels.py:_ncu_capture_once",
+        successor_requirement=_RETIREMENT_REQUIREMENT,
+    )
     proc = subprocess.run(
         [
             ncu, "--metrics", ",".join(_TIMING_NCU_METRICS),

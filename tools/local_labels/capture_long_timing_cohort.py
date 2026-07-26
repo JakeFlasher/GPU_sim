@@ -104,6 +104,10 @@ def _ncu_capture_once(
     ncu: str, binary: Path, run_args: list[str]
 ) -> dict[str, float]:
     """One read-only NCU --metrics capture; return {metric_id: value}."""
+    refuse_legacy_producer(
+        "tools/local_labels/capture_long_timing_cohort.py:_ncu_capture_once",
+        successor_requirement=_RETIREMENT_REQUIREMENT,
+    )
     proc = subprocess.run(
         [ncu, "--cache-control", "all", "--metrics", ",".join(_METRIC_IDS),
          "--launch-count", "1", "--csv", str(binary), *run_args],
