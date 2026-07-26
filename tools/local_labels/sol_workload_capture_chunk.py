@@ -42,6 +42,11 @@ import build_sol_representative_execution_matrix as representative_execution  # 
 import campaign_preflight as preflight  # noqa: E402
 import sm86_capture_chunk as canonical_capture  # noqa: E402
 from tools.local_labels import metric_registry  # noqa: E402
+from tools.local_labels import ncu_action_executor  # noqa: E402
+from tools.local_labels import ncu_details_export_receipt  # noqa: E402
+from tools.local_labels import ncu_launch_documents  # noqa: E402
+from tools.local_labels import ncu_launch_sidecars  # noqa: E402
+from tools.local_labels import sidecar_schema_authority  # noqa: E402
 import sol_capture_environment as sol_environment  # noqa: E402
 import sol_live_workload_coverage_inventory as live_coverage  # noqa: E402
 import sol_reconstitution as sol_recon  # noqa: E402
@@ -77,6 +82,13 @@ LIVE_COVERAGE_SCHEMA = (
     / "sol_live_workload_coverage_inventory.schema.json"
 )
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+TRACE_CAPTURED_UTC_RE = re.compile(
+    r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z"
+)
+CAPTURE_STARTED_UTC_RE = re.compile(
+    r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}"
+    r"\.[0-9]{6}Z"
+)
 SAFE_SLUG_RE = re.compile(r"^problem_[0-9]{3}_[A-Za-z0-9_]+$")
 GIB = 1024 ** 3
 SUPPLEMENTAL_ROOT_MARKER = ".sol_workload_capture_root.json"
@@ -4056,24 +4068,324 @@ def _require_retention_capacity(
         )
 
 
-def _verify_artifacts(
-    result: dict[str, Any], *, root: Path,
+def _close_snapshot_descriptors(
+    descriptors: tuple[int | None, ...], *, operation: str,
+    preserve_error: bool,
+) -> None:
+    """Close each snapshot descriptor while preserving the primary failure."""
+    first_error: OSError | None = None
+    for descriptor in descriptors:
+        if descriptor is None:
+            continue
+        try:
+            os.close(descriptor)
+        except OSError as exc:
+            if first_error is None:
+                first_error = exc
+    if first_error is None or preserve_error:
+        return
+    mapped = _output_storage_refusal(first_error, operation=operation)
+    if mapped is not None:
+        raise mapped from first_error
+    raise WorkloadCaptureRefusal(
+        "supplemental_artifact_snapshot_failed",
+        f"{operation}: {first_error}",
+    ) from first_error
+
+
+def _open_snapshot_root(root: Path) -> tuple[int, os.stat_result]:
+    """Pin one lexical publication root without following symlinks."""
+    lexical = Path(root)
+    if ".." in lexical.parts:
+        raise WorkloadCaptureRefusal(
+            "supplemental_artifact_root_invalid", str(lexical)
+        )
+    absolute = lexical.absolute()
+    parts = absolute.parts[1:]
+    flags = (
+        os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_CLOEXEC", 0)
+    )
+    descriptor: int | None = None
+    try:
+        descriptor = os.open("/", flags)
+        for component in parts:
+            child = os.open(component, flags, dir_fd=descriptor)
+            prior = descriptor
+            descriptor = child
+            _close_snapshot_descriptors(
+                (prior,), operation="supplemental_artifact_root_walk_close",
+                preserve_error=False,
+            )
+        observed = os.fstat(descriptor)
+    except OSError as exc:
+        _close_snapshot_descriptors(
+            (descriptor,), operation="supplemental_artifact_root_error_close",
+            preserve_error=True,
+        )
+        mapped = _output_storage_refusal(
+            exc, operation="supplemental_artifact_root_open",
+        )
+        if mapped is not None:
+            raise mapped from exc
+        raise WorkloadCaptureRefusal(
+            "supplemental_artifact_root_invalid", f"{absolute}: {exc}"
+        ) from exc
+    except WorkloadCaptureRefusal:
+        _close_snapshot_descriptors(
+            (descriptor,), operation="supplemental_artifact_root_error_close",
+            preserve_error=True,
+        )
+        raise
+    if not stat.S_ISDIR(observed.st_mode):
+        _close_snapshot_descriptors(
+            (descriptor,), operation="supplemental_artifact_root_close",
+            preserve_error=False,
+        )
+        raise WorkloadCaptureRefusal(
+            "supplemental_artifact_root_invalid", str(absolute)
+        )
+    return descriptor, observed
+
+
+def _open_snapshot_parent_at(
+    root_descriptor: int, relative_directory: Path,
 ) -> int:
+    """Open one artifact parent below a pinned root without following links."""
+    if (
+        relative_directory.is_absolute()
+        or ".." in relative_directory.parts
+    ):
+        raise WorkloadCaptureRefusal(
+            "supplemental_artifact_namespace_invalid",
+            relative_directory.as_posix(),
+        )
+    flags = (
+        os.O_RDONLY | os.O_DIRECTORY | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_CLOEXEC", 0)
+    )
+    descriptor: int | None = None
+    active_error: Exception | None = None
+    try:
+        descriptor = os.dup(root_descriptor)
+        for component in relative_directory.parts:
+            child = os.open(component, flags, dir_fd=descriptor)
+            prior = descriptor
+            descriptor = child
+            _close_snapshot_descriptors(
+                (prior,), operation="supplemental_artifact_parent_walk_close",
+                preserve_error=False,
+            )
+        return descriptor
+    except OSError as exc:
+        active_error = exc
+        mapped = _output_storage_refusal(
+            exc, operation="supplemental_artifact_parent_open",
+        )
+        if mapped is not None:
+            raise mapped from exc
+        raise WorkloadCaptureRefusal(
+            "supplemental_artifact_namespace_invalid",
+            f"{relative_directory.as_posix()}: {exc}",
+        ) from exc
+    except WorkloadCaptureRefusal as exc:
+        active_error = exc
+        raise
+    finally:
+        if active_error is not None:
+            _close_snapshot_descriptors(
+                (descriptor,), operation="supplemental_artifact_parent_error_close",
+                preserve_error=True,
+            )
+
+
+def _read_snapshot_artifact_at(
+    parent_descriptor: int, artifact_name: str,
+) -> tuple[bytes, os.stat_result]:
+    """Read one artifact through its already pinned parent descriptor."""
+    if (
+        not artifact_name or Path(artifact_name).name != artifact_name
+        or artifact_name in {".", ".."}
+    ):
+        raise WorkloadCaptureRefusal(
+            "supplemental_artifact_missing", artifact_name
+        )
+    file_flags = (
+        os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NONBLOCK", 0)
+    )
+    file_descriptor: int | None = None
+    active_error: Exception | None = None
+    try:
+        file_descriptor = os.open(
+            artifact_name, file_flags, dir_fd=parent_descriptor,
+        )
+        observed = os.fstat(file_descriptor)
+        if not stat.S_ISREG(observed.st_mode):
+            raise WorkloadCaptureRefusal(
+                "supplemental_artifact_missing", artifact_name
+            )
+        chunks: list[bytes] = []
+        while True:
+            block = os.read(file_descriptor, 1 << 20)
+            if not block:
+                break
+            chunks.append(block)
+        return b"".join(chunks), observed
+    except OSError as exc:
+        active_error = exc
+        mapped = _output_storage_refusal(
+            exc, operation="supplemental_artifact_snapshot",
+        )
+        if mapped is not None:
+            raise mapped from exc
+        raise WorkloadCaptureRefusal(
+            "supplemental_artifact_snapshot_failed",
+            f"{artifact_name}: {exc}",
+        ) from exc
+    except WorkloadCaptureRefusal as exc:
+        active_error = exc
+        raise
+    finally:
+        _close_snapshot_descriptors(
+            (file_descriptor,),
+            operation="supplemental_artifact_snapshot_close",
+            preserve_error=active_error is not None,
+        )
+
+
+def _snapshot_directory_names_at(
+    parent_descriptor: int, relative_directory: Path,
+) -> tuple[tuple[int, int], frozenset[str]]:
+    """List one artifact parent through its already pinned descriptor."""
+    try:
+        observed = os.fstat(parent_descriptor)
+        names = os.listdir(parent_descriptor)
+        if any(type(name) is not str or not name for name in names):
+            raise WorkloadCaptureRefusal(
+                "supplemental_artifact_namespace_invalid",
+                relative_directory.as_posix(),
+            )
+        return (
+            (observed.st_dev, observed.st_ino),
+            frozenset(names),
+        )
+    except OSError as exc:
+        mapped = _output_storage_refusal(
+            exc, operation="supplemental_artifact_namespace",
+        )
+        if mapped is not None:
+            raise mapped from exc
+        raise WorkloadCaptureRefusal(
+            "supplemental_artifact_namespace_invalid",
+            f"{relative_directory.as_posix()}: {exc}",
+        ) from exc
+
+
+def _require_snapshot_root_unchanged(
+    root: Path, expected_identity: tuple[int, int],
+) -> None:
+    try:
+        descriptor, observed = _open_snapshot_root(root)
+    except WorkloadCaptureRefusal as exc:
+        if exc.code in {STORAGE_CAPACITY_CODE, STORAGE_INTEGRITY_CODE}:
+            raise
+        raise WorkloadCaptureRefusal(
+            "supplemental_artifact_root_changed", str(root)
+        ) from exc
+    _close_snapshot_descriptors(
+        (descriptor,), operation="supplemental_artifact_root_recheck_close",
+        preserve_error=False,
+    )
+    if (observed.st_dev, observed.st_ino) != expected_identity:
+        raise WorkloadCaptureRefusal(
+            "supplemental_artifact_root_changed", str(root)
+        )
+
+
+def _require_snapshot_directories_unchanged(
+    root: Path, expected_root_identity: tuple[int, int],
+    expected_directories: dict[
+        str, tuple[tuple[int, int], frozenset[str]]
+    ],
+) -> None:
+    """Recheck artifact-parent identities and namespaces below the pinned root."""
+    try:
+        descriptor, observed_root = _open_snapshot_root(root)
+    except WorkloadCaptureRefusal as exc:
+        if exc.code in {STORAGE_CAPACITY_CODE, STORAGE_INTEGRITY_CODE}:
+            raise
+        raise WorkloadCaptureRefusal(
+            "supplemental_artifact_root_changed", str(root)
+        ) from exc
+    active_error: Exception | None = None
+    try:
+        if (observed_root.st_dev, observed_root.st_ino) != expected_root_identity:
+            raise WorkloadCaptureRefusal(
+                "supplemental_artifact_root_changed", str(root)
+            )
+        for relative, expected in sorted(expected_directories.items()):
+            parent_descriptor: int | None = None
+            parent_error: Exception | None = None
+            try:
+                parent_descriptor = _open_snapshot_parent_at(
+                    descriptor, Path(relative),
+                )
+                observed = _snapshot_directory_names_at(
+                    parent_descriptor, Path(relative),
+                )
+            except WorkloadCaptureRefusal as exc:
+                parent_error = exc
+                if exc.code in {STORAGE_CAPACITY_CODE, STORAGE_INTEGRITY_CODE}:
+                    raise
+                raise WorkloadCaptureRefusal(
+                    "supplemental_artifact_namespace_changed", relative
+                ) from exc
+            finally:
+                _close_snapshot_descriptors(
+                    (parent_descriptor,),
+                    operation="supplemental_artifact_namespace_parent_close",
+                    preserve_error=parent_error is not None,
+                )
+            if observed != expected:
+                raise WorkloadCaptureRefusal(
+                    "supplemental_artifact_namespace_changed", relative
+                )
+    except Exception as exc:
+        active_error = exc
+        raise
+    finally:
+        _close_snapshot_descriptors(
+            (descriptor,), operation="supplemental_artifact_namespace_recheck_close",
+            preserve_error=active_error is not None,
+        )
+
+
+def _snapshot_artifacts(
+    result: dict[str, Any], *, root: Path,
+) -> tuple[
+    int,
+    dict[str, tuple[dict[str, Any], bytes]],
+    dict[str, tuple[tuple[int, int], frozenset[str]]],
+    tuple[int, int],
+]:
+    """Read declared bytes and namespaces beneath one pinned publication root."""
     artifacts = result.get("artifacts")
     if not isinstance(artifacts, list) or not artifacts:
         raise WorkloadCaptureRefusal(
             "supplemental_artifacts_invalid", repr(artifacts)
         )
-    total = 0
-    seen: set[str] = set()
-    resolved_root = _resolve_output_path(
-        root, operation="supplemental_artifact_root_resolve",
-    )
+    validated_artifacts: list[tuple[dict[str, Any], str, Path]] = []
+    seen_paths: set[str] = set()
+    parent_directories: set[Path] = set()
     for row in artifacts:
         rel = row.get("relative_path") if isinstance(row, dict) else None
+        relative = Path(rel) if isinstance(rel, str) else None
         if (
-            not isinstance(rel, str) or not rel or rel in seen
-            or Path(rel).is_absolute() or ".." in Path(rel).parts
+            not isinstance(row, dict)
+            or not isinstance(rel, str) or not rel or rel in seen_paths
+            or relative is None or relative.is_absolute()
+            or ".." in relative.parts or relative.as_posix() != rel
             or not SHA256_RE.fullmatch(str(row.get("sha256", "")))
             or type(row.get("size_bytes")) is not int
             or row["size_bytes"] < 0
@@ -4081,35 +4393,1676 @@ def _verify_artifacts(
             raise WorkloadCaptureRefusal(
                 "supplemental_artifacts_invalid", repr(row)
             )
-        seen.add(rel)
-        candidate = root / rel
-        observed = _output_lstat(
-            candidate, operation="supplemental_artifact_lstat",
-        )
-        if observed is None or stat.S_ISLNK(
-            observed.st_mode
-        ) or not stat.S_ISREG(observed.st_mode):
-            raise WorkloadCaptureRefusal(
-                "supplemental_artifact_missing", str(candidate)
+        seen_paths.add(rel)
+        parent_directories.add(relative.parent)
+        validated_artifacts.append((row, rel, relative))
+
+    total = 0
+    snapshot: dict[str, tuple[dict[str, Any], bytes]] = {}
+    directory_names: dict[
+        str, tuple[tuple[int, int], frozenset[str]]
+    ] = {}
+    parent_descriptors: dict[Path, int] = {}
+    root_descriptor, observed_root = _open_snapshot_root(root)
+    root_identity = (observed_root.st_dev, observed_root.st_ino)
+    active_error: Exception | None = None
+    try:
+        for parent in sorted(
+            parent_directories, key=lambda path: path.as_posix()
+        ):
+            parent_descriptors[parent] = _open_snapshot_parent_at(
+                root_descriptor, parent,
             )
-        path = _resolve_output_path(
-            candidate, operation="supplemental_artifact_resolve",
-        )
-        try:
-            path.relative_to(resolved_root)
-        except ValueError as exc:
-            raise WorkloadCaptureRefusal(
-                "supplemental_artifact_path_escape", rel
-            ) from exc
-        if observed.st_size != row["size_bytes"] or _sha256_output_file(
-            path, role="supplemental published artifact",
-            operation="supplemental_artifact_hash",
-        ) != row["sha256"]:
-            raise WorkloadCaptureRefusal(
-                "supplemental_artifact_hash_mismatch", rel
+        for row, rel, relative in validated_artifacts:
+            payload, observed = _read_snapshot_artifact_at(
+                parent_descriptors[relative.parent], relative.name,
             )
-        total += row["size_bytes"]
+            if (
+                observed.st_size != row["size_bytes"]
+                or len(payload) != row["size_bytes"]
+                or hashlib.sha256(payload).hexdigest() != row["sha256"]
+            ):
+                raise WorkloadCaptureRefusal(
+                    "supplemental_artifact_hash_mismatch", rel
+                )
+            snapshot[rel] = (copy.deepcopy(row), payload)
+            total += row["size_bytes"]
+        directory_names = {
+            parent.as_posix(): _snapshot_directory_names_at(
+                parent_descriptors[parent], parent,
+            )
+            for parent in sorted(
+                parent_directories, key=lambda path: path.as_posix()
+            )
+        }
+        _require_snapshot_directories_unchanged(
+            root, root_identity, directory_names,
+        )
+        return total, snapshot, directory_names, root_identity
+    except Exception as exc:
+        active_error = exc
+        raise
+    finally:
+        _close_snapshot_descriptors(
+            (*parent_descriptors.values(), root_descriptor),
+            operation="supplemental_artifact_root_close",
+            preserve_error=active_error is not None,
+        )
+
+
+def _verify_artifacts(
+    result: dict[str, Any], *, root: Path,
+) -> int:
+    total, _snapshot, _directory_names, _root_identity = _snapshot_artifacts(
+        result, root=root,
+    )
     return total
+
+
+def _parse_retained_object_payload(
+    payload: bytes, *, role: str,
+) -> dict[str, Any]:
+    try:
+        value = canonical_capture.immutable.strict_json_loads(
+            payload, label=role,
+        )
+    except canonical_capture.immutable.ImmutableArtifactError as exc:
+        raise WorkloadCaptureRefusal(
+            "supplemental_input_reference_json_invalid", str(exc),
+        ) from exc
+    if type(value) is not dict:
+        raise WorkloadCaptureRefusal(
+            "supplemental_input_reference_json_invalid",
+            f"{role}: root is not an exact object",
+        )
+    return value
+
+
+def _snapshot_json(
+    snapshot: dict[str, tuple[dict[str, Any], bytes]], relative_path: str,
+    *, role: str, root_type: type,
+) -> Any:
+    try:
+        value = canonical_capture.immutable.strict_json_loads(
+            snapshot[relative_path][1], label=role,
+        )
+    except (KeyError, canonical_capture.immutable.ImmutableArtifactError) as exc:
+        raise WorkloadCaptureRefusal(
+            "supplemental_done_launch_set_invalid", f"{role}: {exc}",
+        ) from exc
+    if type(value) is not root_type:
+        raise WorkloadCaptureRefusal(
+            "supplemental_done_launch_set_invalid",
+            f"{role} root has type {type(value).__name__}",
+        )
+    return value
+
+
+def _require_pretty_snapshot(
+    snapshot: dict[str, tuple[dict[str, Any], bytes]],
+    relative_path: str, document: Any, *, role: str,
+) -> None:
+    try:
+        expected = canonical_capture.immutable.pretty_json_bytes(document)
+    except canonical_capture.immutable.ImmutableArtifactError as exc:
+        raise WorkloadCaptureRefusal(
+            "supplemental_done_launch_set_invalid", f"{role}: {exc}",
+        ) from exc
+    if snapshot[relative_path][1] != expected:
+        raise WorkloadCaptureRefusal(
+            "supplemental_done_launch_set_invalid",
+            f"{role} presentation bytes are noncanonical",
+        )
+
+
+def _launch_set_preflight_authority(
+    document: dict[str, Any], *, expected_sha256: str,
+    expected_source_commit: str, expected_pins_sha256: str,
+    expected_matrix_sha256: str, expected_arch: str, expected_sku: str,
+    expected_protocol_version: str, expected_ncu_version_prefix: str,
+) -> tuple[ncu_action_executor.ExpectedNcuIdentity, str]:
+    """Derive immutable launch-set authority without reopening live host state."""
+    schema_path = (
+        REPO_ROOT / "workloads/simbench_bw/schemas"
+        / "campaign_preflight_manifest.schema.json"
+    )
+    try:
+        jsonschema.validate(document, json.loads(schema_path.read_text()))
+    except (OSError, json.JSONDecodeError, jsonschema.ValidationError) as exc:
+        raise WorkloadCaptureRefusal(
+            "supplemental_done_launch_set_preflight_invalid", str(exc),
+        ) from exc
+    if (
+        document.get("schema_version") != 3
+        or document.get("capture_admitted") is not True
+        or document.get("working_tree_clean") is not True
+        or document.get("git_head") != expected_source_commit
+        or document.get("pins_sha256") != expected_pins_sha256
+        or document.get("capture_matrix_sha256") != expected_matrix_sha256
+        or document.get("arch") != expected_arch
+        or document.get("sku") != expected_sku
+        or document.get("protocol_version") != expected_protocol_version
+        or document.get("blockers") != []
+        or not SHA256_RE.fullmatch(expected_sha256)
+    ):
+        raise WorkloadCaptureRefusal(
+            "supplemental_done_launch_set_preflight_invalid",
+            "retained preflight authority differs from DONE inputs",
+        )
+    checks = document.get("checks") or {}
+    ncu = checks.get("ncu") or {}
+    try:
+        normalized_ncu_prefix = (
+            canonical_capture.toolchain_contract.normalized_ncu_version_prefix(
+                expected_ncu_version_prefix
+            )
+        )
+        ncu_version_matches = (
+            canonical_capture.toolchain_contract.ncu_version_matches(
+                ncu.get("version_line"), normalized_ncu_prefix,
+            )
+        )
+    except canonical_capture.toolchain_contract.CaptureToolchainContractError as exc:
+        raise WorkloadCaptureRefusal(
+            "supplemental_done_launch_set_preflight_invalid", str(exc),
+        ) from exc
+    if (
+        ncu.get("status") != preflight.STATUS_OK
+        or ncu.get("expected") != normalized_ncu_prefix
+        or ncu.get("observed") != ncu.get("version_line")
+        or not ncu_version_matches
+    ):
+        raise WorkloadCaptureRefusal(
+            "supplemental_done_launch_set_preflight_invalid",
+            "retained NCU check is not authoritative",
+        )
+    try:
+        identity = ncu_action_executor.build_expected_ncu_identity(
+            resolved_path=ncu["resolved_path"],
+            executable_sha256=ncu["executable_sha256"],
+            version_line=ncu["version_line"],
+        )
+        gpu_uuid_sha256 = canonical_capture._launch_set_device_uuid_sha256(
+            document
+        )
+    except (
+        KeyError,
+        ncu_action_executor.NcuActionExecutorError,
+        canonical_capture.ChunkRefusal,
+    ) as exc:
+        raise WorkloadCaptureRefusal(
+            "supplemental_done_launch_set_preflight_invalid", str(exc),
+        ) from exc
+    return identity, gpu_uuid_sha256
+
+
+def _launch_set_protocol(expected_launch_count: int) -> dict[str, Any]:
+    return {
+        "ncu_target_processes": "all",
+        "ncu_filter_mode": "global",
+        "ncu_replay_mode": "kernel",
+        "ncu_cache_control": "all",
+        "ncu_clock_control": "none",
+        "ncu_profile_from_start": False,
+        "ncu_launch_skip": 0,
+        "ncu_launch_count": expected_launch_count + 1,
+    }
+
+
+def _retained_rebound_argument(
+    captured_path: Any, *, source: Any, input_kind: str, safe_name: str,
+    snapshot: dict[str, tuple[dict[str, Any], bytes]],
+) -> str:
+    extensions = {"workload": "jsonl", "definition": "json"}
+    directories = {
+        "workload": "retained_workload",
+        "definition": "retained_definition",
+    }
+    if input_kind not in extensions or not isinstance(source, dict):
+        raise WorkloadCaptureRefusal(
+            "supplemental_done_rebound_input_invalid", input_kind
+        )
+    digest = source.get("sha256")
+    expected_size = source.get("size_bytes")
+    expected_relative = (
+        Path("cells") / safe_name / "sol_requests" / directories[input_kind]
+        / f"{digest}.{extensions[input_kind]}"
+    )
+    directory_rows = {
+        relative for relative in snapshot
+        if Path(relative).parent == expected_relative.parent
+    }
+    expected_relative_text = expected_relative.as_posix()
+    artifact = snapshot.get(expected_relative_text)
+    if (
+        not SHA256_RE.fullmatch(str(digest))
+        or type(expected_size) is not int or expected_size <= 0
+        or directory_rows != {expected_relative_text}
+        or artifact is None
+        or artifact[0].get("artifact_kind") != "sol_capture_evidence"
+        or artifact[0].get("sha256") != digest
+        or artifact[0].get("size_bytes") != expected_size
+        or len(artifact[1]) != expected_size
+        or hashlib.sha256(artifact[1]).hexdigest() != digest
+        or type(captured_path) is not str
+    ):
+        raise WorkloadCaptureRefusal(
+            "supplemental_done_rebound_input_invalid", input_kind
+        )
+    path = Path(captured_path)
+    if (
+        not path.is_absolute()
+        or os.path.normpath(captured_path) != captured_path
+        or path.parts[-len(expected_relative.parts):] != expected_relative.parts
+    ):
+        raise WorkloadCaptureRefusal(
+            "supplemental_done_rebound_input_invalid",
+            f"{input_kind}: {captured_path!r}",
+        )
+    return captured_path
+
+
+def _validated_done_app_args(
+    observed_command: list[Any], *, cell: dict[str, Any], safe_name: str,
+    binding: dict[str, Any], trace_manifest: dict[str, Any],
+    snapshot: dict[str, tuple[dict[str, Any], bytes]],
+) -> list[str]:
+    invocation = cell["invocation"]
+    logical = invocation.get("logical_workload") or {}
+    trace_command = trace_manifest.get("command")
+    if (
+        observed_command.count("--") != 1
+        or type(trace_command) is not list or not trace_command
+        or any(type(value) is not str for value in trace_command)
+    ):
+        raise WorkloadCaptureRefusal(
+            "supplemental_done_launch_set_command_invalid", "application argv shape",
+        )
+    separator = observed_command.index("--")
+    label_args = observed_command[separator + 1:]
+    trace_args = trace_command[1:]
+    matrix_label_args = invocation.get("label_app_args")
+    matrix_trace_args = invocation.get("trace_app_args")
+    if binding.get("cohort") != "reduced_proxy":
+        if label_args != matrix_label_args or trace_args != matrix_trace_args:
+            raise WorkloadCaptureRefusal(
+                "supplemental_done_launch_set_command_invalid",
+                "native application arguments differ from matrix authority",
+            )
+        return list(label_args)
+
+    external_workload = logical.get("external_workload_source")
+    external_definition = logical.get("external_definition_source")
+    matrix_args = [
+        "--definition", logical.get("definition_file"),
+        "--workload", (
+            external_workload.get("name")
+            if isinstance(external_workload, dict) else None
+        ),
+        "--solution", invocation.get("authority_reference_path"), "--json",
+    ]
+    adapter = invocation.get("adapter_contract") or {}
+    if (
+        matrix_label_args != matrix_args
+        or matrix_trace_args != matrix_args
+        or adapter.get("forwarded_argv") != matrix_args
+        or len(label_args) != len(matrix_args)
+        or label_args != trace_args
+    ):
+        raise WorkloadCaptureRefusal(
+            "supplemental_done_launch_set_command_invalid",
+            "reduced application argument authorities differ",
+        )
+    expected = list(matrix_args)
+    expected[3] = _retained_rebound_argument(
+        label_args[3], source=external_workload, input_kind="workload",
+        safe_name=safe_name, snapshot=snapshot,
+    )
+    if external_definition is not None:
+        expected[1] = _retained_rebound_argument(
+            label_args[1], source=external_definition, input_kind="definition",
+            safe_name=safe_name, snapshot=snapshot,
+        )
+    else:
+        definition_parent = (
+            Path("cells") / safe_name / "sol_requests" / "retained_definition"
+        )
+        if any(Path(relative).parent == definition_parent for relative in snapshot):
+            raise WorkloadCaptureRefusal(
+                "supplemental_done_rebound_input_invalid",
+                "unexpected retained definition",
+            )
+    if label_args != expected:
+        raise WorkloadCaptureRefusal(
+            "supplemental_done_launch_set_command_invalid",
+            "reduced application arguments differ from retained bytes",
+        )
+    return list(label_args)
+
+
+def _valid_done_process_probe(
+    value: Any, *, require_post_smoke: bool = False,
+) -> bool:
+    base_fields = {
+        "status", "detail", "enumerated_processes", "ignored_self_pid",
+        "ignored_verified_ancestor_pids", "conflicts",
+    }
+    expected_fields = (
+        {*base_fields, "post_smoke"} if require_post_smoke else base_fields
+    )
+    if type(value) is not dict or set(value) != expected_fields:
+        return False
+    ancestors = value.get("ignored_verified_ancestor_pids")
+    self_pid = value.get("ignored_self_pid")
+    base_valid = (
+        value.get("status") == preflight.STATUS_OK
+        and value.get("detail")
+        == "no SOL evaluator or NCU process is active"
+        and type(value.get("enumerated_processes")) is int
+        and value["enumerated_processes"] >= 0
+        and type(self_pid) is int and self_pid > 0
+        and type(ancestors) is list
+        and all(type(pid) is int and pid > 0 for pid in ancestors)
+        and ancestors == sorted(set(ancestors))
+        and self_pid not in ancestors
+        and value.get("conflicts") == []
+    )
+    return base_valid and (
+        not require_post_smoke
+        or _valid_done_process_probe(value.get("post_smoke"))
+    )
+
+
+def _valid_done_clock_probe(
+    value: Any, *, reference: dict[str, Any], require_settle: bool,
+    require_post_smoke: bool = False,
+) -> bool:
+    base_fields = {
+        "status", "detail", "observed", "samples", "sample_count",
+        "expected", "lock_state_evidence", "applications_clock_setting",
+    }
+    expected_fields = set(base_fields)
+    if require_settle:
+        expected_fields.update({"settle_attempt_count", "settle_attempts"})
+    if require_post_smoke:
+        expected_fields.add("post_smoke")
+    if type(value) is not dict or set(value) != expected_fields:
+        return False
+    samples = value.get("samples")
+    sample_fields = {
+        "persistence_mode", "graphics_clock_mhz", "sm_clock_mhz",
+        "mem_clock_mhz", "pstate",
+    }
+    expected_sample = {
+        "persistence_mode": reference.get("persistence_mode"),
+        "graphics_clock_mhz": reference.get("sm_clock_mhz"),
+        "sm_clock_mhz": reference.get("sm_clock_mhz"),
+        "mem_clock_mhz": reference.get("mem_clock_mhz"),
+        "pstate": "P0",
+    }
+    expected_projection = {
+        field: reference.get(field) for field in (
+            "persistence_mode", "sm_clock_mhz", "mem_clock_mhz"
+        )
+    }
+    if (
+        type(samples) is not list or len(samples) != 3
+        or any(
+            type(sample) is not dict or set(sample) != sample_fields
+            or _canonical_json_bytes(sample)
+            != _canonical_json_bytes(expected_sample)
+            for sample in samples
+        )
+    ):
+        return False
+    expected_status, expected_detail = preflight.clock_state_verdict(
+        samples, reference,
+    )
+    if (
+        value.get("status") != expected_status
+        or expected_status != preflight.STATUS_OK
+        or value.get("detail") != expected_detail
+        or value.get("sample_count") != 3
+        or _canonical_json_bytes(value.get("observed"))
+        != _canonical_json_bytes(samples[-1])
+        or _canonical_json_bytes(value.get("expected"))
+        != _canonical_json_bytes(expected_projection)
+        or value.get("lock_state_evidence")
+        != "repeated_exact_readback_proxy"
+        or type(value.get("applications_clock_setting")) is not str
+    ):
+        return False
+    if require_settle:
+        count = value.get("settle_attempt_count")
+        attempts = value.get("settle_attempts")
+        if (
+            type(count) is not int or not 1 <= count <= 31
+            or type(attempts) is not list or len(attempts) != count
+            or any(
+                type(attempt) is not dict
+                or set(attempt) != {"ordinal", "status", "detail", "observed"}
+                or attempt.get("ordinal") != ordinal
+                or type(attempt.get("status")) is not str
+                or type(attempt.get("detail")) is not str
+                or (
+                    attempt.get("observed") is not None
+                    and type(attempt.get("observed")) is not dict
+                )
+                or (ordinal < count and attempt.get("status") == preflight.STATUS_OK)
+                for ordinal, attempt in enumerate(attempts, start=1)
+            )
+            or _canonical_json_bytes(attempts[-1]) != _canonical_json_bytes({
+                "ordinal": count,
+                "status": expected_status,
+                "detail": expected_detail,
+                "observed": samples[-1],
+            })
+        ):
+            return False
+    return (
+        not require_post_smoke
+        or _valid_done_clock_probe(
+            value.get("post_smoke"), reference=reference,
+            require_settle=True,
+        )
+    )
+
+
+def _valid_done_capture_guard(
+    value: Any, *, reference: dict[str, Any],
+) -> bool:
+    if type(value) is not dict or set(value) != {
+        "capture_processes", "capture_processes_before_clock_wait",
+        "clock_state",
+    }:
+        return False
+    return (
+        _valid_done_process_probe(value["capture_processes"])
+        and _valid_done_process_probe(
+            value["capture_processes_before_clock_wait"]
+        )
+        and _valid_done_clock_probe(
+            value["clock_state"], reference=reference, require_settle=True,
+        )
+    )
+
+
+def _validate_done_definition_equivalence(
+    *, cell: dict[str, Any], cell_result: dict[str, Any], safe_name: str,
+    snapshot: dict[str, tuple[dict[str, Any], bytes]],
+) -> None:
+    stage = Path("cells") / safe_name / "sol_stage"
+    paths = {
+        "source": (stage / "definition.source.json").as_posix(),
+        "staged": (stage / "definition.json").as_posix(),
+        "attestation": (
+            stage / "definition_equivalence_attestation.json"
+        ).as_posix(),
+        "prepare": (stage / "capture_prepare_manifest.json").as_posix(),
+    }
+    try:
+        rows = {role: snapshot[path] for role, path in paths.items()}
+    except KeyError as exc:
+        raise WorkloadCaptureRefusal(
+            "supplemental_done_definition_equivalence_invalid",
+            f"missing {exc.args[0]}",
+        ) from exc
+    if any(
+        row.get("artifact_kind") != "sol_capture_evidence"
+        for row, _payload in rows.values()
+    ):
+        raise WorkloadCaptureRefusal(
+            "supplemental_done_definition_equivalence_invalid",
+            "definition evidence artifact kind differs",
+        )
+    source_bytes = rows["source"][1]
+    staged_bytes = rows["staged"][1]
+    attestation_bytes = rows["attestation"][1]
+    try:
+        prepare_manifest = canonical_capture.immutable.strict_json_loads(
+            rows["prepare"][1], label="SOL capture prepare manifest",
+        )
+    except canonical_capture.immutable.ImmutableArtifactError as exc:
+        raise WorkloadCaptureRefusal(
+            "supplemental_done_definition_equivalence_invalid", str(exc),
+        ) from exc
+    logical = cell["invocation"]["logical_workload"]
+    if hashlib.sha256(source_bytes).hexdigest() != logical.get(
+        "definition_file_sha256"
+    ):
+        raise WorkloadCaptureRefusal(
+            "supplemental_done_definition_equivalence_invalid",
+            "retained source definition differs from matrix authority",
+        )
+    try:
+        comparison = canonical_capture.sol_def.require_definition_equivalent(
+            source_bytes, staged_bytes,
+        )
+        canonical_capture.sol_def.validate_attestation_shape_and_eligibility(
+            cell_result.get("definition_equivalence")
+        )
+        expected_bytes = canonical_capture.sol_def.serialize_attestation(
+            comparison.attestation
+        )
+        expected_environment, expected_environment_sha256 = (
+            canonical_capture._sol_certifying_environment(cell["invocation"])
+        )
+        (
+            expected_flashinfer, expected_flashinfer_sha256, _runtime_root,
+        ) = canonical_capture._sol_flashinfer_corpus_contract(
+            cell["invocation"]
+        )
+    except (
+        canonical_capture.sol_def.SolDefinitionEquivalenceError,
+        canonical_capture.ChunkRefusal,
+    ) as exc:
+        raise WorkloadCaptureRefusal(
+            "supplemental_done_definition_equivalence_invalid", str(exc),
+        ) from exc
+
+    prepare_fields = {
+        "schema_version", "manifest_kind", "capture_contract_version",
+        "path_mode", "stage_root", "source_inputs", "selection",
+        "solution_contract", "benchmark_config", "environment_contract",
+        "environment_contract_sha256", "flashinfer_corpus_contract",
+        "flashinfer_corpus_contract_sha256", "artifacts", "execution",
+        "stage_definition_sha256", "source_definition_sha256",
+        "staged_definition_sha256", "definition_equivalence",
+    }
+    artifact_fields = {
+        "definition", "definition_source",
+        "definition_equivalence_attestation", "workload", "solution",
+        "adapter", "adapter_source", "certified_env_source", "eval_driver",
+        "capture_runtime", "benchmark_kernel_so", "solution_sources",
+    }
+    expected_stage_paths = {
+        "definition": "definition.json",
+        "definition_source": "definition.source.json",
+        "definition_equivalence_attestation": (
+            "definition_equivalence_attestation.json"
+        ),
+        "workload": "workload.jsonl",
+        "solution": "solution.json",
+        "eval_driver": "eval_driver.py",
+        "capture_runtime": "_capture_runtime.py",
+        "benchmark_kernel_so": "benchmark_kernel.so",
+    }
+    source_inputs = (
+        prepare_manifest.get("source_inputs")
+        if type(prepare_manifest) is dict else None
+    )
+    artifacts = (
+        prepare_manifest.get("artifacts")
+        if type(prepare_manifest) is dict else None
+    )
+    selection = (
+        prepare_manifest.get("selection")
+        if type(prepare_manifest) is dict else None
+    )
+    binding = cell_result.get("workload_row_binding") or {}
+
+    def valid_pin(value: Any, *, expected_path: str | None = None) -> bool:
+        if (
+            type(value) is not dict or set(value) != {"path", "sha256"}
+            or type(value.get("path")) is not str or not value["path"]
+            or SHA256_RE.fullmatch(str(value.get("sha256", ""))) is None
+        ):
+            return False
+        path = Path(value["path"])
+        return (
+            value["path"] == expected_path
+            if expected_path is not None else (
+                path.is_absolute()
+                and os.path.normpath(value["path"]) == value["path"]
+            )
+        )
+
+    expected_source_shas = {
+        "definition": logical.get("definition_file_sha256"),
+        "workload": logical.get("workload_file_sha256"),
+        "solution": cell["invocation"].get("authority_reference_sha256"),
+    }
+    source_keys_valid = (
+        type(source_inputs) is dict
+        and set(source_inputs) in (
+            set(expected_source_shas),
+            {*expected_source_shas, "config"},
+        )
+        and all(
+            valid_pin(source_inputs.get(role))
+            and source_inputs[role].get("sha256") == expected_sha
+            for role, expected_sha in expected_source_shas.items()
+        )
+        and (
+            "config" not in source_inputs
+            or valid_pin(source_inputs.get("config"))
+        )
+    )
+    artifact_pins_valid = (
+        type(artifacts) is dict
+        and set(artifacts) == artifact_fields
+        and all(
+            valid_pin(artifacts.get(role), expected_path=relative)
+            for role, relative in expected_stage_paths.items()
+        )
+        and all(
+            valid_pin(artifacts.get(role))
+            for role in ("adapter", "adapter_source", "certified_env_source")
+        )
+        and type(artifacts.get("solution_sources")) is list
+        and bool(artifacts["solution_sources"])
+        and all(
+            type(entry) is dict
+            and set(entry) == {"relative_path", "path", "sha256"}
+            and type(entry.get("relative_path")) is str
+            and entry["relative_path"]
+            and not Path(entry["relative_path"]).is_absolute()
+            and ".." not in Path(entry["relative_path"]).parts
+            and entry.get("path") == entry["relative_path"]
+            and SHA256_RE.fullmatch(str(entry.get("sha256", ""))) is not None
+            for entry in artifacts["solution_sources"]
+        )
+    )
+    definition_pins_valid = (
+        artifact_pins_valid
+        and artifacts["definition"]["sha256"]
+        == hashlib.sha256(staged_bytes).hexdigest()
+        and artifacts["definition_source"]["sha256"]
+        == hashlib.sha256(source_bytes).hexdigest()
+        and artifacts["definition_equivalence_attestation"]["sha256"]
+        == hashlib.sha256(attestation_bytes).hexdigest()
+        and artifacts["adapter"].get("sha256")
+        == cell["invocation"].get("executable_sha256")
+    )
+    selection_valid = (
+        type(selection) is dict
+        and set(selection) == {
+            "source_workload_index", "source_workload_count",
+            "staged_workload_index", "workload_uuid", "workload_axes",
+            "source_row_sha256",
+        }
+        and type(selection.get("source_workload_index")) is int
+        and selection.get("source_workload_index")
+        == binding.get("source_workload_index")
+        and type(selection.get("source_workload_count")) is int
+        and selection["source_workload_count"] > 0
+        and selection.get("source_workload_count")
+        == logical.get("expected_workloads")
+        and type(selection.get("staged_workload_index")) is int
+        and selection.get("staged_workload_index")
+        == binding.get("capture_workload_index") == 0
+        and type(selection.get("workload_uuid")) is str
+        and selection.get("workload_uuid")
+        == binding.get("source_workload_uuid")
+        and type(selection.get("workload_axes")) is dict
+        and _canonical_json_bytes(selection.get("workload_axes"))
+        == _canonical_json_bytes(binding.get("source_axes"))
+        and SHA256_RE.fullmatch(
+            str(selection.get("source_row_sha256", ""))
+        ) is not None
+        and selection.get("source_row_sha256")
+        == binding.get("source_row_sha256")
+    )
+    solution_contract = (
+        prepare_manifest.get("solution_contract")
+        if type(prepare_manifest) is dict else None
+    )
+    benchmark_config = (
+        prepare_manifest.get("benchmark_config")
+        if type(prepare_manifest) is dict else None
+    )
+    execution = (
+        prepare_manifest.get("execution")
+        if type(prepare_manifest) is dict else None
+    )
+    unsigned_prepare = (
+        dict(prepare_manifest) if type(prepare_manifest) is dict else {}
+    )
+    claimed_stage_sha256 = unsigned_prepare.pop(
+        "stage_definition_sha256", None
+    )
+    prepare_valid = (
+        type(prepare_manifest) is dict
+        and set(prepare_manifest) == prepare_fields
+        and prepare_manifest.get("schema_version") == 1
+        and prepare_manifest.get("manifest_kind")
+        == "sol_execbench_capture_preparation"
+        and prepare_manifest.get("capture_contract_version") == 2
+        and prepare_manifest.get("path_mode") == "stage_relative_v1"
+        and prepare_manifest.get("stage_root") == "."
+        and source_keys_valid
+        and selection_valid
+        and type(solution_contract) is dict
+        and set(solution_contract) == {
+            "definition", "solution", "languages", "entry_point",
+            "destination_passing_style",
+        }
+        and type(solution_contract.get("definition")) is str
+        and bool(solution_contract["definition"])
+        and type(solution_contract.get("solution")) is str
+        and bool(solution_contract["solution"])
+        and type(solution_contract.get("entry_point")) is str
+        and bool(solution_contract["entry_point"])
+        and solution_contract.get("destination_passing_style") is True
+        and type(solution_contract.get("languages")) is list
+        and bool(solution_contract["languages"])
+        and all(type(value) is str and value for value in solution_contract["languages"])
+        and type(benchmark_config) is dict
+        and set(benchmark_config) == {
+            "warmup_runs", "iterations", "lock_clocks",
+            "benchmark_reference", "seed",
+        }
+        and type(benchmark_config.get("warmup_runs")) is int
+        and benchmark_config["warmup_runs"] >= 0
+        and type(benchmark_config.get("iterations")) is int
+        and benchmark_config["iterations"] > 0
+        and type(benchmark_config.get("lock_clocks")) is bool
+        and type(benchmark_config.get("benchmark_reference")) is bool
+        and type(benchmark_config.get("seed")) is int
+        and prepare_manifest.get("environment_contract") == expected_environment
+        and prepare_manifest.get("environment_contract_sha256")
+        == expected_environment_sha256
+        and prepare_manifest.get("flashinfer_corpus_contract")
+        == expected_flashinfer
+        and prepare_manifest.get("flashinfer_corpus_contract_sha256")
+        == expected_flashinfer_sha256
+        and definition_pins_valid
+        and type(execution) is dict
+        and set(execution) == {
+            "command", "working_directory", "timing_methodology",
+            "correctness_rounds", "warmup_calls", "profiled_candidate_calls",
+        }
+        and type(execution.get("command")) is list
+        and len(execution["command"]) == 2
+        and type(execution["command"][0]) is str
+        and Path(execution["command"][0]).is_absolute()
+        and execution["command"][1] == "eval_driver.py"
+        and execution.get("working_directory") == "."
+        and execution.get("timing_methodology") == "cuda_events"
+        and type(execution.get("correctness_rounds")) is int
+        and execution.get("correctness_rounds") == 1
+        and type(execution.get("warmup_calls")) is int
+        and execution.get("warmup_calls") == 1
+        and type(execution.get("profiled_candidate_calls")) is int
+        and execution.get("profiled_candidate_calls") == 1
+        and claimed_stage_sha256
+        == canonical_capture._sol_manifest_sha256(unsigned_prepare)
+        and prepare_manifest.get("source_definition_sha256")
+        == comparison.source_sha256
+        and prepare_manifest.get("staged_definition_sha256")
+        == comparison.staged_sha256
+        and prepare_manifest.get("definition_equivalence")
+        == comparison.attestation
+    )
+    if not prepare_valid:
+        raise WorkloadCaptureRefusal(
+            "supplemental_done_definition_equivalence_invalid",
+            "SOL capture prepare manifest does not rederive",
+        )
+    if (
+        cell_result.get("definition_equivalence") != comparison.attestation
+        or cell_result.get("definition_equivalence_attestation_sha256")
+        != hashlib.sha256(expected_bytes).hexdigest()
+        or attestation_bytes != expected_bytes
+    ):
+        raise WorkloadCaptureRefusal(
+            "supplemental_done_definition_equivalence_invalid",
+            "retained definition attestation does not rederive",
+        )
+
+
+def _validate_done_producer_documents(
+    *, result: dict[str, Any], cell: dict[str, Any], safe_name: str,
+    snapshot: dict[str, tuple[dict[str, Any], bytes]],
+    trace_manifest: dict[str, Any], cell_result: dict[str, Any],
+    retained_preflight: dict[str, Any], expected_launch_count: int,
+    expected_binary_sha256: str, canonical_matrix: dict[str, Any],
+    pins: dict[str, Any],
+) -> None:
+    trace_fields = {
+        "schema_version", "identity", "captured_at_utc", "command",
+        "binary_sha256", "tracer_so_sha256", "trace_contract_id",
+        "memory_payload_classes", "capture_launch_contract", "launch_scope",
+        "dynamic_launch_inventory", "dynamic_launch_inventory_sha256",
+        "launch_count", "launches", "threadblocks_pb_count",
+        "grid_threadblock_count", "decoded_threadblock_count",
+        "decoded_record_count", "zero_record_threadblock_count",
+        "stats_row_count", "expected_records", "admitted_records",
+        "drop_rate", "trace_tree_bytes", "max_trace_bytes",
+        "elapsed_seconds", "sol_phase_evidence",
+    }
+    cell_result_fields = {
+        "schema_version", "identity", "authority_cell_sha256", "disposition",
+        "typed_reason", "detail", "binary_sha256", "guards",
+        "capture_preflight_sha256", "capture_started_at_utc",
+        "admission_run_id", "supersedes", "prior_preparation_failures",
+        "prior_capture_defect_attempts", "definition_equivalence",
+        "definition_equivalence_attestation_sha256", "label_unit_metric_count",
+        "label_launch_count", "trace_threadblocks_pb_count",
+        "trace_admitted_records", "control_decoded_instructions",
+        "control_outcome", "max_wall_time_s", "trace_route_outcome",
+        "trace_route_result_sha256", "cell_elapsed_seconds_before_inventory",
+        "launch_completeness", "workload_row_binding",
+    }
+    injection = (retained_preflight.get("checks") or {}).get(
+        "injection_runtime"
+    ) or {}
+    budget = cell.get("trace_budget") or {}
+    try:
+        launch_contract = canonical_capture._require_capture_launch_contract(
+            cell["invocation"]
+        )
+        capture_started_text = cell_result.get("capture_started_at_utc")
+        trace_captured_text = trace_manifest.get("captured_at_utc")
+        if (
+            type(capture_started_text) is not str
+            or CAPTURE_STARTED_UTC_RE.fullmatch(capture_started_text) is None
+            or type(trace_captured_text) is not str
+            or TRACE_CAPTURED_UTC_RE.fullmatch(trace_captured_text) is None
+        ):
+            raise canonical_capture.ChunkRefusal(
+                "timestamp_invalid", "noncanonical producer timestamp"
+            )
+        capture_started = canonical_capture._parse_utc_timestamp(
+            capture_started_text, field="capture_started_at_utc",
+        )
+        trace_captured = canonical_capture._parse_utc_timestamp(
+            trace_captured_text, field="captured_at_utc",
+        )
+    except (KeyError, canonical_capture.ChunkRefusal) as exc:
+        raise WorkloadCaptureRefusal(
+            "supplemental_done_launch_set_trace_invalid", str(exc),
+        ) from exc
+    result_projection = {
+        "roster_source": cell_result.get("identity", {}).get("roster_source"),
+        "slug": cell_result.get("identity", {}).get("slug"),
+        **{
+            field: cell_result.get(field) for field in (
+                "authority_cell_sha256", "disposition", "typed_reason", "detail",
+                "capture_preflight_sha256", "capture_started_at_utc",
+                "admission_run_id", "supersedes", "prior_preparation_failures",
+                "prior_capture_defect_attempts", "definition_equivalence",
+                "definition_equivalence_attestation_sha256",
+                "launch_completeness", "workload_row_binding",
+            )
+        },
+    }
+    expected_projection = {
+        field: result.get(field) for field in result_projection
+    }
+    integer_fields = (
+        "threadblocks_pb_count", "grid_threadblock_count",
+        "decoded_threadblock_count", "decoded_record_count",
+        "zero_record_threadblock_count", "stats_row_count", "expected_records",
+        "admitted_records", "trace_tree_bytes",
+    )
+    integer_values_valid = all(
+        type(trace_manifest.get(field)) is int
+        and trace_manifest[field] >= (0 if field == "zero_record_threadblock_count" else 1)
+        for field in integer_fields
+    )
+    expected_records = trace_manifest.get("expected_records")
+    admitted_records = trace_manifest.get("admitted_records")
+    guards = cell_result.get("guards")
+    trace_inventory = trace_manifest.get("dynamic_launch_inventory")
+    reference_clock = pins.get("reference_clock_state") or {}
+    retained_checks = retained_preflight.get("checks") or {}
+    retained_processes = retained_checks.get("capture_processes")
+    retained_clock = retained_checks.get("clock_state")
+    reference_clock_valid = (
+        type(reference_clock) is dict
+        and reference_clock.get("persistence_mode") == "Enabled"
+        and type(reference_clock.get("sm_clock_mhz")) is int
+        and reference_clock["sm_clock_mhz"] > 0
+        and type(reference_clock.get("mem_clock_mhz")) is int
+        and reference_clock["mem_clock_mhz"] > 0
+    )
+    preflight_guards_valid = (
+        reference_clock_valid
+        and retained_preflight.get("capture_admitted") is True
+        and retained_preflight.get("blockers") == []
+        and retained_preflight.get("protocol_version")
+        == (pins.get("measurement_protocol") or {}).get("version")
+        and _valid_done_process_probe(
+            retained_processes, require_post_smoke=True,
+        )
+        and _valid_done_clock_probe(
+            retained_clock, reference=reference_clock,
+            require_settle=False, require_post_smoke=True,
+        )
+    )
+    ordered_trace_launches = (
+        [row.get("trace_launch") for row in trace_inventory]
+        if isinstance(trace_inventory, list)
+        and all(isinstance(row, dict) for row in trace_inventory)
+        else None
+    )
+    guards_valid = (
+        preflight_guards_valid
+        and type(guards) is dict
+        and set(guards) == {"prepare", "pre", "between", "post"}
+        and _valid_done_capture_guard(
+            guards["prepare"], reference=reference_clock,
+        )
+        and _valid_done_capture_guard(
+            guards["pre"], reference=reference_clock,
+        )
+        and type(guards["between"]) is list
+        and len(guards["between"]) == 2
+        and all(
+            _valid_done_capture_guard(row, reference=reference_clock)
+            for row in guards["between"]
+        )
+        and _valid_done_capture_guard(
+            guards["post"], reference=reference_clock,
+        )
+    )
+    _validate_done_definition_equivalence(
+        cell=cell,
+        cell_result=cell_result,
+        safe_name=safe_name,
+        snapshot=snapshot,
+    )
+    unit_metric_count = len(
+        canonical_matrix["metric_registry"]["collection"][
+            "selected_unit_metrics"
+        ]
+    )
+    if (
+        set(trace_manifest) != trace_fields
+        or set(cell_result) != cell_result_fields
+        or trace_manifest.get("schema_version") != 1
+        or cell_result.get("schema_version") != 1
+        or trace_manifest.get("identity") != cell["identity"]
+        or cell_result.get("identity") != cell["identity"]
+        or cell_result.get("authority_cell_sha256")
+        != cell["authority_cell_sha256"]
+        or result_projection != expected_projection
+        or trace_manifest.get("binary_sha256") != expected_binary_sha256
+        or cell_result.get("binary_sha256") != expected_binary_sha256
+        or trace_manifest.get("tracer_so_sha256")
+        != injection.get("tracer_so_sha256")
+        or trace_manifest.get("trace_contract_id")
+        != injection.get("root_trace_contract_id")
+        or trace_manifest.get("memory_payload_classes")
+        != injection.get("root_trace_memory_payload_classes")
+        or trace_manifest.get("capture_launch_contract") != launch_contract
+        or trace_manifest.get("launch_scope") != cell.get("launch_scope")
+        or trace_manifest.get("launch_count") != expected_launch_count
+        or _canonical_json_bytes(trace_manifest.get("launches"))
+        != _canonical_json_bytes(ordered_trace_launches)
+        or not integer_values_valid
+        or type(expected_records) is not int
+        or type(admitted_records) is not int
+        or admitted_records > expected_records
+        or trace_manifest.get("drop_rate")
+        != (expected_records - admitted_records) / expected_records
+        or trace_manifest.get("max_trace_bytes") != budget.get("max_trace_bytes")
+        or type(trace_manifest.get("elapsed_seconds")) not in {int, float}
+        or trace_manifest["elapsed_seconds"] < 0
+        or not isinstance(trace_manifest.get("sol_phase_evidence"), dict)
+        or trace_captured < capture_started.replace(microsecond=0)
+        or not guards_valid
+        or cell_result.get("label_unit_metric_count") != unit_metric_count
+        or cell_result.get("label_launch_count") != expected_launch_count
+        or cell_result.get("trace_threadblocks_pb_count")
+        != trace_manifest.get("threadblocks_pb_count")
+        or cell_result.get("trace_admitted_records") != admitted_records
+        or type(cell_result.get("control_decoded_instructions")) is not int
+        or cell_result["control_decoded_instructions"] < 0
+        or type(cell_result.get("control_outcome")) is not str
+        or not cell_result["control_outcome"]
+        or cell_result.get("max_wall_time_s") != budget.get("max_wall_time_s")
+        or cell_result.get("trace_route_outcome") != "admitted"
+        or cell_result.get("trace_route_result_sha256") is not None
+        or type(cell_result.get("cell_elapsed_seconds_before_inventory"))
+        not in {int, float}
+        or cell_result["cell_elapsed_seconds_before_inventory"] < 0
+    ):
+        raise WorkloadCaptureRefusal(
+            "supplemental_done_launch_set_trace_invalid",
+            "trace or cell-result producer document differs from authority",
+        )
+
+
+def _expected_launch_set_command(
+    observed: Any, *, cell: dict[str, Any], safe_name: str,
+    binding: dict[str, Any], snapshot: dict[str, tuple[dict[str, Any], bytes]],
+    canonical_matrix: dict[str, Any], pins: dict[str, Any],
+    trace_manifest: dict[str, Any], expected_launch_count: int,
+) -> tuple[list[str], dict[str, Any], int]:
+    invocation = cell["invocation"]
+    logical = invocation.get("logical_workload") or {}
+    trace_command = trace_manifest.get("command")
+    if (
+        type(observed) is not list or not observed
+        or any(type(value) is not str for value in observed)
+        or type(trace_command) is not list or not trace_command
+        or any(type(value) is not str for value in trace_command)
+        or not trace_command[0]
+    ):
+        raise WorkloadCaptureRefusal(
+            "supplemental_done_launch_set_command_invalid", "command shape",
+        )
+    try:
+        launch_contract = canonical_capture._require_capture_launch_contract(
+            invocation
+        )
+        cuda_version = canonical_capture.toolchain_contract.nvcc_release_text(
+            canonical_capture.toolchain_contract.require_sol_cuda_release(
+                pins["toolchain"]["nvcc_release"]
+            )
+        )
+        ncu_prefix = (
+            canonical_capture.toolchain_contract.normalized_ncu_version_prefix(
+                pins["toolchain"]["ncu_version_prefix"]
+            )
+        )
+        out_dir = canonical_capture._launch_set_option(observed, "--out-dir")
+    except (
+        KeyError,
+        ValueError,
+        canonical_capture.ChunkRefusal,
+        canonical_capture.toolchain_contract.CaptureToolchainContractError,
+    ) as exc:
+        raise WorkloadCaptureRefusal(
+            "supplemental_done_launch_set_command_invalid", str(exc),
+        ) from exc
+    out_path = Path(out_dir)
+    if (
+        not out_path.is_absolute()
+        or os.path.normpath(out_dir) != out_dir
+        or out_path.name != "labels"
+        or out_path.parent.name != safe_name
+        or out_path.parent.parent.name != "cells"
+    ):
+        raise WorkloadCaptureRefusal(
+            "supplemental_done_launch_set_command_invalid",
+            "artifact root does not identify the selected cell",
+        )
+    if type(observed[0]) is not str:
+        raise WorkloadCaptureRefusal(
+            "supplemental_done_launch_set_command_invalid",
+            "label driver path is not a string",
+        )
+    driver_path = Path(observed[0])
+    if (
+        not driver_path.is_absolute()
+        or os.path.normpath(observed[0]) != observed[0]
+        or driver_path.parts[-3:] != (
+            "tools", "local_labels", "label_driver.sh"
+        )
+    ):
+        raise WorkloadCaptureRefusal(
+            "supplemental_done_launch_set_command_invalid",
+            "label driver path is not a canonical repository producer path",
+        )
+    target_path = Path(trace_command[0])
+    if (
+        not target_path.is_absolute()
+        or os.path.normpath(trace_command[0]) != trace_command[0]
+    ):
+        raise WorkloadCaptureRefusal(
+            "supplemental_done_launch_set_command_invalid",
+            "trace target path is not normalized and absolute",
+        )
+    app_args = _validated_done_app_args(
+        observed,
+        cell=cell,
+        safe_name=safe_name,
+        binding=binding,
+        trace_manifest=trace_manifest,
+        snapshot=snapshot,
+    )
+    protocol = _launch_set_protocol(expected_launch_count)
+    expected = [
+        observed[0],
+        "--device", canonical_matrix["arch"],
+        "--slug", cell["identity"]["slug"],
+        "--shape-point", logical["value"],
+        "--shape-binding", "logical-workload",
+        "--repeat", "0",
+        "--launch", "0",
+        "--binary", trace_command[0],
+        "--warmup", str(launch_contract["label_driver_warmup_count"]),
+    ]
+    expected += canonical_capture._explicit_ncu_driver_args(protocol)
+    expected += [
+        "--out-dir", out_dir,
+        "--expected-cuda-release", cuda_version,
+        "--expected-ncu-version-prefix", ncu_prefix,
+        "--publication-metric-scope", "cycles_only_binding",
+    ]
+    unit_metrics = tuple(
+        canonical_matrix["metric_registry"]["collection"][
+            "selected_unit_metrics"
+        ]
+    )
+    for metric in unit_metrics:
+        expected += ["--unit-metric", metric]
+    expected += ["--", *app_args]
+    if observed != expected:
+        raise WorkloadCaptureRefusal(
+            "supplemental_done_launch_set_command_invalid",
+            "capture command differs from matrix, trace, or protocol authority",
+        )
+    return expected, protocol, launch_contract["label_driver_warmup_count"]
+
+
+def _launch_set_bundle_paths(
+    snapshot: dict[str, tuple[dict[str, Any], bytes]], *, safe_name: str,
+    arch: str, slug: str, shape_point: str, expected_launch_count: int,
+) -> tuple[Path, dict[str, str], list[str]]:
+    parent = Path("cells") / safe_name / "labels" / arch / slug / shape_point
+    fixed = {
+        name: (parent / name).as_posix()
+        for name in canonical_capture._LAUNCH_SET_FIXED_ARTIFACT_NAMES
+    }
+    sidecars = [
+        (parent / f"label_0_{ordinal}.json").as_posix()
+        for ordinal in range(expected_launch_count)
+    ]
+    expected = set(fixed.values()) | set(sidecars)
+    launch_rows = {
+        relative for relative in snapshot
+        if Path(relative).parent == parent
+    }
+    if launch_rows != expected:
+        raise WorkloadCaptureRefusal(
+            "supplemental_done_launch_set_namespace_invalid",
+            repr({
+                "missing": sorted(expected - launch_rows),
+                "extra": sorted(launch_rows - expected),
+            }),
+        )
+    expected_kinds = {
+        fixed["run_0_launch_set.ncu-rep"]: "ncu_report",
+        fixed["label_run_manifest_0_launch_set.json"]: "label_run_manifest",
+        fixed["run_0_launch_set.launch_inventory.json"]: (
+            "ncu_launch_observation"
+        ),
+        **{path: "label_sidecar" for path in sidecars},
+    }
+    for relative in expected - set(expected_kinds):
+        expected_kinds[relative] = "execution_log"
+    if any(
+        snapshot[relative][0].get("artifact_kind") != kind
+        for relative, kind in expected_kinds.items()
+    ):
+        raise WorkloadCaptureRefusal(
+            "supplemental_done_launch_set_namespace_invalid",
+            "launch-set artifact kinds differ",
+        )
+    return parent, fixed, sidecars
+
+
+def _fallback_kernel_signature_from_command(
+    *, slug: str, binary_path: str, driver_path: str,
+) -> str:
+    binary = Path(binary_path)
+    driver = Path(driver_path)
+    if (
+        type(slug) is not str or not slug
+        or not binary.is_absolute()
+        or os.path.normpath(binary_path) != binary_path
+        or not driver.is_absolute()
+        or driver.parts[-3:] != ("tools", "local_labels", "label_driver.sh")
+    ):
+        raise WorkloadCaptureRefusal(
+            "supplemental_done_launch_set_manifest_invalid",
+            "fallback signature path authority is malformed",
+        )
+    repository_root = driver.parents[2]
+    try:
+        normalized = binary.relative_to(repository_root).as_posix()
+    except ValueError:
+        normalized = binary.name
+    return hashlib.sha256(f"{slug}|{normalized}".encode()).hexdigest()
+
+
+def _validate_done_launch_crosswalk(
+    *, trace_inventory: list[dict[str, Any]],
+    launches: list[dict[str, Any]], completeness: dict[str, Any],
+    inventory: dict[str, Any], report_sha256: str,
+) -> None:
+    try:
+        for ordinal, (trace_row, ncu_row, complete_row) in enumerate(zip(
+            trace_inventory,
+            launches,
+            completeness["launches"],
+            strict=True,
+        )):
+            projection = canonical_capture._launch_set_ordinal_observation(
+                inventory, ordinal=ordinal,
+            )
+            if (
+                trace_row.get("launch_ordinal") != ordinal
+                or trace_row.get("launch_identity_sha256")
+                != canonical_sha256({
+                    key: value for key, value in trace_row.items()
+                    if key != "launch_identity_sha256"
+                })
+                or canonical_capture._trace_ncu_launch_key(trace_row)
+                != canonical_capture._observation_ncu_launch_key(projection)
+                or ncu_row.get("report_launch_ordinal") != ordinal
+                or complete_row.get("launch_ordinal") != ordinal
+                or complete_row.get("launch_identity_sha256")
+                != trace_row.get("launch_identity_sha256")
+                or complete_row.get("kernel_name")
+                != trace_row["module_mapping"]["kernel_name"]
+                or complete_row.get("ncu_report_sha256") != report_sha256
+            ):
+                raise WorkloadCaptureRefusal(
+                    "supplemental_done_launch_set_crosswalk_invalid",
+                    str(ordinal),
+                )
+    except WorkloadCaptureRefusal:
+        raise
+    except (
+        KeyError, TypeError, ValueError, RecursionError,
+        canonical_capture.ChunkRefusal,
+    ) as exc:
+        raise WorkloadCaptureRefusal(
+            "supplemental_done_launch_set_crosswalk_invalid", str(exc),
+        ) from exc
+
+
+def validate_done_launch_set_bundle(
+    *, result: dict[str, Any], cell: dict[str, Any], safe_name: str,
+    snapshot: dict[str, tuple[dict[str, Any], bytes]],
+    directory_names: dict[str, tuple[tuple[int, int], frozenset[str]]],
+    retained_preflight: dict[str, Any], retained_preflight_sha256: str,
+    registry: metric_registry.MetricRegistry,
+    canonical_matrix: dict[str, Any], pins: dict[str, Any],
+    source_commit: str, supplemental_matrix_sha256: str,
+    pins_sha256: str,
+) -> None:
+    """Rebuild every Q810 launch-set relationship from retained DONE bytes."""
+    completeness = result["launch_completeness"]
+    expected_launch_count = completeness["inventory_launch_count"]
+    identity = cell["identity"]
+    logical = cell["invocation"]["logical_workload"]
+    parent, paths, sidecar_paths = _launch_set_bundle_paths(
+        snapshot,
+        safe_name=safe_name,
+        arch=canonical_matrix["arch"],
+        slug=identity["slug"],
+        shape_point=logical["value"],
+        expected_launch_count=expected_launch_count,
+    )
+    parent_snapshot = directory_names.get(parent.as_posix())
+    observed_names = set(parent_snapshot[1]) if parent_snapshot else set()
+    expected_names = {
+        *(Path(relative).name for relative in paths.values()),
+        *(Path(relative).name for relative in sidecar_paths),
+    }
+    if observed_names != expected_names:
+        raise WorkloadCaptureRefusal(
+            "supplemental_done_launch_set_namespace_invalid",
+            repr(sorted(observed_names)),
+        )
+
+    cell_parent = Path("cells") / safe_name
+    trace_path = (cell_parent / "trace_capture_manifest.json").as_posix()
+    cell_result_path = (cell_parent / "cell_capture_result.json").as_posix()
+    expected_document_kinds = {
+        trace_path: "trace_manifest",
+        cell_result_path: "cell_result",
+    }
+    special_kind_paths = {
+        relative for relative, (row, _payload) in snapshot.items()
+        if row.get("artifact_kind") in set(expected_document_kinds.values())
+    }
+    if (
+        special_kind_paths != set(expected_document_kinds)
+        or any(
+            snapshot.get(relative, ({}, b""))[0].get("artifact_kind") != kind
+            for relative, kind in expected_document_kinds.items()
+        )
+    ):
+        raise WorkloadCaptureRefusal(
+            "supplemental_done_launch_set_trace_invalid",
+            "trace or cell-result canonical path differs",
+        )
+    trace_manifest = _snapshot_json(
+        snapshot, trace_path, role="supplemental trace manifest",
+        root_type=dict,
+    )
+    cell_result = _snapshot_json(
+        snapshot, cell_result_path, role="supplemental cell result",
+        root_type=dict,
+    )
+    expected_binary_sha256 = cell["invocation"]["executable_sha256"]
+    _validate_done_producer_documents(
+        result=result,
+        cell=cell,
+        safe_name=safe_name,
+        snapshot=snapshot,
+        trace_manifest=trace_manifest,
+        cell_result=cell_result,
+        retained_preflight=retained_preflight,
+        expected_launch_count=expected_launch_count,
+        expected_binary_sha256=expected_binary_sha256,
+        canonical_matrix=canonical_matrix,
+        pins=pins,
+    )
+    trace_inventory = trace_manifest.get("dynamic_launch_inventory")
+    if (
+        trace_manifest.get("binary_sha256") != expected_binary_sha256
+        or trace_manifest.get("launch_scope") != "all_in_profiler_roi"
+        or type(trace_inventory) is not list
+        or len(trace_inventory) != expected_launch_count
+        or trace_manifest.get("dynamic_launch_inventory_sha256")
+        != canonical_sha256(trace_inventory)
+        or completeness.get("launch_inventory_sha256")
+        != trace_manifest.get("dynamic_launch_inventory_sha256")
+        or cell_result.get("binary_sha256") != expected_binary_sha256
+        or cell_result.get("capture_preflight_sha256")
+        != retained_preflight_sha256
+        or cell_result.get("admission_run_id") != result.get("admission_run_id")
+        or cell_result.get("launch_completeness") != completeness
+        or cell_result.get("workload_row_binding")
+        != result.get("workload_row_binding")
+    ):
+        raise WorkloadCaptureRefusal(
+            "supplemental_done_launch_set_trace_invalid",
+            "trace, cell result, or DONE launch authority differs",
+        )
+    try:
+        runtime_module_sha256s = (
+            canonical_capture._launch_set_runtime_module_sha256s(
+                trace_inventory
+            )
+        )
+    except canonical_capture.ChunkRefusal as exc:
+        raise WorkloadCaptureRefusal(
+            "supplemental_done_launch_set_trace_invalid", str(exc),
+        ) from exc
+
+    ncu_identity, gpu_uuid_sha256 = _launch_set_preflight_authority(
+        retained_preflight,
+        expected_sha256=retained_preflight_sha256,
+        expected_source_commit=source_commit,
+        expected_pins_sha256=pins_sha256,
+        expected_matrix_sha256=supplemental_matrix_sha256,
+        expected_arch=canonical_matrix["arch"],
+        expected_sku=canonical_matrix["sku"],
+        expected_protocol_version=pins["measurement_protocol"]["version"],
+        expected_ncu_version_prefix=pins["toolchain"][
+            "ncu_version_prefix"
+        ],
+    )
+    report_path = paths["run_0_launch_set.ncu-rep"]
+    report_row, report_bytes = snapshot[report_path]
+    report_sha256 = hashlib.sha256(report_bytes).hexdigest()
+    inventory_path = paths["run_0_launch_set.launch_inventory.json"]
+    inventory = _snapshot_json(
+        snapshot, inventory_path, role="NCU launch inventory", root_type=dict,
+    )
+    metrics_path = paths["run_0_launch_set.launch_metrics.json"]
+    metrics = _snapshot_json(
+        snapshot, metrics_path, role="NCU launch metrics", root_type=list,
+    )
+    _require_pretty_snapshot(
+        snapshot, inventory_path, inventory, role="NCU launch inventory",
+    )
+    _require_pretty_snapshot(
+        snapshot, metrics_path, metrics, role="NCU launch metrics",
+    )
+    csv_path = paths["run_0_launch_set.details.csv"]
+    try:
+        csv_text = snapshot[csv_path][1].decode("utf-8", errors="strict")
+    except UnicodeDecodeError as exc:
+        raise WorkloadCaptureRefusal(
+            "supplemental_done_launch_set_invalid", str(exc),
+        ) from exc
+    command_path = paths["label_launch_set_capture_manifest.json"]
+    capture_manifest = _snapshot_json(
+        snapshot, command_path, role="launch-set capture manifest",
+        root_type=dict,
+    )
+    _require_pretty_snapshot(
+        snapshot, command_path, capture_manifest,
+        role="launch-set capture manifest",
+    )
+    command, protocol, warmup_count = _expected_launch_set_command(
+        capture_manifest.get("command"),
+        cell=cell,
+        safe_name=safe_name,
+        binding=result["workload_row_binding"],
+        snapshot=snapshot,
+        canonical_matrix=canonical_matrix,
+        pins=pins,
+        trace_manifest=trace_manifest,
+        expected_launch_count=expected_launch_count,
+    )
+    unit_metrics = tuple(
+        canonical_matrix["metric_registry"]["collection"][
+            "selected_unit_metrics"
+        ]
+    )
+    try:
+        registry_metrics = (
+            canonical_capture._registry_unit_metrics_for_capture(
+                registry, arch=canonical_matrix["arch"]
+            )
+        )
+    except canonical_capture.ChunkRefusal as exc:
+        raise WorkloadCaptureRefusal(
+            "supplemental_done_launch_set_registry_invalid", str(exc),
+        ) from exc
+    if (
+        set(unit_metrics) != set(registry_metrics)
+        or len(unit_metrics) != len(registry_metrics)
+    ):
+        raise WorkloadCaptureRefusal(
+            "supplemental_done_launch_set_registry_invalid",
+            "canonical metric selection differs from retained registry",
+        )
+    try:
+        launches = ncu_launch_documents.validate_launch_inventory_document(
+            inventory,
+            expected_launch_count=expected_launch_count,
+            report_sha256=report_sha256,
+            protocol=protocol,
+        )
+        ncu_launch_documents.validate_launch_metrics_document(
+            metrics,
+            csv_text=csv_text,
+            inventory=inventory,
+            registry=registry,
+            percentage_metric_names=(
+                canonical_capture._LAUNCH_SET_PERCENTAGE_METRICS
+            ),
+            unit_metric_names=unit_metrics,
+        )
+    except (TypeError, ValueError) as exc:
+        raise WorkloadCaptureRefusal(
+            "supplemental_done_launch_set_products_invalid", str(exc),
+        ) from exc
+
+    _validate_done_launch_crosswalk(
+        trace_inventory=trace_inventory,
+        launches=launches,
+        completeness=completeness,
+        inventory=inventory,
+        report_sha256=report_sha256,
+    )
+
+    execution_path = paths["run_0_launch_set.execution_identity.json"]
+    execution = _snapshot_json(
+        snapshot, execution_path, role="launch execution identity",
+        root_type=dict,
+    )
+    _require_pretty_snapshot(
+        snapshot, execution_path, execution,
+        role="launch execution identity",
+    )
+    try:
+        ncu_launch_documents.validate_launch_execution_identity_document(
+            execution,
+            expected_launch_count=expected_launch_count,
+            expected_target_executable_sha256=expected_binary_sha256,
+            expected_runtime_module_sha256s=runtime_module_sha256s,
+        )
+        ncu_launch_documents.validate_schema("execution_identity", execution)
+        ncu_launch_documents.validate_launch_set_capture_manifest_document(
+            capture_manifest,
+            expected_command=command,
+            expected_launch_count=expected_launch_count,
+            protocol=protocol,
+            expected_launch_observation_sha256=inventory[
+                "observation_sha256"
+            ],
+            expected_execution_identity_sha256=execution["identity_sha256"],
+        )
+        ncu_launch_documents.validate_schema(
+            "capture_manifest", capture_manifest,
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise WorkloadCaptureRefusal(
+            "supplemental_done_launch_set_identity_invalid", str(exc),
+        ) from exc
+
+    labels_root = Path("cells") / safe_name / "labels"
+    product_specs = (
+        ("ncu_report", report_path),
+        ("details_csv", csv_path),
+        ("details_stderr", paths["run_0_launch_set.details.stderr"]),
+        ("launch_inventory", inventory_path),
+        ("launch_metrics", metrics_path),
+    )
+    products = []
+    try:
+        for role, relative in product_specs:
+            row, payload = snapshot[relative]
+            products.append(ncu_details_export_receipt.product_binding(
+                role=role,
+                relative_path=Path(relative).relative_to(
+                    labels_root
+                ).as_posix(),
+                sha256=hashlib.sha256(payload).hexdigest(),
+                size_bytes=row["size_bytes"],
+            ))
+        receipt = _snapshot_json(
+            snapshot,
+            paths["run_0_launch_set.details_export_receipt.json"],
+            role="NCU Details export receipt",
+            root_type=dict,
+        )
+        _require_pretty_snapshot(
+            snapshot,
+            paths["run_0_launch_set.details_export_receipt.json"],
+            receipt,
+            role="NCU Details export receipt",
+        )
+        ncu_details_export_receipt.validate_receipt(
+            receipt,
+            expected_preflight_sha256=retained_preflight_sha256,
+            expected_source_commit=source_commit,
+            expected_capture_identity_sha256=result["admission_run_id"],
+            expected_ncu_identity=ncu_identity,
+            expected_import_arguments=(
+                ncu_details_export_receipt.EXPECTED_IMPORT_ARGUMENTS
+            ),
+            expected_environment=dict(
+                ncu_details_export_receipt.EXPECTED_ACTION_ENVIRONMENT
+            ),
+            expected_working_directory="/",
+            expected_exit_status=0,
+            expected_products=products,
+        )
+    except (
+        KeyError,
+        ValueError,
+        ncu_details_export_receipt.DetailsExportReceiptError,
+    ) as exc:
+        raise WorkloadCaptureRefusal(
+            "supplemental_done_launch_set_receipt_invalid", str(exc),
+        ) from exc
+
+    run_manifest = _snapshot_json(
+        snapshot,
+        paths["label_run_manifest_0_launch_set.json"],
+        role="launch-set run manifest",
+        root_type=dict,
+    )
+    try:
+        expected_kernel_signature_sha256 = (
+            _fallback_kernel_signature_from_command(
+                slug=identity["slug"],
+                binary_path=trace_manifest["command"][0],
+                driver_path=command[0],
+            )
+        )
+        canonical_capture._validate_fixture_launch_set_manifest(
+            run_manifest,
+            command=command,
+            source_commit=source_commit,
+            expected_target_executable_sha256=expected_binary_sha256,
+            expected_kernel_signature_sha256=(
+                expected_kernel_signature_sha256
+            ),
+            expected_kernel_signature_source="fallback_legacy",
+        )
+        _schema_bytes, sidecar_schema = (
+            sidecar_schema_authority.load_authoritative_schema()
+        )
+        sidecars = [
+            _snapshot_json(
+                snapshot, relative,
+                role=f"launch sidecar {ordinal}", root_type=dict,
+            )
+            for ordinal, relative in enumerate(sidecar_paths)
+        ]
+        for ordinal, (relative, sidecar) in enumerate(zip(
+            sidecar_paths, sidecars, strict=True,
+        )):
+            _require_pretty_snapshot(
+                snapshot, relative, sidecar,
+                role=f"launch sidecar {ordinal}",
+            )
+        ncu_launch_sidecars.validate_launch_sidecar_documents(
+            sidecars,
+            inventory=inventory,
+            launch_metrics=metrics,
+            csv_text=csv_text,
+            report_sha256=report_sha256,
+            expected_launch_count=expected_launch_count,
+            protocol=protocol,
+            registry=registry,
+            percentage_metric_names=(
+                canonical_capture._LAUNCH_SET_PERCENTAGE_METRICS
+            ),
+            unit_metric_names=unit_metrics,
+            sidecar_schema=sidecar_schema,
+            provenance=ncu_launch_sidecars.LaunchSidecarProvenance(
+                device=canonical_matrix["arch"],
+                slug=identity["slug"],
+                shape_point=logical["value"],
+                binary_sha256=expected_binary_sha256,
+                profiler_version=ncu_identity.version_line,
+                cuda_version=canonical_capture.toolchain_contract.nvcc_release_text(
+                    canonical_capture.toolchain_contract.require_sol_cuda_release(
+                        pins["toolchain"]["nvcc_release"]
+                    )
+                ),
+                driver_version=pins["toolchain"]["driver_version"],
+                gpu_uuid_sha256=gpu_uuid_sha256,
+                warmup_count=warmup_count,
+            ),
+        )
+    except (
+        KeyError,
+        TypeError,
+        ValueError,
+        canonical_capture.ChunkRefusal,
+        canonical_capture.toolchain_contract.CaptureToolchainContractError,
+        ncu_launch_sidecars.LaunchSidecarError,
+    ) as exc:
+        raise WorkloadCaptureRefusal(
+            "supplemental_done_launch_set_sidecar_invalid", str(exc),
+        ) from exc
 
 
 def validate_result_launch_completeness(result: dict[str, Any]) -> None:
@@ -4525,6 +6478,15 @@ def build_done_manifest(
     _validate_schema(
         manifest, DONE_SCHEMA, code="supplemental_done_schema_invalid"
     )
+    verify_done_manifest(
+        manifest,
+        final_dir=publication_root,
+        matrix=matrix,
+        canonical_matrix=canonical_matrix,
+        campaign_root=campaign_root,
+        require_current_state=False,
+        require_final_location=False,
+    )
     return manifest
 
 
@@ -4605,6 +6567,7 @@ def verify_done_manifest(
         )
     preflight_sha256s: set[str] = set()
     preflight_paths: set[str] = set()
+    retained_preflights: dict[str, dict[str, Any]] = {}
     expected_preflight_prefix = (
         "sol_workload_campaign", "inputs", "preflights",
         manifest["source_commit"], manifest["chunk_id"],
@@ -4628,10 +6591,15 @@ def verify_done_manifest(
             raise WorkloadCaptureRefusal(
                 "supplemental_done_input_mismatch", "preflight reference"
             )
-        _read_portable_input_reference(
+        payload = _read_portable_input_reference(
             reference, campaign_root=campaign_root, repo_root=repo_root,
             source_commit=manifest["source_commit"],
             verify_git_provenance=False,
+        )
+        retained_preflights[reference["sha256"]] = (
+            _parse_retained_object_payload(
+                payload, role="retained capture preflight"
+            )
         )
         preflight_sha256s.add(reference["sha256"])
         preflight_paths.add(relative.as_posix())
@@ -4648,6 +6616,20 @@ def verify_done_manifest(
     retained_canonical = _parse_canonical_object_payload(
         input_payloads["canonical_matrix"], role="canonical matrix"
     )
+    pins = _parse_retained_object_payload(
+        input_payloads["pins"], role="campaign protocol pins"
+    )
+    registry_document = _parse_retained_object_payload(
+        input_payloads["metric_registry"], role="metric registry"
+    )
+    try:
+        launch_set_registry = metric_registry.parse_registry(
+            registry_document
+        )
+    except metric_registry.MetricRegistryError as exc:
+        raise WorkloadCaptureRefusal(
+            "supplemental_done_launch_set_registry_invalid", str(exc),
+        ) from exc
     if matrix is not None and matrix != retained_matrix:
         raise WorkloadCaptureRefusal(
             "supplemental_done_input_mismatch", "supplemental matrix object"
@@ -4689,7 +6671,7 @@ def verify_done_manifest(
         row for row in matrix["chunks"]
         if row["chunk_id"] == manifest["chunk_id"]
     ]
-    _chunk, _resolved = select_workload_chunk(
+    selected_chunk, resolved = select_workload_chunk(
         matrix, canonical_matrix, manifest["chunk_id"]
     )
     flashinfer = manifest.get("flashinfer_corpus")
@@ -4760,7 +6742,15 @@ def verify_done_manifest(
     rows_by_key = {
         _row_identity(row["key"]): row for row in matrix["rows"]
     }
+    cells_by_key = {
+        _row_identity(row["key"]): cell
+        for row, _variant, cell in resolved
+    }
     matrix_sha = references["supplemental_matrix"]["sha256"]
+    publication_root_identity: tuple[int, int] | None = None
+    publication_directories: dict[
+        str, tuple[tuple[int, int], frozenset[str]]
+    ] = {}
     for result in manifest["cell_results"]:
         validate_result_launch_completeness(result)
         binding = result.get("workload_row_binding") or {}
@@ -4781,7 +6771,52 @@ def verify_done_manifest(
             raise WorkloadCaptureRefusal(
                 "supplemental_done_binding_mismatch", repr(key)
             )
-        artifact_total += _verify_artifacts(result, root=final_dir)
+        artifact_bytes, snapshot, directory_names, root_identity = (
+            _snapshot_artifacts(result, root=final_dir)
+        )
+        if publication_root_identity is None:
+            publication_root_identity = root_identity
+        elif publication_root_identity != root_identity:
+            raise WorkloadCaptureRefusal(
+                "supplemental_artifact_root_changed", str(final_dir)
+            )
+        for relative, directory_snapshot in directory_names.items():
+            prior_snapshot = publication_directories.get(relative)
+            if prior_snapshot is not None and prior_snapshot != directory_snapshot:
+                raise WorkloadCaptureRefusal(
+                    "supplemental_artifact_namespace_changed", relative
+                )
+            publication_directories[relative] = directory_snapshot
+        artifact_total += artifact_bytes
+        capture_preflight_sha256 = result.get(
+            "capture_preflight_sha256"
+        )
+        retained_preflight = retained_preflights.get(
+            capture_preflight_sha256
+        )
+        cell = cells_by_key.get(key)
+        if retained_preflight is None or cell is None:
+            raise WorkloadCaptureRefusal(
+                "supplemental_done_launch_set_preflight_invalid", repr(key),
+            )
+        validate_done_launch_set_bundle(
+            result=result,
+            cell=cell,
+            safe_name=_safe_name(binding["row_key"]),
+            snapshot=snapshot,
+            directory_names=directory_names,
+            retained_preflight=retained_preflight,
+            retained_preflight_sha256=capture_preflight_sha256,
+            registry=launch_set_registry,
+            canonical_matrix=canonical_matrix,
+            pins=pins,
+            source_commit=manifest["source_commit"],
+            supplemental_matrix_sha256=matrix_sha,
+            pins_sha256=references["pins"]["sha256"],
+        )
+        _require_snapshot_directories_unchanged(
+            final_dir, root_identity, directory_names,
+        )
         disposition = result.get("disposition")
         dispositions[disposition] = dispositions.get(disposition, 0) + 1
         completeness = result.get("launch_completeness") or {}
@@ -4806,13 +6841,21 @@ def verify_done_manifest(
                     "supplemental_done_launch_completeness_invalid", repr(key)
                 )
             launch_counts[destination] += value
+    if publication_root_identity is None:
+        raise WorkloadCaptureRefusal(
+            "supplemental_artifact_root_invalid", str(final_dir)
+        )
+    observed_publication_storage = _tree_usage(final_dir / "cells")
+    _require_snapshot_directories_unchanged(
+        final_dir, publication_root_identity, publication_directories,
+    )
     if (
         result_keys != expected_keys
         or manifest["row_count"] != len(expected_keys)
         or manifest["counts"] != dict(sorted(dispositions.items()))
         or manifest["launch_counts"] != launch_counts
         or manifest["retained_artifact_bytes"] != artifact_total
-        or manifest["publication_storage"] != _tree_usage(final_dir / "cells")
+        or manifest["publication_storage"] != observed_publication_storage
     ):
         raise WorkloadCaptureRefusal(
             "supplemental_done_result_mismatch", str(final_dir)

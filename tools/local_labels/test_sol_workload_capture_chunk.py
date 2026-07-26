@@ -17,6 +17,7 @@ import pytest
 
 from tools.local_labels import sm86_capture_chunk as canonical_capture
 from tools.local_labels import sol_workload_capture_chunk as capture
+from tools.local_labels import test_sm86_capture_chunk as canonical_fixture
 from tools.local_labels import test_sol_workload_capture_matrix as matrix_fixture
 
 
@@ -166,6 +167,259 @@ def test_output_directory_open_fault_is_typed_before_generic_path_error(
     )
 
 
+def test_snapshot_artifacts_rejects_publication_root_replacement(
+    tmp_path, monkeypatch,
+):
+    root = tmp_path / "published"
+    root.mkdir()
+    artifact = root / "artifact.bin"
+    payload = b"published bytes\n"
+    artifact.write_bytes(payload)
+    result = {
+        "artifacts": [{
+            "relative_path": "artifact.bin",
+            "sha256": hashlib.sha256(payload).hexdigest(),
+            "size_bytes": len(payload),
+            "artifact_kind": "execution_log",
+        }],
+    }
+    displaced = tmp_path / "displaced"
+    real_read = capture._read_snapshot_artifact_at
+    exchanged = False
+
+    def exchange_root(descriptor, relative_path):
+        nonlocal exchanged
+        observed = real_read(descriptor, relative_path)
+        if not exchanged:
+            root.rename(displaced)
+            root.mkdir()
+            (root / "artifact.bin").write_bytes(payload)
+            exchanged = True
+        return observed
+
+    monkeypatch.setattr(capture, "_read_snapshot_artifact_at", exchange_root)
+    with pytest.raises(
+        capture.WorkloadCaptureRefusal,
+        match="supplemental_artifact_root_changed",
+    ):
+        capture._snapshot_artifacts(result, root=root)
+
+
+def test_snapshot_identity_rejects_exchange_after_bytes_are_read(tmp_path):
+    root = tmp_path / "published"
+    root.mkdir()
+    payload = b"published bytes\n"
+    (root / "artifact.bin").write_bytes(payload)
+    result = {
+        "artifacts": [{
+            "relative_path": "artifact.bin",
+            "sha256": hashlib.sha256(payload).hexdigest(),
+            "size_bytes": len(payload),
+            "artifact_kind": "execution_log",
+        }],
+    }
+    _total, _snapshot, names, identity = capture._snapshot_artifacts(
+        result, root=root,
+    )
+    assert names["."][1] == frozenset({"artifact.bin"})
+    root.rename(tmp_path / "displaced")
+    root.mkdir()
+    (root / "artifact.bin").write_bytes(payload)
+    with pytest.raises(
+        capture.WorkloadCaptureRefusal,
+        match="supplemental_artifact_root_changed",
+    ):
+        capture._require_snapshot_root_unchanged(root, identity)
+
+
+def test_snapshot_identity_rejects_child_directory_exchange(tmp_path):
+    root = tmp_path / "published"
+    parent = root / "cell"
+    parent.mkdir(parents=True)
+    payload = b"published bytes\n"
+    (parent / "artifact.bin").write_bytes(payload)
+    result = {
+        "artifacts": [{
+            "relative_path": "cell/artifact.bin",
+            "sha256": hashlib.sha256(payload).hexdigest(),
+            "size_bytes": len(payload),
+            "artifact_kind": "execution_log",
+        }],
+    }
+    _total, _snapshot, directories, root_identity = (
+        capture._snapshot_artifacts(result, root=root)
+    )
+    parent.rename(root / "displaced-cell")
+    replacement = root / "cell"
+    replacement.mkdir()
+    (replacement / "artifact.bin").write_bytes(payload)
+
+    with pytest.raises(
+        capture.WorkloadCaptureRefusal,
+        match="supplemental_artifact_namespace_changed",
+    ):
+        capture._require_snapshot_directories_unchanged(
+            root, root_identity, directories,
+        )
+
+
+def test_snapshot_rejects_exchange_between_read_and_namespace_capture(
+    tmp_path, monkeypatch,
+):
+    root = tmp_path / "published"
+    parent = root / "deep" / "cell"
+    parent.mkdir(parents=True)
+    payloads = {
+        "first.bin": b"first published bytes\n",
+        "second.bin": b"second published bytes\n",
+    }
+    for name, payload in payloads.items():
+        (parent / name).write_bytes(payload)
+    result = {
+        "artifacts": [
+            {
+                "relative_path": f"deep/cell/{name}",
+                "sha256": hashlib.sha256(payload).hexdigest(),
+                "size_bytes": len(payload),
+                "artifact_kind": "execution_log",
+            }
+            for name, payload in payloads.items()
+        ],
+    }
+    real_read = capture._read_snapshot_artifact_at
+    exchanged = False
+
+    def exchange_parent(descriptor, artifact_name):
+        nonlocal exchanged
+        observed = real_read(descriptor, artifact_name)
+        if not exchanged:
+            parent.rename(root / "deep" / "displaced-cell")
+            replacement = root / "deep" / "cell"
+            replacement.mkdir()
+            for name, payload in payloads.items():
+                (replacement / name).write_bytes(payload)
+            exchanged = True
+        return observed
+
+    monkeypatch.setattr(capture, "_read_snapshot_artifact_at", exchange_parent)
+    with pytest.raises(
+        capture.WorkloadCaptureRefusal,
+        match="supplemental_artifact_namespace_changed",
+    ):
+        capture._snapshot_artifacts(result, root=root)
+
+
+def test_snapshot_artifact_dup_failure_is_typed(tmp_path, monkeypatch):
+    root = tmp_path / "published"
+    root.mkdir()
+    (root / "artifact.bin").write_bytes(b"bytes")
+    descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+    monkeypatch.setattr(
+        capture.os,
+        "dup",
+        lambda _descriptor: (_ for _ in ()).throw(
+            OSError(errno.EMFILE, "injected dup failure")
+        ),
+    )
+    try:
+        with pytest.raises(capture.WorkloadCaptureRefusal) as caught:
+            capture._open_snapshot_parent_at(descriptor, Path("."))
+    finally:
+        os.close(descriptor)
+    assert caught.value.code == "supplemental_artifact_namespace_invalid"
+
+
+def test_snapshot_artifact_open_storage_failure_is_typed(tmp_path, monkeypatch):
+    root = tmp_path / "published"
+    root.mkdir()
+    (root / "artifact.bin").write_bytes(b"bytes")
+    real_open = capture.os.open
+    descriptor = real_open(root, os.O_RDONLY | os.O_DIRECTORY)
+
+    def fail_open(path, flags, *args, dir_fd=None, **kwargs):
+        if path == "artifact.bin" and dir_fd is not None:
+            raise OSError(errno.EIO, "injected artifact open failure")
+        return real_open(path, flags, *args, dir_fd=dir_fd, **kwargs)
+
+    monkeypatch.setattr(capture.os, "open", fail_open)
+    try:
+        with pytest.raises(capture.WorkloadCaptureRefusal) as caught:
+            capture._read_snapshot_artifact_at(descriptor, "artifact.bin")
+    finally:
+        capture.os.close(descriptor)
+    assert caught.value.code == capture.STORAGE_INTEGRITY_CODE
+
+
+def test_snapshot_artifact_close_failure_is_typed(tmp_path, monkeypatch):
+    root = tmp_path / "published"
+    root.mkdir()
+    (root / "artifact.bin").write_bytes(b"bytes")
+    descriptor = os.open(root, os.O_RDONLY | os.O_DIRECTORY)
+    real_close = capture.os.close
+    close_count = 0
+
+    def fail_close(value):
+        nonlocal close_count
+        close_count += 1
+        real_close(value)
+        raise OSError(errno.EIO, "injected descriptor close failure")
+
+    monkeypatch.setattr(capture.os, "close", fail_close)
+    try:
+        with pytest.raises(capture.WorkloadCaptureRefusal) as caught:
+            capture._read_snapshot_artifact_at(descriptor, "artifact.bin")
+    finally:
+        real_close(descriptor)
+    assert caught.value.code == capture.STORAGE_INTEGRITY_CODE
+    assert close_count == 1
+
+
+@pytest.mark.parametrize("failing_close", [1, 2, 3])
+def test_snapshot_close_attempts_every_descriptor(
+    tmp_path, monkeypatch, failing_close,
+):
+    descriptors = tuple(
+        os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY) for _ in range(3)
+    )
+    real_close = capture.os.close
+    close_count = 0
+
+    def fail_close(value):
+        nonlocal close_count
+        close_count += 1
+        real_close(value)
+        if close_count == failing_close:
+            raise OSError(errno.EIO, "injected descriptor close failure")
+
+    monkeypatch.setattr(capture.os, "close", fail_close)
+    with pytest.raises(capture.WorkloadCaptureRefusal) as caught:
+        capture._close_snapshot_descriptors(
+            descriptors,
+            operation="supplemental_artifact_root_close",
+            preserve_error=False,
+        )
+    assert caught.value.code == capture.STORAGE_INTEGRITY_CODE
+    assert close_count == 3
+
+
+def test_snapshot_root_recheck_close_failure_is_typed(tmp_path, monkeypatch):
+    descriptor = os.open(tmp_path, os.O_RDONLY | os.O_DIRECTORY)
+    real_close = capture.os.close
+
+    def fail_close(value):
+        real_close(value)
+        raise OSError(errno.EBADF, "injected root recheck close failure")
+
+    monkeypatch.setattr(capture.os, "close", fail_close)
+    with pytest.raises(capture.WorkloadCaptureRefusal) as caught:
+        capture._close_snapshot_descriptors(
+            (descriptor,),
+            operation="supplemental_artifact_root_recheck_close",
+            preserve_error=False,
+        )
+    assert caught.value.code == "supplemental_artifact_snapshot_failed"
+
+
 @pytest.mark.parametrize(
     "error_number", [errno.EIO, getattr(errno, "ESTALE", errno.EIO)],
 )
@@ -266,20 +520,10 @@ def test_generated_artifact_hash_storage_fault_is_typed(
         "sha256": hashlib.sha256(b"fixture").hexdigest(),
         "size_bytes": len(b"fixture"),
     }]}
-    real_open = capture._open_regular_nofollow
+    def fail_read(_descriptor, _size):
+        raise OSError(error_number, "injected artifact snapshot failure")
 
-    def fail_open(path, *, role):
-        if path == artifact:
-            refusal = capture.WorkloadCaptureRefusal(
-                "supplemental_input_path_invalid", f"{role}: injected",
-            )
-            refusal.__cause__ = OSError(
-                error_number, "injected artifact hash failure",
-            )
-            raise refusal
-        return real_open(path, role=role)
-
-    monkeypatch.setattr(capture, "_open_regular_nofollow", fail_open)
+    monkeypatch.setattr(capture.os, "read", fail_read)
     with pytest.raises(capture.WorkloadCaptureRefusal) as caught:
         capture._verify_artifacts(result, root=tmp_path)
     assert caught.value.code == capture.STORAGE_INTEGRITY_CODE
@@ -1589,10 +1833,684 @@ def test_root_owner_rejects_canonical_aliases_and_wrong_existing_owner(
         unrelated.rmdir()
 
 
-def test_done_v2_offline_verifies_after_campaign_relocation_and_source_removal(
-    tmp_path, monkeypatch,
+def _successful_process_probe(pid=1000):
+    return {
+        "status": "ok",
+        "detail": "no SOL evaluator or NCU process is active",
+        "enumerated_processes": 1,
+        "ignored_self_pid": pid,
+        "ignored_verified_ancestor_pids": [1],
+        "conflicts": [],
+    }
+
+
+def _successful_clock_probe(pins, *, settled):
+    reference = pins["reference_clock_state"]
+    sample = {
+        "persistence_mode": reference["persistence_mode"],
+        "graphics_clock_mhz": reference["sm_clock_mhz"],
+        "sm_clock_mhz": reference["sm_clock_mhz"],
+        "mem_clock_mhz": reference["mem_clock_mhz"],
+        "pstate": "P0",
+    }
+    samples = [copy.deepcopy(sample) for _ in range(3)]
+    status, detail = canonical_capture.preflight.clock_state_verdict(
+        samples, reference,
+    )
+    result = {
+        "status": status,
+        "detail": detail,
+        "observed": copy.deepcopy(sample),
+        "samples": samples,
+        "sample_count": 3,
+        "expected": {
+            field: reference[field] for field in (
+                "persistence_mode", "sm_clock_mhz", "mem_clock_mhz"
+            )
+        },
+        "lock_state_evidence": "repeated_exact_readback_proxy",
+        "applications_clock_setting": "query_unavailable",
+    }
+    if settled:
+        result["settle_attempt_count"] = 1
+        result["settle_attempts"] = [{
+            "ordinal": 1,
+            "status": status,
+            "detail": detail,
+            "observed": copy.deepcopy(sample),
+        }]
+    return result
+
+
+def _successful_capture_guard(pins, *, pid=1000):
+    return {
+        "capture_processes": _successful_process_probe(pid),
+        "capture_processes_before_clock_wait": _successful_process_probe(pid),
+        "clock_state": _successful_clock_probe(pins, settled=True),
+    }
+
+
+def _write_done_launch_set_fixture(
+    *, final_dir, binding, cell, canonical_matrix, pins, registry,
+    preflight, preflight_sha256, source_commit, retained_inputs=None,
+    definition_bytes=None,
 ):
-    variants, rows, *_ = matrix_fixture._native_fixture(tmp_path / "fixture")
+    safe_name = capture._safe_name(binding["row_key"])
+    cell_dir = final_dir / "cells" / safe_name
+    effective_cell = copy.deepcopy(cell)
+    retained_paths = []
+    if binding["cohort"] == "reduced_proxy":
+        logical = effective_cell["invocation"]["logical_workload"]
+        sources = {
+            "workload": logical["external_workload_source"],
+        }
+        if logical.get("external_definition_source") is not None:
+            sources["definition"] = logical["external_definition_source"]
+        if not isinstance(retained_inputs, dict) or set(retained_inputs) != set(
+            sources
+        ):
+            raise AssertionError("reduced fixture retained inputs differ")
+        suffixes = {"workload": "jsonl", "definition": "json"}
+        directories = {
+            "workload": "retained_workload",
+            "definition": "retained_definition",
+        }
+        materialized = {}
+        for input_kind, source in sources.items():
+            payload = retained_inputs[input_kind]
+            assert len(payload) == source["size_bytes"]
+            assert hashlib.sha256(payload).hexdigest() == source["sha256"]
+            path = (
+                cell_dir / "sol_requests" / directories[input_kind]
+                / f"{source['sha256']}.{suffixes[input_kind]}"
+            )
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(payload)
+            path.chmod(0o444)
+            retained_paths.append(path)
+            materialized[input_kind] = path
+        effective_cell["invocation"] = (
+            canonical_capture.bind_supplemental_sol_workload_row(
+                effective_cell["invocation"],
+                binding,
+                supplemental_workload_path=materialized["workload"],
+                supplemental_definition_path=materialized.get("definition"),
+            )
+        )
+    logical = cell["invocation"]["logical_workload"]
+    assert isinstance(definition_bytes, bytes)
+    assert hashlib.sha256(definition_bytes).hexdigest() == logical[
+        "definition_file_sha256"
+    ]
+    definition_comparison = (
+        canonical_capture.sol_def.require_definition_equivalent(
+            definition_bytes, definition_bytes,
+        )
+    )
+    definition_attestation = definition_comparison.attestation
+    definition_attestation_bytes = (
+        canonical_capture.sol_def.serialize_attestation(
+            definition_attestation
+        )
+    )
+    stage = cell_dir / "sol_stage"
+    stage.mkdir(parents=True, exist_ok=True)
+    for name, payload in (
+        ("definition.source.json", definition_bytes),
+        ("definition.json", definition_bytes),
+        (
+            "definition_equivalence_attestation.json",
+            definition_attestation_bytes,
+        ),
+    ):
+        path = stage / name
+        path.write_bytes(payload)
+        retained_paths.append(path)
+    environment_contract, environment_contract_sha256 = (
+        canonical_capture._sol_certifying_environment(cell["invocation"])
+    )
+    (
+        flashinfer_contract, flashinfer_contract_sha256, _runtime_root,
+    ) = canonical_capture._sol_flashinfer_corpus_contract(cell["invocation"])
+    definition_sha256 = hashlib.sha256(definition_bytes).hexdigest()
+    attestation_sha256 = hashlib.sha256(
+        definition_attestation_bytes
+    ).hexdigest()
+    prepare_manifest = {
+        "schema_version": 1,
+        "manifest_kind": "sol_execbench_capture_preparation",
+        "capture_contract_version": 2,
+        "path_mode": "stage_relative_v1",
+        "stage_root": ".",
+        "source_inputs": {
+            "definition": {
+                "path": "/dead/source/definition.json",
+                "sha256": logical["definition_file_sha256"],
+            },
+            "workload": {
+                "path": "/dead/source/workload.jsonl",
+                "sha256": logical["workload_file_sha256"],
+            },
+            "solution": {
+                "path": "/dead/source/solution.json",
+                "sha256": cell["invocation"]["authority_reference_sha256"],
+            },
+        },
+        "selection": {
+            "source_workload_index": binding["source_workload_index"],
+            "source_workload_count": logical["expected_workloads"],
+            "staged_workload_index": binding["capture_workload_index"],
+            "workload_uuid": binding["source_workload_uuid"],
+            "workload_axes": copy.deepcopy(binding["source_axes"]),
+            "source_row_sha256": binding["source_row_sha256"],
+        },
+        "solution_contract": {
+            "definition": "fixture_definition",
+            "solution": "fixture_solution",
+            "languages": ["cuda_cpp"],
+            "entry_point": "fixture_entry",
+            "destination_passing_style": True,
+        },
+        "benchmark_config": {
+            "warmup_runs": 10,
+            "iterations": 50,
+            "lock_clocks": False,
+            "benchmark_reference": True,
+            "seed": 200,
+        },
+        "environment_contract": environment_contract,
+        "environment_contract_sha256": environment_contract_sha256,
+        "flashinfer_corpus_contract": flashinfer_contract,
+        "flashinfer_corpus_contract_sha256": flashinfer_contract_sha256,
+        "artifacts": {
+            "definition": {
+                "path": "definition.json", "sha256": definition_sha256,
+            },
+            "definition_source": {
+                "path": "definition.source.json", "sha256": definition_sha256,
+            },
+            "definition_equivalence_attestation": {
+                "path": "definition_equivalence_attestation.json",
+                "sha256": attestation_sha256,
+            },
+            "workload": {"path": "workload.jsonl", "sha256": "1" * 64},
+            "solution": {"path": "solution.json", "sha256": "2" * 64},
+            "adapter": {
+                "path": "/synthetic/sol-execbench-fixture",
+                "sha256": cell["invocation"]["executable_sha256"],
+            },
+            "adapter_source": {
+                "path": "/synthetic/capture_adapter.py", "sha256": "3" * 64,
+            },
+            "certified_env_source": {
+                "path": "/synthetic/certified_env.py", "sha256": "4" * 64,
+            },
+            "eval_driver": {"path": "eval_driver.py", "sha256": "5" * 64},
+            "capture_runtime": {
+                "path": "_capture_runtime.py", "sha256": "6" * 64,
+            },
+            "benchmark_kernel_so": {
+                "path": "benchmark_kernel.so", "sha256": "7" * 64,
+            },
+            "solution_sources": [{
+                "relative_path": "kernel.cu",
+                "path": "kernel.cu",
+                "sha256": "8" * 64,
+            }],
+        },
+        "execution": {
+            "command": ["/synthetic/python", "eval_driver.py"],
+            "working_directory": ".",
+            "timing_methodology": "cuda_events",
+            "correctness_rounds": 1,
+            "warmup_calls": 1,
+            "profiled_candidate_calls": 1,
+        },
+        "source_definition_sha256": definition_comparison.source_sha256,
+        "staged_definition_sha256": definition_comparison.staged_sha256,
+        "definition_equivalence": copy.deepcopy(definition_attestation),
+    }
+    prepare_manifest["stage_definition_sha256"] = (
+        canonical_capture._sol_manifest_sha256(prepare_manifest)
+    )
+    prepare_path = stage / "capture_prepare_manifest.json"
+    prepare_path.write_bytes(
+        canonical_capture.immutable.pretty_json_bytes(prepare_manifest)
+    )
+    retained_paths.append(prepare_path)
+    binary = Path("/synthetic/sol-execbench-fixture")
+    plan = canonical_capture.build_fixture_only_launch_set_plan(
+        cell=effective_cell,
+        binary=binary,
+        invocation=effective_cell["invocation"],
+        cell_dir=cell_dir,
+        matrix=canonical_matrix,
+        pins=pins,
+        trace_inventory_cardinality=1,
+        execution_source_commit=source_commit,
+        registry=registry,
+    )
+    launch_root = plan["cell_root"]
+    launch_root.mkdir(parents=True)
+    report_bytes = b"opaque retained NCU report\n"
+    report_sha256 = hashlib.sha256(report_bytes).hexdigest()
+    report_path = launch_root / "run_0_launch_set.ncu-rep"
+    report_path.write_bytes(report_bytes)
+
+    unit_metrics = tuple(
+        canonical_matrix["metric_registry"]["collection"][
+            "selected_unit_metrics"
+        ]
+    )
+    metric_names = [
+        *canonical_capture._LAUNCH_SET_PERCENTAGE_METRICS,
+        *unit_metrics,
+    ]
+    csv_rows = [
+        '"Metric Value","Stream","ID","Grid Size","Metric Name",'
+        '"Context","Device","Block Size","Process ID","Kernel Name"\n'
+    ]
+    for metric_name in metric_names:
+        entry = registry.get_by_ncu_metric(metric_name)
+        value = 50 if entry.unit == "pct" else 1
+        csv_rows.append(
+            f'"{value}","2","9","(4, 1, 1)","{metric_name}",'
+            '"1","0","(128, 1, 1)","100","_Z7kernelAv"\n'
+        )
+    csv_bytes = "".join(csv_rows).encode()
+    csv_text = csv_bytes.decode()
+    protocol = plan["ncu_launch_protocol"]
+    inventory = canonical_capture.ncu_launch_documents.build_launch_inventory_document(
+        csv_text=csv_text,
+        report_sha256=report_sha256,
+        expected_launch_count=1,
+        protocol=protocol,
+    )
+    metrics = canonical_capture.ncu_launch_documents.build_launch_metrics_document(
+        csv_text=csv_text,
+        inventory=inventory,
+        registry=registry,
+        percentage_metric_names=canonical_capture._LAUNCH_SET_PERCENTAGE_METRICS,
+        unit_metric_names=unit_metrics,
+    )
+    inventory_bytes = canonical_capture.immutable.pretty_json_bytes(inventory)
+    metrics_bytes = canonical_capture.immutable.pretty_json_bytes(metrics)
+    stderr_bytes = b""
+    products_by_role = {
+        "ncu_report": (report_path, report_bytes),
+        "details_csv": (
+            launch_root / "run_0_launch_set.details.csv", csv_bytes,
+        ),
+        "details_stderr": (
+            launch_root / "run_0_launch_set.details.stderr", stderr_bytes,
+        ),
+        "launch_inventory": (
+            launch_root / "run_0_launch_set.launch_inventory.json",
+            inventory_bytes,
+        ),
+        "launch_metrics": (
+            launch_root / "run_0_launch_set.launch_metrics.json", metrics_bytes,
+        ),
+    }
+    for _role, (path, payload) in products_by_role.items():
+        if path != report_path:
+            path.write_bytes(payload)
+    labels_root = cell_dir / "labels"
+    receipt_products = [
+        capture.ncu_details_export_receipt.product_from_bytes(
+            role=role,
+            relative_path=path.relative_to(labels_root).as_posix(),
+            payload=payload,
+        )
+        for role, (path, payload) in products_by_role.items()
+    ]
+    ncu = preflight["checks"]["ncu"]
+    ncu_identity = capture.ncu_action_executor.build_expected_ncu_identity(
+        resolved_path=ncu["resolved_path"],
+        executable_sha256=ncu["executable_sha256"],
+        version_line=ncu["version_line"],
+    )
+    receipt = capture.ncu_details_export_receipt.build_receipt(
+        preflight_sha256=preflight_sha256,
+        source_commit=source_commit,
+        capture_identity_sha256="d" * 64,
+        expected_ncu_identity=ncu_identity,
+        import_arguments=capture.ncu_details_export_receipt.EXPECTED_IMPORT_ARGUMENTS,
+        environment=dict(
+            capture.ncu_details_export_receipt.EXPECTED_ACTION_ENVIRONMENT
+        ),
+        working_directory="/",
+        exit_status=0,
+        products=receipt_products,
+    )
+    receipt_path = launch_root / (
+        "run_0_launch_set.details_export_receipt.json"
+    )
+    receipt_path.write_bytes(canonical_capture.immutable.pretty_json_bytes(receipt))
+
+    target_sha256 = cell["invocation"]["executable_sha256"]
+    runtime_module_sha256 = "7" * 64
+    execution = (
+        canonical_capture.ncu_launch_documents.build_launch_execution_identity_document(
+            target_executable_sha256=target_sha256,
+            runtime_module_sha256s=(runtime_module_sha256,),
+            expected_launch_count=1,
+        )
+    )
+    execution_path = launch_root / (
+        "run_0_launch_set.execution_identity.json"
+    )
+    execution_path.write_bytes(
+        canonical_capture.immutable.pretty_json_bytes(execution)
+    )
+    capture_manifest = (
+        canonical_capture.ncu_launch_documents.build_launch_set_capture_manifest_document(
+            expected_command=plan["command"],
+            expected_launch_count=1,
+            protocol=protocol,
+            launch_observation_sha256=inventory["observation_sha256"],
+            execution_identity_sha256=execution["identity_sha256"],
+        )
+    )
+    capture_manifest_path = launch_root / (
+        "label_launch_set_capture_manifest.json"
+    )
+    capture_manifest_path.write_bytes(
+        canonical_capture.ncu_launch_documents.launch_set_capture_manifest_bytes(
+            capture_manifest,
+            expected_command=plan["command"],
+            expected_launch_count=1,
+            protocol=protocol,
+            expected_launch_observation_sha256=inventory["observation_sha256"],
+            expected_execution_identity_sha256=execution["identity_sha256"],
+        )
+    )
+    sidecar_schema_bytes, sidecar_schema = (
+        canonical_capture.sidecar_schema_authority.load_authoritative_schema()
+    )
+    del sidecar_schema_bytes
+    sidecars = canonical_capture.ncu_launch_sidecars.build_launch_sidecar_documents(
+        inventory=inventory,
+        launch_metrics=metrics,
+        csv_text=csv_text,
+        report_sha256=report_sha256,
+        expected_launch_count=1,
+        protocol=protocol,
+        registry=registry,
+        percentage_metric_names=canonical_capture._LAUNCH_SET_PERCENTAGE_METRICS,
+        unit_metric_names=unit_metrics,
+        sidecar_schema=sidecar_schema,
+        provenance=canonical_capture.ncu_launch_sidecars.LaunchSidecarProvenance(
+            device=canonical_matrix["arch"],
+            slug=cell["identity"]["slug"],
+            shape_point=cell["invocation"]["logical_workload"]["value"],
+            binary_sha256=target_sha256,
+            profiler_version=ncu_identity.version_line,
+            cuda_version="13.2",
+            driver_version=pins["toolchain"]["driver_version"],
+            gpu_uuid_sha256=preflight["checks"]["device"][
+                "gpu_uuid_sha256"
+            ],
+            warmup_count=int(canonical_capture._launch_set_option(
+                plan["command"], "--warmup"
+            )),
+        ),
+    )
+    sidecar_path = launch_root / "label_0_0.json"
+    sidecar_path.write_bytes(
+        canonical_capture.immutable.pretty_json_bytes(sidecars[0])
+    )
+    run_manifest = {
+        "schema_version": 1,
+        "source_commit": source_commit,
+        "binary_sha256": target_sha256,
+        "kernel_signature_sha256": (
+            capture._fallback_kernel_signature_from_command(
+                slug=cell["identity"]["slug"],
+                binary_path=str(binary),
+                driver_path=plan["command"][0],
+            )
+        ),
+        "kernel_signature_source": "fallback_legacy",
+        "arch": canonical_matrix["arch"],
+        "slug": cell["identity"]["slug"],
+        "shape_point": cell["invocation"]["logical_workload"]["value"],
+        "repeat_index": 0,
+        "launch_index": 0,
+    }
+    run_manifest_path = launch_root / "label_run_manifest_0_launch_set.json"
+    run_manifest_path.write_bytes(
+        canonical_capture.immutable.pretty_json_bytes(run_manifest)
+    )
+
+    trace_row = {
+        "launch_ordinal": 0,
+        "trace_launch": {
+            "block_dim": [128, 1, 1],
+            "grid_dim": [4, 1, 1],
+            "device_id": 0,
+        },
+        "module_mapping": {
+            "kernel_name": "_Z7kernelAv",
+            "module": {
+                "status": "stable_static_module",
+                "reason": "resolved_file",
+                "path_at_capture": "/synthetic/module.so",
+                "basename": "module.so",
+                "sha256": runtime_module_sha256,
+            },
+        },
+    }
+    trace_row["launch_identity_sha256"] = capture.canonical_sha256(
+        trace_row
+    )
+    trace_inventory = [trace_row]
+    trace_manifest = {
+        "schema_version": 1,
+        "identity": copy.deepcopy(cell["identity"]),
+        "captured_at_utc": "2026-07-16T00:00:00Z",
+        "command": [
+            str(binary), *effective_cell["invocation"]["trace_app_args"]
+        ],
+        "binary_sha256": target_sha256,
+        "tracer_so_sha256": preflight["checks"]["injection_runtime"][
+            "tracer_so_sha256"
+        ],
+        "trace_contract_id": preflight["checks"]["injection_runtime"][
+            "root_trace_contract_id"
+        ],
+        "memory_payload_classes": preflight["checks"]["injection_runtime"][
+            "root_trace_memory_payload_classes"
+        ],
+        "capture_launch_contract": (
+            canonical_capture._require_capture_launch_contract(
+                effective_cell["invocation"]
+            )
+        ),
+        "launch_scope": "all_in_profiler_roi",
+        "dynamic_launch_inventory": trace_inventory,
+        "dynamic_launch_inventory_sha256": capture.canonical_sha256(
+            trace_inventory
+        ),
+        "launch_count": 1,
+        "launches": [copy.deepcopy(trace_row["trace_launch"])],
+        "threadblocks_pb_count": 1,
+        "grid_threadblock_count": 1,
+        "decoded_threadblock_count": 1,
+        "decoded_record_count": 1,
+        "zero_record_threadblock_count": 0,
+        "stats_row_count": 1,
+        "expected_records": 1,
+        "admitted_records": 1,
+        "drop_rate": 0.0,
+        "trace_tree_bytes": 1,
+        "max_trace_bytes": cell["trace_budget"]["max_trace_bytes"],
+        "elapsed_seconds": 0.25,
+        "sol_phase_evidence": {},
+    }
+    trace_manifest_path = cell_dir / "trace_capture_manifest.json"
+    trace_manifest_path.write_bytes(
+        canonical_capture.immutable.pretty_json_bytes(trace_manifest)
+    )
+    sequence = [{
+        "launch_ordinal": 0,
+        "kernel_name": "_Z7kernelAv",
+        "launch_identity_sha256": trace_row["launch_identity_sha256"],
+    }]
+    sequence_sha256 = capture.canonical_sha256(sequence)
+    completeness = {
+        "schema_version": 1,
+        "launch_scope": "all_in_profiler_roi",
+        "contract": copy.deepcopy(LAUNCH_CONTRACT),
+        "status": "complete_dynamic_launch_set",
+        "launch_inventory_sha256": trace_manifest[
+            "dynamic_launch_inventory_sha256"
+        ],
+        "inventory_launch_count": 1,
+        "trace_launch_sequence_sha256": sequence_sha256,
+        "ncu_replay_sequence_sha256": sequence_sha256,
+        "trace_ncu_sequence_equal": True,
+        "trace_complete_launch_count": 1,
+        "ncu_label_complete_launch_count": 1,
+        "control_complete_launch_count": 1,
+        "launches": [{
+            "launch_ordinal": 0,
+            "launch_identity_sha256": trace_row[
+                "launch_identity_sha256"
+            ],
+            "kernel_name": "_Z7kernelAv",
+            "trace_complete": True,
+            "ncu_label_complete": True,
+            "ncu_report_sha256": report_sha256,
+            "ncu_label_typed_reason": None,
+            "control_complete": True,
+            "control_outcome": "passed",
+            "control_typed_reason": None,
+        }],
+    }
+    completeness["completeness_sha256"] = capture.canonical_sha256(
+        completeness
+    )
+    guard = _successful_capture_guard(pins)
+    cell_result = {
+        "schema_version": 1,
+        "identity": copy.deepcopy(cell["identity"]),
+        "authority_cell_sha256": cell["authority_cell_sha256"],
+        "disposition": "admitted",
+        "typed_reason": None,
+        "detail": None,
+        "binary_sha256": target_sha256,
+        "guards": {
+            "prepare": copy.deepcopy(guard),
+            "pre": copy.deepcopy(guard),
+            "between": [copy.deepcopy(guard), copy.deepcopy(guard)],
+            "post": copy.deepcopy(guard),
+        },
+        "capture_preflight_sha256": preflight_sha256,
+        "capture_started_at_utc": "2026-07-16T00:00:00.500000Z",
+        "admission_run_id": "d" * 64,
+        "supersedes": None,
+        "prior_preparation_failures": [],
+        "prior_capture_defect_attempts": [],
+        "definition_equivalence": copy.deepcopy(definition_attestation),
+        "definition_equivalence_attestation_sha256": hashlib.sha256(
+            definition_attestation_bytes
+        ).hexdigest(),
+        "label_unit_metric_count": len(unit_metrics),
+        "label_launch_count": 1,
+        "trace_threadblocks_pb_count": 1,
+        "trace_admitted_records": 1,
+        "control_decoded_instructions": 1,
+        "control_outcome": "direct_static_controls_emitted",
+        "max_wall_time_s": cell["trace_budget"]["max_wall_time_s"],
+        "trace_route_outcome": "admitted",
+        "trace_route_result_sha256": None,
+        "cell_elapsed_seconds_before_inventory": 0.5,
+        "launch_completeness": completeness,
+        "workload_row_binding": copy.deepcopy(binding),
+    }
+    cell_result_path = cell_dir / "cell_capture_result.json"
+    cell_result_path.write_bytes(
+        canonical_capture.immutable.pretty_json_bytes(cell_result)
+    )
+
+    kinds = {
+        report_path: "ncu_report",
+        run_manifest_path: "label_run_manifest",
+        products_by_role["launch_inventory"][0]: "ncu_launch_observation",
+        sidecar_path: "label_sidecar",
+        trace_manifest_path: "trace_manifest",
+        cell_result_path: "cell_result",
+        **{path: "sol_capture_evidence" for path in retained_paths},
+    }
+    artifacts = []
+    for path in sorted(
+        [
+            report_path,
+            run_manifest_path,
+            products_by_role["details_csv"][0],
+            products_by_role["details_stderr"][0],
+            products_by_role["launch_inventory"][0],
+            products_by_role["launch_metrics"][0],
+            receipt_path,
+            execution_path,
+            sidecar_path,
+            capture_manifest_path,
+            trace_manifest_path,
+            cell_result_path,
+            *retained_paths,
+        ],
+        key=lambda value: value.as_posix(),
+    ):
+        artifacts.append({
+            "relative_path": path.relative_to(final_dir).as_posix(),
+            "sha256": capture.sha256_file(path),
+            "size_bytes": path.stat().st_size,
+            "artifact_kind": kinds.get(path, "execution_log"),
+        })
+    return (
+        completeness,
+        artifacts,
+        definition_attestation,
+        hashlib.sha256(definition_attestation_bytes).hexdigest(),
+    )
+
+
+def _reseal_done_artifact(manifest, *, final_dir, artifact_path):
+    relative = artifact_path.relative_to(final_dir).as_posix()
+    artifact_row = next(
+        row for row in manifest["cell_results"][0]["artifacts"]
+        if row["relative_path"] == relative
+    )
+    artifact_row["sha256"] = capture.sha256_file(artifact_path)
+    artifact_row["size_bytes"] = artifact_path.stat().st_size
+    manifest["retained_artifact_bytes"] = sum(
+        row["size_bytes"]
+        for result in manifest["cell_results"]
+        for row in result["artifacts"]
+    )
+    manifest["publication_storage"] = capture._tree_usage(
+        final_dir / "cells"
+    )
+    unsigned = {
+        key: value for key, value in manifest.items()
+        if key != "done_seal_sha256"
+    }
+    manifest["done_seal_sha256"] = capture.canonical_sha256(unsigned)
+
+
+@pytest.mark.parametrize("reduced_proxy", [False, True])
+def test_done_v2_offline_verifies_after_campaign_relocation_and_source_removal(
+    tmp_path, monkeypatch, reduced_proxy,
+):
+    if reduced_proxy:
+        variants, rows, _provenance = matrix_fixture._reduced_fixture(
+            tmp_path / "fixture", monkeypatch, definition_proxy=True,
+        )
+    else:
+        variants, rows, *_ = matrix_fixture._native_fixture(
+            tmp_path / "fixture"
+        )
     variant = variants[0]
     matrix = matrix_fixture._matrix_document([variant], rows[:1])
     chunk = matrix["chunks"][0]
@@ -1609,7 +2527,18 @@ def test_done_v2_offline_verifies_after_campaign_relocation_and_source_removal(
         "live_coverage_inventory", "runnability", "shrink_provenance",
     ):
         path = source_root / f"{role}.json"
-        path.write_bytes(capture._canonical_json_bytes({"role": role}))
+        if role == "pins":
+            pins_document = json.loads(
+                canonical_capture.DEFAULT_PINS.read_text()
+            )
+            pins_document["toolchain"]["nvcc_release"] = "13.2"
+            path.write_bytes(
+                canonical_capture.immutable.pretty_json_bytes(pins_document)
+            )
+        elif role == "metric_registry":
+            path.write_bytes(capture.DEFAULT_REGISTRY.read_bytes())
+        else:
+            path.write_bytes(capture._canonical_json_bytes({"role": role}))
         sources[role] = path
     matrix_path = source_root / "supplemental-matrix.json"
     matrix_path.write_bytes(capture._canonical_json_bytes(matrix))
@@ -1619,6 +2548,27 @@ def test_done_v2_offline_verifies_after_campaign_relocation_and_source_removal(
         "supplemental_matrix": matrix_path,
         "canonical_matrix": canonical_copy,
     })
+    external_sources = {}
+    retained_inputs = None
+    if reduced_proxy:
+        retained_inputs = {}
+        logical = variant["invocation"]["logical_workload"]
+        reduced_root = tmp_path / "fixture" / "reduced-owner"
+        source_pairs = [
+            ("workload", logical["external_workload_source"]),
+        ]
+        if logical.get("external_definition_source") is not None:
+            source_pairs.append(
+                ("definition", logical["external_definition_source"])
+            )
+        for input_kind, source in source_pairs:
+            role = capture._reduced_source_role(
+                source, input_kind=input_kind
+            )
+            path = reduced_root / source["name"]
+            external_sources[role] = path
+            sources[role] = path
+            retained_inputs[input_kind] = path.read_bytes()
     campaign_identity = capture.supplemental_campaign_identity(
         matrix=matrix, matrix_path=matrix_path,
         canonical_matrix=canonical_matrix,
@@ -1631,6 +2581,7 @@ def test_done_v2_offline_verifies_after_campaign_relocation_and_source_removal(
         live_coverage_inventory_path=sources["live_coverage_inventory"],
         runnability_path=sources["runnability"],
         shrink_path=sources["shrink_provenance"],
+        external_sources=external_sources,
     )
     campaign_root = tmp_path / "campaign"
     capture.establish_supplemental_output_root(
@@ -1649,9 +2600,29 @@ def test_done_v2_offline_verifies_after_campaign_relocation_and_source_removal(
         capture._canonical_json_bytes({"attempt": "failed"})
     )
     failed_preflight.chmod(0o444)
+    pins = json.loads(sources["pins"].read_text())
+    retained_preflight = canonical_fixture._preflight(campaign_root)
+    retained_preflight["git_head"] = matrix["source_commit"]
+    retained_preflight["pins_sha256"] = capture.sha256_file(sources["pins"])
+    retained_preflight["capture_matrix_sha256"] = capture.sha256_file(
+        matrix_path
+    )
+    retained_preflight["arch"] = canonical_matrix["arch"]
+    retained_preflight["sku"] = canonical_matrix["sku"]
+    retained_preflight["checks"]["sol_environment"]["matrix_sha256"] = (
+        capture.sha256_file(matrix_path)
+    )
+    retained_processes = _successful_process_probe()
+    retained_processes["post_smoke"] = _successful_process_probe()
+    retained_clock = _successful_clock_probe(pins, settled=False)
+    retained_clock["post_smoke"] = _successful_clock_probe(
+        pins, settled=True,
+    )
+    retained_preflight["checks"]["capture_processes"] = retained_processes
+    retained_preflight["checks"]["clock_state"] = retained_clock
     preflight = preflight_parent / "preflight-success.json"
     preflight.write_bytes(
-        capture._canonical_json_bytes({"attempt": "success"})
+        canonical_capture.immutable.pretty_json_bytes(retained_preflight)
     )
     preflight.chmod(0o444)
 
@@ -1661,43 +2632,35 @@ def test_done_v2_offline_verifies_after_campaign_relocation_and_source_removal(
         chunk_id=chunk["chunk_id"], row=matrix["rows"][0],
     )
     safe_name = capture._safe_name(binding["row_key"])
-    artifact = final_dir / "cells" / safe_name / "payload.bin"
-    artifact.parent.mkdir(parents=True)
-    artifact.write_bytes(b"portable retained trace")
-    launch = {
-        "launch_ordinal": 0,
-        "launch_identity_sha256": "a" * 64,
-        "kernel_name": "fixture_kernel",
-        "trace_complete": True,
-        "ncu_label_complete": True,
-        "ncu_report_sha256": "b" * 64,
-        "ncu_label_typed_reason": None,
-        "control_complete": True,
-        "control_outcome": "passed",
-        "control_typed_reason": None,
-    }
-    sequence = [{
-        "launch_ordinal": 0, "kernel_name": "fixture_kernel",
-        "launch_identity_sha256": "a" * 64,
-    }]
-    sequence_sha = capture.canonical_sha256(sequence)
-    completeness = {
-        "schema_version": 1,
-        "launch_scope": "all_in_profiler_roi",
-        "contract": copy.deepcopy(LAUNCH_CONTRACT),
-        "status": "complete_dynamic_launch_set",
-        "launch_inventory_sha256": "c" * 64,
-        "inventory_launch_count": 1,
-        "trace_launch_sequence_sha256": sequence_sha,
-        "ncu_replay_sequence_sha256": sequence_sha,
-        "trace_ncu_sequence_equal": True,
-        "trace_complete_launch_count": 1,
-        "ncu_label_complete_launch_count": 1,
-        "control_complete_launch_count": 1,
-        "launches": [launch],
-    }
-    completeness["completeness_sha256"] = capture.canonical_sha256(
-        completeness
+    _selected_chunk, resolved = capture.select_workload_chunk(
+        matrix, canonical_matrix, chunk["chunk_id"]
+    )
+    registry = capture.metric_registry.parse_registry(
+        json.loads(sources["metric_registry"].read_text())
+    )
+    logical = variant["invocation"]["logical_workload"]
+    definition_bytes = (
+        retained_inputs["definition"]
+        if reduced_proxy and logical.get("external_definition_source") is not None
+        else (tmp_path / "fixture" / logical["definition_file"]).read_bytes()
+    )
+    (
+        completeness,
+        artifacts,
+        definition_attestation,
+        definition_attestation_sha256,
+    ) = _write_done_launch_set_fixture(
+        final_dir=final_dir,
+        binding=binding,
+        cell=resolved[0][2],
+        canonical_matrix=canonical_matrix,
+        pins=pins,
+        registry=registry,
+        preflight=retained_preflight,
+        preflight_sha256=capture.sha256_file(preflight),
+        source_commit=matrix["source_commit"],
+        retained_inputs=retained_inputs,
+        definition_bytes=definition_bytes,
     )
     result = {
         "roster_source": "sol_execbench",
@@ -1707,18 +2670,15 @@ def test_done_v2_offline_verifies_after_campaign_relocation_and_source_removal(
         ],
         "disposition": "admitted", "typed_reason": None, "detail": None,
         "capture_preflight_sha256": capture.sha256_file(preflight),
-        "capture_started_at_utc": "2026-07-16T00:00:00.000000Z",
+        "capture_started_at_utc": "2026-07-16T00:00:00.500000Z",
         "admission_run_id": "d" * 64, "supersedes": None,
         "prior_preparation_failures": [], "prior_capture_defect_attempts": [],
-        "definition_equivalence": None,
-        "definition_equivalence_attestation_sha256": None,
+        "definition_equivalence": copy.deepcopy(definition_attestation),
+        "definition_equivalence_attestation_sha256": (
+            definition_attestation_sha256
+        ),
         "launch_completeness": completeness,
-        "artifacts": [{
-            "relative_path": artifact.relative_to(final_dir).as_posix(),
-            "sha256": capture.sha256_file(artifact),
-            "size_bytes": artifact.stat().st_size,
-            "artifact_kind": "synthetic_trace",
-        }],
+        "artifacts": artifacts,
         "workload_row_binding": binding,
     }
     failed_attempt = {
@@ -1739,7 +2699,8 @@ def test_done_v2_offline_verifies_after_campaign_relocation_and_source_removal(
         "terminal_seal_sha256": "0" * 64,
         "capture_preflight_path": "capture_preflight.json",
         "capture_preflight_sha256": capture.sha256_file(preflight),
-        "file_count": 1, "logical_bytes": artifact.stat().st_size,
+        "file_count": len(artifacts),
+        "logical_bytes": sum(row["size_bytes"] for row in artifacts),
         "tree_inventory_sha256": "1" * 64,
     }
     attempt["attempt_summary_sha256"] = capture.canonical_sha256(attempt)
@@ -1796,6 +2757,238 @@ def test_done_v2_offline_verifies_after_campaign_relocation_and_source_removal(
         campaign_root=relocated, repo_root=REPO_ROOT,
         require_current_state=False,
     )
+
+    for case, filename in (
+        ("receipt_ncu_identity", "run_0_launch_set.details_export_receipt.json"),
+        ("execution_module_order", "run_0_launch_set.execution_identity.json"),
+        ("sidecar_provenance", "label_0_0.json"),
+        ("capture_crosslink", "label_launch_set_capture_manifest.json"),
+        ("trace_identity", "trace_capture_manifest.json"),
+        ("trace_launch_metadata", "trace_capture_manifest.json"),
+        ("trace_launch_cross_type", "trace_capture_manifest.json"),
+        ("trace_timestamp_fractional", "trace_capture_manifest.json"),
+        ("trace_timestamp_offset", "trace_capture_manifest.json"),
+        ("trace_timestamp_previous_second", "trace_capture_manifest.json"),
+        ("cell_result_disposition", "cell_capture_result.json"),
+        ("cell_result_guard", "cell_capture_result.json"),
+        ("cell_result_guard_clock", "cell_capture_result.json"),
+        (
+            "definition_attestation",
+            "definition_equivalence_attestation.json",
+        ),
+        ("prepare_manifest", "capture_prepare_manifest.json"),
+    ):
+        tampered = tmp_path / f"tampered-{case}"
+        shutil.copytree(relocated, tampered)
+        tampered_final = tampered / manifest["publication_relative_path"]
+        tampered_manifest = capture._load_object(
+            tampered_final / "DONE.json", role="tampered supplemental DONE"
+        )
+        artifact_row = next(
+            row
+            for row in tampered_manifest["cell_results"][0]["artifacts"]
+            if Path(row["relative_path"]).name == filename
+        )
+        artifact_path = tampered_final / artifact_row["relative_path"]
+        document = json.loads(artifact_path.read_text())
+        if case == "receipt_ncu_identity":
+            document["ncu_identity"]["executable_sha256"] = "6" * 64
+            document["receipt_seal_sha256"] = capture.canonical_sha256({
+                key: value for key, value in document.items()
+                if key != "receipt_seal_sha256"
+            })
+        elif case == "execution_module_order":
+            document["runtime_module_sha256s"][0] = "6" * 64
+            document["identity_sha256"] = capture.canonical_sha256({
+                key: value for key, value in document.items()
+                if key != "identity_sha256"
+            })
+        elif case == "sidecar_provenance":
+            document["binary_sha256"] = "6" * 64
+        elif case == "capture_crosslink":
+            document["ncu_execution_identity_sha256"] = "6" * 64
+        elif case == "trace_identity":
+            document["identity"]["slug"] = "problem_998_tampered"
+        elif case == "trace_launch_metadata":
+            document["launches"][0]["device_id"] = 1
+        elif case == "trace_launch_cross_type":
+            document["launches"][0]["device_id"] = False
+        elif case == "trace_timestamp_fractional":
+            document["captured_at_utc"] = "2026-07-16T00:00:00.100000Z"
+        elif case == "trace_timestamp_offset":
+            document["captured_at_utc"] = "2026-07-16T00:00:00+00:00"
+        elif case == "trace_timestamp_previous_second":
+            document["captured_at_utc"] = "2026-07-15T23:59:59Z"
+        elif case == "cell_result_disposition":
+            document["disposition"] = "failed"
+        elif case == "cell_result_guard":
+            document["guards"]["pre"] = {"status": "ok"}
+        elif case == "cell_result_guard_clock":
+            document["guards"]["pre"]["clock_state"]["samples"][0][
+                "sm_clock_mhz"
+            ] = 1350.0
+        elif case == "definition_attestation":
+            document["result"] = "tampered"
+        else:
+            document["source_definition_sha256"] = "9" * 64
+            unsigned_prepare = dict(document)
+            unsigned_prepare.pop("stage_definition_sha256")
+            document["stage_definition_sha256"] = (
+                canonical_capture._sol_manifest_sha256(unsigned_prepare)
+            )
+        artifact_path.write_bytes(
+            canonical_capture.immutable.pretty_json_bytes(document)
+        )
+        _reseal_done_artifact(
+            tampered_manifest,
+            final_dir=tampered_final,
+            artifact_path=artifact_path,
+        )
+        with pytest.raises(
+            capture.WorkloadCaptureRefusal,
+            match=(
+                "supplemental_done_(launch_set_|definition_equivalence_invalid)"
+            ),
+        ):
+            capture.verify_done_manifest(
+                tampered_manifest,
+                final_dir=tampered_final,
+                campaign_root=tampered,
+                repo_root=REPO_ROOT,
+                require_current_state=False,
+            )
+
+    misplaced = tmp_path / f"misplaced-producer-{reduced_proxy}"
+    shutil.copytree(relocated, misplaced)
+    misplaced_final = misplaced / manifest["publication_relative_path"]
+    misplaced_manifest = capture._load_object(
+        misplaced_final / "DONE.json", role="misplaced producer DONE"
+    )
+    trace_row = next(
+        row for row in misplaced_manifest["cell_results"][0]["artifacts"]
+        if row["artifact_kind"] == "trace_manifest"
+    )
+    old_trace_path = misplaced_final / trace_row["relative_path"]
+    new_trace_path = old_trace_path.with_name("renamed_trace_manifest.json")
+    old_trace_path.rename(new_trace_path)
+    trace_row["relative_path"] = new_trace_path.relative_to(
+        misplaced_final
+    ).as_posix()
+    _reseal_done_artifact(
+        misplaced_manifest,
+        final_dir=misplaced_final,
+        artifact_path=new_trace_path,
+    )
+    with pytest.raises(
+        capture.WorkloadCaptureRefusal,
+        match="supplemental_done_launch_set_trace_invalid",
+    ):
+        capture.verify_done_manifest(
+            misplaced_manifest,
+            final_dir=misplaced_final,
+            campaign_root=misplaced,
+            repo_root=REPO_ROOT,
+            require_current_state=False,
+        )
+
+    if reduced_proxy:
+        for case in (
+            "rebound_hash_suffix", "trace_label_disagreement",
+            "retained_payload",
+        ):
+            tampered = tmp_path / f"tampered-reduced-{case}"
+            shutil.copytree(relocated, tampered)
+            tampered_final = tampered / manifest["publication_relative_path"]
+            tampered_manifest = capture._load_object(
+                tampered_final / "DONE.json", role="tampered reduced DONE"
+            )
+            artifacts = tampered_manifest["cell_results"][0]["artifacts"]
+            if case == "rebound_hash_suffix":
+                artifact_row = next(
+                    row for row in artifacts
+                    if Path(row["relative_path"]).name
+                    == "label_launch_set_capture_manifest.json"
+                )
+                artifact_path = tampered_final / artifact_row["relative_path"]
+                document = json.loads(artifact_path.read_text())
+                separator = document["command"].index("--")
+                document["command"][separator + 4] = (
+                    "/dead/cells/" + safe_name
+                    + "/sol_requests/retained_workload/" + "6" * 64
+                    + ".jsonl"
+                )
+                artifact_path.write_bytes(
+                    canonical_capture.immutable.pretty_json_bytes(document)
+                )
+            elif case == "trace_label_disagreement":
+                artifact_row = next(
+                    row for row in artifacts
+                    if row["artifact_kind"] == "trace_manifest"
+                )
+                artifact_path = tampered_final / artifact_row["relative_path"]
+                document = json.loads(artifact_path.read_text())
+                document["command"][4] = (
+                    "/different/cells/" + safe_name
+                    + "/sol_requests/retained_workload/"
+                    + Path(document["command"][4]).name
+                )
+                artifact_path.write_bytes(
+                    canonical_capture.immutable.pretty_json_bytes(document)
+                )
+            else:
+                artifact_row = next(
+                    row for row in artifacts
+                    if Path(row["relative_path"]).parent.name
+                    == "retained_workload"
+                )
+                artifact_path = tampered_final / artifact_row["relative_path"]
+                artifact_path.chmod(0o644)
+                artifact_path.write_bytes(b"resealed but wrong retained bytes\n")
+            _reseal_done_artifact(
+                tampered_manifest,
+                final_dir=tampered_final,
+                artifact_path=artifact_path,
+            )
+            with pytest.raises(
+                capture.WorkloadCaptureRefusal,
+                match=(
+                    "supplemental_done_(launch_set_command|rebound_input)"
+                ),
+            ):
+                capture.verify_done_manifest(
+                    tampered_manifest,
+                    final_dir=tampered_final,
+                    campaign_root=tampered,
+                    repo_root=REPO_ROOT,
+                    require_current_state=False,
+                )
+
+    omitted = copy.deepcopy(relocated_manifest)
+    omitted["cell_results"][0]["artifacts"] = [
+        row for row in omitted["cell_results"][0]["artifacts"]
+        if "launch_set" not in Path(row["relative_path"]).name
+        and not Path(row["relative_path"]).name.startswith("label_0_")
+        and Path(row["relative_path"]).name
+        != "label_run_manifest_0_launch_set.json"
+    ]
+    omitted["retained_artifact_bytes"] = sum(
+        row["size_bytes"] for row in omitted["cell_results"][0]["artifacts"]
+    )
+    omitted["done_seal_sha256"] = capture.canonical_sha256({
+        key: value for key, value in omitted.items()
+        if key != "done_seal_sha256"
+    })
+    with pytest.raises(
+        capture.WorkloadCaptureRefusal,
+        match="supplemental_done_launch_set_namespace_invalid",
+    ):
+        capture.verify_done_manifest(
+            omitted,
+            final_dir=relocated_final,
+            campaign_root=relocated,
+            repo_root=REPO_ROOT,
+            require_current_state=False,
+        )
 
     bad = copy.deepcopy(relocated_manifest)
     bad["attempt_histories"][0]["attempts"][0][
