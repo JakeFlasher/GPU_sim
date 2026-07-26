@@ -84,6 +84,7 @@ def _build_v5_sidecar(repeat: int, unit_tagged: list[dict]) -> dict:
         "SIDECAR_WARMUP_COUNT": "0",
         "SIDECAR_HIT_RATE_L2": "0.905",
         "SIDECAR_HIT_RATE_L1TEX": "0.71",
+        "SIDECAR_EVIDENCE_CLASS": "campaign",
     }
     return sidecar_emitter.build_sidecar(env, unit_tagged_metrics_path=ut_path)
 
@@ -121,6 +122,7 @@ class V5RoundTripTest(unittest.TestCase):
         )
         self.assertEqual(sidecar["schema_version"], 5)
         self.assertIn("unit_tagged_metrics", sidecar)
+        self.assertEqual(sidecar["evidence_class"], "campaign")
         # Validates against the v5 sidecar schema.
         jsonschema.validate(instance=sidecar, schema=_SIDECAR_SCHEMA)
         # And passes the importer's full pipeline (denylist + schema + CI +
@@ -344,7 +346,12 @@ class SidecarUnitTaggedFailClosedTest(unittest.TestCase):
             "SIDECAR_HIT_RATE_L2": "0.9", "SIDECAR_HIT_RATE_L1TEX": "0.7",
         }
 
-    def test_missing_file_when_path_set_raises(self) -> None:
+    def test_unknown_evidence_class_refuses_emission(self) -> None:
+        env = self._env()
+        env["SIDECAR_EVIDENCE_CLASS"] = "untrusted"
+        with self.assertRaisesRegex(ValueError, "SIDECAR_EVIDENCE_CLASS"):
+            sidecar_emitter.build_sidecar(env)
+
         with self.assertRaises(ValueError):
             sidecar_emitter.build_sidecar(
                 self._env(), unit_tagged_metrics_path="/no/such/file.json"

@@ -52,8 +52,8 @@ import repeatability_aggregator as ra  # noqa: E402
 # exercise a specific schema clause. The v4 contract requires
 # evidence_kind, cache_hit_rate_l1tex_sector_pct, AND l1tex_label_status
 # on every cell; the live + mean_present variant is the natural default
-# because the aggregator only emits live records and computes the L1
-# mean when the per-repeat sidecars carry the L1 field.
+# for this canonical fixture. Production live emission additionally requires
+# every contributing sidecar to carry explicit evidence_class=campaign.
 _VALID_RECORD = {
     "schema_version": 5,
     "slug": "fake_slug",
@@ -240,6 +240,7 @@ class AggregatorEmissionValidatesTest(unittest.TestCase):
                         "aggregation": "kernel",
                     },
                     "cache_hit_rate_l1tex_sector": 0.555,
+                    "evidence_class": "campaign",
                     "confidence_interval_l1tex_sector": {
                         "lower": 0.555,
                         "upper": 0.555,
@@ -338,7 +339,22 @@ class V4SchemaContractTest(unittest.TestCase):
         prop = schema.get("properties", {}).get("evidence_kind", {})
         self.assertEqual(set(prop.get("enum", [])), {"live", "synthetic"})
 
-    def test_record_l1_status_enum_is_four_values(self) -> None:
+    def test_record_evidence_class_is_optional_but_closed(self) -> None:
+        schema = _record_schema(_load_schema())
+        prop = schema.get("properties", {}).get("evidence_class", {})
+        self.assertEqual(
+            set(prop.get("enum", [])),
+            {"campaign", "calibration", "diagnostic", "historical", "retired"},
+        )
+        jsonschema.validate(instance=_VALID_RECORD, schema=schema)
+        record = copy.deepcopy(_VALID_RECORD)
+        record["evidence_class"] = "untrusted"
+        with self.assertRaises(jsonschema.ValidationError):
+            jsonschema.validate(instance=record, schema=schema)
+        record["evidence_class"] = "diagnostic"
+        with self.assertRaises(jsonschema.ValidationError):
+            jsonschema.validate(instance=record, schema=schema)
+
         schema = _record_schema(_load_schema())
         prop = schema.get("properties", {}).get("l1tex_label_status", {})
         self.assertEqual(
@@ -581,10 +597,9 @@ class OnDiskAdmittedFileV4MigrationTest(unittest.TestCase):
 
 
 class AggregatorEmitsEvidenceKindLiveTest(unittest.TestCase):
-    """The aggregator runs only on actual NCU sweep output, so every
-    admitted-cell record it emits is live by construction. The
-    aggregator must emit ``evidence_kind: "live"`` on every record
-    AND bump the file-level schema_version to 4."""
+    """The aggregator emits live only for an all-campaign sidecar cohort;
+    missing, mixed, or noncampaign classes are emitted as synthetic. This
+    test exercises the explicit campaign path and the schema-version pin."""
 
     def test_aggregator_emitted_record_carries_evidence_kind_live(
         self,
@@ -621,6 +636,7 @@ class AggregatorEmitsEvidenceKindLiveTest(unittest.TestCase):
                         "aggregation": "kernel",
                     },
                     "cache_hit_rate_l1tex_sector": 0.555,
+                    "evidence_class": "campaign",
                     "confidence_interval_l1tex_sector": {
                         "lower": 0.555,
                         "upper": 0.555,
@@ -683,6 +699,7 @@ class AggregatorEmitsEvidenceKindLiveTest(unittest.TestCase):
                         "aggregation": "kernel",
                     },
                     "cache_hit_rate_l1tex_sector": 0.555,
+                    "evidence_class": "campaign",
                     "confidence_interval_l1tex_sector": {
                         "lower": 0.555,
                         "upper": 0.555,

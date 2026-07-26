@@ -48,7 +48,7 @@
         "evidence_kind": {
           "type": "string",
           "enum": ["live", "synthetic"],
-          "description": "Classifier for the cell's evidence provenance. \"live\" denotes records produced from a real NCU sweep (the only path the aggregator emits); \"synthetic\" denotes records authored by test fixtures and intended to exercise the wire format without standing in as evidence. The comparison runner's live-only floor counts only cells with evidence_kind == \"live\"; synthetic cells declare their nature explicitly so they cannot accidentally satisfy the smoke-test floor."
+          "description": "Classifier for the cell's evidence provenance. The aggregator emits evidence_kind=live only when every contributing sidecar explicitly carries evidence_class=campaign; missing, mixed, and noncampaign classes emit evidence_kind=synthetic. The comparison runner's live-only floor counts only cells with evidence_kind == \"live\"; synthetic cells declare their nature explicitly so they cannot accidentally satisfy the smoke-test floor. Legacy live records may omit the additive evidence_class field."
         },
         "slug": {
           "type": "string",
@@ -151,6 +151,11 @@
           "items": {"type": "string", "minLength": 1},
           "description": "Optional audit-annotation field listing the immediate-prior source_commit SHA across each refresh cycle (appended on every non-no-op call to tools/local_labels/refresh_admitted_label_source_commit.py). Complements source_commit_override_from (which pins the ORIGINAL pre-refresh origin and is set only once on the first-ever refresh) by recording the IMMEDIATE prior of each subsequent refresh. Purely additive; NOT in 'required'; legacy cells without any refresh history remain valid. Added after review identified that an existing override_from could mask the immediate-prior across multiple refreshes."
         },
+        "evidence_class": {
+          "type": "string",
+          "enum": ["campaign", "calibration", "diagnostic", "historical", "retired"],
+          "description": "Optional evidence provenance class copied only when every contributing sidecar carries the same explicit class. Missing, mixed, or noncampaign sidecar classes force evidence_kind=synthetic."
+        },
         "unit_tagged_metrics": {
           "type": "array",
           "description": "Optional v5 block of aggregated non-percentage label families (count / ns / cycles) and any non-flat-field pct family, one record per admitted target metric that survived its per-unit repeatability gate. ABSENT on cells that carry only the historical fraction hit-rate fields (backwards-compatible: the 4->5 migration stamps schema_version without adding this block). The percentage hit-rate path (cache_hit_rate_l2_sector_pct / cache_hit_rate_l1tex_sector_pct) is unchanged and never appears here. The item schema is inlined (not a $ref) so the admitted_cell sub-schema validates standalone.",
@@ -170,6 +175,22 @@
         }
       },
       "allOf": [
+        {
+          "description": "An explicit noncampaign evidence class can never claim live evidence. Legacy live records may omit evidence_class, but every producer that emits a noncampaign class is constrained to evidence_kind=synthetic.",
+          "if": {
+            "properties": {
+              "evidence_class": {
+                "enum": ["calibration", "diagnostic", "historical", "retired"]
+              }
+            },
+            "required": ["evidence_class"]
+          },
+          "then": {
+            "properties": {
+              "evidence_kind": {"const": "synthetic"}
+            }
+          }
+        },
         {
           "description": "Per-cell status-vs-value consistency arm A: l1tex_label_status=mean_present requires cache_hit_rate_l1tex_sector_pct to be a number (NOT null). A record declaring mean_present with a null L1 mean is a contract break.",
           "if": {

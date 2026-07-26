@@ -56,6 +56,7 @@ def _sidecar(
     device: str = "sm_86",
     slug: str = "gemm_hmma_bf16_sm80",
     shape_point: str = "row_0",
+    evidence_class: str | None = "campaign",
 ) -> dict:
     """Build a schema-valid sidecar dict.
 
@@ -92,6 +93,8 @@ def _sidecar(
             "aggregation": "kernel",
         },
     }
+    if evidence_class is not None:
+        sidecar["evidence_class"] = evidence_class
     if cache_hit_rate_l1tex_sector is not None:
         sidecar["cache_hit_rate_l1tex_sector"] = cache_hit_rate_l1tex_sector
         sidecar["confidence_interval_l1tex_sector"] = {
@@ -168,7 +171,38 @@ class CellAdmissionTest(unittest.TestCase):
             self.assertEqual(cell["n_repeats"], 5)
             self.assertLess(cell["stddev_l2_sector"], 0.03)
 
-    def test_n5_with_l1tex_within_threshold_admitted(self) -> None:
+    def test_missing_evidence_class_is_synthetic(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            sidecars = [
+                _sidecar(
+                    repeat_index=i,
+                    cache_hit_rate_l2_sector=0.40 + 0.005 * i,
+                    evidence_class=None,
+                )
+                for i in range(5)
+            ]
+            _write_cell(root, sidecars)
+            _, admitted, _, _ = ra.aggregate(root)
+            self.assertEqual(admitted["cells"][0]["evidence_kind"], "synthetic")
+            self.assertNotIn("evidence_class", admitted["cells"][0])
+
+    def test_mixed_evidence_classes_never_become_live(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            sidecars = [
+                _sidecar(
+                    repeat_index=i,
+                    cache_hit_rate_l2_sector=0.40 + 0.005 * i,
+                    evidence_class="campaign" if i < 4 else "diagnostic",
+                )
+                for i in range(5)
+            ]
+            _write_cell(root, sidecars)
+            _, admitted, _, _ = ra.aggregate(root)
+            self.assertEqual(admitted["cells"][0]["evidence_kind"], "synthetic")
+            self.assertNotIn("evidence_class", admitted["cells"][0])
+
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             sidecars = [
@@ -184,7 +218,38 @@ class CellAdmissionTest(unittest.TestCase):
             self.assertEqual(len(admitted["cells"]), 1)
             self.assertEqual(len(excluded["cells"]), 0)
 
-    def test_n4_excluded_with_label_repeatability_missing(self) -> None:
+    def test_all_noncampaign_class_is_synthetic_and_preserved(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            sidecars = [
+                _sidecar(
+                    repeat_index=i,
+                    cache_hit_rate_l2_sector=0.40 + 0.005 * i,
+                    evidence_class="calibration",
+                )
+                for i in range(5)
+            ]
+            _write_cell(root, sidecars)
+            _, admitted, _, _ = ra.aggregate(root)
+            self.assertEqual(admitted["cells"][0]["evidence_kind"], "synthetic")
+            self.assertEqual(admitted["cells"][0]["evidence_class"], "calibration")
+
+    def test_campaign_and_missing_class_never_become_live(self) -> None:
+        with tempfile.TemporaryDirectory() as td:
+            root = Path(td)
+            sidecars = [
+                _sidecar(
+                    repeat_index=i,
+                    cache_hit_rate_l2_sector=0.40 + 0.005 * i,
+                    evidence_class="campaign" if i < 4 else None,
+                )
+                for i in range(5)
+            ]
+            _write_cell(root, sidecars)
+            _, admitted, _, _ = ra.aggregate(root)
+            self.assertEqual(admitted["cells"][0]["evidence_kind"], "synthetic")
+            self.assertNotIn("evidence_class", admitted["cells"][0])
+
         with tempfile.TemporaryDirectory() as td:
             root = Path(td)
             sidecars = [

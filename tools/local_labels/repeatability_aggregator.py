@@ -520,6 +520,16 @@ def _validate_provenance(
     return None
 
 
+def _admitted_evidence_class(sidecars: list[dict]) -> str | None:
+    """Return one explicit class only when every sidecar agrees on it."""
+    classes = [sidecar.get("evidence_class") for sidecar in sidecars]
+    if not classes or any(not isinstance(value, str) or not value for value in classes):
+        return None
+    if len(set(classes)) != 1:
+        return None
+    return classes[0]
+
+
 def _admitted_cell_record(
     summary: "CellSummary",
     manifests: list[tuple[Path, dict]],
@@ -576,6 +586,7 @@ def _admitted_cell_record(
     else:
         cache_hit_rate_l1tex_pct = None
         l1tex_label_status = "mean_absent_label_missing"
+    evidence_class = _admitted_evidence_class(sidecars)
     record = {
         "schema_version": 5,
         "slug": summary.cell_key[1],
@@ -592,9 +603,10 @@ def _admitted_cell_record(
         "n_repeats": summary.n_repeats,
         "stddev_l2_sector": summary.stddev_l2_sector,
         "stddev_l1tex_sector": summary.stddev_l1tex_sector,
-        "evidence_kind": "live",
+        "evidence_kind": "live" if evidence_class == "campaign" else "synthetic",
     }
-    # Optional v5 block: only present when this cell carried non-percentage
+    if evidence_class is not None:
+        record["evidence_class"] = evidence_class
     # unit-tagged metrics that survived their per-unit repeatability gate.
     # Legacy L1/L2-only cells omit the field, keeping the record otherwise
     # byte-identical to its pre-v5 shape apart from schema_version.

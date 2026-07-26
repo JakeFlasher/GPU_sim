@@ -73,6 +73,18 @@ def build_sidecar(
     def _env_float(name: str) -> float:
         return float(_env_str(name))
 
+    evidence_class = env.get("SIDECAR_EVIDENCE_CLASS", "")
+    if evidence_class and evidence_class not in {
+        "campaign",
+        "calibration",
+        "diagnostic",
+        "historical",
+        "retired",
+    }:
+        raise ValueError(
+            "SIDECAR_EVIDENCE_CLASS must be campaign|calibration|diagnostic|historical|retired"
+        )
+
     hit_rate_l2 = _env_float("SIDECAR_HIT_RATE_L2")
     hit_rate_l1tex = _env_float("SIDECAR_HIT_RATE_L1TEX")
     confidence_level = _env_float("SIDECAR_CONFIDENCE_LEVEL")
@@ -113,7 +125,9 @@ def build_sidecar(
         },
     }
 
-    # v2.1 protocol (CLAUDE.md Rule 2, 2026-07-06): optional
+    if evidence_class:
+        sidecar["evidence_class"] = evidence_class
+
     # measurement-protocol provenance — the explicit NCU clock-control /
     # cache-control / replay-mode plus the observed host clock, persistence,
     # power and temperature state at emission time (one POST-capture sample;

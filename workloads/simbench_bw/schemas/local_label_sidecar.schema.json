@@ -293,6 +293,11 @@
    "pattern": "^register_cap_[0-9]+$",
    "description": "Optional build-variant identity component (e.g. register_cap_64). Purely additive: NOT in 'required'; base-cell sidecars omit it. Paired with register_cap; the aggregator keys cells by (device, slug, shape_point, variant_id) when present. No schema_version bump (purely additive per the CLAUDE.md wire-extension policy)."
   },
+  "evidence_class": {
+   "type": "string",
+   "enum": ["campaign", "calibration", "diagnostic", "historical", "retired"],
+   "description": "Optional evidence provenance class. Canonical label_driver captures emit campaign; legacy or noncampaign producers must omit or classify this field explicitly so downstream admission cannot infer campaign authority from a sidecar alone."
+  },
   "unit_tagged_metrics": {
    "type": "array",
    "description": "Optional v5 block carrying non-percentage label families (count / ns / cycles) and any pct family not on the historical flat-field path. Each record pins its own unit tag; the importer cross-checks every record's (ncu_metric, unit) against the committed metric registry so a count/ns/cycles value can never travel the percentage path. ABSENT on legacy hit-rate-only cells (backwards-compatible); the historical fraction fields cache_hit_rate_l2_sector / cache_hit_rate_l1tex_sector stay on the flat path.",
