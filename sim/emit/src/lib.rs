@@ -221,6 +221,11 @@ pub enum EmitError {
         num: u64,
         den: u64,
     },
+    #[error("metric {key}: {operation} overflows u64")]
+    CounterOverflow {
+        key: &'static str,
+        operation: &'static str,
+    },
     #[error("counter invariant broken for {key}: {detail}")]
     CounterInvariant {
         key: &'static str,
@@ -234,6 +239,17 @@ pub enum EmitError {
         expected: ArchId,
         got: ArchId,
     },
+}
+
+fn checked_sum(
+    key: &'static str,
+    operation: &'static str,
+    terms: &[u64],
+) -> Result<u64, EmitError> {
+    terms.iter().try_fold(0u64, |sum, &term| {
+        sum.checked_add(term)
+            .ok_or(EmitError::CounterOverflow { key, operation })
+    })
 }
 
 /// READ-class bypass sectors = all bypass sectors minus the ATOM write-class
@@ -267,7 +283,12 @@ fn emit_gmem_ld_sectors(snap: &CounterSnapshot) -> Result<EmitOutcome, EmitError
             needs: MemUnit::L1Tex,
         }));
     };
-    let sectors = l1.hits + l1.misses + bypass_read_sectors(key, l1)?;
+    let bypass = bypass_read_sectors(key, l1)?;
+    let sectors = checked_sum(
+        key,
+        "global-load sector total",
+        &[l1.hits, l1.misses, bypass],
+    )?;
     Ok(EmitOutcome::Predicted(MetricValue::Exact(sectors)))
 }
 
@@ -293,7 +314,12 @@ fn emit_l1tex_read_hit_rate(snap: &CounterSnapshot) -> Result<EmitOutcome, EmitE
         }));
     };
     let num = l1.hits;
-    let den = l1.hits + l1.misses + bypass_read_sectors(key, l1)?;
+    let bypass = bypass_read_sectors(key, l1)?;
+    let den = checked_sum(
+        key,
+        "global-load hit-rate denominator",
+        &[l1.hits, l1.misses, bypass],
+    )?;
     Ok(EmitOutcome::Predicted(MetricValue::fraction(
         key, num, den,
     )?))
@@ -313,8 +339,22 @@ fn emit_l1tex_unified_hit_rate(snap: &CounterSnapshot) -> Result<EmitOutcome, Em
             needs: MemUnit::L1Tex,
         }));
     };
-    let num = l1.hits + l1.store_hits;
-    let den = l1.hits + l1.misses + l1.store_sectors + l1.bypass_sectors + l1.untagged_sectors;
+    let num = checked_sum(
+        key,
+        "unified L1TEX hit-rate numerator",
+        &[l1.hits, l1.store_hits],
+    )?;
+    let den = checked_sum(
+        key,
+        "unified L1TEX hit-rate denominator",
+        &[
+            l1.hits,
+            l1.misses,
+            l1.store_sectors,
+            l1.bypass_sectors,
+            l1.untagged_sectors,
+        ],
+    )?;
     Ok(EmitOutcome::Predicted(MetricValue::fraction(
         key, num, den,
     )?))
@@ -330,10 +370,13 @@ fn emit_l2_hit_rate(snap: &CounterSnapshot) -> Result<EmitOutcome, EmitError> {
             needs: MemUnit::Lts,
         }));
     };
-    Ok(EmitOutcome::Predicted(MetricValue::fraction(
+    let den = checked_sum(
         key,
-        l2.hits,
-        l2.total(),
+        "unified L2 hit-rate denominator",
+        &[l2.hits, l2.misses],
+    )?;
+    Ok(EmitOutcome::Predicted(MetricValue::fraction(
+        key, l2.hits, den,
     )?))
 }
 
@@ -653,6 +696,78 @@ mod tests {
             Err(EmitError::CounterInvariant {
                 key: "traffic_gmem_ld_sectors",
                 detail: "bypass_atom_sectors exceeds bypass_sectors (subset invariant broken)",
+            })
+        );
+    }
+
+    #[test]
+    fn global_load_sector_total_overflow_is_typed() {
+        let mut l1 = L1Counters::for_arch(ArchId::Sm86);
+        l1.misses = u64::MAX;
+        l1.bypass_sectors = 2;
+        assert_eq!(
+            emit(1, Some(l1), None, None),
+            Err(EmitError::CounterOverflow {
+                key: "traffic_gmem_ld_sectors",
+                operation: "global-load sector total",
+            })
+        );
+    }
+
+    #[test]
+    fn global_load_hit_rate_denominator_overflow_is_typed() {
+        let mut l1 = L1Counters::for_arch(ArchId::Sm86);
+        l1.misses = u64::MAX;
+        l1.bypass_sectors = 2;
+        let result = replay(1, Some(l1), None, None);
+        assert_eq!(
+            emit_l1tex_read_hit_rate(&CounterSnapshot::from_replay(&result)),
+            Err(EmitError::CounterOverflow {
+                key: "cache_hit_rate_l1tex_read_sector",
+                operation: "global-load hit-rate denominator",
+            })
+        );
+    }
+
+    #[test]
+    fn unified_l1tex_hit_numerator_overflow_is_typed() {
+        let mut l1 = L1Counters::for_arch(ArchId::Sm86);
+        l1.hits = u64::MAX;
+        l1.store_hits = 1;
+        l1.store_sectors = 1;
+        assert_eq!(
+            emit(1, Some(l1), None, None),
+            Err(EmitError::CounterOverflow {
+                key: "cache_hit_rate_l1tex_sector",
+                operation: "unified L1TEX hit-rate numerator",
+            })
+        );
+    }
+
+    #[test]
+    fn unified_l1tex_hit_denominator_overflow_is_typed() {
+        let mut l1 = L1Counters::for_arch(ArchId::Sm86);
+        l1.misses = u64::MAX;
+        l1.store_sectors = 1;
+        assert_eq!(
+            emit(1, Some(l1), None, None),
+            Err(EmitError::CounterOverflow {
+                key: "cache_hit_rate_l1tex_sector",
+                operation: "unified L1TEX hit-rate denominator",
+            })
+        );
+    }
+
+    #[test]
+    fn unified_l2_hit_denominator_overflow_is_typed() {
+        let mut l2 = L2Counters::for_arch(ArchId::Sm86);
+        l2.hits = u64::MAX;
+        l2.misses = 1;
+        assert_eq!(
+            emit(1, None, Some(l2), None),
+            Err(EmitError::CounterOverflow {
+                key: "cache_hit_rate_l2_sector",
+                operation: "unified L2 hit-rate denominator",
             })
         );
     }
