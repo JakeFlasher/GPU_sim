@@ -90,6 +90,13 @@
         },
         "authority_candidate": {"const": false},
         "can_collect": {"const": false},
+        "quarantine_id": {
+          "enum": ["S001", "S002", "S003", "S004"]
+        },
+        "sha256": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{64}$"
+        },
         "reason": {
           "type": "string",
           "minLength": 1,
@@ -122,9 +129,92 @@
             }
           },
           "then": {
+            "required": ["quarantine_id", "sha256"],
             "properties": {
               "category": {"const": "documentation"},
               "lifecycle": {"const": "quarantined"}
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "path": {
+                "const": "plans/sm86_calibration_microbench_design_fable5_prompt.md"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "quarantine_id": {"const": "S001"},
+              "sha256": {"const": "8bc769b0b15f5a60fe8b12d52bf91c3aca8282999057131ff1324df257b13d93"}
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "path": {
+                "const": "plans/sm86_calibration_microbench_design_fable5_answer.md"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "quarantine_id": {"const": "S002"},
+              "sha256": {"const": "f2fe00cfe045c251f97d40c83dbb08ace731bfdec230a44907c0e5112620f20c"}
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "path": {
+                "const": "plans/sm86_cp_async_timing_probe_fable5_prompt.md"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "quarantine_id": {"const": "S003"},
+              "sha256": {"const": "1704f69bd85abb9c2042ff20b4f6173ceda8476045e6bca08cf52d75fe282402"}
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "path": {
+                "const": "plans/sm86_cp_async_timing_probe_fable5_answer.md"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "quarantine_id": {"const": "S004"},
+              "sha256": {"const": "a90eaec5b7c7c4d78c662c1273b68e7f0b6b0087cce81ae60f514095288d115f"}
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "path": {
+                "not": {
+                  "enum": [
+                    "plans/sm86_calibration_microbench_design_fable5_prompt.md",
+                    "plans/sm86_calibration_microbench_design_fable5_answer.md",
+                    "plans/sm86_cp_async_timing_probe_fable5_prompt.md",
+                    "plans/sm86_cp_async_timing_probe_fable5_answer.md"
+                  ]
+                }
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "quarantine_id": false,
+              "sha256": false
             }
           }
         },

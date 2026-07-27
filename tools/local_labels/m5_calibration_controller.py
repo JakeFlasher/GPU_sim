@@ -23,6 +23,7 @@ import shutil
 import stat
 import subprocess
 import sys
+import types
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping
@@ -66,9 +67,9 @@ SCHEMA_SHA256_BY_VERSION = {
         "M5_DONE": "96d25e640abe0278a6aee901bf55548f68bfd7f4ad85137729dff39f1d1ea029",
     },
     2: {
-        "M5_RUN": "1735eec416b30e5a9695c5e45cd1950e63b6f83c7a2af93a9d224cb8ed521a9b",
-        "M5_RESULT": "a8f61180337200530fc72d71be39e5366d7586c1224dfb91b95168d9fa7b84f5",
-        "M5_DONE": "cbd001ba25e9b269713b37e5cfa637d3398962d9b93dad3e9fc12a4ac05c235b",
+        "M5_RUN": "2890cc24ff7a30a63ce0ae84d0a893e1a14817272bfe1dcd58af7dd1306f710d",
+        "M5_RESULT": "a644b16b72c61aec643066e7a1b306a76f6a234a4e31be8d32847fc81fe23864",
+        "M5_DONE": "cdf4735e5bbf14ce3f4e87932bb937074d6becb4a72ccaa30a105f2acb7edb92",
     },
 }
 # Compatibility aliases are deliberately v1-only and are not used by active
@@ -86,12 +87,38 @@ QUANTITY_AUTHORITY_ID_V1 = "m5-quantity-authority"
 QUANTITY_AUTHORITY_ID_V2 = "m5-quantity-authority-v2"
 QUANTITY_AUTHORITY_MEDIA_TYPE_V2 = "application/vnd.m5.quantity-authority+json"
 AUTHORITY_ANCESTRY_ID_V2 = "m5-quantity-authority-ancestry"
+AUTHORITY_ANCESTRY_AUDIT_ID_V1 = "m5-quantity-authority-ancestry-audit"
+AUTHORITY_ANCESTRY_AUDIT_MEDIA_TYPE_V1 = (
+    "application/vnd.m5.authority-ancestry-audit+json"
+)
 AUTHORITY_REVIEW_ID_V2 = "m5-quantity-authority-review"
 AUTHORITY_OPERATOR_APPROVAL_ID_V2 = "m5-quantity-authority-operator-approval"
 _AUTHORITY_SIGNATURE_DOMAIN = b"M5_QUANTITY_AUTHORITY_V2\0"
 AUTHORITY_SCHEMA_PATH_V2 = SCHEMA_ROOT / "m5_quantity_authority.v2.schema.json"
 AUTHORITY_SCHEMA_ID_V2 = "https://gpu-simulator.invalid/schemas/m5_quantity_authority.v2.schema.json"
-AUTHORITY_SCHEMA_SHA256_V2 = "c374515ae4a04a2cfdb67205647d8a5b77a209c857ac5381df3068bfcce36f29"
+AUTHORITY_SCHEMA_SHA256_V2 = "ffb1a24dc2ac8bb69acf5a4d80a13b23d1f9fa1b35335638ba0e8a0bc99191e3"
+AUTHORITY_ANCESTRY_AUDIT_TOOL_PATH_V1 = (
+    REPO_ROOT / "tools" / "local_labels" / "m5_authority_ancestry_audit.py"
+)
+AUTHORITY_ANCESTRY_AUDIT_SCHEMA_PATH_V1 = (
+    SCHEMA_ROOT / "m5_authority_ancestry_audit.v1.schema.json"
+)
+AUTHORITY_ANCESTRY_AUDIT_SCHEMA_ID_V1 = (
+    "https://gpu-simulator.invalid/schemas/m5_authority_ancestry_audit.v1.schema.json"
+)
+AUTHORITY_ANCESTRY_AUDIT_TOOL_SHA256_V1 = "99a0cdf1ea1cc777d64b87538d15a6289a64d001341b0af64d5ff5ad3406963e"
+AUTHORITY_ANCESTRY_AUDIT_SCHEMA_SHA256_V1 = "8069cabedccdce0faa55b29859ce9db4897e4b52b13a9dbfaa700643bf302fb9"
+M5_SOURCE_REGISTRY_PATH_V1 = (
+    REPO_ROOT / "tools" / "local_labels" / "m5_source_surface_registry.json"
+)
+M5_SOURCE_REGISTRY_SCHEMA_PATH_V1 = (
+    SCHEMA_ROOT / "m5_source_surface_registry.v1.schema.json"
+)
+M5_SOURCE_REGISTRY_SCHEMA_ID_V1 = (
+    "https://gpu-simulator.invalid/schemas/m5_source_surface_registry.v1.schema.json"
+)
+M5_SOURCE_REGISTRY_SHA256_V1 = "3e69f9cd7b94c68dfbcbef6c18cee6181e45558dab7e9ae3b71fc241f6357330"
+M5_SOURCE_REGISTRY_SCHEMA_SHA256_V1 = "8400dde1a6e0a494f4f4530a5d92be871a93b291af2644a676188b74fd794b6c"
 TRUST_ANCHOR_REGISTRY_PATH_V1 = REPO_ROOT / "tools" / "local_labels" / "m5_trust_anchors.json"
 TRUST_ANCHOR_REGISTRY_MEDIA_TYPE_V1 = (
     "application/vnd.m5.trust-anchor-registry+json"
@@ -103,9 +130,7 @@ TRUST_ANCHOR_SCHEMA_PATH_V1 = SCHEMA_ROOT / "m5_trust_anchor_registry.v1.schema.
 TRUST_ANCHOR_SCHEMA_ID_V1 = (
     "https://gpu-simulator.invalid/schemas/m5_trust_anchor_registry.v1.schema.json"
 )
-TRUST_ANCHOR_SCHEMA_SHA256_V1 = (
-    "907abf78747d44b0c457027c5a23555ef805d0c2b9d624df67bfdce124711006"
-)
+TRUST_ANCHOR_SCHEMA_SHA256_V1 = "064fced4eac9b314ad417b63cd0edebb5aa4e5a9672288b5cccf9d7753c3dcf1"
 CAMPAIGN_PROTOCOL_PATH = REPO_ROOT / "tools" / "local_labels" / "campaign_protocol_pins.json"
 CANONICAL_MATRIX_PATH = (
     REPO_ROOT
@@ -156,28 +181,11 @@ CONTROL_PARSER_CONTRACT = {
 }
 EXECUTION_ORDER = ("b", "a", "d", "f", "c", "e")
 SCIENTIFIC_RANK = ("b", "f", "a", "d", "c", "e")
-F_GROUPS = frozenset({"f1", "f2", "f3", "f4", "f5"})
 OUTCOME_KINDS = frozenset(
     {"MEASURED", "RANGE", "CENSORED", "MIXTURE", "UNRESOLVED_STRUCTURE", "SURFACE_GAP"}
 )
 TYPED_GAPS = OUTCOME_KINDS - {"MEASURED"}
 EVIDENCE_ROLES = ("curve", "control", "confound", "composition")
-METHOD_CLASSES = frozenset(
-    {
-        "CLOCK64_DEPENDENCY_CHAIN",
-        "CLOCK64_ELAPSED_WINDOW",
-        "CLOCK64_HIT_MISS_CLASSIFIER",
-        "THROUGHPUT_PLATEAU",
-        "THROUGHPUT_KNEE",
-        "RTT_CONTRAST",
-        "LITTLE_LAW_TRIANGULATION",
-        "PERSISTENCE_DELTA_CONTRAST",
-        "COMPOSITION_IDENTITY",
-        "BURST_SLOPE_BREAK",
-        "WAIT_BAR_CONTRAST",
-        "HYBRID_CONTENTION_CONTRAST",
-    }
-)
 M5_COLLECT_DISABLED = "M5_COLLECT_DISABLED"
 _SAFE_ID = re.compile(r"^[a-z0-9][a-z0-9_.-]{0,127}$")
 _HEX40 = re.compile(r"^[0-9a-f]{40}$")
@@ -194,6 +202,8 @@ _REQUIRED_IDENTITY_KINDS = frozenset(
         "PROTOCOL",
         "AUTHORITY",
         "SOURCE_STATUS",
+        "DESIGN_INPUT",
+        "AUDIT",
     }
 )
 _BINDING_ORDER = {
@@ -232,6 +242,10 @@ _AUTO_IDENTITIES = {
     "m5-canonical-roster",
     QUANTITY_AUTHORITY_ID_V1,
     "m5-quantity-authority-schema",
+    "m5-ancestry-audit-tool",
+    "m5-ancestry-audit-schema",
+    "m5-source-surface-registry",
+    "m5-source-surface-registry-schema",
     "m5-control-emitter",
     "m5-control-extractor",
     "m5-control-join-tool",
@@ -540,6 +554,112 @@ def _validate_v2_quantity_authority_schema(
         _fail(f"M5 v2 quantity authority schema violation at {location}: {error.message}")
 
 
+def _validate_ancestry_audit_schema(
+    audit: Mapping[str, Any], schema_payload: bytes
+) -> None:
+    if immutable.sha256_bytes(schema_payload) != AUTHORITY_ANCESTRY_AUDIT_SCHEMA_SHA256_V1:
+        _fail("M5 ancestry-audit schema digest is not controller-pinned")
+    schema = _schema_from_bytes(
+        schema_payload, AUTHORITY_ANCESTRY_AUDIT_SCHEMA_PATH_V1.name
+    )
+    if schema.get("$id") != AUTHORITY_ANCESTRY_AUDIT_SCHEMA_ID_V1:
+        _fail("M5 ancestry-audit schema identifier is not controller-pinned")
+    errors = sorted(
+        StrictDraft202012Validator(schema).iter_errors(audit),
+        key=lambda error: tuple(str(part) for part in error.absolute_path),
+    )
+    if errors:
+        error = errors[0]
+        location = "/".join(str(part) for part in error.absolute_path) or "<root>"
+        _fail(f"M5 ancestry-audit schema violation at {location}: {error.message}")
+
+
+def _retained_ancestry_audit_module(payload: bytes) -> types.ModuleType:
+    try:
+        source = payload.decode("utf-8", errors="strict")
+        code = compile(
+            source,
+            str(AUTHORITY_ANCESTRY_AUDIT_TOOL_PATH_V1),
+            "exec",
+            dont_inherit=True,
+            optimize=0,
+        )
+        module = types.ModuleType("_m5_retained_authority_ancestry_audit")
+        module.__file__ = str(AUTHORITY_ANCESTRY_AUDIT_TOOL_PATH_V1)
+        exec(code, module.__dict__)
+        identifiers = (
+            getattr(module, "AUDIT_ID", None),
+            getattr(module, "AUDIT_MEDIA_TYPE", None),
+            getattr(module, "AUDIT_POLICY_VERSION", None),
+            getattr(module, "SOURCE_REGISTRY_SCHEMA_ID", None),
+        )
+        if identifiers != (
+            AUTHORITY_ANCESTRY_AUDIT_ID_V1,
+            AUTHORITY_ANCESTRY_AUDIT_MEDIA_TYPE_V1,
+            1,
+            M5_SOURCE_REGISTRY_SCHEMA_ID_V1,
+        ):
+            _fail("retained M5 ancestry-audit tool contract identifiers changed")
+        bind_execution = getattr(module, "bind_executing_tool_sha256", None)
+        if not callable(bind_execution) or not callable(
+            getattr(module, "build_audit", None)
+        ):
+            _fail("retained M5 ancestry-audit tool entry point is absent")
+        bind_execution(immutable.sha256_bytes(payload))
+    except M5ContractError:
+        raise
+    except Exception as exc:
+        _fail(f"retained M5 ancestry-audit tool cannot execute: {exc}")
+    return module
+
+
+def _build_ancestry_audit(
+    *,
+    authority: Mapping[str, Any],
+    authority_raw: bytes,
+    design_inputs: Mapping[str, tuple[Mapping[str, Any], bytes]],
+    source_registry_payload: bytes,
+    source_registry_schema_payload: bytes,
+    audit_tool_payload: bytes,
+    schema_payload: bytes,
+) -> tuple[dict[str, Any], bytes]:
+    try:
+        executing_tool_payload = immutable.read_regular(
+            AUTHORITY_ANCESTRY_AUDIT_TOOL_PATH_V1
+        )
+    except immutable.ImmutableArtifactError as exc:
+        _fail(str(exc))
+    if (
+        immutable.sha256_bytes(executing_tool_payload)
+        != AUTHORITY_ANCESTRY_AUDIT_TOOL_SHA256_V1
+        or audit_tool_payload != executing_tool_payload
+    ):
+        _fail("M5 ancestry-audit executing tool differs from retained pinned bytes")
+    if (
+        immutable.sha256_bytes(source_registry_schema_payload)
+        != M5_SOURCE_REGISTRY_SCHEMA_SHA256_V1
+    ):
+        _fail("M5 source-surface registry schema digest is not controller-pinned")
+    audit_implementation = _retained_ancestry_audit_module(audit_tool_payload)
+    try:
+        audit = audit_implementation.build_audit(
+            authority=authority,
+            authority_raw=authority_raw,
+            design_inputs=design_inputs,
+            source_registry_payload=source_registry_payload,
+            source_registry_schema_payload=source_registry_schema_payload,
+            audit_schema_payload=schema_payload,
+            legacy_authority=_quantity_authority_model(),
+        )
+    except audit_implementation.AncestryAuditError as exc:
+        _fail(str(exc))
+    except Exception as exc:
+        _fail(f"retained M5 ancestry-audit execution failed: {exc}")
+    _validate_ancestry_audit_schema(audit, schema_payload)
+    payload = immutable.pretty_json_bytes(audit)
+    return audit, payload
+
+
 def _trust_anchor_registry(
     registry_payload: bytes | None = None,
     schema_payload: bytes | None = None,
@@ -606,6 +726,9 @@ def _require_admitted_v2_authority(
     public_key: bytes,
     authority_reference: Mapping[str, Any],
     ancestry_reference: Mapping[str, Any],
+    ancestry_audit_reference: Mapping[str, Any],
+    audit_policy_sha256: str,
+    design_input_references: Mapping[str, Mapping[str, Any]],
     review_identity_ids: list[str],
     review_references: list[Mapping[str, Any]],
     operator_reference: Mapping[str, Any],
@@ -623,6 +746,18 @@ def _require_admitted_v2_authority(
         "authority_sha256": authority_reference["sha256"],
         "ancestry_identity_id": AUTHORITY_ANCESTRY_ID_V2,
         "ancestry_sha256": ancestry_reference["sha256"],
+        "ancestry_audit_identity_id": AUTHORITY_ANCESTRY_AUDIT_ID_V1,
+        "ancestry_audit_sha256": ancestry_audit_reference["sha256"],
+        "audit_policy_sha256": audit_policy_sha256,
+        "design_inputs": [
+            {
+                "identity_id": identity_id,
+                "sha256": reference["sha256"],
+                "size_bytes": reference["size_bytes"],
+                "media_type": reference["media_type"],
+            }
+            for identity_id, reference in sorted(design_input_references.items())
+        ],
         "review_witnesses": [
             {
                 "identity_id": identity_id,
@@ -649,6 +784,66 @@ def _require_admitted_v2_authority(
             "witness binding is not uniquely admitted"
         )
     return matches[0]
+
+
+def _authority_design_inputs(
+    authority: Mapping[str, Any],
+    identities: Mapping[str, Mapping[str, Any]],
+    artifact_loader: Callable[[Mapping[str, Any]], bytes],
+) -> dict[str, tuple[Mapping[str, Any], bytes]]:
+    provenance = _exact_object(
+        authority.get("provenance"), "M5 v2 authority provenance"
+    )
+    bindings = _exact_array(
+        provenance.get("design_input_bindings"),
+        "M5 v2 authority design-input bindings",
+    )
+    design_inputs: dict[str, tuple[Mapping[str, Any], bytes]] = {}
+    retained_byte_bindings: set[tuple[str, int]] = set()
+    retained_artifact_ids: set[str] = set()
+    retained_paths: set[str] = set()
+    for index, raw_binding in enumerate(bindings):
+        binding = _exact_object(raw_binding, f"design_input_bindings[{index}]")
+        identity_id = _safe_id(
+            binding.get("identity_id"), f"design_input_bindings[{index}].identity_id"
+        )
+        identity = identities.get(identity_id)
+        if identity is None or identity.get("identity_kind") != "DESIGN_INPUT":
+            _fail(
+                "M5_RULE1_PREREGISTRATION_ANCESTRY: signed design input is "
+                f"absent or wrong-kind: {identity_id}"
+            )
+        if identity_id in design_inputs:
+            _fail("M5_RULE1_PREREGISTRATION_ANCESTRY: duplicate design input")
+        artifact = identity["artifact"]
+        byte_binding = (artifact["sha256"], artifact["size_bytes"])
+        if (
+            byte_binding in retained_byte_bindings
+            or artifact["artifact_id"] in retained_artifact_ids
+            or artifact["relative_path"] in retained_paths
+        ):
+            _fail(
+                "M5_RULE1_PREREGISTRATION_ANCESTRY: distinct design-input "
+                "identities alias retained bytes or artifact references"
+            )
+        retained_byte_bindings.add(byte_binding)
+        retained_artifact_ids.add(artifact["artifact_id"])
+        retained_paths.add(artifact["relative_path"])
+        design_inputs[identity_id] = (
+            artifact,
+            artifact_loader(artifact),
+        )
+    retained_ids = {
+        identity_id
+        for identity_id, identity in identities.items()
+        if identity.get("identity_kind") == "DESIGN_INPUT"
+    }
+    if retained_ids != set(design_inputs):
+        _fail(
+            "M5_RULE1_PREREGISTRATION_ANCESTRY: retained and signed design-input "
+            "sets differ"
+        )
+    return design_inputs
 
 
 def _validate_v2_quantity_authority(
@@ -751,6 +946,8 @@ def _validate_v2_quantity_authority(
             "operator_approval_identity_id",
             "trust_anchor_identity_id",
             "target_free",
+            "design_input_bindings",
+            "scientific_field_sources",
         ),
         "M5 v2 authority provenance",
     )
@@ -1821,6 +2018,10 @@ def _auto_identities(
         ("m5-canonical-matrix", "ROSTER", "v1", CANONICAL_MATRIX_PATH, "application/json", PINNED_AUTHORITY_SHA256["canonical_matrix"]),
         ("m5-canonical-roster", "ROSTER", "v1", CANONICAL_ROSTER_PATH, "application/json", PINNED_AUTHORITY_SHA256["canonical_roster"]),
         ("m5-quantity-authority-schema", "SCHEMA", "v2", AUTHORITY_SCHEMA_PATH_V2, "application/schema+json", AUTHORITY_SCHEMA_SHA256_V2),
+        ("m5-ancestry-audit-tool", "TOOL", "v1", AUTHORITY_ANCESTRY_AUDIT_TOOL_PATH_V1, "text/x-python", AUTHORITY_ANCESTRY_AUDIT_TOOL_SHA256_V1),
+        ("m5-ancestry-audit-schema", "SCHEMA", "v1", AUTHORITY_ANCESTRY_AUDIT_SCHEMA_PATH_V1, "application/schema+json", AUTHORITY_ANCESTRY_AUDIT_SCHEMA_SHA256_V1),
+        ("m5-source-surface-registry", "AUTHORITY", "v1", M5_SOURCE_REGISTRY_PATH_V1, "application/json", M5_SOURCE_REGISTRY_SHA256_V1),
+        ("m5-source-surface-registry-schema", "SCHEMA", "v1", M5_SOURCE_REGISTRY_SCHEMA_PATH_V1, "application/schema+json", M5_SOURCE_REGISTRY_SCHEMA_SHA256_V1),
         ("m5-trust-anchor-registry", "AUTHORITY", "v1", TRUST_ANCHOR_REGISTRY_PATH_V1, TRUST_ANCHOR_REGISTRY_MEDIA_TYPE_V1, TRUST_ANCHOR_REGISTRY_SHA256_V1),
         ("m5-trust-anchor-registry-schema", "SCHEMA", "v1", TRUST_ANCHOR_SCHEMA_PATH_V1, "application/schema+json", TRUST_ANCHOR_SCHEMA_SHA256_V1),
         ("m5-control-emitter", "TOOL", "v1", CONTROL_EMITTER_PATH, "text/x-python", PINNED_AUTHORITY_SHA256["control_emitter"]),
@@ -2081,6 +2282,14 @@ def _validate_run_semantics(
         "m5-canonical-matrix": ("ROSTER", "v1", "application/json"),
         "m5-canonical-roster": ("ROSTER", "v1", "application/json"),
         "m5-quantity-authority-schema": ("SCHEMA", "v2", "application/schema+json"),
+        "m5-ancestry-audit-tool": ("TOOL", "v1", "text/x-python"),
+        "m5-ancestry-audit-schema": ("SCHEMA", "v1", "application/schema+json"),
+        "m5-source-surface-registry": ("AUTHORITY", "v1", "application/json"),
+        "m5-source-surface-registry-schema": (
+            "SCHEMA",
+            "v1",
+            "application/schema+json",
+        ),
         "m5-trust-anchor-registry": (
             "AUTHORITY",
             "v1",
@@ -2117,6 +2326,10 @@ def _validate_run_semantics(
         "m5-canonical-matrix": PINNED_AUTHORITY_SHA256["canonical_matrix"],
         "m5-canonical-roster": PINNED_AUTHORITY_SHA256["canonical_roster"],
         "m5-quantity-authority-schema": AUTHORITY_SCHEMA_SHA256_V2,
+        "m5-ancestry-audit-tool": AUTHORITY_ANCESTRY_AUDIT_TOOL_SHA256_V1,
+        "m5-ancestry-audit-schema": AUTHORITY_ANCESTRY_AUDIT_SCHEMA_SHA256_V1,
+        "m5-source-surface-registry": M5_SOURCE_REGISTRY_SHA256_V1,
+        "m5-source-surface-registry-schema": M5_SOURCE_REGISTRY_SCHEMA_SHA256_V1,
         "m5-trust-anchor-registry": TRUST_ANCHOR_REGISTRY_SHA256_V1,
         "m5-trust-anchor-registry-schema": TRUST_ANCHOR_SCHEMA_SHA256_V1,
         "m5-control-emitter": PINNED_AUTHORITY_SHA256["control_emitter"],
@@ -2166,9 +2379,18 @@ def _validate_run_semantics(
     if provenance["authority_artifact"] != quantity_authority_identity["artifact"]:
         _fail("RUN provenance authority artifact is not identity-bound")
     ancestry_identity = identities.get(AUTHORITY_ANCESTRY_ID_V2)
+    ancestry_audit_identity = identities.get(AUTHORITY_ANCESTRY_AUDIT_ID_V1)
     operator_identity = identities.get(AUTHORITY_OPERATOR_APPROVAL_ID_V2)
     if ancestry_identity is None or operator_identity is None:
         _fail("M5_RULE1_PREREGISTRATION_ANCESTRY: RUN witness identities are incomplete")
+    if (
+        ancestry_audit_identity is None
+        or ancestry_audit_identity["identity_kind"] != "AUDIT"
+        or ancestry_audit_identity["version"] != "v1"
+        or ancestry_audit_identity["artifact"]["media_type"]
+        != AUTHORITY_ANCESTRY_AUDIT_MEDIA_TYPE_V1
+    ):
+        _fail("M5_RULE1_PREREGISTRATION_ANCESTRY: RUN computed audit is absent")
     ancestry = _authority_witness(
         artifact_loader(ancestry_identity["artifact"]),
         ancestry_identity["artifact"],
@@ -2210,20 +2432,6 @@ def _validate_run_semantics(
                 review_identity["identity_id"],
             )
         )
-    _require_admitted_v2_authority(
-        public_key=authority_key,
-        authority_reference=quantity_authority_identity["artifact"],
-        ancestry_reference=ancestry_identity["artifact"],
-        review_identity_ids=review_identity_ids,
-        review_references=review_references,
-        operator_reference=operator_identity["artifact"],
-        registry_payload=artifact_loader(
-            identities["m5-trust-anchor-registry"]["artifact"]
-        ),
-        registry_schema_payload=artifact_loader(
-            identities["m5-trust-anchor-registry-schema"]["artifact"]
-        ),
-    )
     _validate_v2_quantity_authority(
         quantity_authority,
         authority_raw,
@@ -2239,7 +2447,60 @@ def _validate_run_semantics(
             identities["m5-quantity-authority-schema"]["artifact"]
         ),
     )
-    if run["provenance"]["ancestry_artifact"] != ancestry_identity["artifact"] or run["provenance"]["review_artifacts"] != review_references:
+    design_inputs = _authority_design_inputs(
+        quantity_authority, identities, artifact_loader
+    )
+    _audit, expected_audit_payload = _build_ancestry_audit(
+        authority=quantity_authority,
+        authority_raw=authority_raw,
+        design_inputs=design_inputs,
+        source_registry_payload=artifact_loader(
+            identities["m5-source-surface-registry"]["artifact"]
+        ),
+        source_registry_schema_payload=artifact_loader(
+            identities["m5-source-surface-registry-schema"]["artifact"]
+        ),
+        audit_tool_payload=artifact_loader(
+            identities["m5-ancestry-audit-tool"]["artifact"]
+        ),
+        schema_payload=artifact_loader(
+            identities["m5-ancestry-audit-schema"]["artifact"]
+        ),
+    )
+    retained_audit_payload = artifact_loader(ancestry_audit_identity["artifact"])
+    if retained_audit_payload != expected_audit_payload:
+        _fail(
+            "M5_RULE1_PREREGISTRATION_ANCESTRY: retained audit differs from "
+            "controller recomputation"
+        )
+    _require_admitted_v2_authority(
+        public_key=authority_key,
+        authority_reference=quantity_authority_identity["artifact"],
+        ancestry_reference=ancestry_identity["artifact"],
+        ancestry_audit_reference=ancestry_audit_identity["artifact"],
+        audit_policy_sha256=_audit["audit_policy_sha256"],
+        design_input_references={
+            identity_id: reference
+            for identity_id, (reference, _payload) in design_inputs.items()
+        },
+        review_identity_ids=review_identity_ids,
+        review_references=review_references,
+        operator_reference=operator_identity["artifact"],
+        registry_payload=artifact_loader(
+            identities["m5-trust-anchor-registry"]["artifact"]
+        ),
+        registry_schema_payload=artifact_loader(
+            identities["m5-trust-anchor-registry-schema"]["artifact"]
+        ),
+    )
+    if (
+        run["provenance"]["ancestry_artifact"] != ancestry_identity["artifact"]
+        or run["provenance"]["ancestry_audit_artifact"]
+        != ancestry_audit_identity["artifact"]
+        or run["provenance"]["design_input_artifacts"]
+        != [design_inputs[identity_id][0] for identity_id in sorted(design_inputs)]
+        or run["provenance"]["review_artifacts"] != review_references
+    ):
         _fail("RUN provenance witness artifacts are not identity-bound")
     if run["provenance"]["target_free"] is not True or run["provenance"]["operator_approved"] is not True:
         _fail("RUN provenance does not attest target-free operator approval")
@@ -2326,6 +2587,9 @@ def _validate_run_semantics(
     if tuple(row["family_id"] for row in families) != execution_order:
         _fail("RUN family records are not in exact authority execution order")
     rank = {family: index + 1 for index, family in enumerate(scientific_rank)}
+    execution_position = {
+        family: index for index, family in enumerate(execution_order)
+    }
     family_binary_ids: set[str] = set()
     referenced_relationship_ids: set[str] = set()
     for execution_index, family in enumerate(families, start=1):
@@ -2346,7 +2610,7 @@ def _validate_run_semantics(
     quantity_ids: set[str] = set()
     conditioned_bindings: set[bytes] = set()
     family_quantities: dict[str, int] = defaultdict(int)
-    f_groups: set[str] = set()
+    probe_execution_positions: list[int] = []
     pchase_ids: list[str] = []
     for quantity in quantities:
         quantity_id = quantity["quantity_id"]
@@ -2360,14 +2624,33 @@ def _validate_run_semantics(
             _fail("RUN consumer binding plus conditioning must be unique")
         conditioned_bindings.add(condition_key)
         producer = quantity["producer"]
+        upstream_family_ids = quantity["upstream_family_ids"]
         if producer["kind"] == "PROBE_FAMILY":
             family_id = producer["family_id"]
             family_quantities[family_id] += 1
-            if family_id == "f":
-                if quantity["quantity_group"] not in F_GROUPS:
-                    _fail("probe f quantity_group must be one of exact f1..f5")
-                f_groups.add(quantity["quantity_group"])
+            producer_position = execution_position[family_id]
+            probe_execution_positions.append(producer_position)
+            if any(
+                upstream_id not in execution_position
+                for upstream_id in upstream_family_ids
+            ):
+                _fail(f"quantity {quantity_id} has an absent upstream family")
+            if upstream_family_ids != sorted(
+                upstream_family_ids, key=execution_position.__getitem__
+            ):
+                _fail(
+                    f"quantity {quantity_id} upstream families are not in authority execution order"
+                )
+            if any(
+                execution_position[upstream_id] >= producer_position
+                for upstream_id in upstream_family_ids
+            ):
+                _fail(
+                    f"quantity {quantity_id} has a self or non-prior upstream family"
+                )
         else:
+            if upstream_family_ids:
+                _fail(f"pchase quantity {quantity_id} cannot declare probe-family dependencies")
             pchase_ids.append(quantity_id)
 
         contracts = quantity["readout_contracts"]
@@ -2378,8 +2661,6 @@ def _validate_run_semantics(
         derivations = [contract["derivation_identity_id"] for contract in contracts]
         if len(readout_ids) != len(set(readout_ids)):
             _fail(f"quantity {quantity_id} has duplicate planned readout IDs")
-        if any(method not in METHOD_CLASSES for method in methods):
-            _fail(f"quantity {quantity_id} contains an unregistered method class")
         if len(set(methods)) < 2:
             _fail(f"quantity {quantity_id} lacks two independent registered methods")
         if len(derivations) != len(set(derivations)):
@@ -2414,18 +2695,10 @@ def _validate_run_semantics(
                 _fail(f"quantity {quantity_id} derivation contract is not exact")
         if len(derivation_hashes) != len(set(derivation_hashes)):
             _fail(f"quantity {quantity_id} derivation identities are not byte-distinct")
-        if quantity["quantity_group"] == "f3" and quantity["agreement_limit_fraction"] > 0.15:
-            _fail("probe f3 capacity agreement limit must be <=15%")
-    expected_f_groups = {
-        quantity["quantity_group"]
-        for quantity in quantities
-        if quantity["producer"]["kind"] == "PROBE_FAMILY"
-        and quantity["producer"]["family_id"] == "f"
-    }
+    if probe_execution_positions != sorted(probe_execution_positions):
+        _fail("RUN probe quantities are not grouped in authority execution order")
     if set(family_quantities) != set(execution_order):
         _fail("every authority family must own a consumer-bound quantity")
-    if f_groups != expected_f_groups:
-        _fail("probe f quantity groups do not cover the externally retained authority")
     if not pchase_ids:
         _fail("pchase must remain an additional required component")
 
@@ -2540,7 +2813,7 @@ def _validate_run_semantics(
             _fail("RUN calibration control member lacks witness coordinates")
 
     expected_counts = {
-        "family_count": 6,
+        "family_count": len(families),
         "quantity_count": len(quantities),
         "pchase_quantity_count": len(pchase_ids),
         "canonical_runnable_cell_count": 122,
@@ -2597,6 +2870,10 @@ def _plan_request_to_run(
         identity_id = _safe_id(identity["identity_id"], f"{label}.identity_id")
         if identity_id == QUANTITY_AUTHORITY_ID_V1:
             _fail("M5_RULE1_PREREGISTRATION_VERSION: v1 quantity authority is quarantined")
+        if identity_id == AUTHORITY_ANCESTRY_AUDIT_ID_V1:
+            _fail(
+                "M5_RULE1_PREREGISTRATION_ANCESTRY: caller-supplied ancestry audit is forbidden"
+            )
         if identity_id in caller_ids:
             _fail(f"duplicate caller identity {identity_id}")
         caller_ids.add(identity_id)
@@ -2642,6 +2919,12 @@ def _plan_request_to_run(
     analysis_public_key = _material_bytes(authority_material)
     _validate_ed25519_public_key(analysis_public_key, "plan analysis authority public key")
 
+    def caller_artifact_payload(reference: Mapping[str, Any]) -> bytes:
+        material_file = caller_material.get(reference["relative_path"])
+        if material_file is None:
+            _fail(f"M5 caller artifact bytes are absent: {reference['relative_path']}")
+        return _material_bytes(material_file)
+
     def caller_witness(identity_id: str, kind: str) -> tuple[dict[str, Any], dict[str, Any]]:
         identity = caller_by_id.get(identity_id)
         if identity is None or identity["identity_kind"] != kind:
@@ -2683,14 +2966,6 @@ def _plan_request_to_run(
     operator_approval, operator_reference = caller_witness(
         AUTHORITY_OPERATOR_APPROVAL_ID_V2, "AUTHORITY"
     )
-    _require_admitted_v2_authority(
-        public_key=analysis_public_key,
-        authority_reference=quantity_authority_identity["artifact"],
-        ancestry_reference=ancestry_reference,
-        review_identity_ids=normalized_review_identity_ids,
-        review_references=review_references,
-        operator_reference=operator_reference,
-    )
     authority_value = _validate_v2_quantity_authority(
         authority_value,
         authority_raw,
@@ -2703,6 +2978,52 @@ def _plan_request_to_run(
         operator_approval=operator_approval,
         trust_anchor=analysis_public_key,
     )
+    design_inputs = _authority_design_inputs(
+        authority_value, caller_by_id, caller_artifact_payload
+    )
+    try:
+        source_registry_payload = immutable.read_regular(M5_SOURCE_REGISTRY_PATH_V1)
+        source_registry_schema_payload = immutable.read_regular(
+            M5_SOURCE_REGISTRY_SCHEMA_PATH_V1
+        )
+        audit_tool_payload = immutable.read_regular(
+            AUTHORITY_ANCESTRY_AUDIT_TOOL_PATH_V1
+        )
+        audit_schema_payload = immutable.read_regular(
+            AUTHORITY_ANCESTRY_AUDIT_SCHEMA_PATH_V1
+        )
+    except immutable.ImmutableArtifactError as exc:
+        _fail(str(exc))
+    audit, audit_payload = _build_ancestry_audit(
+        authority=authority_value,
+        authority_raw=authority_raw,
+        design_inputs=design_inputs,
+        source_registry_payload=source_registry_payload,
+        source_registry_schema_payload=source_registry_schema_payload,
+        audit_tool_payload=audit_tool_payload,
+        schema_payload=audit_schema_payload,
+    )
+    audit_identity, audit_file = _artifact_from_bytes(
+        AUTHORITY_ANCESTRY_AUDIT_ID_V1,
+        "AUDIT",
+        "v1",
+        audit_payload,
+        AUTHORITY_ANCESTRY_AUDIT_MEDIA_TYPE_V1,
+    )
+    _require_admitted_v2_authority(
+        public_key=analysis_public_key,
+        authority_reference=quantity_authority_identity["artifact"],
+        ancestry_reference=ancestry_reference,
+        ancestry_audit_reference=audit_identity["artifact"],
+        audit_policy_sha256=audit["audit_policy_sha256"],
+        design_input_references={
+            identity_id: reference
+            for identity_id, (reference, _payload) in design_inputs.items()
+        },
+        review_identity_ids=normalized_review_identity_ids,
+        review_references=review_references,
+        operator_reference=operator_reference,
+    )
     quantities = copy.deepcopy(_exact_array(request["quantities"], "quantities"))
     if quantities != authority_value["quantities"]:
         _fail("plan quantities are not the exact externally retained v2 quantity authority")
@@ -2712,7 +3033,8 @@ def _plan_request_to_run(
     auto_ids = {identity["identity_id"] for identity in auto_identities}
     if auto_ids & caller_ids:
         _fail(f"caller identity collides with reserved identity {sorted(auto_ids & caller_ids)}")
-    identities = list(auto_identities) + caller_identities
+    identities = list(auto_identities) + [audit_identity] + caller_identities
+    _merge_material(material, audit_file)
     for file in caller_material.values():
         _merge_material(material, file)
     identity_by_id = {identity["identity_id"]: identity for identity in identities}
@@ -2907,6 +3229,11 @@ def _plan_request_to_run(
         "provenance": {
             "authority_artifact": quantity_authority_identity["artifact"],
             "ancestry_artifact": ancestry_reference,
+            "ancestry_audit_artifact": audit_identity["artifact"],
+            "design_input_artifacts": [
+                design_inputs[identity_id][0]
+                for identity_id in sorted(design_inputs)
+            ],
             "review_artifacts": review_references,
             "target_free": True,
             "operator_approved": True,
@@ -3180,32 +3507,32 @@ def _allowed_lineage_bindings(
 
 
 def _quantity_dependency_contract(quantity: Mapping[str, Any]) -> str:
-    if quantity["producer"]["kind"] != "PROBE_FAMILY":
+    upstream_family_ids = quantity["upstream_family_ids"]
+    if not upstream_family_ids:
         return "NONE"
-    return {
-        "d": "LITTLE_LAW_B_TO_D",
-        "f": "B_D_VERDICTS_TO_F",
-    }.get(quantity["producer"]["family_id"], "NONE")
+    return "UPSTREAM_FAMILIES:" + ",".join(upstream_family_ids)
 
 
 def _expected_upstream_decision_sha256s(
     decision_hashes_by_family: Mapping[str, Iterable[str]],
-    producer_family: str,
+    quantity: Mapping[str, Any],
 ) -> list[str]:
-    """Derive one canonical scientific dependency edge for every phase.
+    """Derive the authority-declared scientific dependency for one quantity."""
 
-    Analysis and revalidation must not each encode a partial dependency graph:
-    the d family consumes b decisions, while f consumes both b and d. Sorting
-    makes the sealed witness independent of dictionary insertion order.
-    """
-    if producer_family == "d":
-        return sorted(decision_hashes_by_family.get("b", ()))
-    if producer_family == "f":
-        return sorted(
-            list(decision_hashes_by_family.get("b", ()))
-            + list(decision_hashes_by_family.get("d", ()))
+    missing = [
+        family_id
+        for family_id in quantity["upstream_family_ids"]
+        if not list(decision_hashes_by_family.get(family_id, ()))
+    ]
+    if missing:
+        _fail(
+            f"quantity {quantity['quantity_id']} lacks prior decisions for authority-declared families {missing}"
         )
-    return []
+    return sorted(
+        decision_sha256
+        for family_id in quantity["upstream_family_ids"]
+        for decision_sha256 in decision_hashes_by_family[family_id]
+    )
 
 
 def _expected_source_lineage_id(
@@ -4700,10 +5027,8 @@ def _analysis_request_to_result(
             else "pchase"
         )
         upstream_decision_sha256s = _expected_upstream_decision_sha256s(
-            decision_hashes_by_family, producer_family
+            decision_hashes_by_family, quantity
         )
-        if producer_family in {"d", "f"} and not upstream_decision_sha256s:
-            _fail(f"probe {producer_family} raw inputs lack required prior decisions")
         readouts, repetitions = _derive_readouts(
             quantity,
             row["readout_inputs"],
@@ -5030,8 +5355,6 @@ def _validate_outcome(quantity: Mapping[str, Any], row: Mapping[str, Any]) -> No
         tolerance = agreement["tolerance_fraction"]
         if tolerance > quantity["agreement_limit_fraction"]:
             _fail(f"MEASURED {quantity['quantity_id']} exceeds planned agreement limit")
-        if quantity["quantity_group"] == "f3" and tolerance > 0.15:
-            _fail("probe f3 capacity measured agreement must be <=15%")
         values = [float(readout["value"]) for readout in value_readouts]
         observed = max(
             (
@@ -5684,7 +6007,7 @@ def _validate_result_semantics(
             else "pchase"
         )
         upstream_decision_sha256s = _expected_upstream_decision_sha256s(
-            decision_hashes_by_family, producer_family
+            decision_hashes_by_family, quantity
         )
         for contract, readout in zip(quantity["readout_contracts"], row["readouts"], strict=True):
             _rederive_readout(

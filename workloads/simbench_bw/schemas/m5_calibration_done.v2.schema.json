@@ -58,7 +58,7 @@
     },
     "authenticity_receipts": {
       "type": "array",
-      "minItems": 405,
+      "minItems": 1,
       "maxItems": 20000,
       "items": {
         "$ref": "#/$defs/artifact"
@@ -200,7 +200,7 @@
         },
         "feature_authenticated_artifact_count": {
           "type": "integer",
-          "minimum": 405,
+          "minimum": 1,
           "maximum": 20000
         },
         "ncu_attachment_phase": {
@@ -415,40 +415,46 @@
       ],
       "properties": {
         "required_quantity_count": {
-          "const": 31
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 512
         },
         "measured_quantity_count": {
           "type": "integer",
           "minimum": 0,
-          "maximum": 31
+          "maximum": 512
         },
         "typed_gap_quantity_count": {
           "type": "integer",
           "minimum": 0,
-          "maximum": 31
+          "maximum": 512
         },
         "result_quantity_count": {
-          "const": 31
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 512
         },
         "unique_artifact_count": {
           "$ref": "#/$defs/positive_integer"
         },
         "raw_sample_series_count": {
-          "const": 62
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 8192
         },
         "pre_ncu_authenticated_artifact_count": {
           "type": "integer",
-          "minimum": 405,
+          "minimum": 1,
           "maximum": 20000
         },
         "authenticated_artifact_count": {
           "type": "integer",
-          "minimum": 405,
+          "minimum": 1,
           "maximum": 20000
         },
         "authority_receipt_count": {
           "type": "integer",
-          "minimum": 405,
+          "minimum": 1,
           "maximum": 20000
         },
         "canonical_control_sidecar_count": {

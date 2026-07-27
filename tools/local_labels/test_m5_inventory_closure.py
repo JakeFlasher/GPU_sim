@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import copy
+import hashlib
 import json
+import os
 import re
+import stat
 import subprocess
 import uuid
 from pathlib import Path
@@ -19,6 +22,28 @@ SCHEMA_PATH = (
     / "simbench_bw"
     / "schemas"
     / "m5_source_surface_registry.v1.schema.json"
+)
+QUARANTINE_PINS = (
+    (
+        "S001",
+        "plans/sm86_calibration_microbench_design_fable5_prompt.md",
+        "8bc769b0b15f5a60fe8b12d52bf91c3aca8282999057131ff1324df257b13d93",
+    ),
+    (
+        "S002",
+        "plans/sm86_calibration_microbench_design_fable5_answer.md",
+        "f2fe00cfe045c251f97d40c83dbb08ace731bfdec230a44907c0e5112620f20c",
+    ),
+    (
+        "S003",
+        "plans/sm86_cp_async_timing_probe_fable5_prompt.md",
+        "1704f69bd85abb9c2042ff20b4f6173ceda8476045e6bca08cf52d75fe282402",
+    ),
+    (
+        "S004",
+        "plans/sm86_cp_async_timing_probe_fable5_answer.md",
+        "a90eaec5b7c7c4d78c662c1273b68e7f0b6b0087cce81ae60f514095288d115f",
+    ),
 )
 
 CLOSURE_ROOTS = (
@@ -102,29 +127,38 @@ AUTO_IDENTITY_PATHS = {
     "data/pchase/sm_86_static_card.json",
     "tools/local_labels/campaign_protocol_pins.json",
     "tools/local_labels/immutable_artifact.py",
+    "tools/local_labels/m5_authority_ancestry_audit.py",
     "tools/local_labels/m5_calibration_controller.py",
+    "tools/local_labels/m5_source_surface_registry.json",
     "tools/local_labels/m5_trust_anchors.json",
     "tools/pchase/pchase_kernels.cu",
     "tools/sass_control/emit_control_bits_sidecar.py",
     "tools/sass_control/extractor.py",
     "tools/sass_control/run_pc_join_witness.py",
+    "workloads/simbench_bw/schemas/m5_authority_ancestry_audit.v1.schema.json",
     "workloads/simbench_bw/schemas/m5_calibration_done.v2.schema.json",
     "workloads/simbench_bw/schemas/m5_calibration_result.v2.schema.json",
     "workloads/simbench_bw/schemas/m5_calibration_run.v2.schema.json",
     "workloads/simbench_bw/schemas/m5_quantity_authority.v2.schema.json",
+    "workloads/simbench_bw/schemas/m5_source_surface_registry.v1.schema.json",
     "workloads/simbench_bw/schemas/m5_trust_anchor_registry.v1.schema.json",
     "workloads/simbench_bw/schemas/sass_control_pc_join_witness.schema.json",
 }
 
 M5_TOKEN = re.compile(rb"(?<![A-Za-z0-9])(?:M5|m5)(?=$|[^A-Za-z0-9])")
-CODE_SCAN_ROOTS = (
-    "arch_profiles",
-    "docs",
-    "eval/guards",
-    "plans",
-    "sim",
-    "tools/local_labels",
-    "workloads/simbench_bw/schemas",
+TEXT_SURFACE_SUFFIXES = frozenset(
+    {
+        ".cu",
+        ".h",
+        ".json",
+        ".md",
+        ".proto",
+        ".py",
+        ".rs",
+        ".sh",
+        ".toml",
+        ".txt",
+    }
 )
 
 
@@ -167,6 +201,47 @@ def _available_paths() -> set[str]:
     }
 
 
+def _read_declared_regular(relative_path: str) -> bytes | None:
+    parts = Path(relative_path).parts
+    if not parts or Path(relative_path).is_absolute() or any(
+        part in {"", ".", ".."} for part in parts
+    ):
+        return None
+    directory_fd = os.open(
+        REPO_ROOT, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC
+    )
+    file_fd: int | None = None
+    try:
+        for component in parts[:-1]:
+            next_fd = os.open(
+                component,
+                os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC | os.O_NOFOLLOW,
+                dir_fd=directory_fd,
+            )
+            os.close(directory_fd)
+            directory_fd = next_fd
+        file_fd = os.open(
+            parts[-1],
+            os.O_RDONLY | os.O_CLOEXEC | os.O_NOFOLLOW,
+            dir_fd=directory_fd,
+        )
+        metadata = os.fstat(file_fd)
+        if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+            return None
+        chunks: list[bytes] = []
+        while True:
+            chunk = os.read(file_fd, 1 << 20)
+            if not chunk:
+                return b"".join(chunks)
+            chunks.append(chunk)
+    except OSError:
+        return None
+    finally:
+        if file_fd is not None:
+            os.close(file_fd)
+        os.close(directory_fd)
+
+
 def _discovered_surfaces(available: set[str]) -> set[str]:
     discovered = set(EXPLICIT_SURFACES)
     for path in available:
@@ -179,10 +254,13 @@ def _discovered_surfaces(available: set[str]) -> set[str]:
             for token in ("calibration_evaluation", "calibration_head", "pchase")
         ):
             discovered.add(path)
-        if path.startswith(CODE_SCAN_ROOTS):
-            candidate = REPO_ROOT / path
-            if candidate.is_file() and M5_TOKEN.search(candidate.read_bytes()):
-                discovered.add(path)
+        payload = _read_declared_regular(path)
+        if payload is None:
+            discovered.add(path)
+        elif Path(path).suffix.lower() in TEXT_SURFACE_SUFFIXES and M5_TOKEN.search(
+            payload
+        ):
+            discovered.add(path)
     return discovered
 
 
@@ -225,9 +303,7 @@ def test_registry_is_closed_schema_valid_and_non_authoritative() -> None:
     registered = set(paths)
     assert registered <= available
     for path in sorted(registered):
-        candidate = REPO_ROOT / path
-        assert not candidate.is_symlink(), path
-        assert candidate.is_file(), path
+        assert _read_declared_regular(path) is not None, path
     unknown, stale = _closure_difference(
         registered, _discovered_surfaces(available)
     )
@@ -259,6 +335,56 @@ def test_unclassified_m5_surface_fails_closure() -> None:
         sentinel.unlink()
 
 
+def test_content_only_m5_surface_in_declared_root_fails_closure() -> None:
+    registry, _payload = _strict_json(REGISTRY_PATH)
+    registered = {entry["path"] for entry in registry["entries"]}
+    sentinel = (
+        REPO_ROOT
+        / "tools"
+        / "nvbit_tracer"
+        / f"closure_inventory_sentinel_{uuid.uuid4().hex}.py"
+    )
+    relative = sentinel.relative_to(REPO_ROOT).as_posix()
+    sentinel.write_text("# synthetic M5 closure sentinel\n", encoding="utf-8")
+    try:
+        available = _available_paths()
+        discovered = _discovered_surfaces(available)
+        assert relative in available
+        assert relative in discovered
+        unknown, stale = _closure_difference(registered, discovered)
+        assert relative in unknown
+        assert stale == set()
+    finally:
+        sentinel.unlink()
+
+
+def test_symlink_surface_in_declared_root_fails_without_content_read(
+    tmp_path: Path,
+) -> None:
+    registry, _payload = _strict_json(REGISTRY_PATH)
+    registered = {entry["path"] for entry in registry["entries"]}
+    target = tmp_path / "outside-declared-roots.py"
+    target.write_text("raise AssertionError('must not be interpreted')\n", encoding="utf-8")
+    sentinel = (
+        REPO_ROOT
+        / "tools"
+        / "nvbit_tracer"
+        / f"closure_symlink_sentinel_{uuid.uuid4().hex}.py"
+    )
+    relative = sentinel.relative_to(REPO_ROOT).as_posix()
+    sentinel.symlink_to(target)
+    try:
+        available = _available_paths()
+        discovered = _discovered_surfaces(available)
+        assert relative in available
+        assert relative in discovered
+        unknown, stale = _closure_difference(registered, discovered)
+        assert relative in unknown
+        assert stale == set()
+    finally:
+        sentinel.unlink()
+
+
 def test_quarantined_ancestry_cannot_be_reclassified_active() -> None:
     registry, _payload = _strict_json(REGISTRY_PATH)
     schema, _schema_payload = _strict_json(SCHEMA_PATH)
@@ -275,6 +401,10 @@ def test_quarantined_ancestry_cannot_be_reclassified_active() -> None:
     }
     by_path = {entry["path"]: entry for entry in registry["entries"]}
     assert all(by_path[path]["lifecycle"] == "quarantined" for path in quarantined)
+    for quarantine_id, path, digest in QUARANTINE_PINS:
+        assert by_path[path]["quarantine_id"] == quarantine_id
+        assert by_path[path]["sha256"] == digest
+        assert hashlib.sha256((REPO_ROOT / path).read_bytes()).hexdigest() == digest
 
     for path in sorted(quarantined):
         mutated = copy.deepcopy(registry)
@@ -285,6 +415,15 @@ def test_quarantined_ancestry_cannot_be_reclassified_active() -> None:
             jsonschema.Draft202012Validator(schema).iter_errors(mutated)
         )
         assert any(error.validator == "const" for error in errors), path
+
+    for quarantine_id, path, _digest in QUARANTINE_PINS:
+        mutated = copy.deepcopy(registry)
+        entry = next(row for row in mutated["entries"] if row["path"] == path)
+        entry["sha256"] = "0" * 64
+        errors = list(
+            jsonschema.Draft202012Validator(schema).iter_errors(mutated)
+        )
+        assert any(error.validator == "const" for error in errors), quarantine_id
 
 
 def test_active_campaign_plan_cannot_cleanse_quarantined_ancestry() -> None:

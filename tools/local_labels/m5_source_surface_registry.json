@@ -185,6 +185,14 @@
     {
       "authority_candidate": false,
       "can_collect": false,
+      "category": "guard",
+      "lifecycle": "active",
+      "path": "tools/local_labels/m5_authority_ancestry_audit.py",
+      "reason": "Mechanical non-revival audit; cannot establish semantic ancestry or scientific authority."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
       "category": "collector",
       "lifecycle": "disabled",
       "path": "tools/local_labels/m5_calibration_collector.py",
@@ -229,6 +237,14 @@
       "lifecycle": "active",
       "path": "tools/local_labels/test_calibration_head_v5_schema.py",
       "reason": "Calibration-head test surface cannot substitute for an M5 producer identity."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "test",
+      "lifecycle": "active",
+      "path": "tools/local_labels/test_m5_authority_ancestry_audit.py",
+      "reason": "Adversarial mechanical ancestry tests grant no semantic or external credit."
     },
     {
       "authority_candidate": false,
@@ -325,6 +341,14 @@
       "lifecycle": "active",
       "path": "workloads/simbench_bw/schemas/calibration_head_v5.schema.json",
       "reason": "Calibration-head v5 schema cannot supply an M5 source identity."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "schema",
+      "lifecycle": "active",
+      "path": "workloads/simbench_bw/schemas/m5_authority_ancestry_audit.v1.schema.json",
+      "reason": "Closed schema for a mechanical audit that grants no semantic or external credit."
     },
     {
       "authority_candidate": false,
@@ -476,7 +500,9 @@
       "category": "documentation",
       "lifecycle": "quarantined",
       "path": "plans/sm86_calibration_microbench_design_fable5_answer.md",
-      "reason": "Contaminated S002 design ancestor retained only for non-revival archaeology."
+      "quarantine_id": "S002",
+      "reason": "Contaminated S002 design ancestor retained only for non-revival archaeology.",
+      "sha256": "f2fe00cfe045c251f97d40c83dbb08ace731bfdec230a44907c0e5112620f20c"
     },
     {
       "authority_candidate": false,
@@ -484,7 +510,9 @@
       "category": "documentation",
       "lifecycle": "quarantined",
       "path": "plans/sm86_calibration_microbench_design_fable5_prompt.md",
-      "reason": "Contaminated S001 design ancestor retained only for non-revival archaeology."
+      "quarantine_id": "S001",
+      "reason": "Contaminated S001 design ancestor retained only for non-revival archaeology.",
+      "sha256": "8bc769b0b15f5a60fe8b12d52bf91c3aca8282999057131ff1324df257b13d93"
     },
     {
       "authority_candidate": false,
@@ -492,7 +520,9 @@
       "category": "documentation",
       "lifecycle": "quarantined",
       "path": "plans/sm86_cp_async_timing_probe_fable5_answer.md",
-      "reason": "Contaminated S004 design ancestor retained only for non-revival archaeology."
+      "quarantine_id": "S004",
+      "reason": "Contaminated S004 design ancestor retained only for non-revival archaeology.",
+      "sha256": "a90eaec5b7c7c4d78c662c1273b68e7f0b6b0087cce81ae60f514095288d115f"
     },
     {
       "authority_candidate": false,
@@ -500,7 +530,9 @@
       "category": "documentation",
       "lifecycle": "quarantined",
       "path": "plans/sm86_cp_async_timing_probe_fable5_prompt.md",
-      "reason": "Contaminated S003 design ancestor retained only for non-revival archaeology."
+      "quarantine_id": "S003",
+      "reason": "Contaminated S003 design ancestor retained only for non-revival archaeology.",
+      "sha256": "1704f69bd85abb9c2042ff20b4f6173ceda8476045e6bca08cf52d75fe282402"
     },
     {
       "authority_candidate": false,

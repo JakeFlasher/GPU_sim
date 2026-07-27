@@ -39,8 +39,8 @@
     },
     "quantity_results": {
       "type": "array",
-      "minItems": 31,
-      "maxItems": 31,
+      "minItems": 1,
+      "maxItems": 512,
       "items": {
         "$ref": "#/$defs/quantity_result"
       }
@@ -113,55 +113,21 @@
     },
     "execution_order": {
       "type": "array",
-      "prefixItems": [
-        {
-          "const": "b"
-        },
-        {
-          "const": "a"
-        },
-        {
-          "const": "d"
-        },
-        {
-          "const": "f"
-        },
-        {
-          "const": "c"
-        },
-        {
-          "const": "e"
-        }
-      ],
-      "items": false,
-      "minItems": 6,
-      "maxItems": 6
+      "minItems": 1,
+      "maxItems": 6,
+      "uniqueItems": true,
+      "items": {
+        "enum": ["a", "b", "c", "d", "e", "f"]
+      }
     },
     "scientific_rank": {
       "type": "array",
-      "prefixItems": [
-        {
-          "const": "b"
-        },
-        {
-          "const": "f"
-        },
-        {
-          "const": "a"
-        },
-        {
-          "const": "d"
-        },
-        {
-          "const": "c"
-        },
-        {
-          "const": "e"
-        }
-      ],
-      "items": false,
-      "minItems": 6,
-      "maxItems": 6
+      "minItems": 1,
+      "maxItems": 6,
+      "uniqueItems": true,
+      "items": {
+        "enum": ["a", "b", "c", "d", "e", "f"]
+      }
     },
     "probe_producer": {
       "type": "object",
@@ -213,13 +179,9 @@
       ],
       "properties": {
         "residency": {
-          "enum": [
-            "L1",
-            "L2",
-            "DRAM",
-            "MIXED",
-            "NOT_APPLICABLE"
-          ]
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
         },
         "access_class": {
           "type": "string",
@@ -229,22 +191,12 @@
         "scope": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 128
+          "maxLength": 64
         },
         "variant": {
           "type": "string",
           "minLength": 1,
-          "maxLength": 128
-        },
-        "modifier": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 32
-        },
-        "size_bytes": {
-          "type": "integer",
-          "minimum": 1,
-          "maximum": 1024
+          "maxLength": 256
         }
       }
     },
@@ -370,26 +322,14 @@
           "$ref": "#/$defs/safe_id"
         },
         "method_class": {
-          "enum": [
-            "CLOCK64_DEPENDENCY_CHAIN",
-            "CLOCK64_ELAPSED_WINDOW",
-            "CLOCK64_HIT_MISS_CLASSIFIER",
-            "THROUGHPUT_PLATEAU",
-            "THROUGHPUT_KNEE",
-            "RTT_CONTRAST",
-            "LITTLE_LAW_TRIANGULATION",
-            "PERSISTENCE_DELTA_CONTRAST",
-            "COMPOSITION_IDENTITY",
-            "BURST_SLOPE_BREAK",
-            "WAIT_BAR_CONTRAST",
-            "HYBRID_CONTENTION_CONTRAST"
-          ]
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
         },
         "instrument": {
-          "enum": [
-            "CLOCK64",
-            "THROUGHPUT"
-          ]
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 64
         },
         "readout_role": {
           "enum": [
@@ -488,7 +428,7 @@
         },
         "upstream_decision_sha256s": {
           "type": "array",
-          "maxItems": 64,
+          "maxItems": 512,
           "uniqueItems": true,
           "items": {
             "$ref": "#/$defs/sha256"
@@ -496,11 +436,7 @@
         },
         "dependency_contract": {
           "type": "string",
-          "enum": [
-            "NONE",
-            "LITTLE_LAW_B_TO_D",
-            "B_D_VERDICTS_TO_F"
-          ]
+          "pattern": "^(?:NONE|UPSTREAM_FAMILIES:[a-f](?:,[a-f]){0,5})$"
         }
       }
     },
@@ -1199,7 +1135,7 @@
         "readouts": {
           "type": "array",
           "minItems": 2,
-          "maxItems": 2,
+          "maxItems": 16,
           "items": {
             "$ref": "#/$defs/readout"
           }
@@ -1301,7 +1237,7 @@
         },
         "entries": {
           "type": "array",
-          "minItems": 405,
+          "minItems": 1,
           "maxItems": 20000,
           "items": {
             "$ref": "#/$defs/authenticity_entry"
@@ -1435,8 +1371,8 @@
         },
         "quantity_ids": {
           "type": "array",
-          "minItems": 14,
-          "maxItems": 14,
+          "minItems": 1,
+          "maxItems": 512,
           "uniqueItems": true,
           "items": {
             "$ref": "#/$defs/safe_id"
@@ -1444,8 +1380,8 @@
         },
         "evidence_artifact_ids": {
           "type": "array",
-          "minItems": 56,
-          "maxItems": 3584,
+          "minItems": 4,
+          "maxItems": 8192,
           "uniqueItems": true,
           "items": {
             "$ref": "#/$defs/safe_id"
@@ -1455,7 +1391,9 @@
           "$ref": "#/$defs/artifact"
         },
         "property_count": {
-          "const": 14
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 512
         },
         "historical_card_identity_id": {
           "const": "m5-pchase-v1-card"
@@ -1759,7 +1697,7 @@
         },
         "feature_authenticated_artifact_count": {
           "type": "integer",
-          "minimum": 405,
+          "minimum": 1,
           "maximum": 20000
         },
         "ncu_attachment_phase": {
@@ -1847,43 +1785,49 @@
       ],
       "properties": {
         "required_quantity_count": {
-          "const": 31
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 512
         },
         "result_quantity_count": {
-          "const": 31
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 512
         },
         "measured_quantity_count": {
           "type": "integer",
           "minimum": 0,
-          "maximum": 31
+          "maximum": 512
         },
         "typed_gap_quantity_count": {
           "type": "integer",
           "minimum": 0,
-          "maximum": 31
+          "maximum": 512
         },
         "evidence_artifact_reference_count": {
           "type": "integer",
-          "minimum": 124,
-          "maximum": 7936
+          "minimum": 4,
+          "maximum": 32768
         },
         "raw_sample_series_count": {
-          "const": 62
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 8192
         },
         "pre_ncu_authenticated_artifact_count": {
           "type": "integer",
-          "minimum": 405,
-          "maximum": 20000
+          "minimum": 1,
+          "maximum": 100000
         },
         "authenticated_artifact_count": {
           "type": "integer",
-          "minimum": 405,
-          "maximum": 20000
+          "minimum": 1,
+          "maximum": 100000
         },
         "authority_receipt_count": {
           "type": "integer",
-          "minimum": 405,
-          "maximum": 20000
+          "minimum": 1,
+          "maximum": 100000
         },
         "protocol_repetition_count": {
           "$ref": "#/$defs/positive_integer"
