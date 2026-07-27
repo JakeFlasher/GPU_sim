@@ -318,6 +318,211 @@ def test_retained_regular_close_is_idempotent(
         retained.verify_unchanged()
 
 
+def _reader_tree(tmp_path: Path) -> tuple[Path, Path, Path, bytes]:
+    root = tmp_path / "reader-root"
+    branch = root / "branch"
+    branch.mkdir(parents=True)
+    payload = b"anchored reader payload"
+    leaf = _regular(branch / "value", payload)
+    return root, branch, leaf, payload
+
+
+def _open_descriptor_count() -> int:
+    return len(os.listdir("/proc/self/fd"))
+
+
+def test_pinned_directory_reader_supports_maximum_depth_without_fd_leak(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "reader-root"
+    root.mkdir()
+    parts = tuple(f"d{index:02d}" for index in range(63))
+    parent = root
+    for part in parts:
+        parent /= part
+        parent.mkdir()
+    _regular(parent / "value", b"maximum depth")
+    relative_path = "/".join((*parts, "value"))
+    assert len(relative_path.split("/")) == immutable._MAX_COMPONENTS
+
+    baseline = _open_descriptor_count()
+    with immutable.PinnedDirectoryReader(root) as reader:
+        assert reader.read(relative_path) == b"maximum depth"
+    assert _open_descriptor_count() == baseline
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ["root_before", "root_after", "ancestor_after", "leaf_after"],
+)
+def test_pinned_directory_reader_rejects_named_path_replacement(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+) -> None:
+    root, branch, leaf, payload = _reader_tree(tmp_path)
+    original_read = immutable._read_fd
+    mutated = False
+
+    def replace_after_read(descriptor: int, *, allow_hardlinks: bool = False) -> bytes:
+        nonlocal mutated
+        result = original_read(descriptor, allow_hardlinks=allow_hardlinks)
+        if mutation == "root_after":
+            root.rename(tmp_path / "moved-root")
+            root.mkdir()
+        elif mutation == "ancestor_after":
+            branch.rename(root / "moved-branch")
+            branch.mkdir()
+            _regular(branch / "value", payload)
+        elif mutation == "leaf_after":
+            leaf.unlink()
+            _regular(leaf, payload)
+        else:
+            return result
+        mutated = True
+        return result
+
+    monkeypatch.setattr(immutable, "_read_fd", replace_after_read)
+    with immutable.PinnedDirectoryReader(root) as reader:
+        if mutation == "root_before":
+            root.rename(tmp_path / "moved-root")
+            root.mkdir()
+            mutated = True
+
+            def unexpected_leaf_open(
+                _root_descriptor: int, _relative_path: str,
+            ) -> None:
+                pytest.fail("leaf open reached after failed root precheck")
+
+            monkeypatch.setattr(
+                immutable, "_open_relative_regular_at", unexpected_leaf_open,
+            )
+        with pytest.raises(immutable.ImmutableArtifactError):
+            reader.read("branch/value")
+    assert mutated is True
+
+
+def test_pinned_directory_reader_rejects_leaf_replacement_before_consumption(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root, _branch, leaf, payload = _reader_tree(tmp_path)
+    original_open = immutable.os.open
+    replaced = False
+
+    def replace_after_leaf_open(
+        path, flags: int, mode: int = 0o777, *, dir_fd: int | None = None,
+    ) -> int:
+        nonlocal replaced
+        descriptor = original_open(path, flags, mode, dir_fd=dir_fd)
+        if path == "value" and (flags & os.O_DIRECTORY) == 0:
+            leaf.unlink()
+            _regular(leaf, payload)
+            replaced = True
+        return descriptor
+
+    def unexpected_read(
+        _descriptor: int, *, allow_hardlinks: bool = False,
+    ) -> bytes:
+        del allow_hardlinks
+        pytest.fail("leaf bytes consumed before initial path verification")
+
+    monkeypatch.setattr(immutable.os, "open", replace_after_leaf_open)
+    monkeypatch.setattr(immutable, "_read_fd", unexpected_read)
+    with immutable.PinnedDirectoryReader(root) as reader:
+        with pytest.raises(immutable.ImmutableArtifactError):
+            reader.read("branch/value")
+    assert replaced is True
+
+
+@pytest.mark.parametrize("mutation", ["hardlink", "truncate", "append"])
+def test_pinned_directory_reader_rejects_mid_read_leaf_mutation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+) -> None:
+    root, _branch, leaf, _payload = _reader_tree(tmp_path)
+    writer: int | None = None
+    if mutation != "hardlink":
+        leaf.chmod(0o644)
+        writer = os.open(leaf, os.O_WRONLY)
+        leaf.chmod(0o444)
+    original_open = immutable._open_relative_regular_at
+    original_read = immutable.os.read
+    target_descriptor: int | None = None
+    mutated = False
+
+    def capture_leaf_descriptor(root_descriptor: int, relative_path: str):
+        nonlocal target_descriptor
+        pinned = original_open(root_descriptor, relative_path)
+        target_descriptor = pinned.descriptor
+        return pinned
+
+    def mutate_after_first_block(descriptor: int, size: int) -> bytes:
+        nonlocal mutated
+        block = original_read(descriptor, size)
+        if descriptor == target_descriptor and block and not mutated:
+            if mutation == "hardlink":
+                os.link(leaf, tmp_path / "value-hardlink")
+            elif mutation == "truncate":
+                assert writer is not None
+                os.ftruncate(writer, 4)
+            else:
+                assert writer is not None
+                os.lseek(writer, 0, os.SEEK_END)
+                os.write(writer, b" appended")
+            mutated = True
+        return block
+
+    monkeypatch.setattr(
+        immutable, "_open_relative_regular_at", capture_leaf_descriptor,
+    )
+    monkeypatch.setattr(immutable.os, "read", mutate_after_first_block)
+    try:
+        with immutable.PinnedDirectoryReader(root) as reader:
+            with pytest.raises(
+                immutable.ImmutableArtifactError,
+                match="regular file changed during snapshot read",
+            ):
+                reader.read("branch/value")
+    finally:
+        if writer is not None:
+            os.close(writer)
+    assert target_descriptor is not None
+    assert mutated is True
+
+
+def test_pinned_directory_reader_failure_closes_all_owned_descriptors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root, _branch, _leaf, _payload = _reader_tree(tmp_path)
+    original_open = immutable._open_relative_regular_at
+    opened: list[int] = []
+
+    def capture_open(root_descriptor: int, relative_path: str):
+        pinned = original_open(root_descriptor, relative_path)
+        opened.extend((pinned.descriptor, *pinned.directory_descriptors))
+        return pinned
+
+    def fail_read(_descriptor: int, *, allow_hardlinks: bool = False) -> bytes:
+        del allow_hardlinks
+        raise RuntimeError("injected anchored-read failure")
+
+    monkeypatch.setattr(immutable, "_open_relative_regular_at", capture_open)
+    monkeypatch.setattr(immutable, "_read_fd", fail_read)
+    reader = immutable.PinnedDirectoryReader(root)
+    root_descriptors = reader._root.descriptors
+    with pytest.raises(RuntimeError, match="injected anchored-read failure"):
+        with reader:
+            reader.read("branch/value")
+
+    assert opened
+    for descriptor in (*opened, *root_descriptors):
+        with pytest.raises(OSError):
+            os.fstat(descriptor)
+
+
 def test_directory_publication_rechecks_after_authorization_callback(
     tmp_path: Path,
 ) -> None:
