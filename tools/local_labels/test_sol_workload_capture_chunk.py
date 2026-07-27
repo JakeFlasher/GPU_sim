@@ -69,6 +69,104 @@ def test_json_publication_errno_less_short_write_is_storage_integrity(
         capture._write_json_new(tmp_path / "result.json", {"value": 1})
 
 
+def _launch_set_preflight_kwargs(document: dict) -> dict:
+    return {
+        "document": document,
+        "expected_sha256": "9" * 64,
+        "expected_source_commit": canonical_fixture.HEAD,
+        "expected_pins_sha256": canonical_fixture.SHA,
+        "expected_matrix_sha256": canonical_fixture.MATRIX_SHA,
+        "expected_arch": "sm_86",
+        "expected_sku": "rtx_3090_ti",
+        "expected_protocol_version": "v2.1",
+        "expected_ncu_version_prefix": "2026.1.0",
+    }
+
+
+def test_launch_set_preflight_threads_selected_device_authority(tmp_path):
+    document = canonical_fixture._preflight(tmp_path)
+    identity, gpu_uuid_sha256, selected_host_gpu_index = (
+        capture._launch_set_preflight_authority(
+            **_launch_set_preflight_kwargs(document)
+        )
+    )
+    assert identity == canonical_fixture._expected_ncu_identity()
+    assert gpu_uuid_sha256 == canonical_fixture.GPU_UUID_SHA256
+    assert selected_host_gpu_index == canonical_fixture.SELECTED_HOST_GPU_INDEX
+
+    document["checks"]["device"].update({
+        "selected_host_gpu_index": 1,
+        "nvidia_smi_device_count": 2,
+        "gpu_uuid_sha256": "7" * 64,
+    })
+    with pytest.raises(capture.WorkloadCaptureRefusal) as caught:
+        capture._launch_set_preflight_authority(
+            **_launch_set_preflight_kwargs(document)
+        )
+    assert caught.value.code == "supplemental_done_launch_set_preflight_invalid"
+
+
+def _launch_set_crosswalk_fixture(tmp_path: Path, *, device: int) -> dict:
+    tmp_path.mkdir(parents=True)
+    published, _plan, trace_inventory = (
+        canonical_fixture._ordered_launch_set_adapter_fixture(tmp_path)
+    )
+    inventory = json.loads(Path(published["launch_inventory"]).read_text())
+    report_sha256 = canonical_capture.sha256_file(published["report"])
+    for trace_row, ncu_row in zip(
+        trace_inventory, inventory["launches"], strict=True,
+    ):
+        trace_row["trace_launch"]["device_id"] = device
+        trace_row["launch_identity_sha256"] = canonical_capture.canonical_sha256({
+            key: value for key, value in trace_row.items()
+            if key != "launch_identity_sha256"
+        })
+        ncu_row["identity"]["Device"] = str(device)
+        ncu_row["identity_sha256"] = canonical_capture.canonical_sha256({
+            key: value for key, value in ncu_row.items()
+            if key != "identity_sha256"
+        })
+    inventory["launch_inventory_sha256"] = canonical_capture.canonical_sha256(
+        inventory["launches"]
+    )
+    inventory["observation_sha256"] = canonical_capture.canonical_sha256({
+        key: value for key, value in inventory.items()
+        if key != "observation_sha256"
+    })
+    completeness = {
+        "launches": [
+            {
+                "launch_ordinal": ordinal,
+                "launch_identity_sha256": trace_row[
+                    "launch_identity_sha256"
+                ],
+                "kernel_name": trace_row["module_mapping"]["kernel_name"],
+                "ncu_report_sha256": report_sha256,
+            }
+            for ordinal, trace_row in enumerate(trace_inventory)
+        ]
+    }
+    return {
+        "trace_inventory": trace_inventory,
+        "launches": inventory["launches"],
+        "completeness": completeness,
+        "inventory": inventory,
+        "report_sha256": report_sha256,
+        "selected_host_gpu_index": 0,
+    }
+
+
+def test_done_launch_crosswalk_binds_each_producer_to_selected_device(tmp_path):
+    capture._validate_done_launch_crosswalk(
+        **_launch_set_crosswalk_fixture(tmp_path / "selected", device=0)
+    )
+    with pytest.raises(capture.WorkloadCaptureRefusal) as caught:
+        capture._validate_done_launch_crosswalk(
+            **_launch_set_crosswalk_fixture(tmp_path / "wrong", device=1)
+        )
+    assert caught.value.code == "supplemental_done_launch_set_crosswalk_invalid"
+
+
 def test_live_source_state_uses_supplemental_not_frozen_canonical_commit(
     monkeypatch,
 ):
@@ -2762,6 +2860,7 @@ def test_done_v2_offline_verifies_after_campaign_relocation_and_source_removal(
         ("receipt_ncu_identity", "run_0_launch_set.details_export_receipt.json"),
         ("execution_module_order", "run_0_launch_set.execution_identity.json"),
         ("sidecar_provenance", "label_0_0.json"),
+        ("sidecar_gpu_uuid", "label_0_0.json"),
         ("capture_crosslink", "label_launch_set_capture_manifest.json"),
         ("trace_identity", "trace_capture_manifest.json"),
         ("trace_launch_metadata", "trace_capture_manifest.json"),
@@ -2805,6 +2904,8 @@ def test_done_v2_offline_verifies_after_campaign_relocation_and_source_removal(
             })
         elif case == "sidecar_provenance":
             document["binary_sha256"] = "6" * 64
+        elif case == "sidecar_gpu_uuid":
+            document["gpu_uuid_sha256"] = "7" * 64
         elif case == "capture_crosslink":
             document["ncu_execution_identity_sha256"] = "6" * 64
         elif case == "trace_identity":
@@ -3308,7 +3409,10 @@ def _attempt_capture_kwargs(
         "pins": {"measurement_protocol": {"version": "v2.1"}},
         "cell_budgets": object(),
         "preflight_manifest": {
-            "checks": {"injection_runtime": {"tracer_so_sha256": "6" * 64}}
+            "checks": {
+                "device": canonical_fixture._current_device_probe(),
+                "injection_runtime": {"tracer_so_sha256": "6" * 64},
+            }
         },
         "expected_ncu_identity": (
             capture.canonical_capture.ncu_executor.ExpectedNcuIdentity(
@@ -3360,6 +3464,12 @@ def test_failed_attempt_is_preserved_and_next_attempt_can_complete(
 
     def fail_capture(**call):
         assert call["expected_ncu_identity"] is kwargs["expected_ncu_identity"]
+        assert call["expected_gpu_uuid_sha256"] == (
+            canonical_fixture.GPU_UUID_SHA256
+        )
+        assert call["selected_host_gpu_index"] == (
+            canonical_fixture.SELECTED_HOST_GPU_INDEX
+        )
         assert call["launch_set_preflight_manifest"] is kwargs[
             "preflight_manifest"
         ]

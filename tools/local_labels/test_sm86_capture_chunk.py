@@ -23,6 +23,8 @@ from tools.local_labels import sol_workload_capture_chunk as sol_chunk
 SHA = "a" * 64
 HEAD = "b" * 40
 MATRIX_SHA = "8" * 64
+GPU_UUID_SHA256 = "6" * 64
+SELECTED_HOST_GPU_INDEX = 0
 CERTIFYING_SOL_ENVIRONMENT = dict(cc.sol_env.PINNED_COMPILER_ENVIRONMENT)
 LEGACY_CERTIFYING_SOL_ENVIRONMENT = dict(
     cc.sol_env.LEGACY_PINNED_COMPILER_ENVIRONMENT
@@ -33,9 +35,9 @@ def _current_device_probe() -> dict:
     return {
         "status": cc.preflight.STATUS_OK,
         "selection_policy": cc.preflight.DEVICE_SELECTION_POLICY,
-        "selected_host_gpu_index": 0,
+        "selected_host_gpu_index": SELECTED_HOST_GPU_INDEX,
         "nvidia_smi_device_count": 1,
-        "gpu_uuid_sha256": "6" * 64,
+        "gpu_uuid_sha256": GPU_UUID_SHA256,
     }
 
 
@@ -160,6 +162,18 @@ def _canonical_label(
     }
 
 
+def _require_canonical_launch_identity(
+    *, label: dict, trace: dict, invocation: dict,
+    selected_host_gpu_index: int = SELECTED_HOST_GPU_INDEX,
+) -> dict:
+    return cc.require_canonical_label_launch_identity(
+        label=label,
+        trace=trace,
+        invocation=invocation,
+        selected_host_gpu_index=selected_host_gpu_index,
+    )
+
+
 @pytest.mark.parametrize(
     "block,grid,device",
     [
@@ -171,7 +185,7 @@ def test_canonical_launch_identity_join_accepts_exact_independent_tuple(
     block, grid, device,
 ):
     observation = _canonical_observation(block=block, grid=grid, device=device)
-    binding = cc.require_canonical_label_launch_identity(
+    binding = _require_canonical_launch_identity(
         label=_canonical_label(observation=observation),
         trace={"launches": [_canonical_launch()]},
         invocation=_canonical_launch_invocation(),
@@ -182,6 +196,18 @@ def test_canonical_launch_identity_join_accepts_exact_independent_tuple(
         ),
         "kernel_selector": None,
     }
+
+
+def test_canonical_launch_identity_join_refuses_coherent_wrong_device():
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        _require_canonical_launch_identity(
+            label=_canonical_label(
+                observation=_canonical_observation(device="1")
+            ),
+            trace={"launches": [_canonical_launch(device=1)]},
+            invocation=_canonical_launch_invocation(),
+        )
+    assert caught.value.code == "label_launch_identity_join_mismatch"
 
 
 @pytest.mark.parametrize("field", ["name", "block", "grid", "device"])
@@ -196,7 +222,7 @@ def test_canonical_launch_identity_join_refuses_each_tuple_mismatch(field):
     key, value = replacements[field]
     observation["identity"][key] = value
     with pytest.raises(cc.ChunkRefusal) as caught:
-        cc.require_canonical_label_launch_identity(
+        _require_canonical_launch_identity(
             label=_canonical_label(observation=observation),
             trace={"launches": [_canonical_launch()]},
             invocation=_canonical_launch_invocation(),
@@ -215,7 +241,7 @@ def test_canonical_launch_identity_join_requires_unambiguous_ncu_id(mutation):
     else:
         observation["identity_columns"].append("ID")
     with pytest.raises(cc.ChunkRefusal) as caught:
-        cc.require_canonical_label_launch_identity(
+        _require_canonical_launch_identity(
             label=_canonical_label(observation=observation),
             trace={"launches": [_canonical_launch()]},
             invocation=_canonical_launch_invocation(),
@@ -231,7 +257,7 @@ def test_canonical_launch_identity_join_requires_unambiguous_ncu_id(mutation):
 )
 def test_canonical_launch_identity_join_refuses_malformed_trace_suffix(kernel_name):
     with pytest.raises(cc.ChunkRefusal) as caught:
-        cc.require_canonical_label_launch_identity(
+        _require_canonical_launch_identity(
             label=_canonical_label(),
             trace={"launches": [_canonical_launch(kernel_name=kernel_name)]},
             invocation=_canonical_launch_invocation(),
@@ -241,7 +267,7 @@ def test_canonical_launch_identity_join_refuses_malformed_trace_suffix(kernel_na
 
 def test_canonical_launch_identity_join_refuses_out_of_range_selected_row():
     with pytest.raises(cc.ChunkRefusal) as caught:
-        cc.require_canonical_label_launch_identity(
+        _require_canonical_launch_identity(
             label=_canonical_label(),
             trace={"launches": [_canonical_launch()]},
             invocation=_canonical_launch_invocation(selected=1),
@@ -252,7 +278,7 @@ def test_canonical_launch_identity_join_refuses_out_of_range_selected_row():
 def test_equal_ncu_and_nvbit_ordinals_do_not_override_identity_mismatch():
     observation = _canonical_observation(launch_id="0", kernel_name="_Z9differentv")
     with pytest.raises(cc.ChunkRefusal) as caught:
-        cc.require_canonical_label_launch_identity(
+        _require_canonical_launch_identity(
             label=_canonical_label(observation=observation),
             trace={"launches": [_canonical_launch(kernel_id=0)]},
             invocation=_canonical_launch_invocation(),
@@ -294,7 +320,7 @@ def test_warm_cold_contract_derives_and_joins_exact_mangled_selector():
     launches = invocation["capture_launch_contract"]["trace_launch_sequence"]
     selector = cc._canonical_label_kernel_selector(invocation)
     assert selector == "warm_cold_pair_kernel"
-    binding = cc.require_canonical_label_launch_identity(
+    binding = _require_canonical_launch_identity(
         label=_canonical_label(
             observation=_canonical_observation(
                 kernel_name=selector,
@@ -321,7 +347,7 @@ def test_warm_cold_join_refuses_missing_wrong_or_duplicate_selector(selectors):
         block="(32, 1, 1)", grid="(32, 1, 1)",
     )
     with pytest.raises(cc.ChunkRefusal) as caught:
-        cc.require_canonical_label_launch_identity(
+        _require_canonical_launch_identity(
             label=_canonical_label(observation=observation, selectors=selectors),
             trace={"launches": launches},
             invocation=invocation,
@@ -420,6 +446,8 @@ def test_capture_cell_refuses_identity_mismatch_before_control(tmp_path, monkeyp
                 "preflight_sha256": "7" * 64,
             },
             expected_ncu_identity=_expected_ncu_identity(),
+            expected_gpu_uuid_sha256=GPU_UUID_SHA256,
+            selected_host_gpu_index=SELECTED_HOST_GPU_INDEX,
             certified_sol_env=None,
             sol_environment_probe=None,
             module_store=tmp_path / "module-store",
@@ -481,6 +509,8 @@ def test_supplemental_cell_gate_refuses_before_validation_or_capture(
                 "preflight_sha256": "7" * 64,
             },
             expected_ncu_identity=_expected_ncu_identity(),
+            expected_gpu_uuid_sha256=GPU_UUID_SHA256,
+            selected_host_gpu_index=SELECTED_HOST_GPU_INDEX,
             certified_sol_env=None,
             sol_environment_probe=None,
             module_store=tmp_path / "module-store",
@@ -729,9 +759,9 @@ def test_preflight_retains_exact_singleton_gpu_uuid_authority(tmp_path):
     assert manifest["checks"]["device"] == {
         "status": "ok",
         "selection_policy": cc.preflight.DEVICE_SELECTION_POLICY,
-        "selected_host_gpu_index": 0,
+        "selected_host_gpu_index": SELECTED_HOST_GPU_INDEX,
         "nvidia_smi_device_count": 1,
-        "gpu_uuid_sha256": "6" * 64,
+        "gpu_uuid_sha256": GPU_UUID_SHA256,
     }
 
 
@@ -5038,6 +5068,7 @@ def _runner_recovery_case(tmp_path: Path, monkeypatch):
         return ({
             "generated_at_utc": generated_at,
             "checks": {
+                "device": _current_device_probe(),
                 "sol_environment": probe,
                 "injection_runtime": {"tracer_so_sha256": "4" * 64},
             },
@@ -5046,9 +5077,12 @@ def _runner_recovery_case(tmp_path: Path, monkeypatch):
     capture_counts = {"a": 0, "b": 0}
 
     def fake_capture_cell(
-        *, cell, cell_dir, capture_provenance, expected_ncu_identity, **_kwargs,
+        *, cell, cell_dir, capture_provenance, expected_ncu_identity,
+        expected_gpu_uuid_sha256, selected_host_gpu_index, **_kwargs,
     ):
         assert expected_ncu_identity == _expected_ncu_identity()
+        assert expected_gpu_uuid_sha256 == GPU_UUID_SHA256
+        assert selected_host_gpu_index == SELECTED_HOST_GPU_INDEX
         slug = cell["identity"]["slug"]
         capture_counts[slug] += 1
         payload = cell_dir / "trace.pb"
@@ -5850,8 +5884,13 @@ def test_collection_receipt_rejects_post_publish_byte_substitution(
     assert "producer bytes" in caught.value.detail
 
 
+@pytest.mark.parametrize(
+    "sidecar_gpu_uuid_sha256",
+    [GPU_UUID_SHA256, "7" * 64],
+    ids=["selected-device", "wrong-device"],
+)
 def test_label_capture_stages_workload_output_and_checks_full_vector(
-        tmp_path, monkeypatch):
+        tmp_path, monkeypatch, sidecar_gpu_uuid_sha256):
     matrix = json.loads(cc.DEFAULT_MATRIX.read_text())
     cell = next(
         row for row in matrix["cells"]
@@ -5887,6 +5926,7 @@ def test_label_capture_stages_workload_output_and_checks_full_vector(
             "device": "sm_86", "slug": "silu_fwd_bf16_sm80",
             "shape_point": "timing_shape",
             "binary_sha256": cell["invocation"]["executable_sha256"],
+            "gpu_uuid_sha256": sidecar_gpu_uuid_sha256,
             "profiler_version": "Version 2026.1.0.0 (public-release)",
             "cuda_version": "13.3", "driver_version": "610.43.02",
             "measurement_protocol": {
@@ -5928,13 +5968,30 @@ def test_label_capture_stages_workload_output_and_checks_full_vector(
         return 1.0, stdout, stderr
 
     monkeypatch.setattr(cc, "_run_logged", fake_run)
-    result = cc.capture_label(
-        cell=cell, binary=binary, invocation=cell["invocation"],
-        cell_dir=cell_dir, matrix=matrix, pins=pins, timeout_s=10,
-        preflight_sha256="0" * 64,
-        expected_ncu_identity=_expected_ncu_identity(),
-        kernel_name_selector="_Z15syntheticKernelv",
-    )
+    capture_kwargs = {
+        "cell": cell,
+        "binary": binary,
+        "invocation": cell["invocation"],
+        "cell_dir": cell_dir,
+        "matrix": matrix,
+        "pins": pins,
+        "timeout_s": 10,
+        "preflight_sha256": "0" * 64,
+        "expected_ncu_identity": _expected_ncu_identity(),
+        "expected_gpu_uuid_sha256": GPU_UUID_SHA256,
+        "selected_host_gpu_index": SELECTED_HOST_GPU_INDEX,
+        "kernel_name_selector": "_Z15syntheticKernelv",
+    }
+    if sidecar_gpu_uuid_sha256 != GPU_UUID_SHA256:
+        with pytest.raises(cc.ChunkRefusal) as caught:
+            cc.capture_label(**capture_kwargs)
+        assert caught.value.code == "label_contract_mismatch"
+        assert "gpu_uuid" in caught.value.detail
+        assert not (
+            cell_dir / "logs" / "label_ncu_collection_receipt.json"
+        ).exists()
+        return
+    result = cc.capture_label(**capture_kwargs)
     command = commands[0]
     assert command.count(cc.ncu_executor.AUTHORIZED_NCU_PROC_PATH) == 1
     assert command[command.index("--ncu-exec-path") + 1] is (
@@ -6017,6 +6074,7 @@ def test_sol_label_consumer_keeps_shape_metadata_out_of_target_argv(
         label.update({
             "device": "sm_86", "slug": slug, "shape_point": shape,
             "binary_sha256": invocation["executable_sha256"],
+            "gpu_uuid_sha256": GPU_UUID_SHA256,
             "profiler_version": "Version 2026.1.0.0 (public-release)",
             "cuda_version": "13.2", "driver_version": "610.43.02",
             "measurement_protocol": {
@@ -6059,6 +6117,8 @@ def test_sol_label_consumer_keeps_shape_metadata_out_of_target_argv(
         cell_dir=cell_dir, matrix=matrix, pins=pins, timeout_s=10,
         preflight_sha256="0" * 64,
         expected_ncu_identity=ncu_identity,
+        expected_gpu_uuid_sha256=GPU_UUID_SHA256,
+        selected_host_gpu_index=SELECTED_HOST_GPU_INDEX,
         runtime_cwd=cc.REPO_ROOT, runtime_env=runtime_env,
         bind_supplemental_toolchain=True,
     )
@@ -7178,6 +7238,8 @@ def test_capture_cell_sol_typed_route_seals_full_orchestration_without_gpu(
         expected_tracer_sha256="9" * 64,
         capture_provenance=provenance,
         expected_ncu_identity=_expected_ncu_identity(),
+        expected_gpu_uuid_sha256=GPU_UUID_SHA256,
+        selected_host_gpu_index=SELECTED_HOST_GPU_INDEX,
         certified_sol_env=certified_env,
         sol_environment_probe=probe,
         module_store=(tmp_path / "module_store").resolve(),

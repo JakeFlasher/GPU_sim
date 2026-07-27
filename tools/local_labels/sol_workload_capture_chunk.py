@@ -4520,7 +4520,7 @@ def _launch_set_preflight_authority(
     expected_source_commit: str, expected_pins_sha256: str,
     expected_matrix_sha256: str, expected_arch: str, expected_sku: str,
     expected_protocol_version: str, expected_ncu_version_prefix: str,
-) -> tuple[ncu_action_executor.ExpectedNcuIdentity, str]:
+) -> tuple[ncu_action_executor.ExpectedNcuIdentity, str, int]:
     """Derive immutable launch-set authority without reopening live host state."""
     schema_path = (
         REPO_ROOT / "workloads/simbench_bw/schemas"
@@ -4593,7 +4593,10 @@ def _launch_set_preflight_authority(
         raise WorkloadCaptureRefusal(
             "supplemental_done_launch_set_preflight_invalid", str(exc),
         ) from exc
-    return identity, gpu_uuid_sha256
+    selected_host_gpu_index = document["checks"]["device"][
+        "selected_host_gpu_index"
+    ]
+    return identity, gpu_uuid_sha256, selected_host_gpu_index
 
 
 def _launch_set_protocol(expected_launch_count: int) -> dict[str, Any]:
@@ -5624,8 +5627,17 @@ def _validate_done_launch_crosswalk(
     *, trace_inventory: list[dict[str, Any]],
     launches: list[dict[str, Any]], completeness: dict[str, Any],
     inventory: dict[str, Any], report_sha256: str,
+    selected_host_gpu_index: int,
 ) -> None:
     try:
+        if (
+            type(selected_host_gpu_index) is not int
+            or selected_host_gpu_index != 0
+        ):
+            raise WorkloadCaptureRefusal(
+                "supplemental_done_launch_set_crosswalk_invalid",
+                f"selected_host_gpu_index={selected_host_gpu_index!r}",
+            )
         for ordinal, (trace_row, ncu_row, complete_row) in enumerate(zip(
             trace_inventory,
             launches,
@@ -5635,6 +5647,12 @@ def _validate_done_launch_crosswalk(
             projection = canonical_capture._launch_set_ordinal_observation(
                 inventory, ordinal=ordinal,
             )
+            trace_launch_key = canonical_capture._trace_ncu_launch_key(
+                trace_row
+            )
+            ncu_launch_key = canonical_capture._observation_ncu_launch_key(
+                projection
+            )
             if (
                 trace_row.get("launch_ordinal") != ordinal
                 or trace_row.get("launch_identity_sha256")
@@ -5642,8 +5660,9 @@ def _validate_done_launch_crosswalk(
                     key: value for key, value in trace_row.items()
                     if key != "launch_identity_sha256"
                 })
-                or canonical_capture._trace_ncu_launch_key(trace_row)
-                != canonical_capture._observation_ncu_launch_key(projection)
+                or trace_launch_key[3] != selected_host_gpu_index
+                or ncu_launch_key[3] != selected_host_gpu_index
+                or trace_launch_key != ncu_launch_key
                 or ncu_row.get("report_launch_ordinal") != ordinal
                 or complete_row.get("launch_ordinal") != ordinal
                 or complete_row.get("launch_identity_sha256")
@@ -5779,7 +5798,11 @@ def validate_done_launch_set_bundle(
             "supplemental_done_launch_set_trace_invalid", str(exc),
         ) from exc
 
-    ncu_identity, gpu_uuid_sha256 = _launch_set_preflight_authority(
+    (
+        ncu_identity,
+        gpu_uuid_sha256,
+        selected_host_gpu_index,
+    ) = _launch_set_preflight_authority(
         retained_preflight,
         expected_sha256=retained_preflight_sha256,
         expected_source_commit=source_commit,
@@ -5887,6 +5910,7 @@ def validate_done_launch_set_bundle(
         completeness=completeness,
         inventory=inventory,
         report_sha256=report_sha256,
+        selected_host_gpu_index=selected_host_gpu_index,
     )
 
     execution_path = paths["run_0_launch_set.execution_identity.json"]
@@ -7099,6 +7123,16 @@ def _capture_one(
                 "prior_capture_defect_attempts": [],
             },
             expected_ncu_identity=expected_ncu_identity,
+            expected_gpu_uuid_sha256=(
+                preflight_manifest["checks"]["device"][
+                    "gpu_uuid_sha256"
+                ]
+            ),
+            selected_host_gpu_index=(
+                preflight_manifest["checks"]["device"][
+                    "selected_host_gpu_index"
+                ]
+            ),
             certified_sol_env=certified_row_environment(
                 cell=cell, certified_sol_env=certified_sol_env,
                 flashinfer_proof=flashinfer_proof,

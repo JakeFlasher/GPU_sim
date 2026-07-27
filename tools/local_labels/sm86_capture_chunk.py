@@ -6020,6 +6020,8 @@ def capture_label(
     matrix: dict, pins: dict, timeout_s: float,
     preflight_sha256: str,
     expected_ncu_identity: ncu_executor.ExpectedNcuIdentity,
+    expected_gpu_uuid_sha256: str,
+    selected_host_gpu_index: int,
     runtime_cwd: Path | None = None,
     runtime_env: dict[str, str] | None = None,
     phase_result_validator: Callable[[dict[str, str], str], dict] | None = None,
@@ -6036,6 +6038,18 @@ def capture_label(
     if not _is_sha256(preflight_sha256):
         raise ChunkRefusal(
             "capture_preflight_authority_invalid", repr(preflight_sha256),
+        )
+    if (
+        not _is_sha256(expected_gpu_uuid_sha256)
+        or type(selected_host_gpu_index) is not int
+        or selected_host_gpu_index != 0
+    ):
+        raise ChunkRefusal(
+            "capture_device_authority_invalid",
+            repr({
+                "selected_host_gpu_index": selected_host_gpu_index,
+                "gpu_uuid_sha256": expected_gpu_uuid_sha256,
+            }),
         )
     prepared = _prepare_label_capture_command(
         cell=cell, binary=binary, invocation=invocation, cell_dir=cell_dir,
@@ -6135,6 +6149,8 @@ def capture_label(
         "shape": label.get("shape_point")
         == label_shape_point,
         "binary": label.get("binary_sha256") == invocation["executable_sha256"],
+        "gpu_uuid": label.get("gpu_uuid_sha256")
+        == expected_gpu_uuid_sha256,
         "repeat": label.get("repeat_index") == 0,
         "launch": label.get("launch_index") == label_launch_index,
         "clock": protocol.get("ncu_clock_control") == "none",
@@ -6201,10 +6217,18 @@ def capture_label(
         raise ChunkRefusal(
             "label_launch_observation_invalid", repr(launch_observation)
         )
-    _observation_ncu_launch_key(
+    observed_launch_key = _observation_ncu_launch_key(
         launch_observation,
         refusal_code="label_launch_identity_join_mismatch",
     )
+    if observed_launch_key[3] != selected_host_gpu_index:
+        raise ChunkRefusal(
+            "label_launch_device_authority_mismatch",
+            repr({
+                "selected_host_gpu_index": selected_host_gpu_index,
+                "ncu_device": observed_launch_key[3],
+            }),
+        )
     expected_run = {
         "source_commit": source_commit,
         "binary_sha256": invocation["executable_sha256"],
@@ -8762,9 +8786,18 @@ def _canonical_label_kernel_selector(invocation: dict[str, Any]) -> str | None:
 
 def require_canonical_label_launch_identity(
     *, label: dict[str, Any], trace: dict[str, Any], invocation: dict[str, Any],
+    selected_host_gpu_index: int,
 ) -> dict[str, Any]:
     """Require equality of independently observed canonical NCU/NVBit launches."""
     refusal_code = "label_launch_identity_join_mismatch"
+    if (
+        type(selected_host_gpu_index) is not int
+        or selected_host_gpu_index != 0
+    ):
+        raise ChunkRefusal(
+            refusal_code,
+            f"invalid selected host GPU index: {selected_host_gpu_index!r}",
+        )
     contract = invocation.get("capture_launch_contract")
     if not isinstance(contract, dict) or contract.get("schema_version") != 1:
         raise ChunkRefusal(refusal_code, f"invalid v1 launch contract: {contract!r}")
@@ -8795,10 +8828,16 @@ def require_canonical_label_launch_identity(
     observed_key = _observation_ncu_launch_key(
         observation, refusal_code=refusal_code,
     )
-    if observed_key != expected_key or observed_selectors != expected_selectors:
+    if (
+        expected_key[3] != selected_host_gpu_index
+        or observed_key[3] != selected_host_gpu_index
+        or observed_key != expected_key
+        or observed_selectors != expected_selectors
+    ):
         raise ChunkRefusal(
             refusal_code,
             repr({
+                "selected_host_gpu_index": selected_host_gpu_index,
                 "expected_launch_key": expected_key,
                 "observed_launch_key": observed_key,
                 "expected_kernel_selectors": expected_selectors,
@@ -9658,6 +9697,8 @@ def capture_cell(
     cell_budgets: Any, expected_tracer_sha256: str,
     capture_provenance: dict[str, Any],
     expected_ncu_identity: ncu_executor.ExpectedNcuIdentity,
+    expected_gpu_uuid_sha256: str,
+    selected_host_gpu_index: int,
     certified_sol_env: dict[str, str] | None,
     sol_environment_probe: dict[str, Any] | None,
     module_store: Path,
@@ -9674,6 +9715,18 @@ def capture_cell(
         ncu_executor.validate_expected_ncu_identity(expected_ncu_identity)
     except ncu_executor.NcuActionExecutorError as exc:
         raise ChunkRefusal("capture_ncu_authority_invalid", str(exc)) from exc
+    if (
+        not _is_sha256(expected_gpu_uuid_sha256)
+        or type(selected_host_gpu_index) is not int
+        or selected_host_gpu_index != 0
+    ):
+        raise ChunkRefusal(
+            "capture_device_authority_invalid",
+            repr({
+                "selected_host_gpu_index": selected_host_gpu_index,
+                "gpu_uuid_sha256": expected_gpu_uuid_sha256,
+            }),
+        )
     chunk_root = cell_dir.parents[1]
     capture_started_at_utc = capture_provenance.get("capture_started_at_utc")
     admission_run_id = capture_provenance.get("admission_run_id")
@@ -10010,6 +10063,8 @@ def capture_cell(
             timeout_s=remaining("label"),
             preflight_sha256=capture_provenance["preflight_sha256"],
             expected_ncu_identity=expected_ncu_identity,
+            expected_gpu_uuid_sha256=expected_gpu_uuid_sha256,
+            selected_host_gpu_index=selected_host_gpu_index,
             runtime_cwd=runtime_cwd,
             runtime_env=label_env, phase_result_validator=phase_validator,
             kernel_name_selector=kernel_name_selector,
@@ -10043,6 +10098,7 @@ def capture_cell(
         )
         require_canonical_label_launch_identity(
             label=label, trace=trace, invocation=invocation,
+            selected_host_gpu_index=selected_host_gpu_index,
         )
         if control_policy == "post_trace_module_or_typed":
             control = capture_sol_control(
@@ -12069,6 +12125,16 @@ def run_chunk(args: argparse.Namespace) -> Path:
                 ),
                 capture_provenance=capture_provenance,
                 expected_ncu_identity=expected_ncu_identity,
+                expected_gpu_uuid_sha256=(
+                    preflight_manifest["checks"]["device"][
+                        "gpu_uuid_sha256"
+                    ]
+                ),
+                selected_host_gpu_index=(
+                    preflight_manifest["checks"]["device"][
+                        "selected_host_gpu_index"
+                    ]
+                ),
                 certified_sol_env=certified_sol_env,
                 sol_environment_probe=sol_environment_probe,
                 module_store=output_root / "module_store",
