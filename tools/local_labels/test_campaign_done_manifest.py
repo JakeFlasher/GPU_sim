@@ -2341,6 +2341,69 @@ def test_canonical_membership_hash_is_order_independent(case):
         list(reversed(members)))
 
 
+def test_builder_normalizes_reordered_members_results_and_artifacts(case):
+    members = list(reversed(copy.deepcopy(case["kwargs"]["chunk_membership"])))
+    results = list(reversed(copy.deepcopy(case["kwargs"]["cell_results"])))
+    for row in results:
+        row["artifacts"].reverse()
+
+    manifest = _build(
+        case, chunk_membership=members, cell_results=results,
+    )
+
+    assert manifest["chunk_membership"] == sorted(
+        manifest["chunk_membership"],
+        key=lambda row: (row["roster_source"], row["slug"]),
+    )
+    assert manifest["cell_results"] == sorted(
+        manifest["cell_results"],
+        key=lambda row: (row["roster_source"], row["slug"]),
+    )
+    assert all(
+        row["artifacts"] == sorted(
+            row["artifacts"], key=lambda artifact: artifact["relative_path"],
+        )
+        for row in manifest["cell_results"]
+    )
+    assert dm.verify_seal(manifest, repo_root=case["repo"]) == []
+
+
+def test_resume_rejects_noncanonical_cell_result_order(case):
+    manifest = _build(case)
+    manifest["cell_results"].reverse()
+
+    problems = dm.verify_seal(manifest, repo_root=case["repo"])
+
+    assert any(
+        "cell_results or nested artifacts are not in canonical order" in problem
+        for problem in problems
+    )
+
+
+def test_resume_rejects_noncanonical_membership_order(case):
+    manifest = _build(case)
+    manifest["chunk_membership"].reverse()
+
+    problems = dm.verify_seal(manifest, repo_root=case["repo"])
+
+    assert any(
+        "chunk_membership is not in canonical authority-identity order" in problem
+        for problem in problems
+    )
+
+
+def test_resume_rejects_noncanonical_nested_artifact_order(case):
+    manifest = _build(case)
+    manifest["cell_results"][0]["artifacts"].reverse()
+
+    problems = dm.verify_seal(manifest, repo_root=case["repo"])
+
+    assert any(
+        "cell_results or nested artifacts are not in canonical order" in problem
+        for problem in problems
+    )
+
+
 @pytest.mark.parametrize("bad", ["", "HEAD", "f541a83", "a" * 40 + " "])
 def test_noncanonical_source_commit_refuses_seal(case, bad):
     with pytest.raises(dm.DoneManifestError, match="commit|HEAD"):
@@ -2384,6 +2447,41 @@ def test_duplicate_cell_result_identity_refuses_seal(case):
     results.append(duplicate)
     with pytest.raises(dm.DoneManifestError, match="duplicate cell-result"):
         _build(case, cell_results=results, admitted=3)
+
+
+def test_missing_cell_result_artifact_refuses_seal(case):
+    results = copy.deepcopy(case["kwargs"]["cell_results"])
+    results[0]["artifacts"] = [
+        artifact for artifact in results[0]["artifacts"]
+        if artifact["artifact_kind"] != "cell_result"
+    ]
+
+    with pytest.raises(
+        dm.DoneManifestError,
+        match="requires exactly one cell_result artifact; found 0",
+    ):
+        _build(case, cell_results=results)
+
+
+def test_duplicate_cell_result_artifact_refuses_seal(case):
+    results = copy.deepcopy(case["kwargs"]["cell_results"])
+    _append_artifact(
+        case, results[0], kind="cell_result", name="duplicate_cell_result.json",
+    )
+
+    with pytest.raises(
+        dm.DoneManifestError,
+        match="requires exactly one cell_result artifact; found 2",
+    ):
+        _build(case, cell_results=results)
+
+
+def test_cell_artifact_cannot_claim_sealer_owned_done(case):
+    results = copy.deepcopy(case["kwargs"]["cell_results"])
+    results[0]["artifacts"][0]["relative_path"] = "DONE.json"
+
+    with pytest.raises(dm.DoneManifestError, match="sealer-owned root DONE.json"):
+        _build(case, cell_results=results)
 
 
 def test_missing_cell_result_refuses_seal(case):

@@ -904,6 +904,10 @@ def _normalize_results(
             )
         for artifact in artifacts:
             rel = artifact.get("relative_path")
+            if rel == "DONE.json":
+                problems.append(
+                    f"{label} cannot list sealer-owned root DONE.json as a cell artifact"
+                )
             if isinstance(rel, str) and "superseded" in PurePosixPath(rel).parts:
                 problems.append(
                     f"{label} publishes an artifact beneath superseded/: {rel!r}"
@@ -1045,6 +1049,11 @@ def _semantic_problems(manifest: dict) -> list[str]:
     except DoneManifestError as exc:
         problems.append(str(exc))
         normalized_membership = []
+    else:
+        if membership != normalized_membership:
+            problems.append(
+                "chunk_membership is not in canonical authority-identity order"
+            )
     try:
         normalized_results = _normalize_results(
             results,
@@ -1056,6 +1065,11 @@ def _semantic_problems(manifest: dict) -> list[str]:
     except DoneManifestError as exc:
         problems.append(str(exc))
         normalized_results = []
+    else:
+        if results != normalized_results:
+            problems.append(
+                "cell_results or nested artifacts are not in canonical order"
+            )
 
     member_map = _identity_map(normalized_membership)
     result_map = _identity_map(normalized_results)
