@@ -5706,8 +5706,7 @@ def test_historical_chunk_must_match_current_authority_exactly():
                    manifest, cells=cells, chunk_id="chunk-a"))
 
 
-@pytest.mark.campaign_evidence
-def test_consumer_rederives_external_matrix_and_rejects_resealed_invocation_tamper(
+def _campaign_consumer_rederives_external_matrix_and_rejects_resealed_invocation_tamper(
         tmp_path):
     from tools.local_labels import build_sm86_capture_matrix as matrix_builder
     external_authority = tmp_path / "authority.json"

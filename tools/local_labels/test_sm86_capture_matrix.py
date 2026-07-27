@@ -238,16 +238,14 @@ def test_schema_is_valid_and_committed_frozen_matrix_conforms(matrix):
     assert bcm.validate_matrix(matrix, _REPO, validation_mode="frozen_v1") == []
 
 
-@pytest.mark.campaign_evidence
-def test_committed_artifact_is_exact_deterministic_rebuild(matrix):
+def _campaign_committed_artifact_is_exact_deterministic_rebuild(matrix):
     assert _COMMITTED.is_file(), "generate the committed matrix artifact"
     committed = json.loads(_COMMITTED.read_text())
     assert committed == matrix
     assert bcm.build_matrix(_REPO, require_head_match=False) == matrix
 
 
-@pytest.mark.campaign_evidence
-def test_external_authority_path_is_pinned_and_rederivable(tmp_path):
+def _campaign_external_authority_path_is_pinned_and_rederivable(tmp_path):
     external = tmp_path / "capture_roster_authority_sm86.json"
     external.write_bytes((_REPO / bcm.AUTHORITY_PATH).read_bytes())
     generated = bcm.build_matrix(
@@ -448,8 +446,7 @@ def test_simbench_capture_overrides_and_launch_contracts_are_closed(matrix):
         )
 
 
-@pytest.mark.campaign_evidence
-def test_sol_static_control_toolchain_is_host_verified():
+def _campaign_sol_static_control_toolchain_is_host_verified():
     bcm._verify_static_control_toolchain(bcm.SOL_STATIC_CONTROL_REBIND)
 
 
@@ -460,8 +457,7 @@ def test_sol_static_control_toolchain_rejects_contract_drift():
         bcm._verify_static_control_toolchain(drifted)
 
 
-@pytest.mark.campaign_evidence
-def test_strided_batched_vendor_control_dispatches_post_trace(matrix):
+def _campaign_strided_batched_vendor_control_dispatches_post_trace(matrix):
     cell = next(
         row for row in matrix["cells"]
         if row["identity"] == {
@@ -615,8 +611,7 @@ def test_sol_bridge_binds_exact_native_and_reduced_workloads(matrix):
     ]
 
 
-@pytest.mark.campaign_evidence
-def test_sol_logical_workload_hashes_and_counts_rederive(matrix):
+def _campaign_sol_logical_workload_hashes_and_counts_rederive(matrix):
     sol = [
         cell for cell in matrix["cells"]
         if cell["disposition"] == "runnable"
@@ -917,8 +912,7 @@ def test_sol_bridge_rejects_missing_shape_and_stale_solution_hash():
         )
 
 
-@pytest.mark.campaign_evidence
-def test_sol_bridge_rejects_wrong_definition_binding(monkeypatch):
+def _campaign_sol_bridge_rejects_wrong_definition_binding(monkeypatch):
     authority = json.loads((_REPO / bcm.AUTHORITY_PATH).read_text())
     native = next(
         cell for cell in authority["cells"]
@@ -947,8 +941,7 @@ def test_sol_bridge_rejects_wrong_definition_binding(monkeypatch):
         bcm._sol_invocation(native, _REPO, shrink_contract=contract)
 
 
-@pytest.mark.campaign_evidence
-def test_sol_bridge_rejects_reduced_to_native_misroute():
+def _campaign_sol_bridge_rejects_reduced_to_native_misroute():
     authority = json.loads((_REPO / bcm.AUTHORITY_PATH).read_text())
     reduced = next(
         cell for cell in authority["cells"]

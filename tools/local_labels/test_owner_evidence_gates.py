@@ -71,23 +71,23 @@ def test_campaign_gate_pins_interpreter_and_exact_owner_tests():
         "test_committed_preserved_authorities_are_exact_deterministic_rebuild",
         "tools/local_labels/test_sm120_cohort_frozen_at_b1646ef7.py::"
         "test_retained_sm120_projection_exactly_rederives_from_b1646ef7",
-        "tools/local_labels/test_sm86_capture_chunk.py::"
+        "tools/local_labels/test_sm86_capture_matrix_campaign_evidence.py::"
         "test_consumer_rederives_external_matrix_and_rejects_resealed_invocation_tamper",
         "tools/local_labels/test_sm86_live_capture_authority.py::"
         "test_live_authority_exactly_rederives_current_binaries",
-        "tools/local_labels/test_sm86_capture_matrix.py::"
+        "tools/local_labels/test_sm86_capture_matrix_campaign_evidence.py::"
         "test_committed_artifact_is_exact_deterministic_rebuild",
-        "tools/local_labels/test_sm86_capture_matrix.py::"
+        "tools/local_labels/test_sm86_capture_matrix_campaign_evidence.py::"
         "test_external_authority_path_is_pinned_and_rederivable",
-        "tools/local_labels/test_sm86_capture_matrix.py::"
+        "tools/local_labels/test_sm86_capture_matrix_campaign_evidence.py::"
         "test_sol_static_control_toolchain_is_host_verified",
-        "tools/local_labels/test_sm86_capture_matrix.py::"
+        "tools/local_labels/test_sm86_capture_matrix_campaign_evidence.py::"
         "test_strided_batched_vendor_control_dispatches_post_trace",
-        "tools/local_labels/test_sm86_capture_matrix.py::"
+        "tools/local_labels/test_sm86_capture_matrix_campaign_evidence.py::"
         "test_sol_logical_workload_hashes_and_counts_rederive",
-        "tools/local_labels/test_sm86_capture_matrix.py::"
+        "tools/local_labels/test_sm86_capture_matrix_campaign_evidence.py::"
         "test_sol_bridge_rejects_wrong_definition_binding",
-        "tools/local_labels/test_sm86_capture_matrix.py::"
+        "tools/local_labels/test_sm86_capture_matrix_campaign_evidence.py::"
         "test_sol_bridge_rejects_reduced_to_native_misroute",
     )
     observed_node_ids = tuple(
