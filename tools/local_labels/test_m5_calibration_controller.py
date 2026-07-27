@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import fcntl
 import hashlib
 import json
 import os
@@ -849,6 +850,75 @@ def test_publication_rejects_mid_install_partial_hardlink(
     assert alias.read_bytes() == b"possibly unique evidence"
     assert partial.stat().st_ino == alias.stat().st_ino
     assert partial.stat().st_nlink == 2
+
+
+@pytest.mark.parametrize("lock_kind", ["stage", "partial"])
+def test_publication_rejects_live_lock_contention(
+    tmp_path: Path,
+    lock_kind: str,
+) -> None:
+    output = tmp_path / "output"
+    stage = output / ".final.staging"
+    stage.mkdir(parents=True)
+    file = immutable.ImmutableFile.from_bytes("value", b"possibly unique evidence")
+    sentinel: Path | None = None
+    if lock_kind == "stage":
+        sentinel = stage / "sentinel"
+        sentinel.write_bytes(b"retained stage evidence")
+        sentinel.chmod(0o444)
+        locked_path = stage
+        expected = (
+            "immutable publication is owned by a live publisher: .final.staging"
+        )
+        flags = os.O_RDONLY | os.O_DIRECTORY
+    else:
+        locked_path = stage / immutable._partial_name("value")
+        locked_path.write_bytes(b"possibly unique evidence")
+        locked_path.chmod(0o444)
+        expected = (
+            "deterministic partial is owned by a live publisher: "
+            f"{locked_path.name}"
+        )
+        flags = os.O_RDONLY
+
+    descriptor = os.open(
+        locked_path,
+        flags | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0),
+    )
+    locked_before = immutable._snapshot_fields(os.fstat(descriptor))
+    inventory_before = tuple(sorted(path.name for path in stage.iterdir()))
+    stage_before = immutable._snapshot_fields(stage.stat(follow_symlinks=False))
+    sentinel_before = (
+        immutable._snapshot_fields(sentinel.stat(follow_symlinks=False))
+        if sentinel is not None
+        else None
+    )
+    try:
+        fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        with pytest.raises(immutable.ImmutableArtifactError) as error:
+            immutable.publish_directory(output, "final", [file])
+        assert immutable._snapshot_fields(os.fstat(descriptor)) == locked_before
+        assert immutable._snapshot_fields(
+            locked_path.stat(follow_symlinks=False)
+        ) == locked_before
+        assert immutable._snapshot_fields(
+            stage.stat(follow_symlinks=False)
+        ) == stage_before
+        assert tuple(sorted(path.name for path in stage.iterdir())) == inventory_before
+        if sentinel is not None:
+            assert sentinel_before is not None
+            assert immutable._snapshot_fields(
+                sentinel.stat(follow_symlinks=False)
+            ) == sentinel_before
+            assert sentinel.read_bytes() == b"retained stage evidence"
+        else:
+            assert locked_before[3] == 1
+            assert locked_path.read_bytes() == b"possibly unique evidence"
+    finally:
+        os.close(descriptor)
+
+    assert str(error.value) == expected
+    assert not (output / "final").exists()
 
 
 def test_publication_rejects_stage_and_final_symlink_names(tmp_path: Path) -> None:
