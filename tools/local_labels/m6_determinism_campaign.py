@@ -259,28 +259,17 @@ class InputSnapshotCache:
     """Bind each declared input to one verified byte snapshot per invocation."""
 
     def __init__(self) -> None:
-        self._entries: dict[str, tuple[str, int, bytes, tuple[int, ...]]] = {}
+        self._entries: dict[
+            str,
+            tuple[str, int, bytes, immutable.MetadataSnapshot],
+        ] = {}
         self._witnesses: dict[str, dict[str, Any]] = {}
         self._roles: dict[str, set[str]] = {}
 
     @staticmethod
-    def _identity(path: Path) -> tuple[int, ...]:
-        try:
-            metadata = path.stat(follow_symlinks=False)
-        except OSError as exc:
-            _fail("M6_INPUT_SNAPSHOT", f"cannot stat {path}: {exc}")
-        return (
-            metadata.st_dev,
-            metadata.st_ino,
-            metadata.st_mode,
-            metadata.st_nlink,
-            metadata.st_size,
-            metadata.st_mtime_ns,
-            metadata.st_ctime_ns,
-        )
-
-    @staticmethod
-    def _identity_object(identity: tuple[int, ...]) -> dict[str, int]:
+    def _identity_object(
+        identity: immutable.MetadataSnapshot,
+    ) -> dict[str, int]:
         names = (
             "device",
             "inode",
@@ -309,7 +298,11 @@ class InputSnapshotCache:
                 expected_sha256 is not None and expected_sha256 != digest
             ) or (expected_size is not None and expected_size != size):
                 _fail("M6_INPUT_SNAPSHOT_MIXED", f"{role}: declared identity changed")
-            if self._identity(absolute) != identity:
+            try:
+                observed = immutable.snapshot_regular_identity(absolute)
+            except immutable.ImmutableArtifactError as exc:
+                _fail("M6_INPUT_SNAPSHOT", f"{role}: {absolute}: {exc}")
+            if observed != identity:
                 _fail("M6_INPUT_SNAPSHOT_MIXED", f"{role}: path generation changed")
             witness = self._witnesses[key]
             self._roles.setdefault(key, set()).add(role)
@@ -324,63 +317,62 @@ class InputSnapshotCache:
                     _fail("M6_INPUT_SNAPSHOT_MIXED", f"{role}: size declaration changed")
                 witness["declared_size_bytes"] = expected_size
             return payload
-        before = self._identity(absolute)
-        payload = _read_regular(absolute, role=role)
-        after = self._identity(absolute)
-        if before != after:
-            _fail("M6_INPUT_SNAPSHOT_MIXED", f"{role}: changed during read")
-        digest = sha256_bytes(payload)
-        size = len(payload)
-        if expected_sha256 is not None and expected_sha256 != digest:
-            _fail("M6_SOURCE_IDENTITY_MISMATCH", role)
-        if expected_size is not None and expected_size != size:
-            _fail("M6_SOURCE_IDENTITY_MISMATCH", role)
-        self._entries[key] = (digest, size, payload, after)
-        self._roles[key] = {role}
-        self._witnesses[key] = {
-            "canonical_path": key,
-            "role": role,
-            "declared_sha256": expected_sha256,
-            "declared_size_bytes": expected_size,
-            "observed_sha256": digest,
-            "observed_size_bytes": size,
-            "pre_identity": self._identity_object(before),
-            "post_identity": self._identity_object(after),
-        }
-        return payload
+        try:
+            snapshot = immutable.read_regular_snapshot(absolute)
+        except immutable.ImmutableArtifactError as exc:
+            _fail("M6_INPUT_SNAPSHOT", f"{role}: {absolute}: {exc}")
+        return self.bind_pinned(
+            absolute,
+            snapshot.payload,
+            identity=snapshot.metadata,
+            role=role,
+            expected_sha256=expected_sha256,
+            expected_size=expected_size,
+        )
 
-    def bind(
+    def lookup_bound(
+        self,
+        path: Path,
+        *,
+        identity: immutable.MetadataSnapshot,
+        role: str,
+    ) -> bytes | None:
+        """Return bytes already bound to this exact pinned generation."""
+        absolute = Path(os.path.abspath(os.fspath(path)))
+        key = os.fspath(absolute)
+        existing = self._entries.get(key)
+        if existing is None:
+            return None
+        if existing[3] != identity:
+            _fail("M6_INPUT_SNAPSHOT_MIXED", f"{role}: path generation changed")
+        self._roles.setdefault(key, set()).add(role)
+        return existing[2]
+
+    def bind_pinned(
         self,
         path: Path,
         payload: bytes,
         *,
+        identity: immutable.MetadataSnapshot,
         role: str,
         expected_sha256: str | None = None,
         expected_size: int | None = None,
     ) -> bytes:
-        """Register already-consumed bytes without reopening their source."""
+        """Bind bytes and identity consumed through a pinned regular leaf."""
         absolute = Path(os.path.abspath(os.fspath(path)))
-        canonical = _resolve_no_symlink_chain(absolute, role=role)
-        if canonical != absolute:
-            _fail("M6_INPUT_SNAPSHOT_MIXED", f"{role}: path alias")
-        before = self._identity(absolute)
-        try:
-            metadata = absolute.stat(follow_symlinks=False)
-        except OSError as exc:
-            _fail("M6_INPUT_SNAPSHOT", f"{role}: cannot stat {absolute}: {exc}")
-        if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+        if (
+            len(identity) != 7
+            or not stat.S_ISREG(identity[2])
+            or identity[3] != 1
+        ):
             _fail("M6_INPUT_SNAPSHOT", f"{role}: regular single-link file required")
-        if len(payload) != metadata.st_size:
+        if len(payload) != identity[4]:
             _fail("M6_INPUT_SNAPSHOT_MIXED", f"{role}: bound payload size differs")
         digest = sha256_bytes(payload)
         if expected_sha256 is not None and digest != expected_sha256:
             _fail("M6_SOURCE_IDENTITY_MISMATCH", role)
         if expected_size is not None and len(payload) != expected_size:
             _fail("M6_SOURCE_IDENTITY_MISMATCH", role)
-        after = self._identity(absolute)
-        if before != after:
-            _fail("M6_INPUT_SNAPSHOT_MIXED", f"{role}: path generation changed")
-        identity = after
         key = os.fspath(absolute)
         existing = self._entries.get(key)
         if existing is not None:
@@ -427,18 +419,6 @@ class InputSnapshotCache:
 
     def witness_payload(self) -> bytes:
         return canonical_bytes(self.witness())
-
-
-def _stat_snapshot(metadata: os.stat_result) -> tuple[int, int, int, int, int, int, int]:
-    return (
-        metadata.st_dev,
-        metadata.st_ino,
-        metadata.st_mode,
-        metadata.st_nlink,
-        metadata.st_size,
-        metadata.st_mtime_ns,
-        metadata.st_ctime_ns,
-    )
 
 
 def _read_regular_cached(
@@ -638,7 +618,9 @@ def _file_identity(
     if payload is None:
         data = _read_regular_cached(path, role=role, cache=cache)
     elif cache is not None:
-        data = cache.bind(path, payload, role=role)
+        data = cache.read(path, role=role)
+        if data != payload:
+            _fail("M6_INPUT_SNAPSHOT_MIXED", f"{role}: supplied payload changed")
     else:
         data = payload
     return {
@@ -1326,158 +1308,78 @@ class _PinnedTreeTransaction:
             self.reader = immutable.PinnedDirectoryReader(self.root)
         except (OSError, immutable.ImmutableArtifactError) as exc:
             _fail("M6_TREE_SNAPSHOT", f"{role}: {self.root}: {exc}")
-        self._initial = self._scan()
-
-    def _open_directory(self, parts: tuple[str, ...]) -> list[int]:
-        descriptors = [os.dup(self.reader.descriptor)]
-        flags = (
-            os.O_RDONLY
-            | os.O_DIRECTORY
-            | getattr(os, "O_CLOEXEC", 0)
-            | getattr(os, "O_NOFOLLOW", 0)
-        )
         try:
-            for part in parts:
-                child = os.open(part, flags, dir_fd=descriptors[-1])
-                linked = os.stat(
-                    part, dir_fd=descriptors[-1], follow_symlinks=False,
-                )
-                opened = os.fstat(child)
-                if (
-                    stat.S_ISLNK(linked.st_mode)
-                    or not stat.S_ISDIR(linked.st_mode)
-                    or _stat_snapshot(linked) != _stat_snapshot(opened)
-                ):
-                    os.close(child)
-                    _fail(
-                        "M6_TREE_SNAPSHOT",
-                        f"{self.role}: directory component changed",
-                    )
-                descriptors.append(child)
-            return descriptors
+            self._initial = self._snapshot_inventory()
         except BaseException:
-            for descriptor in reversed(descriptors):
-                os.close(descriptor)
+            self.reader.close()
             raise
 
-    def _scan(self) -> dict[str, tuple[str, tuple[int, int, int, int, int, int, int]]]:
+    def _snapshot_inventory(
+        self,
+    ) -> dict[
+        str,
+        tuple[str, immutable.MetadataSnapshot],
+    ]:
         try:
-            self.reader.verify_path()
-            root_before = os.fstat(self.reader.descriptor)
-            if not stat.S_ISDIR(root_before.st_mode):
-                _fail("M6_TREE_SNAPSHOT", f"{self.role}: root is not a directory")
-            if self.require_readonly_directories and root_before.st_mode & 0o222:
-                _fail("M6_TREE_SNAPSHOT", f"{self.role}: writable root directory")
-            observed: dict[
-                str, tuple[str, tuple[int, int, int, int, int, int, int]]
-            ] = {"": ("directory", _stat_snapshot(root_before))}
-            pending: list[tuple[str, ...]] = [()]
-            while pending:
-                parts = pending.pop()
-                descriptors = self._open_directory(parts)
-                directory = descriptors[-1]
-                try:
-                    before = os.fstat(directory)
-                    relative_directory = PurePosixPath(*parts).as_posix() if parts else ""
-                    declared = observed.get(relative_directory)
-                    if declared is not None and declared != (
-                        "directory", _stat_snapshot(before),
-                    ):
-                        _fail(
-                            "M6_TREE_SNAPSHOT",
-                            f"{self.role}: directory generation changed: "
-                            f"{relative_directory or '.'}",
-                        )
-                    with os.scandir(directory) as entries:
-                        rows = [
-                            (entry.name, entry.stat(follow_symlinks=False))
-                            for entry in entries
-                        ]
-                    after = os.fstat(directory)
-                    if _stat_snapshot(after) != _stat_snapshot(before):
-                        _fail(
-                            "M6_TREE_SNAPSHOT",
-                            f"{self.role}: directory changed during inventory: "
-                            f"{relative_directory or '.'}",
-                        )
-                finally:
-                    for descriptor in reversed(descriptors):
-                        os.close(descriptor)
-                for name, metadata in rows:
-                    child_parts = (*parts, name)
-                    relative = PurePosixPath(*child_parts).as_posix()
-                    try:
-                        immutable.safe_relative_path(relative)
-                    except immutable.ImmutableArtifactError as exc:
-                        _fail("M6_TREE_SNAPSHOT", f"{self.role}: {exc}")
-                    snapshot = _stat_snapshot(metadata)
-                    if stat.S_ISLNK(metadata.st_mode):
-                        _fail("M6_TREE_SNAPSHOT", f"{self.role}: symlink: {relative}")
-                    if stat.S_ISDIR(metadata.st_mode):
-                        if (
-                            self.require_readonly_directories
-                            and metadata.st_mode & 0o222
-                        ):
-                            _fail(
-                                "M6_TREE_SNAPSHOT",
-                                f"{self.role}: writable directory: {relative}",
-                            )
-                        kind = "directory"
-                        pending.append(child_parts)
-                    elif stat.S_ISREG(metadata.st_mode):
-                        if metadata.st_nlink != 1:
-                            _fail(
-                                "M6_TREE_SNAPSHOT",
-                                f"{self.role}: hard-linked file: {relative}",
-                            )
-                        if self.require_readonly_files and metadata.st_mode & 0o222:
-                            _fail(
-                                "M6_TREE_SNAPSHOT",
-                                f"{self.role}: writable file: {relative}",
-                            )
-                        kind = "file"
-                    else:
-                        _fail(
-                            "M6_TREE_SNAPSHOT",
-                            f"{self.role}: non-regular entry: {relative}",
-                        )
-                    if relative in observed:
-                        _fail(
-                            "M6_TREE_SNAPSHOT",
-                            f"{self.role}: duplicate inventory path: {relative}",
-                        )
-                    observed[relative] = (kind, snapshot)
-            root_after = os.fstat(self.reader.descriptor)
-            self.reader.verify_path()
-            if _stat_snapshot(root_after) != _stat_snapshot(root_before):
-                _fail(
-                    "M6_TREE_SNAPSHOT",
-                    f"{self.role}: root changed during inventory",
-                )
-            return observed
-        except M6Error:
-            raise
+            snapshot = self.reader.snapshot_tree(
+                require_readonly_files=self.require_readonly_files,
+                require_readonly_directories=self.require_readonly_directories,
+            )
         except (OSError, immutable.ImmutableArtifactError) as exc:
             _fail("M6_TREE_SNAPSHOT", f"{self.role}: {exc}")
+        observed = {
+            "" if path == "." else path: ("directory", metadata)
+            for path, metadata in snapshot.directories
+        }
+        observed.update(
+            (path, ("file", metadata))
+            for path, metadata in snapshot.files
+        )
+        return observed
 
     @property
     def inventory(self) -> Mapping[
-        str, tuple[str, tuple[int, int, int, int, int, int, int]]
+        str, tuple[str, immutable.MetadataSnapshot]
     ]:
         return self._initial
 
     def read(self, relative_path: str, *, role: str) -> bytes:
         try:
-            immutable.safe_relative_path(relative_path)
-            absolute = self.root / relative_path
-            if self.input_cache is not None:
-                return self.input_cache.read(absolute, role=role)
-            return self.reader.read(relative_path)
+            relative = immutable.safe_relative_path(relative_path).as_posix()
+            initial = self._initial.get(relative)
+            if initial is None or initial[0] != "file":
+                raise immutable.ImmutableArtifactError(
+                    f"pinned regular file is absent from initial inventory: {relative}"
+                )
+            expected = initial[1]
+            if self.input_cache is None:
+                return self.reader.read(relative)
+            self.reader.verify_regular(relative, expected)
+            cached = self.input_cache.lookup_bound(
+                self.root / relative,
+                identity=expected,
+                role=role,
+            )
+            if cached is not None:
+                return cached
+            snapshot = self.reader.read_snapshot(relative)
+            if snapshot.metadata != expected:
+                _fail(
+                    "M6_INPUT_SNAPSHOT_MIXED",
+                    f"{role}: changed since initial tree inventory",
+                )
+            return self.input_cache.bind_pinned(
+                self.root / relative,
+                snapshot.payload,
+                identity=snapshot.metadata,
+                role=role,
+            )
         except (OSError, immutable.ImmutableArtifactError) as exc:
-            _fail("M6_TREE_READ", f"{role}: {relative_path}: {exc}")
+            code = "M6_INPUT_SNAPSHOT" if self.input_cache is not None else "M6_TREE_READ"
+            _fail(code, f"{role}: {relative_path}: {exc}")
 
     def verify(self) -> None:
-        final = self._scan()
+        final = self._snapshot_inventory()
         if final != self._initial:
             changed = sorted(set(final) ^ set(self._initial))
             if not changed:
@@ -7945,6 +7847,7 @@ def _cmd_verify(args: argparse.Namespace) -> int:
         role="M6 analysis bundle",
         require_readonly_files=True,
         require_readonly_directories=True,
+        input_cache=input_cache,
     ) as transaction:
         observed = {
             path: kind

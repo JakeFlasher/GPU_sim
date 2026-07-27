@@ -362,10 +362,12 @@ def test_pinned_directory_reader_rejects_named_path_replacement(
     mutation: str,
 ) -> None:
     root, branch, leaf, payload = _reader_tree(tmp_path)
-    original_read = immutable._read_fd
+    original_read = immutable._read_fd_snapshot
     mutated = False
 
-    def replace_after_read(descriptor: int, *, allow_hardlinks: bool = False) -> bytes:
+    def replace_after_read(
+        descriptor: int, *, allow_hardlinks: bool = False,
+    ) -> tuple[bytes, immutable.MetadataSnapshot]:
         nonlocal mutated
         result = original_read(descriptor, allow_hardlinks=allow_hardlinks)
         if mutation == "root_after":
@@ -383,7 +385,7 @@ def test_pinned_directory_reader_rejects_named_path_replacement(
         mutated = True
         return result
 
-    monkeypatch.setattr(immutable, "_read_fd", replace_after_read)
+    monkeypatch.setattr(immutable, "_read_fd_snapshot", replace_after_read)
     with immutable.PinnedDirectoryReader(root) as reader:
         if mutation == "root_before":
             root.rename(tmp_path / "moved-root")
@@ -424,12 +426,12 @@ def test_pinned_directory_reader_rejects_leaf_replacement_before_consumption(
 
     def unexpected_read(
         _descriptor: int, *, allow_hardlinks: bool = False,
-    ) -> bytes:
+    ) -> tuple[bytes, immutable.MetadataSnapshot]:
         del allow_hardlinks
         pytest.fail("leaf bytes consumed before initial path verification")
 
     monkeypatch.setattr(immutable.os, "open", replace_after_leaf_open)
-    monkeypatch.setattr(immutable, "_read_fd", unexpected_read)
+    monkeypatch.setattr(immutable, "_read_fd_snapshot", unexpected_read)
     with immutable.PinnedDirectoryReader(root) as reader:
         with pytest.raises(immutable.ImmutableArtifactError):
             reader.read("branch/value")
@@ -506,12 +508,14 @@ def test_pinned_directory_reader_failure_closes_all_owned_descriptors(
         opened.extend((pinned.descriptor, *pinned.directory_descriptors))
         return pinned
 
-    def fail_read(_descriptor: int, *, allow_hardlinks: bool = False) -> bytes:
+    def fail_read(
+        _descriptor: int, *, allow_hardlinks: bool = False,
+    ) -> tuple[bytes, immutable.MetadataSnapshot]:
         del allow_hardlinks
         raise RuntimeError("injected anchored-read failure")
 
     monkeypatch.setattr(immutable, "_open_relative_regular_at", capture_open)
-    monkeypatch.setattr(immutable, "_read_fd", fail_read)
+    monkeypatch.setattr(immutable, "_read_fd_snapshot", fail_read)
     reader = immutable.PinnedDirectoryReader(root)
     root_descriptors = reader._root.descriptors
     with pytest.raises(RuntimeError, match="injected anchored-read failure"):
@@ -534,6 +538,46 @@ def _snapshot_material(
         material.append(immutable.ImmutableFile.from_bytes(relative_path, payload))
     root.chmod(0o555)
     return tuple(material)
+
+
+def test_pinned_directory_reader_exposes_stable_tree_snapshot(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "snapshot-tree"
+    branch = root / "branch"
+    branch.mkdir(parents=True)
+    leaf = _regular(branch / "value", b"snapshot payload")
+    branch.chmod(0o555)
+    root.chmod(0o555)
+    try:
+        with immutable.PinnedDirectoryReader(root) as reader:
+            snapshot = reader.snapshot_tree(
+                require_readonly_files=True,
+                require_readonly_directories=True,
+            )
+            regular = reader.read_snapshot("branch/value")
+            reader.verify_regular("branch/value", regular.metadata)
+        absolute_regular = immutable.read_regular_snapshot(leaf)
+        absolute_identity = immutable.snapshot_regular_identity(leaf)
+        assert regular.payload == b"snapshot payload"
+        assert absolute_regular == regular
+        assert absolute_identity == regular.metadata
+        assert regular.metadata == immutable._snapshot_fields(
+            leaf.stat(follow_symlinks=False)
+        )
+        assert tuple(path for path, _metadata in snapshot.files) == (
+            "branch/value",
+        )
+        assert tuple(path for path, _metadata in snapshot.directories) == (
+            ".",
+            "branch",
+        )
+        assert dict(snapshot.files)["branch/value"] == immutable._snapshot_fields(
+            leaf.stat(follow_symlinks=False)
+        )
+    finally:
+        branch.chmod(0o755)
+        root.chmod(0o755)
 
 
 def test_snapshot_closure_scales_to_twenty_thousand_files_under_rlimit(

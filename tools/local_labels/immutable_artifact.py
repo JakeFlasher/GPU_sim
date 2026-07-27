@@ -253,8 +253,25 @@ def strict_json_loads(payload: bytes, *, label: str = "JSON") -> Any:
     return value
 
 
-_Snapshot = tuple[int, int, int, int, int, int, int]
+MetadataSnapshot = tuple[int, int, int, int, int, int, int]
+_Snapshot = MetadataSnapshot
 _TreeSnapshot = tuple[dict[str, _Snapshot], dict[str, _Snapshot]]
+
+
+@dataclasses.dataclass(frozen=True)
+class PinnedRegularSnapshot:
+    """Bytes and seven-field identity consumed through one pinned leaf."""
+
+    payload: bytes
+    metadata: MetadataSnapshot
+
+
+@dataclasses.dataclass(frozen=True)
+class PinnedTreeSnapshot:
+    """One stable descriptor-relative tree inventory; root is directory `.`."""
+
+    files: tuple[tuple[str, MetadataSnapshot], ...]
+    directories: tuple[tuple[str, MetadataSnapshot], ...]
 
 
 def _snapshot_fields(metadata: os.stat_result) -> _Snapshot:
@@ -274,7 +291,7 @@ def _consume_stable_regular(
     consume: Callable[[bytes], None],
     *,
     allow_hardlinks: bool = False,
-) -> tuple[int, int]:
+) -> tuple[int, int, MetadataSnapshot]:
     """Consume a pinned leaf through the anchored-reader state machine.
 
     Ownership transitions are CLOSED -> CHAIN_PINNED -> LEAF_PINNED ->
@@ -308,24 +325,34 @@ def _consume_stable_regular(
         except InterruptedError:
             continue
     after = os.fstat(descriptor)
-    if extra or consumed != before.st_size or _snapshot_fields(after) != _snapshot_fields(before):
+    snapshot = _snapshot_fields(before)
+    if extra or consumed != before.st_size or _snapshot_fields(after) != snapshot:
         raise ImmutableArtifactError("regular file changed during snapshot read")
-    return consumed, before.st_mode
+    return consumed, before.st_mode, snapshot
+
+
+def _read_fd_snapshot(
+    descriptor: int, *, allow_hardlinks: bool = False,
+) -> tuple[bytes, MetadataSnapshot]:
+    blocks: list[bytes] = []
+    _size, _mode, snapshot = _consume_stable_regular(
+        descriptor, blocks.append, allow_hardlinks=allow_hardlinks
+    )
+    return b"".join(blocks), snapshot
 
 
 def _read_fd(descriptor: int, *, allow_hardlinks: bool = False) -> bytes:
-    blocks: list[bytes] = []
-    _consume_stable_regular(
-        descriptor, blocks.append, allow_hardlinks=allow_hardlinks
+    payload, _snapshot = _read_fd_snapshot(
+        descriptor, allow_hardlinks=allow_hardlinks,
     )
-    return b"".join(blocks)
+    return payload
 
 
 def _hash_fd(
     descriptor: int, *, allow_hardlinks: bool = False
 ) -> tuple[str, int, int]:
     digest = hashlib.sha256()
-    size, mode = _consume_stable_regular(
+    size, mode, _snapshot = _consume_stable_regular(
         descriptor, digest.update, allow_hardlinks=allow_hardlinks
     )
     return digest.hexdigest(), size, mode
@@ -836,14 +863,42 @@ def open_retained_regular(path: Path) -> RetainedRegular:
         raise
 
 
-def read_regular(path: Path, *, allow_hardlinks: bool = False) -> bytes:
+def read_regular_snapshot(
+    path: Path, *, allow_hardlinks: bool = False,
+) -> PinnedRegularSnapshot:
     pinned = _open_regular(Path(path), allow_hardlinks=allow_hardlinks)
     try:
-        payload = _read_fd(pinned.descriptor, allow_hardlinks=allow_hardlinks)
+        payload, metadata = _read_fd_snapshot(
+            pinned.descriptor, allow_hardlinks=allow_hardlinks,
+        )
         pinned.verify_path()
-        return payload
+        if _snapshot_fields(os.fstat(pinned.descriptor)) != metadata:
+            raise ImmutableArtifactError("regular file changed after snapshot read")
+        return PinnedRegularSnapshot(payload, metadata)
     finally:
         pinned.close()
+
+
+def snapshot_regular_identity(
+    path: Path, *, allow_hardlinks: bool = False,
+) -> MetadataSnapshot:
+    """Return one anchored, byte-free identity for an exact regular leaf."""
+    pinned = _open_regular(Path(path), allow_hardlinks=allow_hardlinks)
+    try:
+        before = _snapshot_fields(os.fstat(pinned.descriptor))
+        pinned.verify_path()
+        after = _snapshot_fields(os.fstat(pinned.descriptor))
+        if after != before:
+            raise ImmutableArtifactError("regular file changed during identity snapshot")
+        return after
+    finally:
+        pinned.close()
+
+
+def read_regular(path: Path, *, allow_hardlinks: bool = False) -> bytes:
+    return read_regular_snapshot(
+        path, allow_hardlinks=allow_hardlinks,
+    ).payload
 
 
 def strict_json_load(path: Path) -> Any:
@@ -1026,16 +1081,57 @@ class PinnedDirectoryReader:
     def verify_path(self) -> None:
         self._root.verify_path()
 
-    def read(self, relative_path: str) -> bytes:
+    def read_snapshot(self, relative_path: str) -> PinnedRegularSnapshot:
         self._root.verify_path()
         pinned = _open_relative_regular_at(self._root.descriptor, relative_path)
         try:
-            payload = _read_fd(pinned.descriptor)
+            payload, metadata = _read_fd_snapshot(pinned.descriptor)
             pinned.verify_path()
+            if _snapshot_fields(os.fstat(pinned.descriptor)) != metadata:
+                raise ImmutableArtifactError(
+                    "regular file changed after snapshot read"
+                )
             self._root.verify_path()
-            return payload
+            return PinnedRegularSnapshot(payload, metadata)
         finally:
             pinned.close()
+
+    def read(self, relative_path: str) -> bytes:
+        return self.read_snapshot(relative_path).payload
+
+    def verify_regular(
+        self, relative_path: str, expected: MetadataSnapshot,
+    ) -> None:
+        self._root.verify_path()
+        pinned = _open_relative_regular_at(self._root.descriptor, relative_path)
+        try:
+            if _snapshot_fields(os.fstat(pinned.descriptor)) != expected:
+                raise ImmutableArtifactError(
+                    f"pinned regular-file generation changed: {relative_path}"
+                )
+            pinned.verify_path()
+            if _snapshot_fields(os.fstat(pinned.descriptor)) != expected:
+                raise ImmutableArtifactError(
+                    f"pinned regular-file generation changed: {relative_path}"
+                )
+            self._root.verify_path()
+        finally:
+            pinned.close()
+
+    def snapshot_tree(
+        self,
+        *,
+        require_readonly_files: bool = False,
+        require_readonly_directories: bool = False,
+    ) -> PinnedTreeSnapshot:
+        self._root.verify_path()
+        snapshot = _snapshot_pinned_tree_at(
+            self._root.descriptor,
+            require_readonly_files=require_readonly_files,
+            require_readonly_directories=require_readonly_directories,
+        )
+        self._root.verify_path()
+        return snapshot
 
     def close(self) -> None:
         self._root.close()
@@ -1086,7 +1182,7 @@ def _copy_to_descriptor(file: ImmutableFile, descriptor: int) -> None:
                 _write_all(descriptor, memoryview(block))
                 digest.update(block)
 
-            size, _ = _consume_stable_regular(
+            size, _, _snapshot = _consume_stable_regular(
                 source.descriptor,
                 copy_block,
                 allow_hardlinks=file.allow_hardlinks,
@@ -1811,6 +1907,47 @@ def _arm_directory_mutation_monitor(
     except BaseException:
         monitor.close()
         raise
+
+
+def _snapshot_pinned_tree_at(
+    root_descriptor: int,
+    *,
+    require_readonly_files: bool,
+    require_readonly_directories: bool,
+) -> PinnedTreeSnapshot:
+    monitor = _arm_directory_mutation_monitor(root_descriptor)
+    try:
+        root_before = _snapshot_fields(os.fstat(root_descriptor))
+        if not stat.S_ISDIR(root_before[2]):
+            raise ImmutableArtifactError("pinned tree root is not a directory")
+        if require_readonly_directories and root_before[2] & 0o222:
+            raise ImmutableArtifactError("pinned tree root directory is writable")
+        files, directories = _snapshot_tree_descriptor(root_descriptor)
+        if directories.get(".") != root_before:
+            raise ImmutableArtifactError("pinned tree root changed during inventory")
+        for relative_path, snapshot in files.items():
+            if snapshot[3] != 1:
+                raise ImmutableArtifactError(
+                    f"hard-linked file in pinned tree: {relative_path}"
+                )
+            if require_readonly_files and snapshot[2] & 0o222:
+                raise ImmutableArtifactError(
+                    f"writable file in pinned tree: {relative_path}"
+                )
+        for relative_path, snapshot in directories.items():
+            if require_readonly_directories and snapshot[2] & 0o222:
+                raise ImmutableArtifactError(
+                    f"writable directory in pinned tree: {relative_path}"
+                )
+        if _snapshot_fields(os.fstat(root_descriptor)) != root_before:
+            raise ImmutableArtifactError("pinned tree root changed during inventory")
+        monitor.require_quiet()
+        return PinnedTreeSnapshot(
+            files=tuple(sorted(files.items())),
+            directories=tuple(sorted(directories.items())),
+        )
+    finally:
+        monitor.close()
 
 
 def _verify_snapshot_contents_at(

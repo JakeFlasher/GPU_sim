@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import copy
+import inspect
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -817,6 +819,238 @@ def test_single_file_publication_rejects_symlinked_ancestor(
         campaign._write_new(output, {"value": 1})
     assert error.value.code == "M6_OUTPUT_PARENT"
     assert not (nested / "schedule.json").exists()
+
+
+def test_pinned_tree_transaction_reuses_one_pinned_read_across_transactions(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "transaction-root"
+    root.mkdir()
+    (root / "value").write_bytes(b"pinned payload")
+    cache = campaign.InputSnapshotCache()
+    original_read_snapshot = campaign.immutable.PinnedDirectoryReader.read_snapshot
+    reads = 0
+
+    def count_read_snapshot(
+        reader: campaign.immutable.PinnedDirectoryReader,
+        relative_path: str,
+    ) -> campaign.immutable.PinnedRegularSnapshot:
+        nonlocal reads
+        reads += 1
+        return original_read_snapshot(reader, relative_path)
+
+    def unexpected_absolute_read(*args, **kwargs):  # noqa: ANN002,ANN003
+        pytest.fail("transaction bypassed its pinned directory reader")
+
+    monkeypatch.setattr(
+        campaign.immutable.PinnedDirectoryReader,
+        "read_snapshot",
+        count_read_snapshot,
+    )
+    monkeypatch.setattr(cache, "read", unexpected_absolute_read)
+    with campaign._PinnedTreeTransaction(
+        root,
+        role="first pinned transaction fixture",
+        input_cache=cache,
+    ) as transaction:
+        assert transaction.read("value", role="first role") == b"pinned payload"
+        assert transaction.read("value", role="second role") == b"pinned payload"
+        transaction.verify()
+    with campaign._PinnedTreeTransaction(
+        root,
+        role="second pinned transaction fixture",
+        input_cache=cache,
+    ) as transaction:
+        assert transaction.read("value", role="third role") == b"pinned payload"
+        transaction.verify()
+    assert reads == 1
+
+
+def test_absolute_cache_snapshot_reuses_exact_identity_in_tree_transaction(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "transaction-root"
+    root.mkdir()
+    leaf = root / "value"
+    leaf.write_bytes(b"pinned payload")
+    cache = campaign.InputSnapshotCache()
+
+    assert cache.read(leaf, role="absolute role") == b"pinned payload"
+    with campaign._PinnedTreeTransaction(
+        root,
+        role="pinned cache fixture",
+        input_cache=cache,
+    ) as transaction:
+        expected = transaction.inventory["value"][1]
+        assert cache._entries[os.fspath(leaf)][3] == expected
+
+        def unexpected_byte_read(_relative_path: str):
+            pytest.fail("exact cached generation was physically reread")
+
+        monkeypatch.setattr(transaction.reader, "read_snapshot", unexpected_byte_read)
+        assert transaction.read("value", role="tree role") == b"pinned payload"
+        transaction.verify()
+
+
+def test_absolute_cache_records_exchanged_generation_from_consumed_descriptor(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "transaction-root"
+    root.mkdir()
+    leaf = root / "value"
+    leaf.write_bytes(b"original payload")
+    alternate = tmp_path / "alternate-root"
+    alternate.mkdir()
+    alternate_leaf = alternate / "value"
+    alternate_leaf.write_bytes(b"attacker payload")
+    alternate_identity = campaign.immutable._snapshot_fields(
+        alternate_leaf.stat(follow_symlinks=False)
+    )
+    held = tmp_path / "held-root"
+    cache = campaign.InputSnapshotCache()
+    original_snapshot = campaign.immutable.read_regular_snapshot
+
+    def exchange_for_snapshot(path: Path):
+        root.rename(held)
+        alternate.rename(root)
+        try:
+            return original_snapshot(path)
+        finally:
+            root.rename(alternate)
+            held.rename(root)
+
+    monkeypatch.setattr(
+        campaign.immutable,
+        "read_regular_snapshot",
+        exchange_for_snapshot,
+    )
+    assert cache.read(leaf, role="exchanged absolute role") == b"attacker payload"
+    assert cache._entries[os.fspath(leaf)][3] == alternate_identity
+
+    with campaign._PinnedTreeTransaction(
+        root,
+        role="restored pinned cache fixture",
+        input_cache=cache,
+    ) as transaction:
+        with pytest.raises(campaign.M6Error) as error:
+            transaction.read("value", role="restored tree role")
+    assert error.value.code == "M6_INPUT_SNAPSHOT_MIXED"
+
+
+def test_pinned_tree_transaction_binds_consumed_generation_during_ancestor_exchange(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "transaction-root"
+    root.mkdir()
+    (root / "value").write_bytes(b"same-size bytes")
+    alternate = tmp_path / "alternate-root"
+    alternate.mkdir()
+    (alternate / "value").write_bytes(b"other payload!!")
+    held = tmp_path / "held-root"
+    cache = campaign.InputSnapshotCache()
+
+    with campaign._PinnedTreeTransaction(
+        root,
+        role="ancestor exchange fixture",
+        input_cache=cache,
+    ) as transaction:
+        expected = transaction.inventory["value"][1]
+        original_bind = cache.bind_pinned
+        exchanged = False
+
+        def exchange_while_binding(path, payload, **kwargs):  # noqa: ANN001,ANN003
+            nonlocal exchanged
+            root.rename(held)
+            alternate.rename(root)
+            try:
+                exchanged = True
+                return original_bind(path, payload, **kwargs)
+            finally:
+                root.rename(alternate)
+                held.rename(root)
+
+        monkeypatch.setattr(cache, "bind_pinned", exchange_while_binding)
+        assert transaction.read("value", role="exchange role") == b"same-size bytes"
+        assert exchanged is True
+        assert cache._entries[os.fspath(root / "value")][3] == expected
+        with pytest.raises(campaign.M6Error) as changed:
+            transaction.verify()
+        assert changed.value.code == "M6_TREE_CHANGED"
+
+
+@pytest.mark.parametrize("mutation", ["missing", "replaced"])
+def test_cache_backed_tree_read_retains_input_snapshot_error_for_leaf_change(
+    tmp_path: Path,
+    mutation: str,
+) -> None:
+    root = tmp_path / "transaction-root"
+    root.mkdir()
+    leaf = root / "value"
+    leaf.write_bytes(b"pinned payload")
+
+    with campaign._PinnedTreeTransaction(
+        root,
+        role="leaf change fixture",
+        input_cache=campaign.InputSnapshotCache(),
+    ) as transaction:
+        leaf.unlink()
+        if mutation == "replaced":
+            leaf.write_bytes(b"pinned payload")
+        with pytest.raises(campaign.M6Error) as error:
+            transaction.read("value", role="changed leaf")
+    assert error.value.code == "M6_INPUT_SNAPSHOT"
+
+
+def test_cache_backed_tree_read_retains_input_snapshot_error_for_mid_read_change(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "transaction-root"
+    root.mkdir()
+    leaf = root / "value"
+    leaf.write_bytes(b"a" * ((1 << 20) + 1))
+
+    with campaign._PinnedTreeTransaction(
+        root,
+        role="mid-read change fixture",
+        input_cache=campaign.InputSnapshotCache(),
+    ) as transaction:
+        original_read = campaign.immutable.os.read
+        mutated = False
+
+        def mutate_after_first_block(descriptor: int, size: int) -> bytes:
+            nonlocal mutated
+            block = original_read(descriptor, size)
+            if block and not mutated:
+                mutated = True
+                with leaf.open("r+b") as stream:
+                    stream.seek(-1, 2)
+                    stream.write(b"b")
+                    stream.flush()
+                    os.fsync(stream.fileno())
+            return block
+
+        monkeypatch.setattr(campaign.immutable.os, "read", mutate_after_first_block)
+        with pytest.raises(campaign.M6Error) as error:
+            transaction.read("value", role="mid-read changed leaf")
+    assert mutated is True
+    assert error.value.code == "M6_INPUT_SNAPSHOT"
+
+
+def test_pinned_tree_transaction_contains_no_private_tree_walker() -> None:
+    source = inspect.getsource(campaign._PinnedTreeTransaction)
+
+    assert "reader.snapshot_tree(" in source
+    assert "input_cache.lookup_bound(" in source
+    assert "input_cache.bind_pinned(" in source
+    assert "os.open(" not in source
+    assert "os.stat(" not in source
+    assert "os.scandir(" not in source
+    assert "_stat_snapshot" not in source
 
 
 def test_event_transaction_rejects_generation_mixing(
@@ -2053,6 +2287,7 @@ def test_require_done_failure_leaves_no_partial_output(
 def test_analysis_publication_is_exact_readonly_and_relocatable(
     schedule: dict,
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     slot = schedule["slots"][0]
     journal = campaign.build_journal(
@@ -2088,12 +2323,35 @@ def test_analysis_publication_is_exact_readonly_and_relocatable(
 
     relocated = tmp_path / "relocated-analysis"
     out_dir.rename(relocated)
+    transaction_caches: list[campaign.InputSnapshotCache | None] = []
+    read_caches: set[campaign.InputSnapshotCache] = set()
+    original_transaction_init = campaign._PinnedTreeTransaction.__init__
+    original_cache_read = campaign.InputSnapshotCache.read
+
+    def track_transaction_cache(self, *args, **kwargs):  # noqa: ANN001,ANN002,ANN003
+        if kwargs.get("role") == "M6 analysis bundle":
+            transaction_caches.append(kwargs.get("input_cache"))
+        original_transaction_init(self, *args, **kwargs)
+
+    def track_cache_read(self, *args, **kwargs):  # noqa: ANN001,ANN002,ANN003
+        read_caches.add(self)
+        return original_cache_read(self, *args, **kwargs)
+
+    monkeypatch.setattr(
+        campaign._PinnedTreeTransaction,
+        "__init__",
+        track_transaction_cache,
+    )
+    monkeypatch.setattr(campaign.InputSnapshotCache, "read", track_cache_read)
     assert campaign.main([
         "verify",
         "--schedule", str(schedule_path),
         "--journal", str(journal_path),
         "--analysis-root", str(relocated),
     ]) == 0
+    assert len(transaction_caches) == 1
+    assert transaction_caches[0] is not None
+    assert transaction_caches[0] in read_caches
 
 
 def test_analysis_publication_refuses_repository_overlap(tmp_path: Path) -> None:
