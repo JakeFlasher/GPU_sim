@@ -1,0 +1,196 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gpu-simulator.invalid/schemas/m5_source_surface_registry.v1.schema.json",
+  "title": "M5 Rule-1 source-surface registry",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_kind",
+    "authority_policy",
+    "card_write_policy",
+    "collection_gate",
+    "credit_state",
+    "external_gate_state",
+    "milestone_state",
+    "closure_roots",
+    "entries"
+  ],
+  "properties": {
+    "schema_version": {"const": 1},
+    "artifact_kind": {"const": "M5_SOURCE_SURFACE_REGISTRY"},
+    "authority_policy": {"const": "NO_SOURCE_SURFACE_IS_AN_M5_AUTHORITY"},
+    "card_write_policy": {"const": "FORBIDDEN"},
+    "collection_gate": {"const": "M5_COLLECT_DISABLED"},
+    "credit_state": {"const": "NO_REVIEW_OPERATOR_HARDWARE_OR_CAMPAIGN_CREDIT"},
+    "external_gate_state": {"const": "REVIEW_OPERATOR_HARDWARE_UNCHANGED"},
+    "milestone_state": {"const": "M5_NOT_STARTED"},
+    "closure_roots": {
+      "const": [
+        "CLAUDE.md",
+        "arch_profiles",
+        "data/local_labels",
+        "data/pchase",
+        "docs",
+        "eval/frozen_labels",
+        "eval/guards",
+        "plans",
+        "sim",
+        "tools/local_labels",
+        "tools/nvbit_tracer",
+        "tools/pchase",
+        "tools/producer_retirement.py",
+        "tools/sass_control",
+        "workloads/simbench_bw"
+      ]
+    },
+    "entries": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 256,
+      "items": {"$ref": "#/$defs/entry"}
+    }
+  },
+  "$defs": {
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "category",
+        "lifecycle",
+        "authority_candidate",
+        "can_collect",
+        "reason"
+      ],
+      "properties": {
+        "path": {
+          "type": "string",
+          "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.(?:/|$))[A-Za-z0-9_.+/-]{1,255}$"
+        },
+        "category": {
+          "enum": [
+            "collector",
+            "documentation",
+            "downstream_consumer",
+            "forbidden_substitute",
+            "guard",
+            "legacy_retired",
+            "pinned_input",
+            "producer",
+            "runtime_dependency",
+            "schema",
+            "source_inventory",
+            "test",
+            "trust_registry"
+          ]
+        },
+        "lifecycle": {
+          "enum": ["active", "disabled", "historical", "quarantined"]
+        },
+        "authority_candidate": {"const": false},
+        "can_collect": {"const": false},
+        "reason": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "path": {
+                "const": "plans/sm86_comprehensive_live_capture_campaign_plan.md"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "category": {"const": "documentation"},
+              "lifecycle": {"const": "active"},
+              "reason": {"const": "Active scheduling plan; legacy design and rank references are not preregistration authority."}
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "path": {
+                "pattern": "^plans/(?:sm86_calibration_microbench_design_fable5_(?:prompt|answer)\\.md|sm86_cp_async_timing_probe_fable5_(?:prompt|answer)\\.md)$"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "category": {"const": "documentation"},
+              "lifecycle": {"const": "quarantined"}
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "path": {
+                "pattern": "^plans/fable5_consultation_and_response/01-m5-rule1-provenance(?:--final\\.merged\\.prompt|\\.fable5\\.response)\\.txt$"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "category": {"const": "documentation"},
+              "lifecycle": {"const": "quarantined"}
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "path": {
+                "pattern": "^workloads/simbench_bw/schemas/m5_calibration_(?:run|result|done)\\.v1\\.schema\\.json$"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "category": {"const": "schema"},
+              "lifecycle": {"const": "quarantined"}
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "path": {
+                "pattern": "^(?:data/local_labels/nvml_(?:reference_operating_point|short_burst_anchor)_sm_86\\.json|eval/frozen_labels/sm86_m1_bundle_v21\\.json|tools/local_labels/(?:calibrate_nvml_.*|fit_.*calibration_head.*|sm120_calibration_head_historical_only_scanner\\.py|test_calibration_head_v5_schema\\.py)|workloads/simbench_bw/(?:nvml_covariate_acceptance\\.toml|nvml_covariate_join\\.py|nvml_metadata_verifier\\.py|schemas/(?:calibration_evaluation_.*|calibration_head_.*|nvml_covariate\\.schema\\.json|nvml_reference_operating_point\\.schema\\.json)))$"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "category": {"const": "forbidden_substitute"},
+              "authority_candidate": {"const": false},
+              "can_collect": {"const": false}
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "path": {
+                "const": "tools/local_labels/m5_calibration_collector.py"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "category": {"const": "collector"},
+              "lifecycle": {"const": "disabled"},
+              "can_collect": {"const": false}
+            }
+          }
+        }
+      ]
+    }
+  }
+}

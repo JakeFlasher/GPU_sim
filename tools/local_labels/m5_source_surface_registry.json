@@ -1,0 +1,813 @@
+{
+  "artifact_kind": "M5_SOURCE_SURFACE_REGISTRY",
+  "authority_policy": "NO_SOURCE_SURFACE_IS_AN_M5_AUTHORITY",
+  "card_write_policy": "FORBIDDEN",
+  "closure_roots": [
+    "CLAUDE.md",
+    "arch_profiles",
+    "data/local_labels",
+    "data/pchase",
+    "docs",
+    "eval/frozen_labels",
+    "eval/guards",
+    "plans",
+    "sim",
+    "tools/local_labels",
+    "tools/nvbit_tracer",
+    "tools/pchase",
+    "tools/producer_retirement.py",
+    "tools/sass_control",
+    "workloads/simbench_bw"
+  ],
+  "collection_gate": "M5_COLLECT_DISABLED",
+  "credit_state": "NO_REVIEW_OPERATOR_HARDWARE_OR_CAMPAIGN_CREDIT",
+  "entries": [
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "documentation",
+      "lifecycle": "active",
+      "path": "CLAUDE.md",
+      "reason": "Binding project policy and milestone state; not scientific authority."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "downstream_consumer",
+      "lifecycle": "active",
+      "path": "arch_profiles/loader.py",
+      "reason": "Future typed research-gap consumer; no direct M5 authority or card write."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "legacy_retired",
+      "lifecycle": "historical",
+      "path": "data/pchase/sm_86_static_card.json",
+      "reason": "Frozen v1 pchase evidence; values may not seed a successor authority."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "documentation",
+      "lifecycle": "active",
+      "path": "docs/STATUS.md",
+      "reason": "Records M5 as not started and grants no campaign or hardware credit."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "documentation",
+      "lifecycle": "active",
+      "path": "docs/immutable_publication_contract.md",
+      "reason": "Publication boundary documentation used by M5 runtime scaffolding."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "documentation",
+      "lifecycle": "active",
+      "path": "docs/m5_rule1_provenance_v2.md",
+      "reason": "Current M5 Rule-1 software boundary documentation; not an admitted authority."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "guard",
+      "lifecycle": "active",
+      "path": "eval/guards/test_targets_not_features_guard.py",
+      "reason": "Repository-wide targets-never-features and no-card-write guard surface."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "documentation",
+      "lifecycle": "quarantined",
+      "path": "plans/fable5_consultation_and_response/01-m5-rule1-provenance--final.merged.prompt.txt",
+      "reason": "Historical consultation input with forbidden preregistration ancestry."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "documentation",
+      "lifecycle": "quarantined",
+      "path": "plans/fable5_consultation_and_response/01-m5-rule1-provenance.fable5.response.txt",
+      "reason": "Advisory historical response; never repository or scientific authority."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "documentation",
+      "lifecycle": "active",
+      "path": "plans/micro2027_ncu_sim_execution_plan.md",
+      "reason": "Authoritative milestone plan; external M5 gates remain binding."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "documentation",
+      "lifecycle": "active",
+      "path": "plans/sm86_comprehensive_live_capture_campaign_plan.md",
+      "reason": "Active scheduling plan; legacy design and rank references are not preregistration authority."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "downstream_consumer",
+      "lifecycle": "active",
+      "path": "sim/calib/src/lib.rs",
+      "reason": "Typed calibration consumer requiring a future admitted M5 gap handoff."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "downstream_consumer",
+      "lifecycle": "active",
+      "path": "sim/mem/src/pchase_card.rs",
+      "reason": "Simulator pchase-card consumer; not an M5 producer or trust root."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "forbidden_substitute",
+      "lifecycle": "active",
+      "path": "tools/local_labels/calibrate_nvml_reference_operating_point.py",
+      "reason": "Separate NVML calibration tooling; forbidden as an M5 source identity."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "forbidden_substitute",
+      "lifecycle": "active",
+      "path": "tools/local_labels/calibrate_nvml_short_burst_anchor.py",
+      "reason": "Separate NVML calibration tooling; forbidden as an M5 source identity."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "forbidden_substitute",
+      "lifecycle": "active",
+      "path": "tools/local_labels/fit_calibration_head.py",
+      "reason": "Generic calibration-head fitter lacks an M5 Rule-1-clean identity."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "forbidden_substitute",
+      "lifecycle": "active",
+      "path": "tools/local_labels/fit_calibration_head_v4_sm120.py",
+      "reason": "sm_120 calibration-head fitter is out of scope and forbidden as M5 authority."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "forbidden_substitute",
+      "lifecycle": "active",
+      "path": "tools/local_labels/fit_l1_calibration_head.py",
+      "reason": "L1 calibration-head fitter lacks an M5 Rule-1-clean identity."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "forbidden_substitute",
+      "lifecycle": "active",
+      "path": "tools/local_labels/fit_monotonic_calibration_head_v5.py",
+      "reason": "Monotonic calibration-head fitter is not an M5 producer or trust root."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "runtime_dependency",
+      "lifecycle": "active",
+      "path": "tools/local_labels/immutable_artifact.py",
+      "reason": "Shared immutable publication dependency; carries no M5 scientific authority."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "collector",
+      "lifecycle": "disabled",
+      "path": "tools/local_labels/m5_calibration_collector.py",
+      "reason": "Tracked owner surface that refuses exactly with M5_COLLECT_DISABLED."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "producer",
+      "lifecycle": "active",
+      "path": "tools/local_labels/m5_calibration_controller.py",
+      "reason": "Offline controller and verifier; production admission remains externally gated."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "source_inventory",
+      "lifecycle": "active",
+      "path": "tools/local_labels/m5_source_surface_registry.json",
+      "reason": "Closed classification registry; explicitly not an M5 scientific authority."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "trust_registry",
+      "lifecycle": "active",
+      "path": "tools/local_labels/m5_trust_anchors.json",
+      "reason": "Controller-pinned public trust registry; intentionally admits no production anchor."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "forbidden_substitute",
+      "lifecycle": "historical",
+      "path": "tools/local_labels/sm120_calibration_head_historical_only_scanner.py",
+      "reason": "Historical sm_120 scanner; out of scope and forbidden as sm_86 M5 identity."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "forbidden_substitute",
+      "lifecycle": "active",
+      "path": "tools/local_labels/test_calibration_head_v5_schema.py",
+      "reason": "Calibration-head test surface cannot substitute for an M5 producer identity."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "test",
+      "lifecycle": "active",
+      "path": "tools/local_labels/test_m5_calibration_collector.py",
+      "reason": "Binds the disabled collector's import, call, and direct-execution surface."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "test",
+      "lifecycle": "active",
+      "path": "tools/local_labels/test_m5_calibration_controller.py",
+      "reason": "Synthetic offline controller tests grant no production or hardware credit."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "test",
+      "lifecycle": "active",
+      "path": "tools/local_labels/test_m5_inventory_closure.py",
+      "reason": "Owner test for registry schema, discovery closure, and substitute rejection."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "pinned_input",
+      "lifecycle": "disabled",
+      "path": "tools/pchase/pchase_kernels.cu",
+      "reason": "Pinned probe source; build and collection require future admitted authority."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "legacy_retired",
+      "lifecycle": "historical",
+      "path": "tools/pchase/run_pchase_card.py",
+      "reason": "Retired v1 pchase producer; all collection-capable helpers refuse."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "test",
+      "lifecycle": "historical",
+      "path": "tools/pchase/test_pchase_card.py",
+      "reason": "Historical producer test surface retained without reviving collection."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "guard",
+      "lifecycle": "active",
+      "path": "tools/pchase/test_pchase_retirement_import_boundary.py",
+      "reason": "Binds non-invocability of retired imported pchase helpers."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "legacy_retired",
+      "lifecycle": "historical",
+      "path": "tools/pchase/transcribe_latencies_to_arch_card.py",
+      "reason": "Retired card transcriber that refuses before file access."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "runtime_dependency",
+      "lifecycle": "active",
+      "path": "tools/producer_retirement.py",
+      "reason": "Shared typed retirement boundary for legacy producer entry points."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "forbidden_substitute",
+      "lifecycle": "active",
+      "path": "workloads/simbench_bw/schemas/calibration_evaluation_v1.schema.json",
+      "reason": "Generic calibration-evaluation schema is forbidden as M5 authority."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "forbidden_substitute",
+      "lifecycle": "active",
+      "path": "workloads/simbench_bw/schemas/calibration_head_v1.schema.json",
+      "reason": "Calibration-head v1 schema cannot supply an M5 source identity."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "forbidden_substitute",
+      "lifecycle": "active",
+      "path": "workloads/simbench_bw/schemas/calibration_head_v5.schema.json",
+      "reason": "Calibration-head v5 schema cannot supply an M5 source identity."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "schema",
+      "lifecycle": "quarantined",
+      "path": "workloads/simbench_bw/schemas/m5_calibration_done.v1.schema.json",
+      "reason": "Quarantined v1 DONE wire contract retained for explicit historical dispatch."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "schema",
+      "lifecycle": "active",
+      "path": "workloads/simbench_bw/schemas/m5_calibration_done.v2.schema.json",
+      "reason": "Active v2 DONE schema; no admitted production bundle currently exists."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "schema",
+      "lifecycle": "quarantined",
+      "path": "workloads/simbench_bw/schemas/m5_calibration_result.v1.schema.json",
+      "reason": "Quarantined v1 RESULT wire contract retained for explicit historical dispatch."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "schema",
+      "lifecycle": "active",
+      "path": "workloads/simbench_bw/schemas/m5_calibration_result.v2.schema.json",
+      "reason": "Active v2 RESULT schema; hardware and reviewer gates remain unsatisfied."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "schema",
+      "lifecycle": "quarantined",
+      "path": "workloads/simbench_bw/schemas/m5_calibration_run.v1.schema.json",
+      "reason": "Quarantined v1 RUN wire contract retained for explicit historical dispatch."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "schema",
+      "lifecycle": "active",
+      "path": "workloads/simbench_bw/schemas/m5_calibration_run.v2.schema.json",
+      "reason": "Active v2 RUN schema; planning still requires admitted external witnesses."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "schema",
+      "lifecycle": "active",
+      "path": "workloads/simbench_bw/schemas/m5_quantity_authority.v2.schema.json",
+      "reason": "V2 quantity-authority shape; schema validity does not establish ancestry."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "schema",
+      "lifecycle": "active",
+      "path": "workloads/simbench_bw/schemas/m5_source_surface_registry.v1.schema.json",
+      "reason": "Closed schema for this non-authoritative source inventory."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "schema",
+      "lifecycle": "active",
+      "path": "workloads/simbench_bw/schemas/m5_trust_anchor_registry.v1.schema.json",
+      "reason": "Closed trust-registry schema; the production registry remains empty."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "schema",
+      "lifecycle": "historical",
+      "path": "workloads/simbench_bw/schemas/pchase_static_card.schema.json",
+      "reason": "Historical v1 pchase card schema; not a successor M5 authority."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "downstream_consumer",
+      "lifecycle": "active",
+      "path": "arch_profiles/__init__.py",
+      "reason": "Exports typed research-gap interfaces; consumes no M5 RESULT or DONE today."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "downstream_consumer",
+      "lifecycle": "active",
+      "path": "arch_profiles/cards/sm_86.json",
+      "reason": "Architecture-card target that this M5 campaign is forbidden to mutate."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "schema",
+      "lifecycle": "active",
+      "path": "arch_profiles/schema/arch_profile.schema.json",
+      "reason": "Downstream typed value-or-research-gap consumer contract."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "test",
+      "lifecycle": "active",
+      "path": "arch_profiles/tests/test_arch_profile_lockstep.py",
+      "reason": "Binds architecture profile schema and loader lockstep."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "pinned_input",
+      "lifecycle": "active",
+      "path": "data/local_labels/campaign/capture_roster_authority_sm86.json",
+      "reason": "Controller-bound roster identity; contains no M5 scientific authority."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "pinned_input",
+      "lifecycle": "active",
+      "path": "data/local_labels/campaign/sm86_reference_capture_matrix.json",
+      "reason": "Controller-bound canonical matrix identity; never an M5 trust root."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "documentation",
+      "lifecycle": "historical",
+      "path": "plans/fable5_consultation_and_response/02-immutable-publication--final.merged.prompt.txt",
+      "reason": "Historical immutable-publication consultation input; not M5 authority."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "documentation",
+      "lifecycle": "historical",
+      "path": "plans/fable5_consultation_and_response/02-immutable-publication.fable5.response.txt",
+      "reason": "Advisory immutable-publication response; not evidence or scientific authority."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "documentation",
+      "lifecycle": "quarantined",
+      "path": "plans/sm86_calibration_microbench_design_fable5_answer.md",
+      "reason": "Contaminated S002 design ancestor retained only for non-revival archaeology."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "documentation",
+      "lifecycle": "quarantined",
+      "path": "plans/sm86_calibration_microbench_design_fable5_prompt.md",
+      "reason": "Contaminated S001 design ancestor retained only for non-revival archaeology."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "documentation",
+      "lifecycle": "quarantined",
+      "path": "plans/sm86_cp_async_timing_probe_fable5_answer.md",
+      "reason": "Contaminated S004 design ancestor retained only for non-revival archaeology."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "documentation",
+      "lifecycle": "quarantined",
+      "path": "plans/sm86_cp_async_timing_probe_fable5_prompt.md",
+      "reason": "Contaminated S003 design ancestor retained only for non-revival archaeology."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "downstream_consumer",
+      "lifecycle": "active",
+      "path": "sim/mem/src/l1.rs",
+      "reason": "Transitive architecture-card value consumer; no direct M5 input."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "downstream_consumer",
+      "lifecycle": "active",
+      "path": "sim/mem/src/lib.rs",
+      "reason": "Exports the pchase-card consumer surface; reads no M5 artifact today."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "downstream_consumer",
+      "lifecycle": "active",
+      "path": "sim/sm/src/issue.rs",
+      "reason": "Transitive architecture-card timing consumer; no direct M5 input."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "test",
+      "lifecycle": "active",
+      "path": "sim/sm/tests/machine_local_replay.rs",
+      "reason": "Transitive simulator consumer test; grants no M5 hardware credit."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "pinned_input",
+      "lifecycle": "active",
+      "path": "tools/local_labels/campaign_protocol_pins.json",
+      "reason": "Controller-bound protocol pins; cannot supply M5 quantity values."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "test",
+      "lifecycle": "active",
+      "path": "tools/local_labels/test_immutable_artifact.py",
+      "reason": "Binds the shared publication dependency used by M5."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "guard",
+      "lifecycle": "active",
+      "path": "tools/local_labels/test_source_s_retirement_guards.py",
+      "reason": "Binds frozen pchase bytes and retired public producer boundaries."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "runtime_dependency",
+      "lifecycle": "active",
+      "path": "tools/sass_control/emit_control_bits_sidecar.py",
+      "reason": "Controller-bound SASS control-sidecar producer; not an M5 authority."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "runtime_dependency",
+      "lifecycle": "active",
+      "path": "tools/sass_control/extractor.py",
+      "reason": "Controller-bound static control extractor; consumes no NCU target values."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "runtime_dependency",
+      "lifecycle": "active",
+      "path": "tools/sass_control/run_pc_join_witness.py",
+      "reason": "Controller-bound PC-join witness producer; not an M5 trust root."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "schema",
+      "lifecycle": "active",
+      "path": "workloads/simbench_bw/schemas/sass_control_pc_join_witness.schema.json",
+      "reason": "Related input schema for controller-bound PC-join witnesses."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "documentation",
+      "lifecycle": "historical",
+      "path": "plans/cache_hit_rate_predictor_first_plan.md",
+      "reason": "Historical cache plan with an incidental M5 dependency reference; not M5 authority."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "documentation",
+      "lifecycle": "historical",
+      "path": "plans/cache_predictor_l2_trustworthy_baseline_plan.md",
+      "reason": "Historical cache plan with an incidental M5 dependency reference; not M5 authority."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "documentation",
+      "lifecycle": "historical",
+      "path": "plans/cache_predictor_m1_lower_bound_plan.md",
+      "reason": "Historical cache plan with an incidental M5 dependency reference; not M5 authority."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "documentation",
+      "lifecycle": "historical",
+      "path": "plans/cache_predictor_m2_label_stabilization_plan.md",
+      "reason": "Historical cache plan with an incidental M5 dependency reference; not M5 authority."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "documentation",
+      "lifecycle": "historical",
+      "path": "plans/fable5_consultation_and_response/03-m6-determinism--final.merged.prompt.txt",
+      "reason": "Historical M6 consultation input with an M5 dependency reference; not M5 authority."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "documentation",
+      "lifecycle": "historical",
+      "path": "plans/fable5_consultation_and_response/03-m6-determinism.fable5.response.txt",
+      "reason": "Advisory M6 response with an M5 dependency reference; not M5 authority."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "documentation",
+      "lifecycle": "historical",
+      "path": "plans/fable5_consultation_and_response/04-capture-launch-contracts--final.merged.prompt.txt",
+      "reason": "Historical capture consultation input with an M5 dependency reference."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "documentation",
+      "lifecycle": "historical",
+      "path": "plans/fable5_consultation_and_response/06-rust-production-simulator--final.merged.prompt.txt",
+      "reason": "Historical simulator consultation input with an M5 dependency reference."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "documentation",
+      "lifecycle": "historical",
+      "path": "plans/fable5_consultation_and_response/06-rust-production-simulator.fable.response.txt",
+      "reason": "Advisory simulator response with an M5 dependency reference; not M5 authority."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "documentation",
+      "lifecycle": "historical",
+      "path": "plans/fable5_consultation_and_response/07-cycle-semantics-evaluator--final.merged.prompt.txt",
+      "reason": "Historical evaluator consultation input with an M5 dependency reference."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "documentation",
+      "lifecycle": "historical",
+      "path": "plans/nonroot_sota_perf_model_next_phase_plan.md",
+      "reason": "Historical performance plan with an incidental M5 reference; not M5 authority."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "documentation",
+      "lifecycle": "historical",
+      "path": "plans/per_bucket_monotonic_calibration_counter_free_l2_observability_plan.md",
+      "reason": "Historical calibration plan with an incidental M5 reference; forbidden as authority."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "documentation",
+      "lifecycle": "historical",
+      "path": "plans/sm120_cache_replay_counter_free_l2_observability_plan.md",
+      "reason": "Historical sm_120 plan; out of scope and not an sm_86 M5 authority."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "documentation",
+      "lifecycle": "historical",
+      "path": "plans/sm120_only_decoupled_framework_plan.md",
+      "reason": "Historical sm_120 plan; out of scope and not an sm_86 M5 authority."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "documentation",
+      "lifecycle": "historical",
+      "path": "plans/sm120_tier_expansion_wallclock_cache_metrics_plan.md",
+      "reason": "Historical sm_120 plan; out of scope and not an sm_86 M5 authority."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "documentation",
+      "lifecycle": "historical",
+      "path": "plans/sm86_cohort_regen_3090ti_plan.md",
+      "reason": "Historical cohort plan with an M5 dependency reference; not M5 authority."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "documentation",
+      "lifecycle": "historical",
+      "path": "plans/sm86_ncu_replacement_continuation_plan.md",
+      "reason": "Historical capture plan with an M5 dependency reference; not M5 authority."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "documentation",
+      "lifecycle": "historical",
+      "path": "plans/sm86_nonroot_wallclock_prediction_plan.md",
+      "reason": "Historical timing plan with an M5 dependency reference; not M5 authority."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "forbidden_substitute",
+      "lifecycle": "historical",
+      "path": "data/local_labels/nvml_reference_operating_point_sm_86.json",
+      "reason": "NVML calibration values are unrelated and forbidden as M5 source authority."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "forbidden_substitute",
+      "lifecycle": "historical",
+      "path": "data/local_labels/nvml_short_burst_anchor_sm_86.json",
+      "reason": "NVML calibration values are unrelated and forbidden as M5 source authority."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "forbidden_substitute",
+      "lifecycle": "historical",
+      "path": "eval/frozen_labels/sm86_m1_bundle_v21.json",
+      "reason": "Frozen label values may pin provenance but are forbidden as M5 scientific input."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "runtime_dependency",
+      "lifecycle": "active",
+      "path": "tools/nvbit_tracer/nvbit_release/core/nvbit.h",
+      "reason": "Controller-checked NVBit version header; never an M5 quantity authority."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "forbidden_substitute",
+      "lifecycle": "active",
+      "path": "workloads/simbench_bw/nvml_covariate_acceptance.toml",
+      "reason": "NVML calibration acceptance policy cannot substitute for M5 authority."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "forbidden_substitute",
+      "lifecycle": "active",
+      "path": "workloads/simbench_bw/nvml_covariate_join.py",
+      "reason": "NVML covariate joiner is unrelated and forbidden as an M5 producer."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "forbidden_substitute",
+      "lifecycle": "active",
+      "path": "workloads/simbench_bw/nvml_metadata_verifier.py",
+      "reason": "NVML metadata verifier is unrelated and forbidden as an M5 producer."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "forbidden_substitute",
+      "lifecycle": "active",
+      "path": "workloads/simbench_bw/schemas/nvml_covariate.schema.json",
+      "reason": "NVML covariate schema cannot establish an M5 source identity."
+    },
+    {
+      "authority_candidate": false,
+      "can_collect": false,
+      "category": "forbidden_substitute",
+      "lifecycle": "active",
+      "path": "workloads/simbench_bw/schemas/nvml_reference_operating_point.schema.json",
+      "reason": "NVML operating-point schema cannot establish an M5 source identity."
+    }
+  ],
+  "external_gate_state": "REVIEW_OPERATOR_HARDWARE_UNCHANGED",
+  "milestone_state": "M5_NOT_STARTED",
+  "schema_version": 1
+}
