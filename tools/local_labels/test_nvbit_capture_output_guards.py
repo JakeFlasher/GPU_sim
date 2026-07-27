@@ -135,33 +135,46 @@ def test_register_cap_protected_output_refuses_before_mutation(
     assert calls == []
 
 
-def test_golden_capture_safe_plan_is_nonmutating(tmp_path: Path) -> None:
-    output = STAGING / "test_golden_plan"
-    existed = output.exists()
-    env = os.environ | {
-        "PYTHONDONTWRITEBYTECODE": "1",
-        "NVBIT_CAPTURE_OUTPUT_ROOT": str(output),
+def _golden_plan_environment(**additions: str) -> dict[str, str]:
+    environment = {
+        "LANG": "C",
+        "LANGUAGE": "C",
+        "LC_ALL": "C",
+        "PATH": "/bin:/usr/bin",
     }
+    environment.update(additions)
+    return environment
+
+
+def test_golden_capture_safe_plan_is_nonmutating() -> None:
+    output = STAGING / "golden_cells"
+    existed = output.exists()
     proc = subprocess.run(
         [str(GOLDEN_SCRIPT), "--plan-only", "gs_stream_copy"],
-        cwd=REPO, env=env, capture_output=True, text=True,
+        cwd=REPO,
+        env=_golden_plan_environment(),
+        capture_output=True,
+        text=True,
     )
     assert proc.returncode == 0, proc.stderr
+    assert f"root={output}" in proc.stdout
     assert output.exists() is existed
 
 
-def test_golden_capture_protected_plan_has_zero_mutation() -> None:
+def test_golden_capture_retired_output_override_cannot_redirect() -> None:
     forbidden = PROTECTED / "guard_negative_must_not_exist"
     assert not forbidden.exists()
-    env = os.environ | {
-        "PYTHONDONTWRITEBYTECODE": "1",
-        "NVBIT_CAPTURE_OUTPUT_ROOT": str(forbidden),
-    }
     proc = subprocess.run(
         [str(GOLDEN_SCRIPT), "--plan-only", "gs_stream_copy"],
-        cwd=REPO, env=env, capture_output=True, text=True,
+        cwd=REPO,
+        env=_golden_plan_environment(
+            NVBIT_CAPTURE_OUTPUT_ROOT=str(forbidden),
+        ),
+        capture_output=True,
+        text=True,
     )
-    assert proc.returncode != 0
+    assert proc.returncode == 0, proc.stderr
+    assert f"root={STAGING / 'golden_cells'}" in proc.stdout
     assert not forbidden.exists()
 
 
