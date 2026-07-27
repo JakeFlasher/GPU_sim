@@ -809,6 +809,46 @@ def test_verify_published_files_is_read_only(tmp_path: Path, monkeypatch: pytest
     immutable.verify_published_files(root, [file])
 
 
+def test_publication_rejects_mid_install_partial_hardlink(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output = tmp_path / "output"
+    alias = tmp_path / "outside-hardlink"
+    file = immutable.ImmutableFile.from_bytes("value", b"possibly unique evidence")
+    original_verify = immutable._verify_locked_partial_path
+    expected_partial_name = immutable._partial_name("value")
+    injected = False
+
+    def hardlink_before_reverify(
+        parent_descriptor: int,
+        partial_name: str,
+        descriptor: int,
+    ) -> None:
+        nonlocal injected
+        if not injected and partial_name == expected_partial_name:
+            os.link(output / ".final.staging" / partial_name, alias)
+            injected = True
+        original_verify(parent_descriptor, partial_name, descriptor)
+
+    monkeypatch.setattr(
+        immutable,
+        "_verify_locked_partial_path",
+        hardlink_before_reverify,
+    )
+    with pytest.raises(
+        immutable.ImmutableArtifactError,
+        match="locked deterministic partial path changed",
+    ):
+        immutable.publish_directory(output, "final", [file])
+
+    partial = output / ".final.staging" / expected_partial_name
+    assert injected is True
+    assert not (output / "final").exists()
+    assert partial.read_bytes() == b"possibly unique evidence"
+    assert alias.read_bytes() == b"possibly unique evidence"
+    assert partial.stat().st_ino == alias.stat().st_ino
+    assert partial.stat().st_nlink == 2
 
 
 def test_publication_rejects_stage_and_final_symlink_names(tmp_path: Path) -> None:
