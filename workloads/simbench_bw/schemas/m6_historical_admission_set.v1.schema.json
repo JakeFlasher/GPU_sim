@@ -1,0 +1,116 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "simbench_bw/schemas/m6_historical_admission_set.v1.schema.json",
+  "title": "M6 external historical admission set authority",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_kind",
+    "authority_id",
+    "issued_at_utc",
+    "projection_contract",
+    "bindings",
+    "expected_projection_count",
+    "admitted_keys",
+    "admitted_keys_sha256",
+    "authority_sha256"
+  ],
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1
+    },
+    "artifact_kind": {
+      "type": "string",
+      "const": "m6_historical_admission_set"
+    },
+    "authority_id": {
+      "type": "string",
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$"
+    },
+    "issued_at_utc": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "projection_contract": {
+      "const": "reference_config_cell_metric_dispersion_gate_v1"
+    },
+    "bindings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "canonical_matrix_sha256",
+        "matrix_seal_sha256",
+        "roster_authority_sha256",
+        "metric_identity_sha256",
+        "reference_config_id"
+      ],
+      "properties": {
+        "canonical_matrix_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "matrix_seal_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "roster_authority_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "metric_identity_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "reference_config_id": {
+          "const": "cfg=clock_none__cache_all"
+        }
+      }
+    },
+    "expected_projection_count": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "admitted_keys": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/admittedKey"
+      }
+    },
+    "admitted_keys_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "authority_sha256": {
+      "$ref": "#/$defs/sha256"
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "admittedKey": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "cell_id",
+        "cell_identity_sha256",
+        "metric_key",
+        "metric_sha256"
+      ],
+      "properties": {
+        "cell_id": {
+          "type": "string",
+          "minLength": 3
+        },
+        "cell_identity_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "metric_key": {
+          "type": "string",
+          "minLength": 1
+        },
+        "metric_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    }
+  }
+}

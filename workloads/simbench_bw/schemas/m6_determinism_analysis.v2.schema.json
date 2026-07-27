@@ -192,6 +192,7 @@
         "admitted_summary_consumed",
         "reference_oor_zero_confirmed",
         "multiplicity_policy",
+        "historical_admission_reconciliation",
         "limitations",
         "floor_fallback_authorizations"
       ],
@@ -275,6 +276,9 @@
               "$ref": "#/$defs/sha256"
             }
           }
+        },
+        "historical_admission_reconciliation": {
+          "$ref": "#/$defs/historicalReconciliation"
         },
         "limitations": {
           "type": "object",
@@ -484,10 +488,7 @@
           "type": "boolean"
         },
         "historical_reconciliation": {
-          "type": [
-            "string",
-            "null"
-          ]
+          "type": "boolean"
         },
         "reference_oor_zero": {
           "type": "boolean"
@@ -514,6 +515,269 @@
     "sha256": {
       "type": "string",
       "pattern": "^[0-9a-f]{64}$"
+    },
+    "historicalBindings": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "canonical_matrix_sha256",
+        "matrix_seal_sha256",
+        "roster_authority_sha256",
+        "metric_identity_sha256",
+        "reference_config_id"
+      ],
+      "properties": {
+        "canonical_matrix_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "matrix_seal_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "roster_authority_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "metric_identity_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "reference_config_id": {
+          "const": "cfg=clock_none__cache_all"
+        }
+      }
+    },
+    "historicalAuthority": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "authority_id",
+        "issued_at_utc",
+        "artifact_sha256",
+        "size_bytes",
+        "authority_sha256",
+        "admitted_count",
+        "admitted_set_sha256",
+        "bindings"
+      ],
+      "properties": {
+        "authority_id": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{2,127}$"
+        },
+        "issued_at_utc": {
+          "type": "string",
+          "format": "date-time"
+        },
+        "artifact_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "authority_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "admitted_count": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "admitted_set_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "bindings": {
+          "$ref": "#/$defs/historicalBindings"
+        }
+      }
+    },
+    "historicalReconciliation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "projection_contract",
+        "reference_config_id",
+        "expected_projection_count",
+        "observed_projection_count",
+        "projection_complete",
+        "projected_admitted_count",
+        "projected_admitted_set_sha256",
+        "authority",
+        "exact_set_match",
+        "typed_reason",
+        "reconciliation_sha256"
+      ],
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": [
+            "external_pending",
+            "projection_incomplete",
+            "set_mismatch",
+            "reconciled"
+          ]
+        },
+        "projection_contract": {
+          "const": "reference_config_cell_metric_dispersion_gate_v1"
+        },
+        "reference_config_id": {
+          "const": "cfg=clock_none__cache_all"
+        },
+        "expected_projection_count": {
+          "type": "integer",
+          "const": 6710
+        },
+        "observed_projection_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 6710
+        },
+        "projection_complete": {
+          "type": "boolean"
+        },
+        "projected_admitted_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 6710
+        },
+        "projected_admitted_set_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "authority": {
+          "oneOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/historicalAuthority"
+            }
+          ]
+        },
+        "exact_set_match": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "typed_reason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reconciliation_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "reconciled"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "projection_complete": {
+                "const": true
+              },
+              "authority": {
+                "$ref": "#/$defs/historicalAuthority"
+              },
+              "exact_set_match": {
+                "const": true
+              },
+              "typed_reason": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "external_pending"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "authority": {
+                "type": "null"
+              },
+              "exact_set_match": {
+                "type": "null"
+              },
+              "typed_reason": {
+                "const": "historical_admitted_set_not_supplied"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "set_mismatch"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "projection_complete": {
+                "const": true
+              },
+              "authority": {
+                "$ref": "#/$defs/historicalAuthority"
+              },
+              "exact_set_match": {
+                "const": false
+              },
+              "typed_reason": {
+                "const": "historical_admitted_set_mismatch"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "projection_incomplete"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "projection_complete": {
+                "const": false
+              },
+              "authority": {
+                "$ref": "#/$defs/historicalAuthority"
+              },
+              "exact_set_match": {
+                "type": "null"
+              },
+              "typed_reason": {
+                "const": "historical_projection_incomplete"
+              }
+            }
+          }
+        }
+      ]
     },
     "numberOrNull": {
       "type": [

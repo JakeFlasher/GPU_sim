@@ -7,6 +7,7 @@ import json
 import os
 import stat
 import sys
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 from typing import Any, Mapping, Sequence
@@ -110,7 +111,22 @@ def _inventory(root: Path) -> tuple[list[dict[str, Any]], dict[str, bytes]]:
     return entries, payloads
 
 
-def _bound_identity(path: Path, role: str) -> tuple[str, bytes]:
+FileIdentity = tuple[int, int, int, int, int, int, int]
+
+
+def _file_identity(metadata: os.stat_result) -> FileIdentity:
+    return (
+        metadata.st_dev,
+        metadata.st_ino,
+        metadata.st_mode,
+        metadata.st_nlink,
+        metadata.st_size,
+        metadata.st_mtime_ns,
+        metadata.st_ctime_ns,
+    )
+
+
+def _bound_identity(path: Path, role: str) -> tuple[str, bytes, FileIdentity]:
     _require_current_owner(path, role)
     try:
         before = path.lstat()
@@ -126,25 +142,10 @@ def _bound_identity(path: Path, role: str) -> tuple[str, bytes]:
         after = path.lstat()
     except OSError as exc:
         _fail("M6_RECOVERY_INPUT", f"{role}: {path}: {exc}")
-    if (
-        before.st_dev,
-        before.st_ino,
-        before.st_mode,
-        before.st_nlink,
-        before.st_size,
-        before.st_mtime_ns,
-        before.st_ctime_ns,
-    ) != (
-        after.st_dev,
-        after.st_ino,
-        after.st_mode,
-        after.st_nlink,
-        after.st_size,
-        after.st_mtime_ns,
-        after.st_ctime_ns,
-    ):
+    before_identity = _file_identity(before)
+    if before_identity != _file_identity(after):
         _fail("M6_RECOVERY_INPUT_MIXED", role)
-    return _sha(payload), payload
+    return _sha(payload), payload, before_identity
 
 
 def _validate_declared_sha(value: str, role: str) -> None:
@@ -156,9 +157,14 @@ def _recheck_bound_identity(
     path: Path,
     role: str,
     expected_payload: bytes,
+    expected_identity: FileIdentity,
 ) -> None:
-    observed_digest, payload = _bound_identity(path, role)
-    if observed_digest != _sha(expected_payload) or payload != expected_payload:
+    observed_digest, payload, identity = _bound_identity(path, role)
+    if (
+        observed_digest != _sha(expected_payload)
+        or payload != expected_payload
+        or identity != expected_identity
+    ):
         _fail("M6_RECOVERY_INPUT_MIXED", f"{role}: owner generation changed")
 
 
@@ -167,7 +173,7 @@ def _bind_declared_identity(
     path: Path | None,
     role: str,
     seal_field: str,
-) -> bytes | None:
+) -> tuple[bytes, FileIdentity] | None:
     """Bind a stable owner file to its embedded artifact model seal.
 
     The command-line identities are the schedule/journal/analysis model seals,
@@ -177,14 +183,14 @@ def _bind_declared_identity(
     _validate_declared_sha(declared, role)
     if path is None:
         return None
-    _observed_digest, payload = _bound_identity(path, role)
+    _observed_digest, payload, identity = _bound_identity(path, role)
     try:
         value = campaign.loads_strict(payload, role=f"recovery {role}")
     except campaign.M6Error:
         _fail("M6_RECOVERY_IDENTITY_MISMATCH", f"{role}: {path}")
     if not isinstance(value, Mapping) or value.get(seal_field) != declared:
         _fail("M6_RECOVERY_IDENTITY_MISMATCH", f"{role}: {path}")
-    return payload
+    return payload, identity
 
 
 def _validate_semantic_inputs(
@@ -195,6 +201,7 @@ def _validate_semantic_inputs(
     schedule_path: Path,
     journal_path: Path,
     analysis_path: Path,
+    historical_admission_path: Path | None,
     evidence_root: Path | None,
     schedule_sha256: str,
     journal_sha256: str,
@@ -207,6 +214,18 @@ def _validate_semantic_inputs(
         analysis = campaign.loads_strict(analysis_payload, role="recovery analysis")
         if not all(isinstance(value, dict) for value in (schedule, journal, analysis)):
             _fail("M6_RECOVERY_SEMANTIC_INPUT", "schedule/journal/analysis objects required")
+        historical_reconciliation = analysis.get("analysis_policy", {}).get(
+            "historical_admission_reconciliation"
+        )
+        if (
+            isinstance(historical_reconciliation, Mapping)
+            and historical_reconciliation.get("authority") is not None
+            and historical_admission_path is None
+        ):
+            _fail(
+                "M6_HISTORICAL_AUTHORITY_UNBOUND",
+                "reconciled recovery analysis requires its historical admission authority",
+            )
         if (
             schedule.get("schedule_sha256") != schedule_sha256
             or journal.get("journal_sha256") != journal_sha256
@@ -237,6 +256,7 @@ def _validate_semantic_inputs(
                 "bootstrap_replicates"
             ),
             bootstrap_seed=analysis.get("analysis_policy", {}).get("bootstrap_seed"),
+            historical_admission_path=historical_admission_path,
             evidence_root=evidence_root,
             repo_root=campaign.REPO_ROOT,
         )
@@ -303,6 +323,100 @@ def _expected_material(
             ",".join(unsupported_empty),
         )
     return files, payloads, entries
+
+
+def _verify_expected_done_material(
+    expected_payloads: Mapping[str, bytes],
+    *,
+    schedule_payload: bytes,
+    journal_payload: bytes,
+    analysis_payload: bytes,
+) -> None:
+    """Verify an exact dependency-closed DONE payload set before publication."""
+    if "M6_DONE.json" not in expected_payloads:
+        return
+    required = {
+        "schedule.json",
+        "observation_journal.json",
+        "determinism_study.json",
+        "M6_DONE.json",
+    }
+    missing = sorted(required - set(expected_payloads))
+    if missing:
+        _fail("M6_RECOVERY_DONE_INCOMPLETE", ",".join(missing))
+    owner_payloads = {
+        "schedule.json": schedule_payload,
+        "observation_journal.json": journal_payload,
+        "determinism_study.json": analysis_payload,
+    }
+    mismatched_owners = sorted(
+        relative
+        for relative, payload in owner_payloads.items()
+        if expected_payloads.get(relative) != payload
+    )
+    if mismatched_owners:
+        _fail(
+            "M6_RECOVERY_OWNER_BUNDLE_MISMATCH",
+            ",".join(mismatched_owners),
+        )
+
+    def load(relative: str, role: str) -> dict[str, Any]:
+        try:
+            value = campaign.loads_strict(expected_payloads[relative], role=role)
+        except campaign.M6Error as exc:
+            _fail(exc.code, exc.detail)
+        if not isinstance(value, dict):
+            _fail("M6_RECOVERY_DONE_INCOMPLETE", f"{role}: object required")
+        return value
+
+    schedule = load("schedule.json", "recovery expected schedule")
+    journal = load("observation_journal.json", "recovery expected journal")
+    analysis = load("determinism_study.json", "recovery expected analysis")
+    done = load("M6_DONE.json", "recovery expected DONE")
+
+    with tempfile.TemporaryDirectory(prefix="m6-recovery-done-") as temporary:
+        bundle_root = Path(temporary)
+        directories = {bundle_root}
+        try:
+            for relative, payload in expected_payloads.items():
+                safe = _safe_relative(relative)
+                destination = bundle_root / safe
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                directories.update(
+                    parent
+                    for parent in destination.parents
+                    if parent == bundle_root or bundle_root in parent.parents
+                )
+                destination.write_bytes(payload)
+                destination.chmod(0o444)
+            for directory in sorted(
+                directories, key=lambda path: len(path.parts), reverse=True
+            ):
+                directory.chmod(0o555)
+            campaign.verify_analysis_bundle(
+                schedule=schedule,
+                journal=journal,
+                analysis=analysis,
+                schedule_path=bundle_root / "schedule.json",
+                journal_path=bundle_root / "observation_journal.json",
+                analysis_path=bundle_root / "determinism_study.json",
+                done=done,
+                done_path=bundle_root / "M6_DONE.json",
+                schedule_payload=expected_payloads["schedule.json"],
+                journal_payload=expected_payloads["observation_journal.json"],
+                analysis_payload=expected_payloads["determinism_study.json"],
+                evidence_root=bundle_root / "retained_evidence",
+                bundle_root=bundle_root,
+                repo_root=campaign.REPO_ROOT,
+            )
+        except campaign.M6Error as exc:
+            _fail(exc.code, exc.detail)
+        finally:
+            for directory in sorted(directories, key=lambda path: len(path.parts)):
+                try:
+                    directory.chmod(0o700)
+                except OSError:
+                    pass
 
 
 def _compare_staged_topology(
@@ -491,20 +605,35 @@ def recover_staging(
     schedule_path: Path | None = None,
     journal_path: Path | None = None,
     analysis_path: Path | None = None,
+    historical_admission_path: Path | None = None,
     evidence_root: Path | None = None,
 ) -> dict[str, Any]:
     staging_root = Path(os.path.abspath(os.fspath(staging_root)))
     expected_root = Path(os.path.abspath(os.fspath(expected_root)))
     output_root = Path(os.path.abspath(os.fspath(output_root)))
-    schedule_payload = _bind_declared_identity(
+    schedule_bound = _bind_declared_identity(
         schedule_sha256, schedule_path, "schedule", "schedule_sha256"
     )
-    journal_payload = _bind_declared_identity(
+    journal_bound = _bind_declared_identity(
         journal_sha256, journal_path, "journal", "journal_sha256"
     )
-    analysis_payload = _bind_declared_identity(
+    analysis_bound = _bind_declared_identity(
         analysis_sha256, analysis_path, "analysis", "analysis_sha256"
     )
+    historical_admission_bound: tuple[bytes, FileIdentity] | None = None
+    if historical_admission_path is not None:
+        (
+            _historical_digest,
+            historical_admission_payload,
+            historical_admission_identity,
+        ) = _bound_identity(
+            historical_admission_path,
+            "historical admission authority",
+        )
+        historical_admission_bound = (
+            historical_admission_payload,
+            historical_admission_identity,
+        )
     owner_paths = (schedule_path, journal_path, analysis_path)
     if any(path is None for path in owner_paths):
         value = _receipt(
@@ -520,9 +649,12 @@ def recover_staging(
     assert schedule_path is not None
     assert journal_path is not None
     assert analysis_path is not None
-    assert schedule_payload is not None
-    assert journal_payload is not None
-    assert analysis_payload is not None
+    assert schedule_bound is not None
+    assert journal_bound is not None
+    assert analysis_bound is not None
+    schedule_payload, schedule_identity = schedule_bound
+    journal_payload, journal_identity = journal_bound
+    analysis_payload, analysis_identity = analysis_bound
     _validate_semantic_inputs(
         schedule_payload=schedule_payload,
         journal_payload=journal_payload,
@@ -530,20 +662,32 @@ def recover_staging(
         schedule_path=schedule_path,
         journal_path=journal_path,
         analysis_path=analysis_path,
+        historical_admission_path=historical_admission_path,
         evidence_root=evidence_root,
         schedule_sha256=schedule_sha256,
         journal_sha256=journal_sha256,
         analysis_sha256=analysis_sha256,
     )
-    _recheck_bound_identity(
-        schedule_path, "schedule", schedule_payload
-    )
-    _recheck_bound_identity(
-        journal_path, "journal", journal_payload
-    )
-    _recheck_bound_identity(
-        analysis_path, "analysis", analysis_payload
-    )
+    def recheck_owner_inputs() -> None:
+        _recheck_bound_identity(
+            schedule_path, "schedule", schedule_payload, schedule_identity
+        )
+        _recheck_bound_identity(
+            journal_path, "journal", journal_payload, journal_identity
+        )
+        _recheck_bound_identity(
+            analysis_path, "analysis", analysis_payload, analysis_identity
+        )
+        if historical_admission_path is not None and historical_admission_bound:
+            historical_payload, historical_identity = historical_admission_bound
+            _recheck_bound_identity(
+                historical_admission_path,
+                "historical admission authority",
+                historical_payload,
+                historical_identity,
+            )
+
+    recheck_owner_inputs()
     roots = {
         "staging": staging_root,
         "expected": expected_root,
@@ -593,6 +737,12 @@ def recover_staging(
             contradiction_code=exc.code,
         )
         return _emit_receipt(receipt_path, value)
+    _verify_expected_done_material(
+        expected_payloads,
+        schedule_payload=schedule_payload,
+        journal_payload=journal_payload,
+        analysis_payload=analysis_payload,
+    )
     contradiction, staged_files = _compare_staged_topology(
         inventory,
         expected_entries,
@@ -664,15 +814,7 @@ def recover_staging(
                 _fail("M6_RECOVERY_OUTPUT_CONFLICT", f"{final_name}/{stage_name}")
 
             def before_commit(_root: Path, _descriptor: int) -> None:
-                _recheck_bound_identity(
-                    schedule_path, "schedule", schedule_payload
-                )
-                _recheck_bound_identity(
-                    journal_path, "journal", journal_payload
-                )
-                _recheck_bound_identity(
-                    analysis_path, "analysis", analysis_payload
-                )
+                recheck_owner_inputs()
                 try:
                     current_inventory, current_staged_payloads = _inventory(staging_root)
                     current_expected_files, current_expected_payloads, current_expected_entries = (
@@ -702,15 +844,7 @@ def recover_staging(
         raise
     except (OSError, immutable.ImmutableArtifactError) as exc:
         _fail("M6_RECOVERY_PUBLICATION", str(exc))
-    _recheck_bound_identity(
-        schedule_path, "schedule", schedule_payload
-    )
-    _recheck_bound_identity(
-        journal_path, "journal", journal_payload
-    )
-    _recheck_bound_identity(
-        analysis_path, "analysis", analysis_payload
-    )
+    recheck_owner_inputs()
     value = _receipt(
         decision=decision,
         staging_root=staging_root,
@@ -736,6 +870,12 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--journal", dest="journal_path", type=Path)
     parser.add_argument("--analysis", dest="analysis_path", type=Path)
     parser.add_argument(
+        "--historical-admission-set",
+        dest="historical_admission_path",
+        type=Path,
+        help="separately supplied exact historical admission set authority",
+    )
+    parser.add_argument(
         "--evidence-root",
         dest="evidence_root",
         type=Path,
@@ -760,6 +900,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             schedule_path=args.schedule_path,
             journal_path=args.journal_path,
             analysis_path=args.analysis_path,
+            historical_admission_path=args.historical_admission_path,
             evidence_root=args.evidence_root,
         )
     except (RecoveryError, campaign.M6Error) as exc:

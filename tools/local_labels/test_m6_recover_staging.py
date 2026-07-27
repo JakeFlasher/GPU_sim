@@ -32,6 +32,7 @@ def _run(
     expected: Path,
     final_name: str = "artifact",
     receipt_name: str = "recovery.json",
+    historical_admission_path: Path | None = None,
 ):
     output = tmp_path / "published"
     output.mkdir(exist_ok=True)
@@ -65,6 +66,7 @@ def _run(
             schedule_path=owner_paths["schedule"],
             journal_path=owner_paths["journal"],
             analysis_path=owner_paths["analysis"],
+            historical_admission_path=historical_admission_path,
             receipt_path=tmp_path / receipt_name,
         )
 
@@ -103,6 +105,97 @@ def test_exact_prefix_partial_completes_without_mutating_stage(tmp_path: Path) -
     assert (stage / "a.bin").read_bytes() == b"alpha"
     assert not (stage / "nested" / "b.bin").exists()
     assert (tmp_path / "published/artifact/nested/b.bin").read_bytes() == b"bravo"
+
+
+def test_invalid_done_material_is_rejected_before_publication(tmp_path: Path) -> None:
+    expected = tmp_path / "expected"
+    stage = tmp_path / "stage"
+    _tree(expected)
+    _tree(stage)
+    (expected / "M6_DONE.json").write_text("{}\n", encoding="utf-8")
+    (stage / "M6_DONE.json").write_text("{}\n", encoding="utf-8")
+
+    with pytest.raises(recovery.RecoveryError) as error:
+        _run(tmp_path, stage=stage, expected=expected)
+    assert error.value.code == "M6_RECOVERY_DONE_INCOMPLETE"
+    assert not (tmp_path / "published/artifact").exists()
+
+
+def test_expected_done_material_must_match_bound_owner_payloads() -> None:
+    expected_payloads = {
+        "schedule.json": b'{"owner":"bundle-b"}\n',
+        "observation_journal.json": b'{"owner":"bundle-b"}\n',
+        "determinism_study.json": b'{"owner":"bundle-b"}\n',
+        "M6_DONE.json": b"{}\n",
+    }
+
+    with pytest.raises(recovery.RecoveryError) as error:
+        recovery._verify_expected_done_material(
+            expected_payloads,
+            schedule_payload=b'{"owner":"bundle-a"}\n',
+            journal_payload=expected_payloads["observation_journal.json"],
+            analysis_payload=expected_payloads["determinism_study.json"],
+        )
+    assert error.value.code == "M6_RECOVERY_OWNER_BUNDLE_MISMATCH"
+
+
+def test_historical_authority_generation_is_rechecked_before_commit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    expected = tmp_path / "expected"
+    stage = tmp_path / "stage"
+    _tree(expected)
+    _tree(stage)
+    authority = tmp_path / "historical.json"
+    authority.write_bytes(b"same historical bytes\n")
+    original_publish = immutable.publish_directory
+
+    def replace_then_publish(*args, **kwargs):
+        payload = authority.read_bytes()
+        authority.unlink()
+        authority.write_bytes(payload)
+        return original_publish(*args, **kwargs)
+
+    monkeypatch.setattr(immutable, "publish_directory", replace_then_publish)
+    with pytest.raises(recovery.RecoveryError) as error:
+        _run(
+            tmp_path,
+            stage=stage,
+            expected=expected,
+            historical_admission_path=authority,
+        )
+    assert error.value.code == "M6_RECOVERY_INPUT_MIXED"
+    assert not (tmp_path / "published/artifact").exists()
+
+
+def test_reconciled_analysis_requires_explicit_historical_authority(
+    tmp_path: Path,
+) -> None:
+    schedule = {"schedule_sha256": "1" * 64}
+    journal = {"journal_sha256": "2" * 64}
+    analysis = {
+        "analysis_sha256": "3" * 64,
+        "analysis_policy": {
+            "historical_admission_reconciliation": {"authority": {}}
+        },
+    }
+
+    with pytest.raises(recovery.RecoveryError) as error:
+        recovery._validate_semantic_inputs(
+            schedule_payload=campaign.canonical_bytes(schedule),
+            journal_payload=campaign.canonical_bytes(journal),
+            analysis_payload=campaign.canonical_bytes(analysis),
+            schedule_path=tmp_path / "schedule.json",
+            journal_path=tmp_path / "journal.json",
+            analysis_path=tmp_path / "analysis.json",
+            historical_admission_path=None,
+            evidence_root=None,
+            schedule_sha256="1" * 64,
+            journal_sha256="2" * 64,
+            analysis_sha256="3" * 64,
+        )
+    assert error.value.code == "M6_HISTORICAL_AUTHORITY_UNBOUND"
 
 
 def test_one_byte_contradiction_is_preserved_and_quarantined(tmp_path: Path) -> None:

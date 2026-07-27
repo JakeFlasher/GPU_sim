@@ -428,8 +428,8 @@
         },
         "active_m6_schemas": {
           "type": "array",
-          "minItems": 5,
-          "maxItems": 5,
+          "minItems": 6,
+          "maxItems": 6,
           "items": {
             "$ref": "#/$defs/fileIdentity"
           },

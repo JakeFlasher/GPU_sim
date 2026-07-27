@@ -4,6 +4,7 @@ import copy
 import inspect
 import json
 import os
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -292,6 +293,360 @@ def _write_json(path: Path, value: object) -> None:
     path.write_text(json.dumps(value, sort_keys=True, indent=2) + "\n", encoding="utf-8")
 
 
+def _historical_projection(
+    schedule: dict,
+    *,
+    admitted: bool = True,
+) -> list[dict]:
+    return [
+        {
+            "cell_id": cell["cell_id"],
+            "cell_identity_sha256": cell["cell_identity_sha256"],
+            "config_id": campaign.REFERENCE_CONFIG,
+            "metric_key": metric["key"],
+            "metric_sha256": metric["metric_sha256"],
+            "would_have_been_admitted": admitted,
+        }
+        for cell in schedule["cells"]
+        for metric in schedule["metrics"]
+        if metric["capture_status"] == "selected"
+    ]
+
+
+def _historical_authority(
+    schedule: dict,
+    classifications: list[dict],
+) -> dict:
+    admitted_keys = sorted(
+        (
+            campaign._historical_admission_key(row)
+            for row in classifications
+            if row["would_have_been_admitted"] is True
+        ),
+        key=lambda row: (row["cell_id"], row["metric_key"]),
+    )
+    source = schedule["source_identity"]
+    authority = {
+        "schema_version": 1,
+        "artifact_kind": "m6_historical_admission_set",
+        "authority_id": "offline-test-fixture-no-credit",
+        "issued_at_utc": FIXED_TIME,
+        "projection_contract": campaign.HISTORICAL_ADMISSION_PROJECTION,
+        "bindings": {
+            "canonical_matrix_sha256": source["canonical_matrix"]["sha256"],
+            "matrix_seal_sha256": source["matrix_seal_sha256"],
+            "roster_authority_sha256": source["roster_authority_sha256"],
+            "metric_identity_sha256": schedule["metric_identity_sha256"],
+            "reference_config_id": campaign.REFERENCE_CONFIG,
+        },
+        "expected_projection_count": len(classifications),
+        "admitted_keys": admitted_keys,
+        "admitted_keys_sha256": campaign.canonical_sha256(admitted_keys),
+    }
+    authority["authority_sha256"] = campaign.canonical_sha256(authority)
+    return authority
+
+
+def _write_historical_authority(
+    path: Path,
+    schedule: dict,
+    classifications: list[dict],
+) -> dict:
+    authority = _historical_authority(schedule, classifications)
+    _write_json(path, authority)
+    return authority
+
+
+def _trust_no_credit_historical_authority(
+    monkeypatch: pytest.MonkeyPatch,
+    path: Path,
+) -> None:
+    monkeypatch.setattr(
+        campaign,
+        "HISTORICAL_ADMISSION_AUTHORITY_ARTIFACT_SHA256",
+        campaign.sha256_bytes(path.read_bytes()),
+    )
+
+
+def _fixture_done_analysis(
+    schedule: dict,
+    journal: dict,
+    *,
+    journal_path: Path,
+    historical_authority_path: Path,
+    retained_evidence_relative: str,
+    retained_evidence_payload: bytes,
+    monkeypatch: pytest.MonkeyPatch,
+) -> dict:
+    """Build a schema-real no-credit fixture around an intentionally mocked replay."""
+    analysis = campaign.analyze(
+        schedule,
+        journal,
+        journal_path=journal_path,
+        generated_at_utc=FIXED_TIME,
+        bootstrap_replicates=2,
+    )
+    journal["trigger_state"] = "decided"
+    journal["causal_prefix_closed"] = True
+    journal["events"][0]["sidecars"] = [
+        {
+            "relative_path": retained_evidence_relative,
+            "sha256": campaign.sha256_bytes(retained_evidence_payload),
+            "size_bytes": len(retained_evidence_payload),
+        }
+    ]
+    journal["journal_sha256"] = campaign.canonical_sha256(
+        campaign._without(journal, "journal_sha256")
+    )
+    _write_json(journal_path, journal)
+    selected_metrics = [
+        metric
+        for metric in schedule["metrics"]
+        if metric["capture_status"] == "selected"
+    ]
+    template_by_metric = {
+        row["metric_key"]: row for row in analysis["classifications"]
+    }
+    reference = next(
+        config
+        for config in schedule["configs"]
+        if config["config_id"] == campaign.REFERENCE_CONFIG
+    )
+    classifications = []
+    for cell in schedule["cells"]:
+        for metric in selected_metrics:
+            row = copy.deepcopy(template_by_metric[metric["key"]])
+            row.update(
+                {
+                    "cell_id": cell["cell_id"],
+                    "cell_identity_sha256": cell["cell_identity_sha256"],
+                    "config_id": campaign.REFERENCE_CONFIG,
+                    "config_sha256": reference["config_sha256"],
+                    "expected_repeats": 20,
+                    "collected_repeats": 20,
+                    "in_range_repeats": 20,
+                    "out_of_range_repeats": 0,
+                    "values_sha256": campaign.canonical_sha256([1.0] * 20),
+                    "mean_in_range": 1.0,
+                    "dispersion_gate": 0.0,
+                    "would_have_been_admitted": True,
+                    "sigma_rel": 0.0,
+                    "sigma_rel_upper_95": 0.0,
+                    "determinism_class": "deterministic",
+                    "dispersion_class": "deterministic",
+                    "annotations": [],
+                }
+            )
+            row["classification_sha256"] = campaign.canonical_sha256(
+                campaign._without(row, "classification_sha256")
+            )
+            classifications.append(row)
+    analysis["classifications"] = classifications
+    for row in analysis["noise_floors"]:
+        row.update(
+            {
+                "valid_cells": 122,
+                "cross_cell_p90": 0.0,
+                "p90_upper_90": 0.0,
+                "floor": 0.0,
+                "status": "available",
+                "fallback_authorized": False,
+                "fallback_reason": None,
+                "lower_bound": False,
+            }
+        )
+    analysis["denominators"] = [
+        {
+            "cell_id": cell["cell_id"],
+            "metric_key": metric["key"],
+            "determinism_class": "deterministic",
+            "absolute_resolution": metric["absolute_resolution"],
+            "pooled_floor": 0.0,
+            "cell_override": metric["absolute_resolution"],
+            "denominator": metric["absolute_resolution"],
+            "denominator_kind": "absolute",
+            "gate_target": "exact_value",
+            "exact_match": True,
+            "status": "available",
+        }
+        for cell in schedule["cells"]
+        for metric in selected_metrics
+    ]
+    accounting = analysis["accounting"]
+    expected_rows = campaign.TIER1_SLOTS * campaign.EXPECTED_SELECTED_METRICS
+    accounting.update(
+        {
+            "triggered_cells": 0,
+            "active_tier2_slots": 0,
+            "active_slots": campaign.TIER1_SLOTS,
+            "terminal_slots": campaign.TIER1_SLOTS,
+            "pending_slots": 0,
+            "observed_slots": campaign.TIER1_SLOTS,
+            "excluded_typed_slots": 0,
+            "raw_rows_collected": expected_rows,
+            "classified_raw_rows": expected_rows,
+            "excluded_typed_raw_rows": 0,
+            "not_collected_typed_rows": 0,
+            "expected_rows": expected_rows,
+            "pending_expected_rows": 0,
+            "denominator_scope": "complete_m4_launch_set",
+            "collected_identity_holds": True,
+            "terminal_identity_holds": True,
+            "denominator_identity_holds": True,
+        }
+    )
+    reference_rows = 122 * 20
+    other_rows = 122 * 10
+    for bucket in accounting["per_config_metric"]:
+        bucket_expected = (
+            reference_rows
+            if bucket["config_id"] == campaign.REFERENCE_CONFIG
+            else other_rows
+        )
+        bucket.update(
+            {
+                "expected_rows": bucket_expected,
+                "collected_rows": bucket_expected,
+                "classified_rows": bucket_expected,
+                "excluded_typed_rows": 0,
+                "not_collected_typed_rows": 0,
+                "pending_rows": 0,
+            }
+        )
+    policy = analysis["analysis_policy"]
+    policy["reference_oor_zero_confirmed"] = True
+    multiplicity = policy["multiplicity_policy"]
+    multiplicity["status"] = "sealed"
+    multiplicity["policy_sha256"] = campaign.canonical_sha256(
+        campaign._without(multiplicity, "policy_sha256")
+    )
+    _write_historical_authority(
+        historical_authority_path, schedule, classifications
+    )
+    _trust_no_credit_historical_authority(monkeypatch, historical_authority_path)
+    policy["historical_admission_reconciliation"] = (
+        campaign._historical_admission_reconciliation(
+            schedule,
+            classifications,
+            authority_path=historical_authority_path,
+            repo_root=campaign.REPO_ROOT,
+            input_cache=campaign.InputSnapshotCache(),
+        )
+    )
+    policy["limitations"]["historical_reconciliation"] = (
+        "exact no-credit fixture set supplied"
+    )
+    analysis.update(
+        {
+            "journal_sha256": journal["journal_sha256"],
+            "completion_state": "complete",
+            "publication_state": "M6_DONE",
+            "m4_identity_sha256": schedule["m4_identity"]["identity_sha256"],
+            "study_id": "m6-study-"
+            + campaign.canonical_sha256(
+                [
+                    schedule["schedule_sha256"],
+                    journal["journal_sha256"],
+                    policy["bootstrap_seed"],
+                    policy["bootstrap_replicates"],
+                ]
+            )[:16],
+        }
+    )
+    analysis["scientific_gates"] = campaign._scientific_gate_snapshot(analysis)
+    assert analysis["scientific_gates"]["done_eligible"] is True
+    analysis["analysis_sha256"] = campaign.canonical_sha256(
+        campaign._without(analysis, "analysis_sha256")
+    )
+    return analysis
+
+
+def _closed_scientific_gate_fixture(
+    schedule: dict,
+    authority_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> dict:
+    classifications = _historical_projection(schedule)
+    _write_historical_authority(authority_path, schedule, classifications)
+    _trust_no_credit_historical_authority(monkeypatch, authority_path)
+    historical = campaign._historical_admission_reconciliation(
+        schedule,
+        classifications,
+        authority_path=authority_path,
+        repo_root=campaign.REPO_ROOT,
+        input_cache=campaign.InputSnapshotCache(),
+    )
+    selected_metrics = [
+        metric
+        for metric in schedule["metrics"]
+        if metric["capture_status"] == "selected"
+    ]
+    multiplicity = {
+        "method": "BH-FDR",
+        "q": 0.05,
+        "family_definition": "fixture_no_credit",
+        "status": "sealed",
+        "hypothesis_count": 0,
+        "discoveries": [],
+        "discoveries_sha256": campaign.canonical_sha256([]),
+    }
+    multiplicity["policy_sha256"] = campaign.canonical_sha256(multiplicity)
+    return {
+        "metric_identity_sha256": schedule["metric_identity_sha256"],
+        "classifications": classifications,
+        "noise_floors": [
+            {
+                "metric_key": metric["key"],
+                "valid_cells": 30,
+                "floor": 0.0,
+                "status": "available",
+                "fallback_authorized": False,
+            }
+            for metric in selected_metrics
+        ],
+        "denominators": [
+            {
+                "cell_id": cell["cell_id"],
+                "metric_key": metric["key"],
+                "determinism_class": "deterministic",
+                "absolute_resolution": metric["absolute_resolution"],
+                "denominator": metric["absolute_resolution"],
+                "denominator_kind": "absolute",
+                "exact_match": True,
+                "status": "available",
+            }
+            for cell in schedule["cells"]
+            for metric in selected_metrics
+        ],
+        "accounting": {
+            "per_config_metric": [
+                {"config_id": config["config_id"], "metric_key": metric["key"]}
+                for config in schedule["configs"]
+                for metric in selected_metrics
+            ]
+        },
+        "analysis_policy": {
+            "reference_oor_zero_confirmed": True,
+            "floor_fallback_authorizations": [],
+            "multiplicity_policy": multiplicity,
+            "historical_admission_reconciliation": historical,
+            "limitations": {
+                "censoring": "sealed",
+                "finite_n": "sealed",
+                "within_session": "sealed",
+                "multiplicity": "sealed",
+                "historical_reconciliation": "exact set supplied",
+            },
+        },
+    }
+
+
+def _make_tree_writable(root: Path) -> None:
+    for path in root.rglob("*"):
+        path.chmod(0o755 if path.is_dir() else 0o644)
+    root.chmod(0o755)
+
+
 def _make_tree_readonly(root: Path) -> None:
     paths = list(root.rglob("*"))
     for path in paths:
@@ -351,14 +706,382 @@ def _sidecar_for_slot(schedule: dict, slot: dict, *, value: object = 0.5) -> dic
     }
 
 
+def _assert_recursive_object_closure(value: object) -> None:
+    if isinstance(value, dict):
+        if value.get("type") == "object":
+            assert value.get("additionalProperties") is False
+        for child in value.values():
+            _assert_recursive_object_closure(child)
+    elif isinstance(value, list):
+        for child in value:
+            _assert_recursive_object_closure(child)
+
+
 def test_all_five_schemas_are_valid_and_closed_at_object_definitions() -> None:
     for kind in campaign.SCHEMA_PATHS:
         schema = _schema(kind)
         Draft202012Validator.check_schema(schema)
-        assert schema["additionalProperties"] is False
-        for definition in schema.get("$defs", {}).values():
-            if definition.get("type") == "object":
-                assert definition.get("additionalProperties") is False
+        _assert_recursive_object_closure(schema)
+
+
+def test_all_active_schemas_are_valid_and_closed_at_object_definitions() -> None:
+    for schema_path in campaign.SCHEMA_PATHS_V2.values():
+        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        Draft202012Validator.check_schema(schema)
+        _assert_recursive_object_closure(schema)
+
+
+def test_missing_historical_authority_remains_typed_and_done_ineligible(
+    schedule: dict,
+) -> None:
+    classifications = _historical_projection(schedule)
+    reconciliation = campaign._historical_admission_reconciliation(
+        schedule,
+        classifications,
+        authority_path=None,
+        repo_root=campaign.REPO_ROOT,
+        input_cache=campaign.InputSnapshotCache(),
+    )
+    assert reconciliation["status"] == "external_pending"
+    assert reconciliation["authority"] is None
+    assert reconciliation["exact_set_match"] is None
+
+    analysis = {
+        "classifications": classifications,
+        "noise_floors": [],
+        "denominators": [],
+        "accounting": {},
+        "metric_identity_sha256": schedule["metric_identity_sha256"],
+        "analysis_policy": {
+            "floor_fallback_authorizations": [],
+            "multiplicity_policy": {},
+            "historical_admission_reconciliation": reconciliation,
+            "limitations": {
+                "censoring": "sealed",
+                "finite_n": "sealed",
+                "within_session": "sealed",
+                "multiplicity": "sealed",
+                "historical_reconciliation": "external_pending",
+            },
+        },
+    }
+    gates = campaign._scientific_gate_snapshot(analysis)
+    assert gates["historical_reconciliation"] is False
+    assert gates["done_eligible"] is False
+
+
+def test_self_sealed_historical_authority_is_not_a_trust_anchor(
+    schedule: dict,
+    tmp_path: Path,
+) -> None:
+    assert campaign.HISTORICAL_ADMISSION_AUTHORITY_ARTIFACT_SHA256 is None
+    classifications = _historical_projection(schedule)
+    authority_path = tmp_path / "self-sealed-historical.json"
+    _write_historical_authority(authority_path, schedule, classifications)
+
+    with pytest.raises(campaign.M6Error) as error:
+        campaign._historical_admission_reconciliation(
+            schedule,
+            classifications,
+            authority_path=authority_path,
+            repo_root=campaign.REPO_ROOT,
+            input_cache=campaign.InputSnapshotCache(),
+        )
+    assert error.value.code == "M6_HISTORICAL_AUTHORITY_UNADMITTED"
+
+
+def test_wrong_historical_authority_trust_anchor_is_rejected(
+    schedule: dict,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    classifications = _historical_projection(schedule)
+    authority_path = tmp_path / "historical.json"
+    _write_historical_authority(authority_path, schedule, classifications)
+    monkeypatch.setattr(
+        campaign,
+        "HISTORICAL_ADMISSION_AUTHORITY_ARTIFACT_SHA256",
+        "f" * 64,
+    )
+
+    with pytest.raises(campaign.M6Error) as error:
+        campaign._historical_admission_reconciliation(
+            schedule,
+            classifications,
+            authority_path=authority_path,
+            repo_root=campaign.REPO_ROOT,
+            input_cache=campaign.InputSnapshotCache(),
+        )
+    assert error.value.code == "M6_HISTORICAL_AUTHORITY_UNADMITTED"
+
+
+def test_historical_authority_replacement_is_not_reinterpreted(
+    schedule: dict,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    classifications = _historical_projection(schedule)
+    authority_path = tmp_path / "historical.json"
+    _write_historical_authority(authority_path, schedule, classifications)
+    _trust_no_credit_historical_authority(monkeypatch, authority_path)
+    cache = campaign.InputSnapshotCache()
+    campaign._historical_admission_reconciliation(
+        schedule,
+        classifications,
+        authority_path=authority_path,
+        repo_root=campaign.REPO_ROOT,
+        input_cache=cache,
+    )
+    payload = authority_path.read_bytes()
+    authority_path.unlink()
+    authority_path.write_bytes(payload)
+
+    with pytest.raises(campaign.M6Error) as error:
+        campaign._historical_admission_reconciliation(
+            schedule,
+            classifications,
+            authority_path=authority_path,
+            repo_root=campaign.REPO_ROOT,
+            input_cache=cache,
+        )
+    assert error.value.code == "M6_INPUT_SNAPSHOT_MIXED"
+
+
+def test_historical_authority_exact_set_closes_only_reconciliation_gate(
+    schedule: dict,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    classifications = _historical_projection(schedule)
+    authority_path = tmp_path / "historical.json"
+    authority = _write_historical_authority(
+        authority_path, schedule, classifications
+    )
+    _trust_no_credit_historical_authority(monkeypatch, authority_path)
+    reconciliation = campaign._historical_admission_reconciliation(
+        schedule,
+        classifications,
+        authority_path=authority_path,
+        repo_root=campaign.REPO_ROOT,
+        input_cache=campaign.InputSnapshotCache(),
+    )
+    assert reconciliation["status"] == "reconciled"
+    assert reconciliation["exact_set_match"] is True
+    assert reconciliation["authority"]["authority_sha256"] == (
+        authority["authority_sha256"]
+    )
+
+    analysis = {
+        "classifications": classifications,
+        "noise_floors": [],
+        "denominators": [],
+        "accounting": {},
+        "metric_identity_sha256": schedule["metric_identity_sha256"],
+        "analysis_policy": {
+            "floor_fallback_authorizations": [],
+            "multiplicity_policy": {},
+            "historical_admission_reconciliation": reconciliation,
+            "limitations": {
+                "censoring": "sealed",
+                "finite_n": "sealed",
+                "within_session": "sealed",
+                "multiplicity": "sealed",
+                "historical_reconciliation": "exact set supplied",
+            },
+        },
+    }
+    gates = campaign._scientific_gate_snapshot(analysis)
+    assert gates["historical_reconciliation"] is True
+    assert gates["done_eligible"] is False
+
+
+def test_historical_authority_exact_set_mismatch_fails_closed(
+    schedule: dict,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    authority_projection = _historical_projection(schedule)
+    authority_path = tmp_path / "historical.json"
+    _write_historical_authority(authority_path, schedule, authority_projection)
+    _trust_no_credit_historical_authority(monkeypatch, authority_path)
+    observed_projection = copy.deepcopy(authority_projection)
+    observed_projection[0]["would_have_been_admitted"] = False
+
+    reconciliation = campaign._historical_admission_reconciliation(
+        schedule,
+        observed_projection,
+        authority_path=authority_path,
+        repo_root=campaign.REPO_ROOT,
+        input_cache=campaign.InputSnapshotCache(),
+    )
+    assert reconciliation["status"] == "set_mismatch"
+    assert reconciliation["exact_set_match"] is False
+    assert reconciliation["typed_reason"] == "historical_admitted_set_mismatch"
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected_status", "expected_code"),
+    [
+        ("incomplete", "projection_incomplete", None),
+        ("duplicate", None, "M6_HISTORICAL_PROJECTION_DUPLICATE"),
+        ("out_of_scope", None, "M6_HISTORICAL_PROJECTION_SCOPE"),
+    ],
+)
+def test_historical_projection_scope_and_multiplicity_fail_closed(
+    schedule: dict,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+    expected_status: str | None,
+    expected_code: str | None,
+) -> None:
+    authority_projection = _historical_projection(schedule)
+    authority_path = tmp_path / f"historical-{mutation}.json"
+    _write_historical_authority(authority_path, schedule, authority_projection)
+    _trust_no_credit_historical_authority(monkeypatch, authority_path)
+    observed = copy.deepcopy(authority_projection)
+    if mutation == "incomplete":
+        observed.pop()
+    elif mutation == "duplicate":
+        observed.append(copy.deepcopy(observed[0]))
+    else:
+        observed[0]["cell_id"] = "not-in-the-schedule"
+
+    if expected_code is not None:
+        with pytest.raises(campaign.M6Error) as error:
+            campaign._historical_admission_reconciliation(
+                schedule,
+                observed,
+                authority_path=authority_path,
+                repo_root=campaign.REPO_ROOT,
+                input_cache=campaign.InputSnapshotCache(),
+            )
+        assert error.value.code == expected_code
+        return
+
+    reconciliation = campaign._historical_admission_reconciliation(
+        schedule,
+        observed,
+        authority_path=authority_path,
+        repo_root=campaign.REPO_ROOT,
+        input_cache=campaign.InputSnapshotCache(),
+    )
+    assert reconciliation["status"] == expected_status
+    assert reconciliation["projection_complete"] is False
+    assert reconciliation["exact_set_match"] is None
+
+
+def test_scientific_done_gate_requires_floor_denominator_multiplicity_and_history(
+    schedule: dict,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    baseline = _closed_scientific_gate_fixture(
+        schedule, tmp_path / "historical.json", monkeypatch
+    )
+    baseline_gates = campaign._scientific_gate_snapshot(baseline)
+    assert baseline_gates["floor_nonvacuous"] is True
+    assert baseline_gates["denominator_closed"] is True
+    assert baseline_gates["multiplicity_sealed"] is True
+    assert baseline_gates["historical_reconciliation"] is True
+    assert baseline_gates["done_eligible"] is True
+
+    floor_gap = copy.deepcopy(baseline)
+    floor_gap["noise_floors"][0]["valid_cells"] = 29
+    assert campaign._scientific_gate_snapshot(floor_gap)["done_eligible"] is False
+
+    denominator_gap = copy.deepcopy(baseline)
+    denominator_gap["denominators"][0].update(
+        {
+            "denominator": None,
+            "denominator_kind": "none",
+            "exact_match": False,
+            "status": "pending",
+        }
+    )
+    assert campaign._scientific_gate_snapshot(denominator_gap)[
+        "done_eligible"
+    ] is False
+
+    multiplicity_gap = copy.deepcopy(baseline)
+    policy = multiplicity_gap["analysis_policy"]["multiplicity_policy"]
+    policy["status"] = "external_pending"
+    policy["policy_sha256"] = campaign.canonical_sha256(
+        campaign._without(policy, "policy_sha256")
+    )
+    assert campaign._scientific_gate_snapshot(multiplicity_gap)[
+        "done_eligible"
+    ] is False
+
+    historical_gap = copy.deepcopy(baseline)
+    historical = historical_gap["analysis_policy"][
+        "historical_admission_reconciliation"
+    ]
+    historical["status"] = "set_mismatch"
+    historical["exact_set_match"] = False
+    historical["typed_reason"] = "historical_admitted_set_mismatch"
+    historical["reconciliation_sha256"] = campaign.canonical_sha256(
+        campaign._without(historical, "reconciliation_sha256")
+    )
+    assert campaign._scientific_gate_snapshot(historical_gap)[
+        "done_eligible"
+    ] is False
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected_code"),
+    [
+        ("seal", "M6_SEAL_MISMATCH"),
+        ("inner_set", "M6_HISTORICAL_AUTHORITY_SET_SEAL"),
+        ("binding", "M6_HISTORICAL_AUTHORITY_BINDING"),
+        ("order", "M6_HISTORICAL_AUTHORITY_ORDER"),
+    ],
+)
+def test_historical_authority_tamper_binding_and_order_are_rejected(
+    schedule: dict,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+    expected_code: str,
+) -> None:
+    classifications = _historical_projection(schedule)
+    authority = _historical_authority(schedule, classifications)
+    if mutation == "seal":
+        authority["admitted_keys"][0]["metric_sha256"] = "0" * 64
+    elif mutation == "inner_set":
+        authority["admitted_keys_sha256"] = "0" * 64
+        authority["authority_sha256"] = campaign.canonical_sha256(
+            campaign._without(authority, "authority_sha256")
+        )
+    elif mutation == "binding":
+        authority["bindings"]["metric_identity_sha256"] = "0" * 64
+        authority["authority_sha256"] = campaign.canonical_sha256(
+            campaign._without(authority, "authority_sha256")
+        )
+    else:
+        authority["admitted_keys"][0], authority["admitted_keys"][1] = (
+            authority["admitted_keys"][1],
+            authority["admitted_keys"][0],
+        )
+        authority["admitted_keys_sha256"] = campaign.canonical_sha256(
+            authority["admitted_keys"]
+        )
+        authority["authority_sha256"] = campaign.canonical_sha256(
+            campaign._without(authority, "authority_sha256")
+        )
+    authority_path = tmp_path / f"historical-{mutation}.json"
+    _write_json(authority_path, authority)
+    _trust_no_credit_historical_authority(monkeypatch, authority_path)
+
+    with pytest.raises(campaign.M6Error) as error:
+        campaign._historical_admission_reconciliation(
+            schedule,
+            classifications,
+            authority_path=authority_path,
+            repo_root=campaign.REPO_ROOT,
+            input_cache=campaign.InputSnapshotCache(),
+        )
+    assert error.value.code == expected_code
 
 
 def test_active_schedule_avoids_quadratic_object_uniqueness() -> None:
@@ -1580,6 +2303,284 @@ def _repeat_evidence_bundle(
     }, m4_launch
 
 
+def test_no_credit_fixture_round_trips_dependency_closed_done(
+    schedule: dict,
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _matrix, _archive_root, complete = _schedule_with_complete_m4(
+        schedule, tmp_path, monkeypatch
+    )
+    reference_slot = next(
+        slot
+        for slot in complete["slots"]
+        if slot["config_id"] == campaign.REFERENCE_CONFIG
+    )
+    journal = campaign.build_journal(
+        complete,
+        [
+            campaign.build_excluded_event(
+                reference_slot,
+                reason="operator_stop",
+                detail="no-credit fixture",
+                operator_authority_receipt=OPERATOR_RECEIPT,
+            )
+        ],
+        created_at_utc=FIXED_TIME,
+    )
+    schedule_path = tmp_path / "schedule.json"
+    journal_path = tmp_path / "journal.json"
+    historical_path = tmp_path / "historical.json"
+    evidence_root = tmp_path / "retained-input"
+    evidence_root.mkdir()
+    evidence_payload = b"no-credit retained fixture\n"
+    (evidence_root / "fixture.bin").write_bytes(evidence_payload)
+    _write_json(schedule_path, complete)
+    _write_json(journal_path, journal)
+    analysis = _fixture_done_analysis(
+        complete,
+        journal,
+        journal_path=journal_path,
+        historical_authority_path=historical_path,
+        retained_evidence_relative="fixture.bin",
+        retained_evidence_payload=evidence_payload,
+        monkeypatch=monkeypatch,
+    )
+    campaign._validate_schema("analysis", analysis, campaign.REPO_ROOT)
+    schedule_payload = schedule_path.read_bytes()
+    journal_payload = journal_path.read_bytes()
+    analysis_payload = campaign._pretty_json_bytes(analysis)
+    m4_receipt_path = tmp_path / "m4_receipt.json"
+    _write_json(m4_receipt_path, complete["m4_identity"])
+
+    monkeypatch.setattr(campaign, "validate_journal", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        campaign,
+        "analyze",
+        lambda *args, **kwargs: copy.deepcopy(analysis),
+    )
+    publication_material: dict[str, bytes] = {}
+    output = tmp_path / "published-done"
+    with pytest.raises(campaign.M6Error) as missing_authority:
+        campaign.build_done(
+            complete,
+            journal,
+            analysis,
+            schedule_path=schedule_path,
+            journal_path=journal_path,
+            analysis_path=output / "determinism_study.json",
+            schedule_payload=schedule_payload,
+            journal_payload=journal_payload,
+            analysis_payload=analysis_payload,
+            generated_at_utc=FIXED_TIME,
+            m4_receipt_path=m4_receipt_path,
+            evidence_root=evidence_root,
+        )
+    assert missing_authority.value.code == "M6_HISTORICAL_AUTHORITY_UNBOUND"
+    done = campaign.build_done(
+        complete,
+        journal,
+        analysis,
+        schedule_path=schedule_path,
+        journal_path=journal_path,
+        analysis_path=output / "determinism_study.json",
+        schedule_payload=schedule_payload,
+        journal_payload=journal_payload,
+        analysis_payload=analysis_payload,
+        generated_at_utc=FIXED_TIME,
+        m4_receipt_path=m4_receipt_path,
+        historical_admission_path=historical_path,
+        evidence_root=evidence_root,
+        source_snapshot_path=output / "source_snapshot/identity.json",
+        _publication_material=publication_material,
+    )
+    historical_entries = [
+        entry
+        for entry in done["inventory"]["entries"]
+        if entry["kind"] == "historical_admission_authority"
+    ]
+    assert historical_entries == [
+        {
+            "kind": "historical_admission_authority",
+            "path": "historical/historical_admission_set.json",
+            "sha256": campaign.sha256_bytes(historical_path.read_bytes()),
+            "size_bytes": len(historical_path.read_bytes()),
+        }
+    ]
+    done_payload = campaign._pretty_json_bytes(done)
+    published = campaign._publish_analysis_directory(
+        output,
+        analysis_payload=analysis_payload,
+        done_payload=done_payload,
+        source_snapshot_payload=campaign.canonical_bytes(
+            done["source_snapshot"]["witness"]
+        ),
+        dependency_material=publication_material,
+        repo_root=campaign.REPO_ROOT,
+    )
+    bundled_schedule = json.loads((published / "schedule.json").read_text())
+    bundled_journal = json.loads(
+        (published / "observation_journal.json").read_text()
+    )
+    bundled_analysis = json.loads(
+        (published / "determinism_study.json").read_text()
+    )
+    campaign.verify_analysis_bundle(
+        schedule=bundled_schedule,
+        journal=bundled_journal,
+        analysis=bundled_analysis,
+        schedule_path=published / "schedule.json",
+        journal_path=published / "observation_journal.json",
+        analysis_path=published / "determinism_study.json",
+        done=done,
+        done_path=published / "M6_DONE.json",
+        schedule_payload=(published / "schedule.json").read_bytes(),
+        journal_payload=(published / "observation_journal.json").read_bytes(),
+        analysis_payload=(published / "determinism_study.json").read_bytes(),
+        evidence_root=published / "retained_evidence",
+        bundle_root=published,
+    )
+    assert (
+        bundled_analysis["analysis_policy"]["historical_admission_reconciliation"]
+        ["authority"]["authority_id"]
+        == "offline-test-fixture-no-credit"
+    )
+
+    with pytest.raises(campaign.M6Error) as external_namespace:
+        campaign.verify_analysis_bundle(
+            schedule=bundled_schedule,
+            journal=bundled_journal,
+            analysis=bundled_analysis,
+            schedule_path=published / "schedule.json",
+            journal_path=published / "observation_journal.json",
+            analysis_path=published / "determinism_study.json",
+            done=done,
+            done_path=published / "M6_DONE.json",
+            historical_admission_path=historical_path,
+            evidence_root=published / "retained_evidence",
+            bundle_root=published,
+        )
+    assert external_namespace.value.code == "M6_HISTORICAL_AUTHORITY_NAMESPACE"
+
+    inventory_mutations = {
+        "relabelled": "M6_SCHEMA_VALIDATION",
+        "omitted": "M6_SCHEMA_VALIDATION",
+        "wrong-digest": "M6_FINAL_INVENTORY_IDENTITY",
+        "wrong-size": "M6_FINAL_INVENTORY_IDENTITY",
+        "extra-kind": "M6_SCHEMA_VALIDATION",
+        "missing-witness": "M6_SOURCE_SNAPSHOT_BINDING",
+        "extra-witness": "M6_SOURCE_SNAPSHOT_BINDING",
+    }
+    for mutation, expected_code in inventory_mutations.items():
+        mutated = tmp_path / f"{mutation}-done"
+        shutil.copytree(published, mutated)
+        _make_tree_writable(mutated)
+        mutated_done = json.loads((mutated / "M6_DONE.json").read_text())
+        historical_entry = next(
+            entry
+            for entry in mutated_done["inventory"]["entries"]
+            if entry["kind"] == "historical_admission_authority"
+        )
+        if mutation == "relabelled":
+            historical_entry["kind"] = "analysis"
+        elif mutation == "omitted":
+            mutated_done["inventory"]["entries"].remove(historical_entry)
+        elif mutation == "wrong-digest":
+            historical_entry["sha256"] = "0" * 64
+        elif mutation == "wrong-size":
+            historical_entry["size_bytes"] += 1
+        elif mutation == "extra-kind":
+            decoy_path = mutated / "historical/decoy.json"
+            decoy_path.write_bytes(b"decoy authority\n")
+            mutated_done["inventory"]["entries"].append(
+                {
+                    "kind": "historical_admission_authority",
+                    "path": "historical/decoy.json",
+                    "sha256": campaign.sha256_bytes(decoy_path.read_bytes()),
+                    "size_bytes": len(decoy_path.read_bytes()),
+                }
+            )
+            mutated_done["inventory"]["entries"].sort(
+                key=lambda entry: (entry["path"], entry["kind"])
+            )
+        else:
+            snapshot_path = mutated / "source_snapshot/identity.json"
+            witness = json.loads(snapshot_path.read_text())
+            if mutation == "missing-witness":
+                witness = [
+                    row
+                    for row in witness
+                    if row["role"] != "historical admission set authority"
+                ]
+            else:
+                decoy = copy.deepcopy(
+                    next(
+                        row
+                        for row in witness
+                        if row["role"] == "historical admission set authority"
+                    )
+                )
+                decoy["canonical_path"] += ".decoy"
+                decoy["observed_sha256"] = "0" * 64
+                decoy["observed_size_bytes"] += 1
+                if decoy["declared_sha256"] is not None:
+                    decoy["declared_sha256"] = decoy["observed_sha256"]
+                if decoy["declared_size_bytes"] is not None:
+                    decoy["declared_size_bytes"] = decoy["observed_size_bytes"]
+                decoy["pre_identity"]["size_bytes"] = decoy[
+                    "observed_size_bytes"
+                ]
+                decoy["post_identity"]["size_bytes"] = decoy[
+                    "observed_size_bytes"
+                ]
+                witness.append(decoy)
+                witness.sort(key=lambda row: (row["canonical_path"], row["role"]))
+            snapshot_payload = campaign.canonical_bytes(witness)
+            snapshot_path.write_bytes(snapshot_payload)
+            snapshot_entry = next(
+                entry
+                for entry in mutated_done["inventory"]["entries"]
+                if entry["kind"] == "source_snapshot_identity"
+            )
+            snapshot_entry["sha256"] = campaign.sha256_bytes(snapshot_payload)
+            snapshot_entry["size_bytes"] = len(snapshot_payload)
+            mutated_done["source_snapshot"].update(
+                {
+                    "artifact_sha256": campaign.sha256_bytes(snapshot_payload),
+                    "size_bytes": len(snapshot_payload),
+                    "witness": witness,
+                }
+            )
+        mutated_done["inventory"]["inventory_sha256"] = (
+            campaign.canonical_sha256(mutated_done["inventory"]["entries"])
+        )
+        mutated_done["done_sha256"] = campaign.canonical_sha256(
+            campaign._without(mutated_done, "done_sha256")
+        )
+        (mutated / "M6_DONE.json").write_bytes(
+            campaign._pretty_json_bytes(mutated_done)
+        )
+        _make_tree_readonly(mutated)
+        with pytest.raises(campaign.M6Error) as mutated_error:
+            campaign.verify_analysis_bundle(
+                schedule=json.loads((mutated / "schedule.json").read_text()),
+                journal=json.loads(
+                    (mutated / "observation_journal.json").read_text()
+                ),
+                analysis=json.loads(
+                    (mutated / "determinism_study.json").read_text()
+                ),
+                schedule_path=mutated / "schedule.json",
+                journal_path=mutated / "observation_journal.json",
+                analysis_path=mutated / "determinism_study.json",
+                done=mutated_done,
+                done_path=mutated / "M6_DONE.json",
+                evidence_root=mutated / "retained_evidence",
+                bundle_root=mutated,
+            )
+        assert mutated_error.value.code == expected_code
+
+
 def test_complete_m4_receipt_is_rederived_from_verified_done_artifacts(
     schedule: dict,
     tmp_path: Path,
@@ -2401,6 +3402,12 @@ def test_analysis_schema_rejects_boolean_raw_value(schedule: dict, tmp_path: Pat
         bootstrap_replicates=2,
     )
     assert analysis["analysis_policy"]["reference_oor_zero_confirmed"] is False
+    reconciliation = analysis["analysis_policy"][
+        "historical_admission_reconciliation"
+    ]
+    assert reconciliation["status"] == "external_pending"
+    assert analysis["scientific_gates"]["historical_reconciliation"] is False
+    assert analysis["scientific_gates"]["done_eligible"] is False
     schema = _schema("analysis")
     bad = copy.deepcopy(analysis)
     bad["analysis_policy"]["bootstrap_seed"] = True

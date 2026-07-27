@@ -110,6 +110,8 @@ SCHEMA_PATHS_BY_VERSION = {
         "m4_binding": SCHEMA_DIR / "m6_m4_binding_receipt.schema.json",
         "schedule": SCHEMA_DIR / "m6_determinism_schedule.v2.schema.json",
         "observation_journal": SCHEMA_DIR / "m6_determinism_observation_journal.v2.schema.json",
+        "historical_admission_set": SCHEMA_DIR
+        / "m6_historical_admission_set.v1.schema.json",
         "analysis": SCHEMA_DIR / "m6_determinism_analysis.v2.schema.json",
         "done": SCHEMA_DIR / "m6_determinism_done.v2.schema.json",
     },
@@ -126,6 +128,7 @@ SCHEMA_IDS_BY_VERSION = {
         "m4_binding": "simbench_bw/schemas/m6_m4_binding_receipt.schema.json",
         "schedule": "simbench_bw/schemas/m6_determinism_schedule.v2.schema.json",
         "observation_journal": "simbench_bw/schemas/m6_determinism_observation_journal.v2.schema.json",
+        "historical_admission_set": "simbench_bw/schemas/m6_historical_admission_set.v1.schema.json",
         "analysis": "simbench_bw/schemas/m6_determinism_analysis.v2.schema.json",
         "done": "simbench_bw/schemas/m6_determinism_done.v2.schema.json",
     },
@@ -140,10 +143,11 @@ SCHEMA_SHA256_BY_VERSION = {
     },
     2: {
         "m4_binding": "d1a6338eec3ec59755b5ed769d9fac6ddcc1e790caac31091336207bb4648dc2",
-        "schedule": "707245152841d9387d1535a57fb4d30301dcc88f6fc45f2ecd75055ffec6b473",
+        "schedule": "0cd16ac70046b984306d8e02e8f601f9cbbeafa37f98f2c8ee3e814e8565f3cf",
         "observation_journal": "58afa2fcbcc850e6bafcfb8af0027bdf349ecbfd793b9b3812914d5bae9e85c5",
-        "analysis": "b78eee7430d63c74676d8d0b5b02cb15dc620c468a8993bb7ead9ae6b393dda8",
-        "done": "d48725cc69fe37a040ffbbd7619cb138f1ad89fc2d171c676f069e4ab9511bcc",
+        "historical_admission_set": "675054f6866d89161260595b57dac61f612a59f580a037770b1d4c2818c78aae",
+        "analysis": "004b4e2eaf7a9b4fcd7b2de3c523852376677699e6bd409712e98392215d3401",
+        "done": "cad84152efc311538d2ce6f71c6d22a4d0d34255795cef3674ee01c3329e92d5",
     },
 }
 # Compatibility aliases deliberately retain the historical v1 paths.  Active
@@ -165,6 +169,9 @@ EXPECTED_SELECTED_METRICS = 55
 MAX_SAFE_JSON_INTEGER = (1 << 53) - 1
 STATISTICAL_CONTRACT_VERSION = "m6_statistical_override_v1"
 STATISTICAL_CONTRACT_SHA256 = "17ac0986bc090532ce1898eed5223e02f8e8944ca08ec134e6f58a8a6f9707b5"
+HISTORICAL_ADMISSION_PROJECTION = "reference_config_cell_metric_dispersion_gate_v1"
+# Populated only by a separate, independently reviewed authority-admission change.
+HISTORICAL_ADMISSION_AUTHORITY_ARTIFACT_SHA256: str | None = None
 # These are explicit per-key operands, not unit- or class-derived defaults.  The
 # list is sealed into every projected metric contract and therefore into the
 # schedule metric identity.  A missing or overlapping key fails closed.
@@ -269,7 +276,7 @@ class InputSnapshotCache:
     @staticmethod
     def _identity_object(
         identity: immutable.MetadataSnapshot,
-    ) -> dict[str, int]:
+    ) -> dict[str, int | str]:
         names = (
             "device",
             "inode",
@@ -279,7 +286,10 @@ class InputSnapshotCache:
             "mtime_ns",
             "ctime_ns",
         )
-        return {name: int(value) for name, value in zip(names, identity)}
+        numeric = {name: int(value) for name, value in zip(names, identity)}
+        for name in ("device", "inode", "mtime_ns", "ctime_ns"):
+            numeric[name] = str(numeric[name])
+        return numeric
 
     def read(
         self,
@@ -4996,6 +5006,198 @@ def _completion_state(
     return "complete"
 
 
+def _historical_admission_key(row: Mapping[str, Any]) -> dict[str, Any]:
+    return {
+        "cell_id": row.get("cell_id"),
+        "cell_identity_sha256": row.get("cell_identity_sha256"),
+        "metric_key": row.get("metric_key"),
+        "metric_sha256": row.get("metric_sha256"),
+    }
+
+
+def _validate_historical_admission_authority_schema(
+    authority: Mapping[str, Any],
+    *,
+    repo_root: Path,
+    input_cache: InputSnapshotCache,
+) -> None:
+    if authority.get("schema_version") != 1:
+        _fail("M6_SCHEMA_VERSION", "historical_admission_set: version 1 required")
+    schema, _ = _load_schema(
+        "historical_admission_set",
+        repo_root,
+        version=ACTIVE_SCHEMA_VERSION,
+        cache=input_cache,
+    )
+    validator = Draft202012Validator(schema, format_checker=FormatChecker())
+    errors = sorted(
+        validator.iter_errors(authority), key=lambda error: list(error.absolute_path)
+    )
+    if errors:
+        error = errors[0]
+        location = "/" + "/".join(str(part) for part in error.absolute_path)
+        _fail(
+            "M6_SCHEMA_VALIDATION",
+            f"historical_admission_set{location}: {error.message}",
+        )
+
+
+def _historical_admission_reconciliation(
+    schedule: Mapping[str, Any],
+    classifications: Sequence[Mapping[str, Any]],
+    *,
+    authority_path: Path | None,
+    repo_root: Path,
+    input_cache: InputSnapshotCache,
+) -> dict[str, Any]:
+    """Compare the replayed reference projection to a separate exact-set authority."""
+    selected_metrics = {
+        metric["key"]: metric
+        for metric in schedule["metrics"]
+        if metric["capture_status"] == "selected"
+    }
+    expected_keys = [
+        {
+            "cell_id": cell["cell_id"],
+            "cell_identity_sha256": cell["cell_identity_sha256"],
+            "metric_key": metric_key,
+            "metric_sha256": selected_metrics[metric_key]["metric_sha256"],
+        }
+        for cell in schedule["cells"]
+        for metric_key in sorted(selected_metrics)
+    ]
+    expected_keys.sort(key=lambda row: (row["cell_id"], row["metric_key"]))
+    expected_by_identity = {
+        (row["cell_id"], row["metric_key"]): row for row in expected_keys
+    }
+    projection_rows = [
+        row for row in classifications if row.get("config_id") == REFERENCE_CONFIG
+    ]
+    projected_by_identity: dict[tuple[str, str], Mapping[str, Any]] = {}
+    for row in projection_rows:
+        identity = (row.get("cell_id"), row.get("metric_key"))
+        expected = expected_by_identity.get(identity)
+        if expected is None or _historical_admission_key(row) != expected:
+            _fail("M6_HISTORICAL_PROJECTION_SCOPE", repr(identity))
+        if identity in projected_by_identity:
+            _fail("M6_HISTORICAL_PROJECTION_DUPLICATE", repr(identity))
+        projected_by_identity[identity] = row
+    projection_complete = (
+        len(projected_by_identity) == len(expected_by_identity)
+        and set(projected_by_identity) == set(expected_by_identity)
+        and all(
+            type(row.get("would_have_been_admitted")) is bool
+            for row in projected_by_identity.values()
+        )
+    )
+    projected_admitted = [
+        expected_by_identity[identity]
+        for identity, row in sorted(projected_by_identity.items())
+        if row.get("would_have_been_admitted") is True
+    ]
+    reconciliation: dict[str, Any] = {
+        "status": "external_pending",
+        "projection_contract": HISTORICAL_ADMISSION_PROJECTION,
+        "reference_config_id": REFERENCE_CONFIG,
+        "expected_projection_count": len(expected_keys),
+        "observed_projection_count": len(projected_by_identity),
+        "projection_complete": projection_complete,
+        "projected_admitted_count": len(projected_admitted),
+        "projected_admitted_set_sha256": canonical_sha256(projected_admitted),
+        "authority": None,
+        "exact_set_match": None,
+        "typed_reason": "historical_admitted_set_not_supplied",
+    }
+    if authority_path is None:
+        reconciliation["reconciliation_sha256"] = canonical_sha256(reconciliation)
+        return reconciliation
+
+    authority, authority_payload = load_json(
+        authority_path,
+        role="historical admission set authority",
+        cache=input_cache,
+    )
+    authority_artifact_sha256 = sha256_bytes(authority_payload)
+    admitted_artifact_sha256 = HISTORICAL_ADMISSION_AUTHORITY_ARTIFACT_SHA256
+    if admitted_artifact_sha256 is None:
+        _fail(
+            "M6_HISTORICAL_AUTHORITY_UNADMITTED",
+            "no historical admission authority artifact has an admitted trust anchor",
+        )
+    if authority_artifact_sha256 != admitted_artifact_sha256:
+        _fail(
+            "M6_HISTORICAL_AUTHORITY_UNADMITTED",
+            "historical admission authority artifact does not match the admitted trust anchor",
+        )
+    if not isinstance(authority, dict):
+        _fail("M6_HISTORICAL_AUTHORITY_SHAPE", "object required")
+    _validate_historical_admission_authority_schema(
+        authority,
+        repo_root=repo_root,
+        input_cache=input_cache,
+    )
+    _validate_seal(
+        authority, "authority_sha256", role="historical admission set authority"
+    )
+    admitted_keys = authority.get("admitted_keys")
+    if not isinstance(admitted_keys, list):
+        _fail("M6_HISTORICAL_AUTHORITY_SHAPE", "admitted_keys")
+    normalized_admitted = sorted(
+        admitted_keys, key=lambda row: (row["cell_id"], row["metric_key"])
+    )
+    if admitted_keys != normalized_admitted:
+        _fail("M6_HISTORICAL_AUTHORITY_ORDER", "admitted_keys")
+    identities = [(row["cell_id"], row["metric_key"]) for row in admitted_keys]
+    if len(identities) != len(set(identities)):
+        _fail("M6_HISTORICAL_AUTHORITY_DUPLICATE", "admitted_keys")
+    for row, identity in zip(admitted_keys, identities):
+        if expected_by_identity.get(identity) != row:
+            _fail("M6_HISTORICAL_AUTHORITY_SCOPE", repr(identity))
+    if authority.get("admitted_keys_sha256") != canonical_sha256(admitted_keys):
+        _fail("M6_HISTORICAL_AUTHORITY_SET_SEAL", "admitted_keys")
+    source = schedule["source_identity"]
+    expected_bindings = {
+        "canonical_matrix_sha256": source["canonical_matrix"]["sha256"],
+        "matrix_seal_sha256": source["matrix_seal_sha256"],
+        "roster_authority_sha256": source["roster_authority_sha256"],
+        "metric_identity_sha256": schedule["metric_identity_sha256"],
+        "reference_config_id": REFERENCE_CONFIG,
+    }
+    if authority.get("projection_contract") != HISTORICAL_ADMISSION_PROJECTION:
+        _fail("M6_HISTORICAL_AUTHORITY_BINDING", "projection_contract")
+    if authority.get("bindings") != expected_bindings:
+        _fail("M6_HISTORICAL_AUTHORITY_BINDING", "schedule authority identities")
+    if authority.get("expected_projection_count") != len(expected_keys):
+        _fail("M6_HISTORICAL_AUTHORITY_BINDING", "expected projection count")
+
+    exact_match = projection_complete and admitted_keys == projected_admitted
+    reconciliation.update(
+        {
+            "status": "reconciled" if exact_match else (
+                "set_mismatch" if projection_complete else "projection_incomplete"
+            ),
+            "authority": {
+                "authority_id": authority["authority_id"],
+                "issued_at_utc": authority["issued_at_utc"],
+                "artifact_sha256": authority_artifact_sha256,
+                "size_bytes": len(authority_payload),
+                "authority_sha256": authority["authority_sha256"],
+                "admitted_count": len(admitted_keys),
+                "admitted_set_sha256": authority["admitted_keys_sha256"],
+                "bindings": expected_bindings,
+            },
+            "exact_set_match": exact_match if projection_complete else None,
+            "typed_reason": None if exact_match else (
+                "historical_admitted_set_mismatch"
+                if projection_complete
+                else "historical_projection_incomplete"
+            ),
+        }
+    )
+    reconciliation["reconciliation_sha256"] = canonical_sha256(reconciliation)
+    return reconciliation
+
+
 def analyze(
     schedule: Mapping[str, Any],
     journal: Mapping[str, Any],
@@ -5004,6 +5206,7 @@ def analyze(
     generated_at_utc: str | None = None,
     bootstrap_replicates: int = 1000,
     bootstrap_seed: int | None = None,
+    historical_admission_path: Path | None = None,
     evidence_root: Path | None = None,
     repo_root: Path = REPO_ROOT,
     _input_cache: InputSnapshotCache | None = None,
@@ -5554,6 +5757,32 @@ def analyze(
         multiplicity_policy["discoveries"]
     )
     multiplicity_policy["policy_sha256"] = canonical_sha256(multiplicity_policy)
+    historical_reconciliation = _historical_admission_reconciliation(
+        schedule,
+        classifications,
+        authority_path=historical_admission_path,
+        repo_root=repo_root,
+        input_cache=input_cache,
+    )
+    if historical_reconciliation["status"] == "reconciled":
+        historical_limitation = (
+            "reference-configuration dispersion-gate projection exactly matches "
+            "the separately supplied historical admission set"
+        )
+    elif historical_reconciliation["status"] == "set_mismatch":
+        historical_limitation = (
+            "failed: replayed reference-configuration dispersion-gate projection "
+            "does not match the supplied historical admission set"
+        )
+    elif historical_reconciliation["status"] == "projection_incomplete":
+        historical_limitation = (
+            "external_pending: the historical authority is supplied but the local "
+            "reference-configuration projection is incomplete"
+        )
+    else:
+        historical_limitation = (
+            "external_pending: historical admitted set is not supplied"
+        )
     analysis = {
         "schema_version": ACTIVE_SCHEMA_VERSION,
         "artifact_kind": "determinism_study",
@@ -5594,12 +5823,13 @@ def analyze(
             "admitted_summary_consumed": False,
             "reference_oor_zero_confirmed": reference_oor_zero,
             "multiplicity_policy": multiplicity_policy,
+            "historical_admission_reconciliation": historical_reconciliation,
             "limitations": {
                 "censoring": "finite out-of-range values retained uncensored; floors are lower bounds when OOR exists",
                 "finite_n": "per-cell rare-event bounds use rule_of_three_3_over_n and 1_over_n annotations",
                 "within_session": "replicates and protocol sensitivity are within one controlled session",
                 "multiplicity": "BH-FDR policy is sealed as external_pending; no hypothesis family is admitted until p-values and family membership are supplied",
-                "historical_reconciliation": "external_pending: historical admitted set is not embedded",
+                "historical_reconciliation": historical_limitation,
             },
             "floor_fallback_authorizations": [],
         },
@@ -5635,6 +5865,7 @@ def _scientific_gate_snapshot(analysis: Mapping[str, Any]) -> dict[str, Any]:
     """Derive nonvacuity gates without treating caller summaries as authority."""
     floors = analysis.get("noise_floors")
     denominators = analysis.get("denominators")
+    classifications = analysis.get("classifications")
     accounting = analysis.get("accounting") or {}
     policies = analysis.get("analysis_policy") or {}
     floor_rows = floors if isinstance(floors, list) else []
@@ -5776,6 +6007,68 @@ def _scientific_gate_snapshot(analysis: Mapping[str, Any]) -> dict[str, Any]:
             and multiplicity.get("discoveries_sha256") == canonical_sha256(discoveries)
             and multiplicity.get("policy_sha256") == canonical_sha256(identity)
         )
+    historical = policies.get("historical_admission_reconciliation")
+    historical_reconciliation_closed = False
+    if isinstance(historical, dict):
+        historical_identity = dict(historical)
+        historical_identity.pop("reconciliation_sha256", None)
+        projection_rows = [
+            row
+            for row in classifications
+            if isinstance(row, Mapping)
+            and row.get("config_id") == REFERENCE_CONFIG
+        ] if isinstance(classifications, list) else []
+        projection_identities = [
+            (row.get("cell_id"), row.get("metric_key")) for row in projection_rows
+        ]
+        projected_admitted = sorted(
+            (
+                _historical_admission_key(row)
+                for row in projection_rows
+                if row.get("would_have_been_admitted") is True
+            ),
+            key=lambda row: (str(row["cell_id"]), str(row["metric_key"])),
+        )
+        authority = historical.get("authority")
+        bindings = authority.get("bindings") if isinstance(authority, Mapping) else None
+        historical_reconciliation_closed = (
+            historical.get("status") == "reconciled"
+            and historical.get("projection_contract")
+            == HISTORICAL_ADMISSION_PROJECTION
+            and historical.get("reference_config_id") == REFERENCE_CONFIG
+            and historical.get("expected_projection_count")
+            == EXPECTED_RUNNABLE * EXPECTED_SELECTED_METRICS
+            and historical.get("observed_projection_count")
+            == EXPECTED_RUNNABLE * EXPECTED_SELECTED_METRICS
+            and historical.get("projection_complete") is True
+            and len(projection_rows)
+            == EXPECTED_RUNNABLE * EXPECTED_SELECTED_METRICS
+            and len(set(projection_identities)) == len(projection_identities)
+            and all(
+                type(row.get("would_have_been_admitted")) is bool
+                for row in projection_rows
+            )
+            and historical.get("projected_admitted_count")
+            == len(projected_admitted)
+            and historical.get("projected_admitted_set_sha256")
+            == canonical_sha256(projected_admitted)
+            and isinstance(authority, Mapping)
+            and _sha256_text(authority.get("artifact_sha256"))
+            and type(authority.get("size_bytes")) is int
+            and authority["size_bytes"] > 0
+            and _sha256_text(authority.get("authority_sha256"))
+            and authority.get("admitted_count") == len(projected_admitted)
+            and authority.get("admitted_set_sha256")
+            == canonical_sha256(projected_admitted)
+            and isinstance(bindings, Mapping)
+            and bindings.get("metric_identity_sha256")
+            == analysis.get("metric_identity_sha256")
+            and bindings.get("reference_config_id") == REFERENCE_CONFIG
+            and historical.get("exact_set_match") is True
+            and historical.get("typed_reason") is None
+            and historical.get("reconciliation_sha256")
+            == canonical_sha256(historical_identity)
+        )
     result = {
         "floor_checks": floor_checks,
         "denominator_checks": denominator_checks,
@@ -5800,10 +6093,7 @@ def _scientific_gate_snapshot(analysis: Mapping[str, Any]) -> dict[str, Any]:
         ),
         "limitations_sealed": limitations_sealed,
         "multiplicity_sealed": multiplicity_sealed,
-        "historical_reconciliation": (
-            limitations.get("historical_reconciliation")
-            if isinstance(limitations, dict) else None
-        ),
+        "historical_reconciliation": historical_reconciliation_closed,
         "reference_oor_zero": bool(
             policies.get("reference_oor_zero_confirmed", False)
         ),
@@ -5816,6 +6106,7 @@ def _scientific_gate_snapshot(analysis: Mapping[str, Any]) -> dict[str, Any]:
             "denominator_closed",
             "limitations_sealed",
             "multiplicity_sealed",
+            "historical_reconciliation",
             "reference_oor_zero",
         )
     )
@@ -5846,11 +6137,43 @@ def _validate_snapshot_witness(witness: Any, *, role: str = "source snapshot") -
         identities: list[Mapping[str, Any]] = []
         for identity_name in ("pre_identity", "post_identity"):
             identity = row.get(identity_name)
-            if not isinstance(identity, Mapping) or any(
+            if not isinstance(identity, Mapping):
+                _fail("M6_SOURCE_SNAPSHOT_INCOMPLETE", f"{role}[{index}]/{identity_name}")
+            for field in ("device", "inode"):
+                value = identity.get(field)
+                if not (
+                    (type(value) is int and value >= 0)
+                    or (
+                        isinstance(value, str)
+                        and value.isascii()
+                        and value.isdigit()
+                        and (value == "0" or not value.startswith("0"))
+                    )
+                ):
+                    _fail(
+                        "M6_SOURCE_SNAPSHOT_INCOMPLETE",
+                        f"{role}[{index}]/{identity_name}/{field}",
+                    )
+            if any(
                 type(identity.get(field)) is not int or identity[field] < 0
-                for field in ("device", "inode", "mode", "size_bytes")
+                for field in ("mode", "size_bytes")
             ) or type(identity.get("nlink")) is not int or identity["nlink"] != 1:
                 _fail("M6_SOURCE_SNAPSHOT_INCOMPLETE", f"{role}[{index}]/{identity_name}")
+            for field in ("mtime_ns", "ctime_ns"):
+                value = identity.get(field)
+                if value is not None and not (
+                    (type(value) is int and value >= 0)
+                    or (
+                        isinstance(value, str)
+                        and value.isascii()
+                        and value.isdigit()
+                        and (value == "0" or not value.startswith("0"))
+                    )
+                ):
+                    _fail(
+                        "M6_SOURCE_SNAPSHOT_INCOMPLETE",
+                        f"{role}[{index}]/{identity_name}/{field}",
+                    )
             if not stat.S_ISREG(int(identity["mode"])):
                 _fail("M6_SOURCE_SNAPSHOT_IDENTITY", f"{role}[{index}]/{identity_name}: regular file required")
             if identity["size_bytes"] != observed_size:
@@ -5949,6 +6272,32 @@ def _validate_snapshot_source_bindings(
             )
 
 
+def _validate_snapshot_historical_authority_binding(
+    witness: Sequence[Mapping[str, Any]],
+    authority: Mapping[str, Any] | None,
+) -> None:
+    if not isinstance(authority, Mapping):
+        _fail(
+            "M6_SOURCE_SNAPSHOT_BINDING",
+            "historical admission authority descriptor is absent",
+        )
+    digest = authority.get("artifact_sha256")
+    size = authority.get("size_bytes")
+    role_rows = [
+        row
+        for row in witness
+        if row.get("role") == "historical admission set authority"
+    ]
+    if len(role_rows) != 1 or (
+        role_rows[0].get("observed_sha256") != digest
+        or role_rows[0].get("observed_size_bytes") != size
+    ):
+        _fail(
+            "M6_SOURCE_SNAPSHOT_BINDING",
+            "historical admission authority witness is absent or ambiguous",
+        )
+
+
 def _require_bound_payload(
     payload: bytes | None,
     expected: Mapping[str, Any],
@@ -5985,13 +6334,13 @@ def _pinned_tree_manifest(
             item: dict[str, Any] = {
                 "relative_path": relative,
                 "kind": kind,
-                "device": identity[0],
-                "inode": identity[1],
+                "device": str(identity[0]),
+                "inode": str(identity[1]),
                 "mode": identity[2],
                 "nlink": identity[3],
                 "size_bytes": identity[4],
-                "mtime_ns": identity[5],
-                "ctime_ns": identity[6],
+                "mtime_ns": str(identity[5]),
+                "ctime_ns": str(identity[6]),
             }
             if kind == "file":
                 payload = transaction.read(relative, role=f"{role} {relative}")
@@ -6101,6 +6450,7 @@ def _done_inventory(
     input_cache: InputSnapshotCache | None = None,
     source_snapshot_cache: InputSnapshotCache | None = None,
     recovery_path: Path | None = None,
+    historical_admission_path: Path | None = None,
     m4_receipt_path: Path | None = None,
     source_snapshot_path: Path | None = None,
     evidence_root: Path | None = None,
@@ -6212,6 +6562,47 @@ def _done_inventory(
         analysis_record.get("artifact_sha256"),
         analysis_record.get("size_bytes"),
         payload=analysis_payload,
+    )
+    historical = analysis.get("analysis_policy", {}).get(
+        "historical_admission_reconciliation"
+    )
+    historical_authority = (
+        historical.get("authority") if isinstance(historical, Mapping) else None
+    )
+    if historical_admission_path is None or not isinstance(
+        historical_authority, Mapping
+    ):
+        _fail(
+            "M6_FINAL_INVENTORY_INCOMPLETE",
+            "historical admission authority is absent",
+        )
+    historical_payload = _read_regular_cached(
+        historical_admission_path,
+        role="historical admission set authority",
+        cache=cache,
+        expected_sha256=historical_authority.get("artifact_sha256"),
+        expected_size=historical_authority.get("size_bytes"),
+    )
+    retained_historical = loads_strict(
+        historical_payload, role="historical admission set authority"
+    )
+    if (
+        not isinstance(retained_historical, Mapping)
+        or retained_historical.get("authority_sha256")
+        != historical_authority.get("authority_sha256")
+        or retained_historical.get("admitted_keys_sha256")
+        != historical_authority.get("admitted_set_sha256")
+    ):
+        _fail(
+            "M6_HISTORICAL_AUTHORITY_BINDING",
+            "retained authority differs from analysis",
+        )
+    add(
+        "historical_admission_authority",
+        "historical/historical_admission_set.json",
+        sha256_bytes(historical_payload),
+        len(historical_payload),
+        payload=historical_payload,
     )
 
     m4 = schedule["m4_identity"]
@@ -6543,6 +6934,7 @@ def build_done(
     m4_receipt_path: Path | None = None,
     source_snapshot_path: Path | None = None,
     recovery_path: Path | None = None,
+    historical_admission_path: Path | None = None,
     evidence_root: Path | None = None,
     _publication_material: dict[str, bytes] | None = None,
 ) -> dict[str, Any]:
@@ -6687,6 +7079,11 @@ def build_done(
     scientific = analysis.get("scientific_gates")
     if not isinstance(scientific, dict) or not scientific.get("done_eligible"):
         _fail("M6_DONE_SCIENTIFIC_VACUITY", "scientific nonvacuity gates are not closed")
+    if historical_admission_path is None:
+        _fail(
+            "M6_HISTORICAL_AUTHORITY_UNBOUND",
+            "DONE requires the separately supplied historical admission set",
+        )
     if any(payload is None for payload in (schedule_payload, journal_payload, analysis_payload)):
         _fail("M6_ARTIFACT_PAYLOAD_UNBOUND", "DONE requires bound schedule/journal/analysis payloads")
     if not analysis["analysis_policy"]["reference_oor_zero_confirmed"]:
@@ -6733,6 +7130,7 @@ def build_done(
             "bootstrap_replicates"
         ),
         bootstrap_seed=analysis.get("analysis_policy", {}).get("bootstrap_seed"),
+        historical_admission_path=historical_admission_path,
         evidence_root=evidence_root,
         repo_root=repo_root,
         _input_cache=input_cache,
@@ -6816,6 +7214,7 @@ def build_done(
         m4_receipt_path=m4_receipt_path,
         source_snapshot_path=source_snapshot_path,
         recovery_path=recovery_path,
+        historical_admission_path=historical_admission_path,
         evidence_root=evidence_root,
         derived_seals=derived_seals,
         publication_material=_publication_material,
@@ -6827,6 +7226,15 @@ def build_done(
         witness,
         schedule,
         repo_root=repo_root,
+    )
+    historical_reconciliation = analysis.get("analysis_policy", {}).get(
+        "historical_admission_reconciliation"
+    )
+    _validate_snapshot_historical_authority_binding(
+        witness,
+        historical_reconciliation.get("authority")
+        if isinstance(historical_reconciliation, Mapping)
+        else None,
     )
     if source_snapshot_path is not None and os.path.lexists(source_snapshot_path):
         _verify_existing_source_snapshot(
@@ -7074,6 +7482,23 @@ def _verify_done_inventory_bundle(
         path="determinism_study.json",
         role="analysis",
     )
+    historical_entries = [
+        entry
+        for entry in entries
+        if isinstance(entry, Mapping)
+        and entry.get("kind") == "historical_admission_authority"
+    ]
+    if len(historical_entries) != 1 or historical_entries[0].get("path") != (
+        "historical/historical_admission_set.json"
+    ):
+        _fail(
+            "M6_FINAL_INVENTORY_INCOMPLETE",
+            "historical admission authority singleton",
+        )
+    historical_entry = require_entry(
+        "historical_admission_authority",
+        "historical/historical_admission_set.json",
+    )
 
     bundled_schedule_payload = _read_regular(
         bundle_root / "schedule.json", role="relocated schedule"
@@ -7081,14 +7506,17 @@ def _verify_done_inventory_bundle(
     bundled_schedule = loads_strict(bundled_schedule_payload, role="relocated schedule")
     if not isinstance(bundled_schedule, Mapping):
         _fail("M6_FINAL_INVENTORY_INCOMPLETE", "relocated schedule is not an object")
+    schedule_bindings = {
+        "source_identity_sha256": bundled_schedule.get("source_identity_sha256"),
+        "config_identity_sha256": bundled_schedule.get("config_identity_sha256"),
+        "metric_identity_sha256": bundled_schedule.get("metric_identity_sha256"),
+        "m4_identity_sha256": bundled_schedule.get("m4_identity", {}).get(
+            "identity_sha256"
+        ),
+    }
     if any(
-        bundled_schedule.get(field) != done.get(field)
-        for field in (
-            "source_identity_sha256",
-            "config_identity_sha256",
-            "metric_identity_sha256",
-            "m4_identity_sha256",
-        )
+        schedule_bindings[field] != done.get(field)
+        for field in schedule_bindings
     ):
         _fail("M6_FINAL_INVENTORY_INCOMPLETE", "DONE/schedule identity bindings differ")
     bundled_journal_payload = _read_regular(
@@ -7107,9 +7535,30 @@ def _verify_done_inventory_bundle(
         bundled_analysis, Mapping
     ):
         _fail("M6_FINAL_INVENTORY_INCOMPLETE", "relocated journal/analysis shape")
+    historical_reconciliation = bundled_analysis.get("analysis_policy", {}).get(
+        "historical_admission_reconciliation"
+    )
+    historical_authority = (
+        historical_reconciliation.get("authority")
+        if isinstance(historical_reconciliation, Mapping)
+        else None
+    )
+    if not isinstance(historical_authority, Mapping) or (
+        historical_authority.get("artifact_sha256")
+        != historical_entry.get("sha256")
+        or historical_authority.get("size_bytes")
+        != historical_entry.get("size_bytes")
+    ):
+        _fail(
+            "M6_FINAL_INVENTORY_INCOMPLETE",
+            "historical admission authority descriptor binding",
+        )
 
     schema_descriptors = done.get("schemas")
-    if not isinstance(schema_descriptors, list) or len(schema_descriptors) != 5:
+    if (
+        not isinstance(schema_descriptors, list)
+        or len(schema_descriptors) != len(SCHEMA_PATHS_V2)
+    ):
         _fail("M6_FINAL_INVENTORY_INCOMPLETE", "schema descriptor closure")
     schema_ids: set[str] = set()
     for descriptor in schema_descriptors:
@@ -7135,6 +7584,8 @@ def _verify_done_inventory_bundle(
             )
         ):
             _fail("M6_FINAL_INVENTORY_INCOMPLETE", f"schema:{schema_id}")
+    if schema_ids != set(SCHEMA_PATHS_V2):
+        _fail("M6_FINAL_INVENTORY_INCOMPLETE", "schema descriptor set")
 
     recovery_entry = next(
         (
@@ -7251,6 +7702,10 @@ def _verify_done_inventory_bundle(
         snapshot_value,
         bundled_schedule,
         repo_root=None,
+    )
+    _validate_snapshot_historical_authority_binding(
+        snapshot_value,
+        historical_authority,
     )
 
     m4 = done.get("m4")
@@ -7413,6 +7868,7 @@ def verify_analysis_bundle(
     m4_receipt_path: Path | None = None,
     source_snapshot_path: Path | None = None,
     recovery_path: Path | None = None,
+    historical_admission_path: Path | None = None,
     evidence_root: Path | None = None,
     bundle_root: Path | None = None,
     repo_root: Path = REPO_ROOT,
@@ -7430,6 +7886,19 @@ def verify_analysis_bundle(
                 "relocated DONE verification requires bundled retained_evidence",
             )
         evidence_root = bundled_evidence_root
+        if done is not None:
+            bundled_historical = (
+                bundle_root / "historical/historical_admission_set.json"
+            )
+            if historical_admission_path is None:
+                historical_admission_path = bundled_historical
+            elif Path(
+                os.path.abspath(os.fspath(historical_admission_path))
+            ) != bundled_historical:
+                _fail(
+                    "M6_HISTORICAL_AUTHORITY_NAMESPACE",
+                    "relocated DONE verification requires the bundled historical authority",
+                )
     _require_active_schema("schedule", schedule)
     _require_active_schema("observation_journal", journal)
     _require_active_schema("analysis", analysis)
@@ -7462,6 +7931,7 @@ def verify_analysis_bundle(
         generated_at_utc=analysis["generated_at_utc"],
         bootstrap_replicates=analysis["analysis_policy"]["bootstrap_replicates"],
         bootstrap_seed=analysis["analysis_policy"]["bootstrap_seed"],
+        historical_admission_path=historical_admission_path,
         evidence_root=evidence_root,
         repo_root=repo_root,
         _input_cache=input_cache,
@@ -7523,6 +7993,7 @@ def verify_analysis_bundle(
         m4_receipt_path=m4_receipt_path,
         source_snapshot_path=source_snapshot_path,
         recovery_path=recovery_path,
+        historical_admission_path=historical_admission_path,
         evidence_root=evidence_root,
     )
     if expected_done != done:
@@ -7706,6 +8177,11 @@ def _cmd_analyze(args: argparse.Namespace) -> int:
     schedule_path = Path(args.schedule)
     journal_path = Path(args.journal)
     evidence_root = Path(args.evidence_root) if args.evidence_root else None
+    historical_admission_path = (
+        Path(args.historical_admission_set)
+        if args.historical_admission_set
+        else None
+    )
     input_cache = InputSnapshotCache()
     schedule, schedule_payload = _load_mapping(
         schedule_path, "schedule", cache=input_cache,
@@ -7720,6 +8196,7 @@ def _cmd_analyze(args: argparse.Namespace) -> int:
         generated_at_utc=args.generated_at_utc,
         bootstrap_replicates=args.bootstrap_replicates,
         bootstrap_seed=args.bootstrap_seed,
+        historical_admission_path=historical_admission_path,
         evidence_root=evidence_root,
         repo_root=repo_root,
         _input_cache=input_cache,
@@ -7763,6 +8240,7 @@ def _cmd_analyze(args: argparse.Namespace) -> int:
             m4_receipt_path=m4_receipt_path,
             source_snapshot_path=source_snapshot_path,
             recovery_path=recovery_path,
+            historical_admission_path=historical_admission_path,
             evidence_root=evidence_root,
             _publication_material=publication_material,
         )
@@ -7935,6 +8413,11 @@ def _cmd_verify(args: argparse.Namespace) -> int:
             else (root / "source_snapshot" / "identity.json" if done is not None else None)
         ),
         recovery_path=Path(args.recovery_receipt) if args.recovery_receipt else None,
+        historical_admission_path=(
+            Path(args.historical_admission_set)
+            if args.historical_admission_set
+            else None
+        ),
         evidence_root=requested_evidence_root,
         bundle_root=root if done is not None else None,
         repo_root=repo_root,
@@ -8037,6 +8520,10 @@ def _parser() -> argparse.ArgumentParser:
     analyze_cmd.add_argument("--source-snapshot")
     analyze_cmd.add_argument("--recovery-receipt")
     analyze_cmd.add_argument(
+        "--historical-admission-set",
+        help="separately supplied exact historical admission set authority",
+    )
+    analyze_cmd.add_argument(
         "--evidence-root",
         help="dedicated root containing the journal-referenced sidecars and launch evidence",
     )
@@ -8049,6 +8536,10 @@ def _parser() -> argparse.ArgumentParser:
     verify.add_argument("--m4-receipt")
     verify.add_argument("--source-snapshot")
     verify.add_argument("--recovery-receipt")
+    verify.add_argument(
+        "--historical-admission-set",
+        help="external authority path; relocated DONE bundles use their retained copy",
+    )
     verify.add_argument(
         "--evidence-root",
         help="dedicated root containing external journal-referenced evidence",

@@ -102,8 +102,8 @@
     },
     "schemas": {
       "type": "array",
-      "minItems": 5,
-      "maxItems": 5,
+      "minItems": 6,
+      "maxItems": 6,
       "uniqueItems": true,
       "items": {
         "$ref": "#/$defs/schemaArtifact"
@@ -128,6 +128,14 @@
         {
           "contains": {
             "properties": {"schema_id": {"const": "observation_journal"}},
+            "required": ["schema_id"]
+          },
+          "minContains": 1,
+          "maxContains": 1
+        },
+        {
+          "contains": {
+            "properties": {"schema_id": {"const": "historical_admission_set"}},
             "required": ["schema_id"]
           },
           "minContains": 1,
@@ -170,7 +178,41 @@
           "uniqueItems": true,
           "items": {
             "$ref": "#/$defs/inventoryEntry"
-          }
+          },
+          "allOf": [
+            {
+              "contains": {
+                "properties": {
+                  "kind": {
+                    "const": "historical_admission_authority"
+                  },
+                  "path": {
+                    "const": "historical/historical_admission_set.json"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "path"
+                ]
+              },
+              "minContains": 1,
+              "maxContains": 1
+            },
+            {
+              "contains": {
+                "properties": {
+                  "kind": {
+                    "const": "historical_admission_authority"
+                  }
+                },
+                "required": [
+                  "kind"
+                ]
+              },
+              "minContains": 1,
+              "maxContains": 1
+            }
+          ]
         },
         "inventory_sha256": {
           "$ref": "#/$defs/sha256"
@@ -349,6 +391,7 @@
                 "schedule",
                 "journal",
                 "analysis",
+                "historical_admission_authority",
                 "m4_receipt",
                 "m4_archive_tree",
                 "m4_chunk_done",
@@ -469,13 +512,13 @@
         "ctime_ns"
       ],
       "properties": {
-        "device": {"type": "integer", "minimum": 0},
-        "inode": {"type": "integer", "minimum": 0},
+        "device": {"type": "string", "pattern": "^(0|[1-9][0-9]*)$"},
+        "inode": {"type": "string", "pattern": "^(0|[1-9][0-9]*)$"},
         "mode": {"type": "integer", "minimum": 0},
         "nlink": {"const": 1},
         "size_bytes": {"type": "integer", "minimum": 0},
-        "mtime_ns": {"type": "integer"},
-        "ctime_ns": {"type": "integer"}
+        "mtime_ns": {"type": "string", "pattern": "^(0|[1-9][0-9]*)$"},
+        "ctime_ns": {"type": "string", "pattern": "^(0|[1-9][0-9]*)$"}
       }
     },
     "m4Artifact": {
@@ -550,6 +593,7 @@
             "m4_binding",
             "schedule",
             "observation_journal",
+            "historical_admission_set",
             "analysis",
             "done"
           ]
@@ -603,6 +647,20 @@
             },
             "path": {
               "const": "workloads/simbench_bw/schemas/m6_determinism_observation_journal.v2.schema.json"
+            }
+          },
+          "required": [
+            "schema_id",
+            "path"
+          ]
+        },
+        {
+          "properties": {
+            "schema_id": {
+              "const": "historical_admission_set"
+            },
+            "path": {
+              "const": "workloads/simbench_bw/schemas/m6_historical_admission_set.v1.schema.json"
             }
           },
           "required": [
