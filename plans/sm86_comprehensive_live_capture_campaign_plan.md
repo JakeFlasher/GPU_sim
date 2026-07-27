@@ -52,17 +52,19 @@ never run `sudo`; the operator commands are `sudo nvidia-smi -pm 1`,
 `sudo nvidia-smi -lgc 1350`, and `sudo nvidia-smi -lmc 10501`, with mandatory
 restore commands `sudo nvidia-smi -rgc` and `sudo nvidia-smi -rmc`.
 
-**Status at this plan revision:** P1 is not established. The latest
-repository-default Python run stops during collection on the missing
-`_permit_offline_successor_build` test helper. The exact six-file focused
-capture battery is also red (470 passed, 3 failed, 21 errors), and the named
-live-host test is not currently selected by the `hardware_evidence` marker
-query. The older 685-pass/1-deselection receipt is historical evidence for its
-reviewed bytes, not current-byte credit. P2 is false because no current clean-S
-live-v1/successor output set has been admitted. P3 and P4 are typed pending
-external and therefore false. There is no current hardware credit beyond the
-historical 1/122 canonical credit, and no hardware or campaign-readiness claim
-follows from any green focused subset.
+**Status at this plan revision:** P1 is established only for exact tracked bytes
+at commit `80aec8413a856587b24bedcdf3464d90c5d3f39f` (tree
+`d538b0c265ffeb0a6bde4d1d341f5ae8772c2998`). The repository-default Rust
+formatting and workspace-test gates passed, default Python reported 4241 passed,
+54 skipped, 42 deselected, and 505 subtests passed, and SimBench validation
+reported `ok`; the exact six-file focused battery reported 756 passed and
+exactly the named live-host probe deselected; the independent hardware-marker
+collection selected only that probe; and the frozen-v1, durable-v2, and
+canonical-matrix schemas, authority hashes, 344-cell identity sets, 122/222
+partition, and matrix seal closed in a read-only audit. This byte-scoped result does not transfer to later bytes. P2 remains false because no current
+clean-S live-v1/successor output set has been admitted. P3 and P4 remain typed
+pending external and therefore false. There is no new hardware credit, and no
+hardware or campaign-readiness claim follows from P1.
 
 ## Acceptance Criteria
 

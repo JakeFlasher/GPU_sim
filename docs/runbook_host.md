@@ -32,7 +32,7 @@ conjunctions, not a promotion chain: `Pn == true` never proves `Pn+1`.
 
 | Predicate | Required evidence | Current state |
 |---|---|---|
-| P1 `offline-source-ready(bytes)` | Default Rust/Python/SimBench gates plus the capture-focused battery are green for the same bytes; exactly the live host probe is deselected; frozen-v1, durable-v2, and matrix identities close. | **Not established.** Default Python fails collection; the exact focused battery is also red (470 passed, 3 failed, 21 errors), and marker selection is not closed. Historical green receipts apply only to their recorded bytes. |
+| P1 `offline-source-ready(bytes)` | Default Rust/Python/SimBench gates plus the capture-focused battery are green for the same bytes; exactly the live host probe is deselected; frozen-v1, durable-v2, and matrix identities close. | **Established only for `80aec8413a856587b24bedcdf3464d90c5d3f39f` / tree `d538b0c265ffeb0a6bde4d1d341f5ae8772c2998`.** Rust formatting and workspace tests passed; Python reported 4241 passed, 54 skipped, 42 deselected, and 505 subtests passed; SimBench reported `ok`; the focused battery reported 756 passed / 1 deselected; marker collection selected only the named hardware probe; and read-only frozen-v1/durable-v2/matrix schema, authority-hash, 344-identity, 122/222-partition, and matrix-seal checks passed. This does not transfer to later bytes. |
 | P2 `clean-S-ready(S)` | P1 at clean `HEAD == S`; operator-clean-S live-v1 exists at `inputs/r28_<S8>` with all 122 frozen runnable identities reverified and start/authority/final HEAD equal S; the successor matrix is emitted from it at S with the active registry. | **False.** No current clean-S output set is admitted. |
 | P3 `live-canary-ready(host,S)` | P2; live host probe passes; capture-admitted preflight is fresh within 900 seconds; on-device injection smoke is nonempty and contract-valid; three P0 samples prove persistence enabled and 1350/10501 MHz clocks. | **False / typed pending external.** An artifact or collected probe without a passing verdict is not credit. |
 | P4 `campaign-ready` | P3 immediately before dispatch; campaign lock free; no storage-fault receipt; sufficient retained/staging budget. Supplemental capture also requires the pinned live canary and closed launch-driver/exporter-authority amendments. | **False.** Supplemental dispatch remains prohibited. |
@@ -65,10 +65,10 @@ Recompute the focused capture portion of P1 with the exact bounded battery:
 The result must report exactly one deselected test. A separate `--collect-only
 -q -m hardware_evidence` run over the same six files must identify exactly
 `tools/local_labels/test_campaign_preflight.py::test_environment_probes_ok_on_reference_host`.
-At this revision that marker-selection predicate is not established, so do not
-reuse the historical 685-pass/1-deselection result. Also run the repository-
-default commands from `CLAUDE.md`; a passing focused subset cannot override a
-failing default gate.
+The receipt above establishes those predicates only for its recorded commit and
+tree; rerun both commands for any later byte set. Also run the repository-default
+commands from `CLAUDE.md`; a passing focused subset cannot override a failing
+default gate.
 P1 is byte-scoped; record the tested tree identity. P2 must separately record S
 and prove a clean tree. P3 and P4 require fresh live evidence and are never
 inferred from P1/P2.
