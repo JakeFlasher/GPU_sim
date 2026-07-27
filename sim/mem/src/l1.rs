@@ -648,6 +648,24 @@ impl L1Cache {
     }
 }
 
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+pub enum SectorExpansionError {
+    #[error("data_width_bytes={data_width_bytes} is not strictly positive")]
+    DataWidthInvalid { data_width_bytes: i32 },
+    #[error("active lane index {lane} is outside the 32-lane address vector")]
+    LaneIndexOutOfRange { lane: usize },
+    #[error(
+        "lane {lane} address {base} plus data_width_bytes={data_width_bytes} overflows the signed address domain"
+    )]
+    AddressOverflow {
+        lane: usize,
+        base: i64,
+        data_width_bytes: i32,
+    },
+    #[error("dedup_from={dedup_from} exceeds the output length {out_len}")]
+    DedupStartOutOfRange { dedup_from: usize, out_len: usize },
+}
+
 /// Expand one traced address record's lane vector into UNIQUE global
 /// sector ids, in first-seen order (lane-major, ascending sector within a
 /// lane) — the `l1_trace_adapter` dedup contract: NCU's sector metric
@@ -661,18 +679,46 @@ pub fn push_unique_sectors(
     data_width_bytes: i32,
     out: &mut Vec<i64>,
     dedup_from: usize,
-) {
-    let width = i64::from(data_width_bytes.max(1));
-    for lane in active_lanes {
-        let base = lane_vector[lane];
-        let first = base >> 5;
-        let last = (base + width - 1) >> 5;
-        for sector in first..=last {
-            if !out[dedup_from..].contains(&sector) {
-                out.push(sector);
+) -> Result<(), SectorExpansionError> {
+    if data_width_bytes <= 0 {
+        return Err(SectorExpansionError::DataWidthInvalid { data_width_bytes });
+    }
+    if dedup_from > out.len() {
+        return Err(SectorExpansionError::DedupStartOutOfRange {
+            dedup_from,
+            out_len: out.len(),
+        });
+    }
+    let width_offset = i64::from(data_width_bytes)
+        .checked_sub(1)
+        .ok_or(SectorExpansionError::DataWidthInvalid { data_width_bytes })?;
+    let entry_len = out.len();
+    let result = (|| {
+        for lane in active_lanes {
+            let base = *lane_vector
+                .get(lane)
+                .ok_or(SectorExpansionError::LaneIndexOutOfRange { lane })?;
+            let last_addr =
+                base.checked_add(width_offset)
+                    .ok_or(SectorExpansionError::AddressOverflow {
+                        lane,
+                        base,
+                        data_width_bytes,
+                    })?;
+            let first = base >> 5;
+            let last = last_addr >> 5;
+            for sector in first..=last {
+                if !out[dedup_from..].contains(&sector) {
+                    out.push(sector);
+                }
             }
         }
+        Ok(())
+    })();
+    if result.is_err() {
+        out.truncate(entry_len);
     }
+    result
 }
 
 #[cfg(test)]
@@ -863,12 +909,60 @@ mod tests {
         // Lane 4 crosses sectors 3→4 (base 127, width 4).
         lanes[4] = 127;
         let mut out = Vec::new();
-        push_unique_sectors(&lanes, 0..5, 4, &mut out, 0);
+        push_unique_sectors(&lanes, 0..5, 4, &mut out, 0).unwrap();
         assert_eq!(out, vec![0, 3, 4]);
         // A second address record of the SAME instruction dedups against
         // the instruction's whole slice.
-        push_unique_sectors(&lanes, 0..5, 4, &mut out, 0);
+        push_unique_sectors(&lanes, 0..5, 4, &mut out, 0).unwrap();
         assert_eq!(out, vec![0, 3, 4]);
+    }
+
+    #[test]
+    fn high_address_sector_expansion_overflow_is_typed() {
+        let mut lanes = [i64::MIN; 32];
+        lanes[0] = 0;
+        lanes[1] = i64::MAX;
+        let mut out = vec![7];
+        assert_eq!(
+            push_unique_sectors(&lanes, 0..2, 2, &mut out, 1),
+            Err(SectorExpansionError::AddressOverflow {
+                lane: 1,
+                base: i64::MAX,
+                data_width_bytes: 2,
+            })
+        );
+        assert_eq!(out, vec![7]);
+    }
+
+    #[test]
+    fn nonpositive_sector_width_is_rejected() {
+        let lanes = [0; 32];
+        let mut out = Vec::new();
+        assert_eq!(
+            push_unique_sectors(&lanes, 0..1, 0, &mut out, 0),
+            Err(SectorExpansionError::DataWidthInvalid {
+                data_width_bytes: 0,
+            })
+        );
+        assert!(out.is_empty());
+    }
+
+    #[test]
+    fn malformed_sector_expansion_indices_are_typed() {
+        let lanes = [0; 32];
+        let mut out = vec![3];
+        assert_eq!(
+            push_unique_sectors(&lanes, std::iter::once(32), 1, &mut out, 0),
+            Err(SectorExpansionError::LaneIndexOutOfRange { lane: 32 })
+        );
+        assert_eq!(
+            push_unique_sectors(&lanes, 0..1, 1, &mut out, 2),
+            Err(SectorExpansionError::DedupStartOutOfRange {
+                dedup_from: 2,
+                out_len: 1,
+            })
+        );
+        assert_eq!(out, vec![3]);
     }
 
     #[test]

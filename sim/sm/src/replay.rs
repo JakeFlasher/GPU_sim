@@ -33,7 +33,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use sim_arch::ArchId;
-use sim_mem::{L1Config, L1Counters, push_unique_sectors};
+use sim_mem::{L1Config, L1Counters, SectorExpansionError, push_unique_sectors};
 use sim_trace::lanes::LANE_INACTIVE_SENTINEL;
 use sim_trace::pb;
 use sim_trace::{
@@ -131,6 +131,14 @@ pub enum ReplayError {
         warp_id: i32,
         record_ix: usize,
         sectors: usize,
+    },
+    #[error("{path}: warp {warp_id} record {record_ix}: sector expansion failed: {source}")]
+    SectorExpansion {
+        path: PathBuf,
+        warp_id: i32,
+        record_ix: usize,
+        #[source]
+        source: SectorExpansionError,
     },
     #[error("duplicate block launch index {index} across threadblock files")]
     DuplicateLaunchIndex { index: i64 },
@@ -684,18 +692,40 @@ fn classify_with_l1(
     let start = sectors.len();
     let record = || format!("{} warp={warp_id} inst={record_ix}", path.display());
     let mut effective_space: Option<pb::MemorySpace> = None;
-    let meta = visit_memory_access(inst, record, |a| {
+    let mut sector_error: Option<SectorExpansionError> = None;
+    let visit_result = visit_memory_access(inst, record, |a| {
+        if sector_error.is_some() {
+            return;
+        }
         if effective_space.is_none() {
             effective_space = a.address_space;
         }
-        push_unique_sectors(
+        if let Err(source) = push_unique_sectors(
             &a.lane_vector,
             (0..a.lane_vector.len()).filter(|&i| a.lane_vector[i] != LANE_INACTIVE_SENTINEL),
             a.data_width_bytes,
             sectors,
             start,
-        );
-    })?;
+        ) {
+            sectors.truncate(start);
+            sector_error = Some(source);
+        }
+    });
+    if let Some(source) = sector_error {
+        return Err(ReplayError::SectorExpansion {
+            path: path.to_path_buf(),
+            warp_id,
+            record_ix,
+            source,
+        });
+    }
+    let meta = match visit_result {
+        Ok(meta) => meta,
+        Err(source) => {
+            sectors.truncate(start);
+            return Err(source.into());
+        }
+    };
     let Some(meta) = meta else {
         return Ok(AccessKind::NonMemory);
     };
@@ -813,6 +843,117 @@ mod space_routing_tests {
                 },
             )]),
         }
+    }
+
+    #[test]
+    fn sector_expansion_overflow_carries_replay_context() {
+        let mut addrs = vec![LANE_INACTIVE_SENTINEL; 32];
+        addrs[0] = i64::MAX;
+        let mut later_addrs = vec![LANE_INACTIVE_SENTINEL; 32];
+        later_addrs[0] = 0;
+        let inst = pb::Instruction {
+            pc: 0,
+            active_mask: Some(1),
+            predicate_mask: Some(1),
+            function_unique_id: 1,
+            addresses: vec![
+                pb::Address {
+                    data_width: 2,
+                    compression_format: sim_trace::lanes::FORMAT_LIST_ALL,
+                    addrs,
+                    address_space: Some(pb::MemorySpace::Global as i32),
+                    ..Default::default()
+                },
+                pb::Address {
+                    data_width: 2,
+                    compression_format: sim_trace::lanes::FORMAT_LIST_ALL,
+                    addrs: later_addrs,
+                    address_space: Some(pb::MemorySpace::Global as i32),
+                    ..Default::default()
+                },
+            ],
+            memory_op_class: Some(pb::MemoryOpClass::Global as i32),
+            data_width: Some(2),
+            memory_op_access_kind: Some(pb::MemoryOpAccessKind::Load as i32),
+            ..Default::default()
+        };
+        let mut sectors = vec![11];
+        let err = classify_with_l1(
+            &inst,
+            &schedule(ArchId::Sm86, MemRole::None, "LDG.E"),
+            ArchId::Sm86,
+            &mut sectors,
+            Path::new("block.pb"),
+            7,
+            9,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            ReplayError::SectorExpansion {
+                ref path,
+                warp_id: 7,
+                record_ix: 9,
+                source: SectorExpansionError::AddressOverflow {
+                    lane: 0,
+                    base: i64::MAX,
+                    data_width_bytes: 2,
+                },
+            } if path == Path::new("block.pb")
+        ));
+        assert_eq!(sectors, vec![11]);
+    }
+
+    #[test]
+    fn sector_expansion_error_precedes_later_trace_error() {
+        let mut overflow = vec![LANE_INACTIVE_SENTINEL; 32];
+        overflow[0] = i64::MAX;
+        let inst = pb::Instruction {
+            pc: 0,
+            active_mask: Some(1),
+            predicate_mask: Some(1),
+            function_unique_id: 1,
+            addresses: vec![
+                pb::Address {
+                    data_width: 2,
+                    compression_format: sim_trace::lanes::FORMAT_LIST_ALL,
+                    addrs: overflow,
+                    address_space: Some(pb::MemorySpace::Global as i32),
+                    ..Default::default()
+                },
+                pb::Address {
+                    data_width: 2,
+                    compression_format: sim_trace::lanes::FORMAT_LIST_ALL,
+                    addrs: Vec::new(),
+                    address_space: Some(pb::MemorySpace::Global as i32),
+                    ..Default::default()
+                },
+            ],
+            memory_op_class: Some(pb::MemoryOpClass::Global as i32),
+            data_width: Some(2),
+            ..Default::default()
+        };
+        let mut sectors = vec![13];
+        assert!(matches!(
+            classify_with_l1(
+                &inst,
+                &schedule(ArchId::Sm86, MemRole::None, "LDG.E"),
+                ArchId::Sm86,
+                &mut sectors,
+                Path::new("precedence.pb"),
+                2,
+                4,
+            ),
+            Err(ReplayError::SectorExpansion {
+                source: SectorExpansionError::AddressOverflow {
+                    lane: 0,
+                    base: i64::MAX,
+                    data_width_bytes: 2,
+                },
+                ..
+            })
+        ));
+        assert_eq!(sectors, vec![13]);
     }
 
     #[test]

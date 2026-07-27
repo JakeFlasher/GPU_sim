@@ -46,7 +46,7 @@ pub use cache_op::{
 };
 pub use l1::{
     AccessOutcome, EvAccess, FillKey, L1Cache, L1Config, L1ConfigError, L1Counters, LINE_BYTES,
-    SECTOR_BYTES, SECTORS_PER_LINE, push_unique_sectors,
+    SECTOR_BYTES, SECTORS_PER_LINE, SectorExpansionError, push_unique_sectors,
 };
 pub use l2::{
     DOCUMENTED_DEFAULT_L2_ASSOCIATIVITY, DOCUMENTED_DEFAULT_L2_REPLACEMENT,
