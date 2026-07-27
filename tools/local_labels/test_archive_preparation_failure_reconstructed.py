@@ -78,6 +78,7 @@ def test_path_alias_baselines_remain_frozen_and_v3_is_inactive() -> None:
     assert _sha(v2_path) == _FROZEN_PATH_ALIASES_V2_SHA256
     assert _sha(adr5_path) == _FROZEN_ADR_0005_SHA256
     assert ap.ROUND28_PATH_ALIASES == v1_path
+    assert ap.ROUND28_PATH_ALIASES_V1_SHA256 == _FROZEN_PATH_ALIASES_V1_SHA256
     v1 = json.loads(v1_path.read_bytes())
     v2 = json.loads(v2_path.read_bytes())
     v3 = json.loads(v3_path.read_bytes())
@@ -188,6 +189,7 @@ def repository_adjudications(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     historical_stage.write_bytes(paths["stage_equivalence"].read_bytes())
     aliases = repo / "evidence/path_aliases.v1.json"
     aliases.write_text(json.dumps({
+        "schema_version": 1,
         "aliases": [{
             "match": "prefix", "historical": f"{historical}/",
             "canonical": "evidence/round28/preparation_failures/problem-070/",
@@ -198,6 +200,7 @@ def repository_adjudications(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(ap, "REPO_ROOT", repo)
     monkeypatch.setattr(ap, "ROUND28_EVIDENCE_MANIFEST", manifest)
     monkeypatch.setattr(ap, "ROUND28_PATH_ALIASES", aliases)
+    monkeypatch.setattr(ap, "ROUND28_PATH_ALIASES_V1_SHA256", _sha(aliases))
     monkeypatch.setattr(ap, "ROUND28_CORRECTION_SHA256", _sha(paths["correction"]))
     monkeypatch.setattr(ap, "ROUND28_CORRECTION2_SHA256", _sha(paths["correction2"]))
     monkeypatch.setattr(ap, "ROUND28_ANNEX_C_SHA256", _sha(paths["stage_equivalence"]))
@@ -226,11 +229,13 @@ def _replace_fixture_alias_authority(
     *,
     subject: str,
 ) -> None:
+    value.setdefault("schema_version", 1)
     aliases.write_text(
         json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n",
         encoding="utf-8",
     )
     _commit(repo, subject)
+    ap.ROUND28_PATH_ALIASES_V1_SHA256 = _sha(aliases)
 
 
 def _fixture_alias_row(
@@ -246,6 +251,193 @@ def _fixture_alias_row(
         "canonical": canonical,
         "requires_sha256_match": requires_sha256_match,
     }
+
+
+@pytest.mark.parametrize(
+    ("authority_domain", "schema_version", "code"),
+    [
+        ("wrong_domain", 1, "PREP_ARCHIVE_EVIDENCE_ALIAS_DOMAIN_MISMATCH"),
+        (
+            ap.ROUND28_ALIAS_AUTHORITY_DOMAIN,
+            None,
+            "PREP_ARCHIVE_EVIDENCE_ALIAS_VERSION_UNSUPPORTED",
+        ),
+        (
+            ap.ROUND28_ALIAS_AUTHORITY_DOMAIN,
+            True,
+            "PREP_ARCHIVE_EVIDENCE_ALIAS_VERSION_UNSUPPORTED",
+        ),
+        *[
+            (
+                ap.ROUND28_ALIAS_AUTHORITY_DOMAIN,
+                version,
+                "PREP_ARCHIVE_EVIDENCE_ALIAS_VERSION_UNSUPPORTED",
+            )
+            for version in (2, 3, 4)
+        ],
+    ],
+)
+def test_repository_alias_dispatch_is_closed(
+    repository_adjudications,
+    authority_domain: str,
+    schema_version: object,
+    code: str,
+) -> None:
+    _, request, _, _ = repository_adjudications
+
+    _assert_refusal(
+        code,
+        ap._verify_stage_adjudication_alias,
+        request,
+        authority_domain=authority_domain,
+        schema_version=schema_version,
+    )
+
+
+@pytest.mark.parametrize("declared_version", [None, True, 2, 3, 4])
+def test_repository_alias_declared_version_must_match_dispatch(
+    repository_adjudications,
+    declared_version: object,
+) -> None:
+    repo, request, _paths, aliases = repository_adjudications
+    value = json.loads(aliases.read_bytes())
+    value["schema_version"] = declared_version
+    _replace_fixture_alias_authority(
+        repo,
+        aliases,
+        value,
+        subject=f"fixture declared alias version {declared_version!r}",
+    )
+
+    _assert_refusal(
+        "PREP_ARCHIVE_EVIDENCE_ALIAS_VERSION_UNSUPPORTED",
+        ap._adjudication_hashes,
+        request,
+    )
+
+
+def test_repository_alias_authority_hash_is_pinned(
+    repository_adjudications,
+) -> None:
+    repo, request, _paths, aliases = repository_adjudications
+    value = json.loads(aliases.read_bytes())
+    value["effective_date"] = "2099-01-01"
+    aliases.write_text(json.dumps(value), encoding="utf-8")
+    _commit(repo, "fixture alias authority hash drift")
+
+    _assert_refusal(
+        "PREP_ARCHIVE_EVIDENCE_ALIAS_AUTHORITY_HASH_MISMATCH",
+        ap._adjudication_hashes,
+        request,
+    )
+
+
+def test_repository_alias_authority_must_be_clean(
+    repository_adjudications,
+) -> None:
+    _repo, request, _paths, aliases = repository_adjudications
+    aliases.write_bytes(aliases.read_bytes() + b"\n")
+
+    _assert_refusal(
+        "PREP_ARCHIVE_EVIDENCE_ALIAS_DIRTY",
+        ap._adjudication_hashes,
+        request,
+    )
+
+
+def test_repository_alias_authority_must_be_tracked(
+    repository_adjudications,
+) -> None:
+    repo, request, _paths, aliases = repository_adjudications
+    _git(repo, "rm", "--cached", aliases.relative_to(repo).as_posix())
+
+    _assert_refusal(
+        "PREP_ARCHIVE_EVIDENCE_ALIAS_UNTRACKED",
+        ap._adjudication_hashes,
+        request,
+    )
+
+
+@pytest.mark.parametrize("kind", ["directory", "fifo", "symlink"])
+def test_repository_alias_authority_must_be_regular_non_symlink(
+    repository_adjudications,
+    kind: str,
+) -> None:
+    _repo, request, _paths, aliases = repository_adjudications
+    payload = aliases.read_bytes()
+    aliases.unlink()
+    if kind == "directory":
+        aliases.mkdir()
+    elif kind == "fifo":
+        os.mkfifo(aliases)
+    else:
+        target = aliases.with_suffix(".target")
+        target.write_bytes(payload)
+        aliases.symlink_to(target)
+
+    _assert_refusal(
+        "PREP_ARCHIVE_EVIDENCE_ALIAS_INVALID",
+        ap._adjudication_hashes,
+        request,
+    )
+
+
+def test_repository_alias_authority_must_not_be_hardlinked(
+    repository_adjudications,
+) -> None:
+    repo, request, _paths, aliases = repository_adjudications
+    payload = aliases.read_bytes()
+    aliases.unlink()
+    outside_alias = repo.parent / "outside-path-aliases.v1.json"
+    outside_alias.write_bytes(payload)
+    os.link(outside_alias, aliases)
+
+    _assert_refusal(
+        "PREP_ARCHIVE_EVIDENCE_ALIAS_INVALID",
+        ap._adjudication_hashes,
+        request,
+    )
+
+
+def test_repository_alias_authority_mutation_after_git_checks_is_detected(
+    repository_adjudications,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _repo, request, _paths, aliases = repository_adjudications
+    original_read = ap.immutable.read_regular_snapshot
+
+    def mutate_then_read(path: Path):
+        value = json.loads(aliases.read_bytes())
+        value["effective_date"] = "2099-01-01"
+        aliases.write_text(json.dumps(value), encoding="utf-8")
+        return original_read(path)
+
+    monkeypatch.setattr(ap.immutable, "read_regular_snapshot", mutate_then_read)
+
+    _assert_refusal(
+        "PREP_ARCHIVE_EVIDENCE_ALIAS_AUTHORITY_HASH_MISMATCH",
+        ap._adjudication_hashes,
+        request,
+    )
+
+
+def test_repository_alias_authority_parse_uses_consumed_snapshot(
+    repository_adjudications,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _repo, request, paths, aliases = repository_adjudications
+    original_read = ap.immutable.read_regular_snapshot
+
+    def mutate_after_read(path: Path):
+        snapshot = original_read(path)
+        aliases.write_text("not json", encoding="utf-8")
+        return snapshot
+
+    monkeypatch.setattr(ap.immutable, "read_regular_snapshot", mutate_after_read)
+
+    assert ap._adjudication_hashes(request)["stage_equivalence"] == _sha(
+        paths["stage_equivalence"]
+    )
 
 
 def test_repository_alias_exact_resolution(
@@ -502,8 +694,12 @@ def test_repository_adjudication_alias_refusal_is_typed(
     repo, request, _, aliases = repository_adjudications
     value = json.loads(aliases.read_text(encoding="utf-8"))
     value["aliases"][0]["canonical"] = "evidence/wrong/"
-    aliases.write_text(json.dumps(value), encoding="utf-8")
-    _commit(repo, "plant alias mismatch")
+    _replace_fixture_alias_authority(
+        repo,
+        aliases,
+        value,
+        subject="plant alias mismatch",
+    )
     _assert_refusal(
         "PREP_ARCHIVE_EVIDENCE_ALIAS_MISMATCH", ap._adjudication_hashes, request,
     )
@@ -626,6 +822,7 @@ def reconstructed_fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(ap, "ROUND28_SESSION_LOG", session_log)
     monkeypatch.setattr(ap, "ROUND28_EVIDENCE_MANIFEST", manifest)
     monkeypatch.setattr(ap, "ROUND28_PATH_ALIASES", aliases)
+    monkeypatch.setattr(ap, "ROUND28_PATH_ALIASES_V1_SHA256", _sha(aliases))
     monkeypatch.setattr(ap, "ROUND28_STAGE_EQUIVALENCE_SOURCE", stage_source)
     monkeypatch.setattr(ap, "ROUND28_ANNEX_C_SHA256", _sha(stage_source))
     monkeypatch.setattr(ap, "ROUND28_CORRECTED_ADJUDICATION", corrected)
@@ -1275,8 +1472,12 @@ def test_wrong_alias_target_has_distinct_refusal(
     aliases = ap.ROUND28_PATH_ALIASES
     value = json.loads(aliases.read_text(encoding="utf-8"))
     value["aliases"][0]["canonical"] = "evidence/wrong/"
-    aliases.write_text(json.dumps(value), encoding="utf-8")
-    _commit(fixture.repo, "plant wrong alias")
+    _replace_fixture_alias_authority(
+        fixture.repo,
+        aliases,
+        value,
+        subject="plant wrong alias",
+    )
 
     _assert_refusal(
         "PREP_ARCHIVE_EVIDENCE_ALIAS_MISMATCH",

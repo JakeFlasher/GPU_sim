@@ -29,6 +29,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Mapping, Sequence
 
+try:
+    from tools.local_labels import immutable_artifact as immutable
+except ModuleNotFoundError:  # direct execution from tools/local_labels
+    import immutable_artifact as immutable  # type: ignore[no-redef]
+
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 PREPARATION_FAILURE_ROOT_NAME = "preparation_failures"
@@ -167,6 +172,11 @@ ROUND28_EVIDENCE_ROOT = (
     REPO_ROOT / "evidence/round28/preparation_failures/problem-070"
 )
 ROUND28_EVIDENCE_MANIFEST = REPO_ROOT / "evidence/MANIFEST.sha256"
+ROUND28_ALIAS_AUTHORITY_DOMAIN = "round28_preparation_failure_adjudications"
+ROUND28_ACTIVE_ALIAS_SCHEMA_VERSION = 1
+ROUND28_PATH_ALIASES_V1_SHA256 = (
+    "94446cc702ffe86ecb5b35ae125a20cb758b17a4c521bfcefd4a308618f8c737"
+)
 ROUND28_PATH_ALIASES = REPO_ROOT / "evidence/path_aliases.v1.json"
 ROUND28_RECONSTRUCTION_ROOT = ROUND28_EVIDENCE_ROOT / "prep070_reconstruction"
 ROUND28_SESSION_LOG = ROUND28_EVIDENCE_ROOT / "session_log.jsonl"
@@ -2128,6 +2138,27 @@ def _repository_evidence_hash(path: Path, manifest: Mapping[str, str]) -> str:
     return observed
 
 
+def _round28_alias_authority(
+    *,
+    authority_domain: str,
+    schema_version: int,
+) -> tuple[Path, str]:
+    if authority_domain != ROUND28_ALIAS_AUTHORITY_DOMAIN:
+        raise PreparationArchiveRefusal(
+            "PREP_ARCHIVE_EVIDENCE_ALIAS_DOMAIN_MISMATCH",
+            f"unsupported authority domain: {authority_domain!r}",
+        )
+    if (
+        type(schema_version) is not int
+        or schema_version != ROUND28_ACTIVE_ALIAS_SCHEMA_VERSION
+    ):
+        raise PreparationArchiveRefusal(
+            "PREP_ARCHIVE_EVIDENCE_ALIAS_VERSION_UNSUPPORTED",
+            f"unsupported schema version: {schema_version!r}",
+        )
+    return ROUND28_PATH_ALIASES, ROUND28_PATH_ALIASES_V1_SHA256
+
+
 def _validated_alias_rows(
     value: Mapping[str, Any],
 ) -> tuple[tuple[str, str, str], ...]:
@@ -2219,8 +2250,16 @@ def _resolve_alias_endpoint(
     return endpoint
 
 
-def _verify_stage_adjudication_alias(request: ArchiveRequest) -> None:
-    aliases_path = ROUND28_PATH_ALIASES
+def _verify_stage_adjudication_alias(
+    request: ArchiveRequest,
+    *,
+    authority_domain: str,
+    schema_version: int,
+) -> None:
+    aliases_path, expected_authority_sha256 = _round28_alias_authority(
+        authority_domain=authority_domain,
+        schema_version=schema_version,
+    )
     if aliases_path.is_symlink() or not aliases_path.is_file():
         raise PreparationArchiveRefusal(
             "PREP_ARCHIVE_EVIDENCE_ALIAS_INVALID", str(aliases_path),
@@ -2240,9 +2279,39 @@ def _verify_stage_adjudication_alias(request: ArchiveRequest) -> None:
         proc = subprocess.run(command, cwd=REPO_ROOT, capture_output=True, check=False)
         if proc.returncode != 0 or (command[1] == "status" and proc.stdout):
             raise PreparationArchiveRefusal(code, str(aliases_path))
-    value = _json_object(
-        aliases_path, code="PREP_ARCHIVE_EVIDENCE_ALIAS_INVALID",
-    )
+    try:
+        authority_snapshot = immutable.read_regular_snapshot(aliases_path)
+    except immutable.ImmutableArtifactError as exc:
+        raise PreparationArchiveRefusal(
+            "PREP_ARCHIVE_EVIDENCE_ALIAS_INVALID",
+            f"{aliases_path}: {exc}",
+        ) from exc
+    observed_authority_sha256 = sha256_bytes(authority_snapshot.payload)
+    if observed_authority_sha256 != expected_authority_sha256:
+        raise PreparationArchiveRefusal(
+            "PREP_ARCHIVE_EVIDENCE_ALIAS_AUTHORITY_HASH_MISMATCH",
+            f"{aliases_path}: expected={expected_authority_sha256}; "
+            f"observed={observed_authority_sha256}",
+        )
+    try:
+        value = json.loads(authority_snapshot.payload)
+    except (UnicodeError, json.JSONDecodeError) as exc:
+        raise PreparationArchiveRefusal(
+            "PREP_ARCHIVE_EVIDENCE_ALIAS_INVALID",
+            f"{aliases_path}: {exc}",
+        ) from exc
+    if not isinstance(value, dict):
+        raise PreparationArchiveRefusal(
+            "PREP_ARCHIVE_EVIDENCE_ALIAS_INVALID",
+            f"{aliases_path}: root is not object",
+        )
+    declared_version = value.get("schema_version")
+    if type(declared_version) is not int or declared_version != schema_version:
+        raise PreparationArchiveRefusal(
+            "PREP_ARCHIVE_EVIDENCE_ALIAS_VERSION_UNSUPPORTED",
+            f"declared schema version {declared_version!r} does not match "
+            f"requested version {schema_version}",
+        )
     historical = str(request.adjudication_ref.absolute())
     expected_path = Path(
         os.path.abspath(os.fspath(request.stage_equivalence_adjudication_source))
@@ -2280,7 +2349,11 @@ def _verify_stage_adjudication_alias(request: ArchiveRequest) -> None:
 
 
 def _adjudication_hashes(request: ArchiveRequest) -> dict[str, str]:
-    _verify_stage_adjudication_alias(request)
+    _verify_stage_adjudication_alias(
+        request,
+        authority_domain=ROUND28_ALIAS_AUTHORITY_DOMAIN,
+        schema_version=ROUND28_ACTIVE_ALIAS_SCHEMA_VERSION,
+    )
     refs = {
         "corrected": request.corrected_adjudication_ref,
         "superseded": request.superseded_adjudication_ref,
