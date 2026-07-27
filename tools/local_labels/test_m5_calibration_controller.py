@@ -996,6 +996,72 @@ def test_equal_concurrent_publisher_accepts_durable_winner(
     immutable.verify_published_files(output / "final", [file])
 
 
+@pytest.mark.parametrize("conflict_kind", ["content", "inventory"])
+def test_stale_stage_conflicts_preserve_first_publisher_evidence(
+    tmp_path: Path,
+    conflict_kind: str,
+) -> None:
+    output = tmp_path / "output"
+    first_payload = b"possibly unique evidence"
+    first_files = [immutable.ImmutableFile.from_bytes("value", first_payload)]
+    if conflict_kind == "content":
+        second_payload = bytes([first_payload[0] ^ 1]) + first_payload[1:]
+        second_files = [
+            immutable.ImmutableFile.from_bytes("value", second_payload)
+        ]
+        expected_error = "staged file collision: value"
+    else:
+        first_files.append(
+            immutable.ImmutableFile.from_bytes("extra", b"retained extra evidence")
+        )
+        second_files = first_files[:1]
+        expected_error = "deterministic stage inventory mismatch"
+    authorization_calls = 0
+
+    def stop_before_commit(_root: Path, _descriptor: int) -> None:
+        nonlocal authorization_calls
+        authorization_calls += 1
+        if authorization_calls == 2:
+            raise RuntimeError("injected stop before commit")
+
+    with pytest.raises(RuntimeError, match="injected stop before commit"):
+        immutable.publish_directory(
+            output,
+            "final",
+            first_files,
+            before_commit=stop_before_commit,
+        )
+    assert authorization_calls == 2
+    stage = output / ".final.staging"
+    inventory_before = tuple(sorted(path.name for path in stage.iterdir()))
+    stage_before = immutable._snapshot_fields(stage.stat(follow_symlinks=False))
+    files_before = {
+        path.name: (
+            immutable._snapshot_fields(path.stat(follow_symlinks=False)),
+            path.read_bytes(),
+        )
+        for path in stage.iterdir()
+    }
+
+    with pytest.raises(immutable.ImmutableArtifactError) as error:
+        immutable.publish_directory(output, "final", second_files)
+
+    assert expected_error in str(error.value)
+    assert not (output / "final").exists()
+    assert immutable._snapshot_fields(
+        stage.stat(follow_symlinks=False)
+    ) == stage_before
+    assert tuple(sorted(path.name for path in stage.iterdir())) == inventory_before
+    assert {
+        path.name: (
+            immutable._snapshot_fields(path.stat(follow_symlinks=False)),
+            path.read_bytes(),
+        )
+        for path in stage.iterdir()
+    } == files_before
+    immutable.verify_published_files(stage, first_files)
+
+
 def test_publication_rejects_stage_and_final_symlink_names(tmp_path: Path) -> None:
     output = tmp_path / "output"
     output.mkdir()
