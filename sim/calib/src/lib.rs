@@ -87,6 +87,28 @@ pub enum LatencyKind {
     MshrOutstandingMisses,
 }
 
+impl LatencyKind {
+    const fn value_field(self) -> &'static str {
+        match self {
+            Self::L1Hit => "latencies_cycles.l1_hit.value",
+            Self::L2Hit => "latencies_cycles.l2_hit.value",
+            Self::Dram => "latencies_cycles.dram.value",
+            Self::Shared => "latencies_cycles.shared.value",
+            Self::MshrOutstandingMisses => "latencies_cycles.mshr_outstanding_misses.value",
+        }
+    }
+
+    const fn dispersion_field(self) -> &'static str {
+        match self {
+            Self::L1Hit => "latencies_cycles.l1_hit.dispersion",
+            Self::L2Hit => "latencies_cycles.l2_hit.dispersion",
+            Self::Dram => "latencies_cycles.dram.dispersion",
+            Self::Shared => "latencies_cycles.shared.dispersion",
+            Self::MshrOutstandingMisses => "latencies_cycles.mshr_outstanding_misses.dispersion",
+        }
+    }
+}
+
 impl std::fmt::Display for LatencyKind {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = match self {
@@ -520,7 +542,25 @@ impl ArchCard {
             LatencyKind::MshrOutstandingMisses => &lat.mshr_outstanding_misses,
         };
         match entry {
-            Measured::Value(v) => Ok(v.value),
+            Measured::Value(v) => {
+                if !v.value.is_finite() || v.value <= 0.0 {
+                    return Err(CalibError::InvalidCardValue {
+                        field: kind.value_field(),
+                        value: v.value.to_string(),
+                        requirement: "positive finite scalar",
+                    });
+                }
+                if let Some(dispersion) = v.dispersion
+                    && (!dispersion.is_finite() || dispersion < 0.0)
+                {
+                    return Err(CalibError::InvalidCardValue {
+                        field: kind.dispersion_field(),
+                        value: dispersion.to_string(),
+                        requirement: "non-negative finite scalar",
+                    });
+                }
+                Ok(v.value)
+            }
             Measured::Gap { reason } => Err(CalibError::ResearchGap {
                 arch_id: self.arch_id.clone(),
                 kind,
@@ -552,6 +592,21 @@ mod tests {
             .join(name)
             .canonicalize()
             .expect("card exists in-repo")
+    }
+
+    fn measured_mut(card: &mut ArchCard, kind: LatencyKind) -> &mut MeasuredValue {
+        let latencies = card.latencies_cycles.as_mut().expect("latencies present");
+        let entry = match kind {
+            LatencyKind::L1Hit => &mut latencies.l1_hit,
+            LatencyKind::L2Hit => &mut latencies.l2_hit,
+            LatencyKind::Dram => &mut latencies.dram,
+            LatencyKind::Shared => &mut latencies.shared,
+            LatencyKind::MshrOutstandingMisses => &mut latencies.mshr_outstanding_misses,
+        };
+        match entry {
+            Measured::Value(value) => value,
+            Measured::Gap { .. } => panic!("expected measured value"),
+        }
     }
 
     #[test]
@@ -655,6 +710,48 @@ mod tests {
         assert!(l.shared < l.l1_hit);
         assert!(l.l1_hit < l.l2_hit);
         assert!(l.l2_hit < l.dram);
+    }
+
+    #[test]
+    fn required_latency_rejects_invalid_measured_values() {
+        let base = ArchCard::load(&card_path("sm_86.json")).expect("load sm_86 card");
+        for bad in [0.0, -1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let mut card = base.clone();
+            measured_mut(&mut card, LatencyKind::L1Hit).value = bad;
+            match card.require_latency(LatencyKind::L1Hit) {
+                Err(CalibError::InvalidCardValue {
+                    field,
+                    value,
+                    requirement,
+                }) => {
+                    assert_eq!(field, "latencies_cycles.l1_hit.value");
+                    assert_eq!(value, bad.to_string());
+                    assert_eq!(requirement, "positive finite scalar");
+                }
+                other => panic!("expected typed invalid latency value, got {other:?}"),
+            }
+        }
+    }
+
+    #[test]
+    fn required_latency_rejects_invalid_dispersion() {
+        let base = ArchCard::load(&card_path("sm_86.json")).expect("load sm_86 card");
+        for bad in [-1.0, f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
+            let mut card = base.clone();
+            measured_mut(&mut card, LatencyKind::L1Hit).dispersion = Some(bad);
+            match card.require_latency(LatencyKind::L1Hit) {
+                Err(CalibError::InvalidCardValue {
+                    field,
+                    value,
+                    requirement,
+                }) => {
+                    assert_eq!(field, "latencies_cycles.l1_hit.dispersion");
+                    assert_eq!(value, bad.to_string());
+                    assert_eq!(requirement, "non-negative finite scalar");
+                }
+                other => panic!("expected typed invalid latency dispersion, got {other:?}"),
+            }
+        }
     }
 
     /// The PARTIAL sm_120-laptop card must load: its gap blocks surface as
