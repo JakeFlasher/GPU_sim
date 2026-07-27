@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import errno
 import os
+import resource
 import sys
 from pathlib import Path
 
@@ -521,6 +522,335 @@ def test_pinned_directory_reader_failure_closes_all_owned_descriptors(
     for descriptor in (*opened, *root_descriptors):
         with pytest.raises(OSError):
             os.fstat(descriptor)
+
+
+def _snapshot_material(
+    root: Path, payloads: dict[str, bytes],
+) -> tuple[immutable.ImmutableFile, ...]:
+    material = []
+    root.mkdir()
+    for relative_path, payload in payloads.items():
+        _regular(root / relative_path, payload)
+        material.append(immutable.ImmutableFile.from_bytes(relative_path, payload))
+    root.chmod(0o555)
+    return tuple(material)
+
+
+def test_snapshot_closure_scales_to_twenty_thousand_files_under_rlimit(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    old_limit = resource.getrlimit(resource.RLIMIT_NOFILE)
+    if old_limit[1] != resource.RLIM_INFINITY and old_limit[1] < 256:
+        pytest.skip("RLIMIT_NOFILE hard limit is below the required harness bound")
+    root = tmp_path / "large-tree"
+    root.mkdir()
+    empty_sha256 = immutable.sha256_bytes(b"")
+    material = []
+    for index in range(20_000):
+        relative_path = f"f{index:05d}"
+        descriptor = os.open(
+            root / relative_path,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+            0o444,
+        )
+        os.close(descriptor)
+        material.append(immutable.ImmutableFile(
+            relative_path, empty_sha256, 0, payload=b"",
+        ))
+    root.chmod(0o555)
+
+    original_os_open = immutable.os.open
+    original_dup = immutable.os.dup
+    original_scandir = immutable.os.scandir
+    original_hash = immutable._hash_fd
+    hash_calls = 0
+    peak_descriptors = 0
+
+    def record_peak() -> None:
+        nonlocal peak_descriptors
+        peak_descriptors = max(peak_descriptors, _open_descriptor_count())
+
+    def track_os_open(*args, **kwargs):
+        descriptor = original_os_open(*args, **kwargs)
+        record_peak()
+        return descriptor
+
+    def track_dup(descriptor: int) -> int:
+        duplicate = original_dup(descriptor)
+        record_peak()
+        return duplicate
+
+    def track_scandir(path):
+        entries = original_scandir(path)
+        record_peak()
+        return entries
+
+    def count_hash(
+        descriptor: int, *, allow_hardlinks: bool = False,
+    ) -> tuple[str, int, int]:
+        nonlocal hash_calls
+        hash_calls += 1
+        return original_hash(descriptor, allow_hardlinks=allow_hardlinks)
+
+    monkeypatch.setattr(immutable.os, "open", track_os_open)
+    monkeypatch.setattr(immutable.os, "dup", track_dup)
+    monkeypatch.setattr(immutable.os, "scandir", track_scandir)
+    monkeypatch.setattr(immutable, "_hash_fd", count_hash)
+    try:
+        resource.setrlimit(resource.RLIMIT_NOFILE, (256, old_limit[1]))
+        process_baseline = _open_descriptor_count()
+        with immutable.PinnedDirectoryReader(root) as reader:
+            verifier_baseline = _open_descriptor_count()
+            peak_descriptors = verifier_baseline
+            files, directories = immutable._verify_published_files_at(
+                reader.descriptor, material,
+            )
+        assert len(files) == 20_000
+        assert set(directories) == {"."}
+        assert hash_calls == 20_000
+        assert 0 <= peak_descriptors - verifier_baseline <= 16
+        assert peak_descriptors < 256
+        assert _open_descriptor_count() == process_baseline
+    finally:
+        resource.setrlimit(resource.RLIMIT_NOFILE, old_limit)
+        root.chmod(0o755)
+
+
+def test_snapshot_closure_rejects_depth_above_bound_without_fd_leak(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "deep-tree"
+    root.mkdir()
+    parent = root
+    for index in range(65):
+        parent /= f"d{index:02d}"
+        parent.mkdir()
+
+    with immutable.PinnedDirectoryReader(root) as reader:
+        baseline = _open_descriptor_count()
+        with pytest.raises(immutable.ImmutableArtifactError):
+            immutable._verify_snapshot_closure_at(
+                reader.descriptor,
+                {},
+                require_readonly_directories=False,
+            )
+        assert _open_descriptor_count() == baseline
+
+
+def test_snapshot_closure_failure_closes_transient_descriptors(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "failure-tree"
+    material = _snapshot_material(root, {"a": b"a", "b": b"b"})
+    expected = immutable._material_map(material)
+    original_verify = immutable._verify_open_file
+    calls = 0
+
+    def fail_second_hash(
+        descriptor: int, file: immutable.ImmutableFile,
+    ) -> bool:
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            raise RuntimeError("injected scalable verification failure")
+        return original_verify(descriptor, file)
+
+    monkeypatch.setattr(immutable, "_verify_open_file", fail_second_hash)
+    try:
+        with immutable.PinnedDirectoryReader(root) as reader:
+            baseline = _open_descriptor_count()
+            with pytest.raises(
+                RuntimeError, match="injected scalable verification failure",
+            ):
+                immutable._verify_snapshot_closure_at(
+                    reader.descriptor,
+                    expected,
+                    require_readonly_directories=True,
+                )
+            assert _open_descriptor_count() == baseline
+    finally:
+        root.chmod(0o755)
+
+
+def test_snapshot_monitor_close_failure_is_typed_and_preserves_primary(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    original_close = immutable.os.close
+    close_only = immutable._DirectoryMutationMonitor()
+    close_only_descriptor = close_only.descriptor
+    active = immutable._DirectoryMutationMonitor()
+    active_descriptor = active.descriptor
+
+    def fail_monitor_close(descriptor: int) -> None:
+        if descriptor in {close_only_descriptor, active_descriptor}:
+            raise OSError("injected monitor close failure")
+        original_close(descriptor)
+
+    monkeypatch.setattr(immutable.os, "close", fail_monitor_close)
+    try:
+        with pytest.raises(
+            immutable.ImmutableArtifactError,
+            match=immutable.DURABILITY_UNPROVEN,
+        ):
+            close_only.close()
+        with pytest.raises(RuntimeError, match="primary verification failure") as raised:
+            try:
+                raise RuntimeError("primary verification failure")
+            finally:
+                active.close()
+        assert any(
+            immutable.DURABILITY_UNPROVEN in note
+            for note in getattr(raised.value, "__notes__", ())
+        )
+    finally:
+        original_close(close_only_descriptor)
+        original_close(active_descriptor)
+
+
+def test_snapshot_closure_rejects_restore_after_early_final_reopen(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "restore-tree"
+    material = _snapshot_material(root, {"a": b"a", "z": b"z"})
+    expected = immutable._material_map(material)
+    early = root / "a"
+    early.chmod(0o644)
+    writer = os.open(early, os.O_WRONLY)
+    early.chmod(0o444)
+    original_open = immutable._open_relative_regular_at
+    opens: dict[str, int] = {}
+    mutated = False
+
+    def mutate_after_early_final_reopen(
+        root_descriptor: int, relative_path: str,
+    ):
+        nonlocal mutated
+        pinned = original_open(root_descriptor, relative_path)
+        opens[relative_path] = opens.get(relative_path, 0) + 1
+        if relative_path == "z" and opens[relative_path] == 2:
+            os.pwrite(writer, b"X", 0)
+            os.pwrite(writer, b"a", 0)
+            mutated = True
+        return pinned
+
+    monkeypatch.setattr(
+        immutable, "_open_relative_regular_at", mutate_after_early_final_reopen,
+    )
+    try:
+        with immutable.PinnedDirectoryReader(root) as reader:
+            with pytest.raises(
+                immutable.ImmutableArtifactError,
+                match="changed before verification closure",
+            ):
+                immutable._verify_snapshot_closure_at(
+                    reader.descriptor,
+                    expected,
+                    require_readonly_directories=True,
+                )
+    finally:
+        os.close(writer)
+        root.chmod(0o755)
+    assert mutated is True
+    assert early.read_bytes() == b"a"
+
+
+def test_snapshot_closure_rejects_write_after_final_snapshot(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "final-snapshot-tree"
+    material = _snapshot_material(root, {"a": b"a", "z": b"z"})
+    expected = immutable._material_map(material)
+    leaf = root / "a"
+    leaf.chmod(0o644)
+    writer = os.open(leaf, os.O_WRONLY)
+    leaf.chmod(0o444)
+    original_snapshot = immutable._snapshot_tree_descriptor
+    calls = 0
+    mutated = False
+    observed = b""
+
+    def mutate_after_final_snapshot(root_descriptor: int):
+        nonlocal calls, mutated
+        calls += 1
+        snapshot = original_snapshot(root_descriptor)
+        if calls == 3:
+            os.pwrite(writer, b"X", 0)
+            mutated = True
+        return snapshot
+
+    monkeypatch.setattr(
+        immutable, "_snapshot_tree_descriptor", mutate_after_final_snapshot,
+    )
+    try:
+        with immutable.PinnedDirectoryReader(root) as reader:
+            with pytest.raises(
+                immutable.ImmutableArtifactError,
+                match="changed during bounded verification",
+            ):
+                immutable._verify_snapshot_closure_at(
+                    reader.descriptor,
+                    expected,
+                    require_readonly_directories=True,
+                )
+        observed = leaf.read_bytes()
+    finally:
+        os.pwrite(writer, b"a", 0)
+        os.close(writer)
+        root.chmod(0o755)
+    assert calls == 3
+    assert mutated is True
+    assert observed == b"X"
+
+
+def test_snapshot_closure_rejects_external_hardlink_after_final_snapshot(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "hardlink-snapshot-tree"
+    material = _snapshot_material(root, {"a": b"a", "z": b"z"})
+    expected = immutable._material_map(material)
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    alias = outside / "alias"
+    original_snapshot = immutable._snapshot_tree_descriptor
+    calls = 0
+    linked = False
+    observed_links = 0
+
+    def link_after_final_snapshot(root_descriptor: int):
+        nonlocal calls, linked
+        calls += 1
+        snapshot = original_snapshot(root_descriptor)
+        if calls == 3:
+            os.link(root / "a", alias)
+            linked = True
+        return snapshot
+
+    monkeypatch.setattr(
+        immutable, "_snapshot_tree_descriptor", link_after_final_snapshot,
+    )
+    try:
+        with immutable.PinnedDirectoryReader(root) as reader:
+            with pytest.raises(
+                immutable.ImmutableArtifactError,
+                match="changed during bounded verification",
+            ):
+                immutable._verify_snapshot_closure_at(
+                    reader.descriptor,
+                    expected,
+                    require_readonly_directories=True,
+                )
+        observed_links = (root / "a").stat().st_nlink
+    finally:
+        alias.unlink(missing_ok=True)
+        root.chmod(0o755)
+    assert calls == 3
+    assert linked is True
+    assert observed_links == 2
 
 
 def test_directory_publication_rechecks_after_authorization_callback(

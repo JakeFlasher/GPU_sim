@@ -26,6 +26,21 @@ _MAX_RELATIVE_BYTES = 4096
 _MAX_FINAL_NAME_BYTES = 246
 _MAX_REGULAR_LEAF_BYTES = 243
 _SNAPSHOT_CLOSURE_THRESHOLD = 512
+_INOTIFY_MUTATION_EVENTS = (
+    0x00000002  # IN_MODIFY
+    | 0x00000004  # IN_ATTRIB
+    | 0x00000008  # IN_CLOSE_WRITE
+    | 0x00000040  # IN_MOVED_FROM
+    | 0x00000080  # IN_MOVED_TO
+    | 0x00000100  # IN_CREATE
+    | 0x00000200  # IN_DELETE
+    | 0x00000400  # IN_DELETE_SELF
+    | 0x00000800  # IN_MOVE_SELF
+    | 0x00002000  # IN_UNMOUNT
+    | 0x00004000  # IN_Q_OVERFLOW
+    | 0x00008000  # IN_IGNORED
+)
+_INOTIFY_DIRECTORY_MASK = _INOTIFY_MUTATION_EVENTS | 0x01000000  # IN_ONLYDIR
 _PARTIAL_SUFFIX = ".m5-partial"
 _PARTIAL_SUFFIXES = frozenset({
     ".m5-partial", ".m6-partial", ".ncu-details-partial",
@@ -1647,8 +1662,90 @@ def _material_map(files: Iterable[ImmutableFile]) -> dict[str, ImmutableFile]:
     return expected
 
 
-def _snapshot_tree_descriptor(
+class _DirectoryMutationMonitor:
+    """Fail closed on local syscall mutations during bounded verification."""
+
+    def __init__(self) -> None:
+        libc = ctypes.CDLL(None, use_errno=True)
+        initialize = getattr(libc, "inotify_init1", None)
+        add_watch = getattr(libc, "inotify_add_watch", None)
+        close_on_exec = getattr(os, "O_CLOEXEC", None)
+        if initialize is None or add_watch is None or not close_on_exec:
+            raise ImmutableArtifactError(
+                f"{VERIFY_RESOURCE_BOUND}: inotify mutation monitor unavailable"
+            )
+        initialize.argtypes = (ctypes.c_int,)
+        initialize.restype = ctypes.c_int
+        add_watch.argtypes = (ctypes.c_int, ctypes.c_char_p, ctypes.c_uint32)
+        add_watch.restype = ctypes.c_int
+        descriptor = initialize(os.O_NONBLOCK | close_on_exec)
+        if descriptor < 0:
+            error = ctypes.get_errno()
+            raise ImmutableArtifactError(
+                f"{VERIFY_RESOURCE_BOUND}: inotify initialization failed: "
+                f"[{error}] {os.strerror(error)}"
+            )
+        self.descriptor = descriptor
+        self._add_watch = add_watch
+
+    def _watch_inode(
+        self, descriptor: int, *, directory: bool,
+    ) -> None:
+        suffix = "/." if directory else ""
+        path = os.fsencode(f"/proc/self/fd/{descriptor}{suffix}")
+        mask = (
+            _INOTIFY_DIRECTORY_MASK
+            if directory
+            else _INOTIFY_MUTATION_EVENTS
+        )
+        result = self._add_watch(self.descriptor, path, mask)
+        if result >= 0:
+            return
+        error = ctypes.get_errno()
+        raise ImmutableArtifactError(
+            f"{VERIFY_RESOURCE_BOUND}: inotify inode watch failed: "
+            f"[{error}] {os.strerror(error)}"
+        )
+
+    def watch_directory(self, descriptor: int) -> None:
+        self._watch_inode(descriptor, directory=True)
+
+    def watch_regular(self, descriptor: int) -> None:
+        self._watch_inode(descriptor, directory=False)
+
+    def require_quiet(self) -> None:
+        while True:
+            try:
+                events = os.read(self.descriptor, 64 * 1024)
+            except BlockingIOError:
+                return
+            except InterruptedError:
+                continue
+            except OSError as exc:
+                raise ImmutableArtifactError(
+                    f"{VERIFY_RESOURCE_BOUND}: inotify event read failed"
+                ) from exc
+            if events:
+                raise ImmutableArtifactError(
+                    "immutable tree changed during bounded verification"
+                )
+            raise ImmutableArtifactError(
+                f"{VERIFY_RESOURCE_BOUND}: inotify monitor closed unexpectedly"
+            )
+
+    def close(self) -> None:
+        descriptor = self.descriptor
+        self.descriptor = -1
+        if descriptor >= 0:
+            _close_descriptors(
+                (descriptor,), label="inotify mutation monitor close",
+            )
+
+
+def _walk_tree_descriptor(
     root_descriptor: int,
+    *,
+    observe_directory: Callable[[int], None] | None = None,
 ) -> _TreeSnapshot:
     """Inventory one tree while retaining only an O(depth) descriptor stack."""
     files: dict[str, _Snapshot] = {}
@@ -1658,6 +1755,8 @@ def _snapshot_tree_descriptor(
         parts = pending.pop()
         directory = _open_pinned_relative_directory(root_descriptor, parts)
         try:
+            if observe_directory is not None:
+                observe_directory(directory.descriptor)
             directories[PurePosixPath(*parts).as_posix() if parts else "."] = (
                 _snapshot_fields(os.fstat(directory.descriptor))
             )
@@ -1686,7 +1785,35 @@ def _snapshot_tree_descriptor(
     return files, directories
 
 
-def _verify_snapshot_closure_at(
+def _snapshot_tree_descriptor(
+    root_descriptor: int,
+) -> _TreeSnapshot:
+    return _walk_tree_descriptor(root_descriptor)
+
+
+def _arm_directory_mutation_monitor(
+    root_descriptor: int,
+) -> _DirectoryMutationMonitor:
+    monitor = _DirectoryMutationMonitor()
+    try:
+        files, _directories = _walk_tree_descriptor(
+            root_descriptor, observe_directory=monitor.watch_directory,
+        )
+        for relative_path in sorted(files):
+            pinned = _open_relative_regular_at(root_descriptor, relative_path)
+            try:
+                monitor.watch_regular(pinned.descriptor)
+                pinned.verify_path()
+            finally:
+                pinned.close()
+        monitor.require_quiet()
+        return monitor
+    except BaseException:
+        monitor.close()
+        raise
+
+
+def _verify_snapshot_contents_at(
     root_descriptor: int,
     expected: dict[str, ImmutableFile],
     *,
@@ -1768,10 +1895,45 @@ def _verify_snapshot_closure_at(
             directory.verify_path()
         finally:
             directory.close()
+    final_files, final_directories = _snapshot_tree_descriptor(root_descriptor)
+    if set(final_files) != set(expected) or set(final_directories) - {"."} != expected_directories:
+        raise ImmutableArtifactError("immutable tree inventory changed during final closure")
+    for relative_path, snapshot in hashed.items():
+        if final_files[relative_path] != snapshot:
+            raise ImmutableArtifactError(
+                f"immutable file changed before verification closure: {relative_path}"
+            )
+    for relative_directory, snapshot in first_directories.items():
+        if final_directories[relative_directory] != snapshot:
+            raise ImmutableArtifactError(
+                "immutable directory changed before verification closure: "
+                f"{relative_directory}"
+            )
     root_after = _snapshot_fields(os.fstat(root_descriptor))
     if root_after != root_before:
         raise ImmutableArtifactError("publication root changed during verification")
-    return second_files, second_directories
+    return final_files, final_directories
+
+
+def _verify_snapshot_closure_at(
+    root_descriptor: int,
+    expected: dict[str, ImmutableFile],
+    *,
+    require_readonly_directories: bool,
+) -> _TreeSnapshot:
+    monitor = _arm_directory_mutation_monitor(root_descriptor)
+    try:
+        snapshot = _verify_snapshot_contents_at(
+            root_descriptor,
+            expected,
+            require_readonly_directories=require_readonly_directories,
+        )
+        # This nonblocking read to EAGAIN is the bounded verifier's final
+        # linearization point for local write and namespace syscalls.
+        monitor.require_quiet()
+        return snapshot
+    finally:
+        monitor.close()
 
 
 def _verify_published_files_at(
