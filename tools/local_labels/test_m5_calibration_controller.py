@@ -811,6 +811,81 @@ def test_verify_published_files_is_read_only(tmp_path: Path, monkeypatch: pytest
     immutable.verify_published_files(root, [file])
 
 
+@pytest.mark.parametrize("mutation", ["chmod", "replace", "mutate_restore"])
+def test_public_verifier_rejects_same_uid_mutation_after_initial_hash(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+) -> None:
+    material = (
+        immutable.ImmutableFile.from_bytes("a", b"a"),
+        immutable.ImmutableFile.from_bytes("z", b"z"),
+    )
+    root = immutable.publish_directory(tmp_path / "output", "final", material)
+    early = root / "a"
+    writer: int | None = None
+    if mutation == "mutate_restore":
+        early.chmod(0o644)
+        writer = os.open(early, os.O_WRONLY)
+        early.chmod(0o444)
+    baseline = early.stat(follow_symlinks=False)
+    original_verify = immutable._verify_open_file
+    mutated = False
+
+    def mutate_after_later_file_hash(
+        descriptor: int,
+        file: immutable.ImmutableFile,
+    ) -> bool:
+        nonlocal mutated
+        result = original_verify(descriptor, file)
+        if file.relative_path == "z" and not mutated:
+            if mutation == "chmod":
+                early.chmod(0o644)
+            elif mutation == "replace":
+                root.chmod(0o755)
+                early.unlink()
+                early.write_bytes(b"a")
+                early.chmod(0o444)
+                root.chmod(0o555)
+            else:
+                assert writer is not None
+                os.pwrite(writer, b"X", 0)
+                os.pwrite(writer, b"a", 0)
+                os.utime(
+                    early,
+                    ns=(baseline.st_atime_ns, baseline.st_mtime_ns),
+                )
+            mutated = True
+        return result
+
+    monkeypatch.setattr(
+        immutable,
+        "_verify_open_file",
+        mutate_after_later_file_hash,
+    )
+    try:
+        with pytest.raises(
+            immutable.ImmutableArtifactError,
+            match="immutable file changed after hashing: a",
+        ):
+            immutable.verify_published_files(root, material)
+        current = early.stat(follow_symlinks=False)
+        assert mutated is True
+        assert early.read_bytes() == b"a"
+        if mutation == "chmod":
+            assert current.st_mode & 0o222
+        elif mutation == "replace":
+            assert current.st_ino != baseline.st_ino
+        else:
+            assert current.st_ino == baseline.st_ino
+            assert current.st_mtime_ns == baseline.st_mtime_ns
+            assert current.st_ctime_ns != baseline.st_ctime_ns
+    finally:
+        if writer is not None:
+            os.close(writer)
+        root.chmod(0o755)
+
+
 def test_publication_rejects_mid_install_partial_hardlink(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
