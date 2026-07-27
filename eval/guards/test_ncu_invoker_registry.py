@@ -44,10 +44,102 @@ EXCLUDED_DIRECTORY_NAMES = {
     "venv",
 }
 SOURCE_SUFFIXES = {".py", ".sh", ".bash", ".bsh", ".ksh", ".zsh"}
-ROLES = {"campaign", "calibration", "diagnostic", "historical", "retired"}
+ROLES = {
+    "campaign",
+    "calibration",
+    "diagnostic",
+    "historical",
+    "retired",
+    "retired_private",
+}
 SOURCE_KINDS = {"python", "shell"}
 SCOPES = {"production", "test"}
 BOUNDARIES = {"discover", "invoke", "both"}
+
+# E842 is the retained reviewed inventory of NCU-reachable production paths.
+# The AST/shell detector remains a broader mechanical guard; these reviewed
+# transitive wrappers do not contain a direct NCU token but still belong in the
+# accounting registry because they delegate to an NCU-bearing caller.
+REVIEWED_NCU_INVOKER_PATHS = frozenset({
+    "tools/local_labels/campaign_preflight.py",
+    "tools/local_labels/label_driver.sh",
+    "tools/local_labels/parse_ncu_metrics.py",
+    "tools/local_labels/sm86_capture_chunk.py",
+    "tools/local_labels/probe_ncu_metric_availability.py",
+    "tools/local_labels/validate_static_occupancy_agreement.py",
+    "tools/local_labels/capture_count_labels.py",
+    "tools/local_labels/capture_t2_stream_labels.py",
+    "tools/local_labels/run_observation_contract_microfixtures.py",
+    "tools/local_labels/orchestrate_sm86_label_recapture.py",
+    "tools/local_labels/run_sm86_label_recapture_sweep.py",
+    "tools/local_labels/sweep_repeatability_matrix.py",
+    "tools/local_labels/run_headline_cohort_sweep.py",
+    "tools/local_labels/repeatability_matrix_runner.py",
+    "tools/trace_sampling/golden_cells/capture_golden_cells.sh",
+    "tools/local_labels/capture_timing_labels.py",
+    "tools/local_labels/capture_long_timing_cohort.py",
+    "tools/sol_baselines_harness/calibration/cache_prediction/ncu_harvester.py",
+})
+REVIEWED_TRANSITIVE_INVOKER_PATHS = frozenset({
+    "tools/local_labels/capture_t2_stream_labels.py",
+    "tools/local_labels/orchestrate_sm86_label_recapture.py",
+    "tools/local_labels/run_sm86_label_recapture_sweep.py",
+    "tools/local_labels/sweep_repeatability_matrix.py",
+    "tools/local_labels/run_headline_cohort_sweep.py",
+    "tools/local_labels/repeatability_matrix_runner.py",
+})
+REVIEWED_ROLE_BY_PATH = {
+    "tools/local_labels/campaign_preflight.py": "campaign",
+    "tools/local_labels/label_driver.sh": "campaign",
+    "tools/local_labels/parse_ncu_metrics.py": "campaign",
+    "tools/local_labels/sm86_capture_chunk.py": "campaign",
+    "tools/local_labels/probe_ncu_metric_availability.py": "diagnostic",
+    "tools/local_labels/validate_static_occupancy_agreement.py": "diagnostic",
+    "tools/local_labels/capture_count_labels.py": "campaign",
+    "tools/local_labels/capture_t2_stream_labels.py": "campaign",
+    "tools/local_labels/run_observation_contract_microfixtures.py": "calibration",
+    "tools/local_labels/orchestrate_sm86_label_recapture.py": "historical",
+    "tools/local_labels/run_sm86_label_recapture_sweep.py": "historical",
+    "tools/local_labels/sweep_repeatability_matrix.py": "calibration",
+    "tools/local_labels/run_headline_cohort_sweep.py": "calibration",
+    "tools/local_labels/repeatability_matrix_runner.py": "calibration",
+    "tools/trace_sampling/golden_cells/capture_golden_cells.sh": "calibration",
+    "tools/local_labels/capture_timing_labels.py": "retired_private",
+    "tools/local_labels/capture_long_timing_cohort.py": "retired_private",
+    "tools/sol_baselines_harness/calibration/cache_prediction/ncu_harvester.py": "retired_private",
+}
+REVIEWED_TRANSITIVE_CALL_SITES = {
+    "tools/local_labels/capture_t2_stream_labels.py": (
+        ("main", "capture_count_labels.capture_and_land", None,
+         frozenset({"metrics", "ncu"})),
+    ),
+    "tools/local_labels/orchestrate_sm86_label_recapture.py": (
+        ("recapture_cell", "subprocess.run", "cmd", frozenset({
+            "capture_output", "cwd", "text", "timeout",
+        })),
+    ),
+    "tools/local_labels/run_sm86_label_recapture_sweep.py": (
+        ("run_sweep", "tools.local_labels.orchestrate_sm86_label_recapture.recapture_cell",
+         None, frozenset({"dry_run", "n_repeats", "shape_point", "slug", "warmup"})),
+    ),
+    "tools/local_labels/sweep_repeatability_matrix.py": (
+        ("_execute_cell_config", "_label_driver_argv", None, frozenset({
+            "binary", "cell", "cfg", "driver", "launch_index", "measurement_manifest",
+            "ncu", "out_dir", "repeat_index", "unit_metrics",
+        })),
+        ("_execute_cell_config", "subprocess.run", "argv", frozenset({
+            "capture_output", "check", "text",
+        })),
+    ),
+    "tools/local_labels/run_headline_cohort_sweep.py": (
+        ("main", "subprocess.run", "cmd", frozenset({"cwd"})),
+    ),
+    "tools/local_labels/repeatability_matrix_runner.py": (
+        ("run_cell", "subprocess.run", "cmd", frozenset({
+            "capture_output", "cwd", "text",
+        })),
+    ),
+}
 EXECUTOR_CALLS = {
     "execute_ncu_action",
     "execute_ncu_supervised_child",
@@ -136,7 +228,25 @@ NCU_INVOKER_REGISTRY: dict[str, RegistryEntry] = {
     "tools/local_labels/capture_count_labels.py": RegistryEntry(
         "campaign", "python", "production", "invoke"
     ),
+    "tools/local_labels/capture_t2_stream_labels.py": RegistryEntry(
+        "campaign", "python", "production", "invoke"
+    ),
     "tools/local_labels/run_observation_contract_microfixtures.py": RegistryEntry(
+        "calibration", "python", "production", "invoke"
+    ),
+    "tools/local_labels/orchestrate_sm86_label_recapture.py": RegistryEntry(
+        "historical", "python", "production", "invoke"
+    ),
+    "tools/local_labels/run_sm86_label_recapture_sweep.py": RegistryEntry(
+        "historical", "python", "production", "invoke"
+    ),
+    "tools/local_labels/sweep_repeatability_matrix.py": RegistryEntry(
+        "calibration", "python", "production", "invoke"
+    ),
+    "tools/local_labels/run_headline_cohort_sweep.py": RegistryEntry(
+        "calibration", "python", "production", "invoke"
+    ),
+    "tools/local_labels/repeatability_matrix_runner.py": RegistryEntry(
         "calibration", "python", "production", "invoke"
     ),
     "tools/trace_sampling/golden_cells/capture_golden_cells.sh": RegistryEntry(
@@ -155,13 +265,13 @@ NCU_INVOKER_REGISTRY: dict[str, RegistryEntry] = {
         "diagnostic", "python", "production", "both"
     ),
     "tools/local_labels/capture_timing_labels.py": RegistryEntry(
-        "retired", "python", "production", "invoke"
+        "retired_private", "python", "production", "invoke"
     ),
     "tools/local_labels/capture_long_timing_cohort.py": RegistryEntry(
-        "retired", "python", "production", "invoke"
+        "retired_private", "python", "production", "invoke"
     ),
     "tools/sol_baselines_harness/calibration/cache_prediction/ncu_harvester.py": RegistryEntry(
-        "retired", "python", "production", "both"
+        "retired_private", "python", "production", "both"
     ),
     "tools/sol_baselines_harness/calibration/cache_prediction/sm86_expanded/emit_expanded_ncu_ledger.py": RegistryEntry(
         "retired", "python", "production", "discover"
@@ -206,6 +316,35 @@ def _call_name(call: ast.Call) -> str:
     if isinstance(call.func, ast.Attribute):
         return call.func.attr
     return ""
+
+
+def _python_call_sites(
+    path: Path,
+) -> dict[str, tuple[tuple[str, str | None, frozenset[str]], ...]]:
+    """Return direct qualified call sites grouped by enclosing function.
+
+    The registry's transitive review is intentionally stronger than a module-wide
+    substring check: each delegation must remain in the reviewed function and
+    retain the argument shape that binds it to the NCU path or launch driver.
+    """
+    tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+    aliases = _import_aliases(tree)
+    sites: dict[str, list[tuple[str, str | None, frozenset[str]]]] = {}
+    for function in ast.walk(tree):
+        if not isinstance(function, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            continue
+        function_sites: list[tuple[str, str | None, frozenset[str]]] = []
+        for call in _scope_calls(function):
+            qualified = _qualified_name(call.func, aliases)
+            first_argument = (
+                _qualified_name(call.args[0], aliases) if call.args else None
+            )
+            keyword_names = frozenset(
+                keyword.arg for keyword in call.keywords if keyword.arg is not None
+            )
+            function_sites.append((qualified, first_argument, keyword_names))
+        sites[function.name] = function_sites
+    return {name: tuple(function_sites) for name, function_sites in sites.items()}
 
 
 def _literal_string(node: ast.AST) -> str | None:
@@ -1234,8 +1373,13 @@ def test_registry_is_closed_and_matches_direct_ncu_sources():
     discovered = _discovered_registry()
     registered_paths = set(NCU_INVOKER_REGISTRY)
     discovered_paths = set(discovered)
+    missing_reviewed = sorted(REVIEWED_NCU_INVOKER_PATHS - registered_paths)
     unknown = sorted(discovered_paths - registered_paths)
-    stale = sorted(registered_paths - discovered_paths)
+    stale = sorted(
+        registered_paths
+        - discovered_paths
+        - REVIEWED_TRANSITIVE_INVOKER_PATHS
+    )
     mismatched = {
         path: {
             "registered": NCU_INVOKER_REGISTRY[path],
@@ -1249,11 +1393,57 @@ def test_registry_is_closed_and_matches_direct_ncu_sources():
         or _boundary_set(NCU_INVOKER_REGISTRY[path].boundary)
         != discovered[path][2]
     }
-    assert not (unknown or stale or mismatched), (
-        "direct NCU source registry drifted; registration accounts for a source "
-        "but does not authorize campaign evidence:\n"
-        f"unknown={unknown!r}\nstale={stale!r}\nmismatched={mismatched!r}"
+    assert not (missing_reviewed or unknown or stale or mismatched), (
+        "NCU source registry drifted; registration accounts for a source but "
+        "does not authorize campaign evidence:\n"
+        f"missing_reviewed={missing_reviewed!r}\nunknown={unknown!r}\n"
+        f"stale={stale!r}\nmismatched={mismatched!r}"
     )
+
+
+def test_reviewed_inventory_includes_transitive_delegators():
+    assert len(REVIEWED_NCU_INVOKER_PATHS) == 18
+    assert len(REVIEWED_TRANSITIVE_INVOKER_PATHS) == 6
+    assert REVIEWED_TRANSITIVE_INVOKER_PATHS <= REVIEWED_NCU_INVOKER_PATHS
+    assert set(REVIEWED_ROLE_BY_PATH) == REVIEWED_NCU_INVOKER_PATHS
+    assert set(REVIEWED_TRANSITIVE_CALL_SITES) == REVIEWED_TRANSITIVE_INVOKER_PATHS
+
+    for relative_path, expected_role in REVIEWED_ROLE_BY_PATH.items():
+        entry = NCU_INVOKER_REGISTRY[relative_path]
+        assert entry.role == expected_role
+        assert entry.scope == "production"
+
+    for relative_path, expected_sites in REVIEWED_TRANSITIVE_CALL_SITES.items():
+        entry = NCU_INVOKER_REGISTRY[relative_path]
+        assert entry.boundary == "invoke"
+        call_sites = _python_call_sites(REPO_ROOT / relative_path)
+        for function_name, expected_call, expected_first_argument, expected_keywords in expected_sites:
+            actual_sites = call_sites.get(function_name, ())
+            assert any(
+                qualified == expected_call
+                and first_argument == expected_first_argument
+                and expected_keywords <= keyword_names
+                for qualified, first_argument, keyword_names in actual_sites
+            ), (
+                f"{relative_path} lost reviewed transitive call site: "
+                f"function={function_name!r}, call={expected_call!r}, "
+                f"first_argument={expected_first_argument!r}, "
+                f"keywords={sorted(expected_keywords)!r}"
+            )
+
+
+def test_retired_private_invokers_are_explicit():
+    expected = {
+        "tools/local_labels/capture_timing_labels.py",
+        "tools/local_labels/capture_long_timing_cohort.py",
+        "tools/sol_baselines_harness/calibration/cache_prediction/ncu_harvester.py",
+    }
+    actual = {
+        path
+        for path, entry in NCU_INVOKER_REGISTRY.items()
+        if entry.role == "retired_private"
+    }
+    assert actual == expected
 
 
 def test_python_detector_controls():
