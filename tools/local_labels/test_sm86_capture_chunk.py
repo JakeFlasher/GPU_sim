@@ -5589,6 +5589,78 @@ def test_ambient_tripwire_reappearance_on_resume_refuses_before_recovery(
     assert case.capture_counts == {"a": 1, "b": 0}
 
 
+def test_finalization_publish_refuses_cross_device_before_rename(
+        tmp_path, monkeypatch):
+    publication_root = tmp_path / "stage" / "publication"
+    publication_root.mkdir(parents=True)
+    final_dir = tmp_path / "output" / "chunks" / "chunk"
+    final_dir.parent.mkdir(parents=True)
+    real_stat = cc.os.stat
+    source_device = real_stat(publication_root).st_dev
+    replace_calls = []
+
+    def device_stat(path, *, follow_symlinks=True):
+        observed = Path(path)
+        metadata = real_stat(path, follow_symlinks=follow_symlinks)
+        if observed == final_dir.parent:
+            fields = list(metadata)
+            fields[2] = source_device + 1
+            return os.stat_result(fields)
+        return metadata
+
+    monkeypatch.setattr(cc.os, "stat", device_stat)
+    monkeypatch.setattr(
+        cc.os, "replace", lambda *args: replace_calls.append(args),
+    )
+
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        cc._publish_finalized_tree(publication_root, final_dir)
+
+    assert caught.value.code == "finalization_cross_device_refused"
+    assert replace_calls == []
+
+
+def test_finalization_publish_converts_exdev_to_typed_refusal(
+        tmp_path, monkeypatch):
+    publication_root = tmp_path / "stage" / "publication"
+    publication_root.mkdir(parents=True)
+    final_dir = tmp_path / "output" / "chunks" / "chunk"
+    final_dir.parent.mkdir(parents=True)
+    fsync_calls = []
+
+    def refuse_replace(_source, _destination):
+        raise OSError(errno.EXDEV, "cross-device link")
+
+    monkeypatch.setattr(cc.os, "replace", refuse_replace)
+    monkeypatch.setattr(
+        cc, "_fsync_directory", lambda path: fsync_calls.append(path),
+    )
+
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        cc._publish_finalized_tree(publication_root, final_dir)
+
+    assert caught.value.code == "finalization_cross_device_refused"
+    assert fsync_calls == []
+
+
+def test_finalization_publish_fsyncs_destination_parent(
+        tmp_path, monkeypatch):
+    publication_root = tmp_path / "stage" / "publication"
+    publication_root.mkdir(parents=True)
+    (publication_root / "DONE.json").write_text("{}\n")
+    final_dir = tmp_path / "output" / "chunks" / "chunk"
+    final_dir.parent.mkdir(parents=True)
+    fsync_calls = []
+    monkeypatch.setattr(
+        cc, "_fsync_directory", lambda path: fsync_calls.append(path),
+    )
+
+    cc._publish_finalized_tree(publication_root, final_dir)
+
+    assert (final_dir / "DONE.json").read_text() == "{}\n"
+    assert fsync_calls == [final_dir.parent]
+
+
 def test_done_finalizer_derives_uniform_journal_preflight_not_cli_preflight(
         tmp_path, monkeypatch):
     import campaign_done_manifest as done

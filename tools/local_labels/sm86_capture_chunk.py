@@ -10676,6 +10676,30 @@ def _fsync_directory(path: Path) -> None:
         os.close(fd)
 
 
+def _publish_finalized_tree(publication_root: Path, final_dir: Path) -> None:
+    final_dir.parent.mkdir(parents=True, exist_ok=True)
+    source_device = os.stat(publication_root, follow_symlinks=False).st_dev
+    destination_device = os.stat(
+        final_dir.parent, follow_symlinks=False,
+    ).st_dev
+    if source_device != destination_device:
+        raise ChunkRefusal(
+            "finalization_cross_device_refused",
+            f"source={publication_root} device={source_device}; "
+            f"destination_parent={final_dir.parent} device={destination_device}",
+        )
+    try:
+        os.replace(publication_root, final_dir)
+    except OSError as exc:
+        if exc.errno == errno.EXDEV:
+            raise ChunkRefusal(
+                "finalization_cross_device_refused",
+                f"source={publication_root}; destination={final_dir}",
+            ) from exc
+        raise
+    _fsync_directory(final_dir.parent)
+
+
 def _write_json_exclusive_fsync(path: Path, payload: dict) -> None:
     if path.exists() or path.is_symlink():
         raise ChunkRefusal("capture_evidence_exists", str(path))
@@ -11812,8 +11836,7 @@ def _finalize_from_journals(
     if problems:
         raise ChunkRefusal("done_seal_invalid", "; ".join(problems))
     _write_json_exclusive_fsync(publication_root / "DONE.json", manifest)
-    final_dir.parent.mkdir(parents=True, exist_ok=True)
-    os.replace(publication_root, final_dir)
+    _publish_finalized_tree(publication_root, final_dir)
     published_manifest = _json(final_dir / "DONE.json")
     resumed = done.verify_seal(
         published_manifest, repo_root=REPO_ROOT,
