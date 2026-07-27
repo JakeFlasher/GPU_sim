@@ -69,6 +69,7 @@ import csv
 import hashlib
 import io
 import json
+import os
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -274,10 +275,10 @@ def extract_launch_observation(text: str) -> dict[str, Any]:
     }
 
 
-def write_launch_observation(
-    *, csv_text: str, report_sha256: str, output_path: Path,
+def build_launch_observation_document(
+    *, csv_text: str, report_sha256: str,
     requested_launch_skip: int, requested_launch_count: int,
-) -> None:
+) -> dict[str, Any]:
     observation = extract_launch_observation(csv_text)
     payload = {
         "schema_version": 1,
@@ -292,9 +293,44 @@ def write_launch_observation(
         payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True
     ).encode("utf-8")
     payload["observation_sha256"] = hashlib.sha256(encoded_for_seal).hexdigest()
-    with output_path.open("x", encoding="utf-8") as stream:
-        json.dump(payload, stream, indent=2, sort_keys=True)
-        stream.write("\n")
+    return payload
+
+
+def write_launch_observation(
+    *, csv_text: str, report_sha256: str, output_path: Path,
+    requested_launch_skip: int, requested_launch_count: int,
+    output_parent_descriptor: int | None = None,
+) -> None:
+    payload = build_launch_observation_document(
+        csv_text=csv_text,
+        report_sha256=report_sha256,
+        requested_launch_skip=requested_launch_skip,
+        requested_launch_count=requested_launch_count,
+    )
+    encoded = (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    if output_parent_descriptor is None:
+        with output_path.open("xb") as stream:
+            stream.write(encoded)
+        return
+    if output_path.name in {"", ".", ".."} or output_path.name != output_path.parts[-1]:
+        raise ValueError("launch observation output leaf is invalid")
+    descriptor = os.open(
+        output_path.name,
+        os.O_WRONLY
+        | os.O_CREAT
+        | os.O_EXCL
+        | os.O_NOFOLLOW
+        | getattr(os, "O_CLOEXEC", 0),
+        0o444,
+        dir_fd=output_parent_descriptor,
+    )
+    try:
+        with os.fdopen(descriptor, "wb", closefd=False) as stream:
+            stream.write(encoded)
+            stream.flush()
+            os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
 
 def validate_launch_observation_document(
     document: Any,

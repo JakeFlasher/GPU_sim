@@ -919,6 +919,30 @@ def _run_command_bounded(
         raise wrapped from exc
 
 
+def execute_bounded_command(
+    command: tuple[str, ...],
+    *,
+    environment: dict[str, str],
+    working_directory: str,
+    inherited_descriptors: tuple[int, ...],
+    timeout_seconds: float,
+    max_output_bytes: int,
+    timeout_code: str,
+    launch_code: str,
+) -> NcuActionResult:
+    """Run a retained-capability command with bounded process cleanup."""
+    return _run_command_bounded(
+        command,
+        environment=environment,
+        working_directory=working_directory,
+        inherited_descriptors=inherited_descriptors,
+        timeout_seconds=timeout_seconds,
+        max_output_bytes=max_output_bytes,
+        timeout_code=timeout_code,
+        launch_code=launch_code,
+    )
+
+
 def _run_bounded(
     descriptor: int,
     arguments: tuple[str, ...],

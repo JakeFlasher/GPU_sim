@@ -730,6 +730,24 @@ class RetainedRegular:
     def proc_path(self) -> str:
         return f"/proc/self/fd/{self.descriptor}"
 
+    def read_bytes(self) -> bytes:
+        """Read this retained inode while preserving path and snapshot identity."""
+        descriptor = self.descriptor
+        self._pinned.verify_path()
+        if _snapshot_fields(os.fstat(descriptor)) != self.snapshot:
+            raise ImmutableArtifactError("retained regular-file metadata changed")
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        payload = _read_fd(descriptor)
+        if _snapshot_fields(os.fstat(descriptor)) != self.snapshot:
+            raise ImmutableArtifactError("retained regular-file metadata changed")
+        if len(payload) != self.size_bytes:
+            raise ImmutableArtifactError("retained regular-file size changed")
+        if hashlib.sha256(payload).hexdigest() != self.sha256:
+            raise ImmutableArtifactError("retained regular-file SHA-256 changed")
+        self._pinned.verify_path()
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        return payload
+
     def verify_unchanged(self) -> None:
         """Rebind path, inode, metadata, size, and bytes to the initial read."""
         descriptor = self.descriptor
@@ -1118,6 +1136,69 @@ def _rename_noreplace_at(
     )
 
 
+def rename_noreplace(source: Path, destination: Path) -> Path:
+    """Publish one source without replacing a concurrent destination winner.
+
+    The source is deliberately retained as evidence.  Callers that need a
+    destructive move must use a higher-level transaction with an inode-bound
+    cleanup policy; a pathname-only unlink would reintroduce a source-swap race.
+    """
+    source = Path(os.path.abspath(os.fspath(source)))
+    destination = Path(os.path.abspath(os.fspath(destination)))
+    if source.parent != destination.parent:
+        raise ImmutableArtifactError(
+            "atomic no-replace publication requires one pinned parent directory"
+        )
+    try:
+        metadata = source.lstat()
+    except OSError as exc:
+        raise ImmutableArtifactError(
+            f"atomic no-replace source is unavailable: {source}"
+        ) from exc
+    if stat.S_ISLNK(metadata.st_mode):
+        raise ImmutableArtifactError(
+            f"atomic no-replace source is a symlink: {source}"
+        )
+    with PinnedDirectoryReader(destination.parent) as parent:
+        parent.verify_path()
+        if _entry_mode(parent.descriptor, destination.name) is not None:
+            raise FileExistsError(destination)
+    if stat.S_ISDIR(metadata.st_mode):
+        material: list[ImmutableFile] = []
+        for path in sorted(source.rglob("*")):
+            child_metadata = path.lstat()
+            if stat.S_ISLNK(child_metadata.st_mode):
+                raise ImmutableArtifactError(
+                    f"atomic no-replace tree contains a symlink: {path}"
+                )
+            if stat.S_ISDIR(child_metadata.st_mode):
+                continue
+            if not stat.S_ISREG(child_metadata.st_mode):
+                raise ImmutableArtifactError(
+                    f"atomic no-replace tree contains a special file: {path}"
+                )
+            material.append(
+                ImmutableFile.from_path(
+                    path.relative_to(source).as_posix(), path,
+                )
+            )
+        if not material:
+            raise ImmutableArtifactError(
+                f"atomic no-replace source directory is empty: {source}"
+            )
+        return publish_directory(destination.parent, destination.name, material)
+    if not stat.S_ISREG(metadata.st_mode):
+        raise ImmutableArtifactError(
+            f"atomic no-replace source is not a regular file or directory: {source}"
+        )
+    return publish_regular_file(
+        destination.parent,
+        destination.name,
+        source,
+        executable=bool(metadata.st_mode & 0o111),
+    )
+
+
 def _partial_name(leaf_name: str) -> str:
     return f".{leaf_name}{_PARTIAL_SUFFIX}"
 
@@ -1176,6 +1257,7 @@ def publish_regular_file(
     *,
     partial_suffix: str = _PARTIAL_SUFFIX,
     pinned_parent: PinnedDirectoryReader | None = None,
+    executable: bool = False,
 ) -> Path:
     """Publish one regular file without destructive failure cleanup.
 
@@ -1188,6 +1270,8 @@ def publish_regular_file(
         raise ImmutableArtifactError(
             f"{NAMESPACE_RESERVED_COMPONENT}: unsupported partial suffix"
         )
+    if type(executable) is not bool:
+        raise ImmutableArtifactError("executable must be boolean")
     if len(os.fsencode(name)) + len(os.fsencode(partial_suffix)) + 1 > 255:
         raise ImmutableArtifactError(
             f"{NAMESPACE_NAME_OVERFLOW}: regular publication partial name: {name!r}"
@@ -1252,6 +1336,10 @@ def publish_regular_file(
                 raise ImmutableArtifactError(
                     f"incomplete pre-existing partial is preserved: {partial_name}"
                 )
+            if executable and not (os.fstat(descriptor).st_mode & 0o111):
+                raise ImmutableArtifactError(
+                    f"pre-existing partial is not executable: {partial_name}"
+                )
             _verify_locked_partial_path(parent_descriptor, partial_name, descriptor)
             _fsync_or_fail(descriptor, f"partial {partial_name}")
             lock_descriptor = descriptor
@@ -1269,7 +1357,7 @@ def publish_regular_file(
             )
             _lock_partial(descriptor, partial_name)
             _copy_to_descriptor(material, descriptor)
-            os.fchmod(descriptor, 0o444)
+            os.fchmod(descriptor, 0o555 if executable else 0o444)
             if not _verify_open_file(descriptor, material):
                 raise ImmutableArtifactError(f"immutable file mismatch: {name}")
             _fsync_or_fail(descriptor, f"partial {partial_name}")
@@ -1291,6 +1379,7 @@ def publish_regular_file(
             or _snapshot_fields(linked) != _snapshot_fields(opened)
             or linked.st_nlink != 1
             or opened.st_nlink != 1
+            or (executable and not (linked.st_mode & 0o111))
         ):
             raise ImmutableArtifactError(f"named regular-file path changed: {name}")
         return Path(parent) / name

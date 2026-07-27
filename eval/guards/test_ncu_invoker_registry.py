@@ -76,6 +76,9 @@ REVIEWED_NCU_INVOKER_PATHS = frozenset({
     "tools/local_labels/run_headline_cohort_sweep.py",
     "tools/local_labels/repeatability_matrix_runner.py",
     "tools/trace_sampling/golden_cells/capture_golden_cells.sh",
+    "tools/trace_sampling/golden_cells/golden_ncu_capture.py",
+    "tools/trace_sampling/golden_cells/retained_nvcc_compile.py",
+    "tools/trace_sampling/golden_cells/retained_nvbit_launch.py",
     "tools/local_labels/capture_timing_labels.py",
     "tools/local_labels/capture_long_timing_cohort.py",
     "tools/sol_baselines_harness/calibration/cache_prediction/ncu_harvester.py",
@@ -87,6 +90,7 @@ REVIEWED_TRANSITIVE_INVOKER_PATHS = frozenset({
     "tools/local_labels/sweep_repeatability_matrix.py",
     "tools/local_labels/run_headline_cohort_sweep.py",
     "tools/local_labels/repeatability_matrix_runner.py",
+    "tools/trace_sampling/golden_cells/capture_golden_cells.sh",
 })
 REVIEWED_ROLE_BY_PATH = {
     "tools/local_labels/campaign_preflight.py": "campaign",
@@ -104,6 +108,9 @@ REVIEWED_ROLE_BY_PATH = {
     "tools/local_labels/run_headline_cohort_sweep.py": "calibration",
     "tools/local_labels/repeatability_matrix_runner.py": "calibration",
     "tools/trace_sampling/golden_cells/capture_golden_cells.sh": "calibration",
+    "tools/trace_sampling/golden_cells/golden_ncu_capture.py": "calibration",
+    "tools/trace_sampling/golden_cells/retained_nvcc_compile.py": "calibration",
+    "tools/trace_sampling/golden_cells/retained_nvbit_launch.py": "calibration",
     "tools/local_labels/capture_timing_labels.py": "retired_private",
     "tools/local_labels/capture_long_timing_cohort.py": "retired_private",
     "tools/sol_baselines_harness/calibration/cache_prediction/ncu_harvester.py": "retired_private",
@@ -140,7 +147,33 @@ REVIEWED_TRANSITIVE_CALL_SITES = {
         })),
     ),
 }
+REVIEWED_TRANSITIVE_SHELL_CALL_SITES = {
+    "tools/trace_sampling/golden_cells/capture_golden_cells.sh": (
+        (
+            "$REPO/tools/trace_sampling/golden_cells/golden_ncu_capture.py",
+            frozenset({
+                "--validate-only", "--preflight", "--preflight-sha256",
+            }),
+            frozenset({"--slug", "--receipt-out", "--published-receipt-out"}),
+        ),
+        (
+            "$REPO/tools/trace_sampling/golden_cells/golden_ncu_capture.py",
+            frozenset({
+                "--preflight", "--preflight-sha256", "--slug", "--binary",
+                "--binary-sha256", "--trace-dir", "--csv-out", "--stderr-out",
+                "--observation-out", "--run-manifest-out",
+                "--capture-manifest-out", "--receipt-out",
+                "--published-trace-dir", "--published-csv-out",
+                "--published-stderr-out", "--published-observation-out",
+                "--published-run-manifest-out", "--published-capture-manifest-out",
+                "--published-receipt-out",
+            }),
+            frozenset({"--validate-only"}),
+        ),
+    ),
+}
 EXECUTOR_CALLS = {
+    "execute_bounded_command",
     "execute_ncu_action",
     "execute_ncu_supervised_child",
     "execute_ncu_supervised_executable",
@@ -250,7 +283,16 @@ NCU_INVOKER_REGISTRY: dict[str, RegistryEntry] = {
         "calibration", "python", "production", "invoke"
     ),
     "tools/trace_sampling/golden_cells/capture_golden_cells.sh": RegistryEntry(
-        "calibration", "shell", "production", "both"
+        "calibration", "shell", "production", "invoke"
+    ),
+    "tools/trace_sampling/golden_cells/golden_ncu_capture.py": RegistryEntry(
+        "calibration", "python", "production", "invoke"
+    ),
+    "tools/trace_sampling/golden_cells/retained_nvcc_compile.py": RegistryEntry(
+        "calibration", "python", "production", "invoke"
+    ),
+    "tools/trace_sampling/golden_cells/retained_nvbit_launch.py": RegistryEntry(
+        "calibration", "python", "production", "invoke"
     ),
     "tools/local_labels/probe_ncu_metric_availability.py": RegistryEntry(
         "diagnostic", "python", "production", "invoke"
@@ -1279,6 +1321,26 @@ def _shell_boundary_kinds(
     return kinds
 
 
+def _reviewed_python_adapter_calls(
+    text: str, expected_script: str,
+) -> tuple[tuple[str, ...], ...]:
+    calls: list[tuple[str, ...]] = []
+    for line in _logical_shell_lines(text):
+        for segment in _command_segments(_shell_tokens(line)):
+            index = 0
+            while index < len(segment) and segment[index] in CONTROL_WORDS:
+                index += 1
+            while index < len(segment) and ASSIGNMENT.fullmatch(segment[index]):
+                index += 1
+            if (
+                index + 1 < len(segment)
+                and segment[index] in {"$PYTHON", "${PYTHON}"}
+                and segment[index + 1] == expected_script
+            ):
+                calls.append(tuple(segment[index + 2:]))
+    return tuple(calls)
+
+
 def _is_test_source(path: Path) -> bool:
     relative = path.relative_to(REPO_ROOT)
     return (
@@ -1402,11 +1464,16 @@ def test_registry_is_closed_and_matches_direct_ncu_sources():
 
 
 def test_reviewed_inventory_includes_transitive_delegators():
-    assert len(REVIEWED_NCU_INVOKER_PATHS) == 18
-    assert len(REVIEWED_TRANSITIVE_INVOKER_PATHS) == 6
+    assert len(REVIEWED_NCU_INVOKER_PATHS) == 21
+    assert len(REVIEWED_TRANSITIVE_INVOKER_PATHS) == 7
     assert REVIEWED_TRANSITIVE_INVOKER_PATHS <= REVIEWED_NCU_INVOKER_PATHS
     assert set(REVIEWED_ROLE_BY_PATH) == REVIEWED_NCU_INVOKER_PATHS
-    assert set(REVIEWED_TRANSITIVE_CALL_SITES) == REVIEWED_TRANSITIVE_INVOKER_PATHS
+    assert (
+        set(REVIEWED_TRANSITIVE_CALL_SITES)
+        == REVIEWED_TRANSITIVE_INVOKER_PATHS
+        - set(REVIEWED_TRANSITIVE_SHELL_CALL_SITES)
+    )
+    assert set(REVIEWED_TRANSITIVE_SHELL_CALL_SITES) <= REVIEWED_TRANSITIVE_INVOKER_PATHS
 
     for relative_path, expected_role in REVIEWED_ROLE_BY_PATH.items():
         entry = NCU_INVOKER_REGISTRY[relative_path]
@@ -1430,6 +1497,61 @@ def test_reviewed_inventory_includes_transitive_delegators():
                 f"first_argument={expected_first_argument!r}, "
                 f"keywords={sorted(expected_keywords)!r}"
             )
+
+    for relative_path, expected_sites in REVIEWED_TRANSITIVE_SHELL_CALL_SITES.items():
+        entry = NCU_INVOKER_REGISTRY[relative_path]
+        assert entry.boundary == "invoke"
+        text = (REPO_ROOT / relative_path).read_text(encoding="utf-8")
+        scripts = {script for script, _required, _forbidden in expected_sites}
+        assert len(scripts) == 1
+        script = next(iter(scripts))
+        actual_calls = _reviewed_python_adapter_calls(text, script)
+        assert len(actual_calls) == len(expected_sites), (
+            f"{relative_path} reviewed shell delegation count changed: "
+            f"expected={len(expected_sites)}, observed={len(actual_calls)}"
+        )
+        unmatched = list(actual_calls)
+        for _script, required_arguments, forbidden_arguments in expected_sites:
+            for index, actual_arguments in enumerate(unmatched):
+                actual_set = set(actual_arguments)
+                if (
+                    required_arguments <= actual_set
+                    and forbidden_arguments.isdisjoint(actual_set)
+                ):
+                    unmatched.pop(index)
+                    break
+            else:
+                raise AssertionError(
+                    f"{relative_path} lost reviewed executable shell delegation: "
+                    f"script={script!r}, required={sorted(required_arguments)!r}, "
+                    f"forbidden={sorted(forbidden_arguments)!r}"
+                )
+        assert not unmatched
+
+
+def test_reviewed_shell_adapter_detection_requires_executable_command():
+    script = "$REPO/tools/trace_sampling/golden_cells/golden_ncu_capture.py"
+    text = (
+        f'# "$PYTHON" "{script}" --validate-only\n'
+        f'NOTE="{script} --validate-only"\n'
+        f'"$PYTHON" "{script}" --validate-only --preflight "$PREFLIGHT"\n'
+    )
+    assert _reviewed_python_adapter_calls(text, script) == ((
+        "--validate-only", "--preflight", "$PREFLIGHT",
+    ),)
+
+
+def test_reviewed_golden_collection_forbids_validate_only_mode():
+    relative_path = "tools/trace_sampling/golden_cells/capture_golden_cells.sh"
+    expected_sites = REVIEWED_TRANSITIVE_SHELL_CALL_SITES[relative_path]
+    _script, required, forbidden = expected_sites[1]
+    text = (REPO_ROOT / relative_path).read_text(encoding="utf-8")
+    actual_calls = _reviewed_python_adapter_calls(text, _script)
+    collection = next(call for call in actual_calls if "--slug" in call)
+    assert required <= set(collection)
+    assert forbidden.isdisjoint(collection)
+    mutated = set(collection) | {"--validate-only"}
+    assert not forbidden.isdisjoint(mutated)
 
 
 def test_retired_private_invokers_are_explicit():

@@ -146,6 +146,7 @@ def test_retained_regular_binds_descriptor_path_snapshot_size_and_hash(
         assert retained.size_bytes == len(b"fixture report")
         assert len(retained.snapshot) == 7
         assert retained.proc_path == f"/proc/self/fd/{retained.descriptor}"
+        assert retained.read_bytes() == b"fixture report"
         assert os.read(retained.descriptor, 7) == b"fixture"
         retained.verify_unchanged()
         assert os.read(retained.descriptor, 7) == b"fixture"
@@ -807,6 +808,14 @@ def test_regular_publication_rejects_post_rename_hardlink(
     assert output.read_bytes() == b"payload"
     assert alias.read_bytes() == b"payload"
     assert output.stat().st_nlink == 2
+
+
+def test_regular_publication_can_preserve_execute_capability(tmp_path: Path) -> None:
+    output = immutable.publish_regular_file(
+        tmp_path, "executable.bin", b"payload", executable=True,
+    )
+    assert output.stat().st_mode & 0o111
+    assert not output.stat().st_mode & 0o222
 
 
 def test_ncu_details_partial_suffix_is_reserved_for_regular_publication(
