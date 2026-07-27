@@ -2128,6 +2128,97 @@ def _repository_evidence_hash(path: Path, manifest: Mapping[str, str]) -> str:
     return observed
 
 
+def _validated_alias_rows(
+    value: Mapping[str, Any],
+) -> tuple[tuple[str, str, str], ...]:
+    aliases = value.get("aliases")
+    if not isinstance(aliases, list):
+        raise PreparationArchiveRefusal(
+            "PREP_ARCHIVE_EVIDENCE_ALIAS_INVALID",
+            "alias authority aliases must be a list",
+        )
+    rows: list[tuple[str, str, str]] = []
+    for index, row in enumerate(aliases):
+        if not isinstance(row, dict):
+            raise PreparationArchiveRefusal(
+                "PREP_ARCHIVE_EVIDENCE_ALIAS_INVALID",
+                f"alias row {index} must be an object",
+            )
+        match = row.get("match")
+        historical = row.get("historical")
+        canonical = row.get("canonical")
+        canonical_path = Path(canonical) if isinstance(canonical, str) else Path(".")
+        if (
+            match not in {"exact", "prefix"}
+            or not isinstance(historical, str)
+            or not historical
+            or not isinstance(canonical, str)
+            or not canonical
+            or canonical_path.is_absolute()
+            or canonical_path == Path(".")
+            or ".." in canonical_path.parts
+            or "\\" in canonical
+            or row.get("requires_sha256_match") is not True
+        ):
+            raise PreparationArchiveRefusal(
+                "PREP_ARCHIVE_EVIDENCE_ALIAS_INVALID",
+                f"alias row {index} is malformed",
+            )
+        rows.append((match, historical, canonical))
+    return tuple(rows)
+
+
+def _resolve_alias_endpoint(
+    historical: str,
+    rows: Sequence[tuple[str, str, str]],
+) -> Path | None:
+    exact: list[tuple[str, str]] = []
+    prefixes: list[tuple[str, str, str]] = []
+    for match, source, target in rows:
+        if match == "exact" and historical == source:
+            exact.append((target, ""))
+        elif match == "prefix" and historical.startswith(source):
+            prefixes.append((source, target, historical[len(source):]))
+    candidates: list[tuple[str, str]]
+    if exact:
+        candidates = exact
+    elif prefixes:
+        longest = max(len(source) for source, _target, _suffix in prefixes)
+        candidates = [
+            (target, suffix)
+            for source, target, suffix in prefixes
+            if len(source) == longest
+        ]
+    else:
+        return None
+    if len(candidates) != 1:
+        raise PreparationArchiveRefusal(
+            "PREP_ARCHIVE_EVIDENCE_ALIAS_AMBIGUOUS",
+            f"historical={historical}; candidates={candidates}",
+        )
+    target, suffix = candidates[0]
+    combined = Path(f"{target}{suffix}")
+    if (
+        combined.is_absolute()
+        or combined == Path(".")
+        or ".." in combined.parts
+        or "\\" in f"{target}{suffix}"
+    ):
+        raise PreparationArchiveRefusal(
+            "PREP_ARCHIVE_EVIDENCE_ALIAS_INVALID",
+            f"resolved alias target is not safe-relative: {target}{suffix}",
+        )
+    endpoint = Path(os.path.abspath(os.fspath(REPO_ROOT / combined)))
+    try:
+        endpoint.relative_to(Path(os.path.abspath(os.fspath(REPO_ROOT))))
+    except ValueError as exc:
+        raise PreparationArchiveRefusal(
+            "PREP_ARCHIVE_EVIDENCE_ALIAS_INVALID",
+            f"resolved alias target escapes repository: {target}{suffix}",
+        ) from exc
+    return endpoint
+
+
 def _verify_stage_adjudication_alias(request: ArchiveRequest) -> None:
     aliases_path = ROUND28_PATH_ALIASES
     if aliases_path.is_symlink() or not aliases_path.is_file():
@@ -2153,37 +2244,29 @@ def _verify_stage_adjudication_alias(request: ArchiveRequest) -> None:
         aliases_path, code="PREP_ARCHIVE_EVIDENCE_ALIAS_INVALID",
     )
     historical = str(request.adjudication_ref.absolute())
-    expected = request.stage_equivalence_adjudication_source.resolve()
-    matches: list[Path] = []
-    for row in value.get("aliases", []):
-        if not isinstance(row, dict) or row.get("requires_sha256_match") is not True:
-            continue
-        source = row.get("historical")
-        target = row.get("canonical")
-        if not isinstance(source, str) or not isinstance(target, str):
-            continue
-        suffix: str | None = None
-        if row.get("match") == "exact" and historical == source:
-            suffix = ""
-        elif row.get("match") == "prefix" and historical.startswith(source):
-            suffix = historical[len(source):]
-        if suffix is not None:
-            matches.append((REPO_ROOT / target / suffix).resolve())
-    if matches != [expected]:
+    expected_path = Path(
+        os.path.abspath(os.fspath(request.stage_equivalence_adjudication_source))
+    )
+    rows = _validated_alias_rows(value)
+    resolved = _resolve_alias_endpoint(historical, rows)
+    if resolved != expected_path:
         raise PreparationArchiveRefusal(
             "PREP_ARCHIVE_EVIDENCE_ALIAS_MISMATCH",
-            f"historical={historical}; resolved={list(map(str, matches))}; "
-            f"expected={expected}",
+            f"historical={historical}; resolved={resolved}; expected={expected_path}",
         )
     historical_path = Path(historical)
-    if historical_path.is_symlink() or not historical_path.is_file():
-        raise PreparationArchiveRefusal(
-            "PREP_ARCHIVE_EVIDENCE_ALIAS_SOURCE_INVALID",
-            f"missing/non-regular historical adjudication: {historical_path}",
-        )
+    for label, endpoint in (
+        ("historical", historical_path),
+        ("canonical", expected_path),
+    ):
+        if endpoint.is_symlink() or not endpoint.is_file():
+            raise PreparationArchiveRefusal(
+                "PREP_ARCHIVE_EVIDENCE_ALIAS_SOURCE_INVALID",
+                f"missing/non-regular {label} adjudication: {endpoint}",
+            )
     try:
         historical_sha256 = sha256_file(historical_path)
-        canonical_sha256 = sha256_file(expected)
+        canonical_sha256 = sha256_file(expected_path)
     except OSError as exc:
         raise PreparationArchiveRefusal(
             "PREP_ARCHIVE_EVIDENCE_ALIAS_SOURCE_INVALID",

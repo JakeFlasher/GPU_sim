@@ -219,6 +219,254 @@ def repository_adjudications(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     return repo, request, paths, aliases
 
 
+def _replace_fixture_alias_authority(
+    repo: Path,
+    aliases: Path,
+    value: dict,
+    *,
+    subject: str,
+) -> None:
+    aliases.write_text(
+        json.dumps(value, sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+    _commit(repo, subject)
+
+
+def _fixture_alias_row(
+    *,
+    match: str,
+    historical: str,
+    canonical: str,
+    requires_sha256_match: bool = True,
+) -> dict:
+    return {
+        "match": match,
+        "historical": historical,
+        "canonical": canonical,
+        "requires_sha256_match": requires_sha256_match,
+    }
+
+
+def test_repository_alias_exact_resolution(
+    repository_adjudications,
+) -> None:
+    repo, request, paths, aliases = repository_adjudications
+    _replace_fixture_alias_authority(
+        repo,
+        aliases,
+        {
+            "aliases": [
+                _fixture_alias_row(
+                    match="exact",
+                    historical=str(request.adjudication_ref.absolute()),
+                    canonical=paths["stage_equivalence"].relative_to(repo).as_posix(),
+                )
+            ]
+        },
+        subject="fixture exact alias",
+    )
+
+    assert ap._adjudication_hashes(request)["stage_equivalence"] == _sha(
+        paths["stage_equivalence"]
+    )
+
+
+@pytest.mark.parametrize("precedence", ["exact", "longest_prefix"])
+def test_repository_alias_resolution_precedence(
+    repository_adjudications,
+    precedence: str,
+) -> None:
+    repo, request, paths, aliases = repository_adjudications
+    historical = str(request.adjudication_ref.absolute())
+    correct_target = paths["stage_equivalence"].relative_to(repo).as_posix()
+    wrong_prefix = _fixture_alias_row(
+        match="prefix",
+        historical=f"{request.adjudication_ref.parents[1]}/",
+        canonical="evidence/wrong/",
+    )
+    if precedence == "exact":
+        preferred = _fixture_alias_row(
+            match="exact",
+            historical=historical,
+            canonical=correct_target,
+        )
+    else:
+        preferred = _fixture_alias_row(
+            match="prefix",
+            historical=f"{request.adjudication_ref.parent}/",
+            canonical=f"{paths['stage_equivalence'].parent.relative_to(repo).as_posix()}/",
+        )
+    _replace_fixture_alias_authority(
+        repo,
+        aliases,
+        {"aliases": [wrong_prefix, preferred]},
+        subject=f"fixture {precedence} precedence",
+    )
+
+    assert ap._adjudication_hashes(request)["stage_equivalence"] == _sha(
+        paths["stage_equivalence"]
+    )
+
+
+@pytest.mark.parametrize("match", ["exact", "prefix"])
+def test_repository_alias_equal_precedence_is_ambiguous(
+    repository_adjudications,
+    match: str,
+) -> None:
+    repo, request, paths, aliases = repository_adjudications
+    if match == "exact":
+        historical = str(request.adjudication_ref.absolute())
+        canonical = paths["stage_equivalence"].relative_to(repo).as_posix()
+    else:
+        historical = f"{request.adjudication_ref.parent}/"
+        canonical = (
+            f"{paths['stage_equivalence'].parent.relative_to(repo).as_posix()}/"
+        )
+    row = _fixture_alias_row(
+        match=match,
+        historical=historical,
+        canonical=canonical,
+    )
+    competing = dict(row)
+    if match == "prefix":
+        competing["canonical"] = "evidence/wrong/"
+    _replace_fixture_alias_authority(
+        repo,
+        aliases,
+        {"aliases": [row, competing]},
+        subject=f"fixture ambiguous {match} alias",
+    )
+
+    _assert_refusal(
+        "PREP_ARCHIVE_EVIDENCE_ALIAS_AMBIGUOUS",
+        ap._adjudication_hashes,
+        request,
+    )
+
+
+@pytest.mark.parametrize(
+    "malformation",
+    ["aliases_not_list", "row_not_object", "match", "hash_gate", "canonical"],
+)
+def test_repository_alias_malformed_rows_fail_closed(
+    repository_adjudications,
+    malformation: str,
+) -> None:
+    repo, request, paths, aliases = repository_adjudications
+    row: object = _fixture_alias_row(
+        match="exact",
+        historical=str(request.adjudication_ref.absolute()),
+        canonical=paths["stage_equivalence"].relative_to(repo).as_posix(),
+    )
+    value: dict = {"aliases": [row]}
+    if malformation == "aliases_not_list":
+        value["aliases"] = {}
+    elif malformation == "row_not_object":
+        value["aliases"] = [None]
+    elif malformation == "match":
+        assert isinstance(row, dict)
+        row["match"] = "glob"
+    elif malformation == "hash_gate":
+        assert isinstance(row, dict)
+        row["requires_sha256_match"] = False
+    else:
+        assert isinstance(row, dict)
+        row["canonical"] = "../escape"
+    _replace_fixture_alias_authority(
+        repo,
+        aliases,
+        value,
+        subject=f"fixture malformed alias {malformation}",
+    )
+
+    _assert_refusal(
+        "PREP_ARCHIVE_EVIDENCE_ALIAS_INVALID",
+        ap._adjudication_hashes,
+        request,
+    )
+
+
+def test_repository_alias_composed_suffix_cannot_escape() -> None:
+    rows = ap._validated_alias_rows({
+        "aliases": [
+            _fixture_alias_row(
+                match="prefix",
+                historical="/historical/",
+                canonical="evidence/retained/",
+            )
+        ]
+    })
+
+    _assert_refusal(
+        "PREP_ARCHIVE_EVIDENCE_ALIAS_INVALID",
+        ap._resolve_alias_endpoint,
+        "/historical/../../outside",
+        rows,
+    )
+
+
+@pytest.mark.parametrize("endpoint_kind", ["directory", "fifo"])
+def test_repository_alias_nonregular_canonical_endpoint_fails_closed(
+    repository_adjudications,
+    endpoint_kind: str,
+) -> None:
+    repo, request, _paths, aliases = repository_adjudications
+    endpoint = repo / "evidence/nonregular-endpoint"
+    _replace_fixture_alias_authority(
+        repo,
+        aliases,
+        {
+            "aliases": [
+                _fixture_alias_row(
+                    match="exact",
+                    historical=str(request.adjudication_ref.absolute()),
+                    canonical=endpoint.relative_to(repo).as_posix(),
+                )
+            ]
+        },
+        subject=f"fixture nonregular alias {endpoint_kind}",
+    )
+    if endpoint_kind == "directory":
+        endpoint.mkdir()
+    else:
+        os.mkfifo(endpoint)
+    nonregular_request = replace(
+        request,
+        stage_equivalence_adjudication_source=endpoint,
+    )
+
+    _assert_refusal(
+        "PREP_ARCHIVE_EVIDENCE_ALIAS_SOURCE_INVALID",
+        ap._adjudication_hashes,
+        nonregular_request,
+    )
+
+
+@pytest.mark.parametrize("endpoint", ["historical", "canonical"])
+def test_repository_alias_endpoint_symlinks_fail_closed(
+    repository_adjudications,
+    endpoint: str,
+) -> None:
+    repo, request, paths, _aliases = repository_adjudications
+    if endpoint == "historical":
+        request.adjudication_ref.unlink()
+        request.adjudication_ref.symlink_to(paths["stage_equivalence"])
+    else:
+        canonical = paths["stage_equivalence"]
+        retained = canonical.with_name("retained-stage-equivalence.md")
+        retained.write_bytes(canonical.read_bytes())
+        canonical.unlink()
+        canonical.symlink_to(retained.name)
+        _commit(repo, "fixture canonical alias symlink")
+
+    _assert_refusal(
+        "PREP_ARCHIVE_EVIDENCE_ALIAS_SOURCE_INVALID",
+        ap._adjudication_hashes,
+        request,
+    )
+
+
 def test_repository_adjudications_accept_tracked_clean_0644(
     repository_adjudications,
 ) -> None:
