@@ -339,6 +339,22 @@ pub struct L2Outcome {
     pub sector_present: bool,
 }
 
+/// Read-only prediction for an ascending sector-mask walk of one line.
+/// The event system uses this to preflight outcome-dependent response and
+/// DRAM arithmetic before [`L2Model::access`] mutates cache state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct L2MaskPreview {
+    pub sectors: u32,
+    pub counted_hits: u32,
+    pub present_sectors: u32,
+}
+
+impl L2MaskPreview {
+    pub fn all_present(self) -> bool {
+        self.present_sectors == self.sectors
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct L2Counters {
     /// Architecture provenance bound by the owning [`L2Model`].
@@ -456,6 +472,45 @@ impl L2Model {
 
     pub fn config(&self) -> &L2Config {
         &self.cfg
+    }
+
+    /// Predict an ascending walk of `sector_mask` for one line without
+    /// changing recency, replacement, validity, or counters. The local mask
+    /// tracks sectors validated by earlier bits in the same request, exactly
+    /// matching repeated [`Self::access`] calls in ascending sector order.
+    pub fn preview_mask(&self, line_id: i64, sector_mask: u8, class: L2OpClass) -> L2MaskPreview {
+        debug_assert!(sector_mask != 0 && sector_mask & !0b1111 == 0);
+        let slice = u64::from(self.cfg.slice_hash.slice_of(line_id, self.cfg.num_slices));
+        let set_idx = line_id
+            .div_euclid(i64::from(self.cfg.num_slices))
+            .rem_euclid(self.num_sets as i64) as u64;
+        let set_key = usize::try_from(slice * self.num_sets + set_idx)
+            .expect("set key fits usize on 64-bit targets");
+        let resident = self.sets[set_key].iter().find(|w| w.tag == line_id);
+        let mut line_present = resident.is_some();
+        let mut valid_mask = resident.map_or(0, |w| w.mask);
+        let mut counted_mask = 0u8;
+        let mut present_mask = 0u8;
+        for sector in 0..4u8 {
+            let bit = 1u8 << sector;
+            if sector_mask & bit == 0 {
+                continue;
+            }
+            let sector_present = line_present && valid_mask & bit != 0;
+            if sector_present {
+                present_mask |= bit;
+            }
+            if sector_present || (line_present && class == L2OpClass::WriteAtomic) {
+                counted_mask |= bit;
+            }
+            line_present = true;
+            valid_mask |= bit;
+        }
+        L2MaskPreview {
+            sectors: sector_mask.count_ones(),
+            counted_hits: counted_mask.count_ones(),
+            present_sectors: present_mask.count_ones(),
+        }
     }
 
     /// One 32 B sector access in global request order. `line_id` is the
@@ -630,6 +685,43 @@ mod tests {
     /// §6.4 tag-match rule.
     fn wr(l2: &mut L2Model, line: i64, sector: u8) -> bool {
         l2.access(line, sector, L2OpClass::WriteAtomic).counted_hit
+    }
+
+    #[test]
+    fn mask_preview_matches_sequential_access_outcomes() {
+        for class in [L2OpClass::Read, L2OpClass::WriteAtomic] {
+            for seeded_mask in 0u8..=0b1111 {
+                for requested_mask in 1u8..=0b1111 {
+                    let mut l2 = L2Model::new(cfg(128 * 4, 2, 1)).unwrap();
+                    for sector in 0..4u8 {
+                        if seeded_mask & (1 << sector) != 0 {
+                            l2.access(7, sector, L2OpClass::WriteAtomic);
+                        }
+                    }
+                    let before = l2.counters;
+                    let preview = l2.preview_mask(7, requested_mask, class);
+                    let outcomes = (0..4u8)
+                        .filter(|sector| requested_mask & (1 << sector) != 0)
+                        .map(|sector| l2.access(7, sector, class))
+                        .collect::<Vec<_>>();
+                    let counted_hits = outcomes
+                        .iter()
+                        .map(|outcome| u32::from(outcome.counted_hit))
+                        .sum::<u32>();
+                    let present_sectors = outcomes
+                        .iter()
+                        .map(|outcome| u32::from(outcome.sector_present))
+                        .sum::<u32>();
+                    assert_eq!(preview.sectors, requested_mask.count_ones());
+                    assert_eq!(preview.counted_hits, counted_hits);
+                    assert_eq!(preview.present_sectors, present_sectors);
+                    assert_eq!(
+                        l2.counters.hits.checked_sub(before.hits).unwrap(),
+                        u64::from(preview.counted_hits)
+                    );
+                }
+            }
+        }
     }
 
     fn cfg(capacity: u64, assoc: u32, slices: u32) -> L2Config {

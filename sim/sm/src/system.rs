@@ -46,17 +46,37 @@ use std::collections::{BTreeMap, BinaryHeap};
 struct UnpricedBounds(Vec<BTreeMap<u64, u32>>);
 
 impl UnpricedBounds {
-    fn insert(&mut self, sm: usize, bound: u64) {
-        *self.0[sm].entry(bound).or_insert(0) += 1;
+    fn insert(&mut self, sm: usize, bound: u64) -> Result<(), SystemError> {
+        let next = self.0[sm]
+            .get(&bound)
+            .copied()
+            .unwrap_or(0)
+            .checked_add(1)
+            .ok_or(SystemError::CounterOverflow {
+                counter: "unpriced response-bound multiplicity",
+            })?;
+        self.0[sm].insert(bound, next);
+        Ok(())
     }
 
-    fn remove(&mut self, sm: usize, bound: u64) {
-        match self.0[sm].get_mut(&bound) {
-            Some(n) if *n > 1 => *n -= 1,
+    fn remove(&mut self, sm: usize, bound: u64) -> Result<(), SystemError> {
+        match self.0[sm].get(&bound).copied() {
+            Some(n) if n > 1 => {
+                self.0[sm].insert(bound, n - 1);
+            }
             Some(_) => {
                 self.0[sm].remove(&bound);
             }
-            None => unreachable!("unpriced bound removed twice"),
+            None => return Err(SystemError::UnpricedBoundMissing { sm, bound }),
+        }
+        Ok(())
+    }
+
+    fn require(&self, sm: usize, bound: u64) -> Result<(), SystemError> {
+        if self.0[sm].contains_key(&bound) {
+            Ok(())
+        } else {
+            Err(SystemError::UnpricedBoundMissing { sm, bound })
         }
     }
 
@@ -84,9 +104,23 @@ impl DueTimes {
         self.0[ix].push(Reverse(t));
     }
 
-    fn pop_expect(&mut self, ix: usize, t: u64) {
-        let _popped = self.0[ix].pop();
-        debug_assert_eq!(_popped, Some(Reverse(t)), "due-time heap out of order");
+    fn pop_expect(
+        &mut self,
+        component: &'static str,
+        ix: usize,
+        t: u64,
+    ) -> Result<(), SystemError> {
+        let got = self.next(ix);
+        if got != Some(t) {
+            return Err(SystemError::DueTimeMismatch {
+                component,
+                sm: ix,
+                expected: t,
+                got,
+            });
+        }
+        self.0[ix].pop();
+        Ok(())
     }
 
     fn next(&self, ix: usize) -> Option<u64> {
@@ -126,19 +160,11 @@ impl L2SourceSplit {
         self.arch
     }
 
-    fn record(&mut self, source: L2Source, hit: bool) {
-        self.sectors[source as usize] += 1;
-        self.hits[source as usize] += u64::from(hit);
-    }
-
     pub fn source(&self, s: L2Source) -> (u64, u64) {
         (self.sectors[s as usize], self.hits[s as usize])
     }
 
-    pub fn add_checked(
-        &mut self,
-        other: &L2SourceSplit,
-    ) -> Result<(), sim_arch::ArchitectureProvenanceError> {
+    pub fn add_checked(&mut self, other: &L2SourceSplit) -> Result<(), SystemCounterError> {
         let expected = self
             .arch
             .ok_or(sim_arch::ArchitectureProvenanceError::Unbound {
@@ -154,24 +180,48 @@ impl L2SourceSplit {
                 component: "L2 source split",
                 expected,
                 got,
-            });
+            }
+            .into());
         }
+        let mut sectors = [0; 4];
+        let mut hits = [0; 4];
         for i in 0..4 {
-            self.sectors[i] += other.sectors[i];
-            self.hits[i] += other.hits[i];
+            sectors[i] = self.sectors[i].checked_add(other.sectors[i]).ok_or(
+                SystemCounterError::Overflow {
+                    counter: "L2 source sectors",
+                },
+            )?;
+            hits[i] =
+                self.hits[i]
+                    .checked_add(other.hits[i])
+                    .ok_or(SystemCounterError::Overflow {
+                        counter: "L2 source hits",
+                    })?;
         }
+        self.sectors = sectors;
+        self.hits = hits;
         Ok(())
     }
 }
 
 use crate::issue::{
     Advance, BlockReplay, IssueError, IssueModelParams, MemRequest, ReplyTo, SmCore, SmMemMode,
-    SmSimResult,
+    SmSimResult, checked_cycle_add,
 };
 use crate::program::FunctionSchedule;
 
 #[derive(Debug, thiserror::Error)]
+pub enum SystemCounterError {
+    #[error(transparent)]
+    Architecture(#[from] sim_arch::ArchitectureProvenanceError),
+    #[error("{counter} counter overflows u64")]
+    Overflow { counter: &'static str },
+}
+
+#[derive(Debug, thiserror::Error)]
 pub enum SystemError {
+    #[error(transparent)]
+    Counters(#[from] SystemCounterError),
     #[error(transparent)]
     Issue(#[from] IssueError),
     #[error(transparent)]
@@ -206,6 +256,44 @@ pub enum SystemError {
         bytes_per_sec: u64,
         sm_clock_hz: u64,
     },
+    #[error("DRAM fixed-point {operation} overflows u128")]
+    DramFixedPointOverflow { operation: &'static str },
+    #[error(
+        "DRAM completion {completion_fp}/{bytes_per_sec} reaches or exceeds u64::MAX, reserved as the unbounded horizon"
+    )]
+    DramCycleDomainExhausted {
+        completion_fp: u128,
+        bytes_per_sec: u128,
+    },
+    #[error("SM actor count {count} exceeds the u32 target-id domain")]
+    ActorCountOutOfRange { count: usize },
+    #[error("event target {target} is outside the {actor_count}-actor system")]
+    EventTargetOutOfRange { target: u32, actor_count: usize },
+    #[error(
+        "{component} due-time mismatch for SM index {sm}: expected event t={expected}, queued head was {got:?}"
+    )]
+    DueTimeMismatch {
+        component: &'static str,
+        sm: usize,
+        expected: u64,
+        got: Option<u64>,
+    },
+    #[error(
+        "L2 request timestamp {issue_time} does not match its event timestamp {event_time} for SM index {sm}"
+    )]
+    RequestTimeMismatch {
+        sm: usize,
+        issue_time: u64,
+        event_time: u64,
+    },
+    #[error("L2 request for sector {sector_id} has invalid sector mask {sector_mask:#06b}")]
+    SectorMaskInvalid { sector_id: i64, sector_mask: u8 },
+    #[error("unpriced response bound {bound} for SM index {sm} is absent")]
+    UnpricedBoundMissing { sm: usize, bound: u64 },
+    #[error("response ready time {ready} precedes lower bound {bound} for SM index {sm}")]
+    ResponseBeforeBound { sm: usize, ready: u64, bound: u64 },
+    #[error("{counter} counter overflows u64")]
+    CounterOverflow { counter: &'static str },
 }
 
 fn require_arch(expected: ArchId, got: ArchId, component: &'static str) -> Result<(), SystemError> {
@@ -237,12 +325,19 @@ struct SpinGuard {
 }
 
 impl SpinGuard {
-    fn new(cores: usize) -> Self {
-        Self {
-            limit: 2 * cores as u64 + 8,
+    fn new(cores: usize) -> Result<Self, SystemError> {
+        let cores =
+            u64::try_from(cores).map_err(|_| SystemError::ActorCountOutOfRange { count: cores })?;
+        let limit = cores.checked_mul(2).and_then(|n| n.checked_add(8)).ok_or(
+            SystemError::CounterOverflow {
+                counter: "spin-guard limit",
+            },
+        )?;
+        Ok(Self {
+            limit,
             last_time: 0,
             idle_wakes: 0,
-        }
+        })
     }
 
     /// Record one processed event. `idle_wake` marks an `SmWake` whose
@@ -257,7 +352,12 @@ impl SpinGuard {
             self.idle_wakes = 0;
             return Ok(());
         }
-        self.idle_wakes += 1;
+        self.idle_wakes = self
+            .idle_wakes
+            .checked_add(1)
+            .ok_or(SystemError::CounterOverflow {
+                counter: "consecutive idle wakes",
+            })?;
         if self.idle_wakes > self.limit {
             return Err(SystemError::Livelock {
                 time,
@@ -348,14 +448,34 @@ impl DramServer {
         }
     }
 
-    /// Serve `bytes` arriving at `arrival` cycles; returns the cycle the
-    /// last byte completes (ceil).
-    fn serve(&mut self, arrival: u64, bytes: u64) -> u64 {
-        let arrival_fp = u128::from(arrival) * self.bytes_per_sec;
+    /// Compute a service completion without mutating the server. The
+    /// caller uses this to preflight the request's exact outcome-dependent
+    /// fetch before any L2 or accounting state commits.
+    fn preview(&self, arrival: u64, bytes: u64) -> Result<(u128, u64), SystemError> {
+        let arrival_fp = u128::from(arrival).checked_mul(self.bytes_per_sec).ok_or(
+            SystemError::DramFixedPointOverflow {
+                operation: "arrival scaling",
+            },
+        )?;
+        let service_fp = u128::from(bytes).checked_mul(self.sm_clock_hz).ok_or(
+            SystemError::DramFixedPointOverflow {
+                operation: "service scaling",
+            },
+        )?;
         let start = arrival_fp.max(self.free_fp);
-        let done = start + u128::from(bytes) * self.sm_clock_hz;
-        self.free_fp = done;
-        u64::try_from(done.div_ceil(self.bytes_per_sec)).expect("cycle domain fits u64")
+        let done = start
+            .checked_add(service_fp)
+            .ok_or(SystemError::DramFixedPointOverflow {
+                operation: "service completion",
+            })?;
+        let ready = done.div_ceil(self.bytes_per_sec);
+        if ready >= u128::from(u64::MAX) {
+            return Err(SystemError::DramCycleDomainExhausted {
+                completion_fp: done,
+                bytes_per_sec: self.bytes_per_sec,
+            });
+        }
+        Ok((done, ready as u64))
     }
 }
 
@@ -401,10 +521,7 @@ impl DramStats {
         self.arch
     }
 
-    pub fn add_checked(
-        &mut self,
-        other: &DramStats,
-    ) -> Result<(), sim_arch::ArchitectureProvenanceError> {
+    pub fn add_checked(&mut self, other: &DramStats) -> Result<(), SystemCounterError> {
         let expected = self
             .arch
             .ok_or(sim_arch::ArchitectureProvenanceError::Unbound {
@@ -420,10 +537,22 @@ impl DramStats {
                 component: "DRAM stats",
                 expected,
                 got,
-            });
+            }
+            .into());
         }
-        self.read_sectors += other.read_sectors;
-        self.bw_delayed_responses += other.bw_delayed_responses;
+        let read_sectors = self.read_sectors.checked_add(other.read_sectors).ok_or(
+            SystemCounterError::Overflow {
+                counter: "DRAM read sectors",
+            },
+        )?;
+        let bw_delayed_responses = self
+            .bw_delayed_responses
+            .checked_add(other.bw_delayed_responses)
+            .ok_or(SystemCounterError::Overflow {
+                counter: "DRAM bandwidth-delayed responses",
+            })?;
+        self.read_sectors = read_sectors;
+        self.bw_delayed_responses = bw_delayed_responses;
         Ok(())
     }
 }
@@ -464,6 +593,7 @@ pub fn simulate_kernel_shared(
     require_arch(arch, l1_config.arch, "L1 configuration")?;
     require_arch(arch, l2.config().arch, "L2 configuration")?;
     require_arch(arch, dram.arch(), "DRAM configuration")?;
+    params.validate_l1_timing(l1_config)?;
     // Fail closed on an inverted ladder: every horizon/run-ahead bound
     // below assumes no response can price under the L2-hit arm.
     if params.global_flat_latency < params.l1_miss_latency {
@@ -485,6 +615,11 @@ pub fn simulate_kernel_shared(
         return Err(SystemError::DramBandwidthInvalid {
             bytes_per_sec,
             sm_clock_hz,
+        });
+    }
+    if u32::try_from(per_sm_blocks.len()).is_err() {
+        return Err(SystemError::ActorCountOutOfRange {
+            count: per_sm_blocks.len(),
         });
     }
     let sm_ids: Vec<i32> = per_sm_blocks.keys().copied().collect();
@@ -517,16 +652,28 @@ pub fn simulate_kernel_shared(
     let mut dram_server = DramServer::new(dram);
     let mut dram_stats = DramStats::for_arch(arch);
     for ix in 0..cores.len() {
-        queue.schedule_at(0, TargetId(ix as u32), Ev::SmWake)?;
+        let target = u32::try_from(ix)
+            .map_err(|_| SystemError::ActorCountOutOfRange { count: cores.len() })?;
+        queue.schedule_at(0, TargetId(target), Ev::SmWake)?;
         wake_due.push(ix, 0);
     }
 
-    let mut spin = SpinGuard::new(cores.len());
+    let mut spin = SpinGuard::new(cores.len())?;
     while let Some(ev) = queue.pop()? {
-        let sm_ix = ev.target.0 as usize;
+        let sm_ix =
+            usize::try_from(ev.target.0).map_err(|_| SystemError::EventTargetOutOfRange {
+                target: ev.target.0,
+                actor_count: cores.len(),
+            })?;
+        if sm_ix >= cores.len() {
+            return Err(SystemError::EventTargetOutOfRange {
+                target: ev.target.0,
+                actor_count: cores.len(),
+            });
+        }
         match ev.kind {
             Ev::SmWake => {
-                wake_due.pop_expect(sm_ix, ev.time);
+                wake_due.pop_expect("SM wake", sm_ix, ev.time)?;
                 let progress = run_sm(
                     sm_ix,
                     &mut cores,
@@ -540,91 +687,147 @@ pub fn simulate_kernel_shared(
                 spin.on_event(ev.time, !progress)?;
             }
             Ev::L2Access(req) => {
-                // One request carries 1..=4 sectors of one line (§6.4
-                // slice 2: NCU counts SECTORS at the LTS, so a merged
-                // line fill walks its whole mask here). Ascending
-                // sector order; each sector is one counted access.
+                if req.issue_time != ev.time {
+                    return Err(SystemError::RequestTimeMismatch {
+                        sm: sm_ix,
+                        issue_time: req.issue_time,
+                        event_time: ev.time,
+                    });
+                }
+                let own_sector_bit = 1u8 << (req.sector_id & 3) as u8;
+                if req.sector_mask == 0
+                    || req.sector_mask & !0b1111 != 0
+                    || req.sector_mask & own_sector_bit == 0
+                {
+                    return Err(SystemError::SectorMaskInvalid {
+                        sector_id: req.sector_id,
+                        sector_mask: req.sector_mask,
+                    });
+                }
+
+                // Predict this exact ascending mask walk without mutating
+                // the caller-owned L2. Outcome-dependent timing, counters,
+                // and DRAM service can then fail before the first access.
                 let line = req.sector_id >> 2;
-                debug_assert!(
-                    req.sector_mask != 0 && req.sector_mask & (1 << (req.sector_id & 3) as u8) != 0,
-                    "request mask must contain its own sector"
-                );
-                let mut all_present = true;
-                let mut fetch_sectors = 0u64;
-                for s in 0..4u8 {
-                    if req.sector_mask & (1 << s) != 0 {
-                        let res = l2.access(line, s, req.class);
-                        l2_by_source.record(req.source, res.counted_hit);
-                        all_present &= res.sector_present;
-                        // Absent READ-class sectors fetch 32 B from
-                        // DRAM (write-class validates from write data;
-                        // v0 models read bandwidth only).
-                        // Absent sectors that FETCH from DRAM: every
-                        // read-class sector (loads need the data), plus
-                        // reply-carrying write-class sectors (an ATOM's
-                        // RMW needs the old value — its pricing takes
-                        // the DRAM arm, so its bytes must be charged
-                        // too, gate finding 2026-07-07). Reply-less
-                        // write-class sectors (STG/RED) validate from
-                        // write data: no read fetch (v0 scope).
-                        if !res.sector_present
-                            && (req.class == sim_mem::L2OpClass::Read || req.reply != ReplyTo::None)
-                        {
-                            fetch_sectors += 1;
-                        }
+                let preview = l2.preview_mask(line, req.sector_mask, req.class);
+                let requested_sectors = u64::from(preview.sectors);
+                let counted_hits = u64::from(preview.counted_hits);
+                let source_ix = req.source as usize;
+                let next_source_sectors = l2_by_source.sectors[source_ix]
+                    .checked_add(requested_sectors)
+                    .ok_or(SystemCounterError::Overflow {
+                        counter: "L2 source sectors",
+                    })?;
+                let next_source_hits = l2_by_source.hits[source_ix]
+                    .checked_add(counted_hits)
+                    .ok_or(SystemCounterError::Overflow {
+                        counter: "L2 source hits",
+                    })?;
+
+                let can_fetch = req.class == sim_mem::L2OpClass::Read || req.reply != ReplyTo::None;
+                let fetch_sectors = if can_fetch {
+                    requested_sectors
+                        .checked_sub(u64::from(preview.present_sectors))
+                        .ok_or(SystemError::CounterOverflow {
+                            counter: "DRAM fetch sectors per request",
+                        })?
+                } else {
+                    0
+                };
+                let next_read_sectors = dram_stats.read_sectors.checked_add(fetch_sectors).ok_or(
+                    SystemError::CounterOverflow {
+                        counter: "DRAM read sectors",
+                    },
+                )?;
+                let service_preview = if fetch_sectors > 0 {
+                    let bytes =
+                        fetch_sectors
+                            .checked_mul(32)
+                            .ok_or(SystemError::CounterOverflow {
+                                counter: "DRAM request bytes",
+                            })?;
+                    match &dram_server {
+                        Some(server) => Some(server.preview(req.issue_time, bytes)?),
+                        None => None,
                     }
-                }
-                // DEMAND-side accounting: read_sectors counts fetches
-                // in BOTH modes (in Unmodeled it audits the ablation's
-                // demand); the byte server, when carded, advances for
-                // EVERY fetch — including reply-less follow-up fills —
-                // so aggregate demand is complete even where no
-                // response prices it.
-                let mut bw_ready = 0;
-                if fetch_sectors > 0 {
-                    dram_stats.read_sectors += fetch_sectors;
-                    if let Some(server) = &mut dram_server {
-                        bw_ready = server.serve(req.issue_time, fetch_sectors * 32);
-                    }
-                }
-                if req.reply != ReplyTo::None {
-                    let bound = req.issue_time + params.l1_miss_latency;
-                    // Pricing keys on the PHYSICAL sector presence, not
-                    // the per-class counted hit (§6.4): a tag-match
-                    // write counts as a hit but a reply-carrying atomic
-                    // still fetches absent data on the DRAM arm. For a
-                    // multi-sector fill the WORST sector prices the
-                    // response — the fill completes when its slowest
-                    // sector arrives. The bandwidth server can only
-                    // push the ready time PAST the latency arm.
-                    let latency_ready = req.issue_time
-                        + if all_present {
-                            params.l1_miss_latency
-                        } else {
-                            params.global_flat_latency
-                        };
+                } else {
+                    None
+                };
+                let bw_ready = service_preview.map_or(0, |(_, ready)| ready);
+
+                let response_plan = if req.reply != ReplyTo::None {
+                    let bound = checked_cycle_add(
+                        "unpriced L2-hit response bound",
+                        req.issue_time,
+                        params.l1_miss_latency,
+                    )?;
+                    unpriced.require(sm_ix, bound)?;
+                    let latency_ready = if preview.all_present() {
+                        bound
+                    } else {
+                        checked_cycle_add(
+                            "DRAM response visibility",
+                            req.issue_time,
+                            params.global_flat_latency,
+                        )?
+                    };
                     let ready = latency_ready.max(bw_ready);
-                    dram_stats.bw_delayed_responses += u64::from(ready > latency_ready);
-                    // The pricing authority must never undercut the
-                    // lower bound SmCore's run-ahead cap assumes (the
-                    // L2-hit arm) — a cheaper arm would let SMs run
-                    // past their own responses non-causally.
-                    debug_assert!(ready >= bound);
+                    if ready < bound {
+                        return Err(SystemError::ResponseBeforeBound {
+                            sm: sm_ix,
+                            ready,
+                            bound,
+                        });
+                    }
+                    let next_delayed = dram_stats
+                        .bw_delayed_responses
+                        .checked_add(u64::from(ready > latency_ready))
+                        .ok_or(SystemError::CounterOverflow {
+                            counter: "DRAM bandwidth-delayed responses",
+                        })?;
+                    Some((bound, ready, next_delayed))
+                } else {
+                    None
+                };
+
+                // Commit the already-preflighted mask walk in the same
+                // ascending order used by preview_mask.
+                for sector in 0..4u8 {
+                    if req.sector_mask & (1 << sector) != 0 {
+                        l2.access(line, sector, req.class);
+                    }
+                }
+                l2_by_source.sectors[source_ix] = next_source_sectors;
+                l2_by_source.hits[source_ix] = next_source_hits;
+                dram_stats.read_sectors = next_read_sectors;
+                if let Some((done, _)) = service_preview
+                    && let Some(server) = &mut dram_server
+                {
+                    server.free_fp = done;
+                }
+                if let Some((bound, ready, next_delayed)) = response_plan {
+                    dram_stats.bw_delayed_responses = next_delayed;
                     queue.schedule_at(ready, ev.target, Ev::MemResponse(req.reply))?;
                     response_due.push(sm_ix, ready);
-                    unpriced.remove(sm_ix, bound);
+                    unpriced.remove(sm_ix, bound)?;
                 }
                 spin.on_event(ev.time, false)?;
             }
             Ev::MemResponse(reply) => {
-                response_due.pop_expect(sm_ix, ev.time);
+                cores[sm_ix].preflight_response(reply, ev.time)?;
+                response_due.pop_expect("memory response", sm_ix, ev.time)?;
                 scratch.clear();
-                cores[sm_ix].on_response(reply, ev.time, &mut scratch);
+                cores[sm_ix].on_response(reply, ev.time, &mut scratch)?;
                 // Retries the completion unblocked become L2 accesses at
                 // the response time.
                 for req in scratch.drain(..) {
                     if req.reply != ReplyTo::None {
-                        unpriced.insert(sm_ix, req.issue_time + params.l1_miss_latency);
+                        let bound = checked_cycle_add(
+                            "retry unpriced L2-hit response bound",
+                            req.issue_time,
+                            params.l1_miss_latency,
+                        )?;
+                        unpriced.insert(sm_ix, bound)?;
                     }
                     queue.schedule_at(req.issue_time, ev.target, Ev::L2Access(req))?;
                 }
@@ -685,11 +888,18 @@ fn run_sm(
     let issued_before = cores[ix].instructions_issued();
     let adv = cores[ix].advance(horizon, scratch)?;
     let progress = cores[ix].instructions_issued() > issued_before || !scratch.is_empty();
+    let target =
+        u32::try_from(ix).map_err(|_| SystemError::ActorCountOutOfRange { count: cores.len() })?;
     for req in scratch.drain(..) {
         if req.reply != ReplyTo::None {
-            unpriced.insert(ix, req.issue_time + l2_hit_latency);
+            let bound = checked_cycle_add(
+                "unpriced L2-hit response bound",
+                req.issue_time,
+                l2_hit_latency,
+            )?;
+            unpriced.insert(ix, bound)?;
         }
-        queue.schedule_at(req.issue_time, TargetId(ix as u32), Ev::L2Access(req))?;
+        queue.schedule_at(req.issue_time, TargetId(target), Ev::L2Access(req))?;
     }
     if let Advance::Idle {
         wake_at: Some(wake),
@@ -697,7 +907,7 @@ fn run_sm(
     {
         let covered = wake_due.next(ix).is_some_and(|t| t <= wake);
         if !covered {
-            queue.schedule_at(wake, TargetId(ix as u32), Ev::SmWake)?;
+            queue.schedule_at(wake, TargetId(target), Ev::SmWake)?;
             wake_due.push(ix, wake);
         }
     }
@@ -824,6 +1034,145 @@ mod tests {
         let mut consumer = cb(1);
         consumer.wait_mask = 0b000001;
         schedule(vec![(0, slot(load, "LDG.E")), (16, slot(consumer, "EXIT"))])
+    }
+
+    #[test]
+    fn empty_system_still_validates_l1_timing_lockstep() {
+        let sched = schedule(Vec::new());
+        let per_sm = BTreeMap::new();
+        let mut cfg = l1_config();
+        cfg.miss_latency += 1;
+        let mut l2 = l2_model();
+        assert!(matches!(
+            simulate_kernel_shared(&per_sm, &sched, &params(), cfg, &mut l2, carded_bw(),),
+            Err(SystemError::Issue(IssueError::L1TimingMismatch {
+                field: "miss",
+                expected: 244,
+                got: 245,
+            }))
+        ));
+    }
+
+    #[test]
+    fn dram_server_rejects_reserved_and_overflowed_completions_transactionally() {
+        let reserved = DramServer::new(DramBw::Carded {
+            arch: ArchId::Sm86,
+            bytes_per_sec: 32,
+            sm_clock_hz: u64::MAX,
+        })
+        .unwrap();
+        assert!(matches!(
+            reserved.preview(0, 32),
+            Err(SystemError::DramCycleDomainExhausted { .. })
+        ));
+        assert_eq!(reserved.free_fp, 0);
+
+        let overflow = DramServer {
+            free_fp: u128::MAX,
+            bytes_per_sec: 1,
+            sm_clock_hz: 1,
+        };
+        assert!(matches!(
+            overflow.preview(0, 1),
+            Err(SystemError::DramFixedPointOverflow {
+                operation: "service completion",
+            })
+        ));
+        assert_eq!(overflow.free_fp, u128::MAX);
+    }
+
+    #[test]
+    fn dram_domain_error_precedes_l2_mutation() {
+        let sched = load_consumer_schedule();
+        let per_sm = BTreeMap::from([(0, dependent_load_blocks(4))]);
+        let mut l2 = l2_model();
+        let err = simulate_kernel_shared(
+            &per_sm,
+            &sched,
+            &params(),
+            l1_config(),
+            &mut l2,
+            DramBw::Carded {
+                arch: ArchId::Sm86,
+                bytes_per_sec: 32,
+                sm_clock_hz: u64::MAX,
+            },
+        )
+        .unwrap_err();
+        assert!(matches!(err, SystemError::DramCycleDomainExhausted { .. }));
+        assert_eq!(l2.counters.total(), 0);
+    }
+
+    #[test]
+    fn l2_hit_does_not_preflight_hypothetical_dram_service() {
+        let mut load = cb(1);
+        load.write_barrier = 0;
+        let mut consumer = cb(1);
+        consumer.wait_mask = 0b000001;
+        let sched = schedule(vec![
+            (0, slot(cb(1), "STG.E")),
+            (16, slot(load, "LDG.E")),
+            (32, slot(consumer, "EXIT")),
+        ]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                warp_slot: 0,
+                insts: vec![
+                    ReplayInst {
+                        pc: 0,
+                        kind: AccessKind::GlobalStore { off: 0, len: 1 },
+                    },
+                    ReplayInst {
+                        pc: 16,
+                        kind: AccessKind::GlobalEligible {
+                            off: 1,
+                            len: 1,
+                            token: CacheOpToken::LdgECa,
+                        },
+                    },
+                    ReplayInst {
+                        pc: 32,
+                        kind: AccessKind::NonMemory,
+                    },
+                ],
+                sectors: vec![4, 4],
+            }],
+        }];
+        let per_sm = BTreeMap::from([(0, blocks)]);
+        let mut l2 = l2_model();
+        let result = simulate_kernel_shared(
+            &per_sm,
+            &sched,
+            &params(),
+            l1_config(),
+            &mut l2,
+            DramBw::Carded {
+                arch: ArchId::Sm86,
+                bytes_per_sec: 32,
+                sm_clock_hz: u64::MAX,
+            },
+        )
+        .unwrap();
+        assert_eq!(result.dram.read_sectors, 0);
+        assert_eq!(result.l2.hits, 1);
+        assert_eq!(result.l2.misses, 1);
+    }
+
+    #[test]
+    fn due_time_mismatch_preserves_the_queued_head() {
+        let mut due = DueTimes::new(1);
+        due.push(0, 7);
+        assert!(matches!(
+            due.pop_expect("test", 0, 8),
+            Err(SystemError::DueTimeMismatch {
+                component: "test",
+                sm: 0,
+                expected: 8,
+                got: Some(7),
+            })
+        ));
+        assert_eq!(due.next(0), Some(7));
     }
 
     /// One SM, one cold load: L2 misses → the consumer waits the DRAM
@@ -1218,7 +1567,7 @@ mod tests {
     /// wake bounces never trip the guard.)
     #[test]
     fn spin_guard_trips_on_frozen_clock_idle_wakes() {
-        let mut g = SpinGuard::new(2); // limit = 12
+        let mut g = SpinGuard::new(2).unwrap(); // limit = 12
         for i in 0..12 {
             assert!(g.on_event(42, true).is_ok(), "wake {i} within bound");
         }
@@ -1233,7 +1582,7 @@ mod tests {
 
     #[test]
     fn spin_guard_resets_on_clock_advance_and_real_events() {
-        let mut g = SpinGuard::new(0); // limit = 8: tightest bound
+        let mut g = SpinGuard::new(0).unwrap(); // limit = 8: tightest bound
         // A clock advance resets the streak...
         for t in 0..100u64 {
             assert!(g.on_event(t, true).is_ok());
@@ -1287,16 +1636,36 @@ mod tests {
 
     /// Zero rates are a typed configuration error, never a clamp.
     #[test]
+    fn source_counter_overflow_is_transactional() {
+        let mut dst = L2SourceSplit::for_arch(ArchId::Sm86);
+        dst.sectors[0] = u64::MAX;
+        dst.hits[1] = 9;
+        let mut src = L2SourceSplit::for_arch(ArchId::Sm86);
+        src.sectors[0] = 1;
+        src.hits[1] = 4;
+        let before = dst;
+        assert!(matches!(
+            dst.add_checked(&src),
+            Err(SystemCounterError::Overflow {
+                counter: "L2 source sectors",
+            })
+        ));
+        assert_eq!(dst, before);
+    }
+
+    #[test]
     fn dram_counter_aggregation_rejects_mixed_architecture() {
         let mut sm86 = DramStats::for_arch(ArchId::Sm86);
         let sm120 = DramStats::for_arch(ArchId::Sm120);
         assert!(matches!(
             sm86.add_checked(&sm120),
-            Err(sim_arch::ArchitectureProvenanceError::Mismatch {
-                component: "DRAM stats",
-                expected: ArchId::Sm86,
-                got: ArchId::Sm120,
-            })
+            Err(SystemCounterError::Architecture(
+                sim_arch::ArchitectureProvenanceError::Mismatch {
+                    component: "DRAM stats",
+                    expected: ArchId::Sm86,
+                    got: ArchId::Sm120,
+                }
+            ))
         ));
     }
 }

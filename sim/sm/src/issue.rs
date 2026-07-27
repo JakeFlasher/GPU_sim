@@ -125,6 +125,26 @@ pub struct IssueModelParams {
     pub max_resident_warps_per_sm: u32,
 }
 
+pub(crate) fn checked_cycle_add(
+    operation: &'static str,
+    base: u64,
+    delta: u64,
+) -> Result<u64, IssueError> {
+    let value = base.checked_add(delta).ok_or(IssueError::TimeOverflow {
+        operation,
+        base,
+        delta,
+    })?;
+    if value == u64::MAX {
+        return Err(IssueError::TimeDomainExhausted {
+            operation,
+            base,
+            delta,
+        });
+    }
+    Ok(value)
+}
+
 fn checked_latency(name: &'static str, value: f64) -> Result<u64, IssueError> {
     // `u64::MAX as f64` is rounded to 2^64.  Treat it as an exclusive
     // boundary: accepting equality would let the float→u64 cast saturate.
@@ -163,20 +183,53 @@ impl IssueModelParams {
     }
 
     /// Non-memory producer visibility (one copy for BOTH memory modes).
-    fn non_memory_ready(&self, t: u64) -> u64 {
-        t + self.non_memory_write_barrier_latency
+    fn non_memory_ready(&self, t: u64) -> Result<u64, IssueError> {
+        checked_cycle_add(
+            "non-memory write-barrier visibility",
+            t,
+            self.non_memory_write_barrier_latency,
+        )
     }
 
     /// Shared-memory visibility (one copy for BOTH memory modes).
-    fn shared_ready(&self, t: u64) -> u64 {
-        t + self.shared_write_barrier_latency
+    fn shared_ready(&self, t: u64) -> Result<u64, IssueError> {
+        checked_cycle_add(
+            "shared-memory write-barrier visibility",
+            t,
+            self.shared_write_barrier_latency,
+        )
     }
 
     /// Store / degenerate-record / L1-bypass visibility: the L2-hit arm.
     /// The single copy both data paths must price identically — the
     /// Const-vs-Shared ablation delta depends on it.
-    fn store_visibility_ready(&self, t: u64) -> u64 {
-        t + self.l1_miss_latency
+    fn store_visibility_ready(&self, t: u64) -> Result<u64, IssueError> {
+        checked_cycle_add(
+            "store/bypass write-barrier visibility",
+            t,
+            self.l1_miss_latency,
+        )
+    }
+
+    /// Validate that an attached L1 uses this parameter set's single
+    /// timing authority. This runs at the system composition root as well
+    /// as per-core construction so an empty SM map cannot skip the check.
+    pub(crate) fn validate_l1_timing(&self, cfg: L1Config) -> Result<(), IssueError> {
+        if cfg.hit_latency != self.l1_hit_latency {
+            return Err(IssueError::L1TimingMismatch {
+                field: "hit",
+                expected: self.l1_hit_latency,
+                got: cfg.hit_latency,
+            });
+        }
+        if cfg.miss_latency != self.l1_miss_latency {
+            return Err(IssueError::L1TimingMismatch {
+                field: "miss",
+                expected: self.l1_miss_latency,
+                got: cfg.miss_latency,
+            });
+        }
+        Ok(())
     }
 
     /// L1 configuration sharing THIS param set's latencies (single
@@ -229,8 +282,34 @@ pub enum IssueError {
         expected: ArchId,
         got: ArchId,
     },
+    #[error("L1 {field} latency {got} does not match issue parameter {expected}")]
+    L1TimingMismatch {
+        field: &'static str,
+        expected: u64,
+        got: u64,
+    },
     #[error("{name} latency must be finite, positive, and fit in u64 (got {value})")]
     InvalidLatency { name: &'static str, value: f64 },
+    #[error("{operation}: cycle addition {base} + {delta} overflows u64")]
+    TimeOverflow {
+        operation: &'static str,
+        base: u64,
+        delta: u64,
+    },
+    #[error(
+        "{operation}: cycle addition {base} + {delta} reaches u64::MAX, reserved as the unbounded horizon"
+    )]
+    TimeDomainExhausted {
+        operation: &'static str,
+        base: u64,
+        delta: u64,
+    },
+    #[error("memory response time u64::MAX is reserved as the unbounded horizon")]
+    ResponseTimeDomainExhausted,
+    #[error("memory response at t={now} precedes the SM clock t={clock}")]
+    ResponseBeforeClock { now: u64, clock: u64 },
+    #[error("advance horizon t={horizon} precedes the SM clock t={clock}")]
+    HorizonBeforeClock { horizon: u64, clock: u64 },
 
     #[error("issue capability unavailable: {0}")]
     Capability(#[from] sim_arch::CapabilityError),
@@ -467,34 +546,35 @@ fn data_ready_time(
     t: u64,
     params: &IssueModelParams,
     l1: Option<&mut L1Cache>,
-) -> u64 {
+) -> Result<u64, IssueError> {
     match kind {
         AccessKind::NonMemory => params.non_memory_ready(t),
         AccessKind::Shared => params.shared_ready(t),
         AccessKind::GlobalEligible { off, len, .. } => match l1 {
             Some(l1) => {
-                let mut ready = t + params.l1_hit_latency;
+                let mut ready =
+                    checked_cycle_add("L1 hit-pipeline floor", t, params.l1_hit_latency)?;
                 for &sector in &sectors[off as usize..off as usize + usize::from(len)] {
                     let (_, r) = l1.access_eligible(sector, t);
                     ready = ready.max(r);
                 }
-                ready
+                Ok(ready)
             }
-            None => t + params.global_flat_latency,
+            None => checked_cycle_add("flat global visibility", t, params.global_flat_latency),
         },
         AccessKind::GlobalBypass { len, token, .. } => match l1 {
             Some(l1) => {
                 l1.count_bypass(u64::from(len), token == CacheOpToken::Atom);
                 params.store_visibility_ready(t)
             }
-            None => t + params.global_flat_latency,
+            None => checked_cycle_add("flat global visibility", t, params.global_flat_latency),
         },
         AccessKind::GlobalUntagged { len, .. } => match l1 {
             Some(l1) => {
                 l1.count_untagged(u64::from(len));
                 params.store_visibility_ready(t)
             }
-            None => t + params.global_flat_latency,
+            None => checked_cycle_add("flat global visibility", t, params.global_flat_latency),
         },
         AccessKind::GlobalStore { off, len } => match l1 {
             Some(l1) => {
@@ -503,7 +583,7 @@ fn data_ready_time(
                 }
                 params.store_visibility_ready(t)
             }
-            None => t + params.global_flat_latency,
+            None => checked_cycle_add("flat global visibility", t, params.global_flat_latency),
         },
     }
 }
@@ -636,6 +716,16 @@ impl<'a> SmCore<'a> {
                 got: params.arch,
             });
         }
+        // Validate the complete dynamic/static join before constructing any
+        // mutable replay state. A later block admission must not discover an
+        // unknown PC after earlier blocks have already committed instructions.
+        for block in blocks {
+            for warp in &block.warps {
+                for inst in &warp.insts {
+                    lookup(schedule, inst.pc, block.launch_index, warp.warp_slot)?;
+                }
+            }
+        }
         let l1_arch = match mode {
             SmMemMode::Flat => None,
             SmMemMode::L1Const(cfg) | SmMemMode::L1Shared(cfg) => Some(cfg.arch),
@@ -648,6 +738,9 @@ impl<'a> SmCore<'a> {
                 expected: schedule.arch,
                 got,
             });
+        }
+        if let SmMemMode::L1Const(cfg) | SmMemMode::L1Shared(cfg) = mode {
+            params.validate_l1_timing(cfg)?;
         }
         let mem = match mode {
             SmMemMode::Flat => MemModel::Flat,
@@ -799,7 +892,7 @@ impl<'a> SmCore<'a> {
         sectors: &'a [i64],
         write_barrier: u8,
         out: &mut Vec<MemRequest>,
-    ) -> Option<u64> {
+    ) -> Result<Option<u64>, IssueError> {
         let t = self.t;
         let p = self.params;
         let MemModel::L1Shared(st) = &mut self.mem else {
@@ -807,8 +900,8 @@ impl<'a> SmCore<'a> {
         };
         let warps = &mut self.warps;
         match kind {
-            AccessKind::NonMemory => Some(p.non_memory_ready(t)),
-            AccessKind::Shared => Some(p.shared_ready(t)),
+            AccessKind::NonMemory => p.non_memory_ready(t).map(Some),
+            AccessKind::Shared => p.shared_ready(t).map(Some),
             AccessKind::GlobalEligible { off, len, .. } => {
                 // The hit-pipeline floor applies to the whole load (as in
                 // L1Const); misses ride their responses. Line fills
@@ -816,7 +909,8 @@ impl<'a> SmCore<'a> {
                 // cleared at advance entry) fold later same-line sectors
                 // into their request mask — one L2 transaction per line
                 // per batch, priced on its worst sector.
-                let mut known = t + p.l1_hit_latency;
+                let mut known =
+                    checked_cycle_add("shared L1 hit-pipeline floor", t, p.l1_hit_latency)?;
                 let range = off as usize..off as usize + usize::from(len);
                 for i in range.clone() {
                     match access_shared(st, warps, wix, write_barrier, sectors[i], t, out) {
@@ -836,7 +930,7 @@ impl<'a> SmCore<'a> {
                         }
                     }
                 }
-                Some(known)
+                Ok(Some(known))
             }
             AccessKind::GlobalBypass { off, len, .. } | AccessKind::GlobalUntagged { off, len } => {
                 let (source, counted, class) = match kind {
@@ -865,7 +959,7 @@ impl<'a> SmCore<'a> {
                     // legal on the wire): no sectors, no requests — but
                     // the write-barrier contract must match L1Const,
                     // which stamps these at the L2-hit arm.
-                    return Some(p.store_visibility_ready(t));
+                    return p.store_visibility_ready(t).map(Some);
                 }
                 let barrier_valid = usize::from(write_barrier) < DEP_BARRIERS;
                 for &sector_id in &sectors[off as usize..off as usize + usize::from(len)] {
@@ -888,7 +982,7 @@ impl<'a> SmCore<'a> {
                         reply,
                     });
                 }
-                None
+                Ok(None)
             }
             AccessKind::GlobalStore { off, len } => {
                 for &sector_id in &sectors[off as usize..off as usize + usize::from(len)] {
@@ -897,15 +991,46 @@ impl<'a> SmCore<'a> {
                 }
                 // v0: store visibility priced at the L2-hit arm (as in
                 // L1Const); stores do not wait on responses.
-                Some(p.store_visibility_ready(t))
+                p.store_visibility_ready(t).map(Some)
             }
         }
+    }
+
+    pub(crate) fn preflight_response(&self, reply: ReplyTo, now: u64) -> Result<(), IssueError> {
+        if now == u64::MAX {
+            return Err(IssueError::ResponseTimeDomainExhausted);
+        }
+        if now < self.t {
+            return Err(IssueError::ResponseBeforeClock { now, clock: self.t });
+        }
+        let MemModel::L1Shared(st) = &self.mem else {
+            unreachable!("responses only exist in shared mode")
+        };
+        // A fill completion can drain parked accesses. Validate the timing
+        // arms owned by the SM before completing the fill or clearing any
+        // waiter. Next-level L2/DRAM pricing is preflighted by the system
+        // against the actual L2 outcome, not a hypothetical miss.
+        if matches!(reply, ReplyTo::L1Fill(_)) && !st.retry.is_empty() {
+            checked_cycle_add("retry L1 hit visibility", now, self.params.l1_hit_latency)?;
+            checked_cycle_add(
+                "retry self-response horizon",
+                now,
+                self.params.l1_miss_latency,
+            )?;
+        }
+        Ok(())
     }
 
     /// Apply one memory response at its event time, then drain what it
     /// unblocked (fill waiters, MSHR retry queue — retries may emit new
     /// requests into `out`).
-    pub fn on_response(&mut self, reply: ReplyTo, now: u64, out: &mut Vec<MemRequest>) {
+    pub fn on_response(
+        &mut self,
+        reply: ReplyTo,
+        now: u64,
+        out: &mut Vec<MemRequest>,
+    ) -> Result<(), IssueError> {
+        self.preflight_response(reply, now)?;
         let MemModel::L1Shared(st) = &mut self.mem else {
             unreachable!("responses only exist in shared mode")
         };
@@ -945,6 +1070,7 @@ impl<'a> SmCore<'a> {
             }
             ReplyTo::None => unreachable!("mutation-only requests get no response"),
         }
+        Ok(())
     }
 
     /// Run issue cycles strictly BEFORE `horizon`. Emits memory requests
@@ -965,6 +1091,12 @@ impl<'a> SmCore<'a> {
         horizon: u64,
         out: &mut Vec<MemRequest>,
     ) -> Result<Advance, IssueError> {
+        if horizon < self.t {
+            return Err(IssueError::HorizonBeforeClock {
+                horizon,
+                clock: self.t,
+            });
+        }
         // New emission batch: line-fill folds are only valid within one
         // call's `out` (the caller schedules it after we return).
         if let MemModel::L1Shared(st) = &mut self.mem {
@@ -983,10 +1115,15 @@ impl<'a> SmCore<'a> {
             // safe horizon (mutation-only store traffic cannot affect
             // this SM and does not).
             if out[before..].iter().any(|r| r.reply != ReplyTo::None) {
-                h = h.min(self.t + self.params.l1_miss_latency);
+                let lower_bound = checked_cycle_add(
+                    "self-response horizon",
+                    self.t,
+                    self.params.l1_miss_latency,
+                )?;
+                h = h.min(lower_bound);
             }
             if issued_this_cycle {
-                self.t += 1;
+                self.t = checked_cycle_add("issue-clock advance", self.t, 1)?;
                 continue;
             }
             // Nothing ready: skip to the next KNOWN timer (resident warps
@@ -1001,7 +1138,8 @@ impl<'a> SmCore<'a> {
                 .min();
             match next_t {
                 Some(nt) => {
-                    let target = nt.max(self.t + 1);
+                    let next_cycle = checked_cycle_add("idle-clock advance", self.t, 1)?;
+                    let target = nt.max(next_cycle);
                     if target >= h {
                         // Park AT the horizon instead of jumping past it:
                         // the event there may ready a warp before the
@@ -1030,21 +1168,128 @@ impl<'a> SmCore<'a> {
         Ok(Advance::Done)
     }
 
+    fn preflight_issue_timing(
+        &self,
+        kind: AccessKind,
+        write_barrier: u8,
+        stall: u8,
+        yield_flag: bool,
+    ) -> Result<(), IssueError> {
+        let t = self.t;
+        checked_cycle_add("issue-clock advance", t, 1)?;
+        checked_cycle_add("warp stall eligibility", t, u64::from(stall.max(1)))?;
+        if yield_flag {
+            checked_cycle_add("warp yield eligibility", t, 2)?;
+        }
+        checked_cycle_add(
+            "read-dependence barrier visibility",
+            t,
+            self.params.read_barrier_latency,
+        )?;
+
+        match kind {
+            AccessKind::NonMemory => {
+                self.params.non_memory_ready(t)?;
+            }
+            AccessKind::Shared => {
+                self.params.shared_ready(t)?;
+            }
+            AccessKind::GlobalEligible { len, .. } => match &self.mem {
+                MemModel::Flat => {
+                    checked_cycle_add(
+                        "flat global visibility",
+                        t,
+                        self.params.global_flat_latency,
+                    )?;
+                }
+                MemModel::L1Const(_) => {
+                    checked_cycle_add("L1 hit-pipeline floor", t, self.params.l1_hit_latency)?;
+                    checked_cycle_add(
+                        "L1 constant miss visibility",
+                        t,
+                        self.params.l1_miss_latency,
+                    )?;
+                }
+                MemModel::L1Shared(_) => {
+                    checked_cycle_add(
+                        "shared L1 hit-pipeline floor",
+                        t,
+                        self.params.l1_hit_latency,
+                    )?;
+                    if len > 0 {
+                        checked_cycle_add("self-response horizon", t, self.params.l1_miss_latency)?;
+                    }
+                }
+            },
+            AccessKind::GlobalBypass { len, .. } | AccessKind::GlobalUntagged { len, .. } => {
+                match &self.mem {
+                    MemModel::Flat => {
+                        checked_cycle_add(
+                            "flat global visibility",
+                            t,
+                            self.params.global_flat_latency,
+                        )?;
+                    }
+                    MemModel::L1Const(_) => {
+                        self.params.store_visibility_ready(t)?;
+                    }
+                    MemModel::L1Shared(_) if len == 0 => {
+                        self.params.store_visibility_ready(t)?;
+                    }
+                    MemModel::L1Shared(_) if usize::from(write_barrier) < DEP_BARRIERS => {
+                        checked_cycle_add("self-response horizon", t, self.params.l1_miss_latency)?;
+                    }
+                    MemModel::L1Shared(_) => {}
+                }
+            }
+            AccessKind::GlobalStore { .. } => match &self.mem {
+                MemModel::Flat => {
+                    checked_cycle_add(
+                        "flat global visibility",
+                        t,
+                        self.params.global_flat_latency,
+                    )?;
+                }
+                MemModel::L1Const(_) | MemModel::L1Shared(_) => {
+                    self.params.store_visibility_ready(t)?;
+                }
+            },
+        }
+        Ok(())
+    }
+
     /// One issue cycle at `self.t` across the four sub-cores. Returns
     /// whether anything issued.
     fn issue_cycle(&mut self, out: &mut Vec<MemRequest>) -> Result<bool, IssueError> {
         let t = self.t;
-        let mut issued_this_cycle = false;
-        for sc in 0..SUB_CORES {
+        let picks: [Option<usize>; SUB_CORES] = std::array::from_fn(|sc| {
             // CGGTY pick: held warp while ready, else youngest ready.
-            let pick = match self.hold[sc] {
+            match self.hold[sc] {
                 Some(w) if self.warps[w].is_ready(t) => Some(w),
                 _ => self.subcore_warps[sc]
                     .iter()
                     .copied()
                     .filter(|&w| self.warps[w].is_ready(t))
                     .max_by_key(|&w| self.warps[w].arrival),
-            };
+            }
+        });
+
+        // A cycle is the caller-visible transaction boundary. Validate every
+        // selected instruction's possible timing arms before any sub-core
+        // mutates counters, cache state, barriers, requests, or retirement.
+        for wix in picks.iter().flatten().copied() {
+            let w = &self.warps[wix];
+            let slot = w.next_slot.expect("ready warp has a pending slot");
+            self.preflight_issue_timing(
+                w.insts[w.next].kind,
+                slot.control.write_barrier,
+                slot.control.stall,
+                slot.control.yield_flag,
+            )?;
+        }
+
+        let mut issued_this_cycle = false;
+        for (sc, pick) in picks.into_iter().enumerate() {
             let Some(wix) = pick else { continue };
             issued_this_cycle = true;
 
@@ -1067,7 +1312,7 @@ impl<'a> SmCore<'a> {
             // Memory-model interaction happens at issue time regardless of
             // whether a dependence barrier consumes the ready time.
             let data_ready = if matches!(self.mem, MemModel::L1Shared(_)) {
-                self.mem_step_shared(wix, inst.kind, warp_sectors, control.write_barrier, out)
+                self.mem_step_shared(wix, inst.kind, warp_sectors, control.write_barrier, out)?
             } else {
                 Some(data_ready_time(
                     inst.kind,
@@ -1075,7 +1320,7 @@ impl<'a> SmCore<'a> {
                     t,
                     &self.params,
                     self.mem.const_l1_mut(),
-                ))
+                )?)
             };
 
             // Yield semantics per the CGGTY paper: the yield bit means
@@ -1083,9 +1328,9 @@ impl<'a> SmCore<'a> {
             // bubble when no other warp is ready — on top of the stall
             // count.
             let stall = u64::from(control.stall.max(1));
-            let mut eligible = t + stall;
+            let mut eligible = checked_cycle_add("warp stall eligibility", t, stall)?;
             if control.yield_flag {
-                eligible = eligible.max(t + 2);
+                eligible = eligible.max(checked_cycle_add("warp yield eligibility", t, 2)?);
             }
             self.warps[wix].eligible = eligible;
             // Dependence barriers are COUNTERS in hardware (producer
@@ -1099,7 +1344,12 @@ impl<'a> SmCore<'a> {
             if let Some(dr) = data_ready {
                 self.warps[wix].stamp_clear(control.write_barrier, dr);
             }
-            self.warps[wix].stamp_clear(control.read_barrier, t + self.params.read_barrier_latency);
+            let read_clear = checked_cycle_add(
+                "read-dependence barrier visibility",
+                t,
+                self.params.read_barrier_latency,
+            )?;
+            self.warps[wix].stamp_clear(control.read_barrier, read_clear);
 
             // Advance the warp's stream.
             self.warps[wix].next += 1;
@@ -1118,7 +1368,8 @@ impl<'a> SmCore<'a> {
                 }
                 if self.block_states[blk_ix].unfinished == 0 {
                     self.resident_warps -= self.block_states[blk_ix].warp_count;
-                    self.admit_blocks(t + 1)?;
+                    let admit_at = checked_cycle_add("block-wave admission", t, 1)?;
+                    self.admit_blocks(admit_at)?;
                 }
             } else {
                 let next_pc = self.warps[wix].insts[self.warps[wix].next].pc;
@@ -1141,10 +1392,11 @@ impl<'a> SmCore<'a> {
             if bs.waiting > 0 && bs.waiting == bs.unfinished {
                 let (first, count) = (bs.first_warp, bs.admitted_warps);
                 self.block_states[blk_ix].waiting = 0;
+                let release_at = checked_cycle_add("block-barrier release", t, 1)?;
                 for w in &mut self.warps[first..first + count] {
                     if w.at_block_barrier {
                         w.at_block_barrier = false;
-                        w.eligible = w.eligible.max(t + 1);
+                        w.eligible = w.eligible.max(release_at);
                     }
                 }
             }
@@ -1389,6 +1641,144 @@ mod tests {
         assert!(checked_latency("infinite", f64::INFINITY).is_err());
         assert!(checked_latency("negative", -1.0).is_err());
         assert_eq!(checked_latency("fractional", 12.01).unwrap(), 13);
+    }
+
+    #[test]
+    fn past_horizon_is_rejected_before_mutation() {
+        let sched = schedule(vec![(0, slot(cb(1), OpClass::Other, "EXIT"))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![warp(0, vec![inst(0)])],
+        }];
+        let mut core = SmCore::new(&blocks, &sched, &params(), SmMemMode::Flat).unwrap();
+        core.t = 1;
+        let mut out = Vec::new();
+        assert!(matches!(
+            core.advance(0, &mut out),
+            Err(IssueError::HorizonBeforeClock {
+                horizon: 0,
+                clock: 1,
+            })
+        ));
+        assert!(out.is_empty());
+        assert_eq!(core.instructions_issued(), 0);
+        assert_eq!(core.warps[0].next, 0);
+    }
+
+    #[test]
+    fn producer_latency_overflow_is_typed() {
+        let sched = schedule(vec![(0, slot(cb(1), OpClass::Other, "EXIT"))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![warp(0, vec![inst(0)])],
+        }];
+        let mut p = params();
+        p.non_memory_write_barrier_latency = u64::MAX;
+        let mut core = SmCore::new(&blocks, &sched, &p, SmMemMode::Flat).unwrap();
+        core.t = 1;
+        let mut out = Vec::new();
+        assert!(matches!(
+            core.advance(u64::MAX, &mut out),
+            Err(IssueError::TimeOverflow {
+                operation: "non-memory write-barrier visibility",
+                base: 1,
+                delta: u64::MAX,
+            })
+        ));
+        assert!(out.is_empty());
+        assert_eq!(core.instructions_issued(), 0);
+        assert_eq!(core.warps[0].next, 0);
+    }
+
+    #[test]
+    fn exact_max_cycle_is_reserved_for_the_unbounded_horizon() {
+        let sched = schedule(vec![(0, slot(cb(1), OpClass::Other, "EXIT"))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![warp(0, vec![inst(0)])],
+        }];
+        let mut p = params();
+        p.non_memory_write_barrier_latency = u64::MAX - 1;
+        let mut core = SmCore::new(&blocks, &sched, &p, SmMemMode::Flat).unwrap();
+        core.t = 1;
+        let mut out = Vec::new();
+        assert!(matches!(
+            core.advance(u64::MAX, &mut out),
+            Err(IssueError::TimeDomainExhausted {
+                operation: "non-memory write-barrier visibility",
+                base: 1,
+                delta,
+            }) if delta == u64::MAX - 1
+        ));
+        assert!(out.is_empty());
+        assert_eq!(core.instructions_issued(), 0);
+        assert_eq!(core.warps[0].next, 0);
+    }
+
+    #[test]
+    fn self_response_horizon_overflow_is_typed() {
+        let mut control = cb(1);
+        control.write_barrier = 0;
+        let sched = schedule(vec![(0, slot(control, OpClass::Other, "LDG.E.CG"))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                warp_slot: 0,
+                insts: vec![ReplayInst {
+                    pc: 0,
+                    kind: AccessKind::GlobalBypass {
+                        off: 0,
+                        len: 1,
+                        token: CacheOpToken::LdgECg,
+                    },
+                }],
+                sectors: vec![0],
+            }],
+        }];
+        let mut p = params();
+        p.l1_miss_latency = u64::MAX;
+        let mut core = SmCore::new(
+            &blocks,
+            &sched,
+            &p,
+            SmMemMode::L1Shared(p.l1_config(768, 32)),
+        )
+        .unwrap();
+        core.t = 1;
+        let mut out = Vec::new();
+        assert!(matches!(
+            core.advance(u64::MAX, &mut out),
+            Err(IssueError::TimeOverflow {
+                operation: "self-response horizon",
+                base: 1,
+                delta: u64::MAX,
+            })
+        ));
+        assert!(out.is_empty());
+        assert_eq!(core.instructions_issued(), 0);
+        assert_eq!(core.warps[0].next, 0);
+        assert_eq!(core.outstanding_responses(), 0);
+        assert_eq!(core.l1_counters().unwrap().bypass_sectors, 0);
+    }
+
+    #[test]
+    fn l1_timing_must_match_issue_parameters() {
+        let sched = schedule(vec![(0, slot(cb(1), OpClass::Other, "EXIT"))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![warp(0, vec![inst(0)])],
+        }];
+        let p = params();
+        let mut cfg = p.l1_config(768, 32);
+        cfg.miss_latency += 1;
+        assert!(matches!(
+            SmCore::new(&blocks, &sched, &p, SmMemMode::L1Shared(cfg)),
+            Err(IssueError::L1TimingMismatch {
+                field: "miss",
+                expected: 244,
+                got: 245,
+            })
+        ));
     }
 
     fn l1_config() -> L1Config {
@@ -1825,7 +2215,8 @@ mod tests {
         };
         // Response at the DRAM arm (423): consumer issues at 423.
         let mut out2 = Vec::new();
-        core.on_response(ReplyTo::L1Fill(fill), 423, &mut out2);
+        core.on_response(ReplyTo::L1Fill(fill), 423, &mut out2)
+            .unwrap();
         assert!(out2.is_empty());
         assert_eq!(core.advance(u64::MAX, &mut out2).unwrap(), Advance::Done);
         let r = core.result();
@@ -1933,7 +2324,7 @@ mod tests {
         assert_eq!(out.len(), 1, "second warp merged, no second request");
         let c = core.l1_counters().unwrap();
         assert_eq!((c.misses, c.merges), (2, 1));
-        core.on_response(out[0].reply, 300, &mut out);
+        core.on_response(out[0].reply, 300, &mut out).unwrap();
         assert_eq!(core.advance(u64::MAX, &mut out).unwrap(), Advance::Done);
         // Both consumers issued at 300 (distinct sub-cores) → cycles 301.
         assert_eq!(core.result().cycles, 301);
@@ -1991,7 +2382,23 @@ mod tests {
         // First fill completes → retry emits the parked request at 244.
         let first = out[0].reply;
         out.clear();
-        core.on_response(first, 244, &mut out);
+        assert!(matches!(
+            core.on_response(first, u64::MAX - 1, &mut out),
+            Err(IssueError::TimeOverflow {
+                operation: "retry L1 hit visibility",
+                base,
+                delta: 34,
+            }) if base == u64::MAX - 1
+        ));
+        assert!(out.is_empty());
+        assert_eq!(core.outstanding_responses(), 1);
+        let MemModel::L1Shared(st) = &core.mem else {
+            panic!("expected shared mode");
+        };
+        assert_eq!(st.retry.len(), 1);
+        assert_eq!(core.warps[1].barrier_pending[0], 1);
+
+        core.on_response(first, 244, &mut out).unwrap();
         assert_eq!(out.len(), 1, "retry sent the parked sector");
         assert_eq!(out[0].issue_time, 244);
         assert_eq!(
@@ -1999,7 +2406,7 @@ mod tests {
             Advance::Idle { wake_at: None }
         );
         let second = out[0].reply;
-        core.on_response(second, 488, &mut out);
+        core.on_response(second, 488, &mut out).unwrap();
         assert_eq!(core.advance(u64::MAX, &mut out).unwrap(), Advance::Done);
         let r = core.result();
         assert_eq!(r.instructions_issued, 4);
@@ -2056,15 +2463,68 @@ mod tests {
         ));
         // Both responses must land before the wait clears.
         let mut sink = Vec::new();
-        core.on_response(out[0].reply, 244, &mut sink);
+        core.on_response(out[0].reply, 244, &mut sink).unwrap();
         assert_eq!(
             core.advance(u64::MAX, &mut sink).unwrap(),
             Advance::Idle { wake_at: None },
             "one of two pending units still outstanding"
         );
-        core.on_response(out[1].reply, 423, &mut sink);
+        core.on_response(out[1].reply, 423, &mut sink).unwrap();
         assert_eq!(core.advance(u64::MAX, &mut sink).unwrap(), Advance::Done);
         assert_eq!(core.result().cycles, 424);
+    }
+
+    #[test]
+    fn invalid_response_times_are_rejected_before_mutation() {
+        let mut load = cb(1);
+        load.write_barrier = 2;
+        let mut consumer = cb(1);
+        consumer.wait_mask = 0b000100;
+        let sched = schedule(vec![
+            (0, slot(load, OpClass::Other, "LDG.E.CG")),
+            (16, slot(consumer, OpClass::Other, "EXIT")),
+        ]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                warp_slot: 0,
+                insts: vec![
+                    ReplayInst {
+                        pc: 0,
+                        kind: AccessKind::GlobalBypass {
+                            off: 0,
+                            len: 1,
+                            token: CacheOpToken::LdgECg,
+                        },
+                    },
+                    inst(16),
+                ],
+                sectors: vec![40],
+            }],
+        }];
+        let mut core = shared_core(&blocks, &sched, &params());
+        let mut requests = Vec::new();
+        assert_eq!(
+            core.advance(u64::MAX, &mut requests).unwrap(),
+            Advance::Idle { wake_at: None }
+        );
+        assert_eq!(core.outstanding_responses(), 1);
+        assert_eq!(core.warps[0].barrier_pending[2], 1);
+
+        let mut retries = Vec::new();
+        assert_eq!(core.now(), 1);
+        assert!(matches!(
+            core.on_response(requests[0].reply, 0, &mut retries),
+            Err(IssueError::ResponseBeforeClock { now: 0, clock: 1 })
+        ));
+        assert!(matches!(
+            core.on_response(requests[0].reply, u64::MAX, &mut retries),
+            Err(IssueError::ResponseTimeDomainExhausted)
+        ));
+        assert!(retries.is_empty());
+        assert_eq!(core.outstanding_responses(), 1);
+        assert_eq!(core.warps[0].barrier_pending[2], 1);
+        assert_eq!(core.warps[0].barrier_clear[2], 0);
     }
 
     #[test]
@@ -2138,7 +2598,7 @@ mod tests {
         assert_eq!(out[0].sector_mask, 0b1111);
         assert_eq!(out[0].reply, ReplyTo::L1Fill(FillKey::Line(10)));
         let mut sink = Vec::new();
-        core.on_response(out[0].reply, 244, &mut sink);
+        core.on_response(out[0].reply, 244, &mut sink).unwrap();
         assert_eq!(core.advance(u64::MAX, &mut sink).unwrap(), Advance::Done);
         assert_eq!(core.result().cycles, 245);
     }
@@ -2203,7 +2663,7 @@ mod tests {
         assert_eq!(out[0].sector_mask, 0b11, "B's sector folded into A's fill");
         assert_eq!(out[0].reply, ReplyTo::L1Fill(FillKey::Line(10)));
         let mut sink = Vec::new();
-        core.on_response(out[0].reply, 244, &mut sink);
+        core.on_response(out[0].reply, 244, &mut sink).unwrap();
         assert_eq!(
             core.advance(u64::MAX, &mut sink).unwrap(),
             Advance::Done,
@@ -2284,7 +2744,7 @@ mod tests {
         // Fill M returns; the merging load issues in a NEW batch while
         // fill L is still in flight.
         let mut out2 = Vec::new();
-        core.on_response(out[0].reply, 423, &mut out2);
+        core.on_response(out[0].reply, 423, &mut out2).unwrap();
         assert_eq!(
             core.advance(u64::MAX, &mut out2).unwrap(),
             Advance::Idle { wake_at: None }
@@ -2296,7 +2756,7 @@ mod tests {
         // Fill L's one response clears BOTH its own waiter (barrier 3)
         // and the merged load's waiter (barrier 2).
         let mut sink = Vec::new();
-        core.on_response(out[1].reply, 846, &mut sink);
+        core.on_response(out[1].reply, 846, &mut sink).unwrap();
         assert_eq!(core.advance(u64::MAX, &mut sink).unwrap(), Advance::Done);
     }
 
