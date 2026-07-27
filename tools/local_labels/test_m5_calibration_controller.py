@@ -8,6 +8,7 @@ import os
 import shutil
 import subprocess
 import sys
+import threading
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -919,6 +920,80 @@ def test_publication_rejects_live_lock_contention(
 
     assert str(error.value) == expected
     assert not (output / "final").exists()
+
+
+def test_equal_concurrent_publisher_accepts_durable_winner(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    output = tmp_path / "output"
+    file = immutable.ImmutableFile.from_bytes("value", b"possibly unique evidence")
+    committed = threading.Event()
+    release = threading.Event()
+    first_results: list[Path] = []
+    first_errors: list[BaseException] = []
+    durability_calls: list[tuple[int, int]] = []
+    authorization_calls = 0
+    original_durability_proof = immutable._durability_proof_at
+
+    def pause_after_commit(_root: Path, _descriptor: int) -> None:
+        nonlocal authorization_calls
+        authorization_calls += 1
+        if authorization_calls == 3:
+            committed.set()
+            if not release.wait(timeout=10):
+                raise AssertionError("concurrent-publisher release timed out")
+
+    def record_durability_proof(
+        publication_root_descriptor: int,
+        tree_root_descriptor: int,
+        material: tuple[immutable.ImmutableFile, ...],
+    ):
+        durability_calls.append(
+            (publication_root_descriptor, tree_root_descriptor)
+        )
+        return original_durability_proof(
+            publication_root_descriptor,
+            tree_root_descriptor,
+            material,
+        )
+
+    def publish_first() -> None:
+        try:
+            first_results.append(
+                immutable.publish_directory(
+                    output,
+                    "final",
+                    [file],
+                    before_commit=pause_after_commit,
+                )
+            )
+        except BaseException as exc:
+            first_errors.append(exc)
+
+    monkeypatch.setattr(
+        immutable,
+        "_durability_proof_at",
+        record_durability_proof,
+    )
+    publisher = threading.Thread(target=publish_first)
+    publisher.start()
+    try:
+        assert committed.wait(timeout=10), "first publisher did not commit"
+        second_result = immutable.publish_directory(output, "final", [file])
+    finally:
+        release.set()
+        publisher.join(timeout=10)
+
+    assert not publisher.is_alive()
+    assert first_errors == []
+    assert first_results == [output / "final"]
+    assert second_result == output / "final"
+    assert authorization_calls == 3
+    assert len(durability_calls) == 1
+    assert durability_calls[0][0] != durability_calls[0][1]
+    assert not (output / ".final.staging").exists()
+    immutable.verify_published_files(output / "final", [file])
 
 
 def test_publication_rejects_stage_and_final_symlink_names(tmp_path: Path) -> None:
