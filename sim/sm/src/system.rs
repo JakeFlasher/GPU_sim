@@ -522,7 +522,7 @@ pub fn simulate_kernel_shared(
     }
 
     let mut spin = SpinGuard::new(cores.len());
-    while let Some(ev) = queue.pop() {
+    while let Some(ev) = queue.pop()? {
         let sm_ix = ev.target.0 as usize;
         match ev.kind {
             Ev::SmWake => {

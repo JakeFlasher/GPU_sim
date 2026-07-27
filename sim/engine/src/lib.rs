@@ -44,6 +44,12 @@ pub enum EngineError {
     SchedulePast { requested: Time, now: Time },
     #[error("delay {delay} from now={now} overflows the u64 cycle domain")]
     TimeOverflow { now: Time, delay: Time },
+    #[error("event insertion sequence is exhausted at {next_seq}")]
+    SeqOverflow { next_seq: u64 },
+    #[error(
+        "event queue yielded t={event_time} before its current clock t={now} — queue causality is corrupt"
+    )]
+    EventBeforeClock { event_time: Time, now: Time },
 }
 
 /// Heap entry ordered by `(time, seq)` only; `kind` deliberately carries no
@@ -111,7 +117,12 @@ impl<K> EventQueue<K> {
             });
         }
         let seq = self.next_seq;
-        self.next_seq += 1;
+        self.next_seq = self
+            .next_seq
+            .checked_add(1)
+            .ok_or(EngineError::SeqOverflow {
+                next_seq: self.next_seq,
+            })?;
         self.heap.push(Reverse(HeapEntry(Event {
             time: at,
             seq,
@@ -145,11 +156,20 @@ impl<K> EventQueue<K> {
     }
 
     /// Pop the next event and advance the clock to its timestamp.
-    pub fn pop(&mut self) -> Option<Event<K>> {
-        let Reverse(HeapEntry(event)) = self.heap.pop()?;
-        debug_assert!(event.time >= self.now, "heap yielded an event in the past");
+    pub fn pop(&mut self) -> Result<Option<Event<K>>, EngineError> {
+        if let Some(Reverse(HeapEntry(event))) = self.heap.peek()
+            && event.time < self.now
+        {
+            return Err(EngineError::EventBeforeClock {
+                event_time: event.time,
+                now: self.now,
+            });
+        }
+        let Some(Reverse(HeapEntry(event))) = self.heap.pop() else {
+            return Ok(None);
+        };
         self.now = event.time;
-        Some(event)
+        Ok(Some(event))
     }
 }
 
@@ -173,7 +193,7 @@ mod tests {
         q.schedule_at(10, TargetId(2), Kind::IssueBatch).unwrap();
         q.schedule_at(5, TargetId(3), Kind::Drain).unwrap();
 
-        let order: Vec<(Time, u32)> = std::iter::from_fn(|| q.pop())
+        let order: Vec<(Time, u32)> = std::iter::from_fn(|| q.pop().unwrap())
             .map(|e| (e.time, e.target.0))
             .collect();
         // t=5 first (FIFO: target 1 before 3), then t=10 (FIFO: 0 before 2).
@@ -186,7 +206,9 @@ mod tests {
         for i in 0..1000u32 {
             q.schedule_at(42, TargetId(i), Kind::IssueBatch).unwrap();
         }
-        let targets: Vec<u32> = std::iter::from_fn(|| q.pop()).map(|e| e.target.0).collect();
+        let targets: Vec<u32> = std::iter::from_fn(|| q.pop().unwrap())
+            .map(|e| e.target.0)
+            .collect();
         assert_eq!(targets, (0..1000).collect::<Vec<_>>());
     }
 
@@ -194,7 +216,7 @@ mod tests {
     fn clock_advances_monotonically_and_rejects_time_travel() {
         let mut q = EventQueue::new();
         q.schedule_at(100, TargetId(0), Kind::Drain).unwrap();
-        assert_eq!(q.pop().unwrap().time, 100);
+        assert_eq!(q.pop().unwrap().unwrap().time, 100);
         assert_eq!(q.now(), 100);
         assert_eq!(
             q.schedule_at(99, TargetId(0), Kind::Drain),
@@ -205,7 +227,7 @@ mod tests {
         );
         // Scheduling exactly at `now` is legal (zero-latency follow-up).
         q.schedule_at(100, TargetId(0), Kind::IssueBatch).unwrap();
-        assert_eq!(q.pop().unwrap().time, 100);
+        assert_eq!(q.pop().unwrap().unwrap().time, 100);
     }
 
     #[test]
@@ -226,10 +248,70 @@ mod tests {
             expected.push((t, seq));
         }
         expected.sort();
-        let popped: Vec<(Time, u64)> = std::iter::from_fn(|| q.pop())
+        let popped: Vec<(Time, u64)> = std::iter::from_fn(|| q.pop().unwrap())
             .map(|e| (e.time, e.seq))
             .collect();
         assert_eq!(popped, expected);
+    }
+
+    #[test]
+    fn schedule_in_overflow_is_typed() {
+        let mut q = EventQueue::new();
+        q.schedule_at(1, TargetId(0), Kind::Drain).unwrap();
+        assert_eq!(q.pop().unwrap().unwrap().time, 1);
+        assert_eq!(
+            q.schedule_in(u64::MAX, TargetId(0), Kind::Drain),
+            Err(EngineError::TimeOverflow {
+                now: 1,
+                delay: u64::MAX,
+            })
+        );
+        assert!(q.is_empty());
+    }
+
+    #[test]
+    fn sequence_exhaustion_is_typed_before_insertion() {
+        let mut q = EventQueue::new();
+        q.next_seq = u64::MAX - 1;
+        assert_eq!(
+            q.schedule_at(0, TargetId(0), Kind::IssueBatch),
+            Ok(u64::MAX - 1)
+        );
+        assert_eq!(q.len(), 1);
+        assert_eq!(
+            q.schedule_at(0, TargetId(1), Kind::Drain),
+            Err(EngineError::SeqOverflow { next_seq: u64::MAX })
+        );
+        assert_eq!(q.len(), 1);
+        assert_eq!(q.pop().unwrap().unwrap().seq, u64::MAX - 1);
+    }
+
+    #[test]
+    fn past_event_from_corrupt_queue_is_typed_in_release_builds() {
+        let mut q = EventQueue::new();
+        q.now = 7;
+        q.heap.push(Reverse(HeapEntry(Event {
+            time: 6,
+            seq: 0,
+            target: TargetId(0),
+            kind: Kind::Drain,
+        })));
+        let expected = Err(EngineError::EventBeforeClock {
+            event_time: 6,
+            now: 7,
+        });
+        assert_eq!(q.pop(), expected);
+        assert_eq!(q.len(), 1, "typed failure must retain the corrupt head");
+        assert_eq!(q.peek_time(), Some(6));
+        assert_eq!(
+            q.pop(),
+            Err(EngineError::EventBeforeClock {
+                event_time: 6,
+                now: 7,
+            }),
+            "repeated pop must fail on the same retained head"
+        );
+        assert_eq!(q.now(), 7);
     }
 
     #[test]
@@ -237,12 +319,12 @@ mod tests {
         let mut q = EventQueue::new();
         q.schedule_at(1, TargetId(0), Kind::IssueBatch).unwrap();
         q.schedule_at(3, TargetId(0), Kind::MemResponse).unwrap();
-        let e = q.pop().unwrap();
+        let e = q.pop().unwrap().unwrap();
         assert_eq!(e.time, 1);
         // React to the event by scheduling a follow-up before the t=3 one.
         q.schedule_in(1, TargetId(1), Kind::Drain).unwrap();
         assert_eq!(
-            q.pop().unwrap(),
+            q.pop().unwrap().unwrap(),
             Event {
                 time: 2,
                 seq: 2,
@@ -250,8 +332,8 @@ mod tests {
                 kind: Kind::Drain
             }
         );
-        assert_eq!(q.pop().unwrap().time, 3);
-        assert!(q.pop().is_none());
+        assert_eq!(q.pop().unwrap().unwrap().time, 3);
+        assert!(q.pop().unwrap().is_none());
         assert_eq!(q.now(), 3);
     }
 }
