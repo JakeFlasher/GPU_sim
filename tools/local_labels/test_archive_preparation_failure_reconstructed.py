@@ -79,6 +79,9 @@ def test_path_alias_baselines_remain_frozen_and_v3_is_inactive() -> None:
     assert _sha(adr5_path) == _FROZEN_ADR_0005_SHA256
     assert ap.ROUND28_PATH_ALIASES == v1_path
     assert ap.ROUND28_PATH_ALIASES_V1_SHA256 == _FROZEN_PATH_ALIASES_V1_SHA256
+    assert ap.ROUND28_PROPOSED_ALIAS_SCHEMA_VERSION == 3
+    assert _REPOSITORY_ROOT / ap.ROUND28_PROPOSED_ALIAS_PATH == v3_path
+    assert _REPOSITORY_ROOT / ap.ROUND28_PROPOSED_ALIAS_ADR == adr7_path
     v1 = json.loads(v1_path.read_bytes())
     v2 = json.loads(v2_path.read_bytes())
     v3 = json.loads(v3_path.read_bytes())
@@ -257,6 +260,7 @@ def _fixture_alias_row(
     ("authority_domain", "schema_version", "code"),
     [
         ("wrong_domain", 1, "PREP_ARCHIVE_EVIDENCE_ALIAS_DOMAIN_MISMATCH"),
+        ("wrong_domain", 3, "PREP_ARCHIVE_EVIDENCE_ALIAS_DOMAIN_MISMATCH"),
         (
             ap.ROUND28_ALIAS_AUTHORITY_DOMAIN,
             None,
@@ -273,7 +277,7 @@ def _fixture_alias_row(
                 version,
                 "PREP_ARCHIVE_EVIDENCE_ALIAS_VERSION_UNSUPPORTED",
             )
-            for version in (2, 3, 4)
+            for version in (2, 4)
         ],
     ],
 )
@@ -291,6 +295,56 @@ def test_repository_alias_dispatch_is_closed(
         request,
         authority_domain=authority_domain,
         schema_version=schema_version,
+    )
+
+
+def test_repository_alias_v3_proposal_is_explicitly_inactive() -> None:
+    with pytest.raises(ap.PreparationArchiveRefusal) as caught:
+        ap._round28_alias_authority(
+            authority_domain=ap.ROUND28_ALIAS_AUTHORITY_DOMAIN,
+            schema_version=ap.ROUND28_PROPOSED_ALIAS_SCHEMA_VERSION,
+        )
+
+    assert caught.value.code == "PREP_ARCHIVE_EVIDENCE_ALIAS_VERSION_INACTIVE"
+    assert caught.value.detail == (
+        "evidence/path_aliases.v3.json remains proposal-only under inactive "
+        "docs/decisions/0007-evidence-retention-and-path-aliases.md"
+    )
+
+
+def test_repository_alias_v3_cannot_activate_by_version_constant_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        ap,
+        "ROUND28_ACTIVE_ALIAS_SCHEMA_VERSION",
+        ap.ROUND28_PROPOSED_ALIAS_SCHEMA_VERSION,
+    )
+
+    _assert_refusal(
+        "PREP_ARCHIVE_EVIDENCE_ALIAS_VERSION_INACTIVE",
+        ap._round28_alias_authority,
+        authority_domain=ap.ROUND28_ALIAS_AUTHORITY_DOMAIN,
+        schema_version=ap.ROUND28_PROPOSED_ALIAS_SCHEMA_VERSION,
+    )
+
+
+@pytest.mark.parametrize("active_version", [2, 4])
+def test_repository_alias_unknown_version_cannot_dispatch_to_v1(
+    monkeypatch: pytest.MonkeyPatch,
+    active_version: int,
+) -> None:
+    monkeypatch.setattr(
+        ap,
+        "ROUND28_ACTIVE_ALIAS_SCHEMA_VERSION",
+        active_version,
+    )
+
+    _assert_refusal(
+        "PREP_ARCHIVE_EVIDENCE_ALIAS_VERSION_UNSUPPORTED",
+        ap._round28_alias_authority,
+        authority_domain=ap.ROUND28_ALIAS_AUTHORITY_DOMAIN,
+        schema_version=active_version,
     )
 
 

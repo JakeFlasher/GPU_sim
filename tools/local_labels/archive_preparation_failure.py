@@ -174,6 +174,11 @@ ROUND28_EVIDENCE_ROOT = (
 ROUND28_EVIDENCE_MANIFEST = REPO_ROOT / "evidence/MANIFEST.sha256"
 ROUND28_ALIAS_AUTHORITY_DOMAIN = "round28_preparation_failure_adjudications"
 ROUND28_ACTIVE_ALIAS_SCHEMA_VERSION = 1
+ROUND28_PROPOSED_ALIAS_SCHEMA_VERSION = 3
+ROUND28_PROPOSED_ALIAS_PATH = "evidence/path_aliases.v3.json"
+ROUND28_PROPOSED_ALIAS_ADR = (
+    "docs/decisions/0007-evidence-retention-and-path-aliases.md"
+)
 ROUND28_PATH_ALIASES_V1_SHA256 = (
     "94446cc702ffe86ecb5b35ae125a20cb758b17a4c521bfcefd4a308618f8c737"
 )
@@ -2148,10 +2153,27 @@ def _round28_alias_authority(
             "PREP_ARCHIVE_EVIDENCE_ALIAS_DOMAIN_MISMATCH",
             f"unsupported authority domain: {authority_domain!r}",
         )
+    if type(schema_version) is not int:
+        raise PreparationArchiveRefusal(
+            "PREP_ARCHIVE_EVIDENCE_ALIAS_VERSION_UNSUPPORTED",
+            f"unsupported schema version: {schema_version!r}",
+        )
+    if schema_version == ROUND28_PROPOSED_ALIAS_SCHEMA_VERSION:
+        raise PreparationArchiveRefusal(
+            "PREP_ARCHIVE_EVIDENCE_ALIAS_VERSION_INACTIVE",
+            f"{ROUND28_PROPOSED_ALIAS_PATH} remains proposal-only under "
+            f"inactive {ROUND28_PROPOSED_ALIAS_ADR}",
+        )
     if (
-        type(schema_version) is not int
-        or schema_version != ROUND28_ACTIVE_ALIAS_SCHEMA_VERSION
+        type(ROUND28_ACTIVE_ALIAS_SCHEMA_VERSION) is not int
+        or ROUND28_ACTIVE_ALIAS_SCHEMA_VERSION != 1
     ):
+        raise PreparationArchiveRefusal(
+            "PREP_ARCHIVE_EVIDENCE_ALIAS_VERSION_UNSUPPORTED",
+            "unsupported configured active schema version: "
+            f"{ROUND28_ACTIVE_ALIAS_SCHEMA_VERSION!r}",
+        )
+    if schema_version != ROUND28_ACTIVE_ALIAS_SCHEMA_VERSION:
         raise PreparationArchiveRefusal(
             "PREP_ARCHIVE_EVIDENCE_ALIAS_VERSION_UNSUPPORTED",
             f"unsupported schema version: {schema_version!r}",
