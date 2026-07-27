@@ -5,6 +5,8 @@ import errno
 import hashlib
 import json
 import os
+import shutil
+import stat
 import subprocess
 from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
@@ -5688,29 +5690,22 @@ def test_finalization_publish_refuses_cross_device_before_rename(
     publication_root.mkdir(parents=True)
     final_dir = tmp_path / "output" / "chunks" / "chunk"
     final_dir.parent.mkdir(parents=True)
-    real_stat = cc.os.stat
-    source_device = real_stat(publication_root).st_dev
-    replace_calls = []
+    source_device = os.stat(publication_root.parent).st_dev
+    rename_calls = []
+    devices = iter((source_device, source_device + 1))
 
-    def device_stat(path, *, follow_symlinks=True):
-        observed = Path(path)
-        metadata = real_stat(path, follow_symlinks=follow_symlinks)
-        if observed == final_dir.parent:
-            fields = list(metadata)
-            fields[2] = source_device + 1
-            return os.stat_result(fields)
-        return metadata
-
-    monkeypatch.setattr(cc.os, "stat", device_stat)
+    monkeypatch.setattr(cc, "_directory_device", lambda _descriptor: next(devices))
     monkeypatch.setattr(
-        cc.os, "replace", lambda *args: replace_calls.append(args),
+        cc.immutable,
+        "_rename_noreplace_at",
+        lambda *args: rename_calls.append(args),
     )
 
     with pytest.raises(cc.ChunkRefusal) as caught:
         cc._publish_finalized_tree(publication_root, final_dir)
 
     assert caught.value.code == "finalization_cross_device_refused"
-    assert replace_calls == []
+    assert rename_calls == []
 
 
 def test_finalization_publish_converts_exdev_to_typed_refusal(
@@ -5719,39 +5714,452 @@ def test_finalization_publish_converts_exdev_to_typed_refusal(
     publication_root.mkdir(parents=True)
     final_dir = tmp_path / "output" / "chunks" / "chunk"
     final_dir.parent.mkdir(parents=True)
-    fsync_calls = []
 
-    def refuse_replace(_source, _destination):
-        raise OSError(errno.EXDEV, "cross-device link")
+    def refuse_rename(*_args):
+        raise cc.immutable.ImmutableArtifactError(
+            "CROSS_DEVICE_RENAME: cross-device link"
+        )
 
-    monkeypatch.setattr(cc.os, "replace", refuse_replace)
     monkeypatch.setattr(
-        cc, "_fsync_directory", lambda path: fsync_calls.append(path),
+        cc.immutable, "_rename_noreplace_at", refuse_rename,
     )
 
     with pytest.raises(cc.ChunkRefusal) as caught:
         cc._publish_finalized_tree(publication_root, final_dir)
 
     assert caught.value.code == "finalization_cross_device_refused"
-    assert fsync_calls == []
 
 
-def test_finalization_publish_fsyncs_destination_parent(
+def test_finalization_publish_fsyncs_both_parents_and_parent_topology(
         tmp_path, monkeypatch):
     publication_root = tmp_path / "stage" / "publication"
     publication_root.mkdir(parents=True)
     (publication_root / "DONE.json").write_text("{}\n")
     final_dir = tmp_path / "output" / "chunks" / "chunk"
-    final_dir.parent.mkdir(parents=True)
-    fsync_calls = []
-    monkeypatch.setattr(
-        cc, "_fsync_directory", lambda path: fsync_calls.append(path),
-    )
+    final_dir.parent.parent.mkdir(parents=True)
+    real_fsync = cc.os.fsync
+    fsynced_directories = []
 
+    def inspect_fsync(descriptor):
+        metadata = cc.os.fstat(descriptor)
+        if stat.S_ISDIR(metadata.st_mode):
+            fsynced_directories.append(
+                Path(os.readlink(f"/proc/self/fd/{descriptor}"))
+            )
+        real_fsync(descriptor)
+
+    monkeypatch.setattr(cc.os, "fsync", inspect_fsync)
     cc._publish_finalized_tree(publication_root, final_dir)
 
     assert (final_dir / "DONE.json").read_text() == "{}\n"
-    assert fsync_calls == [final_dir.parent]
+    assert publication_root.parent in fsynced_directories
+    assert final_dir.parent in fsynced_directories
+    assert final_dir.parent.parent in fsynced_directories
+
+
+def test_finalization_publish_never_replaces_concurrent_destination(tmp_path):
+    publication_root = tmp_path / "stage" / "publication"
+    publication_root.mkdir(parents=True)
+    (publication_root / "source.txt").write_text("source\n")
+    final_dir = tmp_path / "output" / "chunks" / "chunk"
+    final_dir.parent.parent.mkdir(parents=True)
+    real_rename = cc.immutable._rename_noreplace_at
+
+    def concurrent_winner(source_descriptor, source_name,
+                          destination_descriptor, destination_name):
+        os.mkdir(destination_name, dir_fd=destination_descriptor)
+        winner_descriptor = os.open(
+            f"{destination_name}/winner.txt",
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+            0o600,
+            dir_fd=destination_descriptor,
+        )
+        os.write(winner_descriptor, b"winner\n")
+        os.close(winner_descriptor)
+        real_rename(
+            source_descriptor, source_name,
+            destination_descriptor, destination_name,
+        )
+
+    with pytest.MonkeyPatch.context() as patch:
+        patch.setattr(
+            cc.immutable, "_rename_noreplace_at", concurrent_winner,
+        )
+        with pytest.raises(cc.ChunkRefusal) as caught:
+            cc._publish_finalized_tree(publication_root, final_dir)
+
+    assert caught.value.code == "finalization_destination_exists"
+    assert (publication_root / "source.txt").read_text() == "source\n"
+    assert (final_dir / "winner.txt").read_text() == "winner\n"
+
+
+def test_finalization_publish_refuses_symlinked_destination_parent(tmp_path):
+    publication_root = tmp_path / "stage" / "publication"
+    publication_root.mkdir(parents=True)
+    real_chunks = tmp_path / "real-chunks"
+    real_chunks.mkdir()
+    output_root = tmp_path / "output"
+    output_root.mkdir()
+    (output_root / "chunks").symlink_to(real_chunks, target_is_directory=True)
+    final_dir = output_root / "chunks" / "chunk"
+
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        cc._publish_finalized_tree(publication_root, final_dir)
+
+    assert caught.value.code == "finalization_path_refused"
+    assert publication_root.is_dir()
+    assert not (real_chunks / "chunk").exists()
+
+
+def test_finalization_publish_refuses_unavailable_noreplace(tmp_path, monkeypatch):
+    publication_root = tmp_path / "stage" / "publication"
+    publication_root.mkdir(parents=True)
+    final_dir = tmp_path / "output" / "chunks" / "chunk"
+    final_dir.parent.parent.mkdir(parents=True)
+
+    def unavailable(*_args):
+        raise cc.immutable.ImmutableArtifactError(
+            "atomic RENAME_NOREPLACE is unavailable"
+        )
+
+    monkeypatch.setattr(cc.immutable, "_rename_noreplace_at", unavailable)
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        cc._publish_finalized_tree(publication_root, final_dir)
+
+    assert caught.value.code == "finalization_atomic_noreplace_unavailable"
+    assert publication_root.is_dir()
+    assert not final_dir.exists()
+
+
+def test_finalization_publish_rejects_marker_mutation_during_fsync(
+        tmp_path, monkeypatch):
+    publication_root = tmp_path / "stage" / "publication"
+    publication_root.mkdir(parents=True)
+    (publication_root / "DONE.json").write_text("{}\n")
+    final_dir = tmp_path / "output" / "chunks" / "chunk"
+    final_dir.parent.parent.mkdir(parents=True)
+    real_read_snapshot = cc.immutable._read_fd_snapshot
+    mutated = False
+
+    def mutate_after_read(descriptor, **kwargs):
+        nonlocal mutated
+        result = real_read_snapshot(descriptor, **kwargs)
+        if not mutated:
+            marker_path = Path(os.readlink(f"/proc/self/fd/{descriptor}"))
+            marker_path.chmod(0o600)
+            marker_path.write_bytes(b"corrupt\n")
+            mutated = True
+        return result
+
+    monkeypatch.setattr(
+        cc.immutable, "_read_fd_snapshot", mutate_after_read,
+    )
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        cc._publish_finalized_tree(publication_root, final_dir)
+
+    assert mutated is True
+    assert caught.value.code == "finalization_durability_unproven"
+    assert publication_root.is_dir()
+    assert not final_dir.exists()
+
+
+def test_publication_tree_fsyncs_regular_files_and_nested_directories(
+        tmp_path, monkeypatch):
+    publication = tmp_path / "publication"
+    nested = publication / "cells" / "cell"
+    nested.mkdir(parents=True)
+    payload = nested / "payload.bin"
+    payload.write_bytes(b"payload")
+    real_fsync = cc.os.fsync
+    observed = []
+
+    def inspect_fsync(descriptor):
+        metadata = cc.os.fstat(descriptor)
+        observed.append((stat.S_IFMT(metadata.st_mode), metadata.st_ino))
+        real_fsync(descriptor)
+
+    monkeypatch.setattr(cc.os, "fsync", inspect_fsync)
+    snapshot = cc._fsync_publication_tree(publication)
+
+    assert snapshot.files
+    assert (stat.S_IFREG, payload.stat().st_ino) in observed
+    assert (stat.S_IFDIR, nested.stat().st_ino) in observed
+    assert (stat.S_IFDIR, publication.stat().st_ino) in observed
+
+
+def test_new_destination_parent_is_fsynced_before_publication(tmp_path, monkeypatch):
+    publication_root = tmp_path / "stage" / "publication"
+    publication_root.mkdir(parents=True)
+    final_dir = tmp_path / "output" / "chunks" / "chunk"
+    final_dir.parent.parent.mkdir(parents=True)
+    real_fsync = cc.os.fsync
+    real_rename = cc.immutable._rename_noreplace_at
+    events = []
+
+    def inspect_fsync(descriptor):
+        events.append(("fsync", Path(os.readlink(f"/proc/self/fd/{descriptor}"))))
+        real_fsync(descriptor)
+
+    def inspect_rename(*args):
+        events.append(("rename", None))
+        real_rename(*args)
+
+    monkeypatch.setattr(cc.os, "fsync", inspect_fsync)
+    monkeypatch.setattr(cc.immutable, "_rename_noreplace_at", inspect_rename)
+    cc._publish_finalized_tree(publication_root, final_dir)
+
+    assert events[0] == ("fsync", final_dir.parent.parent)
+    rename_index = events.index(("rename", None))
+    assert rename_index > 0
+    assert ("fsync", publication_root) in events[:rename_index]
+
+
+def test_post_rename_fsync_failure_preserves_tree_for_retry(tmp_path, monkeypatch):
+    publication_root = tmp_path / "stage" / "publication"
+    publication_root.mkdir(parents=True)
+    (publication_root / "DONE.json").write_text("{}\n")
+    final_dir = tmp_path / "output" / "chunks" / "chunk"
+    final_dir.parent.parent.mkdir(parents=True)
+    real_fsync = cc.os.fsync
+    real_rename = cc.immutable._rename_noreplace_at
+    renamed = False
+    failed = False
+
+    def observe_rename(*args):
+        nonlocal renamed
+        real_rename(*args)
+        renamed = True
+
+    def fail_source_parent_after_rename(descriptor):
+        nonlocal failed
+        path = Path(os.readlink(f"/proc/self/fd/{descriptor}"))
+        if renamed and not failed and path == publication_root.parent:
+            failed = True
+            raise OSError(errno.EIO, "injected fsync failure")
+        real_fsync(descriptor)
+
+    monkeypatch.setattr(cc.immutable, "_rename_noreplace_at", observe_rename)
+    monkeypatch.setattr(cc.os, "fsync", fail_source_parent_after_rename)
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        cc._publish_finalized_tree(publication_root, final_dir)
+
+    assert caught.value.code == "finalization_durability_unproven"
+    assert failed is True
+    assert not publication_root.exists()
+    assert (final_dir / "DONE.json").read_text() == "{}\n"
+
+    monkeypatch.setattr(cc.os, "fsync", real_fsync)
+    cc._establish_finalization_durability(publication_root.parent, final_dir)
+
+
+def test_finalization_publish_rejects_post_check_destination_swap(
+        tmp_path, monkeypatch):
+    publication_root = tmp_path / "stage" / "publication"
+    publication_root.mkdir(parents=True)
+    (publication_root / "DONE.json").write_text("{}\n")
+    final_dir = tmp_path / "output" / "chunks" / "chunk"
+    final_dir.parent.parent.mkdir(parents=True)
+    displaced = final_dir.parent / "original"
+    real_fsync = cc.os.fsync
+    real_rename = cc.immutable._rename_noreplace_at
+    renamed = False
+    swapped = False
+
+    def observe_rename(*args):
+        nonlocal renamed
+        real_rename(*args)
+        renamed = True
+
+    def swap_before_destination_parent_fsync(descriptor):
+        nonlocal swapped
+        path = Path(os.readlink(f"/proc/self/fd/{descriptor}"))
+        if renamed and not swapped and path == final_dir.parent:
+            final_dir.rename(displaced)
+            shutil.copytree(displaced, final_dir)
+            swapped = True
+        real_fsync(descriptor)
+
+    monkeypatch.setattr(cc.immutable, "_rename_noreplace_at", observe_rename)
+    monkeypatch.setattr(cc.os, "fsync", swap_before_destination_parent_fsync)
+
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        cc._publish_finalized_tree(publication_root, final_dir)
+
+    assert swapped is True
+    assert caught.value.code == "finalization_destination_identity_changed"
+    assert (displaced / "DONE.json").read_text() == "{}\n"
+    assert (final_dir / "DONE.json").read_text() == "{}\n"
+
+
+def test_finalized_resume_pins_tree_across_parent_durability(
+        tmp_path, monkeypatch):
+    publication_root = tmp_path / "stage" / "publication"
+    publication_root.mkdir(parents=True)
+    (publication_root / "DONE.json").write_text("{}\n")
+    final_dir = tmp_path / "output" / "chunks" / "chunk"
+    final_dir.parent.parent.mkdir(parents=True)
+    cc._publish_finalized_tree(publication_root, final_dir)
+    displaced = final_dir.parent / "original"
+    real_fsync = cc.os.fsync
+    swapped = False
+
+    def swap_before_destination_parent_fsync(descriptor):
+        nonlocal swapped
+        path = Path(os.readlink(f"/proc/self/fd/{descriptor}"))
+        if not swapped and path == final_dir.parent:
+            final_dir.rename(displaced)
+            shutil.copytree(displaced, final_dir)
+            swapped = True
+        real_fsync(descriptor)
+
+    monkeypatch.setattr(cc.os, "fsync", swap_before_destination_parent_fsync)
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        cc._establish_finalization_durability(publication_root.parent, final_dir)
+
+    assert swapped is True
+    assert caught.value.code == "finalization_durability_unproven"
+    assert (displaced / "DONE.json").read_text() == "{}\n"
+    assert (final_dir / "DONE.json").read_text() == "{}\n"
+
+
+def test_current_resume_rejects_replaced_source_parent_identity(
+        tmp_path, monkeypatch):
+    publication_root = tmp_path / "stage" / "publication"
+    publication_root.mkdir(parents=True)
+    (publication_root / "DONE.json").write_text("{}\n")
+    final_dir = tmp_path / "output" / "chunks" / "chunk"
+    final_dir.parent.parent.mkdir(parents=True)
+    real_fsync = cc.os.fsync
+    real_rename = cc.immutable._rename_noreplace_at
+    renamed = False
+    failed = False
+
+    def observe_rename(*args):
+        nonlocal renamed
+        real_rename(*args)
+        renamed = True
+
+    def fail_source_parent_after_rename(descriptor):
+        nonlocal failed
+        path = Path(os.readlink(f"/proc/self/fd/{descriptor}"))
+        if renamed and not failed and path == publication_root.parent:
+            failed = True
+            raise OSError(errno.EIO, "injected fsync failure")
+        real_fsync(descriptor)
+
+    monkeypatch.setattr(cc.immutable, "_rename_noreplace_at", observe_rename)
+    monkeypatch.setattr(cc.os, "fsync", fail_source_parent_after_rename)
+    with pytest.raises(cc.ChunkRefusal):
+        cc._publish_finalized_tree(publication_root, final_dir)
+
+    retained_parent = publication_root.parent.with_name("original-publications")
+    publication_root.parent.rename(retained_parent)
+    publication_root.parent.mkdir()
+    for marker in retained_parent.glob(
+            f"{cc._FINALIZATION_PARENT_IDENTITY_PREFIX}*"):
+        shutil.copy2(marker, publication_root.parent / marker.name)
+
+    monkeypatch.setattr(cc.os, "fsync", real_fsync)
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        cc._establish_finalization_durability(publication_root.parent, final_dir)
+
+    assert caught.value.code == "finalization_durability_unproven"
+    assert "finalization parent identity" in caught.value.detail
+    assert (final_dir / "DONE.json").read_text() == "{}\n"
+    assert any(retained_parent.iterdir())
+
+
+def test_current_resume_requires_retained_publication_parent(tmp_path):
+    final_dir = tmp_path / "output" / "chunks" / "chunk"
+    final_dir.mkdir(parents=True)
+    missing = tmp_path / "stage" / "publications"
+
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        cc._establish_finalization_durability(missing, final_dir)
+
+    assert caught.value.code == "finalization_durability_unproven"
+    assert "current publication parent is absent" in caught.value.detail
+
+
+def test_finalized_resume_retries_failed_durability_barrier(tmp_path, monkeypatch):
+    import campaign_done_manifest as done
+
+    case = _runner_recovery_case(tmp_path, monkeypatch)
+    final_dir = case.output_root / "chunks" / "chunk"
+    final_dir.mkdir(parents=True)
+    (final_dir / "DONE.json").write_text("{}\n")
+    publication_parent = (
+        case.output_root / ".staging" / ("d" * 40) / "chunk"
+        / cc.sha256_file(case.matrix_path) / "publications"
+    )
+    publication_parent.mkdir(parents=True)
+    monkeypatch.setattr(done, "verify_seal", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(
+        cc, "_historical_chunk_matches", lambda *_args, **_kwargs: [],
+    )
+    calls = []
+
+    def durability(publication_parent, destination, **kwargs):
+        calls.append((publication_parent, destination, kwargs))
+        if len(calls) == 1:
+            raise cc.ChunkRefusal(
+                "finalization_durability_unproven", "injected fsync failure",
+            )
+
+    monkeypatch.setattr(cc, "_establish_finalization_durability", durability)
+    with pytest.raises(cc.ChunkRefusal, match="injected fsync failure"):
+        cc.run_chunk(case.args(case.preflights["A"]))
+
+    assert cc.run_chunk(case.args(case.preflights["A"])) == final_dir
+    assert len(calls) == 2
+    assert [call[:2] for call in calls] == [
+        (publication_parent, final_dir),
+        (publication_parent, final_dir),
+    ]
+    assert all(call[2]["allow_missing_publication_parent"] is False for call in calls)
+    assert all(
+        isinstance(
+            call[2]["final_reader"],
+            cc.immutable.PinnedDirectoryReader,
+        )
+        for call in calls
+    )
+
+
+def test_finalized_resume_reverifies_after_durability_barrier(tmp_path, monkeypatch):
+    import campaign_done_manifest as done
+
+    case = _runner_recovery_case(tmp_path, monkeypatch)
+    final_dir = case.output_root / "chunks" / "chunk"
+    final_dir.mkdir(parents=True)
+    (final_dir / "DONE.json").write_text("{}\n")
+    publication_parent = (
+        case.output_root / ".staging" / ("d" * 40) / "chunk"
+        / cc.sha256_file(case.matrix_path) / "publications"
+    )
+    publication_parent.mkdir(parents=True)
+    verify_calls = 0
+
+    def verify(*_args, **_kwargs):
+        nonlocal verify_calls
+        verify_calls += 1
+        return [] if verify_calls == 1 else ["injected post-fsync drift"]
+
+    monkeypatch.setattr(done, "verify_seal", verify)
+    monkeypatch.setattr(
+        cc, "_historical_chunk_matches", lambda *_args, **_kwargs: [],
+    )
+    monkeypatch.setattr(
+        cc, "_establish_finalization_durability",
+        lambda *_args, **_kwargs: None,
+    )
+
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        cc.run_chunk(case.args(case.preflights["A"]))
+
+    assert caught.value.code == "finalized_chunk_changed_during_durability"
+    assert "injected post-fsync drift" in caught.value.detail
+    assert verify_calls == 2
 
 
 def test_done_finalizer_derives_uniform_journal_preflight_not_cli_preflight(
@@ -5828,6 +6236,7 @@ def test_done_finalizer_derives_uniform_journal_preflight_not_cli_preflight(
     monkeypatch.setattr(done, "_assert_schema_valid", lambda _manifest: None)
     monkeypatch.setattr(done, "verify_seal", lambda *_args, **_kwargs: [])
     final_dir = tmp_path / "output" / "chunks" / "chunk"
+    final_dir.parent.parent.mkdir(parents=True)
     result = cc._finalize_from_journals(
         args=SimpleNamespace(chunk_id="chunk"), cells=[cell], active=active,
         stage_root=stage, final_dir=final_dir, matrix=matrix,

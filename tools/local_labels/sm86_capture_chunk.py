@@ -174,6 +174,7 @@ _STORAGE_FAILURE_ERRNOS = frozenset({
     ),
 })
 LABEL_DRIVER_STORAGE_MARKER = "LABEL_DRIVER_STORAGE_FAILURE:"
+_FINALIZATION_PARENT_IDENTITY_PREFIX = ".m6-finalization-parent-"
 
 
 def _storage_origin(exc: BaseException | None) -> OSError | None:
@@ -10676,28 +10677,523 @@ def _fsync_directory(path: Path) -> None:
         os.close(fd)
 
 
-def _publish_finalized_tree(publication_root: Path, final_dir: Path) -> None:
-    final_dir.parent.mkdir(parents=True, exist_ok=True)
-    source_device = os.stat(publication_root, follow_symlinks=False).st_dev
-    destination_device = os.stat(
-        final_dir.parent, follow_symlinks=False,
-    ).st_dev
-    if source_device != destination_device:
+def _sync_pinned_tree(
+    reader: immutable.PinnedDirectoryReader,
+) -> immutable.PinnedTreeSnapshot:
+    reader.verify_path()
+    snapshot = reader.snapshot_tree()
+    try:
+        for relative_path, expected in snapshot.files:
+            pinned = immutable._open_relative_regular_at(
+                reader.descriptor, relative_path,
+            )
+            try:
+                if immutable._snapshot_fields(os.fstat(pinned.descriptor)) != expected:
+                    raise immutable.ImmutableArtifactError(
+                        f"publication file changed before fsync: {relative_path}"
+                    )
+                os.fsync(pinned.descriptor)
+                pinned.verify_path()
+                if immutable._snapshot_fields(os.fstat(pinned.descriptor)) != expected:
+                    raise immutable.ImmutableArtifactError(
+                        f"publication file changed during fsync: {relative_path}"
+                    )
+            finally:
+                pinned.close()
+        directories = [
+            (relative_path, expected)
+            for relative_path, expected in snapshot.directories
+            if relative_path != "."
+        ]
+        directories.sort(
+            key=lambda row: len(row[0].split("/")), reverse=True,
+        )
+        for relative_path, expected in directories:
+            pinned = immutable._open_pinned_relative_directory(
+                reader.descriptor, tuple(relative_path.split("/")),
+            )
+            try:
+                if immutable._snapshot_fields(os.fstat(pinned.descriptor)) != expected:
+                    raise immutable.ImmutableArtifactError(
+                        f"publication directory changed before fsync: {relative_path}"
+                    )
+                os.fsync(pinned.descriptor)
+                pinned.verify_path()
+                if immutable._snapshot_fields(os.fstat(pinned.descriptor)) != expected:
+                    raise immutable.ImmutableArtifactError(
+                        f"publication directory changed during fsync: {relative_path}"
+                    )
+            finally:
+                pinned.close()
+        os.fsync(reader.descriptor)
+        reader.verify_path()
+        if reader.snapshot_tree() != snapshot:
+            raise immutable.ImmutableArtifactError(
+                "publication tree changed during durability closure"
+            )
+    except OSError as exc:
+        raise immutable.ImmutableArtifactError(
+            f"publication tree fsync failed: {exc}"
+        ) from exc
+    return snapshot
+
+
+def _fsync_publication_tree(path: Path) -> immutable.PinnedTreeSnapshot:
+    try:
+        with immutable.PinnedDirectoryReader(path) as reader:
+            return _sync_pinned_tree(reader)
+    except (OSError, immutable.ImmutableArtifactError) as exc:
         raise ChunkRefusal(
-            "finalization_cross_device_refused",
-            f"source={publication_root} device={source_device}; "
-            f"destination_parent={final_dir.parent} device={destination_device}",
+            "finalization_payload_durability_unproven",
+            f"unable to durably sync publication tree {path}: {exc}",
+        ) from exc
+
+
+def _finalization_parent_identity(
+    source_descriptor: int,
+    destination_descriptor: int,
+    grandparent_descriptor: int,
+    tree_descriptor: int,
+    *,
+    destination_parent_name: str,
+    destination_name: str,
+) -> tuple[str, bytes]:
+    source = os.fstat(source_descriptor)
+    destination = os.fstat(destination_descriptor)
+    grandparent = os.fstat(grandparent_descriptor)
+    tree = os.fstat(tree_descriptor)
+    body = {
+        "artifact_kind": "M6_FINALIZATION_PARENT_IDENTITY",
+        "schema_version": 1,
+        "source_parent_device": source.st_dev,
+        "source_parent_inode": source.st_ino,
+        "publication_tree_device": tree.st_dev,
+        "publication_tree_inode": tree.st_ino,
+        "destination_grandparent_device": grandparent.st_dev,
+        "destination_grandparent_inode": grandparent.st_ino,
+        "destination_parent_name": destination_parent_name,
+        "destination_parent_device": destination.st_dev,
+        "destination_parent_inode": destination.st_ino,
+        "destination_name": destination_name,
+    }
+    seal = hashlib.sha256(immutable.canonical_json_bytes(body)).hexdigest()
+    body["identity_seal_sha256"] = seal
+    name = f"{_FINALIZATION_PARENT_IDENTITY_PREFIX}{seal}.v1.json"
+    return name, immutable.canonical_json_bytes(body) + b"\n"
+
+
+def _bind_finalization_parent_identity(
+    source_reader: immutable.PinnedDirectoryReader,
+    destination_reader: immutable.PinnedDirectoryReader,
+    grandparent_reader: immutable.PinnedDirectoryReader,
+    tree_descriptor: int,
+    *,
+    destination_parent_name: str,
+    destination_name: str,
+    create: bool,
+) -> None:
+    marker_name, expected = _finalization_parent_identity(
+        source_reader.descriptor,
+        destination_reader.descriptor,
+        grandparent_reader.descriptor,
+        tree_descriptor,
+        destination_parent_name=destination_parent_name,
+        destination_name=destination_name,
+    )
+    if create:
+        flags = (
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL
+            | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+        )
+        try:
+            descriptor = os.open(
+                marker_name, flags, 0o600, dir_fd=source_reader.descriptor,
+            )
+        except FileExistsError:
+            descriptor = None
+        except OSError as exc:
+            raise immutable.ImmutableArtifactError(
+                f"cannot create finalization parent identity: {exc}"
+            ) from exc
+        if descriptor is not None:
+            try:
+                view = memoryview(expected)
+                offset = 0
+                while offset < len(view):
+                    try:
+                        written = os.write(descriptor, view[offset:])
+                    except InterruptedError:
+                        continue
+                    if written <= 0:
+                        raise immutable.ImmutableArtifactError(
+                            "short finalization parent identity write"
+                        )
+                    offset += written
+                metadata = os.fstat(descriptor)
+                if not stat.S_ISREG(metadata.st_mode) or metadata.st_nlink != 1:
+                    raise immutable.ImmutableArtifactError(
+                        "finalization parent identity is not a unique regular file"
+                    )
+                os.fchmod(descriptor, 0o400)
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
+
+    try:
+        pinned = immutable._open_relative_regular_at(
+            source_reader.descriptor, marker_name,
+        )
+        try:
+            observed, before = immutable._read_fd_snapshot(pinned.descriptor)
+            if observed != expected or stat.S_IMODE(before[2]) & 0o222:
+                raise immutable.ImmutableArtifactError(
+                    "finalization parent identity does not match pinned transaction"
+                )
+            os.fsync(pinned.descriptor)
+            os.lseek(pinned.descriptor, 0, os.SEEK_SET)
+            observed_after, after = immutable._read_fd_snapshot(
+                pinned.descriptor
+            )
+            if observed_after != expected or after != before:
+                raise immutable.ImmutableArtifactError(
+                    "finalization parent identity changed during fsync"
+                )
+            pinned.verify_path()
+        finally:
+            pinned.close()
+        source_reader.verify_path()
+        destination_reader.verify_path()
+        grandparent_reader.verify_path()
+        os.fsync(source_reader.descriptor)
+        source_reader.verify_path()
+        destination_reader.verify_path()
+        grandparent_reader.verify_path()
+    except (OSError, immutable.ImmutableArtifactError) as exc:
+        raise immutable.ImmutableArtifactError(
+            f"cannot verify finalization parent identity: {exc}"
+        ) from exc
+
+
+def _establish_finalization_durability(
+    publication_parent: Path,
+    final_dir: Path,
+    *,
+    allow_missing_publication_parent: bool = False,
+    final_reader: immutable.PinnedDirectoryReader | None = None,
+) -> None:
+    publication_parent_exists = os.path.lexists(publication_parent)
+    if not publication_parent_exists and not allow_missing_publication_parent:
+        raise ChunkRefusal(
+            "finalization_durability_unproven",
+            f"current publication parent is absent: {publication_parent}",
         )
     try:
-        os.replace(publication_root, final_dir)
-    except OSError as exc:
-        if exc.errno == errno.EXDEV:
-            raise ChunkRefusal(
-                "finalization_cross_device_refused",
-                f"source={publication_root}; destination={final_dir}",
-            ) from exc
+        with contextlib.ExitStack() as stack:
+            source_reader = (
+                stack.enter_context(
+                    immutable.PinnedDirectoryReader(publication_parent)
+                )
+                if publication_parent_exists else None
+            )
+            destination_reader = stack.enter_context(
+                immutable.PinnedDirectoryReader(final_dir.parent)
+            )
+            grandparent_reader = stack.enter_context(
+                immutable.PinnedDirectoryReader(final_dir.parent.parent)
+            )
+            owned_final_reader = None
+            if final_reader is None:
+                owned_final_reader = stack.enter_context(
+                    immutable.PinnedDirectoryReader(final_dir)
+                )
+                active_final_reader = owned_final_reader
+            else:
+                active_final_reader = final_reader
+            readers = [
+                reader for reader in (
+                    source_reader, destination_reader, grandparent_reader,
+                    active_final_reader,
+                ) if reader is not None
+            ]
+            for reader in readers:
+                reader.verify_path()
+            if source_reader is not None and not allow_missing_publication_parent:
+                _bind_finalization_parent_identity(
+                    source_reader,
+                    destination_reader,
+                    grandparent_reader,
+                    active_final_reader.descriptor,
+                    destination_parent_name=final_dir.parent.name,
+                    destination_name=final_dir.name,
+                    create=False,
+                )
+            final_snapshot = _sync_pinned_tree(active_final_reader)
+            for reader in (
+                source_reader, destination_reader, grandparent_reader,
+            ):
+                if reader is not None:
+                    os.fsync(reader.descriptor)
+            for reader in readers:
+                reader.verify_path()
+            if active_final_reader.snapshot_tree() != final_snapshot:
+                raise immutable.ImmutableArtifactError(
+                    "finalized tree changed during durability retry"
+                )
+            named_final = immutable._open_pinned_relative_directory(
+                destination_reader.descriptor, (final_dir.name,),
+            )
+            try:
+                expected_identity = os.fstat(active_final_reader.descriptor)
+                observed_identity = os.fstat(named_final.descriptor)
+                if (
+                    observed_identity.st_dev,
+                    observed_identity.st_ino,
+                ) != (expected_identity.st_dev, expected_identity.st_ino):
+                    raise immutable.ImmutableArtifactError(
+                        "finalized destination entry changed during durability retry"
+                    )
+                if _descriptor_tree_snapshot(named_final.descriptor) != final_snapshot:
+                    raise immutable.ImmutableArtifactError(
+                        "finalized destination tree changed during durability retry"
+                    )
+                named_final.verify_path()
+            finally:
+                named_final.close()
+    except (OSError, immutable.ImmutableArtifactError) as exc:
+        raise ChunkRefusal(
+            "finalization_durability_unproven",
+            f"unable to fsync finalization directories for {final_dir}: {exc}",
+        ) from exc
+
+
+def _directory_device(descriptor: int) -> int:
+    return os.fstat(descriptor).st_dev
+
+
+def _descriptor_tree_snapshot(
+    descriptor: int,
+) -> immutable.PinnedTreeSnapshot:
+    files, directories = immutable._snapshot_tree_descriptor(descriptor)
+    return immutable.PinnedTreeSnapshot(
+        files=tuple(sorted(files.items())),
+        directories=tuple(sorted(directories.items())),
+    )
+
+
+def _tree_matches_after_rename(
+    expected: immutable.PinnedTreeSnapshot,
+    observed: immutable.PinnedTreeSnapshot,
+) -> bool:
+    if expected.files != observed.files:
+        return False
+    expected_directories = dict(expected.directories)
+    observed_directories = dict(observed.directories)
+    expected_root = expected_directories.pop(".", None)
+    observed_root = observed_directories.pop(".", None)
+    return (
+        expected_directories == observed_directories
+        and expected_root is not None
+        and observed_root is not None
+        and expected_root[:-1] == observed_root[:-1]
+    )
+
+
+def _publish_finalized_tree(publication_root: Path, final_dir: Path) -> None:
+    """Publish under the campaign-wide cooperative-writer lock.
+
+    The retained descriptors close every mutation window through the terminal
+    destination check.  Production callers hold ``acquire_campaign_lock``;
+    arbitrary same-UID writers that bypass that advisory boundary can mutate any
+    returned pathname after its last syscall and must be caught by the consumer's
+    next immutable verification.
+    """
+    destination_parent = final_dir.parent
+    destination_grandparent = destination_parent.parent
+
+    try:
+        with contextlib.ExitStack() as stack:
+            grandparent_reader = stack.enter_context(
+                immutable.PinnedDirectoryReader(destination_grandparent)
+            )
+            grandparent_reader.verify_path()
+            try:
+                os.mkdir(
+                    destination_parent.name,
+                    mode=0o700,
+                    dir_fd=grandparent_reader.descriptor,
+                )
+                parent_created = True
+            except FileExistsError:
+                parent_created = False
+            grandparent_reader.verify_path()
+            if parent_created:
+                try:
+                    os.fsync(grandparent_reader.descriptor)
+                except OSError as exc:
+                    raise ChunkRefusal(
+                        "finalization_durability_unproven",
+                        f"unable to fsync created parent {destination_parent}: {exc}",
+                    ) from exc
+                grandparent_reader.verify_path()
+
+            source_reader = stack.enter_context(
+                immutable.PinnedDirectoryReader(publication_root.parent)
+            )
+            destination_reader = stack.enter_context(
+                immutable.PinnedDirectoryReader(destination_parent)
+            )
+            tree_reader = stack.enter_context(
+                immutable.PinnedDirectoryReader(publication_root)
+            )
+            source_reader.verify_path()
+            destination_reader.verify_path()
+            tree_reader.verify_path()
+            source_stat = os.stat(
+                publication_root.name,
+                dir_fd=source_reader.descriptor,
+                follow_symlinks=False,
+            )
+            tree_stat = os.fstat(tree_reader.descriptor)
+            if (
+                not stat.S_ISDIR(source_stat.st_mode)
+                or (source_stat.st_dev, source_stat.st_ino)
+                != (tree_stat.st_dev, tree_stat.st_ino)
+            ):
+                raise ChunkRefusal(
+                    "finalization_source_not_directory",
+                    str(publication_root),
+                )
+            source_device = _directory_device(source_reader.descriptor)
+            destination_device = _directory_device(
+                destination_reader.descriptor
+            )
+            if source_device != destination_device:
+                raise ChunkRefusal(
+                    "finalization_cross_device_refused",
+                    f"source={publication_root} device={source_device}; "
+                    f"destination_parent={destination_parent} "
+                    f"device={destination_device}",
+                )
+            try:
+                _bind_finalization_parent_identity(
+                    source_reader,
+                    destination_reader,
+                    grandparent_reader,
+                    tree_reader.descriptor,
+                    destination_parent_name=destination_parent.name,
+                    destination_name=final_dir.name,
+                    create=True,
+                )
+            except (OSError, immutable.ImmutableArtifactError) as exc:
+                raise ChunkRefusal(
+                    "finalization_durability_unproven",
+                    f"unable to retain finalization transaction identity: {exc}",
+                ) from exc
+            try:
+                tree_snapshot = _sync_pinned_tree(tree_reader)
+            except (OSError, immutable.ImmutableArtifactError) as exc:
+                raise ChunkRefusal(
+                    "finalization_payload_durability_unproven",
+                    f"unable to durably sync publication tree "
+                    f"{publication_root}: {exc}",
+                ) from exc
+            try:
+                immutable._rename_noreplace_at(
+                    source_reader.descriptor,
+                    publication_root.name,
+                    destination_reader.descriptor,
+                    final_dir.name,
+                )
+            except FileExistsError as exc:
+                raise ChunkRefusal(
+                    "finalization_destination_exists",
+                    str(final_dir),
+                ) from exc
+            except immutable.ImmutableArtifactError as exc:
+                if str(exc).startswith("CROSS_DEVICE_RENAME:"):
+                    raise ChunkRefusal(
+                        "finalization_cross_device_refused",
+                        f"source={publication_root}; destination={final_dir}",
+                    ) from exc
+                if "RENAME_NOREPLACE is unavailable" in str(exc):
+                    code = "finalization_atomic_noreplace_unavailable"
+                else:
+                    code = "finalization_atomic_noreplace_failed"
+                raise ChunkRefusal(
+                    code,
+                    f"source={publication_root}; destination={final_dir}: {exc}",
+                ) from exc
+            source_reader.verify_path()
+            destination_reader.verify_path()
+            grandparent_reader.verify_path()
+            published_stat = os.stat(
+                final_dir.name,
+                dir_fd=destination_reader.descriptor,
+                follow_symlinks=False,
+            )
+            if (
+                not stat.S_ISDIR(published_stat.st_mode)
+                or (published_stat.st_dev, published_stat.st_ino)
+                != (source_stat.st_dev, source_stat.st_ino)
+            ):
+                raise ChunkRefusal(
+                    "finalization_destination_identity_changed",
+                    str(final_dir),
+                )
+            try:
+                os.fsync(source_reader.descriptor)
+                os.fsync(destination_reader.descriptor)
+                os.fsync(grandparent_reader.descriptor)
+            except OSError as exc:
+                raise ChunkRefusal(
+                    "finalization_durability_unproven",
+                    f"unable to fsync renamed publication {final_dir}: {exc}",
+                ) from exc
+            source_reader.verify_path()
+            destination_reader.verify_path()
+            grandparent_reader.verify_path()
+            retained_tree_snapshot = _descriptor_tree_snapshot(
+                tree_reader.descriptor
+            )
+            if not _tree_matches_after_rename(
+                tree_snapshot, retained_tree_snapshot,
+            ):
+                raise ChunkRefusal(
+                    "finalization_destination_identity_changed",
+                    f"publication tree changed during rename: {final_dir}",
+                )
+            named_final = immutable._open_pinned_relative_directory(
+                destination_reader.descriptor, (final_dir.name,),
+            )
+            try:
+                opened_identity = os.fstat(named_final.descriptor)
+                retained_identity = os.fstat(tree_reader.descriptor)
+                if (
+                    opened_identity.st_dev,
+                    opened_identity.st_ino,
+                ) != (retained_identity.st_dev, retained_identity.st_ino):
+                    raise ChunkRefusal(
+                        "finalization_destination_identity_changed",
+                        str(final_dir),
+                    )
+                if (
+                    _descriptor_tree_snapshot(named_final.descriptor)
+                    != retained_tree_snapshot
+                ):
+                    raise ChunkRefusal(
+                        "finalization_destination_identity_changed",
+                        f"published path tree differs from retained tree: {final_dir}",
+                    )
+                named_final.verify_path()
+            finally:
+                named_final.close()
+    except ChunkRefusal:
         raise
-    _fsync_directory(final_dir.parent)
+    except (OSError, immutable.ImmutableArtifactError) as exc:
+        raise ChunkRefusal(
+            "finalization_path_refused",
+            f"source={publication_root}; destination={final_dir}: {exc}",
+        ) from exc
 
 
 def _write_json_exclusive_fsync(path: Path, payload: dict) -> None:
@@ -11847,6 +12343,127 @@ def _finalize_from_journals(
     return final_dir
 
 
+def _resume_finalized_chunk(
+    *,
+    final_dir: Path,
+    publication_parent: Path,
+    cells: list[dict],
+    chunk_id: str,
+) -> Path:
+    """Reverify one final tree while the campaign writer lock is retained."""
+    import campaign_done_manifest as done  # noqa: E402
+
+    done_relative = "DONE.json"
+    try:
+        with immutable.PinnedDirectoryReader(final_dir) as final_reader:
+            initial_tree = final_reader.snapshot_tree()
+            try:
+                initial_done = final_reader.read_snapshot(done_relative)
+            except immutable.ImmutableArtifactError as exc:
+                raise ChunkRefusal(
+                    "finalized_chunk_missing_done",
+                    f"{final_dir} has no pinned regular DONE.json: {exc}",
+                ) from exc
+            resume_manifest = immutable.strict_json_loads(
+                initial_done.payload, label=str(final_dir / done_relative),
+            )
+            resume_problems = done.verify_seal(
+                resume_manifest, repo_root=REPO_ROOT,
+                require_current_head=True, require_clean_tree=True,
+            )
+            resume_problems.extend(_historical_chunk_matches(
+                resume_manifest, cells=cells, chunk_id=chunk_id,
+            ))
+            if not resume_problems:
+                historical_bootstrap = done._is_historical_bootstrap(
+                    resume_manifest
+                )
+                _establish_finalization_durability(
+                    publication_parent,
+                    final_dir,
+                    allow_missing_publication_parent=historical_bootstrap,
+                    final_reader=final_reader,
+                )
+                post_problems = done.verify_seal(
+                    resume_manifest, repo_root=REPO_ROOT,
+                    require_current_head=True, require_clean_tree=True,
+                )
+                post_problems.extend(_historical_chunk_matches(
+                    resume_manifest, cells=cells, chunk_id=chunk_id,
+                ))
+                post_done = final_reader.read_snapshot(done_relative)
+                if post_done != initial_done:
+                    post_problems.append(
+                        "DONE identity or bytes changed during durability verification"
+                    )
+                if final_reader.snapshot_tree() != initial_tree:
+                    post_problems.append(
+                        "finalized tree changed during durability verification"
+                    )
+                final_reader.verify_path()
+                if post_problems:
+                    raise ChunkRefusal(
+                        "finalized_chunk_changed_during_durability",
+                        "; ".join(post_problems),
+                    )
+                return final_dir
+
+            historical_problems = done.verify_seal(
+                resume_manifest, repo_root=REPO_ROOT,
+                require_current_head=False, require_clean_tree=False,
+            )
+            historical_problems.extend(_historical_chunk_matches(
+                resume_manifest, cells=cells, chunk_id=chunk_id,
+            ))
+            if not historical_problems:
+                if done._is_historical_bootstrap(resume_manifest):
+                    _establish_finalization_durability(
+                        publication_parent,
+                        final_dir,
+                        allow_missing_publication_parent=True,
+                        final_reader=final_reader,
+                    )
+                    post_problems = done.verify_seal(
+                        resume_manifest, repo_root=REPO_ROOT,
+                        require_current_head=False, require_clean_tree=False,
+                    )
+                    post_problems.extend(_historical_chunk_matches(
+                        resume_manifest, cells=cells, chunk_id=chunk_id,
+                    ))
+                    post_done = final_reader.read_snapshot(done_relative)
+                    if post_done != initial_done:
+                        post_problems.append(
+                            "DONE identity or bytes changed during durability verification"
+                        )
+                    if final_reader.snapshot_tree() != initial_tree:
+                        post_problems.append(
+                            "finalized tree changed during durability verification"
+                        )
+                    final_reader.verify_path()
+                    if post_problems:
+                        raise ChunkRefusal(
+                            "finalized_chunk_changed_during_durability",
+                            "; ".join(post_problems),
+                        )
+                    return final_dir
+                historical_problems.append(
+                    "historical non-bootstrap chunk must be revision-archived and "
+                    "recaptured at the current matrix HEAD"
+                )
+            raise ChunkRefusal(
+                "finalized_chunk_resume_invalid",
+                "current=" + "; ".join(resume_problems)
+                + " | historical=" + "; ".join(historical_problems),
+            )
+    except ChunkRefusal:
+        raise
+    except (OSError, ValueError, immutable.ImmutableArtifactError) as exc:
+        raise ChunkRefusal(
+            "finalized_chunk_changed_during_durability",
+            f"unable to consume pinned finalized chunk {final_dir}: {exc}",
+        ) from exc
+
+
 def run_chunk(args: argparse.Namespace) -> Path:
     matrix_path = Path(args.matrix).resolve()
     authority_path = Path(args.authority).resolve()
@@ -11877,49 +12494,20 @@ def run_chunk(args: argparse.Namespace) -> Path:
     capture_defects_by_cell = _capture_defect_state(
         output_root=output_root, cells=cells, source_commit=head_pre,
     )
-    final_dir = output_root / "chunks" / args.chunk_id
-    if final_dir.exists():
-        import campaign_done_manifest as done  # noqa: E402
-        done_path = final_dir / "DONE.json"
-        if not done_path.is_file():
-            raise ChunkRefusal(
-                "finalized_chunk_missing_done", f"{final_dir} has no DONE.json"
-            )
-        resume_manifest = _json(done_path)
-        resume_problems = done.verify_seal(
-            resume_manifest, repo_root=REPO_ROOT, require_current_head=True,
-            require_clean_tree=True,
-        )
-        resume_problems.extend(_historical_chunk_matches(
-            resume_manifest, cells=cells, chunk_id=args.chunk_id,
-        ))
-        if not resume_problems:
-            return final_dir
-        historical_problems = done.verify_seal(
-            resume_manifest, repo_root=REPO_ROOT, require_current_head=False,
-            require_clean_tree=False,
-        )
-        historical_problems.extend(_historical_chunk_matches(
-            resume_manifest, cells=cells, chunk_id=args.chunk_id,
-        ))
-        if not historical_problems:
-            if done._is_historical_bootstrap(resume_manifest):
-                return final_dir
-            historical_problems.append(
-                "historical non-bootstrap chunk must be revision-archived and "
-                "recaptured at the current matrix HEAD"
-            )
-        raise ChunkRefusal(
-            "finalized_chunk_resume_invalid",
-            "current=" + "; ".join(resume_problems)
-            + " | historical=" + "; ".join(historical_problems),
-        )
-
-    pins = _json(pins_path)
     matrix_sha = sha256_file(matrix_path)
     stage_root = (
         output_root / ".staging" / head_pre / args.chunk_id / matrix_sha
     )
+    final_dir = output_root / "chunks" / args.chunk_id
+    if final_dir.exists():
+        return _resume_finalized_chunk(
+            final_dir=final_dir,
+            publication_parent=stage_root / "publications",
+            cells=cells,
+            chunk_id=args.chunk_id,
+        )
+
+    pins = _json(pins_path)
     stage_root.mkdir(parents=True, exist_ok=True)
     journals_root = stage_root / "journals"
     superseded_root = stage_root / "superseded"

@@ -1242,6 +1242,17 @@ def _rename_noreplace_at(
         raise ImmutableArtifactError(
             "CROSS_DEVICE_RENAME: atomic no-replace rename crossed filesystems"
         )
+    unavailable_errors = {
+        errno.ENOSYS,
+        errno.EINVAL,
+        getattr(errno, "EOPNOTSUPP", errno.ENOSYS),
+        getattr(errno, "ENOTSUP", errno.ENOSYS),
+    }
+    if error in unavailable_errors:
+        raise ImmutableArtifactError(
+            "atomic RENAME_NOREPLACE is unavailable: "
+            f"[{error}] {os.strerror(error)}"
+        )
     raise ImmutableArtifactError(
         f"atomic no-replace rename failed: [{error}] {os.strerror(error)}"
     )

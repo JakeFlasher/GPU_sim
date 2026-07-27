@@ -1422,3 +1422,36 @@ def test_ncu_details_partial_suffix_is_reserved_for_tree_material(
         match=immutable.NAMESPACE_RESERVED_COMPONENT,
     ):
         immutable.publish_directory(tmp_path, "artifact", material)
+
+
+@pytest.mark.parametrize(
+    "unsupported_errno",
+    [
+        errno.ENOSYS,
+        errno.EINVAL,
+        getattr(errno, "EOPNOTSUPP", errno.ENOSYS),
+    ],
+)
+def test_rename_noreplace_maps_unsupported_kernel_to_unavailable(
+    monkeypatch, unsupported_errno,
+) -> None:
+    class RenameAt2:
+        argtypes = None
+        restype = None
+
+        def __call__(self, *_args):
+            return -1
+
+    class Libc:
+        renameat2 = RenameAt2()
+
+    monkeypatch.setattr(immutable.ctypes, "CDLL", lambda *_args, **_kwargs: Libc())
+    monkeypatch.setattr(
+        immutable.ctypes, "get_errno", lambda: unsupported_errno,
+    )
+
+    with pytest.raises(
+        immutable.ImmutableArtifactError,
+        match="RENAME_NOREPLACE is unavailable",
+    ):
+        immutable._rename_noreplace_at(1, "source", 2, "destination")
