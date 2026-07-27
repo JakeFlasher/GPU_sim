@@ -181,6 +181,11 @@ def main(argv: list[str] | None = None) -> int:
     # resurrection guard).
     assert_targets_probe_available(metrics)
 
+    if args.dry_run:
+        sys.stderr.write(
+            "[capture_t2_stream] --dry-run: no files written\n")
+        return 0
+
     try:
         admitted, exclusions, stats = capture_and_land(
             label_admitted_path=label_path,
@@ -194,11 +199,6 @@ def main(argv: list[str] | None = None) -> int:
             f"t2_stream_capture_unavailable: {exc} (no write performed)\n"
         )
         return 3
-
-    if args.dry_run:
-        sys.stderr.write(
-            "[capture_t2_stream] --dry-run: no files written\n")
-        return 0
 
     label_path.write_text(
         json.dumps(admitted, indent=2) + "\n", encoding="utf-8",
