@@ -4343,6 +4343,17 @@ def test_campaign_chunk_lock_open_storage_failure_is_typed(tmp_path, monkeypatch
     assert cc._storage_origin(caught.value).errno == errno.ENOSPC
 
 
+def test_campaign_chunk_lock_reports_held_writer(tmp_path):
+    first = cc.acquire_campaign_lock(tmp_path)
+    try:
+        with pytest.raises(cc.ChunkRefusal) as caught:
+            cc.acquire_campaign_lock(tmp_path)
+    finally:
+        first.close()
+
+    assert caught.value.code == "campaign_writer_active"
+
+
 def test_campaign_chunk_lock_primary_storage_fault_wins_over_close_fault(
     tmp_path, monkeypatch,
 ):
@@ -4521,6 +4532,21 @@ def test_output_root_must_be_absolute_and_external(tmp_path, monkeypatch):
     with pytest.raises(cc.ChunkRefusal, match="output_root_inside_repository"):
         cc._assert_external_output_root(inside)
     assert not inside.exists()
+
+
+def test_symlinked_output_root_alias_into_repository_is_rejected(
+        tmp_path, monkeypatch):
+    repo = tmp_path / "repo"
+    inside = repo / "captures"
+    inside.mkdir(parents=True)
+    alias = tmp_path / "external-alias"
+    alias.symlink_to(inside, target_is_directory=True)
+    monkeypatch.setattr(cc, "REPO_ROOT", repo)
+
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        cc._assert_external_output_root(alias)
+
+    assert caught.value.code == "output_root_inside_repository"
 
 
 def test_resume_requires_exact_current_input_hashes(tmp_path):
@@ -4732,6 +4758,73 @@ def test_cross_preflight_recovery_is_refused_and_journal_is_unchanged(tmp_path):
             original_preflight_status="fresh",
         )
     assert cc._content_inventory(journal_dir) == before
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "message"),
+    [
+        ("session_id", "other-session", "mixed session ids"),
+        ("chunk_id", "other-chunk", "mixed chunk ids"),
+    ],
+)
+def test_chunk_session_rejects_mixed_identity_without_mutating_journal(
+        tmp_path, field, value, message):
+    path = tmp_path / "chunk_run_journal.jsonl"
+    session_id, _rows = cc._chunk_session(
+        path, chunk_id="chunk", source_commit="d" * 40,
+        matrix_sha256="b" * 64, matrix_seal_sha256="e" * 64,
+    )
+    row = {
+        "schema_version": 1,
+        "event": "finalization_probe",
+        "session_id": session_id,
+        "chunk_id": "chunk",
+        "run_id": "f" * 64,
+        "observed_at_utc": "2026-07-10T12:00:00Z",
+        "certifying": False,
+        "sol_environment": {"status": "failed"},
+    }
+    row[field] = value
+    cc._append_jsonl_fsync(path, row)
+    before = path.read_bytes()
+
+    with pytest.raises(cc.ChunkRefusal, match=message):
+        cc._chunk_session(
+            path, chunk_id="chunk", source_commit="d" * 40,
+            matrix_sha256="b" * 64, matrix_seal_sha256="e" * 64,
+        )
+
+    assert path.read_bytes() == before
+
+
+def test_finalization_probe_exception_is_noncertifying_and_nonfatal(
+        tmp_path, monkeypatch):
+    path = tmp_path / "chunk_run_journal.jsonl"
+    monkeypatch.setattr(
+        cc.sol_env,
+        "probe_sol_environment",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("injected probe failure")
+        ),
+    )
+
+    cc._record_finalization_probe(
+        run_journal_path=path,
+        session_id="session",
+        chunk_id="chunk",
+        matrix={},
+        matrix_path=tmp_path / "matrix.json",
+    )
+
+    rows = cc._read_jsonl(path, error_code="test")
+    assert len(rows) == 1
+    assert rows[0]["event"] == "finalization_probe"
+    assert rows[0]["certifying"] is False
+    assert rows[0]["sol_environment"] == {
+        "status": "failed",
+        "typed_error": "SOL_ENV_FINALIZATION_PROBE_ERROR",
+        "detail": "RuntimeError: injected probe failure",
+    }
 
 
 def test_expired_cross_preflight_journal_is_supersedable_not_mutated(tmp_path):
