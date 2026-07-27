@@ -92,6 +92,20 @@ _AUTHORITY_SIGNATURE_DOMAIN = b"M5_QUANTITY_AUTHORITY_V2\0"
 AUTHORITY_SCHEMA_PATH_V2 = SCHEMA_ROOT / "m5_quantity_authority.v2.schema.json"
 AUTHORITY_SCHEMA_ID_V2 = "https://gpu-simulator.invalid/schemas/m5_quantity_authority.v2.schema.json"
 AUTHORITY_SCHEMA_SHA256_V2 = "c374515ae4a04a2cfdb67205647d8a5b77a209c857ac5381df3068bfcce36f29"
+TRUST_ANCHOR_REGISTRY_PATH_V1 = REPO_ROOT / "tools" / "local_labels" / "m5_trust_anchors.json"
+TRUST_ANCHOR_REGISTRY_MEDIA_TYPE_V1 = (
+    "application/vnd.m5.trust-anchor-registry+json"
+)
+TRUST_ANCHOR_REGISTRY_SHA256_V1 = (
+    "723bd12653f0aa1d4875ed731bdf8e2ffd001acc8c46ed33fd1d8d3ca893710e"
+)
+TRUST_ANCHOR_SCHEMA_PATH_V1 = SCHEMA_ROOT / "m5_trust_anchor_registry.v1.schema.json"
+TRUST_ANCHOR_SCHEMA_ID_V1 = (
+    "https://gpu-simulator.invalid/schemas/m5_trust_anchor_registry.v1.schema.json"
+)
+TRUST_ANCHOR_SCHEMA_SHA256_V1 = (
+    "907abf78747d44b0c457027c5a23555ef805d0c2b9d624df67bfdce124711006"
+)
 CAMPAIGN_PROTOCOL_PATH = REPO_ROOT / "tools" / "local_labels" / "campaign_protocol_pins.json"
 CANONICAL_MATRIX_PATH = (
     REPO_ROOT
@@ -526,6 +540,117 @@ def _validate_v2_quantity_authority_schema(
         _fail(f"M5 v2 quantity authority schema violation at {location}: {error.message}")
 
 
+def _trust_anchor_registry(
+    registry_payload: bytes | None = None,
+    schema_payload: bytes | None = None,
+) -> dict[str, Any]:
+    try:
+        registry_raw = (
+            immutable.read_regular(TRUST_ANCHOR_REGISTRY_PATH_V1)
+            if registry_payload is None
+            else registry_payload
+        )
+        schema_raw = (
+            immutable.read_regular(TRUST_ANCHOR_SCHEMA_PATH_V1)
+            if schema_payload is None
+            else schema_payload
+        )
+    except immutable.ImmutableArtifactError as exc:
+        _fail(str(exc))
+    if immutable.sha256_bytes(registry_raw) != TRUST_ANCHOR_REGISTRY_SHA256_V1:
+        _fail("M5 trust-anchor registry digest is not controller-pinned")
+    if immutable.sha256_bytes(schema_raw) != TRUST_ANCHOR_SCHEMA_SHA256_V1:
+        _fail("M5 trust-anchor registry schema digest is not controller-pinned")
+    try:
+        value = immutable.strict_json_loads(
+            registry_raw, label="M5 trust-anchor registry"
+        )
+    except immutable.ImmutableArtifactError as exc:
+        _fail(str(exc))
+    registry = _exact_object(value, "M5 trust-anchor registry")
+    if registry_raw != immutable.pretty_json_bytes(registry):
+        _fail("M5 trust-anchor registry is not exact pretty JSON")
+    schema = _schema_from_bytes(schema_raw, TRUST_ANCHOR_SCHEMA_PATH_V1.name)
+    if schema.get("$id") != TRUST_ANCHOR_SCHEMA_ID_V1:
+        _fail("M5 trust-anchor registry schema identifier is not controller-pinned")
+    errors = sorted(
+        StrictDraft202012Validator(schema).iter_errors(registry),
+        key=lambda error: tuple(str(part) for part in error.absolute_path),
+    )
+    if errors:
+        error = errors[0]
+        location = "/".join(str(part) for part in error.absolute_path) or "<root>"
+        _fail(
+            "M5 trust-anchor registry schema violation at "
+            f"{location}: {error.message}"
+        )
+    anchor_ids: set[str] = set()
+    bindings: set[bytes] = set()
+    for index, raw_entry in enumerate(registry["entries"]):
+        entry = _exact_object(raw_entry, f"M5 trust-anchor registry entries[{index}]")
+        anchor_id = _safe_id(entry["anchor_id"], f"trust anchor entries[{index}].anchor_id")
+        if anchor_id in anchor_ids:
+            _fail("M5 trust-anchor registry contains duplicate anchor_id")
+        anchor_ids.add(anchor_id)
+        binding = copy.deepcopy(entry)
+        binding.pop("anchor_id")
+        binding_bytes = immutable.canonical_json_bytes(binding)
+        if binding_bytes in bindings:
+            _fail("M5 trust-anchor registry contains an ambiguous authority binding")
+        bindings.add(binding_bytes)
+    return copy.deepcopy(registry)
+
+
+def _require_admitted_v2_authority(
+    *,
+    public_key: bytes,
+    authority_reference: Mapping[str, Any],
+    ancestry_reference: Mapping[str, Any],
+    review_identity_ids: list[str],
+    review_references: list[Mapping[str, Any]],
+    operator_reference: Mapping[str, Any],
+    registry_payload: bytes | None = None,
+    registry_schema_payload: bytes | None = None,
+) -> str:
+    if len(review_identity_ids) != len(review_references):
+        _fail("M5_RULE1_TRUST_ANCHOR_UNADMITTED: review binding is incomplete")
+    expected = {
+        "authority_domain": "sm86_m5_rule1_quantity_authority_v2",
+        "trust_anchor_identity_id": "m5-analysis-authority",
+        "quantity_authority_identity_id": QUANTITY_AUTHORITY_ID_V2,
+        "algorithm": "Ed25519",
+        "public_key_sha256": immutable.sha256_bytes(public_key),
+        "authority_sha256": authority_reference["sha256"],
+        "ancestry_identity_id": AUTHORITY_ANCESTRY_ID_V2,
+        "ancestry_sha256": ancestry_reference["sha256"],
+        "review_witnesses": [
+            {
+                "identity_id": identity_id,
+                "sha256": reference["sha256"],
+            }
+            for identity_id, reference in zip(
+                review_identity_ids, review_references, strict=True
+            )
+        ],
+        "operator_approval_identity_id": AUTHORITY_OPERATOR_APPROVAL_ID_V2,
+        "operator_approval_sha256": operator_reference["sha256"],
+        "admission_basis": "EXPLICIT_REVIEW_AND_OPERATOR_ACCEPTANCE",
+    }
+    registry = _trust_anchor_registry(registry_payload, registry_schema_payload)
+    matches = []
+    for raw_entry in registry["entries"]:
+        entry = copy.deepcopy(_exact_object(raw_entry, "M5 trust-anchor entry"))
+        anchor_id = entry.pop("anchor_id")
+        if entry == expected:
+            matches.append(anchor_id)
+    if len(matches) != 1:
+        _fail(
+            "M5_RULE1_TRUST_ANCHOR_UNADMITTED: exact public authority and "
+            "witness binding is not uniquely admitted"
+        )
+    return matches[0]
+
+
 def _validate_v2_quantity_authority(
     authority: Mapping[str, Any],
     raw: bytes,
@@ -564,6 +689,20 @@ def _validate_v2_quantity_authority(
         or authority["authority_id"] != "sm86-m5-quantity-authority-v2"
     ):
         _fail("M5_RULE1_PREREGISTRATION_VERSION: v1 quantity authority is not admissible")
+    legacy_authority = _quantity_authority_model()
+    if {
+        "execution_order": authority["execution_order"],
+        "scientific_rank": authority["scientific_rank"],
+        "quantities": authority["quantities"],
+    } == {
+        "execution_order": legacy_authority["execution_order"],
+        "scientific_rank": legacy_authority["scientific_rank"],
+        "quantities": legacy_authority["quantities"],
+    }:
+        _fail(
+            "M5_RULE1_PREREGISTRATION_ANCESTRY: v2 authority is an exact "
+            "content rewrap of quarantined v1"
+        )
     if raw != immutable.pretty_json_bytes(authority):
         _fail("M5 v2 quantity authority is not exact pretty JSON")
     if authority_reference["sha256"] != immutable.sha256_bytes(raw):
@@ -1682,6 +1821,8 @@ def _auto_identities(
         ("m5-canonical-matrix", "ROSTER", "v1", CANONICAL_MATRIX_PATH, "application/json", PINNED_AUTHORITY_SHA256["canonical_matrix"]),
         ("m5-canonical-roster", "ROSTER", "v1", CANONICAL_ROSTER_PATH, "application/json", PINNED_AUTHORITY_SHA256["canonical_roster"]),
         ("m5-quantity-authority-schema", "SCHEMA", "v2", AUTHORITY_SCHEMA_PATH_V2, "application/schema+json", AUTHORITY_SCHEMA_SHA256_V2),
+        ("m5-trust-anchor-registry", "AUTHORITY", "v1", TRUST_ANCHOR_REGISTRY_PATH_V1, TRUST_ANCHOR_REGISTRY_MEDIA_TYPE_V1, TRUST_ANCHOR_REGISTRY_SHA256_V1),
+        ("m5-trust-anchor-registry-schema", "SCHEMA", "v1", TRUST_ANCHOR_SCHEMA_PATH_V1, "application/schema+json", TRUST_ANCHOR_SCHEMA_SHA256_V1),
         ("m5-control-emitter", "TOOL", "v1", CONTROL_EMITTER_PATH, "text/x-python", PINNED_AUTHORITY_SHA256["control_emitter"]),
         ("m5-control-extractor", "TOOL", "v1", CONTROL_EXTRACTOR_PATH, "text/x-python", PINNED_AUTHORITY_SHA256["control_extractor"]),
         ("m5-control-join-tool", "TOOL", "v1", CONTROL_JOIN_TOOL_PATH, "text/x-python", PINNED_AUTHORITY_SHA256["control_join_tool"]),
@@ -1940,6 +2081,16 @@ def _validate_run_semantics(
         "m5-canonical-matrix": ("ROSTER", "v1", "application/json"),
         "m5-canonical-roster": ("ROSTER", "v1", "application/json"),
         "m5-quantity-authority-schema": ("SCHEMA", "v2", "application/schema+json"),
+        "m5-trust-anchor-registry": (
+            "AUTHORITY",
+            "v1",
+            TRUST_ANCHOR_REGISTRY_MEDIA_TYPE_V1,
+        ),
+        "m5-trust-anchor-registry-schema": (
+            "SCHEMA",
+            "v1",
+            "application/schema+json",
+        ),
         "m5-control-emitter": ("TOOL", "v1", "text/x-python"),
         "m5-control-extractor": ("TOOL", "v1", "text/x-python"),
         "m5-control-join-tool": ("TOOL", "v1", "text/x-python"),
@@ -1966,6 +2117,8 @@ def _validate_run_semantics(
         "m5-canonical-matrix": PINNED_AUTHORITY_SHA256["canonical_matrix"],
         "m5-canonical-roster": PINNED_AUTHORITY_SHA256["canonical_roster"],
         "m5-quantity-authority-schema": AUTHORITY_SCHEMA_SHA256_V2,
+        "m5-trust-anchor-registry": TRUST_ANCHOR_REGISTRY_SHA256_V1,
+        "m5-trust-anchor-registry-schema": TRUST_ANCHOR_SCHEMA_SHA256_V1,
         "m5-control-emitter": PINNED_AUTHORITY_SHA256["control_emitter"],
         "m5-control-extractor": PINNED_AUTHORITY_SHA256["control_extractor"],
         "m5-control-join-tool": PINNED_AUTHORITY_SHA256["control_join_tool"],
@@ -2039,13 +2192,16 @@ def _validate_run_semantics(
     )
     review_references: list[Mapping[str, Any]] = []
     review_witnesses: list[Mapping[str, Any]] = []
+    review_identity_ids: list[str] = []
     for review_id in _exact_array(
         authority_provenance.get("review_identity_ids"),
         "M5 v2 authority review identities",
     ):
-        review_identity = identities.get(_safe_id(review_id, "review identity_id"))
+        normalized_review_id = _safe_id(review_id, "review identity_id")
+        review_identity = identities.get(normalized_review_id)
         if review_identity is None or review_identity["identity_kind"] != "AUTHORITY":
             _fail("M5_RULE1_INDEPENDENT_REVIEW_MISSING: RUN review identity is absent")
+        review_identity_ids.append(normalized_review_id)
         review_references.append(review_identity["artifact"])
         review_witnesses.append(
             _authority_witness(
@@ -2054,6 +2210,20 @@ def _validate_run_semantics(
                 review_identity["identity_id"],
             )
         )
+    _require_admitted_v2_authority(
+        public_key=authority_key,
+        authority_reference=quantity_authority_identity["artifact"],
+        ancestry_reference=ancestry_identity["artifact"],
+        review_identity_ids=review_identity_ids,
+        review_references=review_references,
+        operator_reference=operator_identity["artifact"],
+        registry_payload=artifact_loader(
+            identities["m5-trust-anchor-registry"]["artifact"]
+        ),
+        registry_schema_payload=artifact_loader(
+            identities["m5-trust-anchor-registry-schema"]["artifact"]
+        ),
+    )
     _validate_v2_quantity_authority(
         quantity_authority,
         authority_raw,
@@ -2501,14 +2671,25 @@ def _plan_request_to_run(
     )
     review_witnesses: list[dict[str, Any]] = []
     review_references: list[dict[str, Any]] = []
+    normalized_review_identity_ids: list[str] = []
     for identity_id in review_identity_ids:
-        review, reference = caller_witness(
-            _safe_id(identity_id, "M5 v2 review identity_id"), "AUTHORITY"
+        normalized_identity_id = _safe_id(
+            identity_id, "M5 v2 review identity_id"
         )
+        review, reference = caller_witness(normalized_identity_id, "AUTHORITY")
+        normalized_review_identity_ids.append(normalized_identity_id)
         review_witnesses.append(review)
         review_references.append(reference)
     operator_approval, operator_reference = caller_witness(
         AUTHORITY_OPERATOR_APPROVAL_ID_V2, "AUTHORITY"
+    )
+    _require_admitted_v2_authority(
+        public_key=analysis_public_key,
+        authority_reference=quantity_authority_identity["artifact"],
+        ancestry_reference=ancestry_reference,
+        review_identity_ids=normalized_review_identity_ids,
+        review_references=review_references,
+        operator_reference=operator_reference,
     )
     authority_value = _validate_v2_quantity_authority(
         authority_value,

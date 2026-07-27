@@ -21,6 +21,9 @@ from tools.local_labels import m5_calibration_controller as m5
 
 _COMMIT = "1" * 40
 _SEED = bytes(range(32))
+_REPOSITORY_ROOT = Path(__file__).resolve().parents[2]
+_PRODUCTION_TRUST_REGISTRY_PATH = m5.TRUST_ANCHOR_REGISTRY_PATH_V1
+_PRODUCTION_TRUST_REGISTRY_SHA256 = m5.TRUST_ANCHOR_REGISTRY_SHA256_V1
 
 
 def _encode_point(point: tuple[int, int, int, int]) -> bytes:
@@ -33,8 +36,8 @@ def _encode_point(point: tuple[int, int, int, int]) -> bytes:
     return bytes(encoded)
 
 
-def _test_key() -> tuple[bytes, int, bytes]:
-    digest = hashlib.sha512(_SEED).digest()
+def _test_key(seed: bytes = _SEED) -> tuple[bytes, int, bytes]:
+    digest = hashlib.sha512(seed).digest()
     scalar = int.from_bytes(digest[:32], "little")
     scalar &= (1 << 254) - 8
     scalar |= 1 << 254
@@ -42,8 +45,8 @@ def _test_key() -> tuple[bytes, int, bytes]:
     return public, scalar, digest[32:]
 
 
-def _sign(message: bytes) -> bytes:
-    public, scalar, prefix = _test_key()
+def _sign(message: bytes, seed: bytes = _SEED) -> bytes:
+    public, scalar, prefix = _test_key(seed)
     nonce = int.from_bytes(hashlib.sha512(prefix + message).digest(), "little") % m5._ED25519_L
     encoded_r = _encode_point(m5._ed25519_scalar_mult(m5._ED25519_BASE, nonce))
     challenge = int.from_bytes(
@@ -77,9 +80,97 @@ def _identity(root: Path, identity_id: str, kind: str, version: str, payload: by
     }
 
 
+def _install_fixture_trust_registry(identities: list[dict[str, Any]]) -> None:
+    by_id = {identity["identity_id"]: identity for identity in identities}
+
+    def artifact_sha(identity_id: str) -> str:
+        return immutable.sha256_file(
+            Path(by_id[identity_id]["artifact_input"]["path"])
+        )[0]
+
+    registry = {
+        "schema_version": 1,
+        "artifact_kind": "M5_TRUST_ANCHOR_REGISTRY",
+        "entries": [
+            {
+                "anchor_id": "fixture-m5-authority",
+                "authority_domain": "sm86_m5_rule1_quantity_authority_v2",
+                "trust_anchor_identity_id": "m5-analysis-authority",
+                "quantity_authority_identity_id": "m5-quantity-authority-v2",
+                "algorithm": "Ed25519",
+                "public_key_sha256": artifact_sha("m5-analysis-authority"),
+                "authority_sha256": artifact_sha("m5-quantity-authority-v2"),
+                "ancestry_identity_id": "m5-quantity-authority-ancestry",
+                "ancestry_sha256": artifact_sha("m5-quantity-authority-ancestry"),
+                "review_witnesses": [
+                    {
+                        "identity_id": "m5-quantity-authority-review",
+                        "sha256": artifact_sha("m5-quantity-authority-review"),
+                    }
+                ],
+                "operator_approval_identity_id": (
+                    "m5-quantity-authority-operator-approval"
+                ),
+                "operator_approval_sha256": artifact_sha(
+                    "m5-quantity-authority-operator-approval"
+                ),
+                "admission_basis": "EXPLICIT_REVIEW_AND_OPERATOR_ACCEPTANCE",
+            }
+        ],
+    }
+    payload = immutable.pretty_json_bytes(registry)
+    _write(m5.TRUST_ANCHOR_REGISTRY_PATH_V1, payload)
+    m5.TRUST_ANCHOR_REGISTRY_SHA256_V1 = immutable.sha256_bytes(payload)
+
+
+def _resign_fixture_authority(
+    request: dict[str, Any], quantities: list[dict[str, Any]]
+) -> None:
+    by_id = {
+        identity["identity_id"]: identity for identity in request["identities"]
+    }
+    authority_path = Path(
+        by_id["m5-quantity-authority-v2"]["artifact_input"]["path"]
+    )
+    authority = json.loads(authority_path.read_bytes())
+    authority["quantities"] = copy.deepcopy(quantities)
+    authority["consumer_binding_registry"] = [
+        {
+            "quantity_id": quantity["quantity_id"],
+            "consumer_binding": quantity["consumer_binding"],
+            "authorized_gap_kinds": list(quantity["authorized_gap_kinds"]),
+            "research_gap_only": True,
+        }
+        for quantity in quantities
+    ]
+    unsigned = copy.deepcopy(authority)
+    unsigned.pop("signature_ed25519")
+    authority["signature_ed25519"] = _sign(
+        m5._AUTHORITY_SIGNATURE_DOMAIN
+        + immutable.canonical_json_bytes(unsigned)
+    ).hex()
+    authority_raw = immutable.pretty_json_bytes(authority)
+    authority_path.write_bytes(authority_raw)
+    authority_sha256 = immutable.sha256_bytes(authority_raw)
+    for identity_id in (
+        "m5-quantity-authority-ancestry",
+        "m5-quantity-authority-review",
+        "m5-quantity-authority-operator-approval",
+    ):
+        witness_path = Path(by_id[identity_id]["artifact_input"]["path"])
+        witness = json.loads(witness_path.read_bytes())
+        witness["authority_sha256"] = authority_sha256
+        witness_path.write_bytes(immutable.pretty_json_bytes(witness))
+    request["quantities"] = copy.deepcopy(quantities)
+    _install_fixture_trust_registry(request["identities"])
+
+
 def _plan_request(root: Path) -> dict[str, Any]:
     public, _scalar, _prefix = _test_key()
     quantities = copy.deepcopy(m5._quantity_authority_model()["quantities"])
+    quantities[0]["meaning"] = (
+        "Fixture-only independently preregistered L1-to-XBAR read-port width"
+    )
     authority_unsigned = {
         "schema_version": 2,
         "artifact_kind": "M5_QUANTITY_AUTHORITY",
@@ -451,8 +542,17 @@ class CampaignBuilder:
 
 
 @pytest.fixture(scope="module", autouse=True)
-def _stable_source() -> None:
+def _stable_source(tmp_path_factory: pytest.TempPathFactory) -> None:
     monkeypatch = pytest.MonkeyPatch()
+    trust_root = tmp_path_factory.mktemp("m5-trust-registry")
+    monkeypatch.setattr(
+        m5,
+        "TRUST_ANCHOR_REGISTRY_PATH_V1",
+        trust_root / "m5_trust_anchors.json",
+    )
+    monkeypatch.setattr(m5, "TRUST_ANCHOR_REGISTRY_SHA256_V1", "0" * 64)
+    bootstrap_request = _plan_request(trust_root / "bootstrap")
+    _install_fixture_trust_registry(bootstrap_request["identities"])
     monkeypatch.setattr(m5, "_observe_git_source", lambda: (_COMMIT, b""))
     yield
     monkeypatch.undo()
@@ -627,6 +727,41 @@ def test_invalid_ed25519_authority_is_rejected(tmp_path: Path) -> None:
         m5.plan(path, tmp_path / "out")
 
 
+def test_unregistered_analysis_authority_is_rejected(tmp_path: Path) -> None:
+    request = _plan_request(tmp_path)
+    authority = next(
+        identity
+        for identity in request["identities"]
+        if identity["identity_id"] == "m5-analysis-authority"
+    )
+    alternate_seed = bytes(reversed(_SEED))
+    alternate_public, _scalar, _prefix = _test_key(alternate_seed)
+    Path(authority["artifact_input"]["path"]).write_bytes(alternate_public)
+    path = _write_json(tmp_path / "request.json", request)
+
+    with pytest.raises(m5.M5ContractError, match="TRUST_ANCHOR_UNADMITTED"):
+        m5.plan(path, tmp_path / "out")
+
+
+def test_empty_public_registry_admits_no_fixture_authority(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = _plan_request(tmp_path)
+    monkeypatch.setattr(
+        m5, "TRUST_ANCHOR_REGISTRY_PATH_V1", _PRODUCTION_TRUST_REGISTRY_PATH
+    )
+    monkeypatch.setattr(
+        m5,
+        "TRUST_ANCHOR_REGISTRY_SHA256_V1",
+        _PRODUCTION_TRUST_REGISTRY_SHA256,
+    )
+    path = _write_json(tmp_path / "request.json", request)
+
+    with pytest.raises(m5.M5ContractError, match="TRUST_ANCHOR_UNADMITTED"):
+        m5.plan(path, tmp_path / "out")
+
+
 def test_v1_quantity_authority_is_quarantined(tmp_path: Path) -> None:
     request = _plan_request(tmp_path)
     legacy = m5._quantity_authority_model()
@@ -645,6 +780,24 @@ def test_v1_quantity_authority_is_quarantined(tmp_path: Path) -> None:
         m5.plan(path, tmp_path / "out")
 
 
+def test_resigned_v1_content_cannot_be_admitted_as_v2(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    request = _plan_request(tmp_path)
+    isolated_registry = tmp_path / "isolated-trust-registry.json"
+    monkeypatch.setattr(m5, "TRUST_ANCHOR_REGISTRY_PATH_V1", isolated_registry)
+    monkeypatch.setattr(m5, "TRUST_ANCHOR_REGISTRY_SHA256_V1", "0" * 64)
+    legacy_quantities = copy.deepcopy(
+        m5._quantity_authority_model()["quantities"]
+    )
+    _resign_fixture_authority(request, legacy_quantities)
+    path = _write_json(tmp_path / "request.json", request)
+
+    with pytest.raises(m5.M5ContractError, match="exact content rewrap"):
+        m5.plan(path, tmp_path / "out")
+
+
 def test_v2_authority_requires_independent_review_witness(tmp_path: Path) -> None:
     request = _plan_request(tmp_path)
     request["identities"] = [
@@ -657,6 +810,33 @@ def test_v2_authority_requires_independent_review_witness(tmp_path: Path) -> Non
         m5.plan(path, tmp_path / "out")
 
 
+@pytest.mark.parametrize(
+    ("identity_id", "field"),
+    [
+        ("m5-quantity-authority-review", "reviewer_id"),
+        ("m5-quantity-authority-operator-approval", "operator_id"),
+    ],
+)
+def test_self_issued_authority_witness_is_not_admitted(
+    tmp_path: Path,
+    identity_id: str,
+    field: str,
+) -> None:
+    request = _plan_request(tmp_path)
+    identity = next(
+        row for row in request["identities"] if row["identity_id"] == identity_id
+    )
+    witness_path = Path(identity["artifact_input"]["path"])
+    witness = json.loads(witness_path.read_bytes())
+    witness[field] = "caller-self-issued"
+    witness_path.write_bytes(immutable.pretty_json_bytes(witness))
+    path = _write_json(tmp_path / "request.json", request)
+
+    with pytest.raises(m5.M5ContractError, match="TRUST_ANCHOR_UNADMITTED"):
+        m5.plan(path, tmp_path / "out")
+
+
+def test_collect_cli_refuses_before_optional_imports(tmp_path: Path) -> None:
     script = Path(m5.__file__).resolve()
     completed = subprocess.run(
         [sys.executable, "-S", str(script), "collect", "--output", str(tmp_path / "never")],
@@ -681,6 +861,44 @@ def test_schemas_are_closed_draft_2020_12() -> None:
         assert schema["$id"] == m5.SCHEMA_IDS[kind]
         assert schema["additionalProperties"] is False
         assert immutable.sha256_file(path)[0] == m5.SCHEMA_SHA256_V1[kind]
+
+
+def test_v2_authority_and_empty_public_trust_registry_are_pinned(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    for path, schema_id, expected_sha256 in (
+        (
+            m5.AUTHORITY_SCHEMA_PATH_V2,
+            m5.AUTHORITY_SCHEMA_ID_V2,
+            m5.AUTHORITY_SCHEMA_SHA256_V2,
+        ),
+        (
+            m5.TRUST_ANCHOR_SCHEMA_PATH_V1,
+            m5.TRUST_ANCHOR_SCHEMA_ID_V1,
+            m5.TRUST_ANCHOR_SCHEMA_SHA256_V1,
+        ),
+    ):
+        schema = json.loads(path.read_bytes())
+        Draft202012Validator.check_schema(schema)
+        assert schema["$id"] == schema_id
+        assert schema["additionalProperties"] is False
+        assert immutable.sha256_file(path)[0] == expected_sha256
+
+    assert _PRODUCTION_TRUST_REGISTRY_PATH == (
+        _REPOSITORY_ROOT / "tools/local_labels/m5_trust_anchors.json"
+    )
+    assert immutable.sha256_file(_PRODUCTION_TRUST_REGISTRY_PATH)[0] == (
+        _PRODUCTION_TRUST_REGISTRY_SHA256
+    )
+    monkeypatch.setattr(
+        m5, "TRUST_ANCHOR_REGISTRY_PATH_V1", _PRODUCTION_TRUST_REGISTRY_PATH
+    )
+    monkeypatch.setattr(
+        m5,
+        "TRUST_ANCHOR_REGISTRY_SHA256_V1",
+        _PRODUCTION_TRUST_REGISTRY_SHA256,
+    )
+    assert m5._trust_anchor_registry()["entries"] == []
 
 
 def test_read_regular_rejects_symlink_and_hardlink(tmp_path: Path) -> None:
