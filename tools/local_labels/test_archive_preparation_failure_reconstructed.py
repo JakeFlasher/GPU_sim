@@ -47,6 +47,65 @@ _H3_SUBJECT = (
     "fix(local_labels): rebind prep070 refusal authority to legacy "
     "9b8e0e40 comparator"
 )
+_FROZEN_PATH_ALIASES_V1_SHA256 = (
+    "94446cc702ffe86ecb5b35ae125a20cb758b17a4c521bfcefd4a308618f8c737"
+)
+_FROZEN_PATH_ALIASES_V2_SHA256 = (
+    "00197a24756dc5c7b1b75ee21b68695a83650619ea4f58d184892e2361710747"
+)
+_FROZEN_ADR_0005_SHA256 = (
+    "0584eb99359d2af9d7ec192b6d1c84c8042f6a26d36466a71b836265c0cbb290"
+)
+
+
+def test_path_alias_baselines_remain_frozen_and_v3_is_inactive() -> None:
+    v1_path = _REPOSITORY_ROOT / "evidence/path_aliases.v1.json"
+    v2_path = _REPOSITORY_ROOT / "evidence/path_aliases.v2.json"
+    adr5_path = (
+        _REPOSITORY_ROOT
+        / "docs/decisions/0005-sol-problem-039-capture-envelope.md"
+    )
+    v3_path = _REPOSITORY_ROOT / "evidence/path_aliases.v3.json"
+    adr7_path = (
+        _REPOSITORY_ROOT
+        / "docs/decisions/0007-evidence-retention-and-path-aliases.md"
+    )
+    decision_index = (_REPOSITORY_ROOT / "docs/decisions/README.md").read_text(
+        encoding="utf-8"
+    )
+
+    assert _sha(v1_path) == _FROZEN_PATH_ALIASES_V1_SHA256
+    assert _sha(v2_path) == _FROZEN_PATH_ALIASES_V2_SHA256
+    assert _sha(adr5_path) == _FROZEN_ADR_0005_SHA256
+    assert ap.ROUND28_PATH_ALIASES == v1_path
+    v1 = json.loads(v1_path.read_bytes())
+    v2 = json.loads(v2_path.read_bytes())
+    v3 = json.loads(v3_path.read_bytes())
+    adr5 = adr5_path.read_text(encoding="utf-8")
+    adr7 = adr7_path.read_text(encoding="utf-8")
+
+    assert v1["schema_version"] == 1
+    assert v2["schema_version"] == 2
+    assert "prefix_mappings" in v2 and "aliases" not in v2
+    assert "- Status: Accepted" in adr5
+    assert "SOL_PROBLEM_039_CAPTURE_ENVELOPE_21600" in adr5
+    assert v3["schema_version"] == 3
+    assert v3["authority_domain"] == (
+        "round28_preparation_failure_adjudications"
+    )
+    assert v3["activation"] == "inactive_operator_acceptance_required"
+    assert v3["supersedes"] == {
+        "path": "evidence/path_aliases.v1.json",
+        "sha256": _FROZEN_PATH_ALIASES_V1_SHA256,
+    }
+    status_lines = [
+        line for line in adr7.splitlines()
+        if line.startswith("- **Status:**")
+    ]
+    assert status_lines == [
+        "- **Status:** Proposed; inactive pending explicit operator acceptance"
+    ]
+    assert "0007-evidence-retention-and-path-aliases.md" not in decision_index
 
 
 def _sha(path: Path) -> str:
