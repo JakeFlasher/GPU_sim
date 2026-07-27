@@ -88,7 +88,7 @@ pub enum TraceError {
         x: i32,
         y: i32,
         z: i32,
-        index: i64,
+        index: i128,
         grid: i64,
     },
     #[error(
@@ -97,6 +97,11 @@ pub enum TraceError {
     BlockIdDuplicate { path: PathBuf, index: i64 },
     #[error("kernel {kernel_id}: grid_dim absent or degenerate on the wire")]
     GridDimMissing { kernel_id: i32 },
+    #[error("kernel {kernel_id}: {operation} overflows the signed launch-index domain")]
+    GridArithmeticOverflow {
+        kernel_id: i32,
+        operation: &'static str,
+    },
     #[error("{record}: {source}")]
     Lane {
         record: String,
@@ -136,7 +141,7 @@ pub enum TraceError {
         lane_addr: u64,
         allocation_id: u32,
         base: u64,
-        end: u64,
+        end: u128,
     },
 }
 
@@ -1106,10 +1111,16 @@ fn validate_subset_producer_contract(
     } else {
         segment_len.min(complete_cutoff)
     };
+    // Deliberate semantic clamp: the Python producer defines ghost removal as
+    // max(0, waves - ghosts), so the saturating subtractions here are contract
+    // arithmetic rather than overflow recovery. The ghost product itself must
+    // still be checked.
     let expected_tail_measured = tail_wave_count.saturating_sub(ghost_depth);
     let segment_count = complete_cutoff / segment_len + u64::from(residual_tail);
-    let expected_measured =
-        reconstructed_n_waves.saturating_sub(ghost_depth.saturating_mul(segment_count));
+    let ghost_waves = ghost_depth
+        .checked_mul(segment_count)
+        .ok_or_else(|| "ghost-wave accounting overflows u64".to_string())?;
+    let expected_measured = reconstructed_n_waves.saturating_sub(ghost_waves);
     if gate_tail_measured != expected_tail_measured || gate_measured != expected_measured {
         return Err("measured-wave gates disagree with reconstructed ghost accounting".to_string());
     }
@@ -1203,7 +1214,14 @@ fn validate_subset_producer_contract(
             required(stratum, "launch_tercile", &context)?,
             &format!("{context}.launch_tercile"),
         )?;
-        if tercile > 2 || id != phase.saturating_mul(3).saturating_add(tercile) {
+        if tercile > 2 {
+            return Err(format!("{context} id does not encode phase/launch tercile"));
+        }
+        let encoded_id = phase
+            .checked_mul(3)
+            .and_then(|value| value.checked_add(tercile))
+            .ok_or_else(|| format!("{context} phase/launch tercile encoding overflows u64"))?;
+        if id != encoded_id {
             return Err(format!("{context} id does not encode phase/launch tercile"));
         }
         if !stratum_ids.insert(id) || !stratum_keys.insert((phase, tercile)) {
@@ -1943,32 +1961,69 @@ pub fn block_launch_index(
             kernel_id: kernel.id,
         })?;
     let (gx, gy, gz) = (i64::from(grid.x), i64::from(grid.y), i64::from(grid.z));
-    let grid_total = gx * gy * gz;
+    let grid_plane = gx
+        .checked_mul(gy)
+        .ok_or(TraceError::GridArithmeticOverflow {
+            kernel_id: kernel.id,
+            operation: "grid plane size",
+        })?;
+    let grid_total = grid_plane
+        .checked_mul(gz)
+        .ok_or(TraceError::GridArithmeticOverflow {
+            kernel_id: kernel.id,
+            operation: "grid volume",
+        })?;
     let Some(bid) = tb.block_id.as_ref() else {
         return Err(TraceError::BlockIdMissing {
             path: path.to_path_buf(),
         });
     };
     let (x, y, z) = (bid.x, bid.y, bid.z);
-    let index = i64::from(x) + i64::from(y) * gx + i64::from(z) * gx * gy;
-    // Per-AXIS bound: an out-of-grid CTA on one axis (e.g. (2,0,0) on a (2,2,1)
-    // grid) can still flatten INTO [0, grid_total) and would otherwise alias to a
-    // valid launch index — falsely satisfying the completeness gate. Reject each
-    // coordinate against its own extent, not only the flattened range.
-    if x < 0
-        || y < 0
-        || z < 0
-        || i64::from(x) >= gx
-        || i64::from(y) >= gy
-        || i64::from(z) >= gz
-        || index >= grid_total
-    {
+    // Reject invalid coordinates before signed launch-index arithmetic. A malformed
+    // out-of-axis coordinate must remain a range error even when its flattened
+    // value exceeds i64; i128 covers every i32-coordinate/i32-grid product.
+    if x < 0 || y < 0 || z < 0 || i64::from(x) >= gx || i64::from(y) >= gy || i64::from(z) >= gz {
+        let index =
+            i128::from(x) + i128::from(y) * i128::from(gx) + i128::from(z) * i128::from(grid_plane);
         return Err(TraceError::BlockIdOutOfRange {
             path: path.to_path_buf(),
             x,
             y,
             z,
             index,
+            grid: grid_total,
+        });
+    }
+    let y_offset = i64::from(y)
+        .checked_mul(gx)
+        .ok_or(TraceError::GridArithmeticOverflow {
+            kernel_id: kernel.id,
+            operation: "block y offset",
+        })?;
+    let z_offset =
+        i64::from(z)
+            .checked_mul(grid_plane)
+            .ok_or(TraceError::GridArithmeticOverflow {
+                kernel_id: kernel.id,
+                operation: "block z offset",
+            })?;
+    let index = i64::from(x)
+        .checked_add(y_offset)
+        .and_then(|value| value.checked_add(z_offset))
+        .ok_or(TraceError::GridArithmeticOverflow {
+            kernel_id: kernel.id,
+            operation: "flattened block index",
+        })?;
+    // The per-axis checks above prevent an invalid CTA from flattening into a
+    // valid launch index. Retain the flattened range check as a fail-closed
+    // invariant over the checked arithmetic.
+    if index >= grid_total {
+        return Err(TraceError::BlockIdOutOfRange {
+            path: path.to_path_buf(),
+            x,
+            y,
+            z,
+            index: i128::from(index),
             grid: grid_total,
         });
     }
@@ -2358,7 +2413,8 @@ pub fn check_allocation_identity(
                 record: record(),
                 source,
             })?;
-        let end = range.base.wrapping_add(range.size);
+        let base = u128::from(range.base);
+        let end = base + u128::from(range.size);
         for lane in 0..lanes::LANES_PER_WARP {
             if (and_mask >> lane) & 1 == 0 {
                 continue;
@@ -2368,7 +2424,8 @@ pub fn check_allocation_identity(
                 continue;
             }
             let lane_addr = slot as u64;
-            if !(range.base <= lane_addr && lane_addr < end) {
+            let lane_addr_wide = u128::from(lane_addr);
+            if !(base <= lane_addr_wide && lane_addr_wide < end) {
                 return Err(TraceError::LaneOutsideAllocationRange {
                     record: record(),
                     lane,
@@ -2661,6 +2718,56 @@ mod tests {
     }
 
     #[test]
+    fn out_of_axis_precedes_flattening_overflow() {
+        let kernel = pb::Kernel {
+            id: 8,
+            grid_dim: Some(pb::Dim3d {
+                x: i32::MAX,
+                y: i32::MAX,
+                z: 1,
+            }),
+            ..Default::default()
+        };
+        let tb = pb::Threadblock {
+            block_id: Some(pb::Dim3d { x: 0, y: 0, z: 3 }),
+            warps: Default::default(),
+        };
+        let expected_index = 3_i128 * i128::from(i32::MAX) * i128::from(i32::MAX);
+        assert!(matches!(
+            block_launch_index(&kernel, &tb, Path::new("t.pb")),
+            Err(TraceError::BlockIdOutOfRange {
+                index,
+                grid,
+                ..
+            }) if index == expected_index && grid == i64::from(i32::MAX) * i64::from(i32::MAX)
+        ));
+    }
+
+    #[test]
+    fn grid_volume_overflow_is_typed() {
+        let kernel = pb::Kernel {
+            id: 9,
+            grid_dim: Some(pb::Dim3d {
+                x: i32::MAX,
+                y: i32::MAX,
+                z: i32::MAX,
+            }),
+            ..Default::default()
+        };
+        let tb = pb::Threadblock {
+            block_id: Some(pb::Dim3d { x: 0, y: 0, z: 0 }),
+            warps: Default::default(),
+        };
+        assert!(matches!(
+            block_launch_index(&kernel, &tb, Path::new("t.pb")),
+            Err(TraceError::GridArithmeticOverflow {
+                kernel_id: 9,
+                operation: "grid volume",
+            })
+        ));
+    }
+
+    #[test]
     fn missing_threadblock_dir_is_typed_error() {
         let tmp = tempfile::tempdir().unwrap();
         write_synthetic_trace(tmp.path(), 2);
@@ -2927,6 +3034,22 @@ mod tests {
     }
 
     #[test]
+    fn allocation_crossing_u64_boundary_uses_wide_range_arithmetic() {
+        let registry = AllocationRegistry::from_str(
+            r#"[{"allocation_id":1,"context_id":1,"device_id":0,"base_address":"0xfffffffffffffff0","size_bytes":32,"alive":true}]"#,
+            Path::new("t"),
+        )
+        .unwrap();
+        let inst = identity_inst(
+            pb::MemoryOpClass::Global,
+            Some(pb::MemorySpace::Global),
+            Some(1),
+            u64::MAX - 4,
+        );
+        assert!(check_allocation_identity(&inst, Some(&registry), || "t".into()).is_ok());
+    }
+
+    #[test]
     fn unknown_id_rejected() {
         let inst = identity_inst(
             pb::MemoryOpClass::Global,
@@ -3130,6 +3253,39 @@ mod sampling_sidecar_tests {
                 .into_iter()
                 .collect()
         );
+    }
+
+    #[test]
+    fn stratum_id_overflow_is_rejected_not_saturated() {
+        let mut value = subset_value();
+        value["strata"][0]["id"] = serde_json::json!(u64::MAX);
+        value["strata"][0]["phase_id"] = serde_json::json!(u64::MAX);
+        reseal(&mut value);
+        match load_json(serde_json::to_vec(&value).unwrap()) {
+            Err(TraceError::SamplingSidecarMalformed { message, .. }) => {
+                assert!(message.contains("encoding overflows u64"), "{message}");
+            }
+            other => panic!("expected stratum overflow rejection, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn invalid_tercile_precedes_stratum_id_overflow() {
+        let mut value = subset_value();
+        value["strata"][0]["id"] = serde_json::json!(u64::MAX);
+        value["strata"][0]["phase_id"] = serde_json::json!(u64::MAX);
+        value["strata"][0]["launch_tercile"] = serde_json::json!(3);
+        reseal(&mut value);
+        match load_json(serde_json::to_vec(&value).unwrap()) {
+            Err(TraceError::SamplingSidecarMalformed { message, .. }) => {
+                assert!(
+                    message.contains("id does not encode phase/launch tercile"),
+                    "{message}"
+                );
+                assert!(!message.contains("overflows"), "{message}");
+            }
+            other => panic!("expected invalid tercile rejection, got {other:?}"),
+        }
     }
 
     #[test]

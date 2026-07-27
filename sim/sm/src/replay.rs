@@ -139,6 +139,8 @@ pub enum ReplayError {
          must issue exactly once)"
     )]
     CountMismatch { issued: u64, records: u64 },
+    #[error("kernel launch grid {grid:?} overflows the u64 block-count domain")]
+    GridSizeOverflow { grid: (u32, u32, u32) },
     #[error(
         "E_INCOMPLETE_TRACE: {seen}/{grid_total} launch blocks present and no \
          trace_sampling.json sidecar — an incomplete trace must carry a sampling sidecar"
@@ -191,6 +193,13 @@ pub struct KernelReplayResult {
     pub l2_by_source: Option<L2SourceSplit>,
     /// DRAM read-traffic observer (shared mode only).
     pub dram: Option<DramStats>,
+}
+
+fn checked_grid_total(grid: (u32, u32, u32)) -> Result<u64, ReplayError> {
+    u64::from(grid.0)
+        .checked_mul(u64::from(grid.1))
+        .and_then(|value| value.checked_mul(u64::from(grid.2)))
+        .ok_or(ReplayError::GridSizeOverflow { grid })
 }
 
 /// Decode one launch into per-SM block replays on the traced placement.
@@ -317,7 +326,7 @@ fn extract_per_sm_blocks(
     // (gridDim is never rewritten) and whose captured record count matches
     // records_seen. Absent/non-sampling sidecars never waive full coverage.
     let (gx, gy, gz) = kernel_grid(loc.kernel)?;
-    let grid_total = u64::from(gx) * u64::from(gy) * u64::from(gz);
+    let grid_total = checked_grid_total((gx, gy, gz))?;
     let seen = seen_indices.len() as u64;
     match td.sampling_sidecar() {
         None => {
@@ -1081,6 +1090,15 @@ mod completeness_tests {
     use crate::program::FunctionSchedule;
     use prost::Message;
     use std::collections::BTreeMap as StdMap;
+
+    #[test]
+    fn completeness_grid_overflow_is_typed() {
+        let wire_max = i32::MAX as u32;
+        assert!(matches!(
+            checked_grid_total((wire_max, wire_max, wire_max)),
+            Err(ReplayError::GridSizeOverflow { grid }) if grid == (wire_max, wire_max, wire_max)
+        ));
+    }
 
     /// A minimal non-memory record (no memory_op_class) carrying placement, so it
     /// increments records_seen without engaging the allocation-identity gate.
