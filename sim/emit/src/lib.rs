@@ -119,12 +119,98 @@ impl MetricValue {
         if num > den {
             return Err(EmitError::RateExceedsUnity { key, num, den });
         }
+        let value = if den == 0 {
+            None
+        } else {
+            Some(exact_fraction_to_f64(key, num, den)?)
+        };
         Ok(Self::Fraction {
-            value: (den != 0).then(|| num as f64 / den as f64),
+            value,
             numerator: num,
             denominator: den,
         })
     }
+}
+
+/// Correctly round an exact `u64/u64` ratio in `[0, 1]` to binary64 without
+/// first rounding each integer operand independently. Every positive ratio in
+/// this domain is a normal binary64 value (`>= 1/u64::MAX > 2^-64`), so a
+/// 53-bit normalized quotient plus exact remainder is sufficient. `u128`
+/// covers the largest scaled numerator: at most 117 significant bits.
+fn exact_fraction_to_f64(key: &'static str, num: u64, den: u64) -> Result<f64, EmitError> {
+    const FRACTION_BITS: u32 = 52;
+    const HIDDEN_BIT: u128 = 1_u128 << FRACTION_BITS;
+    const CARRY_BIT: u128 = HIDDEN_BIT << 1;
+    const EXPONENT_BIAS: u64 = 1023;
+    const DETAIL: &str = "exact fraction conversion invariant broken";
+    let invariant = || EmitError::CounterInvariant {
+        key,
+        detail: DETAIL,
+    };
+
+    if den == 0 || num > den {
+        return Err(invariant());
+    }
+    if num == 0 {
+        return Ok(0.0);
+    }
+    if num == den {
+        return Ok(1.0);
+    }
+
+    // For 0 < num/den < 1, `negative_exponent` is `-floor(log2(num/den))`
+    // in 1..=64. Comparing exact integers resolves the one-bit ambiguity left
+    // by the operands' individual `ilog2` values.
+    let bit_gap = den
+        .ilog2()
+        .checked_sub(num.ilog2())
+        .ok_or_else(&invariant)?;
+    let normalized_num = u128::from(num)
+        .checked_shl(bit_gap)
+        .ok_or_else(&invariant)?;
+    let mut negative_exponent = bit_gap
+        .checked_add(u32::from(normalized_num < u128::from(den)))
+        .ok_or_else(&invariant)?;
+    let scale = FRACTION_BITS
+        .checked_add(negative_exponent)
+        .ok_or_else(&invariant)?;
+    let scaled_num = u128::from(num).checked_shl(scale).ok_or_else(&invariant)?;
+    let den_wide = u128::from(den);
+    let quotient = scaled_num / den_wide;
+    let remainder = scaled_num % den_wide;
+    let twice_remainder = remainder.checked_mul(2).ok_or_else(&invariant)?;
+    let round_up = twice_remainder > den_wide || (twice_remainder == den_wide && quotient & 1 == 1);
+    let mut rounded = if round_up {
+        quotient.checked_add(1).ok_or_else(&invariant)?
+    } else {
+        quotient
+    };
+
+    // Rounding can carry into the next exponent (including exactly 1.0).
+    if rounded == CARRY_BIT {
+        rounded >>= 1;
+        negative_exponent = negative_exponent.checked_sub(1).ok_or_else(&invariant)?;
+    }
+    if !(HIDDEN_BIT..CARRY_BIT).contains(&rounded) {
+        return Err(invariant());
+    }
+
+    let significand = u64::try_from(rounded).map_err(|_| invariant())?;
+    let fraction = significand
+        .checked_sub(1_u64 << FRACTION_BITS)
+        .ok_or_else(&invariant)?;
+    let biased_exponent = EXPONENT_BIAS
+        .checked_sub(u64::from(negative_exponent))
+        .ok_or_else(&invariant)?;
+    let bits = biased_exponent
+        .checked_shl(FRACTION_BITS)
+        .and_then(|exponent| exponent.checked_add(fraction))
+        .ok_or_else(&invariant)?;
+    let value = f64::from_bits(bits);
+    if !value.is_finite() || !(0.0..=1.0).contains(&value) {
+        return Err(invariant());
+    }
+    Ok(value)
 }
 
 /// The NCU-facing unit of a metric (the registry `unit` field). Only the
@@ -622,6 +708,62 @@ mod tests {
             panic!("expected fraction");
         };
         assert_eq!(value, Some(0.0));
+    }
+
+    #[test]
+    fn fraction_rounds_the_exact_counter_ratio_once() {
+        let numerator = 1_u64 << 53;
+        let denominator = numerator + 1;
+        let MetricValue::Fraction { value, .. } =
+            MetricValue::fraction("k", numerator, denominator).unwrap()
+        else {
+            panic!("expected fraction");
+        };
+        let below_one = f64::from_bits(1.0_f64.to_bits() - 1);
+        assert_eq!(value, Some(below_one));
+        assert!(value.unwrap() < 1.0);
+    }
+
+    #[test]
+    fn exact_fraction_conversion_covers_the_full_u64_domain() {
+        assert_eq!(exact_fraction_to_f64("k", 1, 2).unwrap(), 0.5);
+        assert_eq!(
+            exact_fraction_to_f64("k", 1, u64::MAX).unwrap(),
+            2.0_f64.powi(-64)
+        );
+        // Exact midpoints round to the neighbor with an even low bit.
+        let tie_denominator = 1_u64 << 54;
+        let half_bits = 0.5_f64.to_bits();
+        assert_eq!(
+            exact_fraction_to_f64("k", (1_u64 << 53) + 1, tie_denominator).unwrap(),
+            0.5
+        );
+        assert_eq!(
+            exact_fraction_to_f64("k", (1_u64 << 53) + 3, tie_denominator).unwrap(),
+            f64::from_bits(half_bits + 2)
+        );
+        // This ratio is genuinely closer to 1.0 than to its lower neighbor.
+        assert_eq!(
+            exact_fraction_to_f64("k", u64::MAX - 1, u64::MAX).unwrap(),
+            1.0
+        );
+    }
+
+    #[test]
+    fn exact_fraction_conversion_matches_exhaustive_small_ratios() {
+        for denominator in 1_u32..=512 {
+            for numerator in 0..=denominator {
+                let exact =
+                    exact_fraction_to_f64("k", u64::from(numerator), u64::from(denominator))
+                        .unwrap();
+                let single_round_reference = f64::from(numerator) / f64::from(denominator);
+                assert_eq!(
+                    exact.to_bits(),
+                    single_round_reference.to_bits(),
+                    "{numerator}/{denominator}"
+                );
+            }
+        }
     }
 
     #[test]
