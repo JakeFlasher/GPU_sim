@@ -33,7 +33,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use sim_arch::ArchId;
-use sim_mem::{L1Config, L1CounterError, L1Counters, SectorExpansionError, push_unique_sectors};
+use sim_mem::{L1Config, L1CounterError, L1Counters, SectorExpansionError, SectorExpansionPlan};
 use sim_trace::lanes::LANE_INACTIVE_SENTINEL;
 use sim_trace::pb;
 use sim_trace::reader::{
@@ -1174,6 +1174,17 @@ fn append_staged_global_sectors(
     // `AccessKind::off` spans the native `usize` arena domain. Only one
     // record's compact length narrows to `u16`.
     let kind = checked_staged_global_kind(role, start, count).ok_or_else(|| overflow(count))?;
+    sectors
+        .try_reserve(count)
+        .map_err(|_| ReplayError::SectorExpansion {
+            path: path.to_path_buf(),
+            warp_id,
+            record_ix,
+            source: SectorExpansionError::CapacityUnavailable {
+                buffer: "warp sector arena",
+                additional: count,
+            },
+        })?;
     sectors.extend_from_slice(sector_scratch);
     Ok(kind)
 }
@@ -1248,19 +1259,18 @@ fn classify_with_l1_preflighted(
     };
     let inst = preflight.memory.instruction();
     let meta = preflight.memory.meta();
+    let mut sector_plan = SectorExpansionPlan::new();
     let mut sector_error: Option<SectorExpansionError> = None;
     if preflight.route == ReplayMemoryRoute::Global {
         preflight.memory.visit_addresses(|access| {
             if sector_error.is_some() {
                 return;
             }
-            if let Err(source) = push_unique_sectors(
+            if let Err(source) = sector_plan.include_record(
                 &access.lane_vector,
                 (0..access.lane_vector.len())
                     .filter(|&i| access.lane_vector[i] != LANE_INACTIVE_SENTINEL),
                 access.data_width_bytes,
-                sector_scratch,
-                0,
             ) {
                 sector_error = Some(source);
             }
@@ -1293,9 +1303,34 @@ fn classify_with_l1_preflighted(
     // A pc absent from the schedule surfaces as the issue loop's typed
     // PcNotInSchedule; classification stays neutral in that case. A present
     // but unrecognized static opcode fails closed instead of becoming a
-    // generic untagged global access. Resolve that role before publishing the
-    // staged sectors to the warp arena.
+    // generic untagged global access. Resolve that role before sector-count
+    // rejection, matching the established special-route/opcode precedence.
     let role = require_known_global_role(schedule, arch, inst.pc)?;
+    let prepared = sector_plan
+        .prepare()
+        .map_err(|source| ReplayError::SectorExpansion {
+            path: path.to_path_buf(),
+            warp_id,
+            record_ix,
+            source,
+        })?;
+    let count = prepared.unique_count();
+    if count > usize::from(u16::MAX) {
+        return Err(ReplayError::SectorCountOverflow {
+            path: path.to_path_buf(),
+            warp_id,
+            record_ix,
+            sectors: count,
+        });
+    }
+    *sector_scratch = prepared
+        .expand_bounded(usize::from(u16::MAX))
+        .map_err(|source| ReplayError::SectorExpansion {
+            path: path.to_path_buf(),
+            warp_id,
+            record_ix,
+            source,
+        })?;
     append_staged_global_sectors(role, sectors, sector_scratch, path, warp_id, record_ix)
 }
 
@@ -1722,6 +1757,169 @@ mod space_routing_tests {
     }
 
     #[test]
+    fn oversized_data_width_is_rejected_before_sector_expansion() {
+        let mut inst = global_inst();
+        inst.data_width = Some(i32::MAX);
+        inst.addresses[0].data_width = i32::MAX;
+        inst.addresses[0].addrs[0] = 0;
+        let mut sectors = vec![13];
+        let mut sector_scratch = vec![99];
+
+        let err = classify_with_l1(
+            &inst,
+            &schedule(
+                ArchId::Sm86,
+                MemRole::EligibleLoad(CacheOpToken::LdgECa),
+                "LDG.E.CA",
+            ),
+            ArchId::Sm86,
+            &mut sectors,
+            &mut sector_scratch,
+            Path::new("wide.pb"),
+            8,
+            10,
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            err,
+            ReplayError::SectorCountOverflow {
+                ref path,
+                warp_id: 8,
+                record_ix: 10,
+                sectors: 67_108_864,
+            } if path == Path::new("wide.pb")
+        ));
+        assert_eq!(sectors, vec![13]);
+        assert!(sector_scratch.is_empty());
+    }
+
+    #[test]
+    fn multi_address_overflow_reports_the_exact_instruction_union() {
+        const WIDTH: i32 = 96_000;
+        let first = vec![0; 32];
+        let second = (0_i64..32)
+            .map(|lane| (3_000 + lane * 3_000) * 32)
+            .collect();
+        let inst = pb::Instruction {
+            pc: 0,
+            active_mask: Some(u32::MAX),
+            predicate_mask: Some(u32::MAX),
+            function_unique_id: 1,
+            addresses: vec![
+                pb::Address {
+                    data_width: WIDTH,
+                    compression_format: sim_trace::lanes::FORMAT_LIST_ALL,
+                    addrs: first,
+                    address_space: Some(pb::MemorySpace::Global as i32),
+                    ..Default::default()
+                },
+                pb::Address {
+                    data_width: WIDTH,
+                    compression_format: sim_trace::lanes::FORMAT_LIST_ALL,
+                    addrs: second,
+                    address_space: Some(pb::MemorySpace::Global as i32),
+                    ..Default::default()
+                },
+            ],
+            memory_op_class: Some(pb::MemoryOpClass::Global as i32),
+            data_width: Some(WIDTH),
+            memory_op_access_kind: Some(pb::MemoryOpAccessKind::Load as i32),
+            ..Default::default()
+        };
+        let mut sectors = vec![15];
+        let mut sector_scratch = vec![99];
+
+        let err = classify_with_l1(
+            &inst,
+            &schedule(
+                ArchId::Sm86,
+                MemRole::EligibleLoad(CacheOpToken::LdgECa),
+                "LDG.E.CA",
+            ),
+            ArchId::Sm86,
+            &mut sectors,
+            &mut sector_scratch,
+            Path::new("multi-wide.pb"),
+            9,
+            11,
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            err,
+            ReplayError::SectorCountOverflow {
+                ref path,
+                warp_id: 9,
+                record_ix: 11,
+                sectors: 99_000,
+            } if path == Path::new("multi-wide.pb")
+        ));
+        assert_eq!(sectors, vec![15]);
+        assert!(sector_scratch.is_empty());
+    }
+
+    #[test]
+    fn oversized_count_does_not_mask_unknown_static_opcode() {
+        let mut inst = global_inst();
+        inst.data_width = Some(i32::MAX);
+        inst.addresses[0].data_width = i32::MAX;
+        inst.addresses[0].addrs[0] = 0;
+        let mut sectors = vec![17];
+        let mut sector_scratch = vec![99];
+
+        assert!(matches!(
+            classify_with_l1(
+                &inst,
+                &schedule(ArchId::Sm86, MemRole::None, "IADD3 R0, R1, R2, RZ"),
+                ArchId::Sm86,
+                &mut sectors,
+                &mut sector_scratch,
+                Path::new("wide-opcode.pb"),
+                10,
+                12,
+            ),
+            Err(ReplayError::UnknownGlobalOpcode {
+                arch: ArchId::Sm86,
+                pc: 0,
+                ref opcode,
+            }) if opcode == "IADD3"
+        ));
+        assert_eq!(sectors, vec![17]);
+        assert!(sector_scratch.is_empty());
+    }
+
+    #[test]
+    fn oversized_count_does_not_mask_unsupported_special_route() {
+        let mut inst = atomic_inst(Some(pb::MemorySpace::Global));
+        inst.function_unique_id = 1;
+        inst.data_width = Some(i32::MAX);
+        inst.addresses[0].data_width = i32::MAX;
+        inst.addresses[0].addrs[0] = 0;
+        let mut sectors = vec![19];
+        let mut sector_scratch = vec![99];
+
+        assert!(matches!(
+            classify_with_l1(
+                &inst,
+                &schedule(ArchId::Sm120, MemRole::None, "ATOMG.E.ADD.STRONG.GPU"),
+                ArchId::Sm120,
+                &mut sectors,
+                &mut sector_scratch,
+                Path::new("wide-atomic.pb"),
+                11,
+                13,
+            ),
+            Err(ReplayError::UnsupportedMemoryPath {
+                arch: ArchId::Sm120,
+                class: pb::MemoryOpClass::Atomic,
+            })
+        ));
+        assert_eq!(sectors, vec![19]);
+        assert!(sector_scratch.is_empty());
+    }
+
+    #[test]
     fn later_trace_error_precedes_sector_callbacks() {
         let mut overflow = vec![LANE_INACTIVE_SENTINEL; 32];
         overflow[0] = i64::MAX;
@@ -1853,7 +2051,7 @@ mod space_routing_tests {
             } if opcode == "IADD3"
         ));
         assert_eq!(sectors, vec![19]);
-        assert_eq!(sector_scratch, vec![0x1000 >> 5]);
+        assert!(sector_scratch.is_empty());
     }
 
     #[test]

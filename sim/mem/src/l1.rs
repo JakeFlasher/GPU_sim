@@ -1368,63 +1368,218 @@ pub enum SectorExpansionError {
         base: i64,
         data_width_bytes: i32,
     },
-    #[error("dedup_from={dedup_from} exceeds the output length {out_len}")]
-    DedupStartOutOfRange { dedup_from: usize, out_len: usize },
+    #[error("unique sector count {sectors} exceeds the configured limit {limit}")]
+    UniqueSectorLimitExceeded { limit: usize, sectors: usize },
+    #[error("unique sector count {sectors} does not fit the host index domain")]
+    UniqueSectorCountOutOfRange { sectors: u128 },
+    #[error("sector expansion produced {produced} entries, expected {expected}")]
+    CardinalityMismatch { expected: usize, produced: usize },
+    #[error("unable to reserve {additional} sector entries for {buffer}")]
+    CapacityUnavailable {
+        buffer: &'static str,
+        additional: usize,
+    },
 }
 
-/// Expand one traced address record's lane vector into UNIQUE global
-/// sector ids, in first-seen order (lane-major, ascending sector within a
-/// lane) — the `l1_trace_adapter` dedup contract: NCU's sector metric
-/// counts unique 32 B sectors per warp INSTRUCTION, and emission order
-/// feeds the LRU, so both the SET and the ORDER are ported. `dedup_from`
-/// marks where the current instruction's sectors begin in `out`, so a
-/// multi-address-record instruction dedups across ALL its records.
-pub fn push_unique_sectors(
+/// Validated lane-sector intervals for all address records of one instruction.
+/// Planning is range-based: no sector range is enumerated until the exact
+/// instruction-wide union is known to fit its consumer's bound.
+#[derive(Debug, Default)]
+pub struct SectorExpansionPlan {
+    intervals: Vec<(i64, i64)>,
+}
+
+/// A plan whose exact instruction-wide union cardinality has been computed.
+#[derive(Debug)]
+pub struct PreparedSectorExpansion {
+    intervals: Vec<(i64, i64)>,
+    unique_count: usize,
+}
+
+fn collect_sector_intervals(
     lane_vector: &[i64; 32],
     active_lanes: impl Iterator<Item = usize>,
     data_width_bytes: i32,
-    out: &mut Vec<i64>,
-    dedup_from: usize,
-) -> Result<(), SectorExpansionError> {
+) -> Result<([(i64, i64); 32], usize), SectorExpansionError> {
     if data_width_bytes <= 0 {
         return Err(SectorExpansionError::DataWidthInvalid { data_width_bytes });
-    }
-    if dedup_from > out.len() {
-        return Err(SectorExpansionError::DedupStartOutOfRange {
-            dedup_from,
-            out_len: out.len(),
-        });
     }
     let width_offset = i64::from(data_width_bytes)
         .checked_sub(1)
         .ok_or(SectorExpansionError::DataWidthInvalid { data_width_bytes })?;
-    let entry_len = out.len();
-    let result = (|| {
-        for lane in active_lanes {
-            let base = *lane_vector
-                .get(lane)
-                .ok_or(SectorExpansionError::LaneIndexOutOfRange { lane })?;
-            let last_addr =
-                base.checked_add(width_offset)
-                    .ok_or(SectorExpansionError::AddressOverflow {
-                        lane,
-                        base,
-                        data_width_bytes,
-                    })?;
-            let first = base >> 5;
-            let last = last_addr >> 5;
-            for sector in first..=last {
-                if !out[dedup_from..].contains(&sector) {
-                    out.push(sector);
+    let mut lane_seen = [false; 32];
+    let mut intervals = [(0_i64, 0_i64); 32];
+    let mut interval_count = 0;
+    for lane in active_lanes {
+        let base = *lane_vector
+            .get(lane)
+            .ok_or(SectorExpansionError::LaneIndexOutOfRange { lane })?;
+        if lane_seen[lane] {
+            continue;
+        }
+        lane_seen[lane] = true;
+        let last_addr =
+            base.checked_add(width_offset)
+                .ok_or(SectorExpansionError::AddressOverflow {
+                    lane,
+                    base,
+                    data_width_bytes,
+                })?;
+        intervals[interval_count] = (base >> 5, last_addr >> 5);
+        interval_count += 1;
+    }
+    Ok((intervals, interval_count))
+}
+
+impl SectorExpansionPlan {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Add one address record without enumerating its sector ranges. The plan
+    /// is unchanged if validation or fallible reservation fails.
+    pub fn include_record(
+        &mut self,
+        lane_vector: &[i64; 32],
+        active_lanes: impl Iterator<Item = usize>,
+        data_width_bytes: i32,
+    ) -> Result<(), SectorExpansionError> {
+        let (intervals, interval_count) =
+            collect_sector_intervals(lane_vector, active_lanes, data_width_bytes)?;
+        self.intervals.try_reserve(interval_count).map_err(|_| {
+            SectorExpansionError::CapacityUnavailable {
+                buffer: "sector interval plan",
+                additional: interval_count,
+            }
+        })?;
+        self.intervals
+            .extend_from_slice(&intervals[..interval_count]);
+        Ok(())
+    }
+
+    /// Compute the exact union over every included address record in
+    /// O(intervals log intervals), still without enumerating sectors.
+    pub fn prepare(self) -> Result<PreparedSectorExpansion, SectorExpansionError> {
+        let mut sorted = Vec::new();
+        sorted.try_reserve(self.intervals.len()).map_err(|_| {
+            SectorExpansionError::CapacityUnavailable {
+                buffer: "sorted sector intervals",
+                additional: self.intervals.len(),
+            }
+        })?;
+        sorted.extend_from_slice(&self.intervals);
+        sorted.sort_unstable();
+
+        let mut union_count = 0_u128;
+        if let Some(&(initial_first, initial_last)) = sorted.first() {
+            let mut first = initial_first;
+            let mut last = initial_last;
+            for &(next_first, next_last) in &sorted[1..] {
+                if next_first <= last.saturating_add(1) {
+                    last = last.max(next_last);
+                } else {
+                    union_count += (i128::from(last) - i128::from(first) + 1).unsigned_abs();
+                    first = next_first;
+                    last = next_last;
                 }
             }
+            union_count += (i128::from(last) - i128::from(first) + 1).unsigned_abs();
         }
-        Ok(())
-    })();
-    if result.is_err() {
-        out.truncate(entry_len);
+        let unique_count = usize::try_from(union_count).map_err(|_| {
+            SectorExpansionError::UniqueSectorCountOutOfRange {
+                sectors: union_count,
+            }
+        })?;
+        Ok(PreparedSectorExpansion {
+            intervals: self.intervals,
+            unique_count,
+        })
     }
-    result
+}
+
+impl PreparedSectorExpansion {
+    pub fn unique_count(&self) -> usize {
+        self.unique_count
+    }
+
+    /// Expand only after the exact instruction-wide union fits `max_unique`.
+    /// Covered ranges are tracked as intervals, so repeated or overlapping
+    /// records enumerate each sector exactly once while retaining the original
+    /// lane-major, record-major first-seen order.
+    pub fn expand_bounded(self, max_unique: usize) -> Result<Vec<i64>, SectorExpansionError> {
+        if self.unique_count > max_unique {
+            return Err(SectorExpansionError::UniqueSectorLimitExceeded {
+                limit: max_unique,
+                sectors: self.unique_count,
+            });
+        }
+        let mut staged = Vec::new();
+        staged.try_reserve(self.unique_count).map_err(|_| {
+            SectorExpansionError::CapacityUnavailable {
+                buffer: "sector staging",
+                additional: self.unique_count,
+            }
+        })?;
+        let covered_capacity = self.intervals.len().min(self.unique_count);
+        let mut covered: Vec<(i64, i64)> = Vec::new();
+        covered.try_reserve(covered_capacity).map_err(|_| {
+            SectorExpansionError::CapacityUnavailable {
+                buffer: "covered sector intervals",
+                additional: covered_capacity,
+            }
+        })?;
+
+        for (first, last) in self.intervals {
+            let start = covered.partition_point(|&(_, covered_last)| covered_last < first);
+            let mut cursor = Some(first);
+            for &(covered_first, covered_last) in &covered[start..] {
+                let Some(next) = cursor else {
+                    break;
+                };
+                if covered_first > last {
+                    break;
+                }
+                if next < covered_first {
+                    for sector in next..=last.min(covered_first.saturating_sub(1)) {
+                        staged.push(sector);
+                    }
+                }
+                cursor = if covered_last >= last {
+                    None
+                } else {
+                    covered_last
+                        .checked_add(1)
+                        .map(|after_covered| next.max(after_covered))
+                };
+            }
+            if let Some(next) = cursor {
+                for sector in next..=last {
+                    staged.push(sector);
+                }
+            }
+
+            let left = covered
+                .partition_point(|&(_, covered_last)| covered_last.saturating_add(1) < first);
+            let right = left
+                + covered[left..]
+                    .partition_point(|&(covered_first, _)| covered_first <= last.saturating_add(1));
+            if left == right {
+                covered.insert(left, (first, last));
+            } else {
+                let merged = (first.min(covered[left].0), last.max(covered[right - 1].1));
+                covered[left] = merged;
+                covered.drain(left + 1..right);
+            }
+        }
+
+        if staged.len() != self.unique_count {
+            return Err(SectorExpansionError::CardinalityMismatch {
+                expected: self.unique_count,
+                produced: staged.len(),
+            });
+        }
+        Ok(staged)
+    }
 }
 
 #[cfg(test)]
@@ -1900,13 +2055,81 @@ mod tests {
         }
         // Lane 4 crosses sectors 3→4 (base 127, width 4).
         lanes[4] = 127;
-        let mut out = Vec::new();
-        push_unique_sectors(&lanes, 0..5, 4, &mut out, 0).unwrap();
-        assert_eq!(out, vec![0, 3, 4]);
+        let mut plan = SectorExpansionPlan::new();
+        plan.include_record(&lanes, 0..5, 4).unwrap();
         // A second address record of the SAME instruction dedups against
-        // the instruction's whole slice.
-        push_unique_sectors(&lanes, 0..5, 4, &mut out, 0).unwrap();
-        assert_eq!(out, vec![0, 3, 4]);
+        // the instruction's whole sector union.
+        plan.include_record(&lanes, 0..5, 4).unwrap();
+        let prepared = plan.prepare().unwrap();
+        assert_eq!(prepared.unique_count(), 3);
+        assert_eq!(prepared.expand_bounded(usize::MAX).unwrap(), vec![0, 3, 4]);
+    }
+
+    #[test]
+    fn overlapping_records_preserve_first_seen_sector_order() {
+        let mut later_first = [i64::MIN; 32];
+        later_first[0] = 10 * i64::from(SECTOR_BYTES);
+        let mut earlier_overlap = [i64::MIN; 32];
+        earlier_overlap[0] = 8 * i64::from(SECTOR_BYTES);
+        let mut plan = SectorExpansionPlan::new();
+        plan.include_record(&later_first, 0..1, 96).unwrap();
+        plan.include_record(&earlier_overlap, 0..1, 128).unwrap();
+
+        let prepared = plan.prepare().unwrap();
+        assert_eq!(prepared.unique_count(), 5);
+        assert_eq!(prepared.expand_bounded(5).unwrap(), vec![10, 11, 12, 8, 9]);
+    }
+
+    #[test]
+    fn oversized_sector_union_is_rejected_before_expansion() {
+        let mut lanes = [i64::MIN; 32];
+        lanes[0] = 0;
+        let mut plan = SectorExpansionPlan::new();
+        plan.include_record(&lanes, 0..1, i32::MAX).unwrap();
+        let prepared = plan.prepare().unwrap();
+        assert_eq!(prepared.unique_count(), 67_108_864);
+
+        assert_eq!(
+            prepared.expand_bounded(usize::from(u16::MAX)),
+            Err(SectorExpansionError::UniqueSectorLimitExceeded {
+                limit: usize::from(u16::MAX),
+                sectors: 67_108_864,
+            })
+        );
+    }
+
+    #[test]
+    fn bounded_sector_expansion_uses_union_not_interval_sum() {
+        let mut lanes = [i64::MIN; 32];
+        lanes[0] = 0;
+        lanes[1] = 1;
+        let mut plan = SectorExpansionPlan::new();
+        plan.include_record(&lanes, 0..2, 64).unwrap();
+        let prepared = plan.prepare().unwrap();
+
+        assert_eq!(prepared.unique_count(), 3);
+        assert_eq!(prepared.expand_bounded(3).unwrap(), vec![0, 1, 2]);
+    }
+
+    #[test]
+    fn accumulated_sector_limit_failure_is_nonmutating() {
+        let mut first = [i64::MIN; 32];
+        first[0] = 0;
+        let mut second = [i64::MIN; 32];
+        second[0] = 64;
+        let mut plan = SectorExpansionPlan::new();
+        plan.include_record(&first, 0..1, 64).unwrap();
+        plan.include_record(&second, 0..1, 64).unwrap();
+        let prepared = plan.prepare().unwrap();
+
+        assert_eq!(prepared.unique_count(), 4);
+        assert_eq!(
+            prepared.expand_bounded(3),
+            Err(SectorExpansionError::UniqueSectorLimitExceeded {
+                limit: 3,
+                sectors: 4,
+            })
+        );
     }
 
     #[test]
@@ -1914,47 +2137,43 @@ mod tests {
         let mut lanes = [i64::MIN; 32];
         lanes[0] = 0;
         lanes[1] = i64::MAX;
-        let mut out = vec![7];
+        let mut plan = SectorExpansionPlan::new();
         assert_eq!(
-            push_unique_sectors(&lanes, 0..2, 2, &mut out, 1),
+            plan.include_record(&lanes, 0..2, 2),
             Err(SectorExpansionError::AddressOverflow {
                 lane: 1,
                 base: i64::MAX,
                 data_width_bytes: 2,
             })
         );
-        assert_eq!(out, vec![7]);
+        assert!(plan.intervals.is_empty());
     }
 
     #[test]
     fn nonpositive_sector_width_is_rejected() {
         let lanes = [0; 32];
-        let mut out = Vec::new();
+        let mut plan = SectorExpansionPlan::new();
         assert_eq!(
-            push_unique_sectors(&lanes, 0..1, 0, &mut out, 0),
+            plan.include_record(&lanes, 0..1, 0),
             Err(SectorExpansionError::DataWidthInvalid {
                 data_width_bytes: 0,
             })
         );
-        assert!(out.is_empty());
+        assert!(plan.intervals.is_empty());
     }
 
     #[test]
-    fn malformed_sector_expansion_indices_are_typed() {
+    fn malformed_sector_expansion_indices_are_typed_and_nonmutating() {
         let lanes = [0; 32];
-        let mut out = vec![3];
+        let mut plan = SectorExpansionPlan::new();
+        plan.include_record(&lanes, 0..1, 1).unwrap();
+        let before = plan.intervals.clone();
+
         assert_eq!(
-            push_unique_sectors(&lanes, std::iter::once(32), 1, &mut out, 0),
+            plan.include_record(&lanes, std::iter::once(32), 1),
             Err(SectorExpansionError::LaneIndexOutOfRange { lane: 32 })
         );
-        assert_eq!(
-            push_unique_sectors(&lanes, 0..1, 1, &mut out, 2),
-            Err(SectorExpansionError::DedupStartOutOfRange {
-                dedup_from: 2,
-                out_len: 1,
-            })
-        );
-        assert_eq!(out, vec![3]);
+        assert_eq!(plan.intervals, before);
     }
 
     #[test]
