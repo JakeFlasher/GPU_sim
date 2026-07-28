@@ -415,7 +415,7 @@ impl FillDue {
 }
 
 enum SingleOutcome {
-    Done(AccessOutcome, u64),
+    Done(AccessOutcome, Option<u64>),
     Stall { retry_at: u64 },
 }
 
@@ -423,7 +423,7 @@ enum SingleOutcome {
 /// each fill-timing mode maps it to its own public outcome type.
 enum CoreAccess {
     Hit {
-        ready: u64,
+        ready: Option<u64>,
     },
     /// Merged into an in-flight line allocation. Constant mode carries the
     /// exact due cycle; event mode carries [`FillDue::Untimed`].
@@ -456,9 +456,15 @@ enum FillTiming {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Readiness {
+    Observed,
+    Unobserved,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FillRequest {
-    Constant { now: u64 },
-    Event { now: u64 },
+    Constant { now: u64, readiness: Readiness },
+    Event { now: u64, readiness: Readiness },
 }
 
 impl FillRequest {
@@ -469,18 +475,30 @@ impl FillRequest {
         }
     }
 
-    fn hit_ready(self, hit_latency: u64) -> Result<u64, L1AccessError> {
+    fn hit_ready(self, hit_latency: u64) -> Result<Option<u64>, L1AccessError> {
         match self {
-            Self::Constant { now } => L1Cache::checked_time_add("hit visibility", now, hit_latency),
-            Self::Event { now } => {
-                L1Cache::checked_time_add("event hit visibility", now, hit_latency)
+            Self::Constant {
+                now,
+                readiness: Readiness::Observed,
+            } => L1Cache::checked_time_add("hit visibility", now, hit_latency).map(Some),
+            Self::Event {
+                now,
+                readiness: Readiness::Observed,
+            } => L1Cache::checked_time_add("event hit visibility", now, hit_latency).map(Some),
+            Self::Constant {
+                readiness: Readiness::Unobserved,
+                ..
             }
+            | Self::Event {
+                readiness: Readiness::Unobserved,
+                ..
+            } => Ok(None),
         }
     }
 
     fn fill_due(self, miss_latency: u64) -> Result<FillDue, L1AccessError> {
         match self {
-            Self::Constant { now } => {
+            Self::Constant { now, .. } => {
                 L1Cache::checked_time_add("miss visibility", now, miss_latency).map(FillDue::Timed)
             }
             Self::Event { .. } => Ok(FillDue::Untimed),
@@ -521,6 +539,17 @@ pub enum EvAccess {
     /// Every MSHR entry is busy: the caller parks the access and retries
     /// after the next completion frees an entry (the event-mode analogue
     /// of the constant mode's retry-at-earliest-fill).
+    Stalled,
+}
+
+/// Event-mode cache outcome when no dependence barrier consumes hit-ready time.
+/// Cache state and fill ownership are identical to [`EvAccess`], but a hit does
+/// not perform otherwise-unused timestamp arithmetic.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EvAccessUnobserved {
+    Hit,
+    MissRequest { fill: FillKey },
+    MergedPending { fill: FillKey },
     Stalled,
 }
 
@@ -955,16 +984,21 @@ impl L1Cache {
         }
     }
 
-    fn access_single(&mut self, sector_id: i64, now: u64) -> Result<SingleOutcome, L1AccessError> {
+    fn access_single(
+        &mut self,
+        sector_id: i64,
+        now: u64,
+        readiness: Readiness,
+    ) -> Result<SingleOutcome, L1AccessError> {
         self.apply_fills(now)?;
-        match self.access_core(sector_id, FillRequest::Constant { now })? {
+        match self.access_core(sector_id, FillRequest::Constant { now, readiness })? {
             CoreAccess::Hit { ready } => Ok(SingleOutcome::Done(AccessOutcome::Hit, ready)),
             CoreAccess::LineMerge { pending } | CoreAccess::SectorMerge { pending } => {
                 let pending = pending.timed().ok_or(L1AccessError::FillTimingMismatch {
                     latched: Self::timing_name(FillTiming::Event),
                     requested: Self::timing_name(FillTiming::Constant),
                 })?;
-                Ok(SingleOutcome::Done(AccessOutcome::Merge, pending))
+                Ok(SingleOutcome::Done(AccessOutcome::Merge, Some(pending)))
             }
             CoreAccess::Stalled => Ok(SingleOutcome::Stall {
                 retry_at: self.earliest_fill()?,
@@ -976,7 +1010,7 @@ impl L1Cache {
                 })?;
                 Ok(SingleOutcome::Done(
                     AccessOutcome::MissSectorResident,
-                    ready,
+                    Some(ready),
                 ))
             }
             CoreAccess::MissLineAlloc { pending } => {
@@ -984,7 +1018,10 @@ impl L1Cache {
                     latched: Self::timing_name(FillTiming::Event),
                     requested: Self::timing_name(FillTiming::Constant),
                 })?;
-                Ok(SingleOutcome::Done(AccessOutcome::MissLineAlloc, ready))
+                Ok(SingleOutcome::Done(
+                    AccessOutcome::MissLineAlloc,
+                    Some(ready),
+                ))
             }
         }
     }
@@ -997,8 +1034,28 @@ impl L1Cache {
         self.commit_latch(FillTiming::Constant);
         let mut t = now;
         loop {
-            match self.access_single(sector_id, t)? {
-                SingleOutcome::Done(outcome, ready) => return Ok((outcome, ready)),
+            match self.access_single(sector_id, t, Readiness::Observed)? {
+                SingleOutcome::Done(outcome, Some(ready)) => return Ok((outcome, ready)),
+                SingleOutcome::Done(_, None) => {
+                    unreachable!("observed constant access omitted its ready time")
+                }
+                SingleOutcome::Stall { retry_at } => {
+                    t = retry_at.max(Self::checked_time_add("stall retry", t, 1)?);
+                }
+            }
+        }
+    }
+
+    fn access_eligible_constant_unobserved_impl(
+        &mut self,
+        sector_id: i64,
+        now: u64,
+    ) -> Result<AccessOutcome, L1AccessError> {
+        self.commit_latch(FillTiming::Constant);
+        let mut t = now;
+        loop {
+            match self.access_single(sector_id, t, Readiness::Unobserved)? {
+                SingleOutcome::Done(outcome, _) => return Ok(outcome),
                 SingleOutcome::Stall { retry_at } => {
                     t = retry_at.max(Self::checked_time_add("stall retry", t, 1)?);
                 }
@@ -1033,17 +1090,56 @@ impl L1Cache {
         self.access_eligible_constant_impl(sector_id, now)
     }
 
+    /// Mutate constant-mode cache state for one eligible sector without
+    /// observing producer-ready time. Fresh misses still compute their fill due
+    /// time; hits and merges skip visibility arithmetic that no dependence
+    /// barrier consumes.
+    pub fn access_eligible_unobserved(
+        &mut self,
+        sector_id: i64,
+        now: u64,
+    ) -> Result<AccessOutcome, L1AccessError> {
+        self.preflight_latch(FillTiming::Constant)?;
+        let budget = L1MutationBudget {
+            eligible_sectors: 1,
+            recency_touches: 1,
+            new_fills: 1,
+            ..L1MutationBudget::default()
+        };
+        let fast_path_safe = self.preflight_mutation_budget(budget).is_ok()
+            && self.preflight_constant_access_timing(now).is_ok();
+        if !fast_path_safe {
+            let mut shadow = self.clone();
+            let outcome = shadow.access_eligible_constant_unobserved_impl(sector_id, now)?;
+            *self = shadow;
+            return Ok(outcome);
+        }
+        self.access_eligible_constant_unobserved_impl(sector_id, now)
+    }
+
+    fn access_eligible_event_core(
+        &mut self,
+        sector_id: i64,
+        now: u64,
+        readiness: Readiness,
+    ) -> Result<CoreAccess, L1AccessError> {
+        self.commit_latch(FillTiming::Event);
+        self.access_core(sector_id, FillRequest::Event { now, readiness })
+    }
+
     fn access_eligible_event_impl(
         &mut self,
         sector_id: i64,
         now: u64,
     ) -> Result<EvAccess, L1AccessError> {
-        self.commit_latch(FillTiming::Event);
         let line = sector_id >> 2;
         let sector = (sector_id & 3) as u8;
         Ok(
-            match self.access_core(sector_id, FillRequest::Event { now })? {
-                CoreAccess::Hit { ready } => EvAccess::Hit { ready },
+            match self.access_eligible_event_core(sector_id, now, Readiness::Observed)? {
+                CoreAccess::Hit { ready: Some(ready) } => EvAccess::Hit { ready },
+                CoreAccess::Hit { ready: None } => {
+                    unreachable!("observed event access omitted its ready time")
+                }
                 CoreAccess::LineMerge { .. } => EvAccess::MergedPending {
                     fill: FillKey::Line(line),
                 },
@@ -1055,6 +1151,33 @@ impl L1Cache {
                     fill: FillKey::Sector(line, sector),
                 },
                 CoreAccess::MissLineAlloc { .. } => EvAccess::MissRequest {
+                    fill: FillKey::Line(line),
+                },
+            },
+        )
+    }
+
+    fn access_eligible_event_unobserved_impl(
+        &mut self,
+        sector_id: i64,
+        now: u64,
+    ) -> Result<EvAccessUnobserved, L1AccessError> {
+        let line = sector_id >> 2;
+        let sector = (sector_id & 3) as u8;
+        Ok(
+            match self.access_eligible_event_core(sector_id, now, Readiness::Unobserved)? {
+                CoreAccess::Hit { .. } => EvAccessUnobserved::Hit,
+                CoreAccess::LineMerge { .. } => EvAccessUnobserved::MergedPending {
+                    fill: FillKey::Line(line),
+                },
+                CoreAccess::SectorMerge { .. } => EvAccessUnobserved::MergedPending {
+                    fill: FillKey::Sector(line, sector),
+                },
+                CoreAccess::Stalled => EvAccessUnobserved::Stalled,
+                CoreAccess::MissSectorResident { .. } => EvAccessUnobserved::MissRequest {
+                    fill: FillKey::Sector(line, sector),
+                },
+                CoreAccess::MissLineAlloc { .. } => EvAccessUnobserved::MissRequest {
                     fill: FillKey::Line(line),
                 },
             },
@@ -1096,6 +1219,29 @@ impl L1Cache {
             return Ok(outcome);
         }
         self.access_eligible_event_impl(sector_id, now)
+    }
+
+    /// Event-mode cache mutation when no dependence barrier consumes a hit's
+    /// ready time. Miss, merge, stall, fill ownership, and counters are unchanged.
+    pub fn access_eligible_ev_unobserved(
+        &mut self,
+        sector_id: i64,
+        now: u64,
+    ) -> Result<EvAccessUnobserved, L1AccessError> {
+        self.preflight_latch(FillTiming::Event)?;
+        let budget = L1MutationBudget {
+            eligible_sectors: 1,
+            recency_touches: 1,
+            new_fills: 1,
+            ..L1MutationBudget::default()
+        };
+        if self.preflight_mutation_budget(budget).is_err() {
+            let mut shadow = self.clone();
+            let outcome = shadow.access_eligible_event_unobserved_impl(sector_id, now)?;
+            *self = shadow;
+            return Ok(outcome);
+        }
+        self.access_eligible_event_unobserved_impl(sector_id, now)
     }
 
     /// Complete an event-mode fill AT the response event's time. A
@@ -1381,6 +1527,88 @@ mod tests {
         // Same sector before the fill time: merge, never an LRU hit.
         let (o, _) = access(&mut l1, 0, 100);
         assert_eq!(o, AccessOutcome::Merge);
+    }
+
+    #[test]
+    fn unobserved_hits_skip_unused_visibility_arithmetic() {
+        let cfg = L1Config {
+            arch: ArchId::Sm86,
+            line_capacity: 8,
+            mshr_count: Some(1),
+            hit_latency: 2,
+            miss_latency: 3,
+        };
+
+        let mut constant = L1Cache::new(cfg).unwrap();
+        assert_eq!(
+            constant.access_eligible_unobserved(0, 0).unwrap(),
+            AccessOutcome::MissLineAlloc
+        );
+        assert_eq!(
+            constant.access_eligible_unobserved(0, 3).unwrap(),
+            AccessOutcome::Hit
+        );
+        let before_observed = constant.clone();
+        assert!(matches!(
+            constant.access_eligible(0, u64::MAX - 1),
+            Err(L1AccessError::TimeOverflow {
+                operation: "hit visibility",
+                base,
+                delta: 2,
+            }) if base == u64::MAX - 1
+        ));
+        assert_cache_state_eq(&constant, &before_observed);
+        assert_eq!(
+            constant
+                .access_eligible_unobserved(0, u64::MAX - 1)
+                .unwrap(),
+            AccessOutcome::Hit
+        );
+
+        let mut event = L1Cache::new(cfg).unwrap();
+        let EvAccess::MissRequest { fill } = event.access_eligible_ev(0, 0).unwrap() else {
+            panic!("expected event-mode prefill miss");
+        };
+        event.complete_fill(fill).unwrap();
+        let before_observed = event.clone();
+        assert!(matches!(
+            event.access_eligible_ev(0, u64::MAX - 1),
+            Err(L1AccessError::TimeOverflow {
+                operation: "event hit visibility",
+                base,
+                delta: 2,
+            }) if base == u64::MAX - 1
+        ));
+        assert_cache_state_eq(&event, &before_observed);
+        assert_eq!(
+            event
+                .access_eligible_ev_unobserved(0, u64::MAX - 1)
+                .unwrap(),
+            EvAccessUnobserved::Hit
+        );
+    }
+
+    #[test]
+    fn unobserved_constant_miss_still_requires_a_fill_due_time() {
+        let cfg = L1Config {
+            arch: ArchId::Sm86,
+            line_capacity: 8,
+            mshr_count: Some(1),
+            hit_latency: 1,
+            miss_latency: 2,
+        };
+        let mut l1 = L1Cache::new(cfg).unwrap();
+        let before = l1.clone();
+
+        assert!(matches!(
+            l1.access_eligible_unobserved(0, u64::MAX - 1),
+            Err(L1AccessError::TimeOverflow {
+                operation: "miss visibility",
+                base,
+                delta: 2,
+            }) if base == u64::MAX - 1
+        ));
+        assert_cache_state_eq(&l1, &before);
     }
 
     #[test]

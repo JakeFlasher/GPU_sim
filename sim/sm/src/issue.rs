@@ -58,8 +58,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 
 use sim_arch::ArchId;
 use sim_mem::{
-    CacheOpToken, EvAccess, FillKey, L1AccessError, L1Cache, L1Config, L1Counters,
-    L1MutationBudget, L2OpClass, L2Source,
+    CacheOpToken, EvAccess, EvAccessUnobserved, FillKey, L1AccessError, L1Cache, L1Config,
+    L1Counters, L1MutationBudget, L2OpClass, L2Source,
 };
 
 use crate::control_bits::{ControlDomainError, DepBarrier};
@@ -826,51 +826,111 @@ impl WarpState<'_> {
 
 /// Data-ready time for one issued record at time `t` in the Flat/L1Const
 /// modes (fill times known at issue), driving the L1 state/counters when
-/// attached.
+/// attached. Producer visibility is computed only when a write barrier consumes
+/// it; cache accesses still run without one because they mutate modeled state.
 fn data_ready_time(
     kind: AccessKind,
     sectors: &[i64],
     t: u64,
     params: &IssueModelParams,
     l1: Option<&mut L1Cache>,
-) -> Result<u64, IssueError> {
+    write_barrier: Option<DepBarrier>,
+) -> Result<Option<u64>, IssueError> {
+    let needs_ready = write_barrier.is_some();
     match kind {
-        AccessKind::NonMemory => params.non_memory_ready(t),
-        AccessKind::Shared => params.shared_ready(t),
+        AccessKind::NonMemory => {
+            if needs_ready {
+                params.non_memory_ready(t).map(Some)
+            } else {
+                Ok(None)
+            }
+        }
+        AccessKind::Shared => {
+            if needs_ready {
+                params.shared_ready(t).map(Some)
+            } else {
+                Ok(None)
+            }
+        }
         AccessKind::GlobalEligible { off, len, .. } => match l1 {
             Some(l1) => {
-                let mut ready =
-                    checked_cycle_add("L1 hit-pipeline floor", t, params.l1_hit_latency)?;
+                let mut ready = needs_ready
+                    .then(|| checked_cycle_add("L1 hit-pipeline floor", t, params.l1_hit_latency))
+                    .transpose()?;
                 for &sector in &sectors[off..off + usize::from(len)] {
-                    let (_, r) = l1.access_eligible(sector, t)?;
-                    ready = ready.max(r);
+                    if let Some(current) = &mut ready {
+                        let (_, sector_ready) = l1.access_eligible(sector, t)?;
+                        *current = (*current).max(sector_ready);
+                    } else {
+                        l1.access_eligible_unobserved(sector, t)?;
+                    }
                 }
                 Ok(ready)
             }
-            None => checked_cycle_add("flat global visibility", t, params.global_flat_latency),
+            None => {
+                if needs_ready {
+                    checked_cycle_add("flat global visibility", t, params.global_flat_latency)
+                        .map(Some)
+                } else {
+                    Ok(None)
+                }
+            }
         },
         AccessKind::GlobalBypass { len, token, .. } => match l1 {
             Some(l1) => {
                 l1.count_bypass(u64::from(len), token == CacheOpToken::Atom)?;
-                params.store_visibility_ready(t)
+                if needs_ready {
+                    params.store_visibility_ready(t).map(Some)
+                } else {
+                    Ok(None)
+                }
             }
-            None => checked_cycle_add("flat global visibility", t, params.global_flat_latency),
+            None => {
+                if needs_ready {
+                    checked_cycle_add("flat global visibility", t, params.global_flat_latency)
+                        .map(Some)
+                } else {
+                    Ok(None)
+                }
+            }
         },
         AccessKind::GlobalUntagged { len, .. } => match l1 {
             Some(l1) => {
                 l1.count_untagged(u64::from(len))?;
-                params.store_visibility_ready(t)
+                if needs_ready {
+                    params.store_visibility_ready(t).map(Some)
+                } else {
+                    Ok(None)
+                }
             }
-            None => checked_cycle_add("flat global visibility", t, params.global_flat_latency),
+            None => {
+                if needs_ready {
+                    checked_cycle_add("flat global visibility", t, params.global_flat_latency)
+                        .map(Some)
+                } else {
+                    Ok(None)
+                }
+            }
         },
         AccessKind::GlobalStore { off, len } => match l1 {
             Some(l1) => {
                 for &sector in &sectors[off..off + usize::from(len)] {
                     l1.probe_store(sector, t)?;
                 }
-                params.store_visibility_ready(t)
+                if needs_ready {
+                    params.store_visibility_ready(t).map(Some)
+                } else {
+                    Ok(None)
+                }
             }
-            None => checked_cycle_add("flat global visibility", t, params.global_flat_latency),
+            None => {
+                if needs_ready {
+                    checked_cycle_add("flat global visibility", t, params.global_flat_latency)
+                        .map(Some)
+                } else {
+                    Ok(None)
+                }
+            }
         },
     }
 }
@@ -1350,17 +1410,31 @@ impl<'a> SmCore<'a> {
         };
         let warps = &mut self.warps;
         match kind {
-            AccessKind::NonMemory => p.non_memory_ready(t).map(Some),
-            AccessKind::Shared => p.shared_ready(t).map(Some),
+            AccessKind::NonMemory => {
+                if write_barrier.is_some() {
+                    p.non_memory_ready(t).map(Some)
+                } else {
+                    Ok(None)
+                }
+            }
+            AccessKind::Shared => {
+                if write_barrier.is_some() {
+                    p.shared_ready(t).map(Some)
+                } else {
+                    Ok(None)
+                }
+            }
             AccessKind::GlobalEligible { off, len, .. } => {
-                // The hit-pipeline floor applies to the whole load (as in
-                // L1Const); misses ride their responses. Line fills
+                // The hit-pipeline floor applies to the whole dependent load
+                // (as in L1Const); misses ride their responses. Line fills
                 // emitted anywhere in THIS emission batch (st.line_folds,
                 // cleared at advance entry) fold later same-line sectors
                 // into their request mask — one L2 transaction per line
                 // per batch, priced on its worst sector.
-                let mut known =
-                    checked_cycle_add("shared L1 hit-pipeline floor", t, p.l1_hit_latency)?;
+                let mut known = write_barrier
+                    .is_some()
+                    .then(|| checked_cycle_add("shared L1 hit-pipeline floor", t, p.l1_hit_latency))
+                    .transpose()?;
                 let range = off..off + usize::from(len);
                 for i in range.clone() {
                     match access_shared(
@@ -1373,7 +1447,11 @@ impl<'a> SmCore<'a> {
                         t,
                         out,
                     ) {
-                        Ok(Some(ready)) => known = known.max(ready),
+                        Ok(Some(ready)) => {
+                            if let Some(current) = &mut known {
+                                *current = (*current).max(ready);
+                            }
+                        }
                         Ok(None) => {}
                         Err(SharedAccessError::Stalled) => {
                             // MSHR full: park the remainder; the entry
@@ -1391,7 +1469,7 @@ impl<'a> SmCore<'a> {
                         Err(SharedAccessError::Issue(source)) => return Err(source),
                     }
                 }
-                Ok(Some(known))
+                Ok(known)
             }
             AccessKind::GlobalBypass { off, len, .. } | AccessKind::GlobalUntagged { off, len } => {
                 let (source, counted, class) = match kind {
@@ -1417,10 +1495,13 @@ impl<'a> SmCore<'a> {
                 }
                 if len == 0 {
                     // Degenerate record (fully predicated-off lanes are
-                    // legal on the wire): no sectors, no requests — but
-                    // the write-barrier contract must match L1Const,
-                    // which stamps these at the L2-hit arm.
-                    return p.store_visibility_ready(t).map(Some);
+                    // legal on the wire): no sectors, no requests. Only a
+                    // present write barrier consumes the L2-hit visibility.
+                    return if write_barrier.is_some() {
+                        p.store_visibility_ready(t).map(Some)
+                    } else {
+                        Ok(None)
+                    };
                 }
                 for i in off..off + usize::from(len) {
                     let sector_id = sectors[i];
@@ -1452,9 +1533,13 @@ impl<'a> SmCore<'a> {
                     st.l1.probe_store(sector_id, t)?;
                     out.push(MemRequest::store(t, sector_id));
                 }
-                // v0: store visibility priced at the L2-hit arm (as in
-                // L1Const); stores do not wait on responses.
-                p.store_visibility_ready(t).map(Some)
+                // v0: a present store write barrier is priced at the L2-hit
+                // arm (as in L1Const); stores do not wait on responses.
+                if write_barrier.is_some() {
+                    p.store_visibility_ready(t).map(Some)
+                } else {
+                    Ok(None)
+                }
             }
         }
     }
@@ -1666,9 +1751,9 @@ impl<'a> SmCore<'a> {
             }
             for sector_index in retry.lo..retry.hi {
                 let sector_id = self.warps[retry.warp].sectors[sector_index];
-                match shadow.access_eligible_ev(sector_id, now)? {
-                    EvAccess::Hit { .. } => {}
-                    EvAccess::MissRequest { .. } | EvAccess::MergedPending { .. } => {
+                match access_shared_l1(&mut shadow, sector_id, now, retry.barrier.is_some())? {
+                    SharedL1Access::Hit { .. } => {}
+                    SharedL1Access::MissRequest { .. } | SharedL1Access::MergedPending { .. } => {
                         if let Some(barrier) = retry.barrier {
                             let current = exact
                                 .entry((retry.warp, barrier))
@@ -1684,7 +1769,7 @@ impl<'a> SmCore<'a> {
                             )?;
                         }
                     }
-                    EvAccess::Stalled => {
+                    SharedL1Access::Stalled => {
                         if let Some(barrier) = retry.barrier {
                             let current = exact
                                 .entry((retry.warp, barrier))
@@ -1701,6 +1786,57 @@ impl<'a> SmCore<'a> {
                         }
                         break 'retries;
                     }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn preflight_retry_timing(
+        &self,
+        st: &SharedL2State,
+        fill: FillKey,
+        now: u64,
+    ) -> Result<(), IssueError> {
+        if st.retry.is_empty() {
+            return Ok(());
+        }
+        let observes_hit_ready = st.retry.iter().any(|retry| retry.barrier.is_some());
+        let hit_timing_fits =
+            !observes_hit_ready || now.checked_add(self.params.l1_hit_latency).is_some();
+        let response_timing_fits = now.checked_add(self.params.l1_miss_latency).is_some();
+        if hit_timing_fits && response_timing_fits {
+            return Ok(());
+        }
+
+        // At the cycle-domain boundary, replay the retry queue on a shadow L1.
+        // A hit needs a timestamp only when its retry carries a write barrier;
+        // only a fresh miss emits a new self-affecting response. Merges and
+        // stalls consume neither timing arm.
+        let mut shadow = st.l1.clone();
+        shadow.complete_fill(fill)?;
+        'retries: for retry in &st.retry {
+            for sector_index in retry.lo..retry.hi {
+                let sector_id = self.warps[retry.warp].sectors[sector_index];
+                match access_shared_l1(&mut shadow, sector_id, now, false)? {
+                    SharedL1Access::Hit { .. } => {
+                        if retry.barrier.is_some() {
+                            checked_cycle_add(
+                                "retry L1 hit visibility",
+                                now,
+                                self.params.l1_hit_latency,
+                            )?;
+                        }
+                    }
+                    SharedL1Access::MissRequest { .. } => {
+                        checked_cycle_add(
+                            "retry self-response horizon",
+                            now,
+                            self.params.l1_miss_latency,
+                        )?;
+                    }
+                    SharedL1Access::MergedPending { .. } => {}
+                    SharedL1Access::Stalled => break 'retries,
                 }
             }
         }
@@ -1744,17 +1880,11 @@ impl<'a> SmCore<'a> {
             });
         }
         self.preflight_response_accounting(st, reply, now)?;
-        // A fill completion can drain parked accesses. Validate the timing
-        // arms owned by the SM before completing the fill or clearing any
-        // waiter. Next-level L2/DRAM pricing is preflighted by the system
-        // against the actual L2 outcome, not a hypothetical miss.
-        if matches!(reply, ReplyTo::L1Fill { .. }) && !st.retry.is_empty() {
-            checked_cycle_add("retry L1 hit visibility", now, self.params.l1_hit_latency)?;
-            checked_cycle_add(
-                "retry self-response horizon",
-                now,
-                self.params.l1_miss_latency,
-            )?;
+        // A fill completion can drain parked accesses. Validate only the timing
+        // branch each exact retry outcome consumes; next-level L2/DRAM pricing
+        // is preflighted by the system against the actual L2 outcome.
+        if let ReplyTo::L1Fill { fill, .. } = reply {
+            self.preflight_retry_timing(st, fill, now)?;
         }
         Ok(())
     }
@@ -1921,6 +2051,7 @@ impl<'a> SmCore<'a> {
         &self,
         kind: AccessKind,
         write_barrier: Option<DepBarrier>,
+        read_barrier: Option<DepBarrier>,
         stall: u8,
         yield_flag: bool,
     ) -> Result<(), IssueError> {
@@ -1930,78 +2061,76 @@ impl<'a> SmCore<'a> {
         if yield_flag {
             checked_cycle_add("warp yield eligibility", t, 2)?;
         }
-        checked_cycle_add(
-            "read-dependence barrier visibility",
-            t,
-            self.params.read_barrier_latency,
-        )?;
+        if read_barrier.is_some() {
+            checked_cycle_add(
+                "read-dependence barrier visibility",
+                t,
+                self.params.read_barrier_latency,
+            )?;
+        }
 
+        let needs_ready = write_barrier.is_some();
         match kind {
-            AccessKind::NonMemory => {
+            AccessKind::NonMemory if needs_ready => {
                 self.params.non_memory_ready(t)?;
             }
-            AccessKind::Shared => {
+            AccessKind::Shared if needs_ready => {
                 self.params.shared_ready(t)?;
             }
-            AccessKind::GlobalEligible { len, .. } => match &self.mem {
-                MemModel::Flat => {
+            AccessKind::NonMemory | AccessKind::Shared => {}
+            AccessKind::GlobalEligible { .. } => match &self.mem {
+                MemModel::Flat if needs_ready => {
                     checked_cycle_add(
                         "flat global visibility",
                         t,
                         self.params.global_flat_latency,
                     )?;
                 }
-                MemModel::L1Const(_) => {
+                MemModel::L1Const(_) if needs_ready => {
                     checked_cycle_add("L1 hit-pipeline floor", t, self.params.l1_hit_latency)?;
-                    checked_cycle_add(
-                        "L1 constant miss visibility",
-                        t,
-                        self.params.l1_miss_latency,
-                    )?;
                 }
-                MemModel::L1Shared(_) => {
+                MemModel::L1Shared(_) if needs_ready => {
                     checked_cycle_add(
                         "shared L1 hit-pipeline floor",
                         t,
                         self.params.l1_hit_latency,
                     )?;
-                    if len > 0 {
-                        checked_cycle_add("self-response horizon", t, self.params.l1_miss_latency)?;
-                    }
                 }
+                MemModel::Flat | MemModel::L1Const(_) | MemModel::L1Shared(_) => {}
             },
             AccessKind::GlobalBypass { len, .. } | AccessKind::GlobalUntagged { len, .. } => {
                 match &self.mem {
-                    MemModel::Flat => {
+                    MemModel::Flat if needs_ready => {
                         checked_cycle_add(
                             "flat global visibility",
                             t,
                             self.params.global_flat_latency,
                         )?;
                     }
-                    MemModel::L1Const(_) => {
+                    MemModel::L1Const(_) if needs_ready => {
                         self.params.store_visibility_ready(t)?;
                     }
-                    MemModel::L1Shared(_) if len == 0 => {
+                    MemModel::L1Shared(_) if len == 0 && needs_ready => {
                         self.params.store_visibility_ready(t)?;
                     }
-                    MemModel::L1Shared(_) if write_barrier.is_some() => {
+                    MemModel::L1Shared(_) if len > 0 && needs_ready => {
                         checked_cycle_add("self-response horizon", t, self.params.l1_miss_latency)?;
                     }
-                    MemModel::L1Shared(_) => {}
+                    MemModel::Flat | MemModel::L1Const(_) | MemModel::L1Shared(_) => {}
                 }
             }
             AccessKind::GlobalStore { .. } => match &self.mem {
-                MemModel::Flat => {
+                MemModel::Flat if needs_ready => {
                     checked_cycle_add(
                         "flat global visibility",
                         t,
                         self.params.global_flat_latency,
                     )?;
                 }
-                MemModel::L1Const(_) | MemModel::L1Shared(_) => {
+                MemModel::L1Const(_) | MemModel::L1Shared(_) if needs_ready => {
                     self.params.store_visibility_ready(t)?;
                 }
+                MemModel::Flat | MemModel::L1Const(_) | MemModel::L1Shared(_) => {}
             },
         }
         Ok(())
@@ -2150,9 +2279,14 @@ impl<'a> SmCore<'a> {
 
         let constant_timing_fits = shared.is_some()
             || l1.constant_batch_timing_has_headroom(self.t, budget.eligible_sectors);
+        let shared_timing_fits = shared.is_none()
+            || budget.eligible_sectors == 0
+            || (self.t.checked_add(self.params.l1_hit_latency).is_some()
+                && self.t.checked_add(self.params.l1_miss_latency).is_some());
         if l1.preflight_mutation_budget(budget).is_ok()
             && pending_budget_fits
             && constant_timing_fits
+            && shared_timing_fits
         {
             return Ok(());
         }
@@ -2172,16 +2306,33 @@ impl<'a> SmCore<'a> {
                     let mut pending_add = 0u32;
                     for &sector_id in &warp.sectors[off..off + usize::from(len)] {
                         if shared.is_some() {
-                            match shadow.access_eligible_ev(sector_id, self.t)? {
-                                EvAccess::Hit { .. } => {}
-                                EvAccess::MissRequest { .. } | EvAccess::MergedPending { .. } => {
+                            match access_shared_l1(
+                                &mut shadow,
+                                sector_id,
+                                self.t,
+                                slot.control.write_barrier.is_some(),
+                            )? {
+                                SharedL1Access::Hit { .. } => {}
+                                SharedL1Access::MissRequest { .. } => {
+                                    checked_cycle_add(
+                                        "self-response horizon",
+                                        self.t,
+                                        self.params.l1_miss_latency,
+                                    )?;
                                     pending_add = checked_u32_counter_add(
                                         "issue exact pending-add budget",
                                         pending_add,
                                         1,
                                     )?;
                                 }
-                                EvAccess::Stalled => {
+                                SharedL1Access::MergedPending { .. } => {
+                                    pending_add = checked_u32_counter_add(
+                                        "issue exact pending-add budget",
+                                        pending_add,
+                                        1,
+                                    )?;
+                                }
+                                SharedL1Access::Stalled => {
                                     pending_add = checked_u32_counter_add(
                                         "issue exact pending-add budget",
                                         pending_add,
@@ -2190,8 +2341,10 @@ impl<'a> SmCore<'a> {
                                     break;
                                 }
                             }
-                        } else {
+                        } else if slot.control.write_barrier.is_some() {
                             shadow.access_eligible(sector_id, self.t)?;
+                        } else {
+                            shadow.access_eligible_unobserved(sector_id, self.t)?;
                         }
                     }
                     if shared.is_some() {
@@ -2344,6 +2497,7 @@ impl<'a> SmCore<'a> {
             self.preflight_issue_timing(
                 w.insts[w.next].kind,
                 slot.control.write_barrier,
+                slot.control.read_barrier,
                 slot.control.stall,
                 slot.control.yield_flag,
             )?;
@@ -2395,13 +2549,14 @@ impl<'a> SmCore<'a> {
                     out,
                 )?
             } else {
-                Some(data_ready_time(
+                data_ready_time(
                     inst.kind,
                     warp_sectors,
                     t,
                     &self.params,
                     self.mem.const_l1_mut(),
-                )?)
+                    control.write_barrier,
+                )?
             };
 
             // Yield semantics per the CGGTY paper: the yield bit means
@@ -2425,12 +2580,14 @@ impl<'a> SmCore<'a> {
             if let Some(dr) = data_ready {
                 self.warps[wix].stamp_clear(control.write_barrier, dr);
             }
-            let read_clear = checked_cycle_add(
-                "read-dependence barrier visibility",
-                t,
-                self.params.read_barrier_latency,
-            )?;
-            self.warps[wix].stamp_clear(control.read_barrier, read_clear);
+            if let Some(read_barrier) = control.read_barrier {
+                let read_clear = checked_cycle_add(
+                    "read-dependence barrier visibility",
+                    t,
+                    self.params.read_barrier_latency,
+                )?;
+                self.warps[wix].stamp_clear(Some(read_barrier), read_clear);
+            }
 
             // Advance the warp's stream.
             self.warps[wix].next =
@@ -2551,6 +2708,35 @@ fn register_response(st: &mut SharedL2State, reply: ReplyTo) -> Result<(), Issue
     Ok(())
 }
 
+enum SharedL1Access {
+    Hit { ready: Option<u64> },
+    MissRequest { fill: FillKey },
+    MergedPending { fill: FillKey },
+    Stalled,
+}
+
+fn access_shared_l1(
+    l1: &mut L1Cache,
+    sector_id: i64,
+    now: u64,
+    observe_ready: bool,
+) -> Result<SharedL1Access, L1AccessError> {
+    if observe_ready {
+        return Ok(match l1.access_eligible_ev(sector_id, now)? {
+            EvAccess::Hit { ready } => SharedL1Access::Hit { ready: Some(ready) },
+            EvAccess::MissRequest { fill } => SharedL1Access::MissRequest { fill },
+            EvAccess::MergedPending { fill } => SharedL1Access::MergedPending { fill },
+            EvAccess::Stalled => SharedL1Access::Stalled,
+        });
+    }
+    Ok(match l1.access_eligible_ev_unobserved(sector_id, now)? {
+        EvAccessUnobserved::Hit => SharedL1Access::Hit { ready: None },
+        EvAccessUnobserved::MissRequest { fill } => SharedL1Access::MissRequest { fill },
+        EvAccessUnobserved::MergedPending { fill } => SharedL1Access::MergedPending { fill },
+        EvAccessUnobserved::Stalled => SharedL1Access::Stalled,
+    })
+}
+
 enum SharedAccessError {
     Stalled,
     Issue(IssueError),
@@ -2592,13 +2778,11 @@ fn access_shared(
     out: &mut Vec<MemRequest>,
 ) -> Result<Option<u64>, SharedAccessError> {
     let sbit = 1u8 << (sector_id & 3) as u8;
-    match st
-        .l1
-        .access_eligible_ev(sector_id, now)
+    match access_shared_l1(&mut st.l1, sector_id, now, barrier.is_some())
         .map_err(IssueError::from)?
     {
-        EvAccess::Hit { ready } => Ok(Some(ready)),
-        EvAccess::MissRequest { fill } => {
+        SharedL1Access::Hit { ready } => Ok(ready),
+        SharedL1Access::MissRequest { fill } => {
             let request = MemRequest::l1_fill(now, sector_id, fill, response_id);
             register_response(st, request.reply)?;
             out.push(request);
@@ -2609,7 +2793,7 @@ fn access_shared(
             add_fill_waiter(st, warps, fill, wix, barrier)?;
             Ok(None)
         }
-        EvAccess::MergedPending { fill } => {
+        SharedL1Access::MergedPending { fill } => {
             if let FillKey::Line(line) = fill {
                 // Pairing invariant (proven at the 2026-07-07 gate): a
                 // line-pending merge always has a live fill_masks entry
@@ -2639,7 +2823,7 @@ fn access_shared(
             add_fill_waiter(st, warps, fill, wix, barrier)?;
             Ok(None)
         }
-        EvAccess::Stalled => Err(SharedAccessError::Stalled),
+        SharedL1Access::Stalled => Err(SharedAccessError::Stalled),
     }
 }
 
@@ -3010,7 +3194,9 @@ mod tests {
 
     #[test]
     fn producer_latency_overflow_is_typed() {
-        let sched = schedule(vec![(0, slot(cb(1), OpClass::Other, "EXIT"))]);
+        let mut control = cb(1);
+        control.write_barrier = Some(barrier(0));
+        let sched = schedule(vec![(0, slot(control, OpClass::Other, "EXIT"))]);
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![warp(0, vec![inst(0)])],
@@ -3031,6 +3217,226 @@ mod tests {
         assert!(out.is_empty());
         assert_eq!(core.instructions_issued(), 0);
         assert_eq!(core.warps[0].next, 0);
+    }
+
+    #[test]
+    fn absent_dependency_barriers_skip_unused_visibility_timing() {
+        let sched = schedule(vec![(0, slot(cb(1), OpClass::Other, "LDS"))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![warp(
+                0,
+                vec![ReplayInst {
+                    pc: 0,
+                    kind: AccessKind::Shared,
+                }],
+            )],
+        }];
+        let mut p = params();
+        p.shared_write_barrier_latency = u64::MAX;
+        p.read_barrier_latency = u64::MAX;
+        let mut core = SmCore::new(&blocks, &sched, &p, SmMemMode::Flat).unwrap();
+        core.t = u64::MAX - 1;
+        let mut out = Vec::new();
+
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut out).unwrap(),
+            Advance::Done
+        );
+        assert!(out.is_empty());
+        assert_eq!(core.result().cycles, u64::MAX);
+        assert_eq!(core.warps[0].barrier_clear, [0; DEP_BARRIERS]);
+    }
+
+    #[test]
+    fn present_read_barrier_overflow_remains_typed_and_nonmutating() {
+        let mut control = cb(1);
+        control.read_barrier = Some(barrier(0));
+        let sched = schedule(vec![(0, slot(control, OpClass::Other, "LDS"))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![warp(
+                0,
+                vec![ReplayInst {
+                    pc: 0,
+                    kind: AccessKind::Shared,
+                }],
+            )],
+        }];
+        let mut p = params();
+        p.read_barrier_latency = 2;
+        let mut core = SmCore::new(&blocks, &sched, &p, SmMemMode::Flat).unwrap();
+        core.t = u64::MAX - 1;
+        let mut out = Vec::new();
+
+        assert!(matches!(
+            core.advance(ReplayHorizon::Unbounded, &mut out),
+            Err(IssueError::TimeOverflow {
+                operation: "read-dependence barrier visibility",
+                base,
+                delta: 2,
+            }) if base == u64::MAX - 1
+        ));
+        assert!(out.is_empty());
+        assert_eq!(core.instructions_issued(), 0);
+        assert_eq!(core.warps[0].next, 0);
+        assert_eq!(core.warps[0].barrier_clear, [0; DEP_BARRIERS]);
+    }
+
+    #[test]
+    fn warm_l1_hit_ignores_an_overflowing_unused_miss_arm() {
+        let mut control = cb(1);
+        control.write_barrier = Some(barrier(0));
+        let sched = schedule(vec![(0, slot(control, OpClass::Other, "LDG.E"))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                warp_slot: 0,
+                insts: vec![ReplayInst {
+                    pc: 0,
+                    kind: eligible(0, 1),
+                }],
+                sectors: vec![0],
+            }],
+        }];
+        let mut p = params();
+        p.l1_hit_latency = 1;
+        p.l1_miss_latency = 2;
+
+        for shared in [false, true] {
+            let mode = if shared {
+                SmMemMode::L1Shared(p.l1_config(8, 1))
+            } else {
+                SmMemMode::L1Const(p.l1_config(8, 1))
+            };
+            let mut core = SmCore::new(&blocks, &sched, &p, mode).unwrap();
+            match &mut core.mem {
+                MemModel::L1Const(l1) => {
+                    assert!(matches!(
+                        l1.access_eligible(0, 0).unwrap(),
+                        (AccessOutcome::MissLineAlloc, 2)
+                    ));
+                    assert!(matches!(
+                        l1.access_eligible(0, 2).unwrap(),
+                        (AccessOutcome::Hit, 3)
+                    ));
+                }
+                MemModel::L1Shared(st) => {
+                    let EvAccess::MissRequest { fill } = st.l1.access_eligible_ev(0, 0).unwrap()
+                    else {
+                        panic!("expected cold prefill miss");
+                    };
+                    st.l1.complete_fill(fill).unwrap();
+                }
+                MemModel::Flat => panic!("expected an L1 mode"),
+            }
+            core.t = u64::MAX - 1;
+            let mut out = Vec::new();
+
+            assert_eq!(
+                core.advance(ReplayHorizon::Unbounded, &mut out).unwrap(),
+                Advance::Done
+            );
+            assert!(out.is_empty());
+            assert_eq!(core.result().cycles, u64::MAX);
+            assert_eq!(core.warps[0].barrier_clear[0], u64::MAX);
+        }
+    }
+
+    #[test]
+    fn unbarriered_warm_l1_hit_skips_unused_hit_visibility() {
+        let sched = schedule(vec![(0, slot(cb(1), OpClass::Other, "LDG.E"))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                warp_slot: 0,
+                insts: vec![ReplayInst {
+                    pc: 0,
+                    kind: eligible(0, 1),
+                }],
+                sectors: vec![0],
+            }],
+        }];
+        let mut p = params();
+        p.l1_hit_latency = 2;
+        p.l1_miss_latency = 3;
+
+        for shared in [false, true] {
+            let mode = if shared {
+                SmMemMode::L1Shared(p.l1_config(8, 1))
+            } else {
+                SmMemMode::L1Const(p.l1_config(8, 1))
+            };
+            let mut core = SmCore::new(&blocks, &sched, &p, mode).unwrap();
+            match &mut core.mem {
+                MemModel::L1Const(l1) => {
+                    assert!(matches!(
+                        l1.access_eligible(0, 0).unwrap(),
+                        (AccessOutcome::MissLineAlloc, 3)
+                    ));
+                    assert!(matches!(
+                        l1.access_eligible(0, 3).unwrap(),
+                        (AccessOutcome::Hit, 5)
+                    ));
+                }
+                MemModel::L1Shared(st) => {
+                    let EvAccess::MissRequest { fill } = st.l1.access_eligible_ev(0, 0).unwrap()
+                    else {
+                        panic!("expected cold prefill miss");
+                    };
+                    st.l1.complete_fill(fill).unwrap();
+                }
+                MemModel::Flat => panic!("expected an L1 mode"),
+            }
+            core.t = u64::MAX - 1;
+            let mut out = Vec::new();
+
+            assert_eq!(
+                core.advance(ReplayHorizon::Unbounded, &mut out).unwrap(),
+                Advance::Done
+            );
+            assert!(out.is_empty());
+            assert_eq!(core.result().cycles, u64::MAX);
+            assert_eq!(core.warps[0].barrier_clear, [0; DEP_BARRIERS]);
+        }
+    }
+
+    #[test]
+    fn cold_shared_l1_miss_overflow_remains_typed_and_nonmutating() {
+        let sched = schedule(vec![(0, slot(cb(1), OpClass::Other, "LDG.E"))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                warp_slot: 0,
+                insts: vec![ReplayInst {
+                    pc: 0,
+                    kind: eligible(0, 1),
+                }],
+                sectors: vec![0],
+            }],
+        }];
+        let mut p = params();
+        p.l1_hit_latency = 1;
+        p.l1_miss_latency = 2;
+        let mut core =
+            SmCore::new(&blocks, &sched, &p, SmMemMode::L1Shared(p.l1_config(8, 1))).unwrap();
+        core.t = u64::MAX - 1;
+        let before = *core.l1_counters().unwrap();
+        let mut out = Vec::new();
+
+        assert!(matches!(
+            core.advance(ReplayHorizon::Unbounded, &mut out),
+            Err(IssueError::TimeOverflow {
+                operation: "self-response horizon",
+                base,
+                delta: 2,
+            }) if base == u64::MAX - 1
+        ));
+        assert!(out.is_empty());
+        assert_eq!(core.instructions_issued(), 0);
+        assert_eq!(core.warps[0].next, 0);
+        assert_eq!(core.outstanding_responses(), 0);
+        assert_eq!(*core.l1_counters().unwrap(), before);
     }
 
     #[test]
@@ -4345,6 +4751,59 @@ mod tests {
     }
 
     #[test]
+    fn unbarriered_retry_hit_skips_unused_timing_arms() {
+        let sched = schedule(vec![(0, slot(cb(1), OpClass::Other, "LDG.E"))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                warp_slot: 0,
+                insts: vec![ReplayInst {
+                    pc: 0,
+                    kind: eligible(0, 1),
+                }],
+                sectors: vec![0, 8],
+            }],
+        }];
+        let mut core = shared_core(&blocks, &sched, &params());
+        let MemModel::L1Shared(st) = &mut core.mem else {
+            panic!("expected shared mode");
+        };
+        let EvAccess::MissRequest { fill } = st.l1.access_eligible_ev(8, 0).unwrap() else {
+            panic!("expected cold prefill miss");
+        };
+        st.l1.complete_fill(fill).unwrap();
+
+        let mut out = Vec::new();
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut out).unwrap(),
+            Advance::Done
+        );
+        assert_eq!(out.len(), 1, "cold issued load still owns an L1 fill");
+        let reply = out.pop().unwrap().reply;
+        let MemModel::L1Shared(st) = &mut core.mem else {
+            panic!("expected shared mode");
+        };
+        st.retry.push_back(Retry {
+            warp: 0,
+            instruction: 0,
+            barrier: None,
+            lo: 1,
+            hi: 2,
+        });
+        let hits_before = st.l1.counters.hits;
+
+        core.on_response(reply, u64::MAX - 1, &mut out).unwrap();
+        assert!(out.is_empty());
+        assert_eq!(core.outstanding_responses(), 0);
+        assert_eq!(core.l1_counters().unwrap().hits, hits_before + 1);
+        let MemModel::L1Shared(st) = &core.mem else {
+            panic!("expected shared mode");
+        };
+        assert!(st.retry.is_empty());
+        assert_eq!(core.warps[0].barrier_clear, [0; DEP_BARRIERS]);
+    }
+
+    #[test]
     fn shared_mode_mshr_stall_parks_and_retries_on_completion() {
         // MSHR capacity 1: the second warp's DIFFERENT-line load stalls,
         // parks, and retries when the first fill completes.
@@ -4399,9 +4858,9 @@ mod tests {
         assert!(matches!(
             core.on_response(first, u64::MAX - 1, &mut out),
             Err(IssueError::TimeOverflow {
-                operation: "retry L1 hit visibility",
+                operation: "retry self-response horizon",
                 base,
-                delta: 34,
+                delta: 244,
             }) if base == u64::MAX - 1
         ));
         assert!(out.is_empty());
