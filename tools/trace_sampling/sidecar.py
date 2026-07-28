@@ -199,7 +199,12 @@ def _validate_subset_semantics(sidecar: dict) -> None:
         if stratum["n_h"] > stratum["N_h"]:
             _fail(f"stratum {stratum_id} has n_h greater than N_h")
         expected_pi = stratum["n_h"] / stratum["N_h"]
-        if not math.isclose(stratum["pi"], expected_pi, rel_tol=0.0, abs_tol=1e-12):
+        # A fixed absolute floor would admit arbitrarily wrong probabilities as
+        # N_h grows. Keep only a relative allowance for cross-runtime float
+        # spelling; both values remain bound to the exact n_h/N_h integers.
+        if not math.isclose(
+                stratum["pi"], expected_pi,
+                rel_tol=1e-12, abs_tol=0.0):
             _fail(f"stratum {stratum_id} pi does not equal n_h/N_h")
         expected_weight = stratum["N_h"] * stratum["sector_stddev"]
         if not math.isclose(

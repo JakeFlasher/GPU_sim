@@ -923,6 +923,12 @@ fn sampling_u64_as_f64(value: u64) -> f64 {
     f64::from(high) * 4_294_967_296.0 + f64::from(low)
 }
 
+fn relative_close_enough(left: f64, right: f64) -> bool {
+    left.is_finite()
+        && right.is_finite()
+        && (left - right).abs() <= 1e-12 * left.abs().max(right.abs())
+}
+
 fn close_enough(left: f64, right: f64) -> bool {
     left.is_finite()
         && right.is_finite()
@@ -1365,7 +1371,9 @@ fn validate_subset_producer_contract(
         }
         let population_f64 = sampling_u64_as_f64(population);
         let expected_pi = sampling_u64_as_f64(sample) / population_f64;
-        if !close_enough(pi, expected_pi) {
+        // An absolute floor would admit arbitrarily wrong probabilities as N_h
+        // grows. Keep only a relative allowance for cross-runtime float spelling.
+        if !relative_close_enough(pi, expected_pi) {
             return Err(format!("{context} has inconsistent design provenance"));
         }
         let expected_weight = population_f64 * stddev;
@@ -3658,6 +3666,29 @@ mod sampling_sidecar_tests {
                 );
             }
             other => panic!("expected stratum cardinality rejection, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn max_population_probability_has_no_absolute_tolerance_floor() {
+        let population = sampling_u64_as_f64(u64::MAX);
+        assert!(!relative_close_enough(1e-13, 2.0 / population));
+
+        let mut value = subset_value();
+        value["strata"][0]["N_h"] = serde_json::json!(u64::MAX);
+        value["strata"][0]["pi"] = serde_json::json!(1e-13);
+        value["strata"][0]["sector_stddev"] = serde_json::json!(0.0);
+        value["strata"][0]["neyman_weight"] = serde_json::json!(0.0);
+        reseal(&mut value);
+
+        match load_json(serde_json::to_vec(&value).unwrap()) {
+            Err(TraceError::SamplingSidecarMalformed { message, .. }) => {
+                assert!(
+                    message.contains("inconsistent design provenance"),
+                    "{message}"
+                );
+            }
+            other => panic!("expected inconsistent probability rejection, got {other:?}"),
         }
     }
 

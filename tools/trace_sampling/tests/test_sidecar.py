@@ -5,7 +5,7 @@ import pytest
 
 from counting_pass import BlockStat, CellStats
 from sidecar import (SidecarSemanticError, build_sidecar, is_valid,
-                     validate_sidecar, write_sidecar)
+                     sidecar_sha256, validate_sidecar, write_sidecar)
 
 
 class _Comp:
@@ -265,6 +265,21 @@ def test_subset_stratum_probability_and_neyman_weight_are_exact():
     sc = _subset()
     sc["strata"][0]["neyman_weight"] = 3.9
     with pytest.raises(SidecarSemanticError, match="neyman_weight"):
+        validate_sidecar(sc)
+
+
+def test_subset_stratum_probability_has_no_absolute_tolerance_floor():
+    sc = _subset()
+    sc["strata"][0].update({
+        "N_h": (1 << 64) - 1,
+        "pi": 1e-13,
+        "sector_stddev": 0.0,
+        "neyman_weight": 0.0,
+    })
+    sc["hashes"].pop("sidecar_sha256")
+    sc["hashes"]["sidecar_sha256"] = sidecar_sha256(sc)
+
+    with pytest.raises(SidecarSemanticError, match="pi"):
         validate_sidecar(sc)
 
 
