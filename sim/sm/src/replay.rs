@@ -62,6 +62,8 @@ pub enum ReplayError {
     System(#[from] SystemError),
     #[error("L2 config invalid: {0}")]
     L2Config(#[from] sim_mem::L2ConfigError),
+    #[error("L2 construction failed: {0}")]
+    L2Build(#[from] sim_mem::L2BuildError),
     #[error("SM {sm_id} L1 counter aggregation failed: {source}")]
     L1Aggregation {
         sm_id: i32,

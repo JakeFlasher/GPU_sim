@@ -51,8 +51,9 @@ pub use l1::{
 };
 pub use l2::{
     DOCUMENTED_DEFAULT_L2_ASSOCIATIVITY, DOCUMENTED_DEFAULT_L2_REPLACEMENT,
-    DOCUMENTED_DEFAULT_L2_SLICE_HASH, L2Config, L2ConfigError, L2CounterError, L2CounterField,
-    L2Counters, L2MaskPreview, L2Model, L2OpClass, L2Outcome, L2Replacement, L2Source, SliceHash,
+    DOCUMENTED_DEFAULT_L2_SLICE_HASH, L2BuildError, L2Config, L2ConfigError, L2CounterError,
+    L2CounterField, L2Counters, L2MaskPreview, L2Model, L2OpClass, L2Outcome, L2Replacement,
+    L2Source, SliceHash,
 };
 pub use pchase_card::{
     DOCUMENTED_DEFAULT_MSHR_COUNT, GeometryPolicyConfig, LatencyConfig, LineCapacityConfig,

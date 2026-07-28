@@ -151,6 +151,25 @@ pub enum L2ConfigError {
     WritePolicyUnsupported { policy: String },
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum L2BuildError {
+    #[error(transparent)]
+    Config(#[from] L2ConfigError),
+    #[error("L2 set count overflows u64: num_slices={num_slices}, sets_per_slice={sets_per_slice}")]
+    SetCountOverflow {
+        num_slices: u32,
+        sets_per_slice: u64,
+    },
+    #[error("L2 set count {set_count} does not fit usize")]
+    SetCountOutOfRange { set_count: u64 },
+    #[error("failed to allocate storage for {set_count} L2 sets: {source}")]
+    SetStorageAllocation {
+        set_count: usize,
+        #[source]
+        source: std::collections::TryReserveError,
+    },
+}
+
 /// Arches whose documented-default L2 knobs (associativity 16, LRU,
 /// line_mod) have been REVIEWED against available public evidence.
 /// Same per-arch-set pattern as `cache_op::BARE_LDG_E_DEFAULTS_TO_CA`:
@@ -271,18 +290,23 @@ impl L2Config {
     }
 
     /// `max(1, capacity // line)` — Python `total_lines`.
-    pub fn total_lines(&self) -> u64 {
-        (self.capacity_bytes / u64::from(self.line_bytes)).max(1)
+    pub fn total_lines(&self) -> Result<u64, L2ConfigError> {
+        self.validate()?;
+        Ok((self.capacity_bytes / u64::from(self.line_bytes)).max(1))
     }
 
     /// `max(1, max(1, total_lines // num_slices) // associativity)` —
     /// Python `num_sets_per_slice`.
-    pub fn num_sets_per_slice(&self) -> u64 {
-        (self.total_lines() / u64::from(self.num_slices))
-            .max(1)
+    pub fn num_sets_per_slice(&self) -> Result<u64, L2ConfigError> {
+        let total_lines = self.total_lines()?;
+        let per_slice = total_lines
+            .checked_div(u64::from(self.num_slices))
+            .ok_or(L2ConfigError::SlicesZero)?
+            .max(1);
+        Ok(per_slice
             .checked_div(u64::from(self.associativity))
-            .expect("associativity validated nonzero")
-            .max(1)
+            .ok_or(L2ConfigError::AssociativityZero)?
+            .max(1))
     }
 }
 
@@ -515,17 +539,35 @@ pub struct L2Model {
     pub counters: L2Counters,
 }
 
+fn checked_set_count(num_slices: u32, sets_per_slice: u64) -> Result<usize, L2BuildError> {
+    let set_count = u64::from(num_slices).checked_mul(sets_per_slice).ok_or(
+        L2BuildError::SetCountOverflow {
+            num_slices,
+            sets_per_slice,
+        },
+    )?;
+    usize::try_from(set_count).map_err(|_| L2BuildError::SetCountOutOfRange { set_count })
+}
+
+fn allocate_set_storage(set_count: usize) -> Result<Vec<Vec<Way>>, L2BuildError> {
+    let mut sets = Vec::new();
+    sets.try_reserve_exact(set_count)
+        .map_err(|source| L2BuildError::SetStorageAllocation { set_count, source })?;
+    sets.resize_with(set_count, Vec::new);
+    Ok(sets)
+}
+
 impl L2Model {
-    pub fn new(cfg: L2Config) -> Result<Self, L2ConfigError> {
+    pub fn new(cfg: L2Config) -> Result<Self, L2BuildError> {
         cfg.validate()?;
-        let num_sets = cfg.num_sets_per_slice();
-        let n = usize::try_from(u64::from(cfg.num_slices) * num_sets)
-            .expect("set count fits usize on 64-bit targets");
+        let num_sets = cfg.num_sets_per_slice()?;
+        let set_count = checked_set_count(cfg.num_slices, num_sets)?;
+        let sets = allocate_set_storage(set_count)?;
         let arch = cfg.arch;
         Ok(Self {
             cfg,
             num_sets,
-            sets: vec![Vec::new(); n],
+            sets,
             clock: 0,
             bip_counter: 0,
             counters: L2Counters::for_arch(arch),
@@ -876,12 +918,63 @@ mod tests {
     #[test]
     fn geometry_derivation_matches_python() {
         let c = cfg(6_291_456, 16, 6);
-        assert_eq!(c.total_lines(), 49_152);
-        assert_eq!(c.num_sets_per_slice(), 512);
+        assert_eq!(c.total_lines().unwrap(), 49_152);
+        assert_eq!(c.num_sets_per_slice().unwrap(), 512);
         // Tiny degenerate config exercises both max(1, ·) clamps.
         let tiny = cfg(1024, 16, 6);
-        assert_eq!(tiny.total_lines(), 8);
-        assert_eq!(tiny.num_sets_per_slice(), 1);
+        assert_eq!(tiny.total_lines().unwrap(), 8);
+        assert_eq!(tiny.num_sets_per_slice().unwrap(), 1);
+    }
+
+    #[test]
+    fn invalid_geometry_and_set_storage_fail_typed() {
+        let mut zero_line = cfg(1024, 16, 6);
+        zero_line.line_bytes = 0;
+        assert!(matches!(
+            zero_line.total_lines(),
+            Err(L2ConfigError::UnsupportedGranularity {
+                line: 0,
+                sector: 32,
+            })
+        ));
+        assert!(matches!(
+            L2Model::new(zero_line),
+            Err(L2BuildError::Config(
+                L2ConfigError::UnsupportedGranularity {
+                    line: 0,
+                    sector: 32,
+                }
+            ))
+        ));
+
+        let mut zero_slices = cfg(1024, 16, 1);
+        zero_slices.num_slices = 0;
+        assert!(matches!(
+            zero_slices.num_sets_per_slice(),
+            Err(L2ConfigError::SlicesZero)
+        ));
+
+        let mut zero_assoc = cfg(1024, 1, 1);
+        zero_assoc.associativity = 0;
+        assert!(matches!(
+            zero_assoc.num_sets_per_slice(),
+            Err(L2ConfigError::AssociativityZero)
+        ));
+
+        assert!(matches!(
+            checked_set_count(u32::MAX, u64::MAX),
+            Err(L2BuildError::SetCountOverflow {
+                num_slices: u32::MAX,
+                sets_per_slice: u64::MAX,
+            })
+        ));
+        assert!(matches!(
+            allocate_set_storage(usize::MAX),
+            Err(L2BuildError::SetStorageAllocation {
+                set_count: usize::MAX,
+                ..
+            })
+        ));
     }
 
     #[test]
