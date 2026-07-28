@@ -45,6 +45,25 @@ use std::collections::{BTreeMap, BinaryHeap};
 /// in L2Access-processing order, which is not bound order.
 struct UnpricedBounds(Vec<BTreeMap<u64, u32>>);
 
+#[derive(Debug, Clone, Copy)]
+enum UnpricedRemoval {
+    Decrement { sm: usize, bound: u64, next: u32 },
+    Remove { sm: usize, bound: u64 },
+}
+
+impl UnpricedRemoval {
+    fn commit(self, bounds: &mut UnpricedBounds) {
+        match self {
+            Self::Decrement { sm, bound, next } => {
+                bounds.0[sm].insert(bound, next);
+            }
+            Self::Remove { sm, bound } => {
+                bounds.0[sm].remove(&bound);
+            }
+        }
+    }
+}
+
 impl UnpricedBounds {
     fn insert(&mut self, sm: usize, bound: u64) -> Result<(), SystemError> {
         let next = self.0[sm]
@@ -59,24 +78,15 @@ impl UnpricedBounds {
         Ok(())
     }
 
-    fn remove(&mut self, sm: usize, bound: u64) -> Result<(), SystemError> {
+    fn prepare_remove(&self, sm: usize, bound: u64) -> Result<UnpricedRemoval, SystemError> {
         match self.0[sm].get(&bound).copied() {
-            Some(n) if n > 1 => {
-                self.0[sm].insert(bound, n - 1);
-            }
-            Some(_) => {
-                self.0[sm].remove(&bound);
-            }
-            None => return Err(SystemError::UnpricedBoundMissing { sm, bound }),
-        }
-        Ok(())
-    }
-
-    fn require(&self, sm: usize, bound: u64) -> Result<(), SystemError> {
-        if self.0[sm].contains_key(&bound) {
-            Ok(())
-        } else {
-            Err(SystemError::UnpricedBoundMissing { sm, bound })
+            Some(n) if n > 1 => Ok(UnpricedRemoval::Decrement {
+                sm,
+                bound,
+                next: n - 1,
+            }),
+            Some(_) => Ok(UnpricedRemoval::Remove { sm, bound }),
+            None => Err(SystemError::UnpricedBoundMissing { sm, bound }),
         }
     }
 
@@ -226,6 +236,8 @@ pub enum SystemError {
     Issue(#[from] IssueError),
     #[error(transparent)]
     Engine(#[from] EngineError),
+    #[error(transparent)]
+    L2(#[from] sim_mem::L2AccessError),
     #[error(
         "event queue drained with sm {sm_id} unfinished ({outstanding} response(s) recorded \
          outstanding) — request/response wiring invariant broken"
@@ -340,6 +352,11 @@ impl SpinGuard {
         })
     }
 
+    fn on_progress_event(&mut self, time: u64) {
+        self.last_time = time;
+        self.idle_wakes = 0;
+    }
+
     /// Record one processed event. `idle_wake` marks an `SmWake` whose
     /// actor neither issued an instruction nor emitted a request; every
     /// other event kind (and any clock advance) resets the streak.
@@ -373,6 +390,21 @@ enum Ev {
     SmWake,
     L2Access(MemRequest),
     MemResponse(ReplyTo),
+}
+
+struct L2ResponseCommit {
+    ready: u64,
+    next_delayed: u64,
+    unpriced_removal: UnpricedRemoval,
+}
+
+struct L2SystemCommit {
+    source_ix: usize,
+    source_sectors: u64,
+    source_hits: u64,
+    read_sectors: u64,
+    dram_free_fp: Option<u128>,
+    response: Option<L2ResponseCommit>,
 }
 
 /// Aggregate DRAM read-bandwidth model (the §6.3 "DRAM
@@ -705,113 +737,126 @@ pub fn simulate_kernel_shared(
                     });
                 }
 
-                // Predict this exact ascending mask walk without mutating
-                // the caller-owned L2. Outcome-dependent timing, counters,
-                // and DRAM service can then fail before the first access.
+                // Prepare the exact ascending mask walk against a private
+                // copy of its set. Every system-side calculation and response
+                // insertion succeeds before the L2 plan becomes visible.
                 let line = req.sector_id >> 2;
-                let preview = l2.preview_mask(line, req.sector_mask, req.class);
-                let requested_sectors = u64::from(preview.sectors);
-                let counted_hits = u64::from(preview.counted_hits);
-                let source_ix = req.source as usize;
-                let next_source_sectors = l2_by_source.sectors[source_ix]
-                    .checked_add(requested_sectors)
-                    .ok_or(SystemCounterError::Overflow {
-                        counter: "L2 source sectors",
-                    })?;
-                let next_source_hits = l2_by_source.hits[source_ix]
-                    .checked_add(counted_hits)
-                    .ok_or(SystemCounterError::Overflow {
-                        counter: "L2 source hits",
-                    })?;
+                let (_, commit) = l2.access_mask_transactional(
+                    line,
+                    req.sector_mask,
+                    req.class,
+                    |preview| -> Result<L2SystemCommit, SystemError> {
+                        let requested_sectors = u64::from(preview.sectors);
+                        let counted_hits = u64::from(preview.counted_hits);
+                        let source_ix = req.source as usize;
+                        let next_source_sectors = l2_by_source.sectors[source_ix]
+                            .checked_add(requested_sectors)
+                            .ok_or(SystemCounterError::Overflow {
+                                counter: "L2 source sectors",
+                            })?;
+                        let next_source_hits = l2_by_source.hits[source_ix]
+                            .checked_add(counted_hits)
+                            .ok_or(SystemCounterError::Overflow {
+                                counter: "L2 source hits",
+                            })?;
 
-                let can_fetch = req.class == sim_mem::L2OpClass::Read || req.reply != ReplyTo::None;
-                let fetch_sectors = if can_fetch {
-                    requested_sectors
-                        .checked_sub(u64::from(preview.present_sectors))
-                        .ok_or(SystemError::CounterOverflow {
-                            counter: "DRAM fetch sectors per request",
-                        })?
-                } else {
-                    0
-                };
-                let next_read_sectors = dram_stats.read_sectors.checked_add(fetch_sectors).ok_or(
-                    SystemError::CounterOverflow {
-                        counter: "DRAM read sectors",
+                        let can_fetch =
+                            req.class == sim_mem::L2OpClass::Read || req.reply != ReplyTo::None;
+                        let fetch_sectors = if can_fetch {
+                            requested_sectors
+                                .checked_sub(u64::from(preview.present_sectors))
+                                .ok_or(SystemError::CounterOverflow {
+                                    counter: "DRAM fetch sectors per request",
+                                })?
+                        } else {
+                            0
+                        };
+                        let next_read_sectors = dram_stats
+                            .read_sectors
+                            .checked_add(fetch_sectors)
+                            .ok_or(SystemError::CounterOverflow {
+                                counter: "DRAM read sectors",
+                            })?;
+                        let service_preview = if fetch_sectors > 0 {
+                            let bytes = fetch_sectors.checked_mul(32).ok_or(
+                                SystemError::CounterOverflow {
+                                    counter: "DRAM request bytes",
+                                },
+                            )?;
+                            match &dram_server {
+                                Some(server) => Some(server.preview(req.issue_time, bytes)?),
+                                None => None,
+                            }
+                        } else {
+                            None
+                        };
+                        let bw_ready = service_preview.map_or(0, |(_, ready)| ready);
+
+                        let response = if req.reply != ReplyTo::None {
+                            let bound = checked_cycle_add(
+                                "unpriced L2-hit response bound",
+                                req.issue_time,
+                                params.l1_miss_latency,
+                            )?;
+                            let unpriced_removal = unpriced.prepare_remove(sm_ix, bound)?;
+                            let latency_ready = if preview.all_present() {
+                                bound
+                            } else {
+                                checked_cycle_add(
+                                    "DRAM response visibility",
+                                    req.issue_time,
+                                    params.global_flat_latency,
+                                )?
+                            };
+                            let ready = latency_ready.max(bw_ready);
+                            if ready < bound {
+                                return Err(SystemError::ResponseBeforeBound {
+                                    sm: sm_ix,
+                                    ready,
+                                    bound,
+                                });
+                            }
+                            let next_delayed = dram_stats
+                                .bw_delayed_responses
+                                .checked_add(u64::from(ready > latency_ready))
+                                .ok_or(SystemError::CounterOverflow {
+                                    counter: "DRAM bandwidth-delayed responses",
+                                })?;
+                            queue.schedule_at(ready, ev.target, Ev::MemResponse(req.reply))?;
+                            Some(L2ResponseCommit {
+                                ready,
+                                next_delayed,
+                                unpriced_removal,
+                            })
+                        } else {
+                            None
+                        };
+
+                        Ok(L2SystemCommit {
+                            source_ix,
+                            source_sectors: next_source_sectors,
+                            source_hits: next_source_hits,
+                            read_sectors: next_read_sectors,
+                            dram_free_fp: service_preview.map(|(done, _)| done),
+                            response,
+                        })
                     },
                 )?;
-                let service_preview = if fetch_sectors > 0 {
-                    let bytes =
-                        fetch_sectors
-                            .checked_mul(32)
-                            .ok_or(SystemError::CounterOverflow {
-                                counter: "DRAM request bytes",
-                            })?;
-                    match &dram_server {
-                        Some(server) => Some(server.preview(req.issue_time, bytes)?),
-                        None => None,
-                    }
-                } else {
-                    None
-                };
-                let bw_ready = service_preview.map_or(0, |(_, ready)| ready);
 
-                let response_plan = if req.reply != ReplyTo::None {
-                    let bound = checked_cycle_add(
-                        "unpriced L2-hit response bound",
-                        req.issue_time,
-                        params.l1_miss_latency,
-                    )?;
-                    unpriced.require(sm_ix, bound)?;
-                    let latency_ready = if preview.all_present() {
-                        bound
-                    } else {
-                        checked_cycle_add(
-                            "DRAM response visibility",
-                            req.issue_time,
-                            params.global_flat_latency,
-                        )?
-                    };
-                    let ready = latency_ready.max(bw_ready);
-                    if ready < bound {
-                        return Err(SystemError::ResponseBeforeBound {
-                            sm: sm_ix,
-                            ready,
-                            bound,
-                        });
-                    }
-                    let next_delayed = dram_stats
-                        .bw_delayed_responses
-                        .checked_add(u64::from(ready > latency_ready))
-                        .ok_or(SystemError::CounterOverflow {
-                            counter: "DRAM bandwidth-delayed responses",
-                        })?;
-                    Some((bound, ready, next_delayed))
-                } else {
-                    None
-                };
-
-                // Commit the already-preflighted mask walk in the same
-                // ascending order used by preview_mask.
-                for sector in 0..4u8 {
-                    if req.sector_mask & (1 << sector) != 0 {
-                        l2.access(line, sector, req.class);
-                    }
-                }
-                l2_by_source.sectors[source_ix] = next_source_sectors;
-                l2_by_source.hits[source_ix] = next_source_hits;
-                dram_stats.read_sectors = next_read_sectors;
-                if let Some((done, _)) = service_preview
+                l2_by_source.sectors[commit.source_ix] = commit.source_sectors;
+                l2_by_source.hits[commit.source_ix] = commit.source_hits;
+                dram_stats.read_sectors = commit.read_sectors;
+                if let Some(done) = commit.dram_free_fp
                     && let Some(server) = &mut dram_server
                 {
                     server.free_fp = done;
                 }
-                if let Some((bound, ready, next_delayed)) = response_plan {
-                    dram_stats.bw_delayed_responses = next_delayed;
-                    queue.schedule_at(ready, ev.target, Ev::MemResponse(req.reply))?;
-                    response_due.push(sm_ix, ready);
-                    unpriced.remove(sm_ix, bound)?;
+                if let Some(response) = commit.response {
+                    dram_stats.bw_delayed_responses = response.next_delayed;
+                    response_due.push(sm_ix, response.ready);
+                    response.unpriced_removal.commit(&mut unpriced);
                 }
-                spin.on_event(ev.time, false)?;
+                spin.on_progress_event(ev.time);
             }
             Ev::MemResponse(reply) => {
                 cores[sm_ix].preflight_response(reply, ev.time)?;

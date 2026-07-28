@@ -54,6 +54,35 @@ pub const DOCUMENTED_DEFAULT_L2_ASSOCIATIVITY: u32 = 16;
 /// The six pre-registered slice-hash candidates, ported bit-exactly from
 /// `SLICE_HASH_REGISTRY`. The card records only the slice COUNT
 /// (vendor-documented); which hash the crossbar uses is a research gap.
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+pub enum L2SetIndexError {
+    #[error("L2 slice count must be positive")]
+    SlicesZero,
+    #[error("L2 sets per slice must be positive")]
+    SetsPerSliceZero,
+    #[error("L2 sets per slice {sets_per_slice} does not fit i64")]
+    SetsPerSliceOutOfSignedRange { sets_per_slice: u64 },
+    #[error("L2 slice index {slice} does not fit u32")]
+    SliceOutOfRange { slice: i64 },
+    #[error("L2 set index {set_index} does not fit u64")]
+    SetIndexOutOfRange { set_index: i64 },
+    #[error(
+        "L2 set key overflows u64: slice={slice}, sets_per_slice={sets_per_slice}, set_index={set_index}"
+    )]
+    SetKeyOverflow {
+        slice: u32,
+        sets_per_slice: u64,
+        set_index: u64,
+    },
+    #[error("L2 set key {set_key} does not fit usize")]
+    SetKeyOutOfRange { set_key: u64 },
+    #[error("L2 set key {set_key} is outside {allocated_sets} allocated sets")]
+    SetKeyOutsideStorage {
+        set_key: usize,
+        allocated_sets: usize,
+    },
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SliceHash {
     /// Documented-default candidate (v0 approximation).
@@ -79,7 +108,10 @@ impl SliceHash {
     /// (a `base_delta` stream summing below zero is structurally legal)
     /// replays identically instead of wrapping through `u64`.
     /// Pinned-value tests below cover both signs.
-    pub fn slice_of(self, line_id: i64, num_slices: u32) -> u32 {
+    pub fn slice_of(self, line_id: i64, num_slices: u32) -> Result<u32, L2SetIndexError> {
+        if num_slices == 0 {
+            return Err(L2SetIndexError::SlicesZero);
+        }
         let n = i64::from(num_slices);
         let s = match self {
             SliceHash::LineMod => line_id.rem_euclid(n),
@@ -98,7 +130,7 @@ impl SliceHash {
             SliceHash::ShiftMod => (line_id >> 1).rem_euclid(n),
             SliceHash::BitReverse => i64::from((line_id as u16).reverse_bits()).rem_euclid(n),
         };
-        s as u32
+        u32::try_from(s).map_err(|_| L2SetIndexError::SliceOutOfRange { slice: s })
     }
 }
 
@@ -364,8 +396,9 @@ pub struct L2Outcome {
 }
 
 /// Read-only prediction for an ascending sector-mask walk of one line.
-/// The event system uses this to preflight outcome-dependent response and
-/// DRAM arithmetic before [`L2Model::access`] mutates cache state.
+/// [`L2Model::access_mask_transactional`] supplies this preview to its
+/// pre-commit callback so outcome-dependent system work can fail before the
+/// prepared cache state becomes visible.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct L2MaskPreview {
     pub sectors: u32,
@@ -377,6 +410,47 @@ impl L2MaskPreview {
     pub fn all_present(self) -> bool {
         self.present_sectors == self.sectors
     }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum L2AccessError {
+    #[error("L2 sector {sector} is outside the 0..4 sector domain")]
+    SectorOutOfRange { sector: u8 },
+    #[error("L2 sector mask {sector_mask:#06b} must select one or more of bits 0..4")]
+    SectorMaskInvalid { sector_mask: u8 },
+    #[error(transparent)]
+    SetIndex(#[from] L2SetIndexError),
+    #[error("L2 access clock overflows i64 at {clock}")]
+    ClockOverflow { clock: i64 },
+    #[error("L2 BIP insertion counter overflows u64 at {counter}")]
+    BipCounterOverflow { counter: u64 },
+    #[error("L2 BIP recency underflows below minimum {minimum} in set {set_key}")]
+    BipRecencyUnderflow { set_key: usize, minimum: i64 },
+    #[error("L2 associativity {associativity} does not fit usize")]
+    AssociativityOutOfRange { associativity: u32 },
+    #[error("L2 set {set_key} has {ways} ways, above associativity {associativity}")]
+    SetOverfull {
+        set_key: usize,
+        ways: usize,
+        associativity: usize,
+    },
+    #[error("L2 replacement set {set_key} is unexpectedly empty")]
+    ReplacementSetEmpty { set_key: usize },
+    #[error("L2 SRRIP way {way} in set {set_key} has invalid recency {recency}")]
+    SrripRecencyOutOfRange {
+        set_key: usize,
+        way: usize,
+        recency: i64,
+    },
+    #[error("failed to reserve {additional} L2 way slot(s) in set {set_key}: {source}")]
+    SetStorageAllocation {
+        set_key: usize,
+        additional: usize,
+        #[source]
+        source: std::collections::TryReserveError,
+    },
+    #[error(transparent)]
+    Counter(#[from] L2CounterError),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -515,7 +589,7 @@ impl L2Counters {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 struct Way {
     /// Full line id as the tag (signed: negative wire-admitted ids
     /// replay with Python's floored semantics, never wrapped).
@@ -578,18 +652,179 @@ impl L2Model {
         &self.cfg
     }
 
+    fn set_key(&self, line_id: i64) -> Result<usize, L2SetIndexError> {
+        if self.cfg.num_slices == 0 {
+            return Err(L2SetIndexError::SlicesZero);
+        }
+        if self.num_sets == 0 {
+            return Err(L2SetIndexError::SetsPerSliceZero);
+        }
+        let signed_sets = i64::try_from(self.num_sets).map_err(|_| {
+            L2SetIndexError::SetsPerSliceOutOfSignedRange {
+                sets_per_slice: self.num_sets,
+            }
+        })?;
+        let slice = self.cfg.slice_hash.slice_of(line_id, self.cfg.num_slices)?;
+        let set_index_signed = line_id
+            .div_euclid(i64::from(self.cfg.num_slices))
+            .rem_euclid(signed_sets);
+        let set_index =
+            u64::try_from(set_index_signed).map_err(|_| L2SetIndexError::SetIndexOutOfRange {
+                set_index: set_index_signed,
+            })?;
+        let set_key = u64::from(slice)
+            .checked_mul(self.num_sets)
+            .and_then(|base| base.checked_add(set_index))
+            .ok_or(L2SetIndexError::SetKeyOverflow {
+                slice,
+                sets_per_slice: self.num_sets,
+                set_index,
+            })?;
+        let set_key =
+            usize::try_from(set_key).map_err(|_| L2SetIndexError::SetKeyOutOfRange { set_key })?;
+        if set_key >= self.sets.len() {
+            return Err(L2SetIndexError::SetKeyOutsideStorage {
+                set_key,
+                allocated_sets: self.sets.len(),
+            });
+        }
+        Ok(set_key)
+    }
+
+    fn prepare_mask(
+        &mut self,
+        line_id: i64,
+        sector_mask: u8,
+        class: L2OpClass,
+    ) -> Result<PreparedMaskAccess, L2AccessError> {
+        validate_sector_mask(sector_mask)?;
+        let set_key = self.set_key(line_id)?;
+        let associativity = usize::try_from(self.cfg.associativity).map_err(|_| {
+            L2AccessError::AssociativityOutOfRange {
+                associativity: self.cfg.associativity,
+            }
+        })?;
+        let ways = &mut self.sets[set_key];
+        if ways.len() > associativity {
+            return Err(L2AccessError::SetOverfull {
+                set_key,
+                ways: ways.len(),
+                associativity,
+            });
+        }
+        validate_srrip_recencies(ways, set_key, self.cfg.replacement)?;
+
+        let resident = ways.iter().position(|way| way.tag == line_id);
+        let mut update = resident.map(|way| PreparedSetUpdate::Update {
+            way,
+            value: ways[way],
+        });
+        let mut line_present = resident.is_some();
+        let mut valid_mask = resident.map_or(0, |way| ways[way].mask);
+        let mut clock = self.clock;
+        let mut bip_counter = self.bip_counter;
+        let mut counters = self.counters;
+        let mut counted_mask = 0u8;
+        let mut present_mask = 0u8;
+
+        for sector in 0..4u8 {
+            let bit = 1u8 << sector;
+            if sector_mask & bit == 0 {
+                continue;
+            }
+            clock = clock
+                .checked_add(1)
+                .ok_or(L2AccessError::ClockOverflow { clock })?;
+            let sector_present = line_present && valid_mask & bit != 0;
+            let counted_hit = sector_present || (line_present && class == L2OpClass::WriteAtomic);
+
+            if !line_present {
+                let next_bip_counter =
+                    if self.cfg.replacement == L2Replacement::Bip {
+                        Some(bip_counter.checked_add(1).ok_or(
+                            L2AccessError::BipCounterOverflow {
+                                counter: bip_counter,
+                            },
+                        )?)
+                    } else {
+                        None
+                    };
+                update = Some(prepare_install(
+                    ways,
+                    set_key,
+                    line_id,
+                    bit,
+                    associativity,
+                    self.cfg.replacement,
+                    clock,
+                    bip_counter,
+                )?);
+                let mut delta = L2Counters::for_arch(bound_counter_arch(&counters)?);
+                delta.misses = 1;
+                delta.line_misses = 1;
+                counters.add_checked(&delta)?;
+                if let Some(next) = next_bip_counter {
+                    bip_counter = next;
+                }
+            } else {
+                let value = update
+                    .as_mut()
+                    .ok_or(L2AccessError::ReplacementSetEmpty { set_key })?
+                    .value_mut();
+                value.recency = match self.cfg.replacement {
+                    L2Replacement::Srrip => 0,
+                    _ => clock,
+                };
+                value.mask |= bit;
+                let mut delta = L2Counters::for_arch(bound_counter_arch(&counters)?);
+                if counted_hit {
+                    delta.hits = 1;
+                    if !sector_present && class == L2OpClass::WriteAtomic {
+                        delta.write_tag_hits = 1;
+                    }
+                } else {
+                    delta.misses = 1;
+                    delta.sector_fill_misses = 1;
+                }
+                counters.add_checked(&delta)?;
+            }
+
+            if counted_hit {
+                counted_mask |= bit;
+            }
+            if sector_present {
+                present_mask |= bit;
+            }
+            line_present = true;
+            valid_mask |= bit;
+        }
+
+        Ok(PreparedMaskAccess {
+            set_key,
+            update: update.ok_or(L2AccessError::ReplacementSetEmpty { set_key })?,
+            clock,
+            bip_counter,
+            counters,
+            preview: L2MaskPreview {
+                sectors: sector_mask.count_ones(),
+                counted_hits: counted_mask.count_ones(),
+                present_sectors: present_mask.count_ones(),
+            },
+        })
+    }
+
     /// Predict an ascending walk of `sector_mask` for one line without
     /// changing recency, replacement, validity, or counters. The local mask
     /// tracks sectors validated by earlier bits in the same request, exactly
     /// matching repeated [`Self::access`] calls in ascending sector order.
-    pub fn preview_mask(&self, line_id: i64, sector_mask: u8, class: L2OpClass) -> L2MaskPreview {
-        debug_assert!(sector_mask != 0 && sector_mask & !0b1111 == 0);
-        let slice = u64::from(self.cfg.slice_hash.slice_of(line_id, self.cfg.num_slices));
-        let set_idx = line_id
-            .div_euclid(i64::from(self.cfg.num_slices))
-            .rem_euclid(self.num_sets as i64) as u64;
-        let set_key = usize::try_from(slice * self.num_sets + set_idx)
-            .expect("set key fits usize on 64-bit targets");
+    pub fn preview_mask(
+        &self,
+        line_id: i64,
+        sector_mask: u8,
+        class: L2OpClass,
+    ) -> Result<L2MaskPreview, L2AccessError> {
+        validate_sector_mask(sector_mask)?;
+        let set_key = self.set_key(line_id)?;
         let resident = self.sets[set_key].iter().find(|w| w.tag == line_id);
         let mut line_present = resident.is_some();
         let mut valid_mask = resident.map_or(0, |w| w.mask);
@@ -610,11 +845,11 @@ impl L2Model {
             line_present = true;
             valid_mask |= bit;
         }
-        L2MaskPreview {
+        Ok(L2MaskPreview {
             sectors: sector_mask.count_ones(),
             counted_hits: counted_mask.count_ones(),
             present_sectors: present_mask.count_ones(),
-        }
+        })
     }
 
     /// One 32 B sector access in global request order. `line_id` is the
@@ -624,154 +859,255 @@ impl L2Model {
     /// [`L2OpClass`]es — the class only changes how a resident-line /
     /// invalid-sector access is COUNTED (Read: sector-fill miss, the
     /// ported Python rule; WriteAtomic: tag-match hit).
-    pub fn access(&mut self, line_id: i64, sector: u8, class: L2OpClass) -> L2Outcome {
-        debug_assert!(sector < 4);
-        let line = line_id;
-        let sbit = 1u8 << sector;
-        let slice = u64::from(self.cfg.slice_hash.slice_of(line, self.cfg.num_slices));
-        let set_idx = line
-            .div_euclid(i64::from(self.cfg.num_slices))
-            .rem_euclid(self.num_sets as i64) as u64;
-        let set_key = usize::try_from(slice * self.num_sets + set_idx)
-            .expect("set key fits usize on 64-bit targets");
-        self.clock += 1;
+    pub fn access(
+        &mut self,
+        line_id: i64,
+        sector: u8,
+        class: L2OpClass,
+    ) -> Result<L2Outcome, L2AccessError> {
+        if sector >= 4 {
+            return Err(L2AccessError::SectorOutOfRange { sector });
+        }
+        let sector_mask = 1u8 << sector;
+        let (preview, ()) = self.access_mask_transactional(line_id, sector_mask, class, |_| {
+            Ok::<(), L2AccessError>(())
+        })?;
+        Ok(L2Outcome {
+            counted_hit: preview.counted_hits == 1,
+            sector_present: preview.present_sectors == 1,
+        })
+    }
 
-        let policy = self.cfg.replacement;
-        let ways = &mut self.sets[set_key];
-        if let Some(way) = ways.iter_mut().find(|w| w.tag == line) {
-            let resident_hit = way.mask & sbit != 0;
-            way.recency = match policy {
-                L2Replacement::Srrip => 0,
-                _ => self.clock,
-            };
-            if resident_hit {
-                self.counters.hits += 1;
-                return L2Outcome {
-                    counted_hit: true,
-                    sector_present: true,
-                };
+    /// Prepare one ascending mask walk, run all caller-owned fallible work
+    /// against its exact outcome preview, and publish the cache changes only
+    /// after the callback succeeds. A preparation or callback error leaves
+    /// recency, validity, replacement metadata, and counters unchanged.
+    pub fn access_mask_transactional<T, E>(
+        &mut self,
+        line_id: i64,
+        sector_mask: u8,
+        class: L2OpClass,
+        before_commit: impl FnOnce(L2MaskPreview) -> Result<T, E>,
+    ) -> Result<(L2MaskPreview, T), E>
+    where
+        E: From<L2AccessError>,
+    {
+        let prepared = self
+            .prepare_mask(line_id, sector_mask, class)
+            .map_err(E::from)?;
+        let preview = prepared.preview;
+        let value = before_commit(preview)?;
+        prepared.commit(self);
+        Ok((preview, value))
+    }
+}
+
+struct PreparedMaskAccess {
+    set_key: usize,
+    update: PreparedSetUpdate,
+    clock: i64,
+    bip_counter: u64,
+    counters: L2Counters,
+    preview: L2MaskPreview,
+}
+
+impl PreparedMaskAccess {
+    fn commit(self, l2: &mut L2Model) {
+        self.update.commit(&mut l2.sets[self.set_key]);
+        l2.clock = self.clock;
+        l2.bip_counter = self.bip_counter;
+        l2.counters = self.counters;
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+enum PreparedSetUpdate {
+    Update {
+        way: usize,
+        value: Way,
+    },
+    Insert {
+        value: Way,
+    },
+    Replace {
+        victim: usize,
+        srrip_age: i64,
+        value: Way,
+    },
+}
+
+impl PreparedSetUpdate {
+    fn value_mut(&mut self) -> &mut Way {
+        match self {
+            Self::Update { value, .. } | Self::Insert { value } | Self::Replace { value, .. } => {
+                value
             }
-            // Line resident, sector not yet valid: the write-class
-            // access supplies its own data → tag-match hit; the read
-            // needs the data → sector-fill miss. Both validate the bit.
-            way.mask |= sbit;
-            return match class {
-                L2OpClass::WriteAtomic => {
-                    self.counters.hits += 1;
-                    self.counters.write_tag_hits += 1;
-                    L2Outcome {
-                        counted_hit: true,
-                        sector_present: false,
+        }
+    }
+
+    fn commit(self, ways: &mut Vec<Way>) {
+        match self {
+            Self::Update { way, value } => ways[way] = value,
+            Self::Insert { value } => ways.push(value),
+            Self::Replace {
+                victim,
+                srrip_age,
+                value,
+            } => {
+                if srrip_age != 0 {
+                    for way in ways.iter_mut() {
+                        way.recency += srrip_age;
                     }
                 }
-                L2OpClass::Read => {
-                    self.counters.misses += 1;
-                    self.counters.sector_fill_misses += 1;
-                    L2Outcome {
-                        counted_hit: false,
-                        sector_present: false,
-                    }
-                }
-            };
-        }
-        // Line miss → allocate (evicting per policy when the set is
-        // full). A miss for BOTH classes: no tag to match.
-        install_way(
-            ways,
-            line,
-            sbit,
-            self.cfg.associativity,
-            policy,
-            self.clock,
-            self.bip_counter,
-        );
-        if policy == L2Replacement::Bip {
-            self.bip_counter += 1;
-        }
-        self.counters.misses += 1;
-        self.counters.line_misses += 1;
-        L2Outcome {
-            counted_hit: false,
-            sector_present: false,
+                ways[victim] = value;
+            }
         }
     }
 }
 
-/// `_install_way` port: insert a freshly-fetched line, evicting per
-/// policy when the set is full.
-fn install_way(
+fn validate_sector_mask(sector_mask: u8) -> Result<(), L2AccessError> {
+    if sector_mask == 0 || sector_mask & !0b1111 != 0 {
+        return Err(L2AccessError::SectorMaskInvalid { sector_mask });
+    }
+    Ok(())
+}
+
+fn bound_counter_arch(counters: &L2Counters) -> Result<ArchId, L2AccessError> {
+    counters.arch().ok_or_else(|| {
+        L2AccessError::Counter(L2CounterError::Architecture(
+            sim_arch::ArchitectureProvenanceError::Unbound {
+                component: "L2 counters",
+            },
+        ))
+    })
+}
+
+fn validate_srrip_recencies(
+    ways: &[Way],
+    set_key: usize,
+    policy: L2Replacement,
+) -> Result<(), L2AccessError> {
+    if policy == L2Replacement::Srrip {
+        for (way, entry) in ways.iter().enumerate() {
+            if !(0..=SRRIP_RRPV_MAX).contains(&entry.recency) {
+                return Err(L2AccessError::SrripRecencyOutOfRange {
+                    set_key,
+                    way,
+                    recency: entry.recency,
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+/// `_install_way` port: prepare insertion or replacement without changing
+/// semantic set state. A spare way slot is reserved before the caller's
+/// pre-commit callback so the later insertion cannot allocate.
+#[allow(clippy::too_many_arguments)]
+fn prepare_install(
     ways: &mut Vec<Way>,
+    set_key: usize,
     tag: i64,
-    sbit: u8,
-    assoc: u32,
+    sector_bit: u8,
+    associativity: usize,
     policy: L2Replacement,
     clock: i64,
     bip_counter: u64,
-) {
-    if ways.len() < assoc as usize {
-        let recency = match policy {
-            L2Replacement::Srrip => SRRIP_INSERT_RRPV,
-            L2Replacement::Bip => {
-                let mru = bip_counter.is_multiple_of(BIP_MRU_INSERT_PERIOD);
-                if mru || ways.is_empty() {
-                    clock
-                } else {
-                    min_recency(ways) - 1
-                }
-            }
-            L2Replacement::Lru => clock,
-        };
-        ways.push(Way {
-            tag,
-            mask: sbit,
-            recency,
+) -> Result<PreparedSetUpdate, L2AccessError> {
+    if ways.len() > associativity {
+        return Err(L2AccessError::SetOverfull {
+            set_key,
+            ways: ways.len(),
+            associativity,
         });
-        return;
+    }
+    if ways.len() < associativity {
+        let recency = insertion_recency(ways, set_key, policy, clock, bip_counter)?;
+        ways.try_reserve_exact(1)
+            .map_err(|source| L2AccessError::SetStorageAllocation {
+                set_key,
+                additional: 1,
+                source,
+            })?;
+        return Ok(PreparedSetUpdate::Insert {
+            value: Way {
+                tag,
+                mask: sector_bit,
+                recency,
+            },
+        });
+    }
+    if ways.is_empty() {
+        return Err(L2AccessError::ReplacementSetEmpty { set_key });
     }
 
-    if policy == L2Replacement::Srrip {
-        // Find a way at RRPV max; if none, age all until one reaches it.
-        loop {
-            if let Some(w) = ways.iter_mut().find(|w| w.recency >= SRRIP_RRPV_MAX) {
-                *w = Way {
-                    tag,
-                    mask: sbit,
-                    recency: SRRIP_INSERT_RRPV,
-                };
-                return;
-            }
-            for w in ways.iter_mut() {
-                w.recency += 1;
-            }
-        }
-    }
-    // LRU / BIP eviction: least recency wins (first index on ties, like
-    // the Python strict `<` scan).
-    let victim = ways
-        .iter()
-        .enumerate()
-        .min_by_key(|(ix, w)| (w.recency, *ix))
-        .map(|(ix, _)| ix)
-        .expect("set is full, hence non-empty");
-    let recency = match policy {
-        L2Replacement::Bip => {
-            let mru = bip_counter.is_multiple_of(BIP_MRU_INSERT_PERIOD);
-            if mru { clock } else { min_recency(ways) - 1 }
-        }
-        _ => clock,
+    let (victim, srrip_age) = if policy == L2Replacement::Srrip {
+        let maximum = ways
+            .iter()
+            .map(|way| way.recency)
+            .max()
+            .ok_or(L2AccessError::ReplacementSetEmpty { set_key })?;
+        let age =
+            SRRIP_RRPV_MAX
+                .checked_sub(maximum)
+                .ok_or(L2AccessError::SrripRecencyOutOfRange {
+                    set_key,
+                    way: 0,
+                    recency: maximum,
+                })?;
+        let victim = ways
+            .iter()
+            .position(|way| way.recency == maximum)
+            .ok_or(L2AccessError::ReplacementSetEmpty { set_key })?;
+        (victim, age)
+    } else {
+        let victim = ways
+            .iter()
+            .enumerate()
+            .min_by_key(|(index, way)| (way.recency, *index))
+            .map(|(index, _)| index)
+            .ok_or(L2AccessError::ReplacementSetEmpty { set_key })?;
+        (victim, 0)
     };
-    ways[victim] = Way {
-        tag,
-        mask: sbit,
-        recency,
-    };
+    let recency = insertion_recency(ways, set_key, policy, clock, bip_counter)?;
+    Ok(PreparedSetUpdate::Replace {
+        victim,
+        srrip_age,
+        value: Way {
+            tag,
+            mask: sector_bit,
+            recency,
+        },
+    })
 }
 
-fn min_recency(ways: &[Way]) -> i64 {
-    ways.iter()
-        .map(|w| w.recency)
-        .min()
-        .expect("min_recency on non-empty ways")
+fn insertion_recency(
+    ways: &[Way],
+    set_key: usize,
+    policy: L2Replacement,
+    clock: i64,
+    bip_counter: u64,
+) -> Result<i64, L2AccessError> {
+    match policy {
+        L2Replacement::Srrip => Ok(SRRIP_INSERT_RRPV),
+        L2Replacement::Bip => {
+            let mru = bip_counter.is_multiple_of(BIP_MRU_INSERT_PERIOD);
+            if mru || ways.is_empty() {
+                Ok(clock)
+            } else {
+                let minimum = ways
+                    .iter()
+                    .map(|way| way.recency)
+                    .min()
+                    .ok_or(L2AccessError::ReplacementSetEmpty { set_key })?;
+                minimum
+                    .checked_sub(1)
+                    .ok_or(L2AccessError::BipRecencyUnderflow { set_key, minimum })
+            }
+        }
+        L2Replacement::Lru => Ok(clock),
+    }
 }
 
 #[cfg(test)]
@@ -782,13 +1118,342 @@ mod tests {
     /// Read-class access sugar: the ported Python rule, where the
     /// counted hit and the physical sector presence coincide.
     fn rd(l2: &mut L2Model, line: i64, sector: u8) -> bool {
-        l2.access(line, sector, L2OpClass::Read).counted_hit
+        l2.access(line, sector, L2OpClass::Read)
+            .unwrap()
+            .counted_hit
     }
 
     /// Write-class access sugar (STG/RED/ATOM): counted hit under the
     /// §6.4 tag-match rule.
     fn wr(l2: &mut L2Model, line: i64, sector: u8) -> bool {
-        l2.access(line, sector, L2OpClass::WriteAtomic).counted_hit
+        l2.access(line, sector, L2OpClass::WriteAtomic)
+            .unwrap()
+            .counted_hit
+    }
+
+    #[derive(Debug, Clone, PartialEq, Eq)]
+    struct L2State {
+        sets: Vec<Vec<Way>>,
+        clock: i64,
+        bip_counter: u64,
+        counters: L2Counters,
+    }
+
+    fn state(l2: &L2Model) -> L2State {
+        L2State {
+            sets: l2.sets.clone(),
+            clock: l2.clock,
+            bip_counter: l2.bip_counter,
+            counters: l2.counters,
+        }
+    }
+
+    fn assert_mask_error_preserves_state(
+        l2: &mut L2Model,
+        line: i64,
+        sector_mask: u8,
+        class: L2OpClass,
+        expected: impl FnOnce(&L2AccessError) -> bool,
+    ) {
+        let before = state(l2);
+        let error = l2
+            .access_mask_transactional(line, sector_mask, class, |_| Ok::<(), L2AccessError>(()))
+            .unwrap_err();
+        assert!(expected(&error), "unexpected error: {error:?}");
+        assert_eq!(state(l2), before, "failed mask access mutated L2 state");
+    }
+
+    #[test]
+    fn transactional_mask_decomposition_matches_single_access_state() {
+        for policy in [L2Replacement::Lru, L2Replacement::Srrip, L2Replacement::Bip] {
+            for class in [L2OpClass::Read, L2OpClass::WriteAtomic] {
+                for target_resident in [false, true] {
+                    for requested_mask in 1u8..=0b1111 {
+                        let mut c = cfg(256, 2, 1);
+                        c.replacement = policy;
+                        let mut transactional = L2Model::new(c.clone()).unwrap();
+                        let mut sequential = L2Model::new(c).unwrap();
+                        for l2 in [&mut transactional, &mut sequential] {
+                            rd(l2, 0, 0);
+                            rd(l2, 1, 0);
+                            if target_resident {
+                                rd(l2, 0, 0);
+                            }
+                        }
+                        let line = if target_resident { 0 } else { 7 };
+                        let (preview, ()) = transactional
+                            .access_mask_transactional(line, requested_mask, class, |_| {
+                                Ok::<(), L2AccessError>(())
+                            })
+                            .unwrap();
+                        let outcomes = (0..4u8)
+                            .filter(|sector| requested_mask & (1 << sector) != 0)
+                            .map(|sector| sequential.access(line, sector, class).unwrap())
+                            .collect::<Vec<_>>();
+                        assert_eq!(
+                            preview,
+                            L2MaskPreview {
+                                sectors: requested_mask.count_ones(),
+                                counted_hits: outcomes
+                                    .iter()
+                                    .map(|outcome| u32::from(outcome.counted_hit))
+                                    .sum(),
+                                present_sectors: outcomes
+                                    .iter()
+                                    .map(|outcome| u32::from(outcome.sector_present))
+                                    .sum(),
+                            },
+                            "preview mismatch for {policy:?}/{class:?}, resident={target_resident}, mask={requested_mask:#06b}"
+                        );
+                        assert_eq!(
+                            state(&transactional),
+                            state(&sequential),
+                            "state mismatch for {policy:?}/{class:?}, resident={target_resident}, mask={requested_mask:#06b}"
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn resident_and_full_set_transactions_reuse_set_storage() {
+        for policy in [L2Replacement::Lru, L2Replacement::Srrip, L2Replacement::Bip] {
+            let mut c = cfg(256, 2, 1);
+            c.replacement = policy;
+            let mut l2 = L2Model::new(c).unwrap();
+            rd(&mut l2, 0, 0);
+            rd(&mut l2, 1, 0);
+            let pointer = l2.sets[0].as_ptr();
+            let capacity = l2.sets[0].capacity();
+
+            l2.access_mask_transactional(0, 0b1111, L2OpClass::Read, |_| {
+                Ok::<(), L2AccessError>(())
+            })
+            .unwrap();
+            assert_eq!(l2.sets[0].as_ptr(), pointer, "{policy:?} resident access");
+            assert_eq!(l2.sets[0].capacity(), capacity);
+
+            l2.access_mask_transactional(7, 0b1111, L2OpClass::Read, |_| {
+                Ok::<(), L2AccessError>(())
+            })
+            .unwrap();
+            assert_eq!(l2.sets[0].as_ptr(), pointer, "{policy:?} replacement");
+            assert_eq!(l2.sets[0].capacity(), capacity);
+        }
+    }
+
+    #[test]
+    fn invalid_masks_and_sectors_are_typed_and_nonmutating() {
+        let mut l2 = L2Model::new(cfg(256, 2, 1)).unwrap();
+        rd(&mut l2, 0, 0);
+        for sector_mask in [0, 0b1_0000, u8::MAX] {
+            let before = state(&l2);
+            let mut callback_called = false;
+            assert!(matches!(
+                l2.access_mask_transactional(
+                    0,
+                    sector_mask,
+                    L2OpClass::Read,
+                    |_| -> Result<(), L2AccessError> {
+                        callback_called = true;
+                        Ok(())
+                    },
+                ),
+                Err(L2AccessError::SectorMaskInvalid { sector_mask: got }) if got == sector_mask
+            ));
+            assert!(!callback_called, "invalid mask invoked pre-commit callback");
+            assert_eq!(state(&l2), before);
+            assert!(matches!(
+                l2.preview_mask(0, sector_mask, L2OpClass::Read),
+                Err(L2AccessError::SectorMaskInvalid { sector_mask: got }) if got == sector_mask
+            ));
+            assert_eq!(state(&l2), before);
+        }
+        for sector in [4, u8::MAX] {
+            let before = state(&l2);
+            assert!(matches!(
+                l2.access(0, sector, L2OpClass::Read),
+                Err(L2AccessError::SectorOutOfRange { sector: got }) if got == sector
+            ));
+            assert_eq!(state(&l2), before);
+        }
+        assert_eq!(
+            SliceHash::LineMod.slice_of(0, 0),
+            Err(L2SetIndexError::SlicesZero)
+        );
+    }
+
+    #[derive(Debug, PartialEq, Eq)]
+    enum CallbackError {
+        L2,
+        Refused,
+    }
+
+    impl From<L2AccessError> for CallbackError {
+        fn from(_: L2AccessError) -> Self {
+            Self::L2
+        }
+    }
+
+    #[test]
+    fn callback_failure_rolls_back_complete_l2_state() {
+        let mut l2 = L2Model::new(cfg(256, 2, 1)).unwrap();
+        rd(&mut l2, 0, 0);
+        rd(&mut l2, 1, 0);
+        let before = state(&l2);
+        let mut preview_seen = None;
+        assert_eq!(
+            l2.access_mask_transactional(7, 0b1111, L2OpClass::Read, |preview| {
+                preview_seen = Some(preview);
+                Err::<(), _>(CallbackError::Refused)
+            }),
+            Err(CallbackError::Refused)
+        );
+        assert_eq!(preview_seen.unwrap().sectors, 4);
+        assert_eq!(state(&l2), before);
+    }
+
+    #[test]
+    fn clock_bip_and_replacement_failures_are_typed_and_transactional() {
+        let mut clock = L2Model::new(cfg(256, 2, 1)).unwrap();
+        clock.clock = i64::MAX;
+        assert_mask_error_preserves_state(&mut clock, 0, 1, L2OpClass::Read, |error| {
+            matches!(error, L2AccessError::ClockOverflow { clock: i64::MAX })
+        });
+
+        let mut c = cfg(256, 2, 1);
+        c.replacement = L2Replacement::Bip;
+        let mut bip_counter = L2Model::new(c.clone()).unwrap();
+        bip_counter.bip_counter = u64::MAX;
+        assert_mask_error_preserves_state(&mut bip_counter, 0, 1, L2OpClass::Read, |error| {
+            matches!(
+                error,
+                L2AccessError::BipCounterOverflow { counter: u64::MAX }
+            )
+        });
+
+        let mut bip_recency = L2Model::new(c).unwrap();
+        rd(&mut bip_recency, 0, 0);
+        bip_recency.bip_counter = 1;
+        bip_recency.sets[0][0].recency = i64::MIN;
+        assert_mask_error_preserves_state(&mut bip_recency, 1, 1, L2OpClass::Read, |error| {
+            matches!(
+                error,
+                L2AccessError::BipRecencyUnderflow {
+                    set_key: 0,
+                    minimum: i64::MIN,
+                }
+            )
+        });
+
+        let mut overfull = L2Model::new(cfg(128, 1, 1)).unwrap();
+        rd(&mut overfull, 0, 0);
+        overfull.sets[0].push(Way {
+            tag: 1,
+            mask: 1,
+            recency: 0,
+        });
+        assert_mask_error_preserves_state(&mut overfull, 2, 1, L2OpClass::Read, |error| {
+            matches!(
+                error,
+                L2AccessError::SetOverfull {
+                    set_key: 0,
+                    ways: 2,
+                    associativity: 1,
+                }
+            )
+        });
+
+        let mut empty = L2Model::new(cfg(128, 1, 1)).unwrap();
+        empty.cfg.associativity = 0;
+        assert_mask_error_preserves_state(&mut empty, 0, 1, L2OpClass::Read, |error| {
+            matches!(error, L2AccessError::ReplacementSetEmpty { set_key: 0 })
+        });
+
+        let mut c = cfg(256, 2, 1);
+        c.replacement = L2Replacement::Srrip;
+        let mut srrip = L2Model::new(c).unwrap();
+        rd(&mut srrip, 0, 0);
+        rd(&mut srrip, 1, 0);
+        srrip.sets[0][0].recency = SRRIP_RRPV_MAX + 1;
+        assert_mask_error_preserves_state(&mut srrip, 2, 1, L2OpClass::Read, |error| {
+            matches!(
+                error,
+                L2AccessError::SrripRecencyOutOfRange {
+                    set_key: 0,
+                    recency: 4,
+                    ..
+                }
+            )
+        });
+    }
+
+    #[test]
+    fn access_counter_failures_are_typed_and_transactional() {
+        let mut hits = L2Model::new(cfg(256, 2, 1)).unwrap();
+        rd(&mut hits, 0, 0);
+        hits.counters.hits = u64::MAX;
+        assert_mask_error_preserves_state(&mut hits, 0, 1, L2OpClass::Read, |error| {
+            matches!(
+                error,
+                L2AccessError::Counter(L2CounterError::Overflow {
+                    field: L2CounterField::Hits,
+                })
+            )
+        });
+
+        let mut misses = L2Model::new(cfg(256, 2, 1)).unwrap();
+        misses.counters.misses = u64::MAX;
+        assert_mask_error_preserves_state(&mut misses, 0, 1, L2OpClass::Read, |error| {
+            matches!(
+                error,
+                L2AccessError::Counter(L2CounterError::Overflow {
+                    field: L2CounterField::Misses,
+                })
+            )
+        });
+
+        let mut line_misses = L2Model::new(cfg(256, 2, 1)).unwrap();
+        line_misses.counters.line_misses = u64::MAX;
+        assert_mask_error_preserves_state(&mut line_misses, 0, 1, L2OpClass::Read, |error| {
+            matches!(
+                error,
+                L2AccessError::Counter(L2CounterError::Overflow {
+                    field: L2CounterField::LineMisses,
+                })
+            )
+        });
+
+        let mut sector_fills = L2Model::new(cfg(256, 2, 1)).unwrap();
+        rd(&mut sector_fills, 0, 0);
+        sector_fills.counters.sector_fill_misses = u64::MAX;
+        assert_mask_error_preserves_state(&mut sector_fills, 0, 0b0010, L2OpClass::Read, |error| {
+            matches!(
+                error,
+                L2AccessError::Counter(L2CounterError::Overflow {
+                    field: L2CounterField::SectorFillMisses,
+                })
+            )
+        });
+
+        let mut write_hits = L2Model::new(cfg(256, 2, 1)).unwrap();
+        rd(&mut write_hits, 0, 0);
+        write_hits.counters.write_tag_hits = u64::MAX;
+        assert_mask_error_preserves_state(
+            &mut write_hits,
+            0,
+            0b0010,
+            L2OpClass::WriteAtomic,
+            |error| {
+                matches!(
+                    error,
+                    L2AccessError::Counter(L2CounterError::Overflow {
+                        field: L2CounterField::WriteTagHits,
+                    })
+                )
+            },
+        );
     }
 
     #[test]
@@ -799,14 +1464,14 @@ mod tests {
                     let mut l2 = L2Model::new(cfg(128 * 4, 2, 1)).unwrap();
                     for sector in 0..4u8 {
                         if seeded_mask & (1 << sector) != 0 {
-                            l2.access(7, sector, L2OpClass::WriteAtomic);
+                            l2.access(7, sector, L2OpClass::WriteAtomic).unwrap();
                         }
                     }
                     let before = l2.counters;
-                    let preview = l2.preview_mask(7, requested_mask, class);
+                    let preview = l2.preview_mask(7, requested_mask, class).unwrap();
                     let outcomes = (0..4u8)
                         .filter(|sector| requested_mask & (1 << sector) != 0)
-                        .map(|sector| l2.access(7, sector, class))
+                        .map(|sector| l2.access(7, sector, class).unwrap())
                         .collect::<Vec<_>>();
                     let counted_hits = outcomes
                         .iter()
@@ -881,8 +1546,16 @@ mod tests {
         ];
         for (hash, at6, at7) in cases {
             for (i, &line) in lines.iter().enumerate() {
-                assert_eq!(hash.slice_of(line, 6), at6[i], "{hash:?}({line}, 6)");
-                assert_eq!(hash.slice_of(line, 7), at7[i], "{hash:?}({line}, 7)");
+                assert_eq!(
+                    hash.slice_of(line, 6).unwrap(),
+                    at6[i],
+                    "{hash:?}({line}, 6)"
+                );
+                assert_eq!(
+                    hash.slice_of(line, 7).unwrap(),
+                    at7[i],
+                    "{hash:?}({line}, 7)"
+                );
             }
         }
     }
@@ -904,8 +1577,16 @@ mod tests {
         ];
         for (hash, at6, at7) in cases {
             for (i, &line) in lines.iter().enumerate() {
-                assert_eq!(hash.slice_of(line, 6), at6[i], "{hash:?}({line}, 6)");
-                assert_eq!(hash.slice_of(line, 7), at7[i], "{hash:?}({line}, 7)");
+                assert_eq!(
+                    hash.slice_of(line, 6).unwrap(),
+                    at6[i],
+                    "{hash:?}({line}, 6)"
+                );
+                assert_eq!(
+                    hash.slice_of(line, 7).unwrap(),
+                    at7[i],
+                    "{hash:?}({line}, 7)"
+                );
             }
         }
         // Set mapping floors too: Python (-93 // 6) % 512 == 496.
@@ -1192,9 +1873,9 @@ mod tests {
         // Physics stays honest for pricing: a tag-match hit to a fresh
         // sector reports it ABSENT before the access (an atomic reply
         // would still fetch from DRAM), while a re-read finds it present.
-        let out = l2.access(3, 3, L2OpClass::WriteAtomic);
+        let out = l2.access(3, 3, L2OpClass::WriteAtomic).unwrap();
         assert!(out.counted_hit && !out.sector_present);
-        let out = l2.access(3, 3, L2OpClass::Read);
+        let out = l2.access(3, 3, L2OpClass::Read).unwrap();
         assert!(out.counted_hit && out.sector_present);
         // Mirror stream under Read class: same state, different counts.
         let mut r = L2Model::new(cfg(1024, 2, 1)).unwrap();
