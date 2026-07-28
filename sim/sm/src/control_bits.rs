@@ -32,7 +32,72 @@ const EXPECTED_LAYOUT: [(&str, &str); 8] = [
     ("reserved_must_be_zero", "bits 21:22"),
 ];
 
-pub const BARRIER_NONE: u8 = 7;
+pub const BARRIER_NONE: Option<DepBarrier> = None;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
+pub enum ControlDomainError {
+    #[error("stall value {stall} exceeds the 4-bit control domain")]
+    StallOutOfRange { stall: u8 },
+    #[error("{field} value {value} is neither dependence barrier 0..5 nor wire sentinel 7")]
+    BarrierOutOfRange { field: &'static str, value: u8 },
+    #[error("wait mask {wait_mask:#010b} exceeds the six dependence barriers")]
+    WaitMaskOutOfRange { wait_mask: u8 },
+    #[error("reuse mask {reuse:#010b} exceeds the 4-bit control domain")]
+    ReuseOutOfRange { reuse: u8 },
+    #[error("yield flag {value} is not a binary wire bit")]
+    YieldFlagOutOfRange { value: u8 },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct DepBarrier(u8);
+
+impl DepBarrier {
+    pub fn new(value: u8) -> Result<Self, ControlDomainError> {
+        if value < 6 {
+            Ok(Self(value))
+        } else {
+            Err(ControlDomainError::BarrierOutOfRange {
+                field: "dependence barrier",
+                value,
+            })
+        }
+    }
+
+    pub const fn index(self) -> usize {
+        self.0 as usize
+    }
+
+    pub const fn wire(self) -> u8 {
+        self.0
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WaitMask(u8);
+
+impl WaitMask {
+    pub const NONE: Self = Self(0);
+
+    pub fn new(wait_mask: u8) -> Result<Self, ControlDomainError> {
+        if wait_mask & !0x3f == 0 {
+            Ok(Self(wait_mask))
+        } else {
+            Err(ControlDomainError::WaitMaskOutOfRange { wait_mask })
+        }
+    }
+
+    pub const fn bits(self) -> u8 {
+        self.0
+    }
+
+    pub const fn contains(self, barrier: DepBarrier) -> bool {
+        self.0 & (1 << barrier.0) != 0
+    }
+
+    pub const fn contains_index(self, index: usize) -> bool {
+        index < 6 && self.0 & (1 << index) != 0
+    }
+}
 
 #[derive(Debug, thiserror::Error)]
 pub enum ControlBitsError {
@@ -78,6 +143,13 @@ pub enum ControlBitsError {
         recorded: ControlBits,
         redecoded: ControlBits,
     },
+    #[error("function {function} pc={pc}: control domain is invalid: {source}")]
+    InvalidControlDomain {
+        function: String,
+        pc: u64,
+        #[source]
+        source: ControlDomainError,
+    },
     #[error("function {function} pc={pc}: reserved control bits 21:22 nonzero in {high_word:#x}")]
     ReservedNonZero {
         function: String,
@@ -122,44 +194,94 @@ pub struct ControlBits {
     /// Yield hint bit as encoded (semantic interpretation is the SM model's
     /// job; this layer records the wire value).
     pub yield_flag: bool,
-    /// Write-dependence barrier index this instruction SETS (7 = none).
-    pub write_barrier: u8,
-    /// Read-dependence barrier index this instruction SETS (7 = none).
-    pub read_barrier: u8,
-    /// Bitmask of barrier indices this instruction WAITS on (6 bits).
-    pub wait_mask: u8,
+    /// Write-dependence barrier this instruction sets (`None` = wire 7).
+    pub write_barrier: Option<DepBarrier>,
+    /// Read-dependence barrier this instruction sets (`None` = wire 7).
+    pub read_barrier: Option<DepBarrier>,
+    /// Set of dependence barriers this instruction waits on.
+    pub wait_mask: WaitMask,
     /// Register-reuse cache flags (4 bits).
     pub reuse: u8,
 }
 
+#[derive(Debug, thiserror::Error)]
+enum ControlDecodeError {
+    #[error("reserved control bits are nonzero")]
+    ReservedNonZero,
+    #[error(transparent)]
+    Domain(#[from] ControlDomainError),
+}
+
 impl ControlBits {
+    pub fn new(
+        stall: u8,
+        yield_flag: bool,
+        write_barrier: u8,
+        read_barrier: u8,
+        wait_mask: u8,
+        reuse: u8,
+    ) -> Result<Self, ControlDomainError> {
+        if stall > 0xf {
+            return Err(ControlDomainError::StallOutOfRange { stall });
+        }
+        if reuse > 0xf {
+            return Err(ControlDomainError::ReuseOutOfRange { reuse });
+        }
+        Ok(Self {
+            stall,
+            yield_flag,
+            write_barrier: Self::barrier_from_wire("write barrier", write_barrier)?,
+            read_barrier: Self::barrier_from_wire("read barrier", read_barrier)?,
+            wait_mask: WaitMask::new(wait_mask)?,
+            reuse,
+        })
+    }
+
+    fn barrier_from_wire(
+        field: &'static str,
+        value: u8,
+    ) -> Result<Option<DepBarrier>, ControlDomainError> {
+        match value {
+            0..=5 => Ok(Some(DepBarrier(value))),
+            7 => Ok(None),
+            _ => Err(ControlDomainError::BarrierOutOfRange { field, value }),
+        }
+    }
+
+    fn yield_from_wire(value: u8) -> Result<bool, ControlDomainError> {
+        match value {
+            0 => Ok(false),
+            1 => Ok(true),
+            _ => Err(ControlDomainError::YieldFlagOutOfRange { value }),
+        }
+    }
+
+    pub fn validate(self) -> Result<(), ControlDomainError> {
+        if self.stall > 0xf {
+            return Err(ControlDomainError::StallOutOfRange { stall: self.stall });
+        }
+        if self.reuse > 0xf {
+            return Err(ControlDomainError::ReuseOutOfRange { reuse: self.reuse });
+        }
+        Ok(())
+    }
+
     /// Decode from the 128-bit instruction's high word: control =
-    /// `(high_word >> 41) & 0x7fffff` (23 bits). Returns `None` when the
-    /// reserved bits 21:22 are nonzero (the producer types such records
-    /// `unknown_encoding`; a decoded record must never carry them).
-    fn decode(high_word: u64) -> Option<Self> {
+    /// `(high_word >> 41) & 0x7fffff` (23 bits).
+    fn decode(high_word: u64) -> Result<Self, ControlDecodeError> {
         let control = (high_word >> 41) & 0x7f_ffff;
         if (control >> 21) & 0b11 != 0 {
-            return None;
+            return Err(ControlDecodeError::ReservedNonZero);
         }
-        let write_barrier = ((control >> 5) & 0x7) as u8;
-        let read_barrier = ((control >> 8) & 0x7) as u8;
-        // Barrier index 6 is wire-invalid on this layout: the six
-        // dependence counters are SB0..SB5 and 7 encodes "none". A 6
-        // can only come from corruption or decode skew — fail closed
-        // like the reserved bits rather than silently treating it as
-        // "none" downstream.
-        if write_barrier == 6 || read_barrier == 6 {
-            return None;
-        }
-        Some(Self {
-            stall: (control & 0xf) as u8,
-            yield_flag: (control >> 4) & 1 == 1,
-            write_barrier,
-            read_barrier,
-            wait_mask: ((control >> 11) & 0x3f) as u8,
-            reuse: ((control >> 17) & 0xf) as u8,
-        })
+        Self::new(
+            (control & 0xf) as u8,
+            (control >> 4) & 1 == 1,
+            ((control >> 5) & 0x7) as u8,
+            ((control >> 8) & 0x7) as u8,
+            ((control >> 11) & 0x3f) as u8,
+            ((control >> 17) & 0xf) as u8,
+        )
+        .map_err(ControlDecodeError::Domain)
     }
 }
 
@@ -340,13 +462,23 @@ impl ControlSidecar {
                         word: high_word_str.clone(),
                     }
                 })?;
-                let redecoded = ControlBits::decode(high_word).ok_or_else(|| {
-                    ControlBitsError::ReservedNonZero {
-                        function: fname.clone(),
-                        pc: rec.pc,
-                        high_word,
+                let redecoded = match ControlBits::decode(high_word) {
+                    Ok(control) => control,
+                    Err(ControlDecodeError::ReservedNonZero) => {
+                        return Err(ControlBitsError::ReservedNonZero {
+                            function: fname.clone(),
+                            pc: rec.pc,
+                            high_word,
+                        });
                     }
-                })?;
+                    Err(ControlDecodeError::Domain(source)) => {
+                        return Err(ControlBitsError::InvalidControlDomain {
+                            function: fname.clone(),
+                            pc: rec.pc,
+                            source,
+                        });
+                    }
+                };
                 let recorded_raw =
                     rec.control
                         .as_ref()
@@ -354,14 +486,27 @@ impl ControlSidecar {
                             function: fname.clone(),
                             pc: rec.pc,
                         })?;
-                let recorded = ControlBits {
-                    stall: recorded_raw.stall,
-                    yield_flag: recorded_raw.yield_flag == 1,
-                    write_barrier: recorded_raw.write_barrier,
-                    read_barrier: recorded_raw.read_barrier,
-                    wait_mask: recorded_raw.wait_mask,
-                    reuse: recorded_raw.reuse,
-                };
+                let yield_flag =
+                    ControlBits::yield_from_wire(recorded_raw.yield_flag).map_err(|source| {
+                        ControlBitsError::InvalidControlDomain {
+                            function: fname.clone(),
+                            pc: rec.pc,
+                            source,
+                        }
+                    })?;
+                let recorded = ControlBits::new(
+                    recorded_raw.stall,
+                    yield_flag,
+                    recorded_raw.write_barrier,
+                    recorded_raw.read_barrier,
+                    recorded_raw.wait_mask,
+                    recorded_raw.reuse,
+                )
+                .map_err(|source| ControlBitsError::InvalidControlDomain {
+                    function: fname.clone(),
+                    pc: rec.pc,
+                    source,
+                })?;
                 if recorded != redecoded {
                     return Err(ControlBitsError::RedecodeMismatch {
                         function: fname.clone(),
@@ -430,15 +575,43 @@ mod tests {
         let cb = ControlBits::decode(0x000f_e400_078e_00ff).expect("reserved bits zero");
         assert_eq!(
             cb,
-            ControlBits {
-                stall: 2,
-                yield_flag: true,
-                write_barrier: 7,
-                read_barrier: 7,
-                wait_mask: 0,
-                reuse: 0,
-            }
+            ControlBits::new(2, true, 7, 7, 0, 0).expect("valid decoded controls")
         );
+    }
+
+    #[test]
+    fn dependence_barrier_wire_domain_is_exact() {
+        for value in 0..=5 {
+            let control = ControlBits::new(0, false, value, 7, 0, 0).unwrap();
+            assert_eq!(control.write_barrier.unwrap().wire(), value);
+        }
+        assert_eq!(
+            ControlBits::new(0, false, 7, 7, 0, 0)
+                .unwrap()
+                .write_barrier,
+            None
+        );
+        for value in (6..=u8::MAX).filter(|&value| value != 7) {
+            assert!(matches!(
+                ControlBits::new(0, false, value, 7, 0, 0),
+                Err(ControlDomainError::BarrierOutOfRange {
+                    field: "write barrier",
+                    value: got,
+                }) if got == value
+            ));
+        }
+    }
+
+    #[test]
+    fn wait_mask_domain_is_exact() {
+        assert_eq!(WaitMask::new(0x3f).unwrap().bits(), 0x3f);
+        for wait_mask in [0x40, 0xff] {
+            assert!(matches!(
+                WaitMask::new(wait_mask),
+                Err(ControlDomainError::WaitMaskOutOfRange { wait_mask: got })
+                    if got == wait_mask
+            ));
+        }
     }
 
     /// Real record: S2UR sets write barrier 1, stall 1 (0x000e620000002600).
@@ -447,7 +620,7 @@ mod tests {
         let cb = ControlBits::decode(0x000e_6200_0000_2600).expect("reserved bits zero");
         assert_eq!(cb.stall, 1);
         assert!(cb.yield_flag);
-        assert_eq!(cb.write_barrier, 1);
+        assert_eq!(cb.write_barrier, Some(DepBarrier::new(1).unwrap()));
         assert_eq!(cb.read_barrier, BARRIER_NONE);
     }
 
@@ -497,6 +670,39 @@ mod tests {
         assert_eq!(f.by_pc.len(), 1);
         assert_eq!(f.by_pc[&0].control.stall, 2);
         assert!(f.by_pc[&0].opcode_text.starts_with("IMAD.MOV"));
+    }
+
+    #[test]
+    fn non_binary_recorded_yield_is_rejected_even_when_false_would_match() {
+        let high_word = 0x000f_e400_078e_00ff_u64 & !(1_u64 << 45);
+        let json = mini_sidecar_json()
+            .replace("0x000fe400078e00ff", &format!("{high_word:#018x}"))
+            .replace(r#""yield_flag": 1"#, r#""yield_flag": 2"#);
+        let raw: RawSidecar = serde_json::from_str(&json).unwrap();
+        assert!(matches!(
+            ControlSidecar::from_raw(raw, "sm_86"),
+            Err(ControlBitsError::InvalidControlDomain {
+                source: ControlDomainError::YieldFlagOutOfRange { value: 2 },
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn high_word_barrier_six_has_precise_domain_error() {
+        let high_word = (0x000f_e400_078e_00ff_u64 & !(0x7_u64 << 46)) | (6_u64 << 46);
+        let json = mini_sidecar_json().replace("0x000fe400078e00ff", &format!("{high_word:#018x}"));
+        let raw: RawSidecar = serde_json::from_str(&json).unwrap();
+        assert!(matches!(
+            ControlSidecar::from_raw(raw, "sm_86"),
+            Err(ControlBitsError::InvalidControlDomain {
+                source: ControlDomainError::BarrierOutOfRange {
+                    field: "write barrier",
+                    value: 6,
+                },
+                ..
+            })
+        ));
     }
 
     #[test]

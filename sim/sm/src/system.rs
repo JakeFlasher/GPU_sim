@@ -242,7 +242,7 @@ pub enum SystemError {
         "event queue drained with sm {sm_id} unfinished ({outstanding} response(s) recorded \
          outstanding) — request/response wiring invariant broken"
     )]
-    Deadlock { sm_id: i32, outstanding: u64 },
+    Deadlock { sm_id: i32, outstanding: usize },
     #[error(
         "event-loop livelock at t={time}: {idle_wakes} consecutive SM wakes issued nothing, \
          emitted nothing and left the clock frozen — horizon/wake wiring invariant broken"
@@ -967,19 +967,20 @@ mod tests {
     use sim_mem::{CacheOpToken, L2Config, L2Replacement, SliceHash};
 
     use super::*;
-    use crate::control_bits::{BARRIER_NONE, ControlBits};
+    use crate::control_bits::{ControlBits, DepBarrier, WaitMask};
     use crate::issue::{AccessKind, ReplayInst, WarpReplay};
     use crate::program::{IssueSlot, OpClass};
 
     fn cb(stall: u8) -> ControlBits {
-        ControlBits {
-            stall,
-            yield_flag: false,
-            write_barrier: BARRIER_NONE,
-            read_barrier: BARRIER_NONE,
-            wait_mask: 0,
-            reuse: 0,
-        }
+        ControlBits::new(stall, false, 7, 7, 0, 0).expect("valid test controls")
+    }
+
+    fn barrier(value: u8) -> DepBarrier {
+        DepBarrier::new(value).expect("valid test barrier")
+    }
+
+    fn wait_mask(bits: u8) -> WaitMask {
+        WaitMask::new(bits).expect("valid test wait mask")
     }
 
     fn slot(control: ControlBits, text: &str) -> IssueSlot {
@@ -1075,9 +1076,9 @@ mod tests {
 
     fn load_consumer_schedule() -> FunctionSchedule {
         let mut load = cb(1);
-        load.write_barrier = 0;
+        load.write_barrier = Some(barrier(0));
         let mut consumer = cb(1);
-        consumer.wait_mask = 0b000001;
+        consumer.wait_mask = wait_mask(0b000001);
         schedule(vec![(0, slot(load, "LDG.E")), (16, slot(consumer, "EXIT"))])
     }
 
@@ -1151,9 +1152,9 @@ mod tests {
     #[test]
     fn l2_hit_does_not_preflight_hypothetical_dram_service() {
         let mut load = cb(1);
-        load.write_barrier = 0;
+        load.write_barrier = Some(barrier(0));
         let mut consumer = cb(1);
-        consumer.wait_mask = 0b000001;
+        consumer.wait_mask = wait_mask(0b000001);
         let sched = schedule(vec![
             (0, slot(cb(1), "STG.E")),
             (16, slot(load, "LDG.E")),
@@ -1274,9 +1275,9 @@ mod tests {
     #[test]
     fn l1_filters_the_l2_stream() {
         let mut load = cb(1);
-        load.write_barrier = 0;
+        load.write_barrier = Some(barrier(0));
         let mut consumer = cb(1);
-        consumer.wait_mask = 0b000001;
+        consumer.wait_mask = wait_mask(0b000001);
         let sched = schedule(vec![
             (0, slot(load, "LDG.E")),
             (16, slot(consumer, "FFMA")),
@@ -1338,7 +1339,7 @@ mod tests {
     #[test]
     fn store_allocates_for_a_later_load_across_sms() {
         let mut store_cb = cb(1);
-        store_cb.read_barrier = 1;
+        store_cb.read_barrier = Some(barrier(1));
         let store_sched_pcs = vec![(0, slot(store_cb, "STG.E")), (16, slot(cb(1), "EXIT"))];
         let sched = schedule(
             store_sched_pcs
@@ -1346,12 +1347,12 @@ mod tests {
                 .chain([
                     (32, {
                         let mut load = cb(1);
-                        load.write_barrier = 0;
+                        load.write_barrier = Some(barrier(0));
                         slot(load, "LDG.E")
                     }),
                     (48, {
                         let mut consumer = cb(1);
-                        consumer.wait_mask = 0b000001;
+                        consumer.wait_mask = wait_mask(0b000001);
                         slot(consumer, "EXIT")
                     }),
                 ])
@@ -1419,9 +1420,9 @@ mod tests {
     #[test]
     fn atomic_tag_hit_counts_hit_but_prices_dram() {
         let mut atom_cb = cb(1);
-        atom_cb.write_barrier = 2;
+        atom_cb.write_barrier = Some(barrier(2));
         let mut consumer = cb(1);
-        consumer.wait_mask = 0b000100;
+        consumer.wait_mask = wait_mask(0b000100);
         let sched = schedule(vec![
             (0, slot(cb(1), "STG.E")),
             (16, slot(atom_cb, "ATOMG.E.ADD.STRONG.GPU")),
@@ -1486,9 +1487,9 @@ mod tests {
     #[test]
     fn multi_sector_fill_prices_on_worst_sector() {
         let mut load = cb(1);
-        load.write_barrier = 0;
+        load.write_barrier = Some(barrier(0));
         let mut consumer = cb(1);
-        consumer.wait_mask = 0b000001;
+        consumer.wait_mask = wait_mask(0b000001);
         let sched = schedule(vec![
             (0, slot(cb(1), "STG.E")),
             (16, slot(load, "LDG.E")),
@@ -1553,9 +1554,9 @@ mod tests {
     fn dram_server_delays_past_the_carded_rate() {
         let build = || {
             let mut load = cb(1);
-            load.write_barrier = 0;
+            load.write_barrier = Some(barrier(0));
             let mut consumer = cb(1);
-            consumer.wait_mask = 0b000001;
+            consumer.wait_mask = wait_mask(0b000001);
             let sched = schedule(vec![(0, slot(load, "LDG.E")), (16, slot(consumer, "EXIT"))]);
             // Distinct lines per SM: two independent cold 32 B fetches.
             let mk = |sector: i64| dependent_load_blocks(sector);

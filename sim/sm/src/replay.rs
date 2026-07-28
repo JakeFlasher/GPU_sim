@@ -1053,14 +1053,7 @@ mod space_routing_tests {
             by_pc: BTreeMap::from([(
                 0,
                 IssueSlot {
-                    control: ControlBits {
-                        stall: 0,
-                        yield_flag: false,
-                        write_barrier: 7,
-                        read_barrier: 7,
-                        wait_mask: 0,
-                        reuse: 0,
-                    },
+                    control: ControlBits::new(0, false, 7, 7, 0, 0).expect("valid test controls"),
                     op_class: OpClass::Other,
                     mem_role: role,
                     opcode_text: opcode_text.into(),

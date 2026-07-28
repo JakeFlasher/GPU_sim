@@ -217,7 +217,7 @@ mod tests {
     use sim_trace::exec_info::KernelStaticInfo;
 
     use super::*;
-    use crate::control_bits::{BARRIER_NONE, FunctionControl, InstructionControl};
+    use crate::control_bits::{FunctionControl, InstructionControl};
 
     fn exec_info(pcs: &[u64]) -> ExecInfo {
         ExecInfo {
@@ -241,14 +241,8 @@ mod tests {
                 (
                     pc,
                     InstructionControl {
-                        control: ControlBits {
-                            stall: 1,
-                            yield_flag: false,
-                            write_barrier: BARRIER_NONE,
-                            read_barrier: BARRIER_NONE,
-                            wait_mask: 0,
-                            reuse: 0,
-                        },
+                        control: ControlBits::new(1, false, 7, 7, 0, 0)
+                            .expect("valid test controls"),
                         opcode_text: if pc == 16 {
                             "BAR.SYNC.DEFER_BLOCKING".to_owned()
                         } else {
