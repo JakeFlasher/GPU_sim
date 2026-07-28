@@ -204,6 +204,8 @@ pub enum L2BuildError {
 
 #[derive(Debug, thiserror::Error)]
 pub enum L2SnapshotError {
+    #[error(transparent)]
+    Counter(#[from] L2CounterError),
     #[error(
         "failed to reserve capacity {capacity} while snapshotting the outer storage for {set_count} L2 sets: {source}"
     )]
@@ -633,7 +635,7 @@ pub struct L2Model {
     sets: Vec<Vec<Way>>,
     clock: i64,
     bip_counter: u64,
-    pub counters: L2Counters,
+    counters: L2Counters,
 }
 
 fn checked_set_count(num_slices: u32, sets_per_slice: u64) -> Result<usize, L2BuildError> {
@@ -652,6 +654,23 @@ fn allocate_set_storage(set_count: usize) -> Result<Vec<Vec<Way>>, L2BuildError>
         .map_err(|source| L2BuildError::SetStorageAllocation { set_count, source })?;
     sets.resize_with(set_count, Vec::new);
     Ok(sets)
+}
+
+fn require_counter_arch(expected: ArchId, counters: &L2Counters) -> Result<(), L2CounterError> {
+    let got = counters
+        .arch()
+        .ok_or(sim_arch::ArchitectureProvenanceError::Unbound {
+            component: "L2 counters",
+        })?;
+    if got != expected {
+        return Err(sim_arch::ArchitectureProvenanceError::Mismatch {
+            component: "L2 counters",
+            expected,
+            got,
+        }
+        .into());
+    }
+    Ok(())
 }
 
 impl L2Model {
@@ -675,11 +694,23 @@ impl L2Model {
         &self.cfg
     }
 
+    /// Return the read-only counter snapshot only when its architecture
+    /// provenance still matches the owning cache configuration.
+    pub fn counters(&self) -> Result<&L2Counters, L2CounterError> {
+        self.validate_counter_architecture()?;
+        Ok(&self.counters)
+    }
+
+    fn validate_counter_architecture(&self) -> Result<(), L2CounterError> {
+        require_counter_arch(self.cfg.arch, &self.counters)
+    }
+
     /// Fallibly copy the complete cache state for a caller-level transaction.
     /// Spare vector capacity is retained so staging does not introduce an
     /// allocation on a path the caller's model had already reserved. No
     /// semantic state in `self` changes if either reservation fails.
     pub fn try_snapshot(&self) -> Result<Self, L2SnapshotError> {
+        self.validate_counter_architecture()?;
         let set_count = self.sets.len();
         let set_capacity = self.sets.capacity();
         let mut sets = Vec::new();
@@ -760,6 +791,7 @@ impl L2Model {
         class: L2OpClass,
     ) -> Result<PreparedMaskAccess, L2AccessError> {
         validate_sector_mask(sector_mask)?;
+        self.validate_counter_architecture()?;
         let set_key = self.set_key(line_id)?;
         let associativity = usize::try_from(self.cfg.associativity).map_err(|_| {
             L2AccessError::AssociativityOutOfRange {
@@ -821,7 +853,7 @@ impl L2Model {
                     clock,
                     bip_counter,
                 )?);
-                let mut delta = L2Counters::for_arch(bound_counter_arch(&counters)?);
+                let mut delta = L2Counters::for_arch(self.cfg.arch);
                 delta.misses = 1;
                 delta.line_misses = 1;
                 counters.add_checked(&delta)?;
@@ -838,7 +870,7 @@ impl L2Model {
                     _ => clock,
                 };
                 value.mask |= bit;
-                let mut delta = L2Counters::for_arch(bound_counter_arch(&counters)?);
+                let mut delta = L2Counters::for_arch(self.cfg.arch);
                 if counted_hit {
                     delta.hits = 1;
                     if !sector_present && class == L2OpClass::WriteAtomic {
@@ -886,6 +918,7 @@ impl L2Model {
         class: L2OpClass,
     ) -> Result<L2MaskPreview, L2AccessError> {
         validate_sector_mask(sector_mask)?;
+        self.validate_counter_architecture()?;
         let set_key = self.set_key(line_id)?;
         let resident = self.sets[set_key].iter().find(|w| w.tag == line_id);
         let mut line_present = resident.is_some();
@@ -1032,16 +1065,6 @@ fn validate_sector_mask(sector_mask: u8) -> Result<(), L2AccessError> {
         return Err(L2AccessError::SectorMaskInvalid { sector_mask });
     }
     Ok(())
-}
-
-fn bound_counter_arch(counters: &L2Counters) -> Result<ArchId, L2AccessError> {
-    counters.arch().ok_or_else(|| {
-        L2AccessError::Counter(L2CounterError::Architecture(
-            sim_arch::ArchitectureProvenanceError::Unbound {
-                component: "L2 counters",
-            },
-        ))
-    })
 }
 
 fn validate_srrip_recencies(
@@ -1547,6 +1570,57 @@ mod tests {
                 )
             },
         );
+    }
+
+    #[test]
+    fn mismatched_counter_architecture_fails_public_boundaries_transactionally() {
+        let mut l2 = L2Model::new(cfg(256, 2, 1)).unwrap();
+        l2.counters = L2Counters::for_arch(ArchId::Sm120);
+        let before = state(&l2);
+
+        assert!(matches!(
+            l2.access(0, 0, L2OpClass::Read),
+            Err(L2AccessError::Counter(L2CounterError::Architecture(
+                sim_arch::ArchitectureProvenanceError::Mismatch {
+                    component: "L2 counters",
+                    expected: ArchId::Sm86,
+                    got: ArchId::Sm120,
+                }
+            )))
+        ));
+        assert_eq!(state(&l2), before, "failed access mutated L2 state");
+
+        assert!(matches!(
+            l2.preview_mask(0, 1, L2OpClass::Read),
+            Err(L2AccessError::Counter(L2CounterError::Architecture(
+                sim_arch::ArchitectureProvenanceError::Mismatch {
+                    expected: ArchId::Sm86,
+                    got: ArchId::Sm120,
+                    ..
+                }
+            )))
+        ));
+        assert!(matches!(
+            l2.try_snapshot(),
+            Err(L2SnapshotError::Counter(L2CounterError::Architecture(
+                sim_arch::ArchitectureProvenanceError::Mismatch {
+                    expected: ArchId::Sm86,
+                    got: ArchId::Sm120,
+                    ..
+                }
+            )))
+        ));
+        assert!(matches!(
+            l2.counters(),
+            Err(L2CounterError::Architecture(
+                sim_arch::ArchitectureProvenanceError::Mismatch {
+                    expected: ArchId::Sm86,
+                    got: ArchId::Sm120,
+                    ..
+                }
+            ))
+        ));
+        assert_eq!(state(&l2), before, "read-only boundaries mutated L2 state");
     }
 
     #[test]

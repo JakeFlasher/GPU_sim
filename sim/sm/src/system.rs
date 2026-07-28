@@ -321,6 +321,67 @@ fn require_arch(expected: ArchId, got: ArchId, component: &'static str) -> Resul
     Ok(())
 }
 
+#[cfg(test)]
+thread_local! {
+    static TEST_L2_COUNTER_ARCH_OVERRIDE: std::cell::Cell<Option<ArchId>> =
+        const { std::cell::Cell::new(None) };
+    static TEST_L2_ACCESS_ERROR_AFTER: std::cell::Cell<Option<usize>> =
+        const { std::cell::Cell::new(None) };
+}
+
+fn checked_l2_counters<'a>(
+    expected: ArchId,
+    l2: &'a L2Model,
+) -> Result<&'a L2Counters, SystemError> {
+    let counters = l2.counters().map_err(sim_mem::L2AccessError::Counter)?;
+    #[cfg(test)]
+    let got = TEST_L2_COUNTER_ARCH_OVERRIDE
+        .with(|override_arch| override_arch.get())
+        .or_else(|| counters.arch());
+    #[cfg(not(test))]
+    let got = counters.arch();
+    let got = got.ok_or_else(|| {
+        sim_mem::L2AccessError::Counter(sim_mem::L2CounterError::Architecture(
+            sim_arch::ArchitectureProvenanceError::Unbound {
+                component: "L2 counters",
+            },
+        ))
+    })?;
+    if got != expected {
+        return Err(
+            sim_mem::L2AccessError::Counter(sim_mem::L2CounterError::Architecture(
+                sim_arch::ArchitectureProvenanceError::Mismatch {
+                    component: "L2 counters",
+                    expected,
+                    got,
+                },
+            ))
+            .into(),
+        );
+    }
+    Ok(counters)
+}
+
+#[cfg(test)]
+fn maybe_inject_l2_access_error() -> Result<(), SystemError> {
+    TEST_L2_ACCESS_ERROR_AFTER.with(|remaining| match remaining.get() {
+        Some(0) => {
+            remaining.set(None);
+            Err(
+                sim_mem::L2AccessError::Counter(sim_mem::L2CounterError::Overflow {
+                    field: sim_mem::L2CounterField::Hits,
+                })
+                .into(),
+            )
+        }
+        Some(count) => {
+            remaining.set(Some(count - 1));
+            Ok(())
+        }
+        None => Ok(()),
+    })
+}
+
 /// Backstop against event-loop LIVELOCK — a regression class this driver
 /// actually shipped once (same-time SmWake ping-pong, before the horizon
 /// contract was narrowed to an SM's own responses). The signature is
@@ -630,6 +691,7 @@ pub fn simulate_kernel_shared(
     require_arch(arch, params.arch, "issue parameters")?;
     require_arch(arch, l1_config.arch, "L1 configuration")?;
     require_arch(arch, l2.config().arch, "L2 configuration")?;
+    checked_l2_counters(arch, l2)?;
     require_arch(arch, dram.arch(), "DRAM configuration")?;
     params.validate_l1_timing(l1_config)?;
     // Fail closed on an inverted ladder: every horizon/run-ahead bound
@@ -749,6 +811,8 @@ pub fn simulate_kernel_shared(
                         sector_mask: req.sector_mask,
                     });
                 }
+                #[cfg(test)]
+                maybe_inject_l2_access_error()?;
 
                 // Prepare the exact ascending mask walk against a private
                 // copy of its set. Every system-side calculation and response
@@ -915,10 +979,11 @@ pub fn simulate_kernel_shared(
         }
         per_sm.insert(sm_ids[ix], core.result());
     }
+    let l2_counters = *checked_l2_counters(arch, &staged_l2)?;
     let result = SystemResult {
         arch,
         per_sm,
-        l2: staged_l2.counters,
+        l2: l2_counters,
         l2_by_source,
         dram: dram_stats,
         terminal_event_time,
@@ -988,9 +1053,7 @@ fn run_sm(
 mod tests {
     use std::collections::BTreeMap;
 
-    use sim_mem::{
-        CacheOpToken, L2Config, L2CounterError, L2CounterField, L2OpClass, L2Replacement, SliceHash,
-    };
+    use sim_mem::{CacheOpToken, L2Config, L2CounterError, L2OpClass, L2Replacement, SliceHash};
 
     use super::*;
     use crate::control_bits::{ControlBits, DepBarrier, WaitMask};
@@ -1063,6 +1126,28 @@ mod tests {
             slice_hash: SliceHash::LineMod,
         })
         .unwrap()
+    }
+
+    struct L2TestFaultGuard;
+
+    impl Drop for L2TestFaultGuard {
+        fn drop(&mut self) {
+            TEST_L2_COUNTER_ARCH_OVERRIDE.with(|value| value.set(None));
+            TEST_L2_ACCESS_ERROR_AFTER.with(|value| value.set(None));
+        }
+    }
+
+    fn override_l2_counter_architecture(arch: ArchId) -> L2TestFaultGuard {
+        let previous = TEST_L2_COUNTER_ARCH_OVERRIDE.with(|value| value.replace(Some(arch)));
+        assert!(previous.is_none(), "nested L2 counter override");
+        L2TestFaultGuard
+    }
+
+    fn inject_l2_error_after(successful_accesses: usize) -> L2TestFaultGuard {
+        let previous =
+            TEST_L2_ACCESS_ERROR_AFTER.with(|value| value.replace(Some(successful_accesses)));
+        assert!(previous.is_none(), "nested L2 access-error injection");
+        L2TestFaultGuard
     }
 
     /// The sm_86 carded rate (~747 B/SM-cycle): far above any of these
@@ -1213,7 +1298,37 @@ mod tests {
         )
         .unwrap_err();
         assert!(matches!(err, SystemError::DramCycleOverflow { .. }));
-        assert_eq!(l2.counters.total().unwrap(), 0);
+        assert_eq!(l2.counters().unwrap().total().unwrap(), 0);
+    }
+
+    #[test]
+    fn empty_system_rejects_mismatched_l2_counter_architecture() {
+        let sched = schedule(Vec::new());
+        let _fault = override_l2_counter_architecture(ArchId::Sm120);
+        let mut l2 = l2_model();
+
+        let err = simulate_kernel_shared(
+            &BTreeMap::new(),
+            &sched,
+            &params(),
+            l1_config(),
+            &mut l2,
+            carded_bw(),
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            SystemError::L2(sim_mem::L2AccessError::Counter(
+                L2CounterError::Architecture(sim_arch::ArchitectureProvenanceError::Mismatch {
+                    component: "L2 counters",
+                    expected: ArchId::Sm86,
+                    got: ArchId::Sm120,
+                })
+            ))
+        ));
+        assert_eq!(l2.config().arch, ArchId::Sm86);
+        assert_eq!(l2.counters().unwrap().arch(), Some(ArchId::Sm86));
+        assert_eq!(l2.counters().unwrap().total().unwrap(), 0);
     }
 
     #[test]
@@ -1238,14 +1353,13 @@ mod tests {
                 }],
             }]
         };
-        // Both loads issue at t=0. The lower-SM request is processed first: it
-        // installs the cold sector, accounts an L1-fill source request, advances
-        // DRAM, and schedules its reply. The second request then hits the same
-        // sector and trips the preseeded hit-counter overflow.
+        // Both loads issue at t=0. The lower-SM request is processed first and
+        // mutates the staged cache. Inject the same typed L2 counter error the
+        // former public counter seam produced on the second request.
         let per_sm = BTreeMap::from([(0, load_blocks()), (1, load_blocks())]);
+        let _fault = inject_l2_error_after(1);
         let mut l2 = l2_model();
-        l2.counters.hits = u64::MAX;
-        let before = l2.counters;
+        let before = *l2.counters().unwrap();
         assert_eq!(
             l2.preview_mask(1, 0b0001, L2OpClass::Read)
                 .unwrap()
@@ -1265,10 +1379,14 @@ mod tests {
         assert!(matches!(
             err,
             SystemError::L2(sim_mem::L2AccessError::Counter(L2CounterError::Overflow {
-                field: L2CounterField::Hits,
+                field: sim_mem::L2CounterField::Hits,
             }))
         ));
-        assert_eq!(l2.counters, before, "a failed kernel published L2 counters");
+        assert_eq!(
+            *l2.counters().unwrap(),
+            before,
+            "a failed kernel published L2 counters"
+        );
         assert_eq!(
             l2.preview_mask(1, 0b0001, L2OpClass::Read)
                 .unwrap()
@@ -1443,7 +1561,7 @@ mod tests {
         assert_eq!(result.per_sm[&0].cycles, 1);
         assert_eq!(result.terminal_event_time, Some(u64::MAX));
         assert_eq!(result.l2.misses, 1);
-        assert_eq!(l2.counters, result.l2);
+        assert_eq!(*l2.counters().unwrap(), result.l2);
     }
 
     #[test]
@@ -1477,7 +1595,7 @@ mod tests {
         let mut p = params();
         p.global_flat_latency = u64::MAX;
         let mut l2 = l2_model();
-        let before = l2.counters;
+        let before = *l2.counters().unwrap();
 
         let error = simulate_kernel_shared(
             &BTreeMap::from([(0, blocks)]),
@@ -1498,7 +1616,8 @@ mod tests {
             })
         ));
         assert_eq!(
-            l2.counters, before,
+            *l2.counters().unwrap(),
+            before,
             "a failed kernel published staged L2 counters"
         );
         assert_eq!(
@@ -1708,7 +1827,8 @@ mod tests {
         assert_eq!(r.l2_by_source.source(sim_mem::L2Source::L1Fill), (1, 1));
         assert_eq!(r.per_sm[&1].cycles, 245, "L2-hit arm for the loader");
         assert_eq!(
-            l2.counters, r.l2,
+            *l2.counters().unwrap(),
+            r.l2,
             "successful replay did not commit staged L2"
         );
         assert_eq!(
