@@ -45,8 +45,9 @@ pub use cache_op::{
     classify_opcode_for_arch, derive_l1_eligible, opcode_head,
 };
 pub use l1::{
-    AccessOutcome, EvAccess, FillKey, L1Cache, L1Config, L1ConfigError, L1Counters, LINE_BYTES,
-    SECTOR_BYTES, SECTORS_PER_LINE, SectorExpansionError, push_unique_sectors,
+    AccessOutcome, EvAccess, FillKey, L1Cache, L1Config, L1ConfigError, L1CounterError,
+    L1CounterField, L1Counters, LINE_BYTES, SECTOR_BYTES, SECTORS_PER_LINE, SectorExpansionError,
+    push_unique_sectors,
 };
 pub use l2::{
     DOCUMENTED_DEFAULT_L2_ASSOCIATIVITY, DOCUMENTED_DEFAULT_L2_REPLACEMENT,

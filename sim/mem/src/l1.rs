@@ -112,6 +112,60 @@ pub struct L1Counters {
     pub store_tag_hits: u64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum L1CounterField {
+    Hits,
+    Misses,
+    Merges,
+    StallEvents,
+    LineFills,
+    LineAllocMisses,
+    SectorResidentMisses,
+    BypassSectors,
+    BypassAtomSectors,
+    UntaggedSectors,
+    StoreSectors,
+    StoreHits,
+    StoreTagHits,
+}
+
+impl std::fmt::Display for L1CounterField {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Hits => "hits",
+            Self::Misses => "misses",
+            Self::Merges => "merges",
+            Self::StallEvents => "stall_events",
+            Self::LineFills => "line_fills",
+            Self::LineAllocMisses => "line_alloc_misses",
+            Self::SectorResidentMisses => "sector_resident_misses",
+            Self::BypassSectors => "bypass_sectors",
+            Self::BypassAtomSectors => "bypass_atom_sectors",
+            Self::UntaggedSectors => "untagged_sectors",
+            Self::StoreSectors => "store_sectors",
+            Self::StoreHits => "store_hits",
+            Self::StoreTagHits => "store_tag_hits",
+        })
+    }
+}
+
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+pub enum L1CounterError {
+    #[error(transparent)]
+    Architecture(#[from] sim_arch::ArchitectureProvenanceError),
+    #[error("L1 counter '{field}' overflows u64 during aggregation")]
+    Overflow { field: L1CounterField },
+}
+
+fn checked_counter_add(
+    field: L1CounterField,
+    left: u64,
+    right: u64,
+) -> Result<u64, L1CounterError> {
+    left.checked_add(right)
+        .ok_or(L1CounterError::Overflow { field })
+}
+
 impl Default for L1Counters {
     fn default() -> Self {
         Self {
@@ -145,10 +199,7 @@ impl L1Counters {
         self.arch
     }
 
-    pub fn add_checked(
-        &mut self,
-        other: &L1Counters,
-    ) -> Result<(), sim_arch::ArchitectureProvenanceError> {
+    pub fn add_checked(&mut self, other: &L1Counters) -> Result<(), L1CounterError> {
         let expected = self
             .arch
             .ok_or(sim_arch::ArchitectureProvenanceError::Unbound {
@@ -164,21 +215,71 @@ impl L1Counters {
                 component: "L1 counters",
                 expected,
                 got,
-            });
+            }
+            .into());
         }
-        self.hits += other.hits;
-        self.misses += other.misses;
-        self.merges += other.merges;
-        self.stall_events += other.stall_events;
-        self.line_fills += other.line_fills;
-        self.line_alloc_misses += other.line_alloc_misses;
-        self.sector_resident_misses += other.sector_resident_misses;
-        self.bypass_sectors += other.bypass_sectors;
-        self.bypass_atom_sectors += other.bypass_atom_sectors;
-        self.untagged_sectors += other.untagged_sectors;
-        self.store_sectors += other.store_sectors;
-        self.store_hits += other.store_hits;
-        self.store_tag_hits += other.store_tag_hits;
+
+        let hits = checked_counter_add(L1CounterField::Hits, self.hits, other.hits)?;
+        let misses = checked_counter_add(L1CounterField::Misses, self.misses, other.misses)?;
+        let merges = checked_counter_add(L1CounterField::Merges, self.merges, other.merges)?;
+        let stall_events = checked_counter_add(
+            L1CounterField::StallEvents,
+            self.stall_events,
+            other.stall_events,
+        )?;
+        let line_fills =
+            checked_counter_add(L1CounterField::LineFills, self.line_fills, other.line_fills)?;
+        let line_alloc_misses = checked_counter_add(
+            L1CounterField::LineAllocMisses,
+            self.line_alloc_misses,
+            other.line_alloc_misses,
+        )?;
+        let sector_resident_misses = checked_counter_add(
+            L1CounterField::SectorResidentMisses,
+            self.sector_resident_misses,
+            other.sector_resident_misses,
+        )?;
+        let bypass_sectors = checked_counter_add(
+            L1CounterField::BypassSectors,
+            self.bypass_sectors,
+            other.bypass_sectors,
+        )?;
+        let bypass_atom_sectors = checked_counter_add(
+            L1CounterField::BypassAtomSectors,
+            self.bypass_atom_sectors,
+            other.bypass_atom_sectors,
+        )?;
+        let untagged_sectors = checked_counter_add(
+            L1CounterField::UntaggedSectors,
+            self.untagged_sectors,
+            other.untagged_sectors,
+        )?;
+        let store_sectors = checked_counter_add(
+            L1CounterField::StoreSectors,
+            self.store_sectors,
+            other.store_sectors,
+        )?;
+        let store_hits =
+            checked_counter_add(L1CounterField::StoreHits, self.store_hits, other.store_hits)?;
+        let store_tag_hits = checked_counter_add(
+            L1CounterField::StoreTagHits,
+            self.store_tag_hits,
+            other.store_tag_hits,
+        )?;
+
+        self.hits = hits;
+        self.misses = misses;
+        self.merges = merges;
+        self.stall_events = stall_events;
+        self.line_fills = line_fills;
+        self.line_alloc_misses = line_alloc_misses;
+        self.sector_resident_misses = sector_resident_misses;
+        self.bypass_sectors = bypass_sectors;
+        self.bypass_atom_sectors = bypass_atom_sectors;
+        self.untagged_sectors = untagged_sectors;
+        self.store_sectors = store_sectors;
+        self.store_hits = store_hits;
+        self.store_tag_hits = store_tag_hits;
         Ok(())
     }
 }
@@ -1074,12 +1175,105 @@ mod tests {
         let sm120 = L1Counters::for_arch(ArchId::Sm120);
         assert!(matches!(
             sm86.add_checked(&sm120),
-            Err(sim_arch::ArchitectureProvenanceError::Mismatch {
-                component: "L1 counters",
-                expected: ArchId::Sm86,
-                got: ArchId::Sm120,
-            })
+            Err(L1CounterError::Architecture(
+                sim_arch::ArchitectureProvenanceError::Mismatch {
+                    component: "L1 counters",
+                    expected: ArchId::Sm86,
+                    got: ArchId::Sm120,
+                }
+            ))
         ));
+    }
+
+    #[test]
+    fn counter_aggregation_overflow_is_named_and_transactional() {
+        type Setter = fn(&mut L1Counters, u64);
+        let cases: [(L1CounterField, Setter); 13] = [
+            (L1CounterField::Hits, |c, v| c.hits = v),
+            (L1CounterField::Misses, |c, v| c.misses = v),
+            (L1CounterField::Merges, |c, v| c.merges = v),
+            (L1CounterField::StallEvents, |c, v| c.stall_events = v),
+            (L1CounterField::LineFills, |c, v| c.line_fills = v),
+            (L1CounterField::LineAllocMisses, |c, v| {
+                c.line_alloc_misses = v
+            }),
+            (L1CounterField::SectorResidentMisses, |c, v| {
+                c.sector_resident_misses = v
+            }),
+            (L1CounterField::BypassSectors, |c, v| c.bypass_sectors = v),
+            (L1CounterField::BypassAtomSectors, |c, v| {
+                c.bypass_atom_sectors = v
+            }),
+            (L1CounterField::UntaggedSectors, |c, v| {
+                c.untagged_sectors = v
+            }),
+            (L1CounterField::StoreSectors, |c, v| c.store_sectors = v),
+            (L1CounterField::StoreHits, |c, v| c.store_hits = v),
+            (L1CounterField::StoreTagHits, |c, v| c.store_tag_hits = v),
+        ];
+        for (field, set) in cases {
+            let mut total = L1Counters::for_arch(ArchId::Sm86);
+            total.hits = 7;
+            set(&mut total, u64::MAX);
+            let before = total;
+            let mut addend = L1Counters::for_arch(ArchId::Sm86);
+            addend.misses = 11;
+            set(&mut addend, 1);
+            assert!(matches!(
+                total.add_checked(&addend),
+                Err(L1CounterError::Overflow { field: got }) if got == field
+            ));
+            assert_eq!(total, before, "overflow in {field} partially committed");
+        }
+    }
+
+    #[test]
+    fn counter_aggregation_commits_every_field() {
+        let mut total = L1Counters::for_arch(ArchId::Sm86);
+        total.hits = 1;
+        total.misses = 2;
+        total.merges = 3;
+        total.stall_events = 4;
+        total.line_fills = 5;
+        total.line_alloc_misses = 6;
+        total.sector_resident_misses = 7;
+        total.bypass_sectors = 8;
+        total.bypass_atom_sectors = 9;
+        total.untagged_sectors = 10;
+        total.store_sectors = 11;
+        total.store_hits = 12;
+        total.store_tag_hits = 13;
+
+        let mut addend = L1Counters::for_arch(ArchId::Sm86);
+        addend.hits = 20;
+        addend.misses = 21;
+        addend.merges = 22;
+        addend.stall_events = 23;
+        addend.line_fills = 24;
+        addend.line_alloc_misses = 25;
+        addend.sector_resident_misses = 26;
+        addend.bypass_sectors = 27;
+        addend.bypass_atom_sectors = 28;
+        addend.untagged_sectors = 29;
+        addend.store_sectors = 30;
+        addend.store_hits = 31;
+        addend.store_tag_hits = 32;
+
+        total.add_checked(&addend).unwrap();
+        assert_eq!(total.arch(), Some(ArchId::Sm86));
+        assert_eq!(total.hits, 21);
+        assert_eq!(total.misses, 23);
+        assert_eq!(total.merges, 25);
+        assert_eq!(total.stall_events, 27);
+        assert_eq!(total.line_fills, 29);
+        assert_eq!(total.line_alloc_misses, 31);
+        assert_eq!(total.sector_resident_misses, 33);
+        assert_eq!(total.bypass_sectors, 35);
+        assert_eq!(total.bypass_atom_sectors, 37);
+        assert_eq!(total.untagged_sectors, 39);
+        assert_eq!(total.store_sectors, 41);
+        assert_eq!(total.store_hits, 43);
+        assert_eq!(total.store_tag_hits, 45);
     }
 
     #[test]

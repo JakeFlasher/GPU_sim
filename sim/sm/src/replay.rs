@@ -30,10 +30,10 @@
 //! is dropped before the next block loads.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use sim_arch::ArchId;
-use sim_mem::{L1Config, L1Counters, SectorExpansionError, push_unique_sectors};
+use sim_mem::{L1Config, L1CounterError, L1Counters, SectorExpansionError, push_unique_sectors};
 use sim_trace::lanes::LANE_INACTIVE_SENTINEL;
 use sim_trace::pb;
 use sim_trace::{
@@ -62,8 +62,18 @@ pub enum ReplayError {
     System(#[from] SystemError),
     #[error("L2 config invalid: {0}")]
     L2Config(#[from] sim_mem::L2ConfigError),
-    #[error("counter provenance invalid: {0}")]
-    CounterProvenance(#[from] sim_arch::ArchitectureProvenanceError),
+    #[error("SM {sm_id} L1 counter aggregation failed: {source}")]
+    L1Aggregation {
+        sm_id: i32,
+        #[source]
+        source: L1CounterError,
+    },
+    #[error("SM {sm_id} L1 counter presence mismatch: expected={expected}, found={found}")]
+    L1PresenceMismatch {
+        sm_id: i32,
+        expected: bool,
+        found: bool,
+    },
     #[error("replay architecture mismatch for {component}: expected {expected}, got {got}")]
     ArchitectureMismatch {
         component: &'static str,
@@ -140,6 +150,26 @@ pub enum ReplayError {
         #[source]
         source: SectorExpansionError,
     },
+    #[error(
+        "{path}: warp {warp_id} record {record_ix}: record count overflows u64 at {accumulated}"
+    )]
+    RecordCountOverflow {
+        path: PathBuf,
+        warp_id: i32,
+        record_ix: usize,
+        accumulated: u64,
+    },
+    #[error("collection '{collection}' length {len} does not fit u64")]
+    CollectionLengthOutOfRange {
+        collection: &'static str,
+        len: usize,
+    },
+    #[error("SM {sm_id} instruction aggregation {accumulated} + {addend} overflows u64")]
+    InstructionCountOverflow {
+        sm_id: i32,
+        accumulated: u64,
+        addend: u64,
+    },
     #[error("duplicate block launch index {index} across threadblock files")]
     DuplicateLaunchIndex { index: i64 },
     #[error(
@@ -210,6 +240,26 @@ fn checked_grid_total(grid: (u32, u32, u32)) -> Result<u64, ReplayError> {
         .ok_or(ReplayError::GridSizeOverflow { grid })
 }
 
+fn checked_record_count(
+    accumulated: u64,
+    path: &Path,
+    warp_id: i32,
+    record_ix: usize,
+) -> Result<u64, ReplayError> {
+    accumulated
+        .checked_add(1)
+        .ok_or_else(|| ReplayError::RecordCountOverflow {
+            path: path.to_path_buf(),
+            warp_id,
+            record_ix,
+            accumulated,
+        })
+}
+
+fn checked_collection_len(collection: &'static str, len: usize) -> Result<u64, ReplayError> {
+    u64::try_from(len).map_err(|_| ReplayError::CollectionLengthOutOfRange { collection, len })
+}
+
 /// Decode one launch into per-SM block replays on the traced placement.
 /// `decode_sectors` selects the L1-mode classification (lane decode +
 /// unique-sector expansion) over the flat-mode class check.
@@ -241,7 +291,7 @@ fn extract_per_sm_blocks(
             let mut insts = Vec::with_capacity(warp.instructions.len());
             let mut sectors: Vec<i64> = Vec::new();
             for (record_ix, inst) in warp.instructions.iter().enumerate() {
-                records_seen += 1;
+                records_seen = checked_record_count(records_seen, &path, warp_id, record_ix)?;
                 // Allocation-identity gate on the path the simulator actually
                 // consumes: a GLOBAL/GENERIC-space active record (ordinary global,
                 // global atomic, LDGSTS source) must carry a resolvable, in-range
@@ -335,7 +385,7 @@ fn extract_per_sm_blocks(
     // records_seen. Absent/non-sampling sidecars never waive full coverage.
     let (gx, gy, gz) = kernel_grid(loc.kernel)?;
     let grid_total = checked_grid_total((gx, gy, gz))?;
-    let seen = seen_indices.len() as u64;
+    let seen = checked_collection_len("replayed block membership", seen_indices.len())?;
     match td.sampling_sidecar() {
         None => {
             if seen < grid_total {
@@ -369,13 +419,14 @@ fn extract_per_sm_blocks(
                 });
             }
             if sc.sanctions_incomplete && sc.selected_block_ids.as_ref() != Some(&seen_indices) {
-                return Err(ReplayError::SelectedBlockMembershipMismatch {
-                    seen,
-                    declared: sc
-                        .selected_block_ids
-                        .as_ref()
-                        .map_or(0, |blocks| blocks.len() as u64),
-                });
+                let declared = match &sc.selected_block_ids {
+                    Some(blocks) => checked_collection_len(
+                        "trace_sampling selected block membership",
+                        blocks.len(),
+                    )?,
+                    None => 0,
+                };
+                return Err(ReplayError::SelectedBlockMembershipMismatch { seen, declared });
             }
             if seen < grid_total && !sc.sanctions_incomplete {
                 return Err(ReplayError::IncompleteTrace { seen, grid_total });
@@ -400,19 +451,33 @@ fn fold_kernel_result(
     arch: ArchId,
     per_sm: BTreeMap<i32, SmSimResult>,
     records_seen: u64,
+    expect_l1: bool,
     l2: Option<(L2Counters, L2SourceSplit, DramStats)>,
 ) -> Result<KernelReplayResult, ReplayError> {
     let mut instructions_issued: u64 = 0;
     let mut max_cycles: u64 = 0;
-    let mut l1_totals: Option<L1Counters> = None;
-    for result in per_sm.values() {
-        instructions_issued += result.instructions_issued;
+    let mut l1_totals = expect_l1.then(|| L1Counters::for_arch(arch));
+    for (&sm_id, result) in &per_sm {
+        instructions_issued = instructions_issued
+            .checked_add(result.instructions_issued)
+            .ok_or(ReplayError::InstructionCountOverflow {
+                sm_id,
+                accumulated: instructions_issued,
+                addend: result.instructions_issued,
+            })?;
         max_cycles = max_cycles.max(result.cycles);
-        if let Some(c) = &result.l1 {
-            match &mut l1_totals {
-                Some(total) => total.add_checked(c)?,
-                None => l1_totals = Some(*c),
-            }
+        let found_l1 = result.l1.is_some();
+        if found_l1 != expect_l1 {
+            return Err(ReplayError::L1PresenceMismatch {
+                sm_id,
+                expected: expect_l1,
+                found: found_l1,
+            });
+        }
+        if let (Some(c), Some(total)) = (&result.l1, &mut l1_totals) {
+            total
+                .add_checked(c)
+                .map_err(|source| ReplayError::L1Aggregation { sm_id, source })?;
         }
     }
     if instructions_issued != records_seen {
@@ -529,7 +594,13 @@ pub fn replay_kernel(
             for (sm, blocks) in &per_sm_blocks {
                 per_sm.insert(*sm, simulate_sm(blocks, schedule, params, l1_config)?);
             }
-            fold_kernel_result(schedule.arch, per_sm, records_seen, None)
+            fold_kernel_result(
+                schedule.arch,
+                per_sm,
+                records_seen,
+                l1_config.is_some(),
+                None,
+            )
         }
         ReplayMemMode::L1SharedL2 { l1, l2, dram } => {
             let mut l2 = L2Model::new(l2)?;
@@ -539,6 +610,7 @@ pub fn replay_kernel(
                 schedule.arch,
                 sys.per_sm,
                 records_seen,
+                true,
                 Some((sys.l2, sys.l2_by_source, sys.dram)),
             )
         }
@@ -797,6 +869,156 @@ fn classify_with_l1(
         MemRole::Store => AccessKind::GlobalStore { off, len },
         MemRole::None => AccessKind::GlobalUntagged { off, len },
     })
+}
+
+#[cfg(test)]
+mod aggregation_tests {
+    use super::*;
+
+    fn sm(instructions_issued: u64, l1: Option<L1Counters>) -> SmSimResult {
+        SmSimResult {
+            instructions_issued,
+            cycles: 1,
+            l1,
+        }
+    }
+
+    #[test]
+    fn record_count_overflow_preserves_context() {
+        let path = Path::new("block_7.msgpack");
+        assert!(matches!(
+            checked_record_count(u64::MAX, path, 3, 11),
+            Err(ReplayError::RecordCountOverflow {
+                path: got,
+                warp_id: 3,
+                record_ix: 11,
+                accumulated: u64::MAX,
+            }) if got == path
+        ));
+    }
+
+    #[test]
+    fn instruction_overflow_precedes_count_mismatch() {
+        let per_sm = BTreeMap::from([(0, sm(u64::MAX, None)), (1, sm(1, None))]);
+        assert!(matches!(
+            fold_kernel_result(ArchId::Sm86, per_sm, 0, false, None),
+            Err(ReplayError::InstructionCountOverflow {
+                sm_id: 1,
+                accumulated: u64::MAX,
+                addend: 1,
+            })
+        ));
+    }
+
+    #[test]
+    fn ordinary_count_mismatch_remains_typed() {
+        let per_sm = BTreeMap::from([(0, sm(4, None))]);
+        assert!(matches!(
+            fold_kernel_result(ArchId::Sm86, per_sm, 5, false, None),
+            Err(ReplayError::CountMismatch {
+                issued: 4,
+                records: 5,
+            })
+        ));
+    }
+
+    #[test]
+    fn first_l1_snapshot_must_have_matching_provenance() {
+        let unbound = BTreeMap::from([(0, sm(1, Some(L1Counters::default())))]);
+        assert!(matches!(
+            fold_kernel_result(ArchId::Sm86, unbound, 1, true, None),
+            Err(ReplayError::L1Aggregation {
+                sm_id: 0,
+                source: L1CounterError::Architecture(
+                    sim_arch::ArchitectureProvenanceError::Unbound {
+                        component: "L1 counters",
+                    }
+                ),
+            })
+        ));
+
+        let wrong_arch = BTreeMap::from([(0, sm(1, Some(L1Counters::for_arch(ArchId::Sm120))))]);
+        assert!(matches!(
+            fold_kernel_result(ArchId::Sm86, wrong_arch, 1, true, None),
+            Err(ReplayError::L1Aggregation {
+                sm_id: 0,
+                source: L1CounterError::Architecture(
+                    sim_arch::ArchitectureProvenanceError::Mismatch {
+                        component: "L1 counters",
+                        expected: ArchId::Sm86,
+                        got: ArchId::Sm120,
+                    }
+                ),
+            })
+        ));
+    }
+
+    #[test]
+    fn l1_presence_must_match_replay_mode_for_every_sm() {
+        let all_none = BTreeMap::from([(0, sm(1, None))]);
+        assert!(matches!(
+            fold_kernel_result(ArchId::Sm86, all_none, 1, true, None),
+            Err(ReplayError::L1PresenceMismatch {
+                sm_id: 0,
+                expected: true,
+                found: false,
+            })
+        ));
+
+        let all_some = BTreeMap::from([(0, sm(1, Some(L1Counters::for_arch(ArchId::Sm86))))]);
+        assert!(matches!(
+            fold_kernel_result(ArchId::Sm86, all_some, 1, false, None),
+            Err(ReplayError::L1PresenceMismatch {
+                sm_id: 0,
+                expected: false,
+                found: true,
+            })
+        ));
+
+        let missing_second = BTreeMap::from([
+            (0, sm(1, Some(L1Counters::for_arch(ArchId::Sm86)))),
+            (1, sm(1, None)),
+        ]);
+        assert!(matches!(
+            fold_kernel_result(ArchId::Sm86, missing_second, 2, true, None),
+            Err(ReplayError::L1PresenceMismatch {
+                sm_id: 1,
+                expected: true,
+                found: false,
+            })
+        ));
+
+        let unexpected_second = BTreeMap::from([
+            (0, sm(1, None)),
+            (1, sm(1, Some(L1Counters::for_arch(ArchId::Sm86)))),
+        ]);
+        assert!(matches!(
+            fold_kernel_result(ArchId::Sm86, unexpected_second, 2, false, None),
+            Err(ReplayError::L1PresenceMismatch {
+                sm_id: 1,
+                expected: false,
+                found: true,
+            })
+        ));
+    }
+
+    #[test]
+    fn l1_overflow_keeps_responsible_sm_context() {
+        let mut first = L1Counters::for_arch(ArchId::Sm86);
+        first.hits = u64::MAX;
+        let mut second = L1Counters::for_arch(ArchId::Sm86);
+        second.hits = 1;
+        let per_sm = BTreeMap::from([(0, sm(1, Some(first))), (1, sm(1, Some(second)))]);
+        assert!(matches!(
+            fold_kernel_result(ArchId::Sm86, per_sm, 2, true, None),
+            Err(ReplayError::L1Aggregation {
+                sm_id: 1,
+                source: L1CounterError::Overflow {
+                    field: sim_mem::L1CounterField::Hits,
+                },
+            })
+        ));
+    }
 }
 
 #[cfg(test)]
