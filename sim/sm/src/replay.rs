@@ -366,10 +366,10 @@ fn extract_per_sm_blocks(
                 records_seen = checked_record_count(records_seen, &path, warp_id, record_ix)?;
                 // Complete wire and producer-shape preflight on the path the
                 // simulator consumes. Structural errors govern route errors;
-                // route errors govern identity diagnostics; only then may a
-                // GLOBAL/GENERIC active record prove its resolvable, in-range
-                // allocation id. The immutable token is reused by both later
-                // passes, so this ordering neither reruns fallible structural
+                // route errors govern the function-identity diagnostic; only a
+                // matching function may then prove each GLOBAL/GENERIC active
+                // record's resolvable, in-range allocation id. The immutable
+                // token is reused by both later passes, so this ordering neither
                 // preflight nor allocates an intermediate payload vector.
                 if decode_sectors {
                     sector_scratch.clear();
@@ -382,13 +382,6 @@ fn extract_per_sm_blocks(
                     warp_id,
                     record_ix,
                 )?;
-                if let Some(preflight) = preflight {
-                    check_preflighted_allocation_identity(
-                        preflight.memory,
-                        td.allocations(),
-                        || format!("{} warp={warp_id} inst={record_ix}", path.display()),
-                    )?;
-                }
                 if inst.function_unique_id != expected_fuid {
                     return Err(ReplayError::MultiFunctionUnsupported {
                         path,
@@ -397,6 +390,13 @@ fn extract_per_sm_blocks(
                         expected: expected_fuid,
                         found: inst.function_unique_id,
                     });
+                }
+                if let Some(preflight) = preflight {
+                    check_preflighted_allocation_identity(
+                        preflight.memory,
+                        td.allocations(),
+                        || format!("{} warp={warp_id} inst={record_ix}", path.display()),
+                    )?;
                 }
                 if let Some(sm) = inst.sm_id {
                     match block_sm {
@@ -3053,6 +3053,34 @@ mod replay_identity_tests {
                 source: sim_trace::lanes::LaneError::ListAllLengthInvalid { got: 0 },
                 ..
             })
+        ));
+    }
+
+    #[test]
+    fn foreign_function_precedes_allocation_identity_after_route_validation() {
+        let mut foreign = malformed_global_inst(pb::MemoryOpClass::Global);
+        foreign.function_unique_id = 2;
+        assert!(matches!(
+            replay_error(foreign),
+            ReplayError::MultiFunctionUnsupported {
+                expected: 1,
+                found: 2,
+                ..
+            }
+        ));
+
+        let mut malformed_route = malformed_global_inst(pb::MemoryOpClass::Atomic);
+        malformed_route.function_unique_id = 2;
+        malformed_route
+            .addresses
+            .push(malformed_route.addresses[0].clone());
+        assert!(matches!(
+            replay_error(malformed_route),
+            ReplayError::MemoryRoute {
+                class: pb::MemoryOpClass::Atomic,
+                source: MemoryRouteError::AtomicOperandCount { got: 2 },
+                ..
+            }
         ));
     }
 
