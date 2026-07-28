@@ -215,8 +215,8 @@ impl L2SourceSplit {
 }
 
 use crate::issue::{
-    Advance, BlockReplay, IssueError, IssueModelParams, MemRequest, ReplyTo, SmCore, SmMemMode,
-    SmSimResult, checked_cycle_add,
+    Advance, BlockReplay, IssueError, IssueModelParams, MemRequest, ReplayHorizon, ReplyTo, SmCore,
+    SmMemMode, SmSimResult, checked_cycle_add,
 };
 use crate::program::FunctionSchedule;
 
@@ -273,9 +273,9 @@ pub enum SystemError {
     #[error("DRAM fixed-point {operation} overflows u128")]
     DramFixedPointOverflow { operation: &'static str },
     #[error(
-        "DRAM completion {completion_fp}/{bytes_per_sec} reaches or exceeds u64::MAX, reserved as the unbounded horizon"
+        "DRAM completion {completion_fp}/{bytes_per_sec} exceeds the u64 cycle domain after ceiling division"
     )]
-    DramCycleDomainExhausted {
+    DramCycleOverflow {
         completion_fp: u128,
         bytes_per_sec: u128,
     },
@@ -502,14 +502,12 @@ impl DramServer {
             .ok_or(SystemError::DramFixedPointOverflow {
                 operation: "service completion",
             })?;
-        let ready = done.div_ceil(self.bytes_per_sec);
-        if ready >= u128::from(u64::MAX) {
-            return Err(SystemError::DramCycleDomainExhausted {
-                completion_fp: done,
-                bytes_per_sec: self.bytes_per_sec,
-            });
-        }
-        Ok((done, ready as u64))
+        let ready_fp = done.div_ceil(self.bytes_per_sec);
+        let ready = u64::try_from(ready_fp).map_err(|_| SystemError::DramCycleOverflow {
+            completion_fp: done,
+            bytes_per_sec: self.bytes_per_sec,
+        })?;
+        Ok((done, ready))
     }
 }
 
@@ -929,6 +927,14 @@ pub fn simulate_kernel_shared(
     Ok(result)
 }
 
+fn replay_horizon(response: Option<u64>, unpriced: Option<u64>) -> ReplayHorizon {
+    match (response, unpriced) {
+        (Some(left), Some(right)) => ReplayHorizon::Bounded(left.min(right)),
+        (Some(bound), None) | (None, Some(bound)) => ReplayHorizon::Bounded(bound),
+        (None, None) => ReplayHorizon::Unbounded,
+    }
+}
+
 /// Resume one SM actor: advance to its earliest self-affecting external
 /// event — the earlier of its next scheduled response and the lower
 /// bound of any request still awaiting L2 pricing — schedule its
@@ -947,8 +953,7 @@ fn run_sm(
     l2_hit_latency: u64,
 ) -> Result<bool, SystemError> {
     scratch.clear();
-    let responses = response_due.next(ix).unwrap_or(u64::MAX);
-    let horizon = responses.min(unpriced.min(ix).unwrap_or(u64::MAX));
+    let horizon = replay_horizon(response_due.next(ix), unpriced.min(ix));
     let issued_before = cores[ix].instructions_issued();
     let adv = cores[ix].advance(horizon, scratch)?;
     let progress = cores[ix].instructions_issued() > issued_before || !scratch.is_empty();
@@ -1150,35 +1155,47 @@ mod tests {
     }
 
     #[test]
-    fn dram_server_rejects_reserved_and_overflowed_completions_transactionally() {
-        let reserved = DramServer::new(DramBw::Carded {
+    fn dram_server_accepts_exact_maximum_and_rejects_true_overflow_transactionally() {
+        let exact = DramServer::new(DramBw::Carded {
             arch: ArchId::Sm86,
             bytes_per_sec: 32,
             sm_clock_hz: u64::MAX,
         })
         .unwrap();
-        assert!(matches!(
-            reserved.preview(0, 32),
-            Err(SystemError::DramCycleDomainExhausted { .. })
-        ));
-        assert_eq!(reserved.free_fp, 0);
+        assert_eq!(
+            exact.preview(0, 32).unwrap(),
+            (u128::from(32_u8) * u128::from(u64::MAX), u64::MAX)
+        );
+        assert_eq!(exact.free_fp, 0);
 
-        let overflow = DramServer {
+        let cycle_overflow = DramServer::new(DramBw::Carded {
+            arch: ArchId::Sm86,
+            bytes_per_sec: 16,
+            sm_clock_hz: u64::MAX,
+        })
+        .unwrap();
+        assert!(matches!(
+            cycle_overflow.preview(0, 32),
+            Err(SystemError::DramCycleOverflow { .. })
+        ));
+        assert_eq!(cycle_overflow.free_fp, 0);
+
+        let fixed_point_overflow = DramServer {
             free_fp: u128::MAX,
             bytes_per_sec: 1,
             sm_clock_hz: 1,
         };
         assert!(matches!(
-            overflow.preview(0, 1),
+            fixed_point_overflow.preview(0, 1),
             Err(SystemError::DramFixedPointOverflow {
                 operation: "service completion",
             })
         ));
-        assert_eq!(overflow.free_fp, u128::MAX);
+        assert_eq!(fixed_point_overflow.free_fp, u128::MAX);
     }
 
     #[test]
-    fn dram_domain_error_precedes_l2_mutation() {
+    fn dram_cycle_overflow_precedes_l2_mutation() {
         let sched = load_consumer_schedule();
         let per_sm = BTreeMap::from([(0, dependent_load_blocks(4))]);
         let mut l2 = l2_model();
@@ -1190,12 +1207,12 @@ mod tests {
             &mut l2,
             DramBw::Carded {
                 arch: ArchId::Sm86,
-                bytes_per_sec: 32,
+                bytes_per_sec: 16,
                 sm_clock_hz: u64::MAX,
             },
         )
         .unwrap_err();
-        assert!(matches!(err, SystemError::DramCycleDomainExhausted { .. }));
+        assert!(matches!(err, SystemError::DramCycleOverflow { .. }));
         assert_eq!(l2.counters.total().unwrap(), 0);
     }
 
@@ -1307,7 +1324,7 @@ mod tests {
             &mut l2,
             DramBw::Carded {
                 arch: ArchId::Sm86,
-                bytes_per_sec: 32,
+                bytes_per_sec: 16,
                 sm_clock_hz: u64::MAX,
             },
         )
@@ -1315,6 +1332,23 @@ mod tests {
         assert_eq!(result.dram.read_sectors, 0);
         assert_eq!(result.l2.hits, 1);
         assert_eq!(result.l2.misses, 1);
+    }
+
+    #[test]
+    fn typed_horizon_preserves_exact_maximum_bounds() {
+        assert_eq!(replay_horizon(None, None), ReplayHorizon::Unbounded);
+        assert_eq!(
+            replay_horizon(Some(u64::MAX), None),
+            ReplayHorizon::Bounded(u64::MAX)
+        );
+        assert_eq!(
+            replay_horizon(None, Some(u64::MAX)),
+            ReplayHorizon::Bounded(u64::MAX)
+        );
+        assert_eq!(
+            replay_horizon(Some(u64::MAX), Some(7)),
+            ReplayHorizon::Bounded(7)
+        );
     }
 
     #[test]
@@ -1369,6 +1403,118 @@ mod tests {
         assert_eq!(result.per_sm[&0].instructions_issued, 1);
         assert_eq!(result.per_sm[&0].cycles, 1);
         assert_eq!(result.terminal_event_time, Some(423));
+    }
+
+    #[test]
+    fn exact_maximum_response_time_is_a_real_terminal_event() {
+        let mut load = cb(1);
+        load.write_barrier = Some(barrier(0));
+        let sched = schedule(vec![(0, slot(load, "LDG.E"))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                warp_slot: 0,
+                insts: vec![ReplayInst {
+                    pc: 0,
+                    kind: AccessKind::GlobalEligible {
+                        off: 0,
+                        len: 1,
+                        token: CacheOpToken::LdgECa,
+                    },
+                }],
+                sectors: vec![4],
+            }],
+        }];
+        let mut p = params();
+        p.global_flat_latency = u64::MAX;
+        let mut l2 = l2_model();
+
+        let result = simulate_kernel_shared(
+            &BTreeMap::from([(0, blocks)]),
+            &sched,
+            &p,
+            l1_config(),
+            &mut l2,
+            DramBw::Unmodeled { arch: ArchId::Sm86 },
+        )
+        .unwrap();
+
+        assert_eq!(result.per_sm[&0].instructions_issued, 1);
+        assert_eq!(result.per_sm[&0].cycles, 1);
+        assert_eq!(result.terminal_event_time, Some(u64::MAX));
+        assert_eq!(result.l2.misses, 1);
+        assert_eq!(l2.counters, result.l2);
+    }
+
+    #[test]
+    fn response_time_overflow_rolls_back_prior_l2_mutation() {
+        let mut load = cb(1);
+        load.write_barrier = Some(barrier(0));
+        let sched = schedule(vec![(0, slot(cb(1), "STG.E")), (16, slot(load, "LDG.E"))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                warp_slot: 0,
+                insts: vec![
+                    ReplayInst {
+                        pc: 0,
+                        kind: AccessKind::GlobalStore { off: 0, len: 1 },
+                    },
+                    ReplayInst {
+                        pc: 16,
+                        kind: AccessKind::GlobalEligible {
+                            off: 1,
+                            len: 1,
+                            token: CacheOpToken::LdgECa,
+                        },
+                    },
+                ],
+                // The store mutates line 2 successfully at t=0. The cold load
+                // then overflows its response time at t=1 on a different line.
+                sectors: vec![8, 4],
+            }],
+        }];
+        let mut p = params();
+        p.global_flat_latency = u64::MAX;
+        let mut l2 = l2_model();
+        let before = l2.counters;
+
+        let error = simulate_kernel_shared(
+            &BTreeMap::from([(0, blocks)]),
+            &sched,
+            &p,
+            l1_config(),
+            &mut l2,
+            DramBw::Unmodeled { arch: ArchId::Sm86 },
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            SystemError::Issue(IssueError::TimeOverflow {
+                operation: "DRAM response visibility",
+                base: 1,
+                delta: u64::MAX,
+            })
+        ));
+        assert_eq!(
+            l2.counters, before,
+            "a failed kernel published staged L2 counters"
+        );
+        assert_eq!(
+            l2.preview_mask(2, 0b0001, L2OpClass::Read)
+                .unwrap()
+                .present_sectors,
+            0,
+            "the earlier successful store escaped the failed kernel transaction"
+        );
+        assert_eq!(
+            l2.preview_mask(1, 0b0001, L2OpClass::Read)
+                .unwrap()
+                .present_sectors,
+            0,
+            "the overflowing load mutated the caller L2"
+        );
     }
 
     /// One SM, one cold load: L2 misses → the consumer waits the DRAM

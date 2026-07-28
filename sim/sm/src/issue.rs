@@ -133,19 +133,11 @@ pub(crate) fn checked_cycle_add(
     base: u64,
     delta: u64,
 ) -> Result<u64, IssueError> {
-    let value = base.checked_add(delta).ok_or(IssueError::TimeOverflow {
+    base.checked_add(delta).ok_or(IssueError::TimeOverflow {
         operation,
         base,
         delta,
-    })?;
-    if value == u64::MAX {
-        return Err(IssueError::TimeDomainExhausted {
-            operation,
-            base,
-            delta,
-        });
-    }
-    Ok(value)
+    })
 }
 
 fn checked_latency(name: &'static str, value: f64) -> Result<u64, IssueError> {
@@ -383,16 +375,6 @@ pub enum IssueError {
         base: u64,
         delta: u64,
     },
-    #[error(
-        "{operation}: cycle addition {base} + {delta} reaches u64::MAX, reserved as the unbounded horizon"
-    )]
-    TimeDomainExhausted {
-        operation: &'static str,
-        base: u64,
-        delta: u64,
-    },
-    #[error("memory response time u64::MAX is reserved as the unbounded horizon")]
-    ResponseTimeDomainExhausted,
     #[error("memory response at t={now} precedes the SM clock t={clock}")]
     ResponseBeforeClock { now: u64, clock: u64 },
     #[error("advance horizon t={horizon} precedes the SM clock t={clock}")]
@@ -566,6 +548,35 @@ impl MemRequest {
             source: L2Source::Store,
             class: L2OpClass::WriteAtomic,
             reply: ReplyTo::None,
+        }
+    }
+}
+
+/// Exclusive limit for one [`SmCore::advance`] call. A bounded horizon may be
+/// any cycle, including `u64::MAX`; unbounded replay is represented by its own
+/// variant instead of stealing a valid timestamp.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ReplayHorizon {
+    Bounded(u64),
+    Unbounded,
+}
+
+impl ReplayHorizon {
+    fn bounded_time(self) -> Option<u64> {
+        match self {
+            Self::Bounded(time) => Some(time),
+            Self::Unbounded => None,
+        }
+    }
+
+    fn reached(self, now: u64) -> bool {
+        self.bounded_time().is_some_and(|bound| now >= bound)
+    }
+
+    fn tighten(self, bound: u64) -> Self {
+        match self {
+            Self::Bounded(current) => Self::Bounded(current.min(bound)),
+            Self::Unbounded => Self::Bounded(bound),
         }
     }
 }
@@ -1688,9 +1699,6 @@ impl<'a> SmCore<'a> {
     }
 
     pub(crate) fn preflight_response(&self, reply: ReplyTo, now: u64) -> Result<(), IssueError> {
-        if now == u64::MAX {
-            return Err(IssueError::ResponseTimeDomainExhausted);
-        }
         if now < self.t {
             return Err(IssueError::ResponseBeforeClock { now, clock: self.t });
         }
@@ -1814,12 +1822,14 @@ impl<'a> SmCore<'a> {
     /// EARLIER than the next known timer, and the clock is monotonic.
     pub fn advance(
         &mut self,
-        horizon: u64,
+        horizon: ReplayHorizon,
         out: &mut Vec<MemRequest>,
     ) -> Result<Advance, IssueError> {
-        if horizon < self.t {
+        if let Some(bound) = horizon.bounded_time()
+            && bound < self.t
+        {
             return Err(IssueError::HorizonBeforeClock {
-                horizon,
+                horizon: bound,
                 clock: self.t,
             });
         }
@@ -1828,9 +1838,9 @@ impl<'a> SmCore<'a> {
         if let MemModel::L1Shared(st) = &mut self.mem {
             st.line_folds.clear();
         }
-        let mut h = horizon;
+        let mut horizon = horizon;
         while self.unfinished_warps > 0 {
-            if self.t >= h {
+            if horizon.reached(self.t) {
                 return Ok(Advance::Idle {
                     wake_at: Some(self.t),
                 });
@@ -1846,7 +1856,7 @@ impl<'a> SmCore<'a> {
                     self.t,
                     self.params.l1_miss_latency,
                 )?;
-                h = h.min(lower_bound);
+                horizon = horizon.tighten(lower_bound);
             }
             if issued_this_cycle {
                 self.t = checked_cycle_add("issue-clock advance", self.t, 1)?;
@@ -1866,11 +1876,15 @@ impl<'a> SmCore<'a> {
                 Some(nt) => {
                     let next_cycle = checked_cycle_add("idle-clock advance", self.t, 1)?;
                     let target = nt.max(next_cycle);
-                    if target >= h {
+                    if let Some(bound) = horizon.bounded_time()
+                        && target >= bound
+                    {
                         // Park AT the horizon instead of jumping past it:
                         // the event there may ready a warp before the
                         // next known timer.
-                        return Ok(Advance::Idle { wake_at: Some(h) });
+                        return Ok(Advance::Idle {
+                            wake_at: Some(bound),
+                        });
                     }
                     self.t = target;
                 }
@@ -2738,7 +2752,7 @@ pub fn simulate_sm(
     };
     let mut core = SmCore::new(blocks, schedule, params, mode)?;
     let mut out = Vec::new();
-    match core.advance(u64::MAX, &mut out)? {
+    match core.advance(ReplayHorizon::Unbounded, &mut out)? {
         Advance::Done => {}
         Advance::Idle { .. } => unreachable!("synchronous modes emit no requests"),
     }
@@ -2820,7 +2834,7 @@ mod tests {
         core.t = 1;
         let mut out = Vec::new();
         assert!(matches!(
-            core.advance(0, &mut out),
+            core.advance(ReplayHorizon::Bounded(0), &mut out),
             Err(IssueError::HorizonBeforeClock {
                 horizon: 0,
                 clock: 1,
@@ -2983,7 +2997,7 @@ mod tests {
         core.t = 1;
         let mut out = Vec::new();
         assert!(matches!(
-            core.advance(u64::MAX, &mut out),
+            core.advance(ReplayHorizon::Unbounded, &mut out),
             Err(IssueError::TimeOverflow {
                 operation: "non-memory write-barrier visibility",
                 base: 1,
@@ -2996,8 +3010,10 @@ mod tests {
     }
 
     #[test]
-    fn exact_max_cycle_is_reserved_for_the_unbounded_horizon() {
-        let sched = schedule(vec![(0, slot(cb(1), OpClass::Other, "EXIT"))]);
+    fn exact_maximum_barrier_time_is_valid() {
+        let mut control = cb(1);
+        control.write_barrier = Some(barrier(0));
+        let sched = schedule(vec![(0, slot(control, OpClass::Other, "EXIT"))]);
         let blocks = vec![BlockReplay {
             launch_index: 0,
             warps: vec![warp(0, vec![inst(0)])],
@@ -3007,13 +3023,65 @@ mod tests {
         let mut core = SmCore::new(&blocks, &sched, &p, SmMemMode::Flat).unwrap();
         core.t = 1;
         let mut out = Vec::new();
+
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut out).unwrap(),
+            Advance::Done
+        );
+        assert!(out.is_empty());
+        assert_eq!(core.instructions_issued(), 1);
+        assert_eq!(core.warps[0].barrier_clear[0], u64::MAX);
+        assert_eq!(core.result().cycles, 2);
+    }
+
+    #[test]
+    fn final_issue_can_advance_the_clock_to_exact_maximum() {
+        let sched = schedule(vec![(0, slot(cb(1), OpClass::Other, "EXIT"))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![warp(0, vec![inst(0)])],
+        }];
+        let mut p = params();
+        p.non_memory_write_barrier_latency = 1;
+        p.read_barrier_latency = 1;
+        let mut core = SmCore::new(&blocks, &sched, &p, SmMemMode::Flat).unwrap();
+        core.t = u64::MAX - 1;
+        let mut out = Vec::new();
+
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut out).unwrap(),
+            Advance::Done
+        );
+        assert!(out.is_empty());
+        assert_eq!(core.result().instructions_issued, 1);
+        assert_eq!(core.result().cycles, u64::MAX);
+    }
+
+    #[test]
+    fn maximum_bounded_horizon_is_distinct_from_unbounded_replay() {
+        let sched = schedule(vec![(0, slot(cb(1), OpClass::Other, "EXIT"))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![warp(0, vec![inst(0)])],
+        }];
+        let mut core = SmCore::new(&blocks, &sched, &params(), SmMemMode::Flat).unwrap();
+        core.t = u64::MAX;
+        let mut out = Vec::new();
+
+        assert_eq!(
+            core.advance(ReplayHorizon::Bounded(u64::MAX), &mut out)
+                .unwrap(),
+            Advance::Idle {
+                wake_at: Some(u64::MAX),
+            }
+        );
         assert!(matches!(
-            core.advance(u64::MAX, &mut out),
-            Err(IssueError::TimeDomainExhausted {
-                operation: "non-memory write-barrier visibility",
-                base: 1,
-                delta,
-            }) if delta == u64::MAX - 1
+            core.advance(ReplayHorizon::Unbounded, &mut out),
+            Err(IssueError::TimeOverflow {
+                operation: "issue-clock advance",
+                base: u64::MAX,
+                delta: 1,
+            })
         ));
         assert!(out.is_empty());
         assert_eq!(core.instructions_issued(), 0);
@@ -3052,7 +3120,7 @@ mod tests {
         core.t = 1;
         let mut out = Vec::new();
         assert!(matches!(
-            core.advance(u64::MAX, &mut out),
+            core.advance(ReplayHorizon::Unbounded, &mut out),
             Err(IssueError::TimeOverflow {
                 operation: "self-response horizon",
                 base: 1,
@@ -3496,7 +3564,7 @@ mod tests {
         let mut out = Vec::new();
 
         assert!(matches!(
-            core.advance(u64::MAX, &mut out),
+            core.advance(ReplayHorizon::Unbounded, &mut out),
             Err(IssueError::CounterOverflow {
                 counter: "issued instruction"
             })
@@ -3531,7 +3599,7 @@ mod tests {
         let mut out = Vec::new();
 
         assert!(matches!(
-            core.advance(u64::MAX, &mut out),
+            core.advance(ReplayHorizon::Unbounded, &mut out),
             Err(IssueError::PendingBarrierOverflow {
                 warp: 0,
                 barrier: 0,
@@ -3575,7 +3643,10 @@ mod tests {
         let before = *core.l1_counters().unwrap();
         let mut out = Vec::new();
 
-        assert_eq!(core.advance(u64::MAX, &mut out).unwrap(), Advance::Done);
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut out).unwrap(),
+            Advance::Done
+        );
         assert!(out.is_empty());
         assert_eq!(core.instructions_issued(), 1);
         assert_eq!(core.warps[0].next, 1);
@@ -3617,7 +3688,7 @@ mod tests {
         let mut out = Vec::new();
 
         assert!(matches!(
-            core.advance(u64::MAX, &mut out),
+            core.advance(ReplayHorizon::Unbounded, &mut out),
             Err(IssueError::L1Access(L1AccessError::Counter(
                 L1CounterError::Overflow {
                     field: L1CounterField::StoreSectors,
@@ -3674,7 +3745,7 @@ mod tests {
         let mut out = Vec::new();
 
         assert!(matches!(
-            core.advance(u64::MAX, &mut out),
+            core.advance(ReplayHorizon::Unbounded, &mut out),
             Err(IssueError::L1Access(L1AccessError::TimeOverflow {
                 operation: "miss visibility",
                 base,
@@ -3728,7 +3799,7 @@ mod tests {
         let mut out = Vec::new();
 
         assert!(matches!(
-            core.advance(u64::MAX, &mut out),
+            core.advance(ReplayHorizon::Unbounded, &mut out),
             Err(IssueError::L1Access(L1AccessError::TimeOverflow {
                 operation: "miss visibility",
                 base,
@@ -3767,8 +3838,12 @@ mod tests {
         let mut second = shared_core(&blocks, &sched, &params());
         let mut first_requests = Vec::new();
         let mut second_requests = Vec::new();
-        first.advance(u64::MAX, &mut first_requests).unwrap();
-        second.advance(u64::MAX, &mut second_requests).unwrap();
+        first
+            .advance(ReplayHorizon::Unbounded, &mut first_requests)
+            .unwrap();
+        second
+            .advance(ReplayHorizon::Unbounded, &mut second_requests)
+            .unwrap();
         let first_reply = first_requests[0].reply;
         let second_reply = second_requests[0].reply;
         assert_ne!(first_reply, second_reply);
@@ -3786,7 +3861,7 @@ mod tests {
         let mut next_generation = shared_core(&blocks, &sched, &params());
         let mut next_requests = Vec::new();
         next_generation
-            .advance(u64::MAX, &mut next_requests)
+            .advance(ReplayHorizon::Unbounded, &mut next_requests)
             .unwrap();
         assert_ne!(first_reply, next_requests[0].reply);
         assert!(matches!(
@@ -3842,7 +3917,8 @@ mod tests {
         let mut core = shared_core(&blocks, &sched, &params());
         let mut requests = Vec::new();
         assert_eq!(
-            core.advance(u64::MAX, &mut requests).unwrap(),
+            core.advance(ReplayHorizon::Unbounded, &mut requests)
+                .unwrap(),
             Advance::Idle { wake_at: None }
         );
         let reply = requests[0].reply;
@@ -3902,7 +3978,8 @@ mod tests {
         let mut core = shared_core(&blocks, &sched, &params());
         let mut requests = Vec::new();
         assert_eq!(
-            core.advance(u64::MAX, &mut requests).unwrap(),
+            core.advance(ReplayHorizon::Unbounded, &mut requests)
+                .unwrap(),
             Advance::Idle { wake_at: None }
         );
         let reply = requests[0].reply;
@@ -3978,7 +4055,8 @@ mod tests {
         let mut core = shared_core(&blocks, &sched, &params());
         let mut requests = Vec::new();
         assert_eq!(
-            core.advance(u64::MAX, &mut requests).unwrap(),
+            core.advance(ReplayHorizon::Unbounded, &mut requests)
+                .unwrap(),
             Advance::Idle { wake_at: None }
         );
         let reply = requests[0].reply;
@@ -4077,7 +4155,7 @@ mod tests {
         let mut out = Vec::new();
         // The load misses → request emitted; the consumer's wait has a
         // PENDING barrier → no computable timer → blocked on response.
-        let a = core.advance(u64::MAX, &mut out).unwrap();
+        let a = core.advance(ReplayHorizon::Unbounded, &mut out).unwrap();
         assert_eq!(a, Advance::Idle { wake_at: None });
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].issue_time, 0);
@@ -4116,7 +4194,10 @@ mod tests {
         // Response at the DRAM arm (423): consumer issues at 423.
         core.on_response(reply, 423, &mut out2).unwrap();
         assert!(out2.is_empty());
-        assert_eq!(core.advance(u64::MAX, &mut out2).unwrap(), Advance::Done);
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut out2).unwrap(),
+            Advance::Done
+        );
         let r = core.result();
         assert_eq!(r.instructions_issued, 2);
         assert_eq!(r.cycles, 424);
@@ -4155,7 +4236,10 @@ mod tests {
         let mut out = Vec::new();
         // 4 independent issues would finish at t=46 — well inside the
         // 244-cycle response bound, so the run completes...
-        assert_eq!(core.advance(u64::MAX, &mut out).unwrap(), Advance::Done);
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut out).unwrap(),
+            Advance::Done
+        );
         assert_eq!(out.len(), 1);
         // ...but a tight EXTERNAL horizon yields first.
         let blocks2 = vec![BlockReplay {
@@ -4176,14 +4260,19 @@ mod tests {
         }];
         let mut core2 = shared_core(&blocks2, &sched, &params());
         let mut out2 = Vec::new();
-        let a = core2.advance(10, &mut out2).unwrap();
+        let a = core2
+            .advance(ReplayHorizon::Bounded(10), &mut out2)
+            .unwrap();
         assert_eq!(
             a,
             Advance::Idle { wake_at: Some(10) },
             "the next known timer (16) lies past the horizon: park AT the \
              horizon, where an event may ready an earlier warp"
         );
-        assert_eq!(core2.advance(u64::MAX, &mut out2).unwrap(), Advance::Done);
+        assert_eq!(
+            core2.advance(ReplayHorizon::Unbounded, &mut out2).unwrap(),
+            Advance::Done
+        );
     }
 
     #[test]
@@ -4216,14 +4305,17 @@ mod tests {
         let mut core = shared_core(&blocks, &sched, &params());
         let mut out = Vec::new();
         assert_eq!(
-            core.advance(u64::MAX, &mut out).unwrap(),
+            core.advance(ReplayHorizon::Unbounded, &mut out).unwrap(),
             Advance::Idle { wake_at: None }
         );
         assert_eq!(out.len(), 1, "second warp merged, no second request");
         let c = core.l1_counters().unwrap();
         assert_eq!((c.misses, c.merges), (2, 1));
         core.on_response(out[0].reply, 300, &mut out).unwrap();
-        assert_eq!(core.advance(u64::MAX, &mut out).unwrap(), Advance::Done);
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut out).unwrap(),
+            Advance::Done
+        );
         // Both consumers issued at 300 (distinct sub-cores) → cycles 301.
         assert_eq!(core.result().cycles, 301);
     }
@@ -4272,7 +4364,7 @@ mod tests {
         let mut core = SmCore::new(&blocks, &sched, &params(), SmMemMode::L1Shared(cfg)).unwrap();
         let mut out = Vec::new();
         assert_eq!(
-            core.advance(u64::MAX, &mut out).unwrap(),
+            core.advance(ReplayHorizon::Unbounded, &mut out).unwrap(),
             Advance::Idle { wake_at: None }
         );
         assert_eq!(out.len(), 1, "second load stalled, not requested");
@@ -4300,12 +4392,15 @@ mod tests {
         assert_eq!(out.len(), 1, "retry sent the parked sector");
         assert_eq!(out[0].issue_time, 244);
         assert_eq!(
-            core.advance(u64::MAX, &mut out).unwrap(),
+            core.advance(ReplayHorizon::Unbounded, &mut out).unwrap(),
             Advance::Idle { wake_at: None }
         );
         let second = out[0].reply;
         core.on_response(second, 488, &mut out).unwrap();
-        assert_eq!(core.advance(u64::MAX, &mut out).unwrap(), Advance::Done);
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut out).unwrap(),
+            Advance::Done
+        );
         let r = core.result();
         assert_eq!(r.instructions_issued, 4);
         // Warp 1's consumer issues at 488 → cycles 489.
@@ -4343,7 +4438,7 @@ mod tests {
         let mut core = shared_core(&blocks, &sched, &params());
         let mut out = Vec::new();
         assert_eq!(
-            core.advance(u64::MAX, &mut out).unwrap(),
+            core.advance(ReplayHorizon::Unbounded, &mut out).unwrap(),
             Advance::Idle { wake_at: None }
         );
         assert_eq!(out.len(), 2, "one request per bypass sector");
@@ -4364,12 +4459,15 @@ mod tests {
         let mut sink = Vec::new();
         core.on_response(out[0].reply, 244, &mut sink).unwrap();
         assert_eq!(
-            core.advance(u64::MAX, &mut sink).unwrap(),
+            core.advance(ReplayHorizon::Unbounded, &mut sink).unwrap(),
             Advance::Idle { wake_at: None },
             "one of two pending units still outstanding"
         );
         core.on_response(out[1].reply, 423, &mut sink).unwrap();
-        assert_eq!(core.advance(u64::MAX, &mut sink).unwrap(), Advance::Done);
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut sink).unwrap(),
+            Advance::Done
+        );
         assert_eq!(core.result().cycles, 424);
     }
 
@@ -4404,7 +4502,8 @@ mod tests {
         let mut core = shared_core(&blocks, &sched, &params());
         let mut requests = Vec::new();
         assert_eq!(
-            core.advance(u64::MAX, &mut requests).unwrap(),
+            core.advance(ReplayHorizon::Unbounded, &mut requests)
+                .unwrap(),
             Advance::Idle { wake_at: None }
         );
         assert_eq!(core.outstanding_responses(), 1);
@@ -4418,10 +4517,6 @@ mod tests {
         assert!(matches!(
             core.on_response(requests[0].reply, 0, &mut retries),
             Err(IssueError::ResponseBeforeClock { now: 0, clock: 1 })
-        ));
-        assert!(matches!(
-            core.on_response(requests[0].reply, u64::MAX, &mut retries),
-            Err(IssueError::ResponseTimeDomainExhausted)
         ));
         assert!(matches!(
             core.on_response(
@@ -4471,6 +4566,46 @@ mod tests {
     }
 
     #[test]
+    fn valid_response_at_exact_maximum_clears_its_barrier() {
+        let mut load = cb(1);
+        load.write_barrier = Some(barrier(2));
+        let sched = schedule(vec![(0, slot(load, OpClass::Other, "LDG.E.CG"))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                warp_slot: 0,
+                insts: vec![ReplayInst {
+                    pc: 0,
+                    kind: AccessKind::GlobalBypass {
+                        off: 0,
+                        len: 1,
+                        token: CacheOpToken::LdgECg,
+                    },
+                }],
+                sectors: vec![40],
+            }],
+        }];
+        let mut core = shared_core(&blocks, &sched, &params());
+        let mut requests = Vec::new();
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut requests)
+                .unwrap(),
+            Advance::Done
+        );
+        assert_eq!(requests.len(), 1);
+        assert_eq!(core.warps[0].barrier_pending[2], 1);
+        let mut retries = Vec::new();
+
+        core.on_response(requests[0].reply, u64::MAX, &mut retries)
+            .unwrap();
+
+        assert!(retries.is_empty());
+        assert_eq!(core.outstanding_responses(), 0);
+        assert_eq!(core.warps[0].barrier_pending[2], 0);
+        assert_eq!(core.warps[0].barrier_clear[2], u64::MAX);
+    }
+
+    #[test]
     fn shared_mode_store_emits_mutation_only_requests() {
         let sched = schedule(vec![
             (0, slot(cb(1), OpClass::Other, "STG.E")),
@@ -4492,7 +4627,10 @@ mod tests {
         }];
         let mut core = shared_core(&blocks, &sched, &params());
         let mut out = Vec::new();
-        assert_eq!(core.advance(u64::MAX, &mut out).unwrap(), Advance::Done);
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut out).unwrap(),
+            Advance::Done
+        );
         assert_eq!(out.len(), 2);
         assert!(out.iter().all(|r| r.source == L2Source::Store
             && r.class == L2OpClass::WriteAtomic
@@ -4534,7 +4672,7 @@ mod tests {
         let mut core = shared_core(&blocks, &sched, &params());
         let mut out = Vec::new();
         assert_eq!(
-            core.advance(u64::MAX, &mut out).unwrap(),
+            core.advance(ReplayHorizon::Unbounded, &mut out).unwrap(),
             Advance::Idle { wake_at: None }
         );
         assert_eq!(out.len(), 1, "one L2 transaction for the whole line");
@@ -4548,7 +4686,10 @@ mod tests {
         ));
         let mut sink = Vec::new();
         core.on_response(out[0].reply, 244, &mut sink).unwrap();
-        assert_eq!(core.advance(u64::MAX, &mut sink).unwrap(), Advance::Done);
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut sink).unwrap(),
+            Advance::Done
+        );
         assert_eq!(core.result().cycles, 245);
     }
 
@@ -4605,7 +4746,7 @@ mod tests {
         let mut core = shared_core(&blocks, &sched, &params());
         let mut out = Vec::new();
         assert_eq!(
-            core.advance(u64::MAX, &mut out).unwrap(),
+            core.advance(ReplayHorizon::Unbounded, &mut out).unwrap(),
             Advance::Idle { wake_at: None }
         );
         assert_eq!(out.len(), 1, "one line transaction for the whole batch");
@@ -4620,7 +4761,7 @@ mod tests {
         let mut sink = Vec::new();
         core.on_response(out[0].reply, 244, &mut sink).unwrap();
         assert_eq!(
-            core.advance(u64::MAX, &mut sink).unwrap(),
+            core.advance(ReplayHorizon::Unbounded, &mut sink).unwrap(),
             Advance::Done,
             "one response clears both instructions' waiters"
         );
@@ -4689,7 +4830,7 @@ mod tests {
         let mut core = shared_core(&blocks, &sched, &params());
         let mut out = Vec::new();
         assert_eq!(
-            core.advance(u64::MAX, &mut out).unwrap(),
+            core.advance(ReplayHorizon::Unbounded, &mut out).unwrap(),
             Advance::Idle { wake_at: None }
         );
         assert_eq!(out.len(), 2, "two fills; the merging load is gated");
@@ -4713,7 +4854,7 @@ mod tests {
         let mut out2 = Vec::new();
         core.on_response(out[0].reply, 423, &mut out2).unwrap();
         assert_eq!(
-            core.advance(u64::MAX, &mut out2).unwrap(),
+            core.advance(ReplayHorizon::Unbounded, &mut out2).unwrap(),
             Advance::Idle { wake_at: None }
         );
         assert_eq!(out2.len(), 1, "exactly one follow-up fetch");
@@ -4724,7 +4865,10 @@ mod tests {
         // and the merged load's waiter (barrier 2).
         let mut sink = Vec::new();
         core.on_response(out[1].reply, 846, &mut sink).unwrap();
-        assert_eq!(core.advance(u64::MAX, &mut sink).unwrap(), Advance::Done);
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut sink).unwrap(),
+            Advance::Done
+        );
     }
 
     /// ATOM records ride BYPASS provenance (they never stage into the
@@ -4761,7 +4905,7 @@ mod tests {
         let mut core = shared_core(&blocks, &sched, &params());
         let mut out = Vec::new();
         assert_eq!(
-            core.advance(u64::MAX, &mut out).unwrap(),
+            core.advance(ReplayHorizon::Unbounded, &mut out).unwrap(),
             Advance::Idle { wake_at: None }
         );
         assert_eq!(out.len(), 1);

@@ -30,8 +30,8 @@ pub use control_bits::{
     FunctionControl, InstructionControl, WaitMask,
 };
 pub use issue::{
-    AccessKind, Advance, BlockReplay, IssueError, IssueModelParams, MemRequest, ReplayInst,
-    ReplyTo, SmCore, SmMemMode, SmSimResult, WarpReplay, simulate_sm,
+    AccessKind, Advance, BlockReplay, IssueError, IssueModelParams, MemRequest, ReplayHorizon,
+    ReplayInst, ReplyTo, SmCore, SmMemMode, SmSimResult, WarpReplay, simulate_sm,
 };
 pub use program::{FunctionSchedule, IssueSlot, OpClass, ProgramError, build_schedules};
 pub use replay::{KernelReplayResult, ReplayError, ReplayMemMode, replay_kernel};
