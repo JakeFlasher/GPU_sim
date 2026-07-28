@@ -202,6 +202,29 @@ pub enum L2BuildError {
     },
 }
 
+#[derive(Debug, thiserror::Error)]
+pub enum L2SnapshotError {
+    #[error(
+        "failed to reserve capacity {capacity} while snapshotting the outer storage for {set_count} L2 sets: {source}"
+    )]
+    SetStorageAllocation {
+        set_count: usize,
+        capacity: usize,
+        #[source]
+        source: std::collections::TryReserveError,
+    },
+    #[error(
+        "failed to reserve capacity {capacity} while snapshotting L2 set {set_key} with {ways} ways: {source}"
+    )]
+    WayStorageAllocation {
+        set_key: usize,
+        ways: usize,
+        capacity: usize,
+        #[source]
+        source: std::collections::TryReserveError,
+    },
+}
+
 /// Arches whose documented-default L2 knobs (associativity 16, LRU,
 /// line_mod) have been REVIEWED against available public evidence.
 /// Same per-arch-set pattern as `cache_op::BARE_LDG_E_DEFAULTS_TO_CA`:
@@ -216,7 +239,7 @@ pub const L2_WRITE_ALLOCATE_POLICY: &str = "write_allocate_non_inclusive";
 
 /// L2 geometry + policy. Construct via [`L2Config::from_carded_geometry`]
 /// so the documented-default provenance is explicit at the call site.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct L2Config {
     /// Deployment architecture whose reviewed defaults/geometry this config carries.
     pub arch: ArchId,
@@ -650,6 +673,45 @@ impl L2Model {
 
     pub fn config(&self) -> &L2Config {
         &self.cfg
+    }
+
+    /// Fallibly copy the complete cache state for a caller-level transaction.
+    /// Spare vector capacity is retained so staging does not introduce an
+    /// allocation on a path the caller's model had already reserved. No
+    /// semantic state in `self` changes if either reservation fails.
+    pub fn try_snapshot(&self) -> Result<Self, L2SnapshotError> {
+        let set_count = self.sets.len();
+        let set_capacity = self.sets.capacity();
+        let mut sets = Vec::new();
+        sets.try_reserve_exact(set_capacity).map_err(|source| {
+            L2SnapshotError::SetStorageAllocation {
+                set_count,
+                capacity: set_capacity,
+                source,
+            }
+        })?;
+        for (set_key, ways) in self.sets.iter().enumerate() {
+            let way_capacity = ways.capacity();
+            let mut copied = Vec::new();
+            copied.try_reserve_exact(way_capacity).map_err(|source| {
+                L2SnapshotError::WayStorageAllocation {
+                    set_key,
+                    ways: ways.len(),
+                    capacity: way_capacity,
+                    source,
+                }
+            })?;
+            copied.extend_from_slice(ways);
+            sets.push(copied);
+        }
+        Ok(Self {
+            cfg: self.cfg,
+            num_sets: self.num_sets,
+            sets,
+            clock: self.clock,
+            bip_counter: self.bip_counter,
+            counters: self.counters,
+        })
     }
 
     fn set_key(&self, line_id: i64) -> Result<usize, L2SetIndexError> {
@@ -1133,6 +1195,8 @@ mod tests {
 
     #[derive(Debug, Clone, PartialEq, Eq)]
     struct L2State {
+        cfg: L2Config,
+        num_sets: u64,
         sets: Vec<Vec<Way>>,
         clock: i64,
         bip_counter: u64,
@@ -1141,10 +1205,39 @@ mod tests {
 
     fn state(l2: &L2Model) -> L2State {
         L2State {
+            cfg: l2.cfg,
+            num_sets: l2.num_sets,
             sets: l2.sets.clone(),
             clock: l2.clock,
             bip_counter: l2.bip_counter,
             counters: l2.counters,
+        }
+    }
+
+    #[test]
+    fn fallible_snapshot_copies_complete_state_and_is_independent() {
+        for policy in [L2Replacement::Lru, L2Replacement::Srrip, L2Replacement::Bip] {
+            let mut config = cfg(256, 2, 1);
+            config.replacement = policy;
+            let mut l2 = L2Model::new(config).unwrap();
+            rd(&mut l2, 0, 0);
+            wr(&mut l2, 1, 1);
+            rd(&mut l2, 0, 2);
+            // Deliberate spare capacity makes a length-only copy observable.
+            l2.sets.reserve_exact(3);
+            l2.sets[0].reserve_exact(3);
+            let before = state(&l2);
+
+            let mut snapshot = l2.try_snapshot().unwrap();
+            assert_eq!(state(&snapshot), before, "{policy:?} snapshot state");
+            assert!(snapshot.sets.capacity() >= l2.sets.capacity());
+            for (copied, original) in snapshot.sets.iter().zip(&l2.sets) {
+                assert!(copied.capacity() >= original.capacity());
+            }
+
+            rd(&mut snapshot, 7, 3);
+            assert_eq!(state(&l2), before, "{policy:?} source was mutated");
+            assert_ne!(state(&snapshot), before, "{policy:?} snapshot is aliased");
         }
     }
 

@@ -237,6 +237,8 @@ pub enum SystemError {
     #[error(transparent)]
     Engine(#[from] EngineError),
     #[error(transparent)]
+    L2Snapshot(#[from] sim_mem::L2SnapshotError),
+    #[error(transparent)]
     L2(#[from] sim_mem::L2AccessError),
     #[error(
         "event queue drained with sm {sm_id} unfinished ({outstanding} response(s) recorded \
@@ -612,7 +614,9 @@ pub struct SystemResult {
 /// caller-constructed (and caller-drained afterwards) so the geometry
 /// resolution stays at the composition root; it must be FRESH per kernel
 /// (cold cache, NCU `--cache-control all` parity — same contract as the
-/// per-SM L1s). `dram` selects the read-bandwidth model ([`DramBw`]):
+/// per-SM L1s). The caller's model is unchanged on every typed error; a
+/// successful run commits the fully drained staged L2 as its final operation.
+/// `dram` selects the read-bandwidth model ([`DramBw`]):
 /// `Unmodeled` is the latency-only ablation / equivalence-differential
 /// mode; `Carded` rates are validated non-zero here (typed
 /// [`SystemError::DramBandwidthInvalid`], never a clamp).
@@ -696,6 +700,12 @@ pub fn simulate_kernel_shared(
 
     let mut spin = SpinGuard::new(cores.len())?;
     let mut terminal_event_time = None;
+    // The caller owns `l2` across this boundary. Complete all replay admission
+    // and event-system setup first so their established typed errors keep
+    // precedence over snapshot allocation failure. Then replay the entire
+    // kernel on a private snapshot and publish it only after event draining,
+    // deadlock checks, and result construction all succeed.
+    let mut staged_l2 = l2.try_snapshot()?;
     while let Some(ev) = queue.pop()? {
         let sm_ix =
             usize::try_from(ev.target.0).map_err(|_| SystemError::EventTargetOutOfRange {
@@ -746,7 +756,7 @@ pub fn simulate_kernel_shared(
                 // copy of its set. Every system-side calculation and response
                 // insertion succeeds before the L2 plan becomes visible.
                 let line = req.sector_id >> 2;
-                let (_, commit) = l2.access_mask_transactional(
+                let (_, commit) = staged_l2.access_mask_transactional(
                     line,
                     req.sector_mask,
                     req.class,
@@ -907,14 +917,16 @@ pub fn simulate_kernel_shared(
         }
         per_sm.insert(sm_ids[ix], core.result());
     }
-    Ok(SystemResult {
+    let result = SystemResult {
         arch,
         per_sm,
-        l2: l2.counters,
+        l2: staged_l2.counters,
         l2_by_source,
         dram: dram_stats,
         terminal_event_time,
-    })
+    };
+    *l2 = staged_l2;
+    Ok(result)
 }
 
 /// Resume one SM actor: advance to its earliest self-affecting external
@@ -971,7 +983,9 @@ fn run_sm(
 mod tests {
     use std::collections::BTreeMap;
 
-    use sim_mem::{CacheOpToken, L2Config, L2Replacement, SliceHash};
+    use sim_mem::{
+        CacheOpToken, L2Config, L2CounterError, L2CounterField, L2OpClass, L2Replacement, SliceHash,
+    };
 
     use super::*;
     use crate::control_bits::{ControlBits, DepBarrier, WaitMask};
@@ -1183,6 +1197,68 @@ mod tests {
         .unwrap_err();
         assert!(matches!(err, SystemError::DramCycleDomainExhausted { .. }));
         assert_eq!(l2.counters.total().unwrap(), 0);
+    }
+
+    #[test]
+    fn later_l2_error_rolls_back_earlier_kernel_accesses() {
+        let mut load_control = cb(1);
+        load_control.write_barrier = Some(barrier(0));
+        let sched = schedule(vec![(0, slot(load_control, "LDG.E"))]);
+        let load_blocks = || {
+            vec![BlockReplay {
+                launch_index: 0,
+                warps: vec![WarpReplay {
+                    warp_slot: 0,
+                    insts: vec![ReplayInst {
+                        pc: 0,
+                        kind: AccessKind::GlobalEligible {
+                            off: 0,
+                            len: 1,
+                            token: CacheOpToken::LdgECa,
+                        },
+                    }],
+                    sectors: vec![4],
+                }],
+            }]
+        };
+        // Both loads issue at t=0. The lower-SM request is processed first: it
+        // installs the cold sector, accounts an L1-fill source request, advances
+        // DRAM, and schedules its reply. The second request then hits the same
+        // sector and trips the preseeded hit-counter overflow.
+        let per_sm = BTreeMap::from([(0, load_blocks()), (1, load_blocks())]);
+        let mut l2 = l2_model();
+        l2.counters.hits = u64::MAX;
+        let before = l2.counters;
+        assert_eq!(
+            l2.preview_mask(1, 0b0001, L2OpClass::Read)
+                .unwrap()
+                .present_sectors,
+            0
+        );
+
+        let err = simulate_kernel_shared(
+            &per_sm,
+            &sched,
+            &params(),
+            l1_config(),
+            &mut l2,
+            carded_bw(),
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            SystemError::L2(sim_mem::L2AccessError::Counter(L2CounterError::Overflow {
+                field: L2CounterField::Hits,
+            }))
+        ));
+        assert_eq!(l2.counters, before, "a failed kernel published L2 counters");
+        assert_eq!(
+            l2.preview_mask(1, 0b0001, L2OpClass::Read)
+                .unwrap()
+                .present_sectors,
+            0,
+            "the first reply-bearing load escaped the failed kernel transaction"
+        );
     }
 
     #[test]
@@ -1485,6 +1561,17 @@ mod tests {
         assert_eq!(r.l2_by_source.source(sim_mem::L2Source::Store), (1, 0));
         assert_eq!(r.l2_by_source.source(sim_mem::L2Source::L1Fill), (1, 1));
         assert_eq!(r.per_sm[&1].cycles, 245, "L2-hit arm for the loader");
+        assert_eq!(
+            l2.counters, r.l2,
+            "successful replay did not commit staged L2"
+        );
+        assert_eq!(
+            l2.preview_mask(1, 0b0001, L2OpClass::Read)
+                .unwrap()
+                .present_sectors,
+            1,
+            "committed caller L2 does not contain the replayed store"
+        );
     }
 
     /// §6.4 split between counting and pricing: an ATOM to a fresh
