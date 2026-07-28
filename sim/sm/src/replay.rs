@@ -858,7 +858,8 @@ fn classify_with_l1(
         record_ix,
         sectors,
     };
-    let off = u32::try_from(start).map_err(|_| overflow(start))?;
+    u32::try_from(start).map_err(|_| overflow(start))?;
+    let off = start;
     let len = u16::try_from(count).map_err(|_| overflow(count))?;
     // A pc absent from the schedule surfaces as the issue loop's typed
     // PcNotInSchedule; classification stays neutral in that case. A present

@@ -282,6 +282,28 @@ pub enum IssueError {
         #[source]
         source: ControlDomainError,
     },
+    #[error(
+        "pc {pc} (block {launch_index}, warp slot {warp_slot}) sector span start {off} + length {len} overflows usize"
+    )]
+    SectorSpanOverflow {
+        pc: u32,
+        launch_index: i64,
+        warp_slot: i32,
+        off: usize,
+        len: u16,
+    },
+    #[error(
+        "pc {pc} (block {launch_index}, warp slot {warp_slot}) sector span {off}..{end} exceeds arena length {sectors}"
+    )]
+    SectorSpanOutOfBounds {
+        pc: u32,
+        launch_index: i64,
+        warp_slot: i32,
+        off: usize,
+        len: u16,
+        end: usize,
+        sectors: usize,
+    },
     #[error("memory response targets warp index {warp}, but this SM has {warps} admitted warps")]
     ResponseWarpOutOfRange { warp: usize, warps: usize },
     #[error("memory response token {reply:?} was not emitted or is no longer outstanding")]
@@ -603,7 +625,7 @@ fn data_ready_time(
             Some(l1) => {
                 let mut ready =
                     checked_cycle_add("L1 hit-pipeline floor", t, params.l1_hit_latency)?;
-                for &sector in &sectors[off as usize..off as usize + usize::from(len)] {
+                for &sector in &sectors[off..off + usize::from(len)] {
                     let (_, r) = l1.access_eligible(sector, t);
                     ready = ready.max(r);
                 }
@@ -627,7 +649,7 @@ fn data_ready_time(
         },
         AccessKind::GlobalStore { off, len } => match l1 {
             Some(l1) => {
-                for &sector in &sectors[off as usize..off as usize + usize::from(len)] {
+                for &sector in &sectors[off..off + usize::from(len)] {
                     l1.probe_store(sector, t);
                 }
                 params.store_visibility_ready(t)
@@ -778,6 +800,13 @@ impl<'a> SmCore<'a> {
                             warp_slot: warp.warp_slot,
                             source,
                         })?;
+                    validate_sector_span(
+                        inst.kind,
+                        warp.sectors.len(),
+                        inst.pc,
+                        block.launch_index,
+                        warp.warp_slot,
+                    )?;
                 }
             }
         }
@@ -967,7 +996,7 @@ impl<'a> SmCore<'a> {
                 // per batch, priced on its worst sector.
                 let mut known =
                     checked_cycle_add("shared L1 hit-pipeline floor", t, p.l1_hit_latency)?;
-                let range = off as usize..off as usize + usize::from(len);
+                let range = off..off + usize::from(len);
                 for i in range.clone() {
                     match access_shared(
                         st,
@@ -1027,7 +1056,7 @@ impl<'a> SmCore<'a> {
                     // which stamps these at the L2-hit arm.
                     return p.store_visibility_ready(t).map(Some);
                 }
-                for i in off as usize..off as usize + usize::from(len) {
+                for i in off..off + usize::from(len) {
                     let sector_id = sectors[i];
                     let reply = if let Some(barrier) = write_barrier {
                         let reply = ReplyTo::Warp {
@@ -1053,7 +1082,7 @@ impl<'a> SmCore<'a> {
                 Ok(None)
             }
             AccessKind::GlobalStore { off, len } => {
-                for &sector_id in &sectors[off as usize..off as usize + usize::from(len)] {
+                for &sector_id in &sectors[off..off + usize::from(len)] {
                     st.l1.probe_store(sector_id, t);
                     out.push(MemRequest::store(t, sector_id));
                 }
@@ -1649,6 +1678,43 @@ fn drain_retries(
     }
 }
 
+fn validate_sector_span(
+    kind: AccessKind,
+    sectors: usize,
+    pc: u32,
+    launch_index: i64,
+    warp_slot: i32,
+) -> Result<(), IssueError> {
+    let (off, len) = match kind {
+        AccessKind::GlobalEligible { off, len, .. }
+        | AccessKind::GlobalBypass { off, len, .. }
+        | AccessKind::GlobalUntagged { off, len }
+        | AccessKind::GlobalStore { off, len } => (off, len),
+        AccessKind::NonMemory | AccessKind::Shared => return Ok(()),
+    };
+    let end = off
+        .checked_add(usize::from(len))
+        .ok_or(IssueError::SectorSpanOverflow {
+            pc,
+            launch_index,
+            warp_slot,
+            off,
+            len,
+        })?;
+    if end > sectors {
+        return Err(IssueError::SectorSpanOutOfBounds {
+            pc,
+            launch_index,
+            warp_slot,
+            off,
+            len,
+            end,
+            sectors,
+        });
+    }
+    Ok(())
+}
+
 fn lookup(
     schedule: &FunctionSchedule,
     pc: u32,
@@ -1774,6 +1840,103 @@ mod tests {
         assert!(out.is_empty());
         assert_eq!(core.instructions_issued(), 0);
         assert_eq!(core.warps[0].next, 0);
+    }
+
+    fn construction_error(kind: AccessKind, sectors: Vec<i64>) -> IssueError {
+        let sched = schedule(vec![(0, slot(cb(1), OpClass::Other, "LDG.E"))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 7,
+            warps: vec![WarpReplay {
+                warp_slot: 3,
+                insts: vec![ReplayInst { pc: 0, kind }],
+                sectors,
+            }],
+        }];
+        let parameters = params();
+        match SmCore::new(&blocks, &sched, &parameters, SmMemMode::Flat) {
+            Err(error) => error,
+            Ok(_) => panic!("invalid sector span constructed replay state"),
+        }
+    }
+
+    #[test]
+    fn every_memory_sector_span_is_validated_before_core_construction() {
+        let kinds = [
+            AccessKind::GlobalEligible {
+                off: 1,
+                len: 1,
+                token: CacheOpToken::LdgECa,
+            },
+            AccessKind::GlobalBypass {
+                off: 1,
+                len: 1,
+                token: CacheOpToken::LdgECg,
+            },
+            AccessKind::GlobalUntagged { off: 1, len: 1 },
+            AccessKind::GlobalStore { off: 1, len: 1 },
+        ];
+        for kind in kinds {
+            assert!(matches!(
+                construction_error(kind, vec![40]),
+                IssueError::SectorSpanOutOfBounds {
+                    pc: 0,
+                    launch_index: 7,
+                    warp_slot: 3,
+                    off: 1,
+                    len: 1,
+                    end: 2,
+                    sectors: 1,
+                }
+            ));
+        }
+    }
+
+    #[test]
+    fn sector_span_overflow_and_empty_out_of_bounds_are_typed() {
+        assert!(matches!(
+            construction_error(
+                AccessKind::GlobalStore {
+                    off: usize::MAX,
+                    len: 1,
+                },
+                Vec::new(),
+            ),
+            IssueError::SectorSpanOverflow {
+                pc: 0,
+                launch_index: 7,
+                warp_slot: 3,
+                off: usize::MAX,
+                len: 1,
+            }
+        ));
+        assert!(matches!(
+            construction_error(AccessKind::GlobalUntagged { off: 1, len: 0 }, Vec::new(),),
+            IssueError::SectorSpanOutOfBounds {
+                off: 1,
+                len: 0,
+                end: 1,
+                sectors: 0,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn empty_sector_span_at_arena_end_is_valid() {
+        let sched = schedule(vec![(0, slot(cb(1), OpClass::Other, "LD.E"))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                warp_slot: 0,
+                insts: vec![ReplayInst {
+                    pc: 0,
+                    kind: AccessKind::GlobalUntagged { off: 0, len: 0 },
+                }],
+                sectors: Vec::new(),
+            }],
+        }];
+        SmCore::new(&blocks, &sched, &params(), SmMemMode::Flat)
+            .expect("empty span at the arena end is valid");
     }
 
     #[test]
@@ -1944,7 +2107,7 @@ mod tests {
         }
     }
 
-    fn eligible(off: u32, len: u16) -> AccessKind {
+    fn eligible(off: usize, len: u16) -> AccessKind {
         AccessKind::GlobalEligible {
             off,
             len,

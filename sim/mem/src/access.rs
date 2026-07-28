@@ -70,28 +70,28 @@ pub enum AccessKind {
     Shared,
     /// Manifest-eligible global-class record: modeled L1 sectors.
     GlobalEligible {
-        off: u32,
+        off: usize,
         len: u16,
         token: CacheOpToken,
     },
     /// Sidecar-tagged INELIGIBLE record (`.cg`/`.cs`/LDGSTS/ATOM/...):
     /// bypasses the modeled L1 straight to the L2.
     GlobalBypass {
-        off: u32,
+        off: usize,
         len: u16,
         token: CacheOpToken,
     },
     /// Global-class record whose pc the classifier did not tag and whose
     /// opcode is not a store: counted in the unified denominator only.
     GlobalUntagged {
-        off: u32,
+        off: usize,
         len: u16,
     },
     /// Global-class STORE (STG/RED...): sectors hit-tested against the
     /// L1 without allocating (v0 write-through no-allocate); allocate at
     /// the L2 (card policy `write_allocate_non_inclusive`).
     GlobalStore {
-        off: u32,
+        off: usize,
         len: u16,
     },
 }
