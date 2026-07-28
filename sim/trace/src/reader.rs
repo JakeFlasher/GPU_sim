@@ -74,6 +74,15 @@ pub enum TraceError {
     #[error("{record}: memory_op_access_kind is present but UNSPECIFIED on a memory instruction")]
     MemoryOpAccessKindUnspecified { record: String },
     #[error(
+        "{record}: address operand {operand} carries {space:?}, incompatible with memory_op_class {class:?} (memory_op_class_address_space_conflict)"
+    )]
+    MemoryOpClassAddressSpaceConflict {
+        record: String,
+        operand: usize,
+        class: pb::MemoryOpClass,
+        space: pb::MemorySpace,
+    },
+    #[error(
         "{record}: {field} carries value {raw} unknown to this reader's committed schema — \
          wire-schema skew; re-run sim/trace/regen_pb.sh against the current .proto and rebuild"
     )]
@@ -2281,6 +2290,32 @@ fn known_enum<T: TryFrom<i32>>(
     })
 }
 
+fn memory_space_is_compatible(class: pb::MemoryOpClass, space: pb::MemorySpace) -> bool {
+    match class {
+        pb::MemoryOpClass::Global => {
+            matches!(space, pb::MemorySpace::Global | pb::MemorySpace::Generic)
+        }
+        pb::MemoryOpClass::Shared => space == pb::MemorySpace::Shared,
+        pb::MemoryOpClass::Local => space == pb::MemorySpace::Local,
+        pb::MemoryOpClass::Atomic => matches!(
+            space,
+            pb::MemorySpace::Global
+                | pb::MemorySpace::Generic
+                | pb::MemorySpace::Shared
+                | pb::MemorySpace::Local
+        ),
+        pb::MemoryOpClass::AsyncCopy => {
+            matches!(space, pb::MemorySpace::Global | pb::MemorySpace::Generic)
+        }
+        pb::MemoryOpClass::Unspecified
+        | pb::MemoryOpClass::Texture
+        | pb::MemoryOpClass::Surface
+        | pb::MemoryOpClass::Tma
+        | pb::MemoryOpClass::ClusterDsmem
+        | pb::MemoryOpClass::Tmem => true,
+    }
+}
+
 fn decode_address_access(
     addr: &pb::Address,
     and_mask: u32,
@@ -2387,6 +2422,24 @@ pub fn preflight_memory_access<'a>(
     // callbacks, but malformed lane payloads and unknown enums remain failures.
     for addr in &inst.addresses {
         decode_address_access(addr, and_mask, inst_width, &record)?;
+    }
+    // Structural preflight above intentionally completes before this semantic
+    // compatibility gate. An explicit per-address space may refine ATOMIC, but
+    // it cannot cross GLOBAL/SHARED/LOCAL classes or turn ASYNC_COPY into a
+    // shared-destination record. Absence remains the admitted legacy fallback.
+    for (operand, addr) in inst.addresses.iter().enumerate() {
+        let Some(raw) = addr.address_space else {
+            continue;
+        };
+        let space: pb::MemorySpace = known_enum(raw, "address_space", &record)?;
+        if !memory_space_is_compatible(op_class, space) {
+            return Err(TraceError::MemoryOpClassAddressSpaceConflict {
+                record: record(),
+                operand,
+                class: op_class,
+                space,
+            });
+        }
     }
 
     Ok(Some(PreflightedMemoryAccess {
@@ -3272,6 +3325,86 @@ mod tests {
     }
 
     #[test]
+    fn operation_aware_memory_space_matrix_admits() {
+        let cases = [
+            (pb::MemoryOpClass::Global, pb::MemorySpace::Global),
+            (pb::MemoryOpClass::Global, pb::MemorySpace::Generic),
+            (pb::MemoryOpClass::Shared, pb::MemorySpace::Shared),
+            (pb::MemoryOpClass::Local, pb::MemorySpace::Local),
+            (pb::MemoryOpClass::Atomic, pb::MemorySpace::Global),
+            (pb::MemoryOpClass::Atomic, pb::MemorySpace::Generic),
+            (pb::MemoryOpClass::Atomic, pb::MemorySpace::Shared),
+            (pb::MemoryOpClass::Atomic, pb::MemorySpace::Local),
+            (pb::MemoryOpClass::AsyncCopy, pb::MemorySpace::Global),
+            (pb::MemoryOpClass::AsyncCopy, pb::MemorySpace::Generic),
+        ];
+        for (class, space) in cases {
+            let inst = identity_inst(class, Some(space), None, 0x40);
+            memory_access(&inst, || format!("{class:?}/{space:?}"))
+                .unwrap_or_else(|error| panic!("{class:?}/{space:?}: {error}"));
+        }
+    }
+
+    #[test]
+    fn missing_memory_space_retains_legacy_fallback() {
+        for class in [
+            pb::MemoryOpClass::Global,
+            pb::MemoryOpClass::Shared,
+            pb::MemoryOpClass::Local,
+            pb::MemoryOpClass::Atomic,
+            pb::MemoryOpClass::AsyncCopy,
+        ] {
+            let inst = identity_inst(class, None, None, 0x40);
+            memory_access(&inst, || format!("legacy {class:?}"))
+                .unwrap_or_else(|error| panic!("legacy {class:?}: {error}"));
+        }
+    }
+
+    #[test]
+    fn crossed_and_non_source_memory_spaces_are_typed_conflicts() {
+        let cases = [
+            (pb::MemoryOpClass::Shared, pb::MemorySpace::Local),
+            (pb::MemoryOpClass::Local, pb::MemorySpace::Shared),
+            (pb::MemoryOpClass::Global, pb::MemorySpace::Shared),
+            (pb::MemoryOpClass::Global, pb::MemorySpace::Local),
+            (pb::MemoryOpClass::AsyncCopy, pb::MemorySpace::Shared),
+            (pb::MemoryOpClass::Atomic, pb::MemorySpace::Unspecified),
+        ];
+        for (class, space) in cases {
+            let inst = identity_inst(class, Some(space), None, 0x40);
+            assert!(matches!(
+                memory_access(&inst, || "t".into()),
+                Err(TraceError::MemoryOpClassAddressSpaceConflict {
+                    operand: 0,
+                    class: got_class,
+                    space: got_space,
+                    ..
+                }) if got_class == class && got_space == space
+            ));
+        }
+    }
+
+    #[test]
+    fn structural_error_precedes_space_conflict() {
+        let mut inst = identity_inst(
+            pb::MemoryOpClass::Shared,
+            Some(pb::MemorySpace::Local),
+            None,
+            0x40,
+        );
+        let mut malformed_later = inst.addresses[0].clone();
+        malformed_later.addrs.clear();
+        inst.addresses.push(malformed_later);
+        assert!(matches!(
+            memory_access(&inst, || "t".into()),
+            Err(TraceError::Lane {
+                source: LaneError::ListAllLengthInvalid { got: 0 },
+                ..
+            })
+        ));
+    }
+
+    #[test]
     fn non_memory_instruction_passes_through() {
         let inst = pb::Instruction::default();
         assert!(memory_access(&inst, || "t".into()).unwrap().is_none());
@@ -3356,6 +3489,25 @@ mod tests {
             Err(TraceError::UnknownEnumValue {
                 field: "address_space",
                 raw: 99,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn identity_gate_reports_space_conflict_before_missing_id() {
+        let inst = identity_inst(
+            pb::MemoryOpClass::Shared,
+            Some(pb::MemorySpace::Global),
+            None,
+            0x7000_0000,
+        );
+        assert!(matches!(
+            check_allocation_identity(&inst, Some(&registry()), || "t".into()),
+            Err(TraceError::MemoryOpClassAddressSpaceConflict {
+                operand: 0,
+                class: pb::MemoryOpClass::Shared,
+                space: pb::MemorySpace::Global,
                 ..
             })
         ));

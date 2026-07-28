@@ -66,6 +66,15 @@ Neither condition is encoded as trace evidence or repaired by generation.
   instruction whose op-class the tracer could not classify should
   have been emitted as a typed ``unsupported_memory_path``
   exclusion sidecar instead.
+- ``memory_op_class_address_space_conflict``: an address record carries
+  an explicit ``address_space`` incompatible with the instruction's
+  operation-aware class. GLOBAL accepts GLOBAL/GENERIC, SHARED accepts
+  SHARED, LOCAL accepts LOCAL, ATOMIC accepts any concrete effective
+  space, and ASYNC_COPY accepts only its GLOBAL/GENERIC source. An
+  absent ``address_space`` retains the legacy class fallback.
+- ``unknown_enum_value``: ``memory_op_class`` or an explicit
+  ``address_space`` carries a number outside the committed protobuf enum;
+  this is schema skew, not an unsupported known operation.
 - ``data_width_missing``: ``data_width`` is absent on the wire on
   an instruction that looks like memory (addresses non-empty or
   memory_op_class present).
@@ -385,6 +394,143 @@ def _reconstruct_lane_vector(
         f"supports list_all (0), base_stride (1), and base_delta "
         f"(2)"
     )
+
+
+def _reconstruct_instruction_addresses(
+    inst: Any,
+    and_mask: int,
+    record_path: str,
+    address_pb2_mod: Any,
+) -> tuple[list[list[int]] | None, ValidationResult | None]:
+    """Structurally validate every address before semantic diagnostics."""
+    known_spaces = (
+        frozenset(address_pb2_mod.MemorySpace.values())
+        if address_pb2_mod is not None
+        else frozenset()
+    )
+    vectors: list[list[int]] = []
+    for addr_index, addr in enumerate(inst.addresses):
+        if (
+            addr.compression_format == _ADDRESS_FORMAT_LIST_ALL
+            and len(addr.addrs) != _LANES_PER_WARP
+        ):
+            return None, ValidationResult(
+                ok=False,
+                typed_reason="lane_vector_length_invalid",
+                detail=(
+                    f"{record_path}: address[{addr_index}] uses "
+                    f"compression_format=list_all but its addrs "
+                    f"list has {len(addr.addrs)} entr"
+                    f"{'y' if len(addr.addrs) == 1 else 'ies'}; "
+                    f"AC4 requires exactly {_LANES_PER_WARP} "
+                    f"entries (one slot per lane, with "
+                    f"LANE_INACTIVE_SENTINEL={LANE_INACTIVE_SENTINEL} "
+                    f"at inactive-lane positions)"
+                ),
+            )
+
+        if addr.compression_format == _ADDRESS_FORMAT_LIST_ALL:
+            real_count = sum(
+                1
+                for entry in addr.addrs
+                if entry != LANE_INACTIVE_SENTINEL
+            )
+        else:
+            real_count = len(addr.addrs)
+        if and_mask == 0 and real_count > 0:
+            return None, ValidationResult(
+                ok=False,
+                typed_reason="lane_mask_inconsistent",
+                detail=(
+                    f"{record_path}: "
+                    f"(active_mask=0x{inst.active_mask:x}) & "
+                    f"(predicate_mask=0x{inst.predicate_mask:x}) "
+                    f"is zero but an inner address record carries "
+                    f"{real_count} non-sentinel addrs entr"
+                    f"{'y' if real_count == 1 else 'ies'}; "
+                    f"the producer only emits per-lane real addresses "
+                    f"for lanes the AND mask gates true"
+                ),
+            )
+        if (
+            and_mask != 0
+            and addr.compression_format == _ADDRESS_FORMAT_LIST_ALL
+            and real_count == 0
+        ):
+            return None, ValidationResult(
+                ok=False,
+                typed_reason="lane_mask_inconsistent",
+                detail=(
+                    f"{record_path}: "
+                    f"(active_mask=0x{inst.active_mask:x}) & "
+                    f"(predicate_mask=0x{inst.predicate_mask:x}) "
+                    f"is 0x{and_mask:x} (non-zero) but a list_all "
+                    f"address record carries 32 sentinel entries with "
+                    f"zero real addresses; the producer emits a real "
+                    f"address at every lane the AND mask gates true"
+                ),
+            )
+
+        vector, malformed = _reconstruct_lane_vector(addr, and_mask)
+        if malformed is not None:
+            return None, ValidationResult(
+                ok=False,
+                typed_reason="compressed_format_malformed",
+                detail=(
+                    f"{record_path}: address[{addr_index}] "
+                    f"(compression_format="
+                    f"{addr.compression_format}): {malformed}"
+                ),
+            )
+        assert vector is not None  # invariant: malformed is None
+        for lane_index in range(_LANES_PER_WARP):
+            bit_set = bool((and_mask >> lane_index) & 1)
+            slot = vector[lane_index]
+            slot_is_sentinel = slot == LANE_INACTIVE_SENTINEL
+            if bit_set and slot_is_sentinel:
+                return None, ValidationResult(
+                    ok=False,
+                    typed_reason="lane_position_mismatch",
+                    detail=(
+                        f"{record_path}: address[{addr_index}] "
+                        f"lane {lane_index} reconstructs to "
+                        f"LANE_INACTIVE_SENTINEL but bit "
+                        f"{lane_index} of "
+                        f"(active_mask & predicate_mask)="
+                        f"0x{and_mask:x} is set; expected a "
+                        f"real address at this lane"
+                    ),
+                )
+            if (not bit_set) and (not slot_is_sentinel):
+                return None, ValidationResult(
+                    ok=False,
+                    typed_reason="lane_position_mismatch",
+                    detail=(
+                        f"{record_path}: address[{addr_index}] "
+                        f"lane {lane_index} reconstructs to "
+                        f"non-sentinel value 0x{slot:x} but bit "
+                        f"{lane_index} of "
+                        f"(active_mask & predicate_mask)="
+                        f"0x{and_mask:x} is clear; expected "
+                        f"LANE_INACTIVE_SENTINEL at this lane"
+                    ),
+                )
+        if (
+            address_pb2_mod is not None
+            and addr.HasField("address_space")
+            and addr.address_space not in known_spaces
+        ):
+            return None, ValidationResult(
+                ok=False,
+                typed_reason="unknown_enum_value",
+                detail=(
+                    f"{record_path}: address[{addr_index}] "
+                    f"address_space carries value {addr.address_space} "
+                    f"unknown to the committed protobuf schema"
+                ),
+            )
+        vectors.append(vector)
+    return vectors, None
 
 
 class TraceContractBindingsMissing(RuntimeError):
@@ -723,6 +869,45 @@ def load_allocations_sidecar(
     return table, None
 
 
+def _expected_address_spaces(
+    memory_op_class: int,
+    instruction_pb2_mod: Any,
+    address_pb2_mod: Any,
+) -> tuple[frozenset[int], str] | None:
+    """Return the explicit effective spaces admitted for one op class.
+
+    ``None`` means this validator has no address-carrying replay contract for
+    the class; unsupported classes remain the downstream consumer's typed
+    responsibility. Missing ``address_space`` never reaches this helper and
+    retains the legacy instruction-class fallback.
+    """
+    global_spaces = frozenset(
+        (
+            address_pb2_mod.MEMORY_SPACE_GLOBAL,
+            address_pb2_mod.MEMORY_SPACE_GENERIC,
+        )
+    )
+    concrete_spaces = frozenset(
+        (
+            address_pb2_mod.MEMORY_SPACE_GLOBAL,
+            address_pb2_mod.MEMORY_SPACE_GENERIC,
+            address_pb2_mod.MEMORY_SPACE_SHARED,
+            address_pb2_mod.MEMORY_SPACE_LOCAL,
+        )
+    )
+    if memory_op_class == instruction_pb2_mod.MEMORY_OP_CLASS_GLOBAL:
+        return global_spaces, "GLOBAL or GENERIC"
+    if memory_op_class == instruction_pb2_mod.MEMORY_OP_CLASS_SHARED:
+        return frozenset((address_pb2_mod.MEMORY_SPACE_SHARED,)), "SHARED"
+    if memory_op_class == instruction_pb2_mod.MEMORY_OP_CLASS_LOCAL:
+        return frozenset((address_pb2_mod.MEMORY_SPACE_LOCAL,)), "LOCAL"
+    if memory_op_class == instruction_pb2_mod.MEMORY_OP_CLASS_ATOMIC:
+        return concrete_spaces, "GLOBAL, GENERIC, SHARED, or LOCAL"
+    if memory_op_class == instruction_pb2_mod.MEMORY_OP_CLASS_ASYNC_COPY:
+        return global_spaces, "GLOBAL or GENERIC source"
+    return None
+
+
 def _check_instruction(
     inst: Any,
     instruction_pb2_mod: Any,
@@ -877,123 +1062,47 @@ def _check_instruction(
             ),
         )
 
-    # Lane-vector length: AC4 requires the `list_all`
-    # compression format to carry exactly 32 entries (one slot
-    # per lane), with `LANE_INACTIVE_SENTINEL` (-1) at inactive-
-    # lane positions. The compressed formats (`base_stride`,
-    # `base_delta`) are not subject to this clause — they encode
-    # the lane vector in `base_address + stride/deltas` and
-    # consumers reconstruct the 32 lane slots downstream. A
-    # `list_all` record whose addrs list has any other length is
-    # a contract violation (e.g., a legacy producer emitting the
-    # sparse pre-Round-17 format, or a regression that broke the
-    # 32-entry pad).
-    for addr_index, addr in enumerate(inst.addresses):
-        if (
-            addr.compression_format == _ADDRESS_FORMAT_LIST_ALL
-            and len(addr.addrs) != _LANES_PER_WARP
-        ):
+    # memory_op_class owns the instruction-level operation/space family and
+    # must be valid before any per-address space can influence allocation
+    # identity. Missing/UNSPECIFIED/schema-skew therefore precede compatibility
+    # and allocation diagnostics, including on class-only zero-active records.
+    if not inst.HasField("memory_op_class"):
+        if len(inst.addresses) > 0:
             return ValidationResult(
                 ok=False,
-                typed_reason="lane_vector_length_invalid",
+                typed_reason=(
+                    "memory_op_class_missing_on_memory_instruction"
+                ),
                 detail=(
-                    f"{record_path}: address[{addr_index}] uses "
-                    f"compression_format=list_all but its addrs "
-                    f"list has {len(addr.addrs)} entr"
-                    f"{'y' if len(addr.addrs) == 1 else 'ies'}; "
-                    f"AC4 requires exactly {_LANES_PER_WARP} "
-                    f"entries (one slot per lane, with "
-                    f"LANE_INACTIVE_SENTINEL={LANE_INACTIVE_SENTINEL} "
-                    f"at inactive-lane positions)"
+                    f"{record_path}: instruction has "
+                    f"{len(inst.addresses)} address record(s) but "
+                    f"memory_op_class is absent"
+                ),
+            )
+    else:
+        known_classes = frozenset(instruction_pb2_mod.MemoryOpClass.values())
+        if inst.memory_op_class not in known_classes:
+            return ValidationResult(
+                ok=False,
+                typed_reason="unknown_enum_value",
+                detail=(
+                    f"{record_path}: memory_op_class carries value "
+                    f"{inst.memory_op_class} unknown to the committed "
+                    f"protobuf schema"
+                ),
+            )
+        if inst.memory_op_class == unspecified:
+            return ValidationResult(
+                ok=False,
+                typed_reason="memory_op_class_unspecified",
+                detail=(
+                    f"{record_path}: memory_op_class is present but "
+                    f"UNSPECIFIED; the tracer should have emitted an "
+                    f"unsupported_memory_path exclusion sidecar instead"
                 ),
             )
 
-    # active_mask & predicate_mask: per-lane emission consistency.
-    # The producer creates the outer `address` submessage
-    # unconditionally for every STANDARD_MEM operand (see
-    # `tracer_tool.cu` line 2623). Under the AC4 32-entry
-    # sentinel format, the contract violation we catch is:
-    #   - `list_all` record with at least one non-sentinel addrs
-    #     entry (i.e., a real address) AND
-    #     `(active_mask & predicate_mask) == 0`
-    #   - compressed-format record (`base_stride`, `base_delta`)
-    #     with addrs non-empty AND
-    #     `(active_mask & predicate_mask) == 0`
-    # A `list_all` record with all sentinel entries (the
-    # predicated-off all-lanes-inactive case) admits — the
-    # producer correctly emitted 32 sentinels and the AND mask
-    # is zero. A conforming producer never claims a real
-    # per-lane address for a lane its own emission gate would
-    # reject.
     and_mask = inst.active_mask & inst.predicate_mask
-    if and_mask == 0:
-        for addr in inst.addresses:
-            if addr.compression_format == _ADDRESS_FORMAT_LIST_ALL:
-                real_count = sum(
-                    1
-                    for entry in addr.addrs
-                    if entry != LANE_INACTIVE_SENTINEL
-                )
-            else:
-                real_count = len(addr.addrs)
-            if real_count > 0:
-                return ValidationResult(
-                    ok=False,
-                    typed_reason="lane_mask_inconsistent",
-                    detail=(
-                        f"{record_path}: "
-                        f"(active_mask=0x{inst.active_mask:x}) & "
-                        f"(predicate_mask=0x{inst.predicate_mask:x}) "
-                        f"is zero but an inner address record "
-                        f"carries {real_count} non-sentinel addrs "
-                        f"entr"
-                        f"{'y' if real_count == 1 else 'ies'}; "
-                        f"the producer only emits per-lane real "
-                        f"addresses for lanes the AND mask gates "
-                        f"true"
-                    ),
-                )
-    else:
-        # Symmetric direction: AND mask non-zero means at least
-        # one lane is active+predicated, and the producer's
-        # `list_all` branch (`tracer_tool.cu` lines 2687-2693)
-        # writes a real (non-sentinel) address at every such
-        # lane slot. A `list_all` record with non-zero AND mask
-        # and ALL 32 entries being LANE_INACTIVE_SENTINEL (i.e.
-        # zero non-sentinel entries) cannot be produced by the
-        # conforming producer. The compressed formats are not
-        # subject to this rule (a `base_stride` record under
-        # non-zero mask legitimately has empty `addrs`; a
-        # `base_delta` record may have empty `addrs` if all
-        # active-lane addresses equal `base_address`).
-        for addr in inst.addresses:
-            if (
-                addr.compression_format
-                == _ADDRESS_FORMAT_LIST_ALL
-                and len(addr.addrs) == _LANES_PER_WARP
-            ):
-                non_sentinel = sum(
-                    1
-                    for entry in addr.addrs
-                    if entry != LANE_INACTIVE_SENTINEL
-                )
-                if non_sentinel == 0:
-                    return ValidationResult(
-                        ok=False,
-                        typed_reason="lane_mask_inconsistent",
-                        detail=(
-                            f"{record_path}: "
-                            f"(active_mask=0x{inst.active_mask:x}) "
-                            f"& (predicate_mask=0x"
-                            f"{inst.predicate_mask:x}) is "
-                            f"0x{and_mask:x} (non-zero) but a "
-                            f"list_all address record carries 32 "
-                            f"sentinel entries with zero real "
-                            f"addresses; the producer emits a real "
-                            f"address at every lane the AND mask "
-                            f"gates true"
-                        ),
-                    )
 
     # Per-record positional identity check via reconstruction.
     # For every address record (regardless of compression format),
@@ -1011,52 +1120,51 @@ def _check_instruction(
     #     R17 review (real address in slot whose AND-mask
     #     bit is clear, or sentinel in slot whose AND-mask bit
     #     is set).
-    for addr_index, addr in enumerate(inst.addresses):
-        vector, malformed = _reconstruct_lane_vector(addr, and_mask)
-        if malformed is not None:
-            return ValidationResult(
-                ok=False,
-                typed_reason="compressed_format_malformed",
-                detail=(
-                    f"{record_path}: address[{addr_index}] "
-                    f"(compression_format="
-                    f"{addr.compression_format}): {malformed}"
-                ),
-            )
-        assert vector is not None  # invariant: malformed is None
-        for lane_index in range(_LANES_PER_WARP):
-            bit_set = bool((and_mask >> lane_index) & 1)
-            slot = vector[lane_index]
-            slot_is_sentinel = slot == LANE_INACTIVE_SENTINEL
-            if bit_set and slot_is_sentinel:
-                return ValidationResult(
-                    ok=False,
-                    typed_reason="lane_position_mismatch",
-                    detail=(
-                        f"{record_path}: address[{addr_index}] "
-                        f"lane {lane_index} reconstructs to "
-                        f"LANE_INACTIVE_SENTINEL but bit "
-                        f"{lane_index} of "
-                        f"(active_mask & predicate_mask)="
-                        f"0x{and_mask:x} is set; expected a "
-                        f"real address at this lane"
-                    ),
-                )
-            if (not bit_set) and (not slot_is_sentinel):
-                return ValidationResult(
-                    ok=False,
-                    typed_reason="lane_position_mismatch",
-                    detail=(
-                        f"{record_path}: address[{addr_index}] "
-                        f"lane {lane_index} reconstructs to "
-                        f"non-sentinel value 0x{slot:x} but bit "
-                        f"{lane_index} of "
-                        f"(active_mask & predicate_mask)="
-                        f"0x{and_mask:x} is clear; expected "
-                        f"LANE_INACTIVE_SENTINEL at this lane"
-                    ),
-                )
+    decoded_vectors, structure_error = _reconstruct_instruction_addresses(
+        inst,
+        and_mask,
+        record_path,
+        address_pb2_mod,
+    )
+    if structure_error is not None:
+        return structure_error
+    assert decoded_vectors is not None
 
+    # Explicit address spaces are additive. Complete lane structure and enum
+    # decoding precede this semantic gate; compatibility then precedes allocation
+    # identity so a contradictory space cannot reroute the record.
+    if inst.HasField("memory_op_class") and address_pb2_mod is not None:
+        expected_spaces = _expected_address_spaces(
+            inst.memory_op_class,
+            instruction_pb2_mod,
+            address_pb2_mod,
+        )
+        if expected_spaces is not None:
+            allowed_spaces, expected_label = expected_spaces
+            for addr_index, addr in enumerate(inst.addresses):
+                if (
+                    addr.HasField("address_space")
+                    and addr.address_space not in allowed_spaces
+                ):
+                    return ValidationResult(
+                        ok=False,
+                        typed_reason=(
+                            "memory_op_class_address_space_conflict"
+                        ),
+                        detail=(
+                            f"{record_path}: address[{addr_index}] "
+                            f"carries address_space={addr.address_space}, "
+                            f"which is incompatible with memory_op_class="
+                            f"{inst.memory_op_class}; expected "
+                            f"{expected_label}. Missing address_space "
+                            f"retains the legacy class fallback, but an "
+                            f"explicit contradictory space is rejected"
+                        ),
+                    )
+
+    for addr_index, (addr, vector) in enumerate(
+        zip(inst.addresses, decoded_vectors)
+    ):
         # Per-record allocation/range identity check (task11d).
         # Gate: memory_op_class present AND class is GLOBAL AND the
         # address record carries an explicit allocation_id != 0. The
@@ -1188,35 +1296,6 @@ def _check_instruction(
                             f"(size_bytes={entry.size_bytes})"
                         ),
                     )
-
-    # memory_op_class: required only when the instruction has
-    # addresses. Non-memory instructions legitimately leave it
-    # absent; predicated-off all-lanes-inactive memory ops without
-    # addresses also legitimately leave it absent (the producer
-    # cannot run the classifier without the opcode token there).
-    if len(inst.addresses) > 0:
-        if not inst.HasField("memory_op_class"):
-            return ValidationResult(
-                ok=False,
-                typed_reason=(
-                    "memory_op_class_missing_on_memory_instruction"
-                ),
-                detail=(
-                    f"{record_path}: instruction has "
-                    f"{len(inst.addresses)} address record(s) but "
-                    f"memory_op_class is absent"
-                ),
-            )
-        if inst.memory_op_class == unspecified:
-            return ValidationResult(
-                ok=False,
-                typed_reason="memory_op_class_unspecified",
-                detail=(
-                    f"{record_path}: memory_op_class is present but "
-                    f"UNSPECIFIED; the tracer should have emitted an "
-                    f"unsupported_memory_path exclusion sidecar instead"
-                ),
-            )
 
     # memory_op_access_kind: producer-side direction tag at proto
     # tag 12. Additive widening — legacy traces emitted before the

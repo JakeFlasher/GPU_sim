@@ -226,6 +226,90 @@ class TraceContractValidatorPositiveTest(unittest.TestCase):
             ),
         )
 
+    def test_explicit_memory_space_compatibility_matrix_admits(self) -> None:
+        """Operation families admit only their reviewed explicit spaces."""
+        from import_trace_contract import validate_threadblock
+
+        _tb_pb2, instruction_pb2, address_pb2 = _import_pb()
+        cases = (
+            (
+                instruction_pb2.MEMORY_OP_CLASS_GLOBAL,
+                address_pb2.MEMORY_SPACE_GLOBAL,
+            ),
+            (
+                instruction_pb2.MEMORY_OP_CLASS_GLOBAL,
+                address_pb2.MEMORY_SPACE_GENERIC,
+            ),
+            (
+                instruction_pb2.MEMORY_OP_CLASS_SHARED,
+                address_pb2.MEMORY_SPACE_SHARED,
+            ),
+            (
+                instruction_pb2.MEMORY_OP_CLASS_LOCAL,
+                address_pb2.MEMORY_SPACE_LOCAL,
+            ),
+            (
+                instruction_pb2.MEMORY_OP_CLASS_ATOMIC,
+                address_pb2.MEMORY_SPACE_GLOBAL,
+            ),
+            (
+                instruction_pb2.MEMORY_OP_CLASS_ATOMIC,
+                address_pb2.MEMORY_SPACE_GENERIC,
+            ),
+            (
+                instruction_pb2.MEMORY_OP_CLASS_ATOMIC,
+                address_pb2.MEMORY_SPACE_SHARED,
+            ),
+            (
+                instruction_pb2.MEMORY_OP_CLASS_ATOMIC,
+                address_pb2.MEMORY_SPACE_LOCAL,
+            ),
+            (
+                instruction_pb2.MEMORY_OP_CLASS_ASYNC_COPY,
+                address_pb2.MEMORY_SPACE_GLOBAL,
+            ),
+            (
+                instruction_pb2.MEMORY_OP_CLASS_ASYNC_COPY,
+                address_pb2.MEMORY_SPACE_GENERIC,
+            ),
+        )
+        for op_class, address_space in cases:
+            with self.subTest(op_class=op_class, address_space=address_space):
+                tb = _make_threadblock_with_instruction(
+                    add_address=True,
+                    set_memory_op_class=True,
+                    memory_op_class_value=op_class,
+                    address_space_value=address_space,
+                )
+                inst = tb.warps[0].instructions[0]
+                inst.predicate_mask = 0
+                inst.addresses[0].addrs[0] = -1
+                result = validate_threadblock(tb)
+                self.assertTrue(result.ok, result.detail)
+
+    def test_missing_address_space_retains_legacy_fallback(self) -> None:
+        from import_trace_contract import validate_threadblock
+
+        _tb_pb2, instruction_pb2, _address_pb2 = _import_pb()
+        for op_class in (
+            instruction_pb2.MEMORY_OP_CLASS_GLOBAL,
+            instruction_pb2.MEMORY_OP_CLASS_SHARED,
+            instruction_pb2.MEMORY_OP_CLASS_LOCAL,
+            instruction_pb2.MEMORY_OP_CLASS_ATOMIC,
+            instruction_pb2.MEMORY_OP_CLASS_ASYNC_COPY,
+        ):
+            with self.subTest(op_class=op_class):
+                tb = _make_threadblock_with_instruction(
+                    add_address=True,
+                    set_memory_op_class=True,
+                    memory_op_class_value=op_class,
+                )
+                inst = tb.warps[0].instructions[0]
+                inst.predicate_mask = 0
+                inst.addresses[0].addrs[0] = -1
+                result = validate_threadblock(tb)
+                self.assertTrue(result.ok, result.detail)
+
     def test_empty_threadblock_admits(self) -> None:
         """A threadblock with no warps is vacuously contract-conformant
         — there are no instructions to violate the contract on. This
@@ -360,6 +444,189 @@ class TraceContractValidatorNegativeTest(unittest.TestCase):
         self.assertEqual(
             result.typed_reason,
             "memory_op_class_unspecified",
+        )
+
+    def test_class_only_unspecified_is_rejected(self) -> None:
+        from import_trace_contract import validate_threadblock
+
+        _tb_pb2, instruction_pb2, _address_pb2 = _import_pb()
+        tb = _make_threadblock_with_instruction(
+            add_address=False,
+            set_memory_op_class=True,
+            memory_op_class_value=(
+                instruction_pb2.MEMORY_OP_CLASS_UNSPECIFIED
+            ),
+        )
+        result = validate_threadblock(tb)
+        self.assertFalse(result.ok)
+        self.assertEqual(result.typed_reason, "memory_op_class_unspecified")
+
+    def test_unknown_memory_class_is_schema_skew(self) -> None:
+        from import_trace_contract import validate_threadblock
+
+        for add_address in (False, True):
+            with self.subTest(add_address=add_address):
+                tb = _make_threadblock_with_instruction(
+                    add_address=add_address,
+                    set_memory_op_class=True,
+                    memory_op_class_value=99,
+                )
+                result = validate_threadblock(tb)
+                self.assertFalse(result.ok)
+                self.assertEqual(result.typed_reason, "unknown_enum_value")
+                self.assertIn("memory_op_class", result.detail)
+
+    def test_unknown_address_space_is_schema_skew_for_unsupported_class(
+        self,
+    ) -> None:
+        from import_trace_contract import validate_threadblock
+
+        _tb_pb2, instruction_pb2, _address_pb2 = _import_pb()
+        tb = _make_threadblock_with_instruction(
+            add_address=True,
+            set_memory_op_class=True,
+            memory_op_class_value=instruction_pb2.MEMORY_OP_CLASS_TEXTURE,
+            address_space_value=99,
+        )
+        result = validate_threadblock(tb)
+        self.assertFalse(result.ok)
+        self.assertEqual(result.typed_reason, "unknown_enum_value")
+        self.assertIn("address_space", result.detail)
+
+    def test_earlier_unknown_space_precedes_later_address_damage(self) -> None:
+        from import_trace_contract import validate_threadblock
+
+        _tb_pb2, instruction_pb2, _address_pb2 = _import_pb()
+        for compression_format in (0, 2):
+            with self.subTest(compression_format=compression_format):
+                tb = _make_threadblock_with_instruction(
+                    add_address=True,
+                    set_memory_op_class=True,
+                    memory_op_class_value=(
+                        instruction_pb2.MEMORY_OP_CLASS_SHARED
+                    ),
+                    address_space_value=99,
+                )
+                malformed_later = (
+                    tb.warps[0].instructions[0].addresses.add()
+                )
+                malformed_later.compression_format = compression_format
+                if compression_format == 2:
+                    malformed_later.addrs.append(1)
+                result = validate_threadblock(tb)
+                self.assertFalse(result.ok)
+                self.assertEqual(result.typed_reason, "unknown_enum_value")
+                self.assertIn("address_space", result.detail)
+
+    def test_crossed_memory_spaces_are_rejected(self) -> None:
+        from import_trace_contract import validate_threadblock
+
+        _tb_pb2, instruction_pb2, address_pb2 = _import_pb()
+        cases = (
+            (
+                instruction_pb2.MEMORY_OP_CLASS_SHARED,
+                address_pb2.MEMORY_SPACE_LOCAL,
+            ),
+            (
+                instruction_pb2.MEMORY_OP_CLASS_LOCAL,
+                address_pb2.MEMORY_SPACE_SHARED,
+            ),
+            (
+                instruction_pb2.MEMORY_OP_CLASS_GLOBAL,
+                address_pb2.MEMORY_SPACE_SHARED,
+            ),
+            (
+                instruction_pb2.MEMORY_OP_CLASS_GLOBAL,
+                address_pb2.MEMORY_SPACE_LOCAL,
+            ),
+            (
+                instruction_pb2.MEMORY_OP_CLASS_ASYNC_COPY,
+                address_pb2.MEMORY_SPACE_SHARED,
+            ),
+            (
+                instruction_pb2.MEMORY_OP_CLASS_ATOMIC,
+                address_pb2.MEMORY_SPACE_UNSPECIFIED,
+            ),
+        )
+        for op_class, address_space in cases:
+            with self.subTest(op_class=op_class, address_space=address_space):
+                tb = _make_threadblock_with_instruction(
+                    add_address=True,
+                    set_memory_op_class=True,
+                    memory_op_class_value=op_class,
+                    address_space_value=address_space,
+                )
+                result = validate_threadblock(tb)
+                self.assertFalse(result.ok)
+                self.assertEqual(
+                    result.typed_reason,
+                    "memory_op_class_address_space_conflict",
+                )
+
+    def test_structural_error_precedes_space_conflict(self) -> None:
+        from import_trace_contract import validate_threadblock
+
+        _tb_pb2, instruction_pb2, address_pb2 = _import_pb()
+        tb = _make_threadblock_with_instruction(
+            add_address=True,
+            set_memory_op_class=True,
+            memory_op_class_value=instruction_pb2.MEMORY_OP_CLASS_SHARED,
+            address_space_value=address_pb2.MEMORY_SPACE_LOCAL,
+        )
+        malformed_later = tb.warps[0].instructions[0].addresses.add()
+        malformed_later.compression_format = 0
+        result = validate_threadblock(tb)
+        self.assertFalse(result.ok)
+        self.assertEqual(result.typed_reason, "lane_vector_length_invalid")
+
+    def test_structural_error_precedes_allocation_identity(self) -> None:
+        from import_trace_contract import validate_threadblock
+
+        _tb_pb2, instruction_pb2, address_pb2 = _import_pb()
+        tb = _make_threadblock_with_instruction(
+            add_address=True,
+            set_memory_op_class=True,
+            memory_op_class_value=instruction_pb2.MEMORY_OP_CLASS_GLOBAL,
+            address_space_value=address_pb2.MEMORY_SPACE_GLOBAL,
+        )
+        malformed_later = tb.warps[0].instructions[0].addresses.add()
+        malformed_later.compression_format = 0
+        result = validate_threadblock(tb)
+        self.assertFalse(result.ok)
+        self.assertEqual(result.typed_reason, "lane_vector_length_invalid")
+
+    def test_space_conflict_precedes_allocation_identity(self) -> None:
+        """A contradictory GLOBAL space cannot reroute a SHARED record."""
+        from import_trace_contract import validate_threadblock
+
+        _tb_pb2, instruction_pb2, address_pb2 = _import_pb()
+        tb = _make_threadblock_with_instruction(
+            add_address=True,
+            set_memory_op_class=True,
+            memory_op_class_value=instruction_pb2.MEMORY_OP_CLASS_SHARED,
+            address_space_value=address_pb2.MEMORY_SPACE_GLOBAL,
+        )
+        result = validate_threadblock(tb)
+        self.assertFalse(result.ok)
+        self.assertEqual(
+            result.typed_reason,
+            "memory_op_class_address_space_conflict",
+        )
+
+    def test_missing_class_precedes_explicit_space(self) -> None:
+        from import_trace_contract import validate_threadblock
+
+        _tb_pb2, _instruction_pb2, address_pb2 = _import_pb()
+        tb = _make_threadblock_with_instruction(
+            add_address=True,
+            set_memory_op_class=False,
+            address_space_value=address_pb2.MEMORY_SPACE_GLOBAL,
+        )
+        result = validate_threadblock(tb)
+        self.assertFalse(result.ok)
+        self.assertEqual(
+            result.typed_reason,
+            "memory_op_class_missing_on_memory_instruction",
         )
 
     def test_memory_op_access_kind_absent_on_memory_inst_admitted(

@@ -68,7 +68,7 @@ pub enum MemoryRouteError {
         "SHARED/LOCAL carries {got} address records; active records require at least one operand"
     )]
     SharedLocalOperandCount { got: usize },
-    #[error("SHARED/LOCAL operand {operand} carries non-shared address_space {space:?}")]
+    #[error("SHARED/LOCAL operand {operand} carries incompatible address_space {space:?}")]
     SharedLocalSpaceInvalid {
         operand: usize,
         space: pb::MemorySpace,
@@ -918,9 +918,14 @@ fn replay_memory_route(
                     got: 0,
                 }));
             }
+            let expected_space = match class {
+                pb::MemoryOpClass::Shared => pb::MemorySpace::Shared,
+                pb::MemoryOpClass::Local => pb::MemorySpace::Local,
+                _ => unreachable!("match arm admits only SHARED or LOCAL"),
+            };
             for (operand, address) in inst.addresses.iter().enumerate() {
                 if let Some(space) = decode_space(operand, address)? {
-                    if !matches!(space, pb::MemorySpace::Shared | pb::MemorySpace::Local) {
+                    if space != expected_space {
                         return Err(contextualize(MemoryRouteError::SharedLocalSpaceInvalid {
                             operand,
                             space,
@@ -928,6 +933,9 @@ fn replay_memory_route(
                     }
                 }
             }
+            // LOCAL receives a distinct hierarchy route in Q1012's next staged
+            // change. Until then it remains on the existing shared timing arm,
+            // but crossed SHARED/LOCAL evidence is no longer admissible.
             Ok(ReplayMemoryRoute::Shared)
         }
         pb::MemoryOpClass::Global => {
@@ -1006,6 +1014,18 @@ fn replay_memory_route(
         }
         pb::MemoryOpClass::AsyncCopy => {
             if payload_contract == MemoryPayloadContract::LegacyExclusion {
+                // Legacy payload capability skips the new one-source shape, but
+                // an explicit space still cannot contradict ASYNC_COPY's global
+                // source. Missing space retains the historical global fallback.
+                for (operand, address) in inst.addresses.iter().enumerate() {
+                    if let Some(space) = decode_space(operand, address)? {
+                        if !matches!(space, pb::MemorySpace::Global | pb::MemorySpace::Generic) {
+                            return Err(contextualize(
+                                MemoryRouteError::AsyncCopySourceSpaceInvalid { space },
+                            ));
+                        }
+                    }
+                }
                 return Ok(ReplayMemoryRoute::Global);
             }
             if inst.addresses.len() != 1 {
@@ -1040,8 +1060,23 @@ fn preflight_replay_memory<'a>(
     record_ix: usize,
 ) -> Result<Option<ReplayMemoryPreflight<'a>>, ReplayError> {
     let record = || format!("{} warp={warp_id} inst={record_ix}", path.display());
-    let Some(memory) = preflight_memory_access(inst, record)? else {
-        return Ok(None);
+    let memory = match preflight_memory_access(inst, record) {
+        Ok(Some(memory)) => memory,
+        Ok(None) => return Ok(None),
+        Err(error) => {
+            // The reader independently rejects class/space contradictions. Route
+            // the same fully-structural-preflighted record through replay's own
+            // shape-aware defense so operand-count diagnostics retain precedence
+            // over a later conflicting operand.
+            if let TraceError::MemoryOpClassAddressSpaceConflict { class, .. } = &error {
+                if let Err(route_error) =
+                    replay_memory_route(inst, *class, payload_contract, path, warp_id, record_ix)
+                {
+                    return Err(route_error);
+                }
+            }
+            return Err(error.into());
+        }
     };
     let meta = memory.meta();
     let route = replay_memory_route(
@@ -2265,6 +2300,62 @@ mod space_routing_tests {
     }
 
     #[test]
+    fn shared_and_local_classes_reject_crossed_spaces() {
+        let cases = [
+            (pb::MemoryOpClass::Shared, pb::MemorySpace::Local),
+            (pb::MemoryOpClass::Local, pb::MemorySpace::Shared),
+        ];
+        for (case, (class, space)) in cases.into_iter().enumerate() {
+            let sched = schedule(ArchId::Sm86, MemRole::None, "LDS");
+            let mut inst = global_inst();
+            inst.memory_op_class = Some(class as i32);
+            inst.addresses[0].address_space = Some(space as i32);
+
+            assert!(matches!(
+                classify_flat(
+                    &inst,
+                    &sched,
+                    sched.arch,
+                    Path::new("crossed_space.pb"),
+                    4,
+                    case,
+                ),
+                Err(ReplayError::MemoryRoute {
+                    warp_id: 4,
+                    record_ix,
+                    class: got_class,
+                    source: MemoryRouteError::SharedLocalSpaceInvalid {
+                        operand: 0,
+                        space: got_space,
+                    },
+                    ..
+                }) if record_ix == case && got_class == class && got_space == space
+            ));
+
+            // Exercise the replay boundary directly as a defense independent of
+            // the reader's equivalent preflight rejection.
+            assert!(matches!(
+                replay_memory_route(
+                    &inst,
+                    class,
+                    MemoryPayloadContract::AddressCarryingV1,
+                    Path::new("crossed_space.pb"),
+                    4,
+                    case,
+                ),
+                Err(ReplayError::MemoryRoute {
+                    class: got_class,
+                    source: MemoryRouteError::SharedLocalSpaceInvalid {
+                        operand: 0,
+                        space: got_space,
+                    },
+                    ..
+                }) if got_class == class && got_space == space
+            ));
+        }
+    }
+
+    #[test]
     fn zero_active_shared_atomic_routes_shared_in_flat_and_l1_modes() {
         let mut inst = atomic_inst(Some(pb::MemorySpace::Shared));
         inst.active_mask = Some(1);
@@ -2590,7 +2681,7 @@ mod space_routing_tests {
     }
 
     #[test]
-    fn capability_empty_legacy_atomic_and_async_skip_new_shape_rules() {
+    fn capability_empty_legacy_routes_skip_shape_but_validate_explicit_space() {
         let atomic_sched = schedule(
             ArchId::Sm86,
             MemRole::BypassLoad(CacheOpToken::Atom),
@@ -2665,6 +2756,43 @@ mod space_routing_tests {
             )
             .is_ok()
         );
+        let mut missing_space_async =
+            async_copy_inst(vec![spaced_address(pb::MemorySpace::Global, 0x1000)]);
+        missing_space_async.addresses[0].address_space = None;
+        assert!(
+            classify_flat_with_contract(
+                &missing_space_async,
+                &async_sched,
+                async_sched.arch,
+                MemoryPayloadContract::LegacyExclusion,
+                Path::new("legacy_async_missing_space.pb"),
+                0,
+                0,
+            )
+            .is_ok()
+        );
+
+        let explicit_shared_async =
+            async_copy_inst(vec![spaced_address(pb::MemorySpace::Shared, 0x40)]);
+        assert!(matches!(
+            classify_flat_with_contract(
+                &explicit_shared_async,
+                &async_sched,
+                async_sched.arch,
+                MemoryPayloadContract::LegacyExclusion,
+                Path::new("legacy_async_shared.pb"),
+                0,
+                0,
+            ),
+            Err(ReplayError::MemoryRoute {
+                class: pb::MemoryOpClass::AsyncCopy,
+                source: MemoryRouteError::AsyncCopySourceSpaceInvalid {
+                    space: pb::MemorySpace::Shared,
+                },
+                ..
+            })
+        ));
+
         let mut async_sectors = vec![21];
         let mut async_scratch = vec![99];
         assert!(matches!(
