@@ -671,6 +671,11 @@ struct BlockState {
 }
 
 impl WarpState<'_> {
+    fn next_issue_retires(&self) -> Result<bool, IssueError> {
+        let next = checked_usize_counter_add("warp instruction cursor", self.next, 1)?;
+        Ok(next == self.insts.len())
+    }
+
     fn preflight_pending_add(
         &self,
         warp: usize,
@@ -2054,12 +2059,15 @@ impl<'a> SmCore<'a> {
         read_barrier: Option<DepBarrier>,
         stall: u8,
         yield_flag: bool,
+        retires_warp: bool,
     ) -> Result<(), IssueError> {
         let t = self.t;
         checked_cycle_add("issue-clock advance", t, 1)?;
-        checked_cycle_add("warp stall eligibility", t, u64::from(stall.max(1)))?;
-        if yield_flag {
-            checked_cycle_add("warp yield eligibility", t, 2)?;
+        if !retires_warp {
+            checked_cycle_add("warp stall eligibility", t, u64::from(stall.max(1)))?;
+            if yield_flag {
+                checked_cycle_add("warp yield eligibility", t, 2)?;
+            }
         }
         if read_barrier.is_some() {
             checked_cycle_add(
@@ -2410,8 +2418,7 @@ impl<'a> SmCore<'a> {
                 .ok_or(IssueError::CounterOverflow {
                     counter: "warp instruction cursor",
                 })?;
-            let next = checked_usize_counter_add("warp instruction cursor", warp.next, 1)?;
-            let retires = next == warp.insts.len();
+            let retires = warp.next_issue_retires()?;
             let slot = warp
                 .next_slot
                 .ok_or(IssueError::MissingIssueSlot { warp: wix })?;
@@ -2494,12 +2501,14 @@ impl<'a> SmCore<'a> {
             let slot = w
                 .next_slot
                 .ok_or(IssueError::MissingIssueSlot { warp: wix })?;
+            let retires_warp = w.next_issue_retires()?;
             self.preflight_issue_timing(
                 w.insts[w.next].kind,
                 slot.control.write_barrier,
                 slot.control.read_barrier,
                 slot.control.stall,
                 slot.control.yield_flag,
+                retires_warp,
             )?;
         }
         self.preflight_issue_memory(&picks)?;
@@ -2520,6 +2529,7 @@ impl<'a> SmCore<'a> {
                 instruction,
                 inst,
                 warp_sectors,
+                retires_warp,
             ) = {
                 let w = &self.warps[wix];
                 let slot = w
@@ -2534,6 +2544,7 @@ impl<'a> SmCore<'a> {
                     w.next,
                     w.insts[w.next],
                     w.sectors,
+                    w.next_issue_retires()?,
                 )
             };
 
@@ -2562,13 +2573,15 @@ impl<'a> SmCore<'a> {
             // Yield semantics per the CGGTY paper: the yield bit means
             // "do not issue this warp in the NEXT cycle" — a one-cycle
             // bubble when no other warp is ready — on top of the stall
-            // count.
-            let stall = u64::from(control.stall.max(1));
-            let mut eligible = checked_cycle_add("warp stall eligibility", t, stall)?;
-            if control.yield_flag {
-                eligible = eligible.max(checked_cycle_add("warp yield eligibility", t, 2)?);
+            // count. A retiring instruction has no next eligibility to observe.
+            if !retires_warp {
+                let stall = u64::from(control.stall.max(1));
+                let mut eligible = checked_cycle_add("warp stall eligibility", t, stall)?;
+                if control.yield_flag {
+                    eligible = eligible.max(checked_cycle_add("warp yield eligibility", t, 2)?);
+                }
+                self.warps[wix].eligible = eligible;
             }
-            self.warps[wix].eligible = eligible;
             // Dependence barriers are COUNTERS in hardware (producer
             // increments at issue, decrements at write-back; the
             // consumer waits for zero), so with several in-flight
@@ -2592,7 +2605,7 @@ impl<'a> SmCore<'a> {
             // Advance the warp's stream.
             self.warps[wix].next =
                 checked_usize_counter_add("warp instruction cursor", self.warps[wix].next, 1)?;
-            if self.warps[wix].next >= self.warps[wix].insts.len() {
+            if retires_warp {
                 self.warps[wix].done = true;
                 self.warps[wix].next_slot = None;
                 self.unfinished_warps =
@@ -3466,25 +3479,65 @@ mod tests {
 
     #[test]
     fn final_issue_can_advance_the_clock_to_exact_maximum() {
-        let sched = schedule(vec![(0, slot(cb(1), OpClass::Other, "EXIT"))]);
-        let blocks = vec![BlockReplay {
-            launch_index: 0,
-            warps: vec![warp(0, vec![inst(0)])],
-        }];
-        let mut p = params();
-        p.non_memory_write_barrier_latency = 1;
-        p.read_barrier_latency = 1;
-        let mut core = SmCore::new(&blocks, &sched, &p, SmMemMode::Flat).unwrap();
-        core.t = u64::MAX - 1;
-        let mut out = Vec::new();
+        for (stall, yield_flag) in [(15, false), (1, true)] {
+            let mut control = cb(stall);
+            control.yield_flag = yield_flag;
+            let sched = schedule(vec![(0, slot(control, OpClass::Other, "EXIT"))]);
+            let blocks = vec![BlockReplay {
+                launch_index: 0,
+                warps: vec![warp(0, vec![inst(0)])],
+            }];
+            let mut p = params();
+            p.non_memory_write_barrier_latency = 1;
+            p.read_barrier_latency = 1;
+            let mut core = SmCore::new(&blocks, &sched, &p, SmMemMode::Flat).unwrap();
+            core.t = u64::MAX - 1;
+            let mut out = Vec::new();
 
-        assert_eq!(
-            core.advance(ReplayHorizon::Unbounded, &mut out).unwrap(),
-            Advance::Done
-        );
-        assert!(out.is_empty());
-        assert_eq!(core.result().instructions_issued, 1);
-        assert_eq!(core.result().cycles, u64::MAX);
+            assert_eq!(
+                core.advance(ReplayHorizon::Unbounded, &mut out).unwrap(),
+                Advance::Done
+            );
+            assert!(out.is_empty());
+            assert_eq!(core.result().instructions_issued, 1);
+            assert_eq!(core.result().cycles, u64::MAX);
+        }
+    }
+
+    #[test]
+    fn nonterminal_issue_still_requires_post_issue_eligibility() {
+        for (stall, yield_flag, expected_operation, expected_delta) in [
+            (15, false, "warp stall eligibility", 15),
+            (1, true, "warp yield eligibility", 2),
+        ] {
+            let mut control = cb(stall);
+            control.yield_flag = yield_flag;
+            let sched = schedule(vec![
+                (0, slot(control, OpClass::Other, "IADD3")),
+                (16, slot(cb(1), OpClass::Other, "EXIT")),
+            ]);
+            let blocks = vec![BlockReplay {
+                launch_index: 0,
+                warps: vec![warp(0, vec![inst(0), inst(16)])],
+            }];
+            let mut core = SmCore::new(&blocks, &sched, &params(), SmMemMode::Flat).unwrap();
+            core.t = u64::MAX - 1;
+            let mut out = Vec::new();
+
+            assert!(matches!(
+                core.advance(ReplayHorizon::Unbounded, &mut out),
+                Err(IssueError::TimeOverflow {
+                    operation,
+                    base,
+                    delta,
+                }) if operation == expected_operation
+                    && base == u64::MAX - 1
+                    && delta == expected_delta
+            ));
+            assert!(out.is_empty());
+            assert_eq!(core.instructions_issued(), 0);
+            assert_eq!(core.warps[0].next, 0);
+        }
     }
 
     #[test]
