@@ -54,10 +54,12 @@
 
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use sim_arch::ArchId;
 use sim_mem::{
-    CacheOpToken, EvAccess, FillKey, L1Cache, L1Config, L1Counters, L2OpClass, L2Source,
+    CacheOpToken, EvAccess, FillKey, L1AccessError, L1Cache, L1Config, L1Counters,
+    L1MutationBudget, L2OpClass, L2Source,
 };
 
 use crate::control_bits::{ControlDomainError, DepBarrier};
@@ -304,6 +306,48 @@ pub enum IssueError {
         end: usize,
         sectors: usize,
     },
+    #[error("block {launch_index} has {warps} live warps, which does not fit in u32")]
+    LiveWarpCountOutOfRange { launch_index: i64, warps: usize },
+    #[error("warp {warp} was selected without a pending issue slot")]
+    MissingIssueSlot { warp: usize },
+    #[error("{counter} counter overflow")]
+    CounterOverflow { counter: &'static str },
+    #[error("{counter} counter underflow")]
+    CounterUnderflow { counter: &'static str },
+    #[error("issuing {add} instruction(s) from count {issued} exceeds replay cardinality {limit}")]
+    InstructionCountExceedsReplay { issued: u64, add: u64, limit: u64 },
+    #[error(
+        "warp {warp} dependence barrier {barrier} pending count {current} + {add} overflows u32"
+    )]
+    PendingBarrierOverflow {
+        warp: usize,
+        barrier: u8,
+        current: u32,
+        add: u32,
+    },
+    #[error(
+        "warp {warp} dependence barrier {barrier} pending count {current} cannot release {remove} unit(s)"
+    )]
+    PendingBarrierUnderflow {
+        warp: usize,
+        barrier: u8,
+        current: u32,
+        remove: u32,
+    },
+    #[error("response-owner identity domain is exhausted")]
+    ResponseOwnerExhausted,
+    #[error("memory responses are invalid for the {mode} memory mode")]
+    ResponseModeMismatch { mode: &'static str },
+    #[error("memory response fill {fill:?} is not in flight in the L1")]
+    ResponseFillNotInFlight { fill: FillKey },
+    #[error("line fill {line} has no live sector-mask bookkeeping")]
+    FillMaskMissing { line: i64 },
+    #[error("line {line} has sector-mask bookkeeping without an in-flight fill")]
+    FillMaskWithoutFill { line: i64 },
+    #[error("response-bearing request token {reply:?} is already outstanding")]
+    ResponseTokenAlreadyOutstanding { reply: ReplyTo },
+    #[error("memory response token {reply:?} disappeared after successful preflight")]
+    ResponseTokenRemovalFailed { reply: ReplyTo },
     #[error("memory response targets warp index {warp}, but this SM has {warps} admitted warps")]
     ResponseWarpOutOfRange { warp: usize, warps: usize },
     #[error("memory response token {reply:?} was not emitted or is no longer outstanding")]
@@ -356,6 +400,8 @@ pub enum IssueError {
 
     #[error("issue capability unavailable: {0}")]
     Capability(#[from] sim_arch::CapabilityError),
+    #[error("L1 access failed: {0}")]
+    L1Access(#[from] L1AccessError),
     #[error("L1 configuration is invalid: {0}")]
     L1Config(#[from] sim_mem::L1ConfigError),
 }
@@ -402,19 +448,46 @@ pub struct MemRequest {
     pub reply: ReplyTo,
 }
 
+/// Process-local identity of one live shared-L2 actor. It is deliberately
+/// opaque and never enters simulator outputs; its only role is to prevent a
+/// response capability emitted by one actor or replay generation from being
+/// accepted by another.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct ResponseOwner(u64);
+
+static NEXT_RESPONSE_OWNER: AtomicU64 = AtomicU64::new(1);
+
+fn allocate_response_owner() -> Result<ResponseOwner, IssueError> {
+    NEXT_RESPONSE_OWNER
+        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
+            current.checked_add(1)
+        })
+        .map(ResponseOwner)
+        .map_err(|_| IssueError::ResponseOwnerExhausted)
+}
+
 /// Stable identity of one response-bearing request. Its fields are private:
 /// callers may route a token emitted in [`MemRequest::reply`], but cannot mint
-/// an identity for a request the SM never emitted.
+/// an identity for a request the SM never emitted. The owner component is
+/// process-unique for the lifetime of the process and rejects cross-core and
+/// stale-replay token swaps.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct ResponseId {
+    owner: ResponseOwner,
     warp: usize,
     instruction: usize,
     sector_index: usize,
 }
 
 impl ResponseId {
-    const fn new(warp: usize, instruction: usize, sector_index: usize) -> Self {
+    const fn new(
+        owner: ResponseOwner,
+        warp: usize,
+        instruction: usize,
+        sector_index: usize,
+    ) -> Self {
         Self {
+            owner,
             warp,
             instruction,
             sector_index,
@@ -440,6 +513,15 @@ pub enum ReplyTo {
     },
     /// Mutation-only access (stores): no response event needed.
     None,
+}
+
+impl ReplyTo {
+    const fn response_id(self) -> Option<ResponseId> {
+        match self {
+            Self::L1Fill { response_id, .. } | Self::Warp { response_id, .. } => Some(response_id),
+            Self::None => None,
+        }
+    }
 }
 
 impl MemRequest {
@@ -501,6 +583,36 @@ pub enum Advance {
 const SUB_CORES: usize = 4;
 const DEP_BARRIERS: usize = 6;
 
+fn checked_u64_counter_add(
+    counter: &'static str,
+    current: u64,
+    add: u64,
+) -> Result<u64, IssueError> {
+    current
+        .checked_add(add)
+        .ok_or(IssueError::CounterOverflow { counter })
+}
+
+fn checked_usize_counter_add(
+    counter: &'static str,
+    current: usize,
+    add: usize,
+) -> Result<usize, IssueError> {
+    current
+        .checked_add(add)
+        .ok_or(IssueError::CounterOverflow { counter })
+}
+
+fn checked_u32_counter_add(
+    counter: &'static str,
+    current: u32,
+    add: u32,
+) -> Result<u32, IssueError> {
+    current
+        .checked_add(add)
+        .ok_or(IssueError::CounterOverflow { counter })
+}
+
 struct WarpState<'a> {
     insts: &'a [ReplayInst],
     sectors: &'a [i64],
@@ -539,34 +651,118 @@ struct BlockState {
 }
 
 impl WarpState<'_> {
-    /// Producer bookkeeping: one pending (unknown write-back) unit on a
+    fn preflight_pending_add(
+        &self,
+        warp: usize,
+        barrier: Option<DepBarrier>,
+        add: u32,
+    ) -> Result<(), IssueError> {
+        let Some(barrier) = barrier else {
+            return Ok(());
+        };
+        let current = self.barrier_pending[barrier.index()];
+        current
+            .checked_add(add)
+            .ok_or(IssueError::PendingBarrierOverflow {
+                warp,
+                barrier: barrier.wire(),
+                current,
+                add,
+            })?;
+        Ok(())
+    }
+
+    fn preflight_pending_remove(
+        &self,
+        warp: usize,
+        barrier: DepBarrier,
+        remove: u32,
+    ) -> Result<(), IssueError> {
+        let current = self.barrier_pending[barrier.index()];
+        current
+            .checked_sub(remove)
+            .ok_or(IssueError::PendingBarrierUnderflow {
+                warp,
+                barrier: barrier.wire(),
+                current,
+                remove,
+            })?;
+        Ok(())
+    }
+
+    /// Producer bookkeeping: pending (unknown write-back) units on a
     /// dependence barrier; `None` carries no dependency.
-    fn add_pending(&mut self, barrier: Option<DepBarrier>) {
-        if let Some(barrier) = barrier {
-            self.barrier_pending[barrier.index()] += 1;
-        }
-    }
-
-    /// One pending unit resolved at `now`: decrement AND max-accumulate
-    /// the clear stamp (hardware counter semantics — the single copy of
-    /// the pairing every response path must preserve).
-    fn clear_pending(&mut self, barrier: DepBarrier, now: u64) {
-        let b = barrier.index();
-        self.barrier_pending[b] = self.barrier_pending[b]
-            .checked_sub(1)
-            .expect("barrier pending-unit underflow");
-        self.barrier_clear[b] = self.barrier_clear[b].max(now);
-    }
-
-    /// Release a pending unit WITHOUT a stamp (a retry entry's own unit;
-    /// its per-sector waiters carry the stamps).
-    fn release_pending(&mut self, barrier: Option<DepBarrier>) {
+    fn add_pending(
+        &mut self,
+        warp: usize,
+        barrier: Option<DepBarrier>,
+        add: u32,
+    ) -> Result<(), IssueError> {
+        self.preflight_pending_add(warp, barrier, add)?;
         if let Some(barrier) = barrier {
             let pending = &mut self.barrier_pending[barrier.index()];
-            *pending = pending
-                .checked_sub(1)
-                .expect("retry entry without a pending unit");
+            let current = *pending;
+            *pending = current
+                .checked_add(add)
+                .ok_or(IssueError::PendingBarrierOverflow {
+                    warp,
+                    barrier: barrier.wire(),
+                    current,
+                    add,
+                })?;
         }
+        Ok(())
+    }
+
+    /// Pending units resolved at `now`: decrement AND max-accumulate the
+    /// clear stamp (hardware counter semantics — the single copy of the
+    /// pairing every response path must preserve).
+    fn clear_pending(
+        &mut self,
+        warp: usize,
+        barrier: DepBarrier,
+        remove: u32,
+        now: u64,
+    ) -> Result<(), IssueError> {
+        self.preflight_pending_remove(warp, barrier, remove)?;
+        let b = barrier.index();
+        let current = self.barrier_pending[b];
+        self.barrier_pending[b] =
+            current
+                .checked_sub(remove)
+                .ok_or(IssueError::PendingBarrierUnderflow {
+                    warp,
+                    barrier: barrier.wire(),
+                    current,
+                    remove,
+                })?;
+        self.barrier_clear[b] = self.barrier_clear[b].max(now);
+        Ok(())
+    }
+
+    /// Release pending units WITHOUT a stamp (a retry entry's own units;
+    /// its per-sector waiters carry the stamps).
+    fn release_pending(
+        &mut self,
+        warp: usize,
+        barrier: Option<DepBarrier>,
+        remove: u32,
+    ) -> Result<(), IssueError> {
+        let Some(barrier) = barrier else {
+            return Ok(());
+        };
+        self.preflight_pending_remove(warp, barrier, remove)?;
+        let pending = &mut self.barrier_pending[barrier.index()];
+        let current = *pending;
+        *pending = current
+            .checked_sub(remove)
+            .ok_or(IssueError::PendingBarrierUnderflow {
+                warp,
+                barrier: barrier.wire(),
+                current,
+                remove,
+            })?;
+        Ok(())
     }
 
     /// Max-accumulate a KNOWN clear stamp on a dependence barrier (counter
@@ -626,7 +822,7 @@ fn data_ready_time(
                 let mut ready =
                     checked_cycle_add("L1 hit-pipeline floor", t, params.l1_hit_latency)?;
                 for &sector in &sectors[off..off + usize::from(len)] {
-                    let (_, r) = l1.access_eligible(sector, t);
+                    let (_, r) = l1.access_eligible(sector, t)?;
                     ready = ready.max(r);
                 }
                 Ok(ready)
@@ -635,14 +831,14 @@ fn data_ready_time(
         },
         AccessKind::GlobalBypass { len, token, .. } => match l1 {
             Some(l1) => {
-                l1.count_bypass(u64::from(len), token == CacheOpToken::Atom);
+                l1.count_bypass(u64::from(len), token == CacheOpToken::Atom)?;
                 params.store_visibility_ready(t)
             }
             None => checked_cycle_add("flat global visibility", t, params.global_flat_latency),
         },
         AccessKind::GlobalUntagged { len, .. } => match l1 {
             Some(l1) => {
-                l1.count_untagged(u64::from(len));
+                l1.count_untagged(u64::from(len))?;
                 params.store_visibility_ready(t)
             }
             None => checked_cycle_add("flat global visibility", t, params.global_flat_latency),
@@ -650,7 +846,7 @@ fn data_ready_time(
         AccessKind::GlobalStore { off, len } => match l1 {
             Some(l1) => {
                 for &sector in &sectors[off..off + usize::from(len)] {
-                    l1.probe_store(sector, t);
+                    l1.probe_store(sector, t)?;
                 }
                 params.store_visibility_ready(t)
             }
@@ -672,12 +868,72 @@ struct Retry {
     hi: usize,
 }
 
+#[derive(Clone, Copy)]
+struct FillWaiter {
+    warp: usize,
+    barrier: DepBarrier,
+    units: u32,
+}
+
 /// Barrier units cleared when one keyed L1 fill completes. Inline for
-/// the dominant single-waiter case — a `Vec` per miss is pure allocator
-/// churn on 100M-record cells.
+/// the dominant single-waiter identity and pre-aggregated by (warp, barrier),
+/// so response preflight never rebuilds ordinary waiter counts in a heap map.
 enum Waiters {
-    One(usize, DepBarrier),
-    Many(Vec<(usize, DepBarrier)>),
+    One(FillWaiter),
+    Many(Vec<FillWaiter>),
+}
+
+impl Waiters {
+    fn add(&mut self, warp: usize, barrier: DepBarrier) -> Result<(), IssueError> {
+        let new_waiter = FillWaiter {
+            warp,
+            barrier,
+            units: 1,
+        };
+        match self {
+            Self::One(waiter) if waiter.warp == warp && waiter.barrier == barrier => {
+                waiter.units = checked_u32_counter_add("fill waiter unit", waiter.units, 1)?;
+            }
+            Self::One(waiter) => {
+                *self = Self::Many(vec![*waiter, new_waiter]);
+            }
+            Self::Many(waiters) => {
+                if let Some(waiter) = waiters
+                    .iter_mut()
+                    .find(|waiter| waiter.warp == warp && waiter.barrier == barrier)
+                {
+                    waiter.units = checked_u32_counter_add("fill waiter unit", waiter.units, 1)?;
+                } else {
+                    waiters.push(new_waiter);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn try_for_each(
+        &self,
+        mut visit: impl FnMut(FillWaiter) -> Result<(), IssueError>,
+    ) -> Result<(), IssueError> {
+        match self {
+            Self::One(waiter) => visit(*waiter),
+            Self::Many(waiters) => {
+                for &waiter in waiters {
+                    visit(waiter)?;
+                }
+                Ok(())
+            }
+        }
+    }
+}
+
+fn accumulate_pending_removal(
+    removals: &mut HashMap<(usize, DepBarrier), u32>,
+    waiter: FillWaiter,
+) -> Result<(), IssueError> {
+    let remove = removals.entry((waiter.warp, waiter.barrier)).or_default();
+    *remove = checked_u32_counter_add("response pending-remove budget", *remove, waiter.units)?;
+    Ok(())
 }
 
 /// State that EXISTS only in the shared-L2 mode — carrying it inside
@@ -685,6 +941,7 @@ enum Waiters {
 /// unrepresentable instead of an `expect()` deep in the memory step.
 struct SharedL2State {
     l1: L1Cache,
+    response_owner: ResponseOwner,
     /// Exact response-bearing request tokens still expected from the system.
     outstanding_replies: HashSet<ReplyTo>,
     /// Barrier units cleared when the keyed L1 fill completes.
@@ -750,6 +1007,8 @@ pub struct SmCore<'a> {
     params: IssueModelParams,
     mem: MemModel,
     blocks: &'a [BlockReplay],
+    block_live_warps: Vec<u32>,
+    instruction_limit: u64,
     warps: Vec<WarpState<'a>>,
     block_states: Vec<BlockState>,
     subcore_warps: [Vec<usize>; SUB_CORES],
@@ -785,11 +1044,41 @@ impl<'a> SmCore<'a> {
                 got: params.arch,
             });
         }
-        // Validate the complete dynamic/static join before constructing any
-        // mutable replay state. A later block admission must not discover an
-        // unknown PC after earlier blocks have already committed instructions.
+        // Validate the complete dynamic/static join and every actor-cardinality
+        // conversion before constructing mutable replay state. A later block
+        // admission must not discover an unknown PC or overflow after earlier
+        // blocks have already committed instructions.
+        let mut block_live_warps = Vec::with_capacity(blocks.len());
+        let mut instruction_limit = 0u64;
+        let mut arrival_limit = 0u64;
         for block in blocks {
+            let live_warp_count = block
+                .warps
+                .iter()
+                .filter(|warp| !warp.insts.is_empty())
+                .count();
+            let live_warps = u32::try_from(live_warp_count).map_err(|_| {
+                IssueError::LiveWarpCountOutOfRange {
+                    launch_index: block.launch_index,
+                    warps: live_warp_count,
+                }
+            })?;
+            block_live_warps.push(live_warps);
+            arrival_limit = checked_u64_counter_add(
+                "warp arrival stamp",
+                arrival_limit,
+                u64::from(live_warps),
+            )?;
             for warp in &block.warps {
+                let warp_instructions =
+                    u64::try_from(warp.insts.len()).map_err(|_| IssueError::CounterOverflow {
+                        counter: "replay instruction cardinality",
+                    })?;
+                instruction_limit = checked_u64_counter_add(
+                    "replay instruction cardinality",
+                    instruction_limit,
+                    warp_instructions,
+                )?;
                 for inst in &warp.insts {
                     let slot = lookup(schedule, inst.pc, block.launch_index, warp.warp_slot)?;
                     slot.control
@@ -831,6 +1120,7 @@ impl<'a> SmCore<'a> {
             SmMemMode::L1Const(cfg) => MemModel::L1Const(L1Cache::new(cfg)?),
             SmMemMode::L1Shared(cfg) => MemModel::L1Shared(SharedL2State {
                 l1: L1Cache::new(cfg)?,
+                response_owner: allocate_response_owner()?,
                 outstanding_replies: HashSet::new(),
                 fill_waiters: HashMap::new(),
                 fill_masks: HashMap::new(),
@@ -843,6 +1133,8 @@ impl<'a> SmCore<'a> {
             params: *params,
             mem,
             blocks,
+            block_live_warps,
+            instruction_limit,
             warps: Vec::new(),
             block_states: Vec::new(),
             subcore_warps: Default::default(),
@@ -904,59 +1196,112 @@ impl<'a> SmCore<'a> {
     fn admit_blocks(&mut self, t: u64) -> Result<(), IssueError> {
         while self.next_block < self.blocks.len() {
             let blk = &self.blocks[self.next_block];
-            let live_warps = blk.warps.iter().filter(|w| !w.insts.is_empty()).count() as u32;
+            let live_warps = self.block_live_warps[self.next_block];
+            let Some(next_resident_warps) = self.resident_warps.checked_add(live_warps) else {
+                // Any overflowing sum is above every u32 residency ceiling,
+                // so this block cannot join a non-empty wave.
+                if self.resident_warps > 0 {
+                    break;
+                }
+                return Err(IssueError::CounterOverflow {
+                    counter: "resident warp",
+                });
+            };
             if self.resident_warps > 0
-                && self.resident_warps + live_warps > self.params.max_resident_warps_per_sm
+                && next_resident_warps > self.params.max_resident_warps_per_sm
             {
                 break;
             }
+
+            let admitted_warps =
+                usize::try_from(live_warps).map_err(|_| IssueError::CounterOverflow {
+                    counter: "admitted warp cardinality",
+                })?;
+            let next_unfinished_warps = checked_usize_counter_add(
+                "unfinished warp",
+                self.unfinished_warps,
+                admitted_warps,
+            )?;
+            let next_arrival_stamp = checked_u64_counter_add(
+                "warp arrival stamp",
+                self.arrival_stamp,
+                u64::from(live_warps),
+            )?;
+            let next_block = checked_usize_counter_add("next block", self.next_block, 1)?;
+
+            // Build the complete block state off to the side. A schedule error
+            // cannot leave a prefix of the block admitted.
             let block_ix = self.block_states.len();
             let first_warp = self.warps.len();
-            let mut unfinished = 0usize;
+            let mut subcore_additions = [0usize; SUB_CORES];
+            let mut pending_warps = Vec::with_capacity(admitted_warps);
             for w in &blk.warps {
-                // Empty traced warps issue nothing: skip entirely
-                // (no residency, no sub-core slot).
                 if w.insts.is_empty() {
                     continue;
                 }
                 let subcore = (w.warp_slot.rem_euclid(SUB_CORES as i32)) as usize;
-                let ws = WarpState {
-                    insts: &w.insts,
-                    sectors: &w.sectors,
-                    next: 0,
-                    next_slot: Some(lookup(
-                        self.schedule,
-                        w.insts[0].pc,
-                        blk.launch_index,
-                        w.warp_slot,
-                    )?),
-                    eligible: t,
-                    barrier_clear: [0; DEP_BARRIERS],
-                    barrier_pending: [0; DEP_BARRIERS],
-                    block: block_ix,
-                    launch_index: blk.launch_index,
-                    warp_slot: w.warp_slot,
-                    pos_in_subcore: self.subcore_warps[subcore].len(),
-                    arrival: self.arrival_stamp,
-                    at_block_barrier: false,
-                    done: false,
-                };
-                self.arrival_stamp += 1;
-                unfinished += 1;
+                let pos_in_subcore = checked_usize_counter_add(
+                    "sub-core resident warp",
+                    self.subcore_warps[subcore].len(),
+                    subcore_additions[subcore],
+                )?;
+                let arrival_offset = u64::try_from(pending_warps.len()).map_err(|_| {
+                    IssueError::CounterOverflow {
+                        counter: "warp arrival stamp",
+                    }
+                })?;
+                let arrival = checked_u64_counter_add(
+                    "warp arrival stamp",
+                    self.arrival_stamp,
+                    arrival_offset,
+                )?;
+                pending_warps.push((
+                    subcore,
+                    WarpState {
+                        insts: &w.insts,
+                        sectors: &w.sectors,
+                        next: 0,
+                        next_slot: Some(lookup(
+                            self.schedule,
+                            w.insts[0].pc,
+                            blk.launch_index,
+                            w.warp_slot,
+                        )?),
+                        eligible: t,
+                        barrier_clear: [0; DEP_BARRIERS],
+                        barrier_pending: [0; DEP_BARRIERS],
+                        block: block_ix,
+                        launch_index: blk.launch_index,
+                        warp_slot: w.warp_slot,
+                        pos_in_subcore,
+                        arrival,
+                        at_block_barrier: false,
+                        done: false,
+                    },
+                ));
+                subcore_additions[subcore] = checked_usize_counter_add(
+                    "sub-core resident warp",
+                    subcore_additions[subcore],
+                    1,
+                )?;
+            }
+
+            for (subcore, warp) in pending_warps {
                 let ix = self.warps.len();
                 self.subcore_warps[subcore].push(ix);
-                self.warps.push(ws);
+                self.warps.push(warp);
             }
             self.block_states.push(BlockState {
-                unfinished,
+                unfinished: admitted_warps,
                 waiting: 0,
                 warp_count: live_warps,
                 first_warp,
-                admitted_warps: unfinished,
+                admitted_warps,
             });
-            self.resident_warps += live_warps;
-            self.unfinished_warps += unfinished;
-            self.next_block += 1;
+            self.resident_warps = next_resident_warps;
+            self.unfinished_warps = next_unfinished_warps;
+            self.arrival_stamp = next_arrival_stamp;
+            self.next_block = next_block;
         }
         Ok(())
     }
@@ -1004,16 +1349,16 @@ impl<'a> SmCore<'a> {
                         wix,
                         write_barrier,
                         sectors[i],
-                        ResponseId::new(wix, instruction, i),
+                        ResponseId::new(st.response_owner, wix, instruction, i),
                         t,
                         out,
                     ) {
                         Ok(Some(ready)) => known = known.max(ready),
                         Ok(None) => {}
-                        Err(()) => {
+                        Err(SharedAccessError::Stalled) => {
                             // MSHR full: park the remainder; the entry
                             // holds one pending unit until drained.
-                            warps[wix].add_pending(write_barrier);
+                            warps[wix].add_pending(wix, write_barrier, 1)?;
                             st.retry.push_back(Retry {
                                 warp: wix,
                                 instruction,
@@ -1023,6 +1368,7 @@ impl<'a> SmCore<'a> {
                             });
                             break;
                         }
+                        Err(SharedAccessError::Issue(source)) => return Err(source),
                     }
                 }
                 Ok(Some(known))
@@ -1045,9 +1391,9 @@ impl<'a> SmCore<'a> {
                 };
                 if counted {
                     st.l1
-                        .count_bypass(u64::from(len), class == L2OpClass::WriteAtomic);
+                        .count_bypass(u64::from(len), class == L2OpClass::WriteAtomic)?;
                 } else {
-                    st.l1.count_untagged(u64::from(len));
+                    st.l1.count_untagged(u64::from(len))?;
                 }
                 if len == 0 {
                     // Degenerate record (fully predicated-off lanes are
@@ -1062,10 +1408,10 @@ impl<'a> SmCore<'a> {
                         let reply = ReplyTo::Warp {
                             warp: wix,
                             barrier,
-                            response_id: ResponseId::new(wix, instruction, i),
+                            response_id: ResponseId::new(st.response_owner, wix, instruction, i),
                         };
-                        warps[wix].add_pending(Some(barrier));
-                        let _ = st.outstanding_replies.insert(reply);
+                        warps[wix].add_pending(wix, Some(barrier), 1)?;
+                        register_response(st, reply)?;
                         reply
                     } else {
                         ReplyTo::None
@@ -1083,7 +1429,7 @@ impl<'a> SmCore<'a> {
             }
             AccessKind::GlobalStore { off, len } => {
                 for &sector_id in &sectors[off..off + usize::from(len)] {
-                    st.l1.probe_store(sector_id, t);
+                    st.l1.probe_store(sector_id, t)?;
                     out.push(MemRequest::store(t, sector_id));
                 }
                 // v0: store visibility priced at the L2-hit arm (as in
@@ -1093,6 +1439,254 @@ impl<'a> SmCore<'a> {
         }
     }
 
+    fn preflight_response_accounting(
+        &self,
+        st: &SharedL2State,
+        reply: ReplyTo,
+        now: u64,
+    ) -> Result<(), IssueError> {
+        let fill = match reply {
+            ReplyTo::Warp { warp, barrier, .. } => {
+                if warp >= self.warps.len() {
+                    return Err(IssueError::ResponseWarpOutOfRange {
+                        warp,
+                        warps: self.warps.len(),
+                    });
+                }
+                self.warps[warp].preflight_pending_remove(warp, barrier, 1)?;
+                return Ok(());
+            }
+            ReplyTo::L1Fill { fill, .. } => {
+                if !st.l1.is_fill_in_flight(fill) {
+                    return Err(IssueError::ResponseFillNotInFlight { fill });
+                }
+                if let FillKey::Line(line) = fill
+                    && !st.fill_masks.contains_key(&line)
+                {
+                    return Err(IssueError::FillMaskMissing { line });
+                }
+                fill
+            }
+            ReplyTo::None => return Err(IssueError::UnexpectedMutationOnlyResponse),
+        };
+
+        if st.retry.is_empty() {
+            if let Some(waiters) = st.fill_waiters.get(&fill) {
+                waiters.try_for_each(|waiter| {
+                    if waiter.warp >= self.warps.len() {
+                        return Err(IssueError::ResponseWarpOutOfRange {
+                            warp: waiter.warp,
+                            warps: self.warps.len(),
+                        });
+                    }
+                    self.warps[waiter.warp].preflight_pending_remove(
+                        waiter.warp,
+                        waiter.barrier,
+                        waiter.units,
+                    )
+                })?;
+            }
+            let budget = L1MutationBudget {
+                recency_touches: 1,
+                ..L1MutationBudget::default()
+            };
+            if st.l1.preflight_mutation_budget(budget).is_err() {
+                let mut shadow = st.l1.clone();
+                shadow.complete_fill(fill)?;
+            }
+            return Ok(());
+        }
+
+        let mut removals = HashMap::new();
+        if let Some(waiters) = st.fill_waiters.get(&fill) {
+            waiters.try_for_each(|waiter| accumulate_pending_removal(&mut removals, waiter))?;
+        }
+
+        let mut projected = HashMap::new();
+        for (&(warp, barrier), &remove) in &removals {
+            if warp >= self.warps.len() {
+                return Err(IssueError::ResponseWarpOutOfRange {
+                    warp,
+                    warps: self.warps.len(),
+                });
+            }
+            self.warps[warp].preflight_pending_remove(warp, barrier, remove)?;
+            let current = self.warps[warp].barrier_pending[barrier.index()];
+            projected.insert(
+                (warp, barrier),
+                current
+                    .checked_sub(remove)
+                    .ok_or(IssueError::PendingBarrierUnderflow {
+                        warp,
+                        barrier: barrier.wire(),
+                        current,
+                        remove,
+                    })?,
+            );
+        }
+
+        let mut budget = L1MutationBudget {
+            recency_touches: 1,
+            ..L1MutationBudget::default()
+        };
+        let mut pending_budget_fits = true;
+        for retry in &st.retry {
+            if retry.warp >= self.warps.len() {
+                return Err(IssueError::ResponseWarpOutOfRange {
+                    warp: retry.warp,
+                    warps: self.warps.len(),
+                });
+            }
+            let remaining = retry
+                .hi
+                .checked_sub(retry.lo)
+                .ok_or(IssueError::CounterUnderflow {
+                    counter: "retry sector cursor",
+                })?;
+            if retry.hi > self.warps[retry.warp].sectors.len() {
+                return Err(IssueError::CounterOverflow {
+                    counter: "retry sector cursor",
+                });
+            }
+            let remaining_u64 =
+                u64::try_from(remaining).map_err(|_| IssueError::CounterOverflow {
+                    counter: "retry L1 budget",
+                })?;
+            budget.eligible_sectors = checked_u64_counter_add(
+                "retry L1 eligible-sector budget",
+                budget.eligible_sectors,
+                remaining_u64,
+            )?;
+            budget.recency_touches = checked_u64_counter_add(
+                "retry L1 recency budget",
+                budget.recency_touches,
+                remaining_u64,
+            )?;
+            budget.new_fills =
+                checked_u64_counter_add("retry L1 fill budget", budget.new_fills, remaining_u64)?;
+            for sector_index in retry.lo..retry.hi {
+                let sector_id = self.warps[retry.warp].sectors[sector_index];
+                preflight_line_fill_mask(st, sector_id)?;
+                let response_id = ResponseId::new(
+                    st.response_owner,
+                    retry.warp,
+                    retry.instruction,
+                    sector_index,
+                );
+                if let Some(&reply) = st
+                    .outstanding_replies
+                    .iter()
+                    .find(|reply| reply.response_id() == Some(response_id))
+                {
+                    return Err(IssueError::ResponseTokenAlreadyOutstanding { reply });
+                }
+            }
+            if let Some(barrier) = retry.barrier {
+                let base = self.warps[retry.warp].barrier_pending[barrier.index()];
+                let current = projected.entry((retry.warp, barrier)).or_insert(base);
+                let before_remove = *current;
+                let after_remove =
+                    before_remove
+                        .checked_sub(1)
+                        .ok_or(IssueError::PendingBarrierUnderflow {
+                            warp: retry.warp,
+                            barrier: barrier.wire(),
+                            current: before_remove,
+                            remove: 1,
+                        })?;
+                let additions =
+                    u32::try_from(remaining).map_err(|_| IssueError::CounterOverflow {
+                        counter: "retry pending-add budget",
+                    })?;
+                if let Some(after_add) = after_remove.checked_add(additions) {
+                    *current = after_add;
+                } else {
+                    pending_budget_fits = false;
+                    *current = after_remove;
+                }
+            }
+        }
+
+        if st.l1.preflight_mutation_budget(budget).is_ok() && pending_budget_fits {
+            return Ok(());
+        }
+
+        // Numeric-boundary slow path: complete and retry on a shadow cache so
+        // warm hits and an atomic retry-unit replacement are charged exactly.
+        let mut shadow = st.l1.clone();
+        shadow.complete_fill(fill)?;
+        let mut exact = HashMap::new();
+        for (&(warp, barrier), &remove) in &removals {
+            let current = self.warps[warp].barrier_pending[barrier.index()];
+            exact.insert(
+                (warp, barrier),
+                current
+                    .checked_sub(remove)
+                    .ok_or(IssueError::PendingBarrierUnderflow {
+                        warp,
+                        barrier: barrier.wire(),
+                        current,
+                        remove,
+                    })?,
+            );
+        }
+        'retries: for retry in &st.retry {
+            if let Some(barrier) = retry.barrier {
+                let base = self.warps[retry.warp].barrier_pending[barrier.index()];
+                let current = exact.entry((retry.warp, barrier)).or_insert(base);
+                let before = *current;
+                *current = before
+                    .checked_sub(1)
+                    .ok_or(IssueError::PendingBarrierUnderflow {
+                        warp: retry.warp,
+                        barrier: barrier.wire(),
+                        current: before,
+                        remove: 1,
+                    })?;
+            }
+            for sector_index in retry.lo..retry.hi {
+                let sector_id = self.warps[retry.warp].sectors[sector_index];
+                match shadow.access_eligible_ev(sector_id, now)? {
+                    EvAccess::Hit { .. } => {}
+                    EvAccess::MissRequest { .. } | EvAccess::MergedPending { .. } => {
+                        if let Some(barrier) = retry.barrier {
+                            let current = exact
+                                .entry((retry.warp, barrier))
+                                .or_insert(self.warps[retry.warp].barrier_pending[barrier.index()]);
+                            let before = *current;
+                            *current = before.checked_add(1).ok_or(
+                                IssueError::PendingBarrierOverflow {
+                                    warp: retry.warp,
+                                    barrier: barrier.wire(),
+                                    current: before,
+                                    add: 1,
+                                },
+                            )?;
+                        }
+                    }
+                    EvAccess::Stalled => {
+                        if let Some(barrier) = retry.barrier {
+                            let current = exact
+                                .entry((retry.warp, barrier))
+                                .or_insert(self.warps[retry.warp].barrier_pending[barrier.index()]);
+                            let before = *current;
+                            *current = before.checked_add(1).ok_or(
+                                IssueError::PendingBarrierOverflow {
+                                    warp: retry.warp,
+                                    barrier: barrier.wire(),
+                                    current: before,
+                                    add: 1,
+                                },
+                            )?;
+                        }
+                        break 'retries;
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
     pub(crate) fn preflight_response(&self, reply: ReplyTo, now: u64) -> Result<(), IssueError> {
         if now == u64::MAX {
             return Err(IssueError::ResponseTimeDomainExhausted);
@@ -1100,8 +1694,16 @@ impl<'a> SmCore<'a> {
         if now < self.t {
             return Err(IssueError::ResponseBeforeClock { now, clock: self.t });
         }
-        let MemModel::L1Shared(st) = &self.mem else {
-            unreachable!("responses only exist in shared mode")
+        let st = match &self.mem {
+            MemModel::L1Shared(st) => st,
+            MemModel::Flat => {
+                return Err(IssueError::ResponseModeMismatch { mode: "flat" });
+            }
+            MemModel::L1Const(_) => {
+                return Err(IssueError::ResponseModeMismatch {
+                    mode: "constant-L1",
+                });
+            }
         };
         match reply {
             ReplyTo::Warp { warp, .. } if warp >= self.warps.len() => {
@@ -1124,6 +1726,7 @@ impl<'a> SmCore<'a> {
                 barrier: barrier.wire(),
             });
         }
+        self.preflight_response_accounting(st, reply, now)?;
         // A fill completion can drain parked accesses. Validate the timing
         // arms owned by the SM before completing the fill or clearing any
         // waiter. Next-level L2/DRAM pricing is preflighted by the system
@@ -1149,37 +1752,49 @@ impl<'a> SmCore<'a> {
         out: &mut Vec<MemRequest>,
     ) -> Result<(), IssueError> {
         self.preflight_response(reply, now)?;
-        let MemModel::L1Shared(st) = &mut self.mem else {
-            unreachable!("responses only exist in shared mode")
+        let st = match &mut self.mem {
+            MemModel::L1Shared(st) => st,
+            MemModel::Flat => {
+                return Err(IssueError::ResponseModeMismatch { mode: "flat" });
+            }
+            MemModel::L1Const(_) => {
+                return Err(IssueError::ResponseModeMismatch {
+                    mode: "constant-L1",
+                });
+            }
         };
-        let _ = st.outstanding_replies.remove(&reply);
+        if !st.outstanding_replies.remove(&reply) {
+            return Err(IssueError::ResponseTokenRemovalFailed { reply });
+        }
         // New emission batch (the retry drain below may emit).
         st.line_folds.clear();
         let warps = &mut self.warps;
         match reply {
             ReplyTo::L1Fill { fill, .. } => {
-                if let FillKey::Line(line) = fill {
-                    st.fill_masks.remove(&line);
+                if let FillKey::Line(line) = fill
+                    && st.fill_masks.remove(&line).is_none()
+                {
+                    return Err(IssueError::FillMaskMissing { line });
                 }
-                st.l1.complete_fill(fill);
+                st.l1.complete_fill(fill)?;
                 if let Some(waiters) = st.fill_waiters.remove(&fill) {
-                    match waiters {
-                        Waiters::One(w, b) => warps[w].clear_pending(b, now),
-                        Waiters::Many(list) => {
-                            for (w, b) in list {
-                                warps[w].clear_pending(b, now);
-                            }
-                        }
-                    }
+                    waiters.try_for_each(|waiter| {
+                        warps[waiter.warp].clear_pending(
+                            waiter.warp,
+                            waiter.barrier,
+                            waiter.units,
+                            now,
+                        )
+                    })?;
                 }
                 // The completed fill freed an MSHR entry: retry parked
                 // accesses (FIFO) until one stalls again.
-                drain_retries(st, warps, now, out);
+                drain_retries(st, warps, now, out)?;
             }
             ReplyTo::Warp { warp, barrier, .. } => {
-                warps[warp].clear_pending(barrier, now);
+                warps[warp].clear_pending(warp, barrier, 1, now)?;
             }
-            ReplyTo::None => unreachable!("mutation-only requests get no response"),
+            ReplyTo::None => return Err(IssueError::UnexpectedMutationOnlyResponse),
         }
         Ok(())
     }
@@ -1369,6 +1984,316 @@ impl<'a> SmCore<'a> {
         Ok(())
     }
 
+    fn preflight_issue_memory(&self, picks: &[Option<usize>; SUB_CORES]) -> Result<(), IssueError> {
+        let (l1, shared) = match &self.mem {
+            MemModel::Flat => return Ok(()),
+            MemModel::L1Const(l1) => (l1, None),
+            MemModel::L1Shared(st) => (&st.l1, Some(st)),
+        };
+        let mut budget = L1MutationBudget::default();
+        let mut pending_budget_fits = true;
+        for &wix in picks.iter().flatten() {
+            let warp = &self.warps[wix];
+            let inst = warp
+                .insts
+                .get(warp.next)
+                .ok_or(IssueError::CounterOverflow {
+                    counter: "warp instruction cursor",
+                })?;
+            let slot = warp
+                .next_slot
+                .ok_or(IssueError::MissingIssueSlot { warp: wix })?;
+            let add_budget = |counter: &'static str, value: &mut u64, add: u64| {
+                *value = checked_u64_counter_add(counter, *value, add)?;
+                Ok::<(), IssueError>(())
+            };
+            match inst.kind {
+                AccessKind::GlobalEligible { off, len, .. } => {
+                    let sectors = u64::from(len);
+                    add_budget(
+                        "L1 eligible-sector budget",
+                        &mut budget.eligible_sectors,
+                        sectors,
+                    )?;
+                    add_budget("L1 recency budget", &mut budget.recency_touches, sectors)?;
+                    add_budget("L1 fill budget", &mut budget.new_fills, sectors)?;
+                    if shared.is_some()
+                        && warp
+                            .preflight_pending_add(wix, slot.control.write_barrier, u32::from(len))
+                            .is_err()
+                    {
+                        pending_budget_fits = false;
+                    }
+                    if let Some(st) = shared {
+                        let end = off.checked_add(usize::from(len)).ok_or(
+                            IssueError::CounterOverflow {
+                                counter: "issue sector cursor",
+                            },
+                        )?;
+                        for sector_index in off..end {
+                            let sector_id = *warp.sectors.get(sector_index).ok_or(
+                                IssueError::CounterOverflow {
+                                    counter: "issue sector cursor",
+                                },
+                            )?;
+                            preflight_line_fill_mask(st, sector_id)?;
+                            let response_id =
+                                ResponseId::new(st.response_owner, wix, warp.next, sector_index);
+                            if let Some(&reply) = st
+                                .outstanding_replies
+                                .iter()
+                                .find(|reply| reply.response_id() == Some(response_id))
+                            {
+                                return Err(IssueError::ResponseTokenAlreadyOutstanding { reply });
+                            }
+                        }
+                    }
+                }
+                AccessKind::GlobalBypass {
+                    len, token, off, ..
+                } => {
+                    let sectors = u64::from(len);
+                    add_budget(
+                        "L1 bypass-sector budget",
+                        &mut budget.bypass_sectors,
+                        sectors,
+                    )?;
+                    if token == CacheOpToken::Atom {
+                        add_budget(
+                            "L1 bypass-atom budget",
+                            &mut budget.bypass_atom_sectors,
+                            sectors,
+                        )?;
+                    }
+                    if let Some(st) = shared
+                        && slot.control.write_barrier.is_some()
+                    {
+                        if warp
+                            .preflight_pending_add(wix, slot.control.write_barrier, u32::from(len))
+                            .is_err()
+                        {
+                            pending_budget_fits = false;
+                        }
+                        for sector_index in off..off + usize::from(len) {
+                            let response_id =
+                                ResponseId::new(st.response_owner, wix, warp.next, sector_index);
+                            if let Some(&reply) = st
+                                .outstanding_replies
+                                .iter()
+                                .find(|reply| reply.response_id() == Some(response_id))
+                            {
+                                return Err(IssueError::ResponseTokenAlreadyOutstanding { reply });
+                            }
+                        }
+                    }
+                }
+                AccessKind::GlobalUntagged { off, len } => {
+                    let sectors = u64::from(len);
+                    add_budget(
+                        "L1 untagged-sector budget",
+                        &mut budget.untagged_sectors,
+                        sectors,
+                    )?;
+                    if let Some(st) = shared
+                        && slot.control.write_barrier.is_some()
+                    {
+                        if warp
+                            .preflight_pending_add(wix, slot.control.write_barrier, u32::from(len))
+                            .is_err()
+                        {
+                            pending_budget_fits = false;
+                        }
+                        for sector_index in off..off + usize::from(len) {
+                            let response_id =
+                                ResponseId::new(st.response_owner, wix, warp.next, sector_index);
+                            if let Some(&reply) = st
+                                .outstanding_replies
+                                .iter()
+                                .find(|reply| reply.response_id() == Some(response_id))
+                            {
+                                return Err(IssueError::ResponseTokenAlreadyOutstanding { reply });
+                            }
+                        }
+                    }
+                }
+                AccessKind::GlobalStore { len, .. } => {
+                    let sectors = u64::from(len);
+                    add_budget("L1 store-sector budget", &mut budget.store_sectors, sectors)?;
+                    add_budget("L1 recency budget", &mut budget.recency_touches, sectors)?;
+                }
+                AccessKind::NonMemory | AccessKind::Shared => {}
+            }
+        }
+
+        let constant_timing_fits = shared.is_some()
+            || l1.constant_batch_timing_has_headroom(self.t, budget.eligible_sectors);
+        if l1.preflight_mutation_budget(budget).is_ok()
+            && pending_budget_fits
+            && constant_timing_fits
+        {
+            return Ok(());
+        }
+
+        // Near a numeric boundary, replay this at-most-four-instruction batch
+        // on a shadow cache. This avoids rejecting valid warm hits while keeping
+        // the ordinary hot path allocation-free.
+        let mut shadow = l1.clone();
+        for &wix in picks.iter().flatten() {
+            let warp = &self.warps[wix];
+            let inst = warp.insts[warp.next];
+            let slot = warp
+                .next_slot
+                .ok_or(IssueError::MissingIssueSlot { warp: wix })?;
+            match inst.kind {
+                AccessKind::GlobalEligible { off, len, .. } => {
+                    let mut pending_add = 0u32;
+                    for &sector_id in &warp.sectors[off..off + usize::from(len)] {
+                        if shared.is_some() {
+                            match shadow.access_eligible_ev(sector_id, self.t)? {
+                                EvAccess::Hit { .. } => {}
+                                EvAccess::MissRequest { .. } | EvAccess::MergedPending { .. } => {
+                                    pending_add = checked_u32_counter_add(
+                                        "issue exact pending-add budget",
+                                        pending_add,
+                                        1,
+                                    )?;
+                                }
+                                EvAccess::Stalled => {
+                                    pending_add = checked_u32_counter_add(
+                                        "issue exact pending-add budget",
+                                        pending_add,
+                                        1,
+                                    )?;
+                                    break;
+                                }
+                            }
+                        } else {
+                            shadow.access_eligible(sector_id, self.t)?;
+                        }
+                    }
+                    if shared.is_some() {
+                        warp.preflight_pending_add(wix, slot.control.write_barrier, pending_add)?;
+                    }
+                }
+                AccessKind::GlobalBypass { len, token, .. } => {
+                    shadow.count_bypass(u64::from(len), token == CacheOpToken::Atom)?;
+                    if shared.is_some() {
+                        warp.preflight_pending_add(
+                            wix,
+                            slot.control.write_barrier,
+                            u32::from(len),
+                        )?;
+                    }
+                }
+                AccessKind::GlobalUntagged { len, .. } => {
+                    shadow.count_untagged(u64::from(len))?;
+                    if shared.is_some() {
+                        warp.preflight_pending_add(
+                            wix,
+                            slot.control.write_barrier,
+                            u32::from(len),
+                        )?;
+                    }
+                }
+                AccessKind::GlobalStore { off, len } => {
+                    for &sector_id in &warp.sectors[off..off + usize::from(len)] {
+                        shadow.probe_store(sector_id, self.t)?;
+                    }
+                }
+                AccessKind::NonMemory | AccessKind::Shared => {}
+            }
+        }
+        Ok(())
+    }
+
+    fn preflight_issue_accounting(
+        &self,
+        picks: &[Option<usize>; SUB_CORES],
+    ) -> Result<u64, IssueError> {
+        let issue_add = u64::try_from(picks.iter().flatten().count()).map_err(|_| {
+            IssueError::CounterOverflow {
+                counter: "issued instruction",
+            }
+        })?;
+        let next_issued = checked_u64_counter_add("issued instruction", self.issued, issue_add)?;
+        if next_issued > self.instruction_limit {
+            return Err(IssueError::InstructionCountExceedsReplay {
+                issued: self.issued,
+                add: issue_add,
+                limit: self.instruction_limit,
+            });
+        }
+
+        let mut block_deltas: [Option<(usize, usize, usize)>; SUB_CORES] = [None; SUB_CORES];
+        let mut total_retirements = 0usize;
+        for &wix in picks.iter().flatten() {
+            let warp = &self.warps[wix];
+            let _inst = warp
+                .insts
+                .get(warp.next)
+                .ok_or(IssueError::CounterOverflow {
+                    counter: "warp instruction cursor",
+                })?;
+            let next = checked_usize_counter_add("warp instruction cursor", warp.next, 1)?;
+            let retires = next == warp.insts.len();
+            let slot = warp
+                .next_slot
+                .ok_or(IssueError::MissingIssueSlot { warp: wix })?;
+            let entry_index = block_deltas
+                .iter()
+                .position(|entry| entry.is_some_and(|(block, _, _)| block == warp.block))
+                .or_else(|| block_deltas.iter().position(Option::is_none))
+                .ok_or(IssueError::CounterOverflow {
+                    counter: "per-cycle block accounting",
+                })?;
+            let entry = block_deltas[entry_index].get_or_insert((warp.block, 0, 0));
+            if retires {
+                entry.1 = checked_usize_counter_add("block retirement", entry.1, 1)?;
+                total_retirements =
+                    checked_usize_counter_add("unfinished warp retirement", total_retirements, 1)?;
+            } else if slot.op_class == OpClass::BlockBarrier {
+                entry.2 = checked_usize_counter_add("block barrier waiter", entry.2, 1)?;
+            }
+        }
+
+        self.unfinished_warps.checked_sub(total_retirements).ok_or(
+            IssueError::CounterUnderflow {
+                counter: "unfinished warp",
+            },
+        )?;
+        let mut residency_released = 0u32;
+        for (block, retirements, arrivals) in block_deltas.into_iter().flatten() {
+            let state = &self.block_states[block];
+            let unfinished =
+                state
+                    .unfinished
+                    .checked_sub(retirements)
+                    .ok_or(IssueError::CounterUnderflow {
+                        counter: "block unfinished warp",
+                    })?;
+            let waiting =
+                checked_usize_counter_add("block barrier waiter", state.waiting, arrivals)?;
+            if waiting > unfinished {
+                return Err(IssueError::CounterOverflow {
+                    counter: "block barrier waiter",
+                });
+            }
+            if unfinished == 0 {
+                residency_released = checked_u32_counter_add(
+                    "resident warp retirement",
+                    residency_released,
+                    state.warp_count,
+                )?;
+            }
+        }
+        self.resident_warps.checked_sub(residency_released).ok_or(
+            IssueError::CounterUnderflow {
+                counter: "resident warp",
+            },
+        )?;
+        Ok(next_issued)
+    }
+
     /// One issue cycle at `self.t` across the four sub-cores. Returns
     /// whether anything issued.
     fn issue_cycle(&mut self, out: &mut Vec<MemRequest>) -> Result<bool, IssueError> {
@@ -1390,7 +2315,9 @@ impl<'a> SmCore<'a> {
         // mutates counters, cache state, barriers, requests, or retirement.
         for wix in picks.iter().flatten().copied() {
             let w = &self.warps[wix];
-            let slot = w.next_slot.expect("ready warp has a pending slot");
+            let slot = w
+                .next_slot
+                .ok_or(IssueError::MissingIssueSlot { warp: wix })?;
             self.preflight_issue_timing(
                 w.insts[w.next].kind,
                 slot.control.write_barrier,
@@ -1398,6 +2325,8 @@ impl<'a> SmCore<'a> {
                 slot.control.yield_flag,
             )?;
         }
+        self.preflight_issue_memory(&picks)?;
+        let next_issued = self.preflight_issue_accounting(&picks)?;
 
         let mut issued_this_cycle = false;
         for (sc, pick) in picks.into_iter().enumerate() {
@@ -1416,7 +2345,9 @@ impl<'a> SmCore<'a> {
                 warp_sectors,
             ) = {
                 let w = &self.warps[wix];
-                let slot = w.next_slot.expect("ready warp has a pending slot");
+                let slot = w
+                    .next_slot
+                    .ok_or(IssueError::MissingIssueSlot { warp: wix })?;
                 (
                     w.block,
                     w.launch_index,
@@ -1428,7 +2359,6 @@ impl<'a> SmCore<'a> {
                     w.sectors,
                 )
             };
-            self.issued += 1;
 
             // Memory-model interaction happens at issue time regardless of
             // whether a dependence barrier consumes the ready time.
@@ -1480,12 +2410,23 @@ impl<'a> SmCore<'a> {
             self.warps[wix].stamp_clear(control.read_barrier, read_clear);
 
             // Advance the warp's stream.
-            self.warps[wix].next += 1;
+            self.warps[wix].next =
+                checked_usize_counter_add("warp instruction cursor", self.warps[wix].next, 1)?;
             if self.warps[wix].next >= self.warps[wix].insts.len() {
                 self.warps[wix].done = true;
                 self.warps[wix].next_slot = None;
-                self.unfinished_warps -= 1;
-                self.block_states[blk_ix].unfinished -= 1;
+                self.unfinished_warps =
+                    self.unfinished_warps
+                        .checked_sub(1)
+                        .ok_or(IssueError::CounterUnderflow {
+                            counter: "unfinished warp",
+                        })?;
+                self.block_states[blk_ix].unfinished = self.block_states[blk_ix]
+                    .unfinished
+                    .checked_sub(1)
+                    .ok_or(IssueError::CounterUnderflow {
+                        counter: "block unfinished warp",
+                    })?;
                 // Retire from the sub-core pick list (swap-remove +
                 // position fix-up) so pick/skip-ahead scans stay
                 // bounded by RESIDENT warps, not warps-ever-admitted.
@@ -1495,7 +2436,12 @@ impl<'a> SmCore<'a> {
                     self.warps[moved].pos_in_subcore = pos;
                 }
                 if self.block_states[blk_ix].unfinished == 0 {
-                    self.resident_warps -= self.block_states[blk_ix].warp_count;
+                    self.resident_warps = self
+                        .resident_warps
+                        .checked_sub(self.block_states[blk_ix].warp_count)
+                        .ok_or(IssueError::CounterUnderflow {
+                            counter: "resident warp",
+                        })?;
                     let admit_at = checked_cycle_add("block-wave admission", t, 1)?;
                     self.admit_blocks(admit_at)?;
                 }
@@ -1511,7 +2457,11 @@ impl<'a> SmCore<'a> {
             // warp never waits.
             if slot_class == OpClass::BlockBarrier && !self.warps[wix].done {
                 self.warps[wix].at_block_barrier = true;
-                self.block_states[blk_ix].waiting += 1;
+                self.block_states[blk_ix].waiting = checked_usize_counter_add(
+                    "block barrier waiter",
+                    self.block_states[blk_ix].waiting,
+                    1,
+                )?;
             }
             // Release check: every unfinished warp of the block waiting.
             // The block's warps are contiguous in `warps` (admission
@@ -1529,6 +2479,7 @@ impl<'a> SmCore<'a> {
                 }
             }
         }
+        self.issued = next_issued;
         Ok(issued_this_cycle)
     }
 }
@@ -1541,32 +2492,59 @@ fn add_fill_waiter(
     fill: FillKey,
     warp: usize,
     barrier: Option<DepBarrier>,
-) {
+) -> Result<(), IssueError> {
     let Some(barrier) = barrier else {
-        return;
+        return Ok(());
     };
-    warps[warp].barrier_pending[barrier.index()] += 1;
+    warps[warp].add_pending(warp, Some(barrier), 1)?;
     match st.fill_waiters.entry(fill) {
         Entry::Vacant(v) => {
-            v.insert(Waiters::One(warp, barrier));
+            v.insert(Waiters::One(FillWaiter {
+                warp,
+                barrier,
+                units: 1,
+            }));
         }
-        Entry::Occupied(mut o) => match o.get_mut() {
-            Waiters::Many(list) => list.push((warp, barrier)),
-            slot => {
-                let Waiters::One(w0, b0) = *slot else {
-                    unreachable!("non-Many slot is One")
-                };
-                *slot = Waiters::Many(vec![(w0, b0), (warp, barrier)]);
-            }
-        },
+        Entry::Occupied(mut o) => o.get_mut().add(warp, barrier)?,
+    }
+    Ok(())
+}
+
+fn preflight_line_fill_mask(st: &SharedL2State, sector_id: i64) -> Result<(), IssueError> {
+    let line = sector_id >> 2;
+    let fill_in_flight = st.l1.is_fill_in_flight(FillKey::Line(line));
+    let has_mask = st.fill_masks.contains_key(&line);
+    match (fill_in_flight, has_mask) {
+        (true, false) => Err(IssueError::FillMaskMissing { line }),
+        (false, true) => Err(IssueError::FillMaskWithoutFill { line }),
+        _ => Ok(()),
+    }
+}
+
+fn register_response(st: &mut SharedL2State, reply: ReplyTo) -> Result<(), IssueError> {
+    if !st.outstanding_replies.insert(reply) {
+        return Err(IssueError::ResponseTokenAlreadyOutstanding { reply });
+    }
+    Ok(())
+}
+
+enum SharedAccessError {
+    Stalled,
+    Issue(IssueError),
+}
+
+impl From<IssueError> for SharedAccessError {
+    fn from(source: IssueError) -> Self {
+        Self::Issue(source)
     }
 }
 
 /// Emission surface of one access BATCH (one instruction's sector
 /// One eligible sector access in L1Shared mode at time `now`, emitting a
 /// request on a fresh miss. Returns `Ok(known_ready)` for hits,
-/// `Ok(None)` when the data waits on a response, `Err(())` on an MSHR
-/// stall (caller parks the remainder).
+/// `Ok(None)` when the data waits on a response, and
+/// `Err(SharedAccessError::Stalled)` on an MSHR stall (caller parks the
+/// remainder). Accounting failures remain typed.
 ///
 /// A sector merging onto a line fill emitted during the CURRENT
 /// emission batch (`st.line_folds` — one `advance`/`on_response` call)
@@ -1580,7 +2558,6 @@ fn add_fill_waiter(
 /// documented approximation: the follow-up's bytes may complete after
 /// the waiter cleared, and same-timestamp queue order may process a
 /// follow-up after its parent fill's response).
-#[allow(clippy::result_unit_err)]
 fn access_shared(
     st: &mut SharedL2State,
     warps: &mut [WarpState<'_>],
@@ -1590,19 +2567,23 @@ fn access_shared(
     response_id: ResponseId,
     now: u64,
     out: &mut Vec<MemRequest>,
-) -> Result<Option<u64>, ()> {
+) -> Result<Option<u64>, SharedAccessError> {
     let sbit = 1u8 << (sector_id & 3) as u8;
-    match st.l1.access_eligible_ev(sector_id, now) {
+    match st
+        .l1
+        .access_eligible_ev(sector_id, now)
+        .map_err(IssueError::from)?
+    {
         EvAccess::Hit { ready } => Ok(Some(ready)),
         EvAccess::MissRequest { fill } => {
             let request = MemRequest::l1_fill(now, sector_id, fill, response_id);
-            let _ = st.outstanding_replies.insert(request.reply);
+            register_response(st, request.reply)?;
             out.push(request);
             if let FillKey::Line(line) = fill {
                 st.fill_masks.insert(line, sbit);
                 st.line_folds.push((line, out.len() - 1));
             }
-            add_fill_waiter(st, warps, fill, wix, barrier);
+            add_fill_waiter(st, warps, fill, wix, barrier)?;
             Ok(None)
         }
         EvAccess::MergedPending { fill } => {
@@ -1616,7 +2597,9 @@ fn access_shared(
                 let sent = st
                     .fill_masks
                     .get_mut(&line)
-                    .expect("line-pending merge without a fill_masks entry");
+                    .ok_or(SharedAccessError::Issue(IssueError::FillMaskMissing {
+                        line,
+                    }))?;
                 if *sent & sbit == 0 {
                     *sent |= sbit;
                     if let Some(&(_, ix)) = st.line_folds.iter().find(|&&(l, _)| l == line) {
@@ -1630,10 +2613,10 @@ fn access_shared(
             }
             // Sector-fill merges need nothing: that sector's fetch was
             // sent with its own request.
-            add_fill_waiter(st, warps, fill, wix, barrier);
+            add_fill_waiter(st, warps, fill, wix, barrier)?;
             Ok(None)
         }
-        EvAccess::Stalled => Err(()),
+        EvAccess::Stalled => Err(SharedAccessError::Stalled),
     }
 }
 
@@ -1642,9 +2625,14 @@ fn drain_retries(
     warps: &mut [WarpState<'_>],
     now: u64,
     out: &mut Vec<MemRequest>,
-) {
+) -> Result<(), IssueError> {
     while let Some(mut r) = st.retry.pop_front() {
         let sectors = warps[r.warp].sectors;
+        // Replace the retry entry's unit atomically with whatever waiter
+        // units this attempt creates. No warp can observe pending state while
+        // a response handler runs; releasing first preserves u32::MAX as a
+        // valid final count instead of requiring a nonexistent transient slot.
+        warps[r.warp].release_pending(r.warp, r.barrier, 1)?;
         // The whole drain is ONE emission batch (st.line_folds, cleared
         // by on_response): a line fill emitted by an earlier retry
         // entry folds later entries' same-line sectors — same-timestamp
@@ -1656,26 +2644,27 @@ fn drain_retries(
                 r.warp,
                 r.barrier,
                 sectors[r.lo],
-                ResponseId::new(r.warp, r.instruction, r.lo),
+                ResponseId::new(st.response_owner, r.warp, r.instruction, r.lo),
                 now,
                 out,
             ) {
                 Ok(Some(ready)) => warps[r.warp].stamp_clear(r.barrier, ready),
                 Ok(None) => {}
-                Err(()) => {
-                    // Still full: keep the entry (and its pending unit)
-                    // parked; nothing behind it can proceed either.
+                Err(SharedAccessError::Stalled) => {
+                    // Still full: restore the retry entry's replacement unit
+                    // and park it; nothing behind it can proceed either.
+                    warps[r.warp].add_pending(r.warp, r.barrier, 1)?;
                     st.retry.push_front(r);
-                    return;
+                    return Ok(());
                 }
+                Err(SharedAccessError::Issue(source)) => return Err(source),
             }
-            r.lo += 1;
+            r.lo = r.lo.checked_add(1).ok_or(IssueError::CounterOverflow {
+                counter: "retry sector cursor",
+            })?;
         }
-        // Entry fully drained: release its pending unit (new waiters
-        // were registered above, so the barrier never transiently reads
-        // clear while work remains).
-        warps[r.warp].release_pending(r.barrier);
     }
+    Ok(())
 }
 
 fn validate_sector_span(
@@ -1762,7 +2751,7 @@ pub fn simulate_sm(
 mod tests {
     use std::collections::BTreeMap;
 
-    use sim_mem::CacheOpToken;
+    use sim_mem::{AccessOutcome, CacheOpToken, L1CounterError, L1CounterField};
 
     use super::*;
     use crate::control_bits::{ControlBits, DepBarrier, WaitMask};
@@ -2491,6 +3480,573 @@ mod tests {
         p: &IssueModelParams,
     ) -> SmCore<'a> {
         SmCore::new(blocks, sched, p, SmMemMode::L1Shared(l1_config())).unwrap()
+    }
+
+    #[test]
+    fn issue_count_overflow_rejects_the_whole_cycle_before_mutation() {
+        let sched = schedule(vec![(0, slot(cb(1), OpClass::Other, "EXIT"))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![warp(0, vec![inst(0)])],
+        }];
+        let mut core = SmCore::new(&blocks, &sched, &params(), SmMemMode::Flat).unwrap();
+        core.issued = u64::MAX;
+        let before_unfinished = core.unfinished_warps;
+        let before_resident = core.resident_warps;
+        let mut out = Vec::new();
+
+        assert!(matches!(
+            core.advance(u64::MAX, &mut out),
+            Err(IssueError::CounterOverflow {
+                counter: "issued instruction"
+            })
+        ));
+        assert!(out.is_empty());
+        assert_eq!(core.instructions_issued(), u64::MAX);
+        assert_eq!(core.warps[0].next, 0);
+        assert!(!core.warps[0].done);
+        assert_eq!(core.unfinished_warps, before_unfinished);
+        assert_eq!(core.resident_warps, before_resident);
+    }
+
+    #[test]
+    fn pending_overflow_rejects_issue_before_cache_or_request_mutation() {
+        let mut load = cb(1);
+        load.write_barrier = Some(barrier(0));
+        let sched = schedule(vec![(0, slot(load, OpClass::Other, "LDG.E"))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                warp_slot: 0,
+                insts: vec![ReplayInst {
+                    pc: 0,
+                    kind: eligible(0, 1),
+                }],
+                sectors: vec![0],
+            }],
+        }];
+        let mut core = shared_core(&blocks, &sched, &params());
+        core.warps[0].barrier_pending[0] = u32::MAX;
+        let before_l1 = *core.l1_counters().unwrap();
+        let mut out = Vec::new();
+
+        assert!(matches!(
+            core.advance(u64::MAX, &mut out),
+            Err(IssueError::PendingBarrierOverflow {
+                warp: 0,
+                barrier: 0,
+                current: u32::MAX,
+                add: 1,
+            })
+        ));
+        assert!(out.is_empty());
+        assert_eq!(core.instructions_issued(), 0);
+        assert_eq!(core.warps[0].next, 0);
+        assert_eq!(core.warps[0].barrier_pending[0], u32::MAX);
+        assert_eq!(core.outstanding_responses(), 0);
+        assert_eq!(*core.l1_counters().unwrap(), before_l1);
+    }
+
+    #[test]
+    fn warm_hit_accepts_maximum_pending_count_without_a_new_unit() {
+        let mut load = cb(1);
+        load.write_barrier = Some(barrier(0));
+        let sched = schedule(vec![(0, slot(load, OpClass::Other, "LDG.E"))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                warp_slot: 0,
+                insts: vec![ReplayInst {
+                    pc: 0,
+                    kind: eligible(0, 1),
+                }],
+                sectors: vec![0],
+            }],
+        }];
+        let mut core = shared_core(&blocks, &sched, &params());
+        let MemModel::L1Shared(st) = &mut core.mem else {
+            panic!("expected shared mode");
+        };
+        let EvAccess::MissRequest { fill } = st.l1.access_eligible_ev(0, 0).unwrap() else {
+            panic!("expected cold prefill miss");
+        };
+        st.l1.complete_fill(fill).unwrap();
+        core.warps[0].barrier_pending[0] = u32::MAX;
+        let before = *core.l1_counters().unwrap();
+        let mut out = Vec::new();
+
+        assert_eq!(core.advance(u64::MAX, &mut out).unwrap(), Advance::Done);
+        assert!(out.is_empty());
+        assert_eq!(core.instructions_issued(), 1);
+        assert_eq!(core.warps[0].next, 1);
+        assert_eq!(core.warps[0].barrier_pending[0], u32::MAX);
+        let after = *core.l1_counters().unwrap();
+        assert_eq!(after.hits, before.hits + 1);
+        assert_eq!(after.misses, before.misses);
+        assert_eq!(core.outstanding_responses(), 0);
+    }
+
+    #[test]
+    fn multi_subcore_l1_overflow_rejects_the_whole_issue_cycle() {
+        let sched = schedule(vec![(0, slot(cb(1), OpClass::Other, "STG.E"))]);
+        let store = || ReplayInst {
+            pc: 0,
+            kind: AccessKind::GlobalStore { off: 0, len: 1 },
+        };
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![
+                WarpReplay {
+                    warp_slot: 0,
+                    insts: vec![store()],
+                    sectors: vec![0],
+                },
+                WarpReplay {
+                    warp_slot: 1,
+                    insts: vec![store()],
+                    sectors: vec![4],
+                },
+            ],
+        }];
+        let mut core = shared_core(&blocks, &sched, &params());
+        let MemModel::L1Shared(st) = &mut core.mem else {
+            panic!("expected shared mode");
+        };
+        st.l1.counters.store_sectors = u64::MAX - 1;
+        let before = *core.l1_counters().unwrap();
+        let mut out = Vec::new();
+
+        assert!(matches!(
+            core.advance(u64::MAX, &mut out),
+            Err(IssueError::L1Access(L1AccessError::Counter(
+                L1CounterError::Overflow {
+                    field: L1CounterField::StoreSectors,
+                }
+            )))
+        ));
+        assert!(out.is_empty());
+        assert_eq!(core.instructions_issued(), 0);
+        assert_eq!(core.warps[0].next, 0);
+        assert_eq!(core.warps[1].next, 0);
+        assert_eq!(*core.l1_counters().unwrap(), before);
+    }
+
+    #[test]
+    fn constant_l1_retry_time_error_rejects_all_subcores_before_mutation() {
+        let mut load = cb(1);
+        load.write_barrier = Some(barrier(0));
+        let sched = schedule(vec![(0, slot(load, OpClass::Other, "LDG.E"))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![
+                WarpReplay {
+                    warp_slot: 0,
+                    insts: vec![ReplayInst {
+                        pc: 0,
+                        kind: eligible(0, 1),
+                    }],
+                    sectors: vec![0],
+                },
+                WarpReplay {
+                    warp_slot: 1,
+                    insts: vec![ReplayInst {
+                        pc: 0,
+                        kind: eligible(0, 1),
+                    }],
+                    sectors: vec![8],
+                },
+            ],
+        }];
+        let mut p = params();
+        p.l1_hit_latency = 2;
+        p.l1_miss_latency = 10;
+        let cfg = p.l1_config(8, 1);
+        let mut core = SmCore::new(&blocks, &sched, &p, SmMemMode::L1Const(cfg)).unwrap();
+        let MemModel::L1Const(l1) = &mut core.mem else {
+            panic!("expected constant L1 mode");
+        };
+        assert!(matches!(
+            l1.access_eligible(0, u64::MAX - 15).unwrap(),
+            (AccessOutcome::MissLineAlloc, ready) if ready == u64::MAX - 5
+        ));
+        core.t = u64::MAX - 14;
+        let before_l1 = *core.l1_counters().unwrap();
+        let mut out = Vec::new();
+
+        assert!(matches!(
+            core.advance(u64::MAX, &mut out),
+            Err(IssueError::L1Access(L1AccessError::TimeOverflow {
+                operation: "miss visibility",
+                base,
+                delta: 10,
+            })) if base == u64::MAX - 5
+        ));
+        assert!(out.is_empty());
+        assert_eq!(core.instructions_issued(), 0);
+        assert_eq!(core.warps[0].next, 0);
+        assert_eq!(core.warps[1].next, 0);
+        assert_eq!(*core.l1_counters().unwrap(), before_l1);
+        let MemModel::L1Const(l1) = &core.mem else {
+            panic!("expected constant L1 mode");
+        };
+        assert!(l1.is_fill_in_flight(FillKey::Line(0)));
+    }
+
+    #[test]
+    fn same_cycle_fill_chain_overflow_rejects_all_subcores_before_mutation() {
+        let mut load = cb(1);
+        load.write_barrier = Some(barrier(0));
+        let sched = schedule(vec![(0, slot(load, OpClass::Other, "LDG.E"))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![
+                WarpReplay {
+                    warp_slot: 0,
+                    insts: vec![ReplayInst {
+                        pc: 0,
+                        kind: eligible(0, 1),
+                    }],
+                    sectors: vec![0],
+                },
+                WarpReplay {
+                    warp_slot: 1,
+                    insts: vec![ReplayInst {
+                        pc: 0,
+                        kind: eligible(0, 1),
+                    }],
+                    sectors: vec![8],
+                },
+            ],
+        }];
+        let mut p = params();
+        p.l1_hit_latency = 2;
+        p.l1_miss_latency = 10;
+        let cfg = p.l1_config(8, 1);
+        let mut core = SmCore::new(&blocks, &sched, &p, SmMemMode::L1Const(cfg)).unwrap();
+        core.t = u64::MAX - 15;
+        let before_l1 = *core.l1_counters().unwrap();
+        let mut out = Vec::new();
+
+        assert!(matches!(
+            core.advance(u64::MAX, &mut out),
+            Err(IssueError::L1Access(L1AccessError::TimeOverflow {
+                operation: "miss visibility",
+                base,
+                delta: 10,
+            })) if base == u64::MAX - 5
+        ));
+        assert!(out.is_empty());
+        assert_eq!(core.instructions_issued(), 0);
+        assert_eq!(core.warps[0].next, 0);
+        assert_eq!(core.warps[1].next, 0);
+        assert_eq!(*core.l1_counters().unwrap(), before_l1);
+        let MemModel::L1Const(l1) = &core.mem else {
+            panic!("expected constant L1 mode");
+        };
+        assert!(!l1.is_fill_in_flight(FillKey::Line(0)));
+        assert!(!l1.is_fill_in_flight(FillKey::Line(2)));
+    }
+
+    #[test]
+    fn response_tokens_reject_cross_core_and_stale_replay_swaps() {
+        let mut load = cb(1);
+        load.write_barrier = Some(barrier(0));
+        let sched = schedule(vec![(0, slot(load, OpClass::Other, "LDG.E"))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                warp_slot: 0,
+                insts: vec![ReplayInst {
+                    pc: 0,
+                    kind: eligible(0, 1),
+                }],
+                sectors: vec![0],
+            }],
+        }];
+        let mut first = shared_core(&blocks, &sched, &params());
+        let mut second = shared_core(&blocks, &sched, &params());
+        let mut first_requests = Vec::new();
+        let mut second_requests = Vec::new();
+        first.advance(u64::MAX, &mut first_requests).unwrap();
+        second.advance(u64::MAX, &mut second_requests).unwrap();
+        let first_reply = first_requests[0].reply;
+        let second_reply = second_requests[0].reply;
+        assert_ne!(first_reply, second_reply);
+        let second_before = *second.l1_counters().unwrap();
+        let mut emitted = Vec::new();
+        assert!(matches!(
+            second.on_response(first_reply, 244, &mut emitted),
+            Err(IssueError::ResponseTokenNotOutstanding { reply }) if reply == first_reply
+        ));
+        assert!(emitted.is_empty());
+        assert_eq!(second.outstanding_responses(), 1);
+        assert_eq!(*second.l1_counters().unwrap(), second_before);
+
+        drop(first);
+        let mut next_generation = shared_core(&blocks, &sched, &params());
+        let mut next_requests = Vec::new();
+        next_generation
+            .advance(u64::MAX, &mut next_requests)
+            .unwrap();
+        assert_ne!(first_reply, next_requests[0].reply);
+        assert!(matches!(
+            next_generation.on_response(first_reply, 244, &mut emitted),
+            Err(IssueError::ResponseTokenNotOutstanding { reply }) if reply == first_reply
+        ));
+        assert_eq!(next_generation.outstanding_responses(), 1);
+    }
+
+    #[test]
+    fn response_to_non_shared_mode_is_typed_and_nonmutating() {
+        let sched = schedule(vec![(0, slot(cb(1), OpClass::Other, "EXIT"))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![warp(0, vec![inst(0)])],
+        }];
+        let mut core = SmCore::new(&blocks, &sched, &params(), SmMemMode::Flat).unwrap();
+        let mut out = Vec::new();
+
+        assert!(matches!(
+            core.on_response(ReplyTo::None, 0, &mut out),
+            Err(IssueError::ResponseModeMismatch { mode: "flat" })
+        ));
+        assert!(out.is_empty());
+        assert_eq!(core.instructions_issued(), 0);
+        assert_eq!(core.warps[0].next, 0);
+    }
+
+    #[test]
+    fn fill_waiter_underflow_rejects_response_before_any_mutation() {
+        let mut load = cb(1);
+        load.write_barrier = Some(barrier(0));
+        let mut consumer = cb(1);
+        consumer.wait_mask = wait_mask(1);
+        let sched = schedule(vec![
+            (0, slot(load, OpClass::Other, "LDG.E")),
+            (16, slot(consumer, OpClass::Other, "EXIT")),
+        ]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                warp_slot: 0,
+                insts: vec![
+                    ReplayInst {
+                        pc: 0,
+                        kind: eligible(0, 1),
+                    },
+                    inst(16),
+                ],
+                sectors: vec![0],
+            }],
+        }];
+        let mut core = shared_core(&blocks, &sched, &params());
+        let mut requests = Vec::new();
+        assert_eq!(
+            core.advance(u64::MAX, &mut requests).unwrap(),
+            Advance::Idle { wake_at: None }
+        );
+        let reply = requests[0].reply;
+        let ReplyTo::L1Fill { fill, .. } = reply else {
+            panic!("expected fill response");
+        };
+        core.warps[0].barrier_pending[0] = 0;
+        let before_l1 = *core.l1_counters().unwrap();
+        let mut emitted = Vec::new();
+
+        assert!(matches!(
+            core.on_response(reply, 244, &mut emitted),
+            Err(IssueError::PendingBarrierUnderflow {
+                warp: 0,
+                barrier: 0,
+                current: 0,
+                remove: 1,
+            })
+        ));
+        assert!(emitted.is_empty());
+        assert_eq!(core.outstanding_responses(), 1);
+        assert_eq!(*core.l1_counters().unwrap(), before_l1);
+        let MemModel::L1Shared(st) = &core.mem else {
+            panic!("expected shared mode");
+        };
+        assert!(st.l1.is_fill_in_flight(fill));
+        assert!(st.fill_waiters.contains_key(&fill));
+        if let FillKey::Line(line) = fill {
+            assert!(st.fill_masks.contains_key(&line));
+        }
+    }
+
+    #[test]
+    fn retry_l1_overflow_preserves_the_entire_response_transaction() {
+        let mut load = cb(1);
+        load.write_barrier = Some(barrier(0));
+        let mut consumer = cb(1);
+        consumer.wait_mask = wait_mask(1);
+        let sched = schedule(vec![
+            (0, slot(load, OpClass::Other, "LDG.E")),
+            (16, slot(consumer, OpClass::Other, "EXIT")),
+        ]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                warp_slot: 0,
+                insts: vec![
+                    ReplayInst {
+                        pc: 0,
+                        kind: eligible(0, 1),
+                    },
+                    inst(16),
+                ],
+                sectors: vec![0, 8],
+            }],
+        }];
+        let mut core = shared_core(&blocks, &sched, &params());
+        let mut requests = Vec::new();
+        assert_eq!(
+            core.advance(u64::MAX, &mut requests).unwrap(),
+            Advance::Idle { wake_at: None }
+        );
+        let reply = requests[0].reply;
+        let ReplyTo::L1Fill { fill, .. } = reply else {
+            panic!("expected fill response");
+        };
+        core.warps[0].barrier_pending[0] = 2;
+        let MemModel::L1Shared(st) = &mut core.mem else {
+            panic!("expected shared mode");
+        };
+        st.retry.push_back(Retry {
+            warp: 0,
+            instruction: 0,
+            barrier: Some(barrier(0)),
+            lo: 1,
+            hi: 2,
+        });
+        st.l1.counters.misses = u64::MAX;
+        let before_l1 = *core.l1_counters().unwrap();
+        let mut emitted = Vec::new();
+
+        assert!(matches!(
+            core.on_response(reply, 244, &mut emitted),
+            Err(IssueError::L1Access(L1AccessError::Counter(
+                L1CounterError::Overflow {
+                    field: L1CounterField::Misses,
+                }
+            )))
+        ));
+        assert!(emitted.is_empty());
+        assert_eq!(core.outstanding_responses(), 1);
+        assert_eq!(core.warps[0].barrier_pending[0], 2);
+        assert_eq!(*core.l1_counters().unwrap(), before_l1);
+        let MemModel::L1Shared(st) = &core.mem else {
+            panic!("expected shared mode");
+        };
+        assert!(st.l1.is_fill_in_flight(fill));
+        assert!(st.fill_waiters.contains_key(&fill));
+        assert_eq!(st.retry.len(), 1);
+        let retry = st.retry.front().unwrap();
+        assert_eq!(retry.warp, 0);
+        assert_eq!(retry.lo, 1);
+        assert_eq!(retry.hi, 2);
+        if let FillKey::Line(line) = fill {
+            assert!(st.fill_masks.contains_key(&line));
+        }
+    }
+
+    #[test]
+    fn retry_replacement_accepts_exact_maximum_pending_count() {
+        let mut load = cb(1);
+        load.write_barrier = Some(barrier(0));
+        let mut consumer = cb(1);
+        consumer.wait_mask = wait_mask(1);
+        let sched = schedule(vec![
+            (0, slot(load, OpClass::Other, "LDG.E")),
+            (16, slot(consumer, OpClass::Other, "EXIT")),
+        ]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                warp_slot: 0,
+                insts: vec![
+                    ReplayInst {
+                        pc: 0,
+                        kind: eligible(0, 1),
+                    },
+                    inst(16),
+                ],
+                sectors: vec![0, 8, 12],
+            }],
+        }];
+        let mut core = shared_core(&blocks, &sched, &params());
+        let mut requests = Vec::new();
+        assert_eq!(
+            core.advance(u64::MAX, &mut requests).unwrap(),
+            Advance::Idle { wake_at: None }
+        );
+        let reply = requests[0].reply;
+        core.warps[0].barrier_pending[0] = u32::MAX;
+        let MemModel::L1Shared(st) = &mut core.mem else {
+            panic!("expected shared mode");
+        };
+        st.retry.push_back(Retry {
+            warp: 0,
+            instruction: 0,
+            barrier: Some(barrier(0)),
+            lo: 1,
+            hi: 3,
+        });
+        let mut emitted = Vec::new();
+
+        core.on_response(reply, 244, &mut emitted).unwrap();
+        assert_eq!(emitted.len(), 2);
+        assert_eq!(core.outstanding_responses(), 2);
+        assert_eq!(core.warps[0].barrier_pending[0], u32::MAX);
+        let MemModel::L1Shared(st) = &core.mem else {
+            panic!("expected shared mode");
+        };
+        assert!(st.retry.is_empty());
+    }
+
+    #[test]
+    fn admission_counter_failure_does_not_partially_admit_a_block() {
+        let sched = schedule(vec![(0, slot(cb(1), OpClass::Other, "EXIT"))]);
+        let blocks = vec![
+            BlockReplay {
+                launch_index: 0,
+                warps: vec![warp(0, vec![inst(0)])],
+            },
+            BlockReplay {
+                launch_index: 1,
+                warps: vec![warp(1, vec![inst(0)])],
+            },
+        ];
+        let mut p = params();
+        p.max_resident_warps_per_sm = 1;
+        let mut core = SmCore::new(&blocks, &sched, &p, SmMemMode::Flat).unwrap();
+        assert_eq!(core.next_block, 1);
+        core.resident_warps = 0;
+        core.arrival_stamp = u64::MAX;
+        let before_warps = core.warps.len();
+        let before_blocks = core.block_states.len();
+        let before_subcores = core.subcore_warps.each_ref().map(Vec::len);
+
+        assert!(matches!(
+            core.admit_blocks(1),
+            Err(IssueError::CounterOverflow {
+                counter: "warp arrival stamp"
+            })
+        ));
+        assert_eq!(core.warps.len(), before_warps);
+        assert_eq!(core.block_states.len(), before_blocks);
+        assert_eq!(core.subcore_warps.each_ref().map(Vec::len), before_subcores);
+        assert_eq!(core.next_block, 1);
+        assert_eq!(core.arrival_stamp, u64::MAX);
+    }
+
+    #[test]
+    fn exact_max_accounting_total_is_valid_when_nothing_is_added() {
+        assert_eq!(
+            checked_u64_counter_add("test total", u64::MAX, 0).unwrap(),
+            u64::MAX
+        );
     }
 
     #[test]
