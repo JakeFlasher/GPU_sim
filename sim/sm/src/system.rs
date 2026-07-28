@@ -15,7 +15,7 @@
 //!   any sector absent → `issue_time + global_flat_latency` (the
 //!   card's DRAM point) — then the carded aggregate DRAM byte server
 //!   ([`DramBw`]) may push the ready time PAST the latency arm when
-//!   the global read-miss stream exceeds the locked-operating-point
+//!   the hierarchy read-miss stream exceeds the locked-operating-point
 //!   rate (it can only ever ADD delay).
 //! - `MemResponse` — completes the originating SM's L1 fill (or clears a
 //!   direct bypass/untagged barrier unit) at exactly the data-ready
@@ -485,6 +485,15 @@ pub enum SystemError {
     },
     #[error("L2 request for sector {sector_id} has invalid sector mask {sector_mask:#06b}")]
     SectorMaskInvalid { sector_id: i64, sector_mask: u8 },
+    #[error(
+        "L2 request for {origin:?}-origin anchor sector {sector_id} has incoherent Local mask {local_sector_mask:#06b} within request mask {sector_mask:#06b}"
+    )]
+    OriginMaskInvalid {
+        sector_id: i64,
+        origin: MemoryOrigin,
+        sector_mask: u8,
+        local_sector_mask: u8,
+    },
     #[error("unpriced response bound {bound} for SM index {sm} is absent")]
     UnpricedBoundMissing { sm: usize, bound: u64 },
     #[error("response ready time {ready} precedes lower bound {bound} for SM index {sm}")]
@@ -505,10 +514,20 @@ fn require_arch(expected: ArchId, got: ArchId, component: &'static str) -> Resul
 }
 
 #[cfg(test)]
+#[derive(Debug, Clone, Copy)]
+struct TestRequestMaskOverride {
+    origin: MemoryOrigin,
+    sector_mask: u8,
+    local_sector_mask: u8,
+}
+
+#[cfg(test)]
 thread_local! {
     static TEST_L2_COUNTER_ARCH_OVERRIDE: std::cell::Cell<Option<ArchId>> =
         const { std::cell::Cell::new(None) };
     static TEST_L2_ACCESS_ERROR_AFTER: std::cell::Cell<Option<usize>> =
+        const { std::cell::Cell::new(None) };
+    static TEST_REQUEST_MASK_OVERRIDE: std::cell::Cell<Option<TestRequestMaskOverride>> =
         const { std::cell::Cell::new(None) };
 }
 
@@ -543,6 +562,17 @@ fn checked_l2_counters<'a>(
         );
     }
     Ok(counters)
+}
+
+#[cfg(test)]
+fn maybe_override_request_masks(req: &mut MemRequest) {
+    TEST_REQUEST_MASK_OVERRIDE.with(|value| {
+        if let Some(override_value) = value.replace(None) {
+            req.origin = override_value.origin;
+            req.sector_mask = override_value.sector_mask;
+            req.local_sector_mask = override_value.local_sector_mask;
+        }
+    });
 }
 
 #[cfg(test)]
@@ -640,6 +670,7 @@ enum Ev {
 
 struct L2ResponseCommit {
     ready: u64,
+    origin_ix: usize,
     next_delayed: u64,
     next_origin_delayed: u64,
     unpriced_removal: UnpricedRemoval,
@@ -647,13 +678,12 @@ struct L2ResponseCommit {
 
 struct L2SystemCommit {
     source_ix: usize,
-    origin_ix: usize,
     source_sectors: u64,
     source_hits: u64,
-    origin_source_sectors: u64,
-    origin_source_hits: u64,
+    origin_source_sectors: [u64; 2],
+    origin_source_hits: [u64; 2],
     read_sectors: u64,
-    origin_read_sectors: u64,
+    origin_read_sectors: [u64; 2],
     dram_free_fp: Option<u128>,
     response: Option<L2ResponseCommit>,
 }
@@ -662,7 +692,7 @@ struct L2SystemCommit {
 /// bandwidth-latency" increment). The carded covariate is the vendor
 /// peak at the LOCKED operating point (`ArchCard.dram_bandwidth` —
 /// bytes/second over the locked SM clock, ~747 B/SM-cycle on the
-/// 3090 Ti); the model is one G/D/1 byte server over the GLOBAL
+/// 3090 Ti); the model is one G/D/1 byte server over the shared hierarchy
 /// read-miss sector stream: each fetching sector demands 32 B, and a
 /// reply-carrying request cannot complete before BOTH its latency arm
 /// and the server's completion of ITS OWN request's bytes. Bytes of
@@ -1104,6 +1134,12 @@ pub fn simulate_kernel_shared(
                         event_time: ev.time,
                     });
                 }
+                #[cfg(test)]
+                let req = {
+                    let mut req = req;
+                    maybe_override_request_masks(&mut req);
+                    req
+                };
                 let own_sector_bit = 1u8 << (req.sector_id & 3) as u8;
                 if req.sector_mask == 0
                     || req.sector_mask & !0b1111 != 0
@@ -1112,6 +1148,17 @@ pub fn simulate_kernel_shared(
                     return Err(SystemError::SectorMaskInvalid {
                         sector_id: req.sector_id,
                         sector_mask: req.sector_mask,
+                    });
+                }
+                let anchor_is_local = req.local_sector_mask & own_sector_bit != 0;
+                if req.local_sector_mask & !req.sector_mask != 0
+                    || anchor_is_local != (req.origin == MemoryOrigin::Local)
+                {
+                    return Err(SystemError::OriginMaskInvalid {
+                        sector_id: req.sector_id,
+                        origin: req.origin,
+                        sector_mask: req.sector_mask,
+                        local_sector_mask: req.local_sector_mask,
                     });
                 }
                 #[cfg(test)]
@@ -1129,7 +1176,14 @@ pub fn simulate_kernel_shared(
                         let requested_sectors = u64::from(preview.sectors);
                         let counted_hits = u64::from(preview.counted_hits);
                         let source_ix = req.source as usize;
-                        let origin_ix = req.origin.index();
+                        let origin_masks = [
+                            req.sector_mask & !req.local_sector_mask,
+                            req.local_sector_mask,
+                        ];
+                        let origin_requested =
+                            origin_masks.map(|mask| u64::from(mask.count_ones()));
+                        let origin_hits = origin_masks
+                            .map(|mask| u64::from((mask & preview.counted_hit_mask).count_ones()));
                         let next_source_sectors = l2_by_source.sectors[source_ix]
                             .checked_add(requested_sectors)
                             .ok_or(SystemCounterError::Overflow {
@@ -1140,42 +1194,50 @@ pub fn simulate_kernel_shared(
                             .ok_or(SystemCounterError::Overflow {
                                 counter: "L2 source hits",
                             })?;
-                        let next_origin_source_sectors = l2_by_source.origin_sectors[origin_ix]
-                            [source_ix]
-                            .checked_add(requested_sectors)
-                            .ok_or(SystemCounterError::Overflow {
-                                counter: "L2 origin/source sectors",
-                            })?;
-                        let next_origin_source_hits = l2_by_source.origin_hits[origin_ix]
-                            [source_ix]
-                            .checked_add(counted_hits)
-                            .ok_or(SystemCounterError::Overflow {
-                                counter: "L2 origin/source hits",
-                            })?;
+                        let mut next_origin_source_sectors = [0u64; 2];
+                        let mut next_origin_source_hits = [0u64; 2];
+                        for origin in MemoryOrigin::ALL {
+                            let origin_ix = origin.index();
+                            next_origin_source_sectors[origin_ix] = l2_by_source.origin_sectors
+                                [origin_ix][source_ix]
+                                .checked_add(origin_requested[origin_ix])
+                                .ok_or(SystemCounterError::Overflow {
+                                    counter: "L2 origin/source sectors",
+                                })?;
+                            next_origin_source_hits[origin_ix] = l2_by_source.origin_hits
+                                [origin_ix][source_ix]
+                                .checked_add(origin_hits[origin_ix])
+                                .ok_or(SystemCounterError::Overflow {
+                                    counter: "L2 origin/source hits",
+                                })?;
+                        }
 
                         let can_fetch =
                             req.class == sim_mem::L2OpClass::Read || req.reply != ReplyTo::None;
-                        let fetch_sectors = if can_fetch {
-                            requested_sectors
-                                .checked_sub(u64::from(preview.present_sectors))
-                                .ok_or(SystemError::CounterOverflow {
-                                    counter: "DRAM fetch sectors per request",
-                                })?
+                        let fetch_mask = if can_fetch {
+                            req.sector_mask & !preview.present_mask
                         } else {
                             0
                         };
+                        let fetch_sectors = u64::from(fetch_mask.count_ones());
+                        let origin_fetches =
+                            origin_masks.map(|mask| u64::from((mask & fetch_mask).count_ones()));
                         let next_read_sectors = dram_stats
                             .read_sectors
                             .checked_add(fetch_sectors)
                             .ok_or(SystemError::CounterOverflow {
                                 counter: "DRAM read sectors",
                             })?;
-                        let next_origin_read_sectors = dram_stats.by_origin[origin_ix]
-                            .read_sectors
-                            .checked_add(fetch_sectors)
-                            .ok_or(SystemError::CounterOverflow {
-                                counter: "DRAM origin read sectors",
-                            })?;
+                        let mut next_origin_read_sectors = [0u64; 2];
+                        for origin in MemoryOrigin::ALL {
+                            let origin_ix = origin.index();
+                            next_origin_read_sectors[origin_ix] = dram_stats.by_origin[origin_ix]
+                                .read_sectors
+                                .checked_add(origin_fetches[origin_ix])
+                                .ok_or(SystemError::CounterOverflow {
+                                    counter: "DRAM origin read sectors",
+                                })?;
+                        }
                         let service_preview = if fetch_sectors > 0 {
                             let bytes = fetch_sectors.checked_mul(32).ok_or(
                                 SystemError::CounterOverflow {
@@ -1192,6 +1254,7 @@ pub fn simulate_kernel_shared(
                         let bw_ready = service_preview.map_or(0, |(_, ready)| ready);
 
                         let response = if req.reply != ReplyTo::None {
+                            let response_origin_ix = req.origin.index();
                             let bound = checked_cycle_add(
                                 "unpriced L2-hit response bound",
                                 req.issue_time,
@@ -1222,7 +1285,7 @@ pub fn simulate_kernel_shared(
                                 .ok_or(SystemError::CounterOverflow {
                                     counter: "DRAM bandwidth-delayed responses",
                                 })?;
-                            let next_origin_delayed = dram_stats.by_origin[origin_ix]
+                            let next_origin_delayed = dram_stats.by_origin[response_origin_ix]
                                 .bw_delayed_responses
                                 .checked_add(delayed)
                                 .ok_or(SystemError::CounterOverflow {
@@ -1231,6 +1294,7 @@ pub fn simulate_kernel_shared(
                             queue.schedule_at(ready, ev.target, Ev::MemResponse(req.reply))?;
                             Some(L2ResponseCommit {
                                 ready,
+                                origin_ix: response_origin_ix,
                                 next_delayed,
                                 next_origin_delayed,
                                 unpriced_removal,
@@ -1241,7 +1305,6 @@ pub fn simulate_kernel_shared(
 
                         Ok(L2SystemCommit {
                             source_ix,
-                            origin_ix,
                             source_sectors: next_source_sectors,
                             source_hits: next_source_hits,
                             origin_source_sectors: next_origin_source_sectors,
@@ -1256,12 +1319,19 @@ pub fn simulate_kernel_shared(
 
                 l2_by_source.sectors[commit.source_ix] = commit.source_sectors;
                 l2_by_source.hits[commit.source_ix] = commit.source_hits;
-                l2_by_source.origin_sectors[commit.origin_ix][commit.source_ix] =
-                    commit.origin_source_sectors;
-                l2_by_source.origin_hits[commit.origin_ix][commit.source_ix] =
-                    commit.origin_source_hits;
+                for origin in MemoryOrigin::ALL {
+                    let origin_ix = origin.index();
+                    l2_by_source.origin_sectors[origin_ix][commit.source_ix] =
+                        commit.origin_source_sectors[origin_ix];
+                    l2_by_source.origin_hits[origin_ix][commit.source_ix] =
+                        commit.origin_source_hits[origin_ix];
+                }
                 dram_stats.read_sectors = commit.read_sectors;
-                dram_stats.by_origin[commit.origin_ix].read_sectors = commit.origin_read_sectors;
+                for origin in MemoryOrigin::ALL {
+                    let origin_ix = origin.index();
+                    dram_stats.by_origin[origin_ix].read_sectors =
+                        commit.origin_read_sectors[origin_ix];
+                }
                 if let Some(done) = commit.dram_free_fp
                     && let Some(server) = &mut dram_server
                 {
@@ -1269,7 +1339,7 @@ pub fn simulate_kernel_shared(
                 }
                 if let Some(response) = commit.response {
                     dram_stats.bw_delayed_responses = response.next_delayed;
-                    dram_stats.by_origin[commit.origin_ix].bw_delayed_responses =
+                    dram_stats.by_origin[response.origin_ix].bw_delayed_responses =
                         response.next_origin_delayed;
                     response_due.push(sm_ix, response.ready);
                     response.unpriced_removal.commit(&mut unpriced);
@@ -1475,6 +1545,7 @@ mod tests {
         fn drop(&mut self) {
             TEST_L2_COUNTER_ARCH_OVERRIDE.with(|value| value.set(None));
             TEST_L2_ACCESS_ERROR_AFTER.with(|value| value.set(None));
+            TEST_REQUEST_MASK_OVERRIDE.with(|value| value.set(None));
         }
     }
 
@@ -1488,6 +1559,12 @@ mod tests {
         let previous =
             TEST_L2_ACCESS_ERROR_AFTER.with(|value| value.replace(Some(successful_accesses)));
         assert!(previous.is_none(), "nested L2 access-error injection");
+        L2TestFaultGuard
+    }
+
+    fn override_next_request_masks(override_value: TestRequestMaskOverride) -> L2TestFaultGuard {
+        let previous = TEST_REQUEST_MASK_OVERRIDE.with(|value| value.replace(Some(override_value)));
+        assert!(previous.is_none(), "nested request-mask override");
         L2TestFaultGuard
     }
 
@@ -2007,6 +2084,186 @@ mod tests {
             0,
             "the overflowing load mutated the caller L2"
         );
+    }
+
+    #[test]
+    fn local_and_global_share_physical_hierarchy_with_per_sector_attribution() {
+        let sched = schedule(vec![
+            (0, slot(cb(1), "STL")),
+            (16, slot(cb(1), "IADD3")),
+            (32, slot(cb(1), "LDG.E")),
+            (48, slot(cb(1), "LDL")),
+        ]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![
+                WarpReplay {
+                    warp_slot: 0,
+                    insts: vec![ReplayInst {
+                        pc: 0,
+                        kind: AccessKind::LocalStore { off: 0, len: 1 },
+                    }],
+                    sectors: vec![40],
+                },
+                WarpReplay {
+                    warp_slot: 1,
+                    insts: vec![
+                        ReplayInst {
+                            pc: 16,
+                            kind: AccessKind::NonMemory,
+                        },
+                        ReplayInst {
+                            pc: 32,
+                            kind: AccessKind::GlobalEligible {
+                                off: 0,
+                                len: 1,
+                                token: CacheOpToken::LdgECa,
+                            },
+                        },
+                    ],
+                    sectors: vec![40],
+                },
+                WarpReplay {
+                    warp_slot: 2,
+                    insts: vec![
+                        ReplayInst {
+                            pc: 16,
+                            kind: AccessKind::NonMemory,
+                        },
+                        ReplayInst {
+                            pc: 48,
+                            kind: AccessKind::LocalLoad { off: 0, len: 1 },
+                        },
+                    ],
+                    sectors: vec![41],
+                },
+            ],
+        }];
+        let mut l2 = l2_model();
+        let result = simulate_kernel_shared(
+            &BTreeMap::from([(0, blocks)]),
+            &sched,
+            &params(),
+            l1_config(),
+            &mut l2,
+            carded_bw(),
+        )
+        .unwrap();
+
+        assert_eq!(result.l2_by_source.source(L2Source::L1Fill), (2, 1));
+        assert_eq!(
+            result
+                .l2_by_source
+                .source_for_origin(MemoryOrigin::Global, L2Source::L1Fill),
+            (1, 1)
+        );
+        assert_eq!(
+            result
+                .l2_by_source
+                .source_for_origin(MemoryOrigin::Local, L2Source::L1Fill),
+            (1, 0)
+        );
+        assert_eq!(result.l2_by_source.source(L2Source::Store), (1, 0));
+        assert_eq!(
+            result
+                .l2_by_source
+                .source_for_origin(MemoryOrigin::Local, L2Source::Store),
+            (1, 0)
+        );
+        assert_eq!(result.dram.origin(MemoryOrigin::Global).read_sectors, 0);
+        assert_eq!(result.dram.origin(MemoryOrigin::Local).read_sectors, 1);
+
+        let l1 = result.per_sm[&0]
+            .l1
+            .expect("shared replay carries L1 counters");
+        assert_eq!(l1.origin(MemoryOrigin::Global).misses, 1);
+        let local = l1.origin(MemoryOrigin::Local);
+        assert_eq!(local.misses, 1);
+        assert_eq!(local.merges, 1);
+        assert_eq!(local.store_sectors, 1);
+        assert_eq!(local.store_hits, 0);
+        l1.validate_origin_partition().unwrap();
+        result.l2_by_source.validate_origin_partition().unwrap();
+        result.dram.validate_origin_partition().unwrap();
+    }
+
+    #[test]
+    fn invalid_origin_masks_precede_l2_failures_and_leave_caller_state() {
+        let mut load = cb(1);
+        load.write_barrier = Some(barrier(0));
+        let sched = schedule(vec![(0, slot(load, "LDL"))]);
+        let cases = [
+            (
+                AccessKind::LocalLoad { off: 0, len: 1 },
+                TestRequestMaskOverride {
+                    origin: MemoryOrigin::Local,
+                    sector_mask: 0b0001,
+                    local_sector_mask: 0,
+                },
+            ),
+            (
+                AccessKind::GlobalEligible {
+                    off: 0,
+                    len: 1,
+                    token: CacheOpToken::LdgECa,
+                },
+                TestRequestMaskOverride {
+                    origin: MemoryOrigin::Global,
+                    sector_mask: 0b0001,
+                    local_sector_mask: 0b0010,
+                },
+            ),
+        ];
+
+        for (kind, mask_override) in cases {
+            let blocks = vec![BlockReplay {
+                launch_index: 0,
+                warps: vec![WarpReplay {
+                    warp_slot: 0,
+                    insts: vec![ReplayInst { pc: 0, kind }],
+                    sectors: vec![4],
+                }],
+            }];
+            let mut l2 = l2_model();
+            let before = *l2.counters().unwrap();
+            let _mask_fault = override_next_request_masks(mask_override);
+            let _later_l2_fault = inject_l2_error_after(0);
+
+            let error = simulate_kernel_shared(
+                &BTreeMap::from([(0, blocks)]),
+                &sched,
+                &params(),
+                l1_config(),
+                &mut l2,
+                carded_bw(),
+            )
+            .unwrap_err();
+
+            assert!(matches!(
+                error,
+                SystemError::OriginMaskInvalid {
+                    sector_id: 4,
+                    origin,
+                    sector_mask,
+                    local_sector_mask,
+                } if origin == mask_override.origin
+                    && sector_mask == mask_override.sector_mask
+                    && local_sector_mask == mask_override.local_sector_mask
+            ));
+            assert_eq!(
+                TEST_L2_ACCESS_ERROR_AFTER.with(std::cell::Cell::get),
+                Some(0),
+                "origin validation reached the later L2/counter stage"
+            );
+            assert_eq!(*l2.counters().unwrap(), before);
+            assert_eq!(
+                l2.preview_mask(1, 0b0001, L2OpClass::Read)
+                    .unwrap()
+                    .present_sectors,
+                0,
+                "invalid origin metadata published staged L2 state"
+            );
+        }
     }
 
     /// One SM, one cold load: L2 misses → the consumer waits the DRAM

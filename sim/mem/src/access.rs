@@ -88,6 +88,19 @@ pub enum AccessKind {
     NonMemory,
     /// Shared-memory class: no L1TEX sector traffic; fixed shared latency.
     Shared,
+    /// Local-memory load (LDL): modeled sectors in the same physical L1/L2
+    /// hierarchy as Global traffic, with Local accounting provenance.
+    LocalLoad {
+        off: usize,
+        len: u16,
+    },
+    /// Local-memory store (STL): write-through/no-allocate L1 probe and
+    /// write-allocate L2 access in the shared physical hierarchy, with Local
+    /// accounting provenance.
+    LocalStore {
+        off: usize,
+        len: u16,
+    },
     /// Manifest-eligible global-class record: modeled L1 sectors.
     GlobalEligible {
         off: usize,

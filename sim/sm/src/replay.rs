@@ -101,6 +101,10 @@ pub enum MemoryRouteError {
         got: pb::MemoryOpAccessKind,
         expected: pb::MemoryOpAccessKind,
     },
+    #[error(
+        "joined static LDL/STL opcode or role requires LOCAL class and address-space routing, got {got:?}"
+    )]
+    StaticLocalRouteMismatch { got: pb::MemoryOpClass },
     #[error("operand {operand} carries address_space value {raw} unknown to the committed schema")]
     UnknownAddressSpace { operand: usize, raw: i32 },
 }
@@ -159,6 +163,14 @@ pub enum ReplayError {
         "global memory record at pc {pc:#x} on architecture {arch} has unknown static opcode head {opcode:?}"
     )]
     UnknownGlobalOpcode {
+        arch: ArchId,
+        pc: u32,
+        opcode: String,
+    },
+    #[error(
+        "local memory record at pc {pc:#x} on architecture {arch} has static opcode head {opcode:?}; expected an admitted LDL or STL role"
+    )]
+    UnknownLocalOpcode {
         arch: ArchId,
         pc: u32,
         opcode: String,
@@ -768,8 +780,37 @@ fn require_known_global_role(
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum LocalDirection {
+    Load,
+    Store,
+}
+
+/// Resolve Local traffic only from the joined LDL/STL sidecar role. A missing pc
+/// remains neutral so the issue loop retains its dedicated `PcNotInSchedule`
+/// diagnostic; every present non-LDL/STL role fails closed.
+fn require_known_local_direction(
+    schedule: &FunctionSchedule,
+    arch: ArchId,
+    pc: u32,
+) -> Result<Option<LocalDirection>, ReplayError> {
+    let Some(slot) = schedule.by_pc.get(&u64::from(pc)) else {
+        return Ok(None);
+    };
+    match (opcode_head(&slot.opcode_text), slot.mem_role) {
+        ("LDL", MemRole::EligibleLoad(CacheOpToken::Ldl)) => Ok(Some(LocalDirection::Load)),
+        ("STL", MemRole::EligibleLoad(CacheOpToken::Stl)) => Ok(Some(LocalDirection::Store)),
+        (opcode, _) => Err(ReplayError::UnknownLocalOpcode {
+            arch,
+            pc,
+            opcode: opcode.to_owned(),
+        }),
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum ReplayMemoryRoute {
     Global,
+    Local,
     Shared,
     Unsupported,
 }
@@ -778,6 +819,39 @@ enum ReplayMemoryRoute {
 struct ReplayMemoryPreflight<'a> {
     memory: PreflightedMemoryAccess<'a>,
     route: ReplayMemoryRoute,
+}
+
+/// Enforce the reciprocal half of Local routing: joined LDL/STL evidence may
+/// only accompany a dynamically Local record whose operand route is Local.
+/// Exact Local opcode/role admission remains in `require_known_local_direction`
+/// so hierarchy-mode sector-expansion errors retain their established priority.
+fn validate_static_memory_route(
+    meta: MemoryAccessMeta,
+    route: ReplayMemoryRoute,
+    schedule: &FunctionSchedule,
+    pc: u32,
+    path: &Path,
+    warp_id: i32,
+    record_ix: usize,
+) -> Result<(), ReplayError> {
+    let Some(slot) = schedule.by_pc.get(&u64::from(pc)) else {
+        return Ok(());
+    };
+    let local_opcode = matches!(opcode_head(&slot.opcode_text), "LDL" | "STL");
+    let local_role = matches!(
+        slot.mem_role,
+        MemRole::EligibleLoad(CacheOpToken::Ldl | CacheOpToken::Stl)
+    );
+    if (local_opcode || local_role) && route != ReplayMemoryRoute::Local {
+        return Err(ReplayError::MemoryRoute {
+            path: path.to_path_buf(),
+            warp_id,
+            record_ix,
+            class: meta.op_class,
+            source: MemoryRouteError::StaticLocalRouteMismatch { got: meta.op_class },
+        });
+    }
+    Ok(())
 }
 
 fn validate_replay_access_kind(
@@ -933,10 +1007,11 @@ fn replay_memory_route(
                     }
                 }
             }
-            // LOCAL receives a distinct hierarchy route in Q1012's next staged
-            // change. Until then it remains on the existing shared timing arm,
-            // but crossed SHARED/LOCAL evidence is no longer admissible.
-            Ok(ReplayMemoryRoute::Shared)
+            Ok(match class {
+                pb::MemoryOpClass::Shared => ReplayMemoryRoute::Shared,
+                pb::MemoryOpClass::Local => ReplayMemoryRoute::Local,
+                _ => unreachable!("match arm admits only SHARED or LOCAL"),
+            })
         }
         pb::MemoryOpClass::Global => {
             if inst.addresses.is_empty() && !zero_effective_mask {
@@ -1092,6 +1167,7 @@ fn preflight_replay_memory<'a>(
     // this exact schedule. A foreign-function record retains the dedicated
     // MultiFunctionUnsupported diagnostic after structural/route validation.
     if inst.function_unique_id == schedule.function_unique_id {
+        validate_static_memory_route(meta, route, schedule, inst.pc, path, warp_id, record_ix)?;
         validate_static_access_kind(meta, schedule, inst.pc, path, warp_id, record_ix)?;
     }
     Ok(Some(ReplayMemoryPreflight { memory, route }))
@@ -1151,6 +1227,16 @@ fn classify_flat_preflighted(
     let meta = preflight.memory.meta();
     match (preflight.route, meta.op_class) {
         (ReplayMemoryRoute::Shared, _) => Ok(AccessKind::Shared),
+        (ReplayMemoryRoute::Local, pb::MemoryOpClass::Local) => Ok(
+            match require_known_local_direction(schedule, arch, inst.pc)? {
+                Some(LocalDirection::Load) => AccessKind::LocalLoad { off: 0, len: 0 },
+                Some(LocalDirection::Store) => AccessKind::LocalStore { off: 0, len: 0 },
+                None => AccessKind::NonMemory,
+            },
+        ),
+        (ReplayMemoryRoute::Local, class) => {
+            Err(ReplayError::UnsupportedMemoryPath { arch, class })
+        }
         (ReplayMemoryRoute::Unsupported, class) => {
             Err(ReplayError::UnsupportedMemoryPath { arch, class })
         }
@@ -1190,15 +1276,27 @@ fn checked_staged_global_kind(role: MemRole, start: usize, count: usize) -> Opti
     })
 }
 
-fn append_staged_global_sectors(
-    role: MemRole,
+fn checked_staged_local_kind(
+    direction: LocalDirection,
+    start: usize,
+    count: usize,
+) -> Option<AccessKind> {
+    let len = u16::try_from(count).ok()?;
+    start.checked_add(count)?;
+    Some(match direction {
+        LocalDirection::Load => AccessKind::LocalLoad { off: start, len },
+        LocalDirection::Store => AccessKind::LocalStore { off: start, len },
+    })
+}
+
+fn append_staged_sectors(
+    kind: Option<AccessKind>,
     sectors: &mut Vec<i64>,
     sector_scratch: &[i64],
     path: &Path,
     warp_id: i32,
     record_ix: usize,
 ) -> Result<AccessKind, ReplayError> {
-    let start = sectors.len();
     let count = sector_scratch.len();
     let overflow = |sectors: usize| ReplayError::SectorCountOverflow {
         path: path.to_path_buf(),
@@ -1208,7 +1306,7 @@ fn append_staged_global_sectors(
     };
     // `AccessKind::off` spans the native `usize` arena domain. Only one
     // record's compact length narrows to `u16`.
-    let kind = checked_staged_global_kind(role, start, count).ok_or_else(|| overflow(count))?;
+    let kind = kind.ok_or_else(|| overflow(count))?;
     sectors
         .try_reserve(count)
         .map_err(|_| ReplayError::SectorExpansion {
@@ -1222,6 +1320,44 @@ fn append_staged_global_sectors(
         })?;
     sectors.extend_from_slice(sector_scratch);
     Ok(kind)
+}
+
+fn append_staged_global_sectors(
+    role: MemRole,
+    sectors: &mut Vec<i64>,
+    sector_scratch: &[i64],
+    path: &Path,
+    warp_id: i32,
+    record_ix: usize,
+) -> Result<AccessKind, ReplayError> {
+    let start = sectors.len();
+    append_staged_sectors(
+        checked_staged_global_kind(role, start, sector_scratch.len()),
+        sectors,
+        sector_scratch,
+        path,
+        warp_id,
+        record_ix,
+    )
+}
+
+fn append_staged_local_sectors(
+    direction: LocalDirection,
+    sectors: &mut Vec<i64>,
+    sector_scratch: &[i64],
+    path: &Path,
+    warp_id: i32,
+    record_ix: usize,
+) -> Result<AccessKind, ReplayError> {
+    let start = sectors.len();
+    append_staged_sectors(
+        checked_staged_local_kind(direction, start, sector_scratch.len()),
+        sectors,
+        sector_scratch,
+        path,
+        warp_id,
+        record_ix,
+    )
 }
 
 /// Full classification in L1 mode: wire-contract decode (streaming form),
@@ -1296,7 +1432,10 @@ fn classify_with_l1_preflighted(
     let meta = preflight.memory.meta();
     let mut sector_plan = SectorExpansionPlan::new();
     let mut sector_error: Option<SectorExpansionError> = None;
-    if preflight.route == ReplayMemoryRoute::Global {
+    if matches!(
+        preflight.route,
+        ReplayMemoryRoute::Global | ReplayMemoryRoute::Local
+    ) {
         preflight.memory.visit_addresses(|access| {
             if sector_error.is_some() {
                 return;
@@ -1319,28 +1458,45 @@ fn classify_with_l1_preflighted(
             source,
         });
     }
-    match (preflight.route, meta.op_class) {
+    enum StagedHierarchyRole {
+        Global(MemRole),
+        Local(LocalDirection),
+    }
+
+    let staged_role = match (preflight.route, meta.op_class) {
         (ReplayMemoryRoute::Shared, _) => return Ok(AccessKind::Shared),
         (ReplayMemoryRoute::Unsupported, class) => {
             return Err(ReplayError::UnsupportedMemoryPath { arch, class });
         }
-        (ReplayMemoryRoute::Global, pb::MemoryOpClass::Global) => {}
+        (ReplayMemoryRoute::Local, pb::MemoryOpClass::Local) => {
+            let Some(direction) = require_known_local_direction(schedule, arch, inst.pc)? else {
+                return Ok(AccessKind::NonMemory);
+            };
+            StagedHierarchyRole::Local(direction)
+        }
+        (ReplayMemoryRoute::Local, class) => {
+            return Err(ReplayError::UnsupportedMemoryPath { arch, class });
+        }
+        (ReplayMemoryRoute::Global, pb::MemoryOpClass::Global) => {
+            StagedHierarchyRole::Global(require_known_global_role(schedule, arch, inst.pc)?)
+        }
         (
             ReplayMemoryRoute::Global,
             class @ (pb::MemoryOpClass::Atomic | pb::MemoryOpClass::AsyncCopy),
         ) => {
             require_sm86_special_role(schedule, arch, inst.pc, class)?;
+            StagedHierarchyRole::Global(require_known_global_role(schedule, arch, inst.pc)?)
         }
         (ReplayMemoryRoute::Global, class) => {
             return Err(ReplayError::UnsupportedMemoryPath { arch, class });
         }
-    }
+    };
     // A pc absent from the schedule surfaces as the issue loop's typed
     // PcNotInSchedule; classification stays neutral in that case. A present
     // but unrecognized static opcode fails closed instead of becoming a
-    // generic untagged global access. Resolve that role before sector-count
-    // rejection, matching the established special-route/opcode precedence.
-    let role = require_known_global_role(schedule, arch, inst.pc)?;
+    // generic untagged access. Static-role resolution follows exact address-
+    // expansion errors but precedes sector-count narrowing, matching the
+    // established global-route precedence without masking arithmetic faults.
     let prepared = sector_plan
         .prepare()
         .map_err(|source| ReplayError::SectorExpansion {
@@ -1366,7 +1522,19 @@ fn classify_with_l1_preflighted(
             record_ix,
             source,
         })?;
-    append_staged_global_sectors(role, sectors, sector_scratch, path, warp_id, record_ix)
+    match staged_role {
+        StagedHierarchyRole::Global(role) => {
+            append_staged_global_sectors(role, sectors, sector_scratch, path, warp_id, record_ix)
+        }
+        StagedHierarchyRole::Local(direction) => append_staged_local_sectors(
+            direction,
+            sectors,
+            sector_scratch,
+            path,
+            warp_id,
+            record_ix,
+        ),
+    }
 }
 
 #[cfg(test)]
@@ -2222,15 +2390,19 @@ mod space_routing_tests {
     }
 
     #[test]
-    fn valid_local_remains_on_dormant_sectorless_route() {
-        let sched = schedule(ArchId::Sm86, MemRole::None, "LDL R0, [R1]");
+    fn valid_ldl_uses_local_sector_route() {
+        let sched = schedule(
+            ArchId::Sm86,
+            MemRole::EligibleLoad(CacheOpToken::Ldl),
+            "LDL R0, [R1]",
+        );
         let mut inst = global_inst();
         inst.memory_op_class = Some(pb::MemoryOpClass::Local as i32);
         inst.addresses[0].address_space = Some(pb::MemorySpace::Local as i32);
 
         let flat = classify_flat(&inst, &sched, sched.arch, Path::new("local.pb"), 0, 0)
-            .expect("valid LOCAL/LOCAL remains admitted before hierarchy activation");
-        assert!(matches!(flat, AccessKind::Shared));
+            .expect("joined LDL has a reviewed flat Local route");
+        assert!(matches!(flat, AccessKind::LocalLoad { off: 0, len: 0 }));
 
         let mut sectors = vec![31];
         let mut sector_scratch = vec![99];
@@ -2244,9 +2416,236 @@ mod space_routing_tests {
             0,
             0,
         )
-        .expect("valid LOCAL/LOCAL remains on the dormant shared timing arm");
-        assert!(matches!(l1, AccessKind::Shared));
-        assert_eq!(sectors, vec![31], "dormant LOCAL must append no sectors");
+        .expect("joined LDL has a reviewed hierarchy Local route");
+        assert!(matches!(l1, AccessKind::LocalLoad { off: 1, len: 1 }));
+        assert_eq!(sectors, vec![31, 0x1000 >> 5]);
+        assert_eq!(sector_scratch, vec![0x1000 >> 5]);
+    }
+
+    #[test]
+    fn valid_stl_preserves_store_direction_on_local_sector_route() {
+        let sched = schedule(
+            ArchId::Sm86,
+            MemRole::EligibleLoad(CacheOpToken::Stl),
+            "STL [R1], R0",
+        );
+        let mut inst = global_inst();
+        inst.memory_op_class = Some(pb::MemoryOpClass::Local as i32);
+        inst.memory_op_access_kind = Some(pb::MemoryOpAccessKind::Store as i32);
+        inst.addresses[0].address_space = Some(pb::MemorySpace::Local as i32);
+
+        let flat = classify_flat(&inst, &sched, sched.arch, Path::new("stl.pb"), 0, 0)
+            .expect("joined STL has a reviewed flat Local route");
+        assert!(matches!(flat, AccessKind::LocalStore { off: 0, len: 0 }));
+
+        let mut sectors = Vec::new();
+        let mut sector_scratch = Vec::new();
+        let l1 = classify_with_l1(
+            &inst,
+            &sched,
+            sched.arch,
+            &mut sectors,
+            &mut sector_scratch,
+            Path::new("stl.pb"),
+            0,
+            0,
+        )
+        .expect("joined STL has a reviewed hierarchy Local route");
+        assert!(matches!(l1, AccessKind::LocalStore { off: 0, len: 1 }));
+        assert_eq!(sectors, vec![0x1000 >> 5]);
+        assert_eq!(sector_scratch, sectors);
+    }
+
+    #[test]
+    fn local_route_rejects_non_ldl_stl_static_roles_without_append() {
+        let sched = schedule(
+            ArchId::Sm86,
+            MemRole::EligibleLoad(CacheOpToken::LdgECa),
+            "LDG.E.CA R0, [R1]",
+        );
+        let mut inst = global_inst();
+        inst.memory_op_class = Some(pb::MemoryOpClass::Local as i32);
+        inst.addresses[0].address_space = Some(pb::MemorySpace::Local as i32);
+
+        assert!(matches!(
+            classify_flat(&inst, &sched, sched.arch, Path::new("local_role.pb"), 2, 3),
+            Err(ReplayError::UnknownLocalOpcode {
+                arch: ArchId::Sm86,
+                pc: 0,
+                ref opcode,
+            }) if opcode == "LDG"
+        ));
+        let mut sectors = vec![17];
+        let mut sector_scratch = vec![99];
+        assert!(matches!(
+            classify_with_l1(
+                &inst,
+                &sched,
+                sched.arch,
+                &mut sectors,
+                &mut sector_scratch,
+                Path::new("local_role.pb"),
+                2,
+                3,
+            ),
+            Err(ReplayError::UnknownLocalOpcode {
+                arch: ArchId::Sm86,
+                pc: 0,
+                ref opcode,
+            }) if opcode == "LDG"
+        ));
+        assert_eq!(sectors, vec![17]);
+        assert!(sector_scratch.is_empty());
+    }
+
+    #[test]
+    fn static_ldl_stl_evidence_cannot_escape_local_route() {
+        let assert_rejected = |inst: &pb::Instruction, sched: &FunctionSchedule, expected_class| {
+            assert!(matches!(
+                classify_flat(
+                    inst,
+                    sched,
+                    sched.arch,
+                    Path::new("escaped_local.pb"),
+                    3,
+                    4,
+                ),
+                Err(ReplayError::MemoryRoute {
+                    class,
+                    source: MemoryRouteError::StaticLocalRouteMismatch { got },
+                    ..
+                }) if class == expected_class && got == expected_class
+            ));
+
+            let mut sectors = vec![23];
+            let mut sector_scratch = vec![99];
+            assert!(matches!(
+                classify_with_l1(
+                    inst,
+                    sched,
+                    sched.arch,
+                    &mut sectors,
+                    &mut sector_scratch,
+                    Path::new("escaped_local.pb"),
+                    3,
+                    4,
+                ),
+                Err(ReplayError::MemoryRoute {
+                    class,
+                    source: MemoryRouteError::StaticLocalRouteMismatch { got },
+                    ..
+                }) if class == expected_class && got == expected_class
+            ));
+            assert_eq!(sectors, vec![23]);
+            assert!(sector_scratch.is_empty());
+        };
+
+        // The concrete contamination case: STL's EligibleLoad role must never
+        // become a GlobalEligible load merely because the dynamic record says
+        // GLOBAL/STORE.
+        let mut global_stl = global_inst();
+        global_stl.memory_op_access_kind = Some(pb::MemoryOpAccessKind::Store as i32);
+        assert_rejected(
+            &global_stl,
+            &schedule(
+                ArchId::Sm86,
+                MemRole::EligibleLoad(CacheOpToken::Stl),
+                "STL [R1], R0",
+            ),
+            pb::MemoryOpClass::Global,
+        );
+
+        // The reciprocal guard is independent of the additive direction field:
+        // legacy-absent access_kind cannot let LDL escape through Shared timing.
+        let mut shared_ldl = global_inst();
+        shared_ldl.memory_op_class = Some(pb::MemoryOpClass::Shared as i32);
+        shared_ldl.memory_op_access_kind = None;
+        shared_ldl.addresses[0].address_space = Some(pb::MemorySpace::Shared as i32);
+        assert_rejected(
+            &shared_ldl,
+            &schedule(
+                ArchId::Sm86,
+                MemRole::EligibleLoad(CacheOpToken::Ldl),
+                "LDL R0, [R1]",
+            ),
+            pb::MemoryOpClass::Shared,
+        );
+    }
+
+    #[test]
+    fn local_address_overflow_precedes_unknown_static_opcode() {
+        let mut inst = global_inst();
+        inst.memory_op_class = Some(pb::MemoryOpClass::Local as i32);
+        inst.data_width = Some(2);
+        inst.addresses[0].address_space = Some(pb::MemorySpace::Local as i32);
+        inst.addresses[0].data_width = 2;
+        inst.addresses[0].addrs[0] = i64::MAX;
+        let mut sectors = vec![29];
+        let mut sector_scratch = vec![99];
+
+        assert!(matches!(
+            classify_with_l1(
+                &inst,
+                &schedule(
+                    ArchId::Sm86,
+                    MemRole::EligibleLoad(CacheOpToken::LdgECa),
+                    "LDG.E.CA R0, [R1]",
+                ),
+                ArchId::Sm86,
+                &mut sectors,
+                &mut sector_scratch,
+                Path::new("local_overflow.pb"),
+                5,
+                6,
+            ),
+            Err(ReplayError::SectorExpansion {
+                warp_id: 5,
+                record_ix: 6,
+                source: SectorExpansionError::AddressOverflow {
+                    lane: 0,
+                    base: i64::MAX,
+                    data_width_bytes: 2,
+                },
+                ..
+            })
+        ));
+        assert_eq!(sectors, vec![29]);
+        assert!(sector_scratch.is_empty());
+    }
+
+    #[test]
+    fn unknown_local_opcode_precedes_sector_count_narrowing() {
+        let mut inst = global_inst();
+        inst.memory_op_class = Some(pb::MemoryOpClass::Local as i32);
+        inst.data_width = Some(i32::MAX);
+        inst.addresses[0].address_space = Some(pb::MemorySpace::Local as i32);
+        inst.addresses[0].data_width = i32::MAX;
+        inst.addresses[0].addrs[0] = 0;
+        let mut sectors = vec![31];
+        let mut sector_scratch = vec![99];
+
+        assert!(matches!(
+            classify_with_l1(
+                &inst,
+                &schedule(
+                    ArchId::Sm86,
+                    MemRole::EligibleLoad(CacheOpToken::LdgECa),
+                    "LDG.E.CA R0, [R1]",
+                ),
+                ArchId::Sm86,
+                &mut sectors,
+                &mut sector_scratch,
+                Path::new("local_wide_opcode.pb"),
+                7,
+                8,
+            ),
+            Err(ReplayError::UnknownLocalOpcode {
+                arch: ArchId::Sm86,
+                pc: 0,
+                ref opcode,
+            }) if opcode == "LDG"
+        ));
+        assert_eq!(sectors, vec![31]);
         assert!(sector_scratch.is_empty());
     }
 

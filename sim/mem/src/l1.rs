@@ -29,10 +29,10 @@
 //!   merges`.
 //!
 //! v0 EXTENSIONS beyond the ported model (kept in separate counters so the
-//! ported semantics stay auditable): global-class STORE sectors are
+//! ported semantics stay auditable): Global/Local STORE sectors are
 //! hit-TESTED against the same state without allocating on miss (NCU's
 //! unified `l1tex__t_sector_hit_rate.pct` counts store sectors; the L1 is
-//! write-through no-allocate for global stores in this v0 hypothesis), and
+//! write-through no-allocate for hierarchy stores in this v0 hypothesis), and
 //! bypass/untagged sector counting for the unified-denominator emission.
 
 use std::collections::{BTreeMap, HashMap};
@@ -927,48 +927,80 @@ impl L1Cache {
         Ok(())
     }
 
-    /// Prove a conservative multi-access mutation budget without changing
-    /// cache state. Callers can fall back to exact shadow replay only when a
-    /// near-limit budget is too conservative.
-    pub fn preflight_mutation_budget(&self, budget: L1MutationBudget) -> Result<(), L1AccessError> {
-        self.counters.add_fields_checked(
-            budget.origin,
-            &[
-                (L1CounterField::Hits, budget.eligible_sectors),
-                (L1CounterField::Misses, budget.eligible_sectors),
-                (L1CounterField::Merges, budget.eligible_sectors),
-                (L1CounterField::StallEvents, budget.eligible_sectors),
-                (L1CounterField::LineFills, budget.eligible_sectors),
-                (L1CounterField::LineAllocMisses, budget.eligible_sectors),
-                (
-                    L1CounterField::SectorResidentMisses,
-                    budget.eligible_sectors,
-                ),
-                (L1CounterField::BypassSectors, budget.bypass_sectors),
-                (
-                    L1CounterField::BypassAtomSectors,
-                    budget.bypass_atom_sectors,
-                ),
-                (L1CounterField::UntaggedSectors, budget.untagged_sectors),
-                (L1CounterField::StoreSectors, budget.store_sectors),
-                (L1CounterField::StoreHits, budget.store_sectors),
-                (L1CounterField::StoreTagHits, budget.store_sectors),
-            ],
-        )?;
+    /// Prove conservative multi-access mutation budgets without changing cache
+    /// state. Counter deltas are staged in caller order so one physical unified
+    /// counter snapshot covers every explicit origin lane. Recency and fill
+    /// sequences consume the combined physical budget exactly once.
+    pub fn preflight_mutation_budgets(
+        &self,
+        budgets: &[L1MutationBudget],
+    ) -> Result<(), L1AccessError> {
+        let mut counters = self.counters;
+        for budget in budgets {
+            counters = counters.add_fields_checked(
+                budget.origin,
+                &[
+                    (L1CounterField::Hits, budget.eligible_sectors),
+                    (L1CounterField::Misses, budget.eligible_sectors),
+                    (L1CounterField::Merges, budget.eligible_sectors),
+                    (L1CounterField::StallEvents, budget.eligible_sectors),
+                    (L1CounterField::LineFills, budget.eligible_sectors),
+                    (L1CounterField::LineAllocMisses, budget.eligible_sectors),
+                    (
+                        L1CounterField::SectorResidentMisses,
+                        budget.eligible_sectors,
+                    ),
+                    (L1CounterField::BypassSectors, budget.bypass_sectors),
+                    (
+                        L1CounterField::BypassAtomSectors,
+                        budget.bypass_atom_sectors,
+                    ),
+                    (L1CounterField::UntaggedSectors, budget.untagged_sectors),
+                    (L1CounterField::StoreSectors, budget.store_sectors),
+                    (L1CounterField::StoreHits, budget.store_sectors),
+                    (L1CounterField::StoreTagHits, budget.store_sectors),
+                ],
+            )?;
+        }
+
+        let mut recency_touches = 0u64;
+        let mut new_fills = 0u64;
+        for budget in budgets {
+            recency_touches = recency_touches.checked_add(budget.recency_touches).ok_or(
+                L1AccessError::SequenceOverflow {
+                    sequence: "recency",
+                    current: self.next_stamp.current(),
+                },
+            )?;
+            new_fills =
+                new_fills
+                    .checked_add(budget.new_fills)
+                    .ok_or(L1AccessError::SequenceOverflow {
+                        sequence: "fill",
+                        current: self.fill_seq.current(),
+                    })?;
+        }
         let in_flight =
             u64::try_from(self.mshr_in_use()).map_err(|_| L1AccessError::SequenceOverflow {
                 sequence: "recency",
                 current: self.next_stamp.current(),
             })?;
-        let recency_touches = budget.recency_touches.checked_add(in_flight).ok_or(
-            L1AccessError::SequenceOverflow {
-                sequence: "recency",
-                current: self.next_stamp.current(),
-            },
-        )?;
+        recency_touches =
+            recency_touches
+                .checked_add(in_flight)
+                .ok_or(L1AccessError::SequenceOverflow {
+                    sequence: "recency",
+                    current: self.next_stamp.current(),
+                })?;
         self.next_stamp.preflight("recency", recency_touches)?;
-        self.fill_seq.preflight("fill", budget.new_fills)?;
+        self.fill_seq.preflight("fill", new_fills)?;
         Ok(())
+    }
+
+    /// Prove one conservative mutation budget. Callers can fall back to exact
+    /// shadow replay only when a near-limit budget is too conservative.
+    pub fn preflight_mutation_budget(&self, budget: L1MutationBudget) -> Result<(), L1AccessError> {
+        self.preflight_mutation_budgets(std::slice::from_ref(&budget))
     }
 
     fn earliest_fill(&self) -> Result<u64, L1AccessError> {
@@ -2773,6 +2805,32 @@ mod tests {
                 field: L1CounterField::Hits,
             })
         );
+    }
+
+    #[test]
+    fn multi_origin_preflight_stages_one_unified_counter_snapshot() {
+        let mut l1 = cache(8, None);
+        l1.counters.hits = u64::MAX - 1;
+        l1.counters.by_origin[MemoryOrigin::Global.index()].hits = u64::MAX - 1;
+        let before = l1.counters;
+        let global = L1MutationBudget {
+            eligible_sectors: 1,
+            ..L1MutationBudget::for_origin(MemoryOrigin::Global)
+        };
+        let local = L1MutationBudget {
+            eligible_sectors: 1,
+            ..L1MutationBudget::for_origin(MemoryOrigin::Local)
+        };
+
+        assert!(l1.preflight_mutation_budget(global).is_ok());
+        assert!(l1.preflight_mutation_budget(local).is_ok());
+        assert_eq!(
+            l1.preflight_mutation_budgets(&[global, local]),
+            Err(L1AccessError::Counter(L1CounterError::Overflow {
+                field: L1CounterField::Hits,
+            }))
+        );
+        assert_eq!(l1.counters, before);
     }
 
     #[test]

@@ -382,8 +382,8 @@ pub enum L2Source {
     Bypass,
     /// A global-class sector whose pc the classifier did not tag.
     Untagged,
-    /// A global store sector (card policy `write_allocate_non_inclusive`
-    /// → stores allocate in L2 exactly like loads).
+    /// A store sector (card policy `write_allocate_non_inclusive` → stores
+    /// allocate in L2 exactly like loads).
     Store,
 }
 
@@ -429,6 +429,11 @@ pub struct L2MaskPreview {
     pub sectors: u32,
     pub counted_hits: u32,
     pub present_sectors: u32,
+    /// Line-relative requested-sector bits whose access counts as an L2 hit.
+    pub counted_hit_mask: u8,
+    /// Line-relative requested-sector bits whose data was physically present
+    /// before its access.
+    pub present_mask: u8,
 }
 
 impl L2MaskPreview {
@@ -903,6 +908,8 @@ impl L2Model {
                 sectors: sector_mask.count_ones(),
                 counted_hits: counted_mask.count_ones(),
                 present_sectors: present_mask.count_ones(),
+                counted_hit_mask: counted_mask,
+                present_mask,
             },
         })
     }
@@ -944,6 +951,8 @@ impl L2Model {
             sectors: sector_mask.count_ones(),
             counted_hits: counted_mask.count_ones(),
             present_sectors: present_mask.count_ones(),
+            counted_hit_mask: counted_mask,
+            present_mask,
         })
     }
 
@@ -1318,6 +1327,18 @@ mod tests {
                                     .iter()
                                     .map(|outcome| u32::from(outcome.sector_present))
                                     .sum(),
+                                counted_hit_mask: (0..4u8)
+                                    .filter(|sector| requested_mask & (1 << sector) != 0)
+                                    .zip(&outcomes)
+                                    .fold(0u8, |mask, (sector, outcome)| {
+                                        mask | (u8::from(outcome.counted_hit) << sector)
+                                    }),
+                                present_mask: (0..4u8)
+                                    .filter(|sector| requested_mask & (1 << sector) != 0)
+                                    .zip(&outcomes)
+                                    .fold(0u8, |mask, (sector, outcome)| {
+                                        mask | (u8::from(outcome.sector_present) << sector)
+                                    }),
                             },
                             "preview mismatch for {policy:?}/{class:?}, resident={target_resident}, mask={requested_mask:#06b}"
                         );
