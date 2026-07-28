@@ -17,17 +17,19 @@
 //!   ([`DramBw`]) may push the ready time PAST the latency arm when
 //!   the hierarchy read-miss stream exceeds the locked-operating-point
 //!   rate (it can only ever ADD delay).
-//! - `MemResponse` — completes the originating SM's L1 fill (or clears a
-//!   direct bypass/untagged barrier unit) at exactly the data-ready
-//!   time, then resumes that SM.
+//! - `L2Fill` — installs a reply-less read fetch at its data-ready time.
+//! - `MemResponse` — first completes any fill carried by the same request,
+//!   then completes the originating SM's L1 fill (or clears a direct
+//!   bypass/untagged barrier unit) at exactly the data-ready time and resumes
+//!   that SM. Stale L2 installation never suppresses the SM response.
 //!
 //! Store and other mutation-only requests take no response event: they
 //! change L2 state in arrival order and nothing waits on them (v0).
 //!
 //! Determinism: SM actors are created in ascending traced `sm_id` order,
-//! all scheduling flows through the `(time, seq)` queue, and the L2 is
-//! touched only from `L2Access` handlers — two runs over the same inputs
-//! produce bit-identical schedules and counters.
+//! all scheduling flows through the `(time, seq)` queue, and L2 lookup and
+//! fill mutation occur only in their typed event handlers — two runs over the
+//! same inputs produce bit-identical schedules and counters.
 
 use std::cmp::Reverse;
 use std::collections::{BTreeMap, BinaryHeap};
@@ -97,7 +99,7 @@ impl UnpricedBounds {
 
 use sim_arch::ArchId;
 use sim_engine::{EngineError, EventQueue, TargetId};
-use sim_mem::{L1Config, L2Counters, L2Model, L2Source, MemoryOrigin};
+use sim_mem::{L1Config, L2Counters, L2FillToken, L2Model, L2Source, MemoryOrigin};
 
 /// Per-actor pending due-times with the one choreography the driver
 /// repeats for responses and wakes: `push` at scheduling, `pop_expect`
@@ -494,6 +496,14 @@ pub enum SystemError {
         sector_mask: u8,
         local_sector_mask: u8,
     },
+    #[error(
+        "L2 fill schedule mismatch for sector {sector_id}: token={has_token}, ready={has_ready}"
+    )]
+    FillScheduleMismatch {
+        sector_id: i64,
+        has_token: bool,
+        has_ready: bool,
+    },
     #[error("unpriced response bound {bound} for SM index {sm} is absent")]
     UnpricedBoundMissing { sm: usize, bound: u64 },
     #[error("response ready time {ready} precedes lower bound {bound} for SM index {sm}")]
@@ -665,7 +675,11 @@ impl SpinGuard {
 enum Ev {
     SmWake,
     L2Access(MemRequest),
-    MemResponse(ReplyTo),
+    L2Fill(L2FillToken),
+    MemResponse {
+        reply: ReplyTo,
+        fill: Option<L2FillToken>,
+    },
 }
 
 struct L2ResponseCommit {
@@ -685,6 +699,7 @@ struct L2SystemCommit {
     read_sectors: u64,
     origin_read_sectors: [u64; 2],
     dram_free_fp: Option<u128>,
+    fill_ready: Option<u64>,
     response: Option<L2ResponseCommit>,
 }
 
@@ -1164,17 +1179,21 @@ pub fn simulate_kernel_shared(
                 #[cfg(test)]
                 maybe_inject_l2_access_error()?;
 
-                // Prepare the exact ascending mask walk against a private
-                // copy of its set. Every system-side calculation and response
-                // insertion succeeds before the L2 plan becomes visible.
+                // Prepare the exact ascending mask walk against a private copy
+                // of its set. The callback completes every fallible timing and
+                // counter calculation before the L2 plan commits; only then can
+                // the API issue a fill token. Event insertion follows
+                // immediately. If insertion fails, the kernel-private L2
+                // snapshot is discarded and the caller-owned model is unchanged.
                 let line = req.sector_id >> 2;
-                let (_, commit) = staged_l2.access_mask_transactional(
+                let (l2_access, commit) = staged_l2.access_mask_event_transactional(
                     line,
                     req.sector_mask,
                     req.class,
                     |preview| -> Result<L2SystemCommit, SystemError> {
-                        let requested_sectors = u64::from(preview.sectors);
-                        let counted_hits = u64::from(preview.counted_hits);
+                        let lookup = preview.lookup;
+                        let requested_sectors = u64::from(lookup.sectors);
+                        let counted_hits = u64::from(lookup.counted_hits);
                         let source_ix = req.source as usize;
                         let origin_masks = [
                             req.sector_mask & !req.local_sector_mask,
@@ -1183,7 +1202,7 @@ pub fn simulate_kernel_shared(
                         let origin_requested =
                             origin_masks.map(|mask| u64::from(mask.count_ones()));
                         let origin_hits = origin_masks
-                            .map(|mask| u64::from((mask & preview.counted_hit_mask).count_ones()));
+                            .map(|mask| u64::from((mask & lookup.counted_hit_mask).count_ones()));
                         let next_source_sectors = l2_by_source.sectors[source_ix]
                             .checked_add(requested_sectors)
                             .ok_or(SystemCounterError::Overflow {
@@ -1215,7 +1234,7 @@ pub fn simulate_kernel_shared(
                         let can_fetch =
                             req.class == sim_mem::L2OpClass::Read || req.reply != ReplyTo::None;
                         let fetch_mask = if can_fetch {
-                            req.sector_mask & !preview.present_mask
+                            req.sector_mask & !lookup.present_mask
                         } else {
                             0
                         };
@@ -1261,7 +1280,7 @@ pub fn simulate_kernel_shared(
                                 params.l1_miss_latency,
                             )?;
                             let unpriced_removal = unpriced.prepare_remove(sm_ix, bound)?;
-                            let latency_ready = if preview.all_present() {
+                            let latency_ready = if lookup.all_present() {
                                 bound
                             } else {
                                 checked_cycle_add(
@@ -1291,7 +1310,6 @@ pub fn simulate_kernel_shared(
                                 .ok_or(SystemError::CounterOverflow {
                                     counter: "DRAM origin bandwidth-delayed responses",
                                 })?;
-                            queue.schedule_at(ready, ev.target, Ev::MemResponse(req.reply))?;
                             Some(L2ResponseCommit {
                                 ready,
                                 origin_ix: response_origin_ix,
@@ -1303,6 +1321,19 @@ pub fn simulate_kernel_shared(
                             None
                         };
 
+                        let fill_ready = match (preview.fill_mask(), response.as_ref()) {
+                            (0, _) => None,
+                            (_, Some(response)) => Some(response.ready),
+                            (_, None) => Some(
+                                checked_cycle_add(
+                                    "DRAM fill visibility",
+                                    req.issue_time,
+                                    params.global_flat_latency,
+                                )?
+                                .max(bw_ready),
+                            ),
+                        };
+
                         Ok(L2SystemCommit {
                             source_ix,
                             source_sectors: next_source_sectors,
@@ -1312,10 +1343,37 @@ pub fn simulate_kernel_shared(
                             read_sectors: next_read_sectors,
                             origin_read_sectors: next_origin_read_sectors,
                             dram_free_fp: service_preview.map(|(done, _)| done),
+                            fill_ready,
                             response,
                         })
                     },
                 )?;
+
+                let has_token = l2_access.fill.is_some();
+                let has_ready = commit.fill_ready.is_some();
+                if has_token != has_ready {
+                    return Err(SystemError::FillScheduleMismatch {
+                        sector_id: req.sector_id,
+                        has_token,
+                        has_ready,
+                    });
+                }
+                // Reply-bearing fills travel in one event so completion is
+                // ordered before delivery without relying on two equal-time
+                // sequence numbers. Reply-less read fetches still receive a
+                // fill-only event; writes need neither kind of completion.
+                if let Some(response) = commit.response.as_ref() {
+                    queue.schedule_at(
+                        response.ready,
+                        ev.target,
+                        Ev::MemResponse {
+                            reply: req.reply,
+                            fill: l2_access.fill,
+                        },
+                    )?;
+                } else if let (Some(fill), Some(ready)) = (l2_access.fill, commit.fill_ready) {
+                    queue.schedule_at(ready, ev.target, Ev::L2Fill(fill))?;
+                }
 
                 l2_by_source.sectors[commit.source_ix] = commit.source_sectors;
                 l2_by_source.hits[commit.source_ix] = commit.source_hits;
@@ -1346,7 +1404,16 @@ pub fn simulate_kernel_shared(
                 }
                 spin.on_progress_event(ev.time);
             }
-            Ev::MemResponse(reply) => {
+            Ev::L2Fill(fill) => {
+                let _completion = staged_l2.complete_fill(fill)?;
+                spin.on_progress_event(ev.time);
+            }
+            Ev::MemResponse { reply, fill } => {
+                if let Some(fill) = fill {
+                    // `Stale` is an expected no-op after eviction; delivery of
+                    // data to the requester remains valid and must continue.
+                    let _completion = staged_l2.complete_fill(fill)?;
+                }
                 cores[sm_ix].preflight_response(reply, ev.time)?;
                 response_due.pop_expect("memory response", sm_ix, ev.time)?;
                 scratch.clear();
@@ -1533,6 +1600,20 @@ mod tests {
             sector_bytes: 32,
             num_slices: 2,
             associativity: 16,
+            replacement: L2Replacement::Lru,
+            slice_hash: SliceHash::LineMod,
+        })
+        .unwrap()
+    }
+
+    fn single_way_l2_model() -> L2Model {
+        L2Model::new(L2Config {
+            arch: ArchId::Sm86,
+            capacity_bytes: 128,
+            line_bytes: 128,
+            sector_bytes: 32,
+            num_slices: 1,
+            associativity: 1,
             replacement: L2Replacement::Lru,
             slice_hash: SliceHash::LineMod,
         })
@@ -2288,12 +2369,12 @@ mod tests {
         assert_eq!(r.l2.hits, 0);
     }
 
-    /// TWO SMs load the same sector: the later request (per the queue's
-    /// deterministic order) hits the line SM 0's miss installed, so its
-    /// consumer runs at the L2-HIT arm — cross-SM sharing that per-SM
-    /// constant latency cannot express.
+    /// Two same-cycle reads of one absent sector both observe it pending rather
+    /// than valid. FIFO order remains deterministic, but no implicit L2 MSHR or
+    /// request coalescing is invented: each read counts a miss, fetches, and
+    /// carries its own generation-bound completion.
     #[test]
-    fn second_sm_hits_the_line_the_first_sm_filled() {
+    fn same_cycle_pending_reads_remain_distinct_misses() {
         let sched = load_consumer_schedule();
         let per_sm = BTreeMap::from([(0, dependent_load_blocks(4)), (7, dependent_load_blocks(4))]);
         let mut l2 = l2_model();
@@ -2306,13 +2387,140 @@ mod tests {
             carded_bw(),
         )
         .unwrap();
-        // Both SMs issue their load at t=0; SM 0's access is processed
-        // first (lower seq), misses and installs; SM 7's SAME-cycle
-        // access then hits the (occupancy-model) resident sector.
-        assert_eq!(r.l2.misses, 1);
-        assert_eq!(r.l2.hits, 1);
-        assert_eq!(r.per_sm[&0].cycles, 424, "miss chain: DRAM arm");
-        assert_eq!(r.per_sm[&7].cycles, 245, "hit chain: L2-hit arm");
+        // Both L2 accesses are ordered before either data-ready completion at
+        // t=423. The first completion validates the sector and the second is an
+        // explicit duplicate completion; both SM responses still arrive.
+        assert_eq!(r.l2.misses, 2);
+        assert_eq!(r.l2.hits, 0);
+        assert_eq!(r.dram.read_sectors, 2);
+        assert_eq!(r.per_sm[&0].cycles, 424);
+        assert_eq!(r.per_sm[&7].cycles, 424);
+    }
+
+    /// A fill may lose its allocation before data returns. Installation is then
+    /// stale, but the data-ready event must still clear the originating SM's
+    /// barrier; stale cache state is not permission to drop a response.
+    #[test]
+    fn stale_fill_does_not_suppress_its_sm_response() {
+        let sched = load_consumer_schedule();
+        let per_sm = BTreeMap::from([(0, dependent_load_blocks(4)), (7, dependent_load_blocks(8))]);
+        let mut l2 = single_way_l2_model();
+        let r = simulate_kernel_shared(
+            &per_sm,
+            &sched,
+            &params(),
+            l1_config(),
+            &mut l2,
+            carded_bw(),
+        )
+        .unwrap();
+
+        assert_eq!(r.l2.misses, 2);
+        assert_eq!(r.l2.hits, 0);
+        assert_eq!(r.per_sm[&0].instructions_issued, 2);
+        assert_eq!(r.per_sm[&7].instructions_issued, 2);
+        assert_eq!(r.per_sm[&0].cycles, 424);
+        assert_eq!(r.per_sm[&7].cycles, 424);
+        assert_eq!(
+            l2.preview_mask(1, 1, L2OpClass::Read)
+                .unwrap()
+                .present_sectors,
+            0,
+            "the evicted fill was not resurrected"
+        );
+        assert_eq!(
+            l2.preview_mask(2, 1, L2OpClass::Read)
+                .unwrap()
+                .present_sectors,
+            1,
+            "the surviving allocation did not complete"
+        );
+    }
+
+    /// A cross-batch L1 merge emits a reply-less follow-up read. Its L2 token
+    /// must survive independently of the original line-fill response and install
+    /// at its own data-ready event, even after the SM has finished.
+    #[test]
+    fn replyless_followup_fetch_receives_a_fill_only_completion() {
+        let mut load_m = cb(1);
+        load_m.write_barrier = Some(barrier(2));
+        let mut load_l = cb(1);
+        load_l.write_barrier = Some(barrier(3));
+        let mut load_merge = cb(1);
+        load_merge.write_barrier = Some(barrier(2));
+        load_merge.wait_mask = wait_mask(0b000100);
+        let mut consumer = cb(1);
+        consumer.wait_mask = wait_mask(0b001100);
+        let sched = schedule(vec![
+            (0, slot(load_m, "LDG.E")),
+            (16, slot(load_l, "LDG.E")),
+            (32, slot(load_merge, "LDG.E")),
+            (48, slot(consumer, "EXIT")),
+        ]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                warp_slot: 0,
+                insts: vec![
+                    ReplayInst {
+                        pc: 0,
+                        kind: AccessKind::GlobalEligible {
+                            off: 0,
+                            len: 1,
+                            token: CacheOpToken::LdgECa,
+                        },
+                    },
+                    ReplayInst {
+                        pc: 16,
+                        kind: AccessKind::GlobalEligible {
+                            off: 1,
+                            len: 1,
+                            token: CacheOpToken::LdgECa,
+                        },
+                    },
+                    ReplayInst {
+                        pc: 32,
+                        kind: AccessKind::GlobalEligible {
+                            off: 2,
+                            len: 1,
+                            token: CacheOpToken::LdgECa,
+                        },
+                    },
+                    ReplayInst {
+                        pc: 48,
+                        kind: AccessKind::NonMemory,
+                    },
+                ],
+                // M: sector 80 (line 20). L: sector 40 (line 10).
+                // The later merge adds sector 41 to line 10.
+                sectors: vec![80, 40, 41],
+            }],
+        }];
+        let mut l2 = l2_model();
+        let r = simulate_kernel_shared(
+            &BTreeMap::from([(0, blocks)]),
+            &sched,
+            &params(),
+            l1_config(),
+            &mut l2,
+            carded_bw(),
+        )
+        .unwrap();
+
+        assert_eq!(r.per_sm[&0].instructions_issued, 4);
+        assert_eq!(r.per_sm[&0].cycles, 458);
+        assert_eq!(r.l2.misses, 3);
+        assert_eq!(r.l2.line_misses, 2);
+        assert_eq!(r.l2.sector_fill_misses, 1);
+        assert_eq!(r.dram.read_sectors, 3);
+        assert_eq!(r.terminal_event_time, Some(846));
+        assert_eq!(
+            l2.preview_mask(10, 0b0011, L2OpClass::Read)
+                .unwrap()
+                .present_sectors,
+            2,
+            "reply-less sector did not install after the original response"
+        );
     }
 
     /// Same-sector reuse WITHIN one SM is an L1 hit and never reaches
