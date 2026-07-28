@@ -39,6 +39,8 @@ use std::collections::{BTreeMap, HashMap};
 
 use sim_arch::ArchId;
 
+use crate::MemoryOrigin;
+
 pub const SECTOR_BYTES: u32 = 32;
 pub const SECTORS_PER_LINE: u32 = 4;
 pub const LINE_BYTES: u32 = SECTOR_BYTES * SECTORS_PER_LINE;
@@ -97,8 +99,11 @@ pub enum L1AccessError {
 
 /// Conservative mutation budget used by callers to prove that a multi-access
 /// batch cannot exhaust L1 counters or internal sequences before committing it.
-#[derive(Debug, Default, Clone, Copy)]
+/// The origin is mandatory so preflight covers the same accounting lane as the
+/// later mutations; there is intentionally no implicit Global default.
+#[derive(Debug, Clone, Copy)]
 pub struct L1MutationBudget {
+    pub origin: MemoryOrigin,
     pub eligible_sectors: u64,
     pub bypass_sectors: u64,
     pub bypass_atom_sectors: u64,
@@ -108,6 +113,21 @@ pub struct L1MutationBudget {
     pub new_fills: u64,
 }
 
+impl L1MutationBudget {
+    pub const fn for_origin(origin: MemoryOrigin) -> Self {
+        Self {
+            origin,
+            eligible_sectors: 0,
+            bypass_sectors: 0,
+            bypass_atom_sectors: 0,
+            untagged_sectors: 0,
+            store_sectors: 0,
+            recency_touches: 0,
+            new_fills: 0,
+        }
+    }
+}
+
 /// Outcome of one eligible sector access (after any MSHR stall retries).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AccessOutcome {
@@ -115,6 +135,26 @@ pub enum AccessOutcome {
     MissLineAlloc,
     MissSectorResident,
     Merge,
+}
+
+/// One origin's accounting lane. It mirrors the unified fields in
+/// [`L1Counters`] but carries no architecture of its own; provenance remains
+/// bound once on the enclosing physical-cache snapshot.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct L1OriginCounters {
+    pub hits: u64,
+    pub misses: u64,
+    pub merges: u64,
+    pub stall_events: u64,
+    pub line_fills: u64,
+    pub line_alloc_misses: u64,
+    pub sector_resident_misses: u64,
+    pub bypass_sectors: u64,
+    pub bypass_atom_sectors: u64,
+    pub untagged_sectors: u64,
+    pub store_sectors: u64,
+    pub store_hits: u64,
+    pub store_tag_hits: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -149,6 +189,9 @@ pub struct L1Counters {
     /// `store_hits` stays the v0 unified diagnostic until l1tex store
     /// accounting is scored against labels and one rule wins.
     pub store_tag_hits: u64,
+    /// Accounting provenance only. Cache tags, fills, MSHRs, recency, and
+    /// replacement remain unified physical state.
+    by_origin: [L1OriginCounters; 2],
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -194,6 +237,26 @@ pub enum L1CounterError {
     Architecture(#[from] sim_arch::ArchitectureProvenanceError),
     #[error("L1 counter '{field}' overflows u64 during aggregation")]
     Overflow { field: L1CounterField },
+    #[error("L1 {origin:?} origin counter '{field}' overflows u64 during aggregation")]
+    OriginOverflow {
+        origin: MemoryOrigin,
+        field: L1CounterField,
+    },
+    #[error("L1 origin partition for '{field}' overflows u64: Global={global}, Local={local}")]
+    OriginPartitionOverflow {
+        field: L1CounterField,
+        global: u64,
+        local: u64,
+    },
+    #[error(
+        "L1 origin partition mismatch for '{field}': unified={unified}, Global={global}, Local={local}"
+    )]
+    OriginPartitionMismatch {
+        field: L1CounterField,
+        unified: u64,
+        global: u64,
+        local: u64,
+    },
 }
 
 fn checked_counter_add(
@@ -203,6 +266,87 @@ fn checked_counter_add(
 ) -> Result<u64, L1CounterError> {
     left.checked_add(right)
         .ok_or(L1CounterError::Overflow { field })
+}
+
+fn origin_counter_mut(counters: &mut L1OriginCounters, field: L1CounterField) -> &mut u64 {
+    match field {
+        L1CounterField::Hits => &mut counters.hits,
+        L1CounterField::Misses => &mut counters.misses,
+        L1CounterField::Merges => &mut counters.merges,
+        L1CounterField::StallEvents => &mut counters.stall_events,
+        L1CounterField::LineFills => &mut counters.line_fills,
+        L1CounterField::LineAllocMisses => &mut counters.line_alloc_misses,
+        L1CounterField::SectorResidentMisses => &mut counters.sector_resident_misses,
+        L1CounterField::BypassSectors => &mut counters.bypass_sectors,
+        L1CounterField::BypassAtomSectors => &mut counters.bypass_atom_sectors,
+        L1CounterField::UntaggedSectors => &mut counters.untagged_sectors,
+        L1CounterField::StoreSectors => &mut counters.store_sectors,
+        L1CounterField::StoreHits => &mut counters.store_hits,
+        L1CounterField::StoreTagHits => &mut counters.store_tag_hits,
+    }
+}
+
+fn add_origin_fields_checked(
+    counters: &L1OriginCounters,
+    origin: MemoryOrigin,
+    deltas: &[(L1CounterField, u64)],
+) -> Result<L1OriginCounters, L1CounterError> {
+    let mut next = *counters;
+    for &(field, delta) in deltas {
+        let counter = origin_counter_mut(&mut next, field);
+        *counter = counter
+            .checked_add(delta)
+            .ok_or(L1CounterError::OriginOverflow { origin, field })?;
+    }
+    Ok(next)
+}
+
+fn origin_deltas(counters: &L1OriginCounters) -> [(L1CounterField, u64); 13] {
+    [
+        (L1CounterField::Hits, counters.hits),
+        (L1CounterField::Misses, counters.misses),
+        (L1CounterField::Merges, counters.merges),
+        (L1CounterField::StallEvents, counters.stall_events),
+        (L1CounterField::LineFills, counters.line_fills),
+        (L1CounterField::LineAllocMisses, counters.line_alloc_misses),
+        (
+            L1CounterField::SectorResidentMisses,
+            counters.sector_resident_misses,
+        ),
+        (L1CounterField::BypassSectors, counters.bypass_sectors),
+        (
+            L1CounterField::BypassAtomSectors,
+            counters.bypass_atom_sectors,
+        ),
+        (L1CounterField::UntaggedSectors, counters.untagged_sectors),
+        (L1CounterField::StoreSectors, counters.store_sectors),
+        (L1CounterField::StoreHits, counters.store_hits),
+        (L1CounterField::StoreTagHits, counters.store_tag_hits),
+    ]
+}
+
+fn unified_deltas(counters: &L1Counters) -> [(L1CounterField, u64); 13] {
+    [
+        (L1CounterField::Hits, counters.hits),
+        (L1CounterField::Misses, counters.misses),
+        (L1CounterField::Merges, counters.merges),
+        (L1CounterField::StallEvents, counters.stall_events),
+        (L1CounterField::LineFills, counters.line_fills),
+        (L1CounterField::LineAllocMisses, counters.line_alloc_misses),
+        (
+            L1CounterField::SectorResidentMisses,
+            counters.sector_resident_misses,
+        ),
+        (L1CounterField::BypassSectors, counters.bypass_sectors),
+        (
+            L1CounterField::BypassAtomSectors,
+            counters.bypass_atom_sectors,
+        ),
+        (L1CounterField::UntaggedSectors, counters.untagged_sectors),
+        (L1CounterField::StoreSectors, counters.store_sectors),
+        (L1CounterField::StoreHits, counters.store_hits),
+        (L1CounterField::StoreTagHits, counters.store_tag_hits),
+    ]
 }
 
 impl Default for L1Counters {
@@ -222,6 +366,7 @@ impl Default for L1Counters {
             store_sectors: 0,
             store_hits: 0,
             store_tag_hits: 0,
+            by_origin: [L1OriginCounters::default(); 2],
         }
     }
 }
@@ -238,7 +383,81 @@ impl L1Counters {
         self.arch
     }
 
-    fn add_fields_checked(&self, deltas: &[(L1CounterField, u64)]) -> Result<Self, L1CounterError> {
+    pub fn origin(&self, origin: MemoryOrigin) -> L1OriginCounters {
+        self.by_origin[origin.index()]
+    }
+
+    /// Verify that every unified observer equals the checked sum of its two
+    /// accounting lanes. This never examines or partitions physical cache state.
+    pub fn validate_origin_partition(&self) -> Result<(), L1CounterError> {
+        let global = self.origin(MemoryOrigin::Global);
+        let local = self.origin(MemoryOrigin::Local);
+        for ((field, unified), (_, global), (_, local)) in unified_deltas(self)
+            .into_iter()
+            .zip(origin_deltas(&global))
+            .zip(origin_deltas(&local))
+            .map(|((unified, global), local)| (unified, global, local))
+        {
+            let partition =
+                global
+                    .checked_add(local)
+                    .ok_or(L1CounterError::OriginPartitionOverflow {
+                        field,
+                        global,
+                        local,
+                    })?;
+            if unified != partition {
+                return Err(L1CounterError::OriginPartitionMismatch {
+                    field,
+                    unified,
+                    global,
+                    local,
+                });
+            }
+        }
+        Ok(())
+    }
+
+    /// Build a coherent synthetic snapshot from explicit origin lanes.
+    pub fn from_origins(
+        arch: ArchId,
+        global: L1OriginCounters,
+        local: L1OriginCounters,
+    ) -> Result<Self, L1CounterError> {
+        let counters = Self::for_arch(arch)
+            .add_fields_checked(MemoryOrigin::Global, &origin_deltas(&global))?;
+        counters.add_fields_checked(MemoryOrigin::Local, &origin_deltas(&local))
+    }
+
+    /// Explicitly attribute an already-built unified snapshot to one origin.
+    /// This is for synthetic composition/tests that construct raw counters;
+    /// modeled cache traffic must use the origin-bearing mutation APIs instead.
+    pub fn with_unified_origin(mut self, origin: MemoryOrigin) -> Self {
+        let unified = L1OriginCounters {
+            hits: self.hits,
+            misses: self.misses,
+            merges: self.merges,
+            stall_events: self.stall_events,
+            line_fills: self.line_fills,
+            line_alloc_misses: self.line_alloc_misses,
+            sector_resident_misses: self.sector_resident_misses,
+            bypass_sectors: self.bypass_sectors,
+            bypass_atom_sectors: self.bypass_atom_sectors,
+            untagged_sectors: self.untagged_sectors,
+            store_sectors: self.store_sectors,
+            store_hits: self.store_hits,
+            store_tag_hits: self.store_tag_hits,
+        };
+        self.by_origin = [L1OriginCounters::default(); 2];
+        self.by_origin[origin.index()] = unified;
+        self
+    }
+
+    fn add_fields_checked(
+        &self,
+        origin: MemoryOrigin,
+        deltas: &[(L1CounterField, u64)],
+    ) -> Result<Self, L1CounterError> {
         let mut next = *self;
         for &(field, delta) in deltas {
             let counter = match field {
@@ -258,6 +477,8 @@ impl L1Counters {
             };
             *counter = checked_counter_add(field, *counter, delta)?;
         }
+        next.by_origin[origin.index()] =
+            add_origin_fields_checked(&self.by_origin[origin.index()], origin, deltas)?;
         Ok(next)
     }
 
@@ -328,20 +549,39 @@ impl L1Counters {
             self.store_tag_hits,
             other.store_tag_hits,
         )?;
+        let mut by_origin = self.by_origin;
+        for origin in MemoryOrigin::ALL {
+            by_origin[origin.index()] = add_origin_fields_checked(
+                &self.by_origin[origin.index()],
+                origin,
+                &origin_deltas(&other.by_origin[origin.index()]),
+            )?;
+        }
 
-        self.hits = hits;
-        self.misses = misses;
-        self.merges = merges;
-        self.stall_events = stall_events;
-        self.line_fills = line_fills;
-        self.line_alloc_misses = line_alloc_misses;
-        self.sector_resident_misses = sector_resident_misses;
-        self.bypass_sectors = bypass_sectors;
-        self.bypass_atom_sectors = bypass_atom_sectors;
-        self.untagged_sectors = untagged_sectors;
-        self.store_sectors = store_sectors;
-        self.store_hits = store_hits;
-        self.store_tag_hits = store_tag_hits;
+        let next = Self {
+            arch: self.arch,
+            hits,
+            misses,
+            merges,
+            stall_events,
+            line_fills,
+            line_alloc_misses,
+            sector_resident_misses,
+            bypass_sectors,
+            bypass_atom_sectors,
+            untagged_sectors,
+            store_sectors,
+            store_hits,
+            store_tag_hits,
+            by_origin,
+        };
+        // Arithmetic precedence stays unified first, then origin lanes. Only
+        // after those operations fit do public aggregation boundaries reject a
+        // malformed input partition (including two defects that would cancel).
+        self.validate_origin_partition()?;
+        other.validate_origin_partition()?;
+        next.validate_origin_partition()?;
+        *self = next;
         Ok(())
     }
 }
@@ -680,9 +920,10 @@ impl L1Cache {
 
     fn apply_counter_deltas(
         &mut self,
+        origin: MemoryOrigin,
         deltas: &[(L1CounterField, u64)],
     ) -> Result<(), L1AccessError> {
-        self.counters = self.counters.add_fields_checked(deltas)?;
+        self.counters = self.counters.add_fields_checked(origin, deltas)?;
         Ok(())
     }
 
@@ -690,27 +931,30 @@ impl L1Cache {
     /// cache state. Callers can fall back to exact shadow replay only when a
     /// near-limit budget is too conservative.
     pub fn preflight_mutation_budget(&self, budget: L1MutationBudget) -> Result<(), L1AccessError> {
-        self.counters.add_fields_checked(&[
-            (L1CounterField::Hits, budget.eligible_sectors),
-            (L1CounterField::Misses, budget.eligible_sectors),
-            (L1CounterField::Merges, budget.eligible_sectors),
-            (L1CounterField::StallEvents, budget.eligible_sectors),
-            (L1CounterField::LineFills, budget.eligible_sectors),
-            (L1CounterField::LineAllocMisses, budget.eligible_sectors),
-            (
-                L1CounterField::SectorResidentMisses,
-                budget.eligible_sectors,
-            ),
-            (L1CounterField::BypassSectors, budget.bypass_sectors),
-            (
-                L1CounterField::BypassAtomSectors,
-                budget.bypass_atom_sectors,
-            ),
-            (L1CounterField::UntaggedSectors, budget.untagged_sectors),
-            (L1CounterField::StoreSectors, budget.store_sectors),
-            (L1CounterField::StoreHits, budget.store_sectors),
-            (L1CounterField::StoreTagHits, budget.store_sectors),
-        ])?;
+        self.counters.add_fields_checked(
+            budget.origin,
+            &[
+                (L1CounterField::Hits, budget.eligible_sectors),
+                (L1CounterField::Misses, budget.eligible_sectors),
+                (L1CounterField::Merges, budget.eligible_sectors),
+                (L1CounterField::StallEvents, budget.eligible_sectors),
+                (L1CounterField::LineFills, budget.eligible_sectors),
+                (L1CounterField::LineAllocMisses, budget.eligible_sectors),
+                (
+                    L1CounterField::SectorResidentMisses,
+                    budget.eligible_sectors,
+                ),
+                (L1CounterField::BypassSectors, budget.bypass_sectors),
+                (
+                    L1CounterField::BypassAtomSectors,
+                    budget.bypass_atom_sectors,
+                ),
+                (L1CounterField::UntaggedSectors, budget.untagged_sectors),
+                (L1CounterField::StoreSectors, budget.store_sectors),
+                (L1CounterField::StoreHits, budget.store_sectors),
+                (L1CounterField::StoreTagHits, budget.store_sectors),
+            ],
+        )?;
         let in_flight =
             u64::try_from(self.mshr_in_use()).map_err(|_| L1AccessError::SequenceOverflow {
                 sequence: "recency",
@@ -907,6 +1151,7 @@ impl L1Cache {
     /// cannot reject a valid merge, stall, or exact-domain result.
     fn access_core(
         &mut self,
+        origin: MemoryOrigin,
         sector_id: i64,
         fill_request: FillRequest,
     ) -> Result<CoreAccess, L1AccessError> {
@@ -914,9 +1159,10 @@ impl L1Cache {
         let sector = (sector_id & 3) as u8;
         if let Some(&(pending, _)) = self.line_fills.get(&line) {
             Self::preflight_fill_timing(pending, fill_request.timing())?;
-            let counters = self
-                .counters
-                .add_fields_checked(&[(L1CounterField::Merges, 1), (L1CounterField::Misses, 1)])?;
+            let counters = self.counters.add_fields_checked(
+                origin,
+                &[(L1CounterField::Merges, 1), (L1CounterField::Misses, 1)],
+            )?;
             self.counters = counters;
             *self.sectors.entry(line).or_default() |= 1 << sector;
             return Ok(CoreAccess::LineMerge { pending });
@@ -933,16 +1179,17 @@ impl L1Cache {
             self.next_stamp.preflight("recency", 1)?;
             let counters = self
                 .counters
-                .add_fields_checked(&[(L1CounterField::Hits, 1)])?;
+                .add_fields_checked(origin, &[(L1CounterField::Hits, 1)])?;
             self.counters = counters;
             self.touch_mru(line)?;
             return Ok(CoreAccess::Hit { ready });
         }
         if line_resident && let Some(&(pending, _)) = self.sector_fills.get(&(line, sector)) {
             Self::preflight_fill_timing(pending, fill_request.timing())?;
-            let counters = self
-                .counters
-                .add_fields_checked(&[(L1CounterField::Merges, 1), (L1CounterField::Misses, 1)])?;
+            let counters = self.counters.add_fields_checked(
+                origin,
+                &[(L1CounterField::Merges, 1), (L1CounterField::Misses, 1)],
+            )?;
             self.counters = counters;
             return Ok(CoreAccess::SectorMerge { pending });
         }
@@ -950,22 +1197,28 @@ impl L1Cache {
         if let Some(cap) = self.cfg.mshr_count
             && self.mshr_in_use() >= cap as usize
         {
-            self.apply_counter_deltas(&[(L1CounterField::StallEvents, 1)])?;
+            self.apply_counter_deltas(origin, &[(L1CounterField::StallEvents, 1)])?;
             return Ok(CoreAccess::Stalled);
         }
         let fill_due = fill_request.fill_due(self.cfg.miss_latency)?;
         let (seq, next_fill_seq) = self.fill_seq.allocate("fill")?;
         let counters = if line_resident {
-            self.counters.add_fields_checked(&[
-                (L1CounterField::Misses, 1),
-                (L1CounterField::SectorResidentMisses, 1),
-            ])?
+            self.counters.add_fields_checked(
+                origin,
+                &[
+                    (L1CounterField::Misses, 1),
+                    (L1CounterField::SectorResidentMisses, 1),
+                ],
+            )?
         } else {
-            self.counters.add_fields_checked(&[
-                (L1CounterField::Misses, 1),
-                (L1CounterField::LineAllocMisses, 1),
-                (L1CounterField::LineFills, 1),
-            ])?
+            self.counters.add_fields_checked(
+                origin,
+                &[
+                    (L1CounterField::Misses, 1),
+                    (L1CounterField::LineAllocMisses, 1),
+                    (L1CounterField::LineFills, 1),
+                ],
+            )?
         };
         self.fill_seq = next_fill_seq;
         self.counters = counters;
@@ -986,12 +1239,13 @@ impl L1Cache {
 
     fn access_single(
         &mut self,
+        origin: MemoryOrigin,
         sector_id: i64,
         now: u64,
         readiness: Readiness,
     ) -> Result<SingleOutcome, L1AccessError> {
         self.apply_fills(now)?;
-        match self.access_core(sector_id, FillRequest::Constant { now, readiness })? {
+        match self.access_core(origin, sector_id, FillRequest::Constant { now, readiness })? {
             CoreAccess::Hit { ready } => Ok(SingleOutcome::Done(AccessOutcome::Hit, ready)),
             CoreAccess::LineMerge { pending } | CoreAccess::SectorMerge { pending } => {
                 let pending = pending.timed().ok_or(L1AccessError::FillTimingMismatch {
@@ -1028,13 +1282,14 @@ impl L1Cache {
 
     fn access_eligible_constant_impl(
         &mut self,
+        origin: MemoryOrigin,
         sector_id: i64,
         now: u64,
     ) -> Result<(AccessOutcome, u64), L1AccessError> {
         self.commit_latch(FillTiming::Constant);
         let mut t = now;
         loop {
-            match self.access_single(sector_id, t, Readiness::Observed)? {
+            match self.access_single(origin, sector_id, t, Readiness::Observed)? {
                 SingleOutcome::Done(outcome, Some(ready)) => return Ok((outcome, ready)),
                 SingleOutcome::Done(_, None) => {
                     unreachable!("observed constant access omitted its ready time")
@@ -1048,13 +1303,14 @@ impl L1Cache {
 
     fn access_eligible_constant_unobserved_impl(
         &mut self,
+        origin: MemoryOrigin,
         sector_id: i64,
         now: u64,
     ) -> Result<AccessOutcome, L1AccessError> {
         self.commit_latch(FillTiming::Constant);
         let mut t = now;
         loop {
-            match self.access_single(sector_id, t, Readiness::Unobserved)? {
+            match self.access_single(origin, sector_id, t, Readiness::Unobserved)? {
                 SingleOutcome::Done(outcome, _) => return Ok(outcome),
                 SingleOutcome::Stall { retry_at } => {
                     t = retry_at.max(Self::checked_time_add("stall retry", t, 1)?);
@@ -1069,6 +1325,7 @@ impl L1Cache {
     /// time.
     pub fn access_eligible(
         &mut self,
+        origin: MemoryOrigin,
         sector_id: i64,
         now: u64,
     ) -> Result<(AccessOutcome, u64), L1AccessError> {
@@ -1077,17 +1334,17 @@ impl L1Cache {
             eligible_sectors: 1,
             recency_touches: 1,
             new_fills: 1,
-            ..L1MutationBudget::default()
+            ..L1MutationBudget::for_origin(origin)
         };
         let fast_path_safe = self.preflight_mutation_budget(budget).is_ok()
             && self.preflight_constant_access_timing(now).is_ok();
         if !fast_path_safe {
             let mut shadow = self.clone();
-            let outcome = shadow.access_eligible_constant_impl(sector_id, now)?;
+            let outcome = shadow.access_eligible_constant_impl(origin, sector_id, now)?;
             *self = shadow;
             return Ok(outcome);
         }
-        self.access_eligible_constant_impl(sector_id, now)
+        self.access_eligible_constant_impl(origin, sector_id, now)
     }
 
     /// Mutate constant-mode cache state for one eligible sector without
@@ -1096,6 +1353,7 @@ impl L1Cache {
     /// barrier consumes.
     pub fn access_eligible_unobserved(
         &mut self,
+        origin: MemoryOrigin,
         sector_id: i64,
         now: u64,
     ) -> Result<AccessOutcome, L1AccessError> {
@@ -1104,38 +1362,41 @@ impl L1Cache {
             eligible_sectors: 1,
             recency_touches: 1,
             new_fills: 1,
-            ..L1MutationBudget::default()
+            ..L1MutationBudget::for_origin(origin)
         };
         let fast_path_safe = self.preflight_mutation_budget(budget).is_ok()
             && self.preflight_constant_access_timing(now).is_ok();
         if !fast_path_safe {
             let mut shadow = self.clone();
-            let outcome = shadow.access_eligible_constant_unobserved_impl(sector_id, now)?;
+            let outcome =
+                shadow.access_eligible_constant_unobserved_impl(origin, sector_id, now)?;
             *self = shadow;
             return Ok(outcome);
         }
-        self.access_eligible_constant_unobserved_impl(sector_id, now)
+        self.access_eligible_constant_unobserved_impl(origin, sector_id, now)
     }
 
     fn access_eligible_event_core(
         &mut self,
+        origin: MemoryOrigin,
         sector_id: i64,
         now: u64,
         readiness: Readiness,
     ) -> Result<CoreAccess, L1AccessError> {
         self.commit_latch(FillTiming::Event);
-        self.access_core(sector_id, FillRequest::Event { now, readiness })
+        self.access_core(origin, sector_id, FillRequest::Event { now, readiness })
     }
 
     fn access_eligible_event_impl(
         &mut self,
+        origin: MemoryOrigin,
         sector_id: i64,
         now: u64,
     ) -> Result<EvAccess, L1AccessError> {
         let line = sector_id >> 2;
         let sector = (sector_id & 3) as u8;
         Ok(
-            match self.access_eligible_event_core(sector_id, now, Readiness::Observed)? {
+            match self.access_eligible_event_core(origin, sector_id, now, Readiness::Observed)? {
                 CoreAccess::Hit { ready: Some(ready) } => EvAccess::Hit { ready },
                 CoreAccess::Hit { ready: None } => {
                     unreachable!("observed event access omitted its ready time")
@@ -1159,13 +1420,14 @@ impl L1Cache {
 
     fn access_eligible_event_unobserved_impl(
         &mut self,
+        origin: MemoryOrigin,
         sector_id: i64,
         now: u64,
     ) -> Result<EvAccessUnobserved, L1AccessError> {
         let line = sector_id >> 2;
         let sector = (sector_id & 3) as u8;
         Ok(
-            match self.access_eligible_event_core(sector_id, now, Readiness::Unobserved)? {
+            match self.access_eligible_event_core(origin, sector_id, now, Readiness::Unobserved)? {
                 CoreAccess::Hit { .. } => EvAccessUnobserved::Hit,
                 CoreAccess::LineMerge { .. } => EvAccessUnobserved::MergedPending {
                     fill: FillKey::Line(line),
@@ -1202,6 +1464,7 @@ impl L1Cache {
     /// of order.
     pub fn access_eligible_ev(
         &mut self,
+        origin: MemoryOrigin,
         sector_id: i64,
         now: u64,
     ) -> Result<EvAccess, L1AccessError> {
@@ -1210,21 +1473,22 @@ impl L1Cache {
             eligible_sectors: 1,
             recency_touches: 1,
             new_fills: 1,
-            ..L1MutationBudget::default()
+            ..L1MutationBudget::for_origin(origin)
         };
         if self.preflight_mutation_budget(budget).is_err() {
             let mut shadow = self.clone();
-            let outcome = shadow.access_eligible_event_impl(sector_id, now)?;
+            let outcome = shadow.access_eligible_event_impl(origin, sector_id, now)?;
             *self = shadow;
             return Ok(outcome);
         }
-        self.access_eligible_event_impl(sector_id, now)
+        self.access_eligible_event_impl(origin, sector_id, now)
     }
 
     /// Event-mode cache mutation when no dependence barrier consumes a hit's
     /// ready time. Miss, merge, stall, fill ownership, and counters are unchanged.
     pub fn access_eligible_ev_unobserved(
         &mut self,
+        origin: MemoryOrigin,
         sector_id: i64,
         now: u64,
     ) -> Result<EvAccessUnobserved, L1AccessError> {
@@ -1233,15 +1497,15 @@ impl L1Cache {
             eligible_sectors: 1,
             recency_touches: 1,
             new_fills: 1,
-            ..L1MutationBudget::default()
+            ..L1MutationBudget::for_origin(origin)
         };
         if self.preflight_mutation_budget(budget).is_err() {
             let mut shadow = self.clone();
-            let outcome = shadow.access_eligible_event_unobserved_impl(sector_id, now)?;
+            let outcome = shadow.access_eligible_event_unobserved_impl(origin, sector_id, now)?;
             *self = shadow;
             return Ok(outcome);
         }
-        self.access_eligible_event_unobserved_impl(sector_id, now)
+        self.access_eligible_event_unobserved_impl(origin, sector_id, now)
     }
 
     /// Complete an event-mode fill AT the response event's time. A
@@ -1289,7 +1553,12 @@ impl L1Cache {
         }
     }
 
-    fn probe_store_impl(&mut self, sector_id: i64, now: u64) -> Result<bool, L1AccessError> {
+    fn probe_store_impl(
+        &mut self,
+        origin: MemoryOrigin,
+        sector_id: i64,
+        now: u64,
+    ) -> Result<bool, L1AccessError> {
         let line = sector_id >> 2;
         let sector = (sector_id & 3) as u8;
         self.apply_fills(now)?;
@@ -1302,11 +1571,14 @@ impl L1Cache {
         if hit {
             self.next_stamp.preflight("recency", 1)?;
         }
-        let counters = self.counters.add_fields_checked(&[
-            (L1CounterField::StoreSectors, 1),
-            (L1CounterField::StoreTagHits, u64::from(tag_resident)),
-            (L1CounterField::StoreHits, u64::from(hit)),
-        ])?;
+        let counters = self.counters.add_fields_checked(
+            origin,
+            &[
+                (L1CounterField::StoreSectors, 1),
+                (L1CounterField::StoreTagHits, u64::from(tag_resident)),
+                (L1CounterField::StoreHits, u64::from(hit)),
+            ],
+        )?;
         self.counters = counters;
         if hit {
             self.touch_mru(line)?;
@@ -1322,35 +1594,52 @@ impl L1Cache {
     /// rule (`store_tag_hits`) — without changing state behavior (MRU
     /// touch stays on the sector-valid hit only, preserving the L1
     /// state trajectory the scored op_ld exactness was proven on).
-    pub fn probe_store(&mut self, sector_id: i64, now: u64) -> Result<bool, L1AccessError> {
+    pub fn probe_store(
+        &mut self,
+        origin: MemoryOrigin,
+        sector_id: i64,
+        now: u64,
+    ) -> Result<bool, L1AccessError> {
         let budget = L1MutationBudget {
             store_sectors: 1,
             recency_touches: 1,
-            ..L1MutationBudget::default()
+            ..L1MutationBudget::for_origin(origin)
         };
         if self.preflight_mutation_budget(budget).is_err() {
             let mut shadow = self.clone();
-            let hit = shadow.probe_store_impl(sector_id, now)?;
+            let hit = shadow.probe_store_impl(origin, sector_id, now)?;
             *self = shadow;
             return Ok(hit);
         }
-        self.probe_store_impl(sector_id, now)
+        self.probe_store_impl(origin, sector_id, now)
     }
 
     /// Manifest-tagged ineligible sectors (the ported bypass counter).
     /// `atom` marks the write-class (ATOM-token) subset — the caller
     /// owns the token, this cache never sees opcodes.
-    pub fn count_bypass(&mut self, sectors: u64, atom: bool) -> Result<(), L1AccessError> {
-        self.apply_counter_deltas(&[
-            (L1CounterField::BypassSectors, sectors),
-            (L1CounterField::BypassAtomSectors, sectors * u64::from(atom)),
-        ])
+    pub fn count_bypass(
+        &mut self,
+        origin: MemoryOrigin,
+        sectors: u64,
+        atom: bool,
+    ) -> Result<(), L1AccessError> {
+        self.apply_counter_deltas(
+            origin,
+            &[
+                (L1CounterField::BypassSectors, sectors),
+                (L1CounterField::BypassAtomSectors, sectors * u64::from(atom)),
+            ],
+        )
     }
 
     /// Global-class sectors whose pc the classifier did not tag (v0
     /// unified-denominator extension).
-    pub fn count_untagged(&mut self, sectors: u64) -> Result<(), L1AccessError> {
-        self.apply_counter_deltas(&[(L1CounterField::UntaggedSectors, sectors)])
+    pub fn count_untagged(
+        &mut self,
+        origin: MemoryOrigin,
+        sectors: u64,
+    ) -> Result<(), L1AccessError> {
+        self.apply_counter_deltas(origin, &[(L1CounterField::UntaggedSectors, sectors)])
     }
 }
 
@@ -1588,11 +1877,13 @@ mod tests {
     use super::*;
 
     fn access(l1: &mut L1Cache, sector: i64, now: u64) -> (AccessOutcome, u64) {
-        l1.access_eligible(sector, now).unwrap()
+        l1.access_eligible(MemoryOrigin::Global, sector, now)
+            .unwrap()
     }
 
     fn access_ev(l1: &mut L1Cache, sector: i64, now: u64) -> EvAccess {
-        l1.access_eligible_ev(sector, now).unwrap()
+        l1.access_eligible_ev(MemoryOrigin::Global, sector, now)
+            .unwrap()
     }
 
     fn complete(l1: &mut L1Cache, fill: FillKey) -> bool {
@@ -1600,7 +1891,7 @@ mod tests {
     }
 
     fn store(l1: &mut L1Cache, sector: i64, now: u64) -> bool {
-        l1.probe_store(sector, now).unwrap()
+        l1.probe_store(MemoryOrigin::Global, sector, now).unwrap()
     }
 
     fn cache(capacity: u64, mshr: Option<u32>) -> L1Cache {
@@ -1638,6 +1929,45 @@ mod tests {
             c.line_alloc_misses + c.sector_resident_misses + c.merges,
             "miss == line_alloc + sector_resident + merge"
         );
+    }
+
+    fn assert_origin_partition(c: &L1Counters) {
+        let global = c.origin(MemoryOrigin::Global);
+        let local = c.origin(MemoryOrigin::Local);
+        macro_rules! partition {
+            ($field:ident) => {
+                assert_eq!(
+                    c.$field,
+                    global.$field + local.$field,
+                    concat!(stringify!($field), " origin partition")
+                );
+            };
+        }
+        partition!(hits);
+        partition!(misses);
+        partition!(merges);
+        partition!(stall_events);
+        partition!(line_fills);
+        partition!(line_alloc_misses);
+        partition!(sector_resident_misses);
+        partition!(bypass_sectors);
+        partition!(bypass_atom_sectors);
+        partition!(untagged_sectors);
+        partition!(store_sectors);
+        partition!(store_hits);
+        partition!(store_tag_hits);
+        for (name, lane) in [("Global", global), ("Local", local)] {
+            assert_eq!(
+                lane.misses,
+                lane.line_alloc_misses + lane.sector_resident_misses + lane.merges,
+                "{name} miss partition"
+            );
+            assert!(
+                lane.bypass_atom_sectors <= lane.bypass_sectors,
+                "{name} bypass-ATOM subset"
+            );
+        }
+        assert!(c.bypass_atom_sectors <= c.bypass_sectors);
     }
 
     #[test]
@@ -1696,16 +2026,20 @@ mod tests {
 
         let mut constant = L1Cache::new(cfg).unwrap();
         assert_eq!(
-            constant.access_eligible_unobserved(0, 0).unwrap(),
+            constant
+                .access_eligible_unobserved(MemoryOrigin::Global, 0, 0)
+                .unwrap(),
             AccessOutcome::MissLineAlloc
         );
         assert_eq!(
-            constant.access_eligible_unobserved(0, 3).unwrap(),
+            constant
+                .access_eligible_unobserved(MemoryOrigin::Global, 0, 3)
+                .unwrap(),
             AccessOutcome::Hit
         );
         let before_observed = constant.clone();
         assert!(matches!(
-            constant.access_eligible(0, u64::MAX - 1),
+            constant.access_eligible(MemoryOrigin::Global,0, u64::MAX - 1),
             Err(L1AccessError::TimeOverflow {
                 operation: "hit visibility",
                 base,
@@ -1715,19 +2049,22 @@ mod tests {
         assert_cache_state_eq(&constant, &before_observed);
         assert_eq!(
             constant
-                .access_eligible_unobserved(0, u64::MAX - 1)
+                .access_eligible_unobserved(MemoryOrigin::Global, 0, u64::MAX - 1)
                 .unwrap(),
             AccessOutcome::Hit
         );
 
         let mut event = L1Cache::new(cfg).unwrap();
-        let EvAccess::MissRequest { fill } = event.access_eligible_ev(0, 0).unwrap() else {
+        let EvAccess::MissRequest { fill } = event
+            .access_eligible_ev(MemoryOrigin::Global, 0, 0)
+            .unwrap()
+        else {
             panic!("expected event-mode prefill miss");
         };
         event.complete_fill(fill).unwrap();
         let before_observed = event.clone();
         assert!(matches!(
-            event.access_eligible_ev(0, u64::MAX - 1),
+            event.access_eligible_ev(MemoryOrigin::Global,0, u64::MAX - 1),
             Err(L1AccessError::TimeOverflow {
                 operation: "event hit visibility",
                 base,
@@ -1737,7 +2074,7 @@ mod tests {
         assert_cache_state_eq(&event, &before_observed);
         assert_eq!(
             event
-                .access_eligible_ev_unobserved(0, u64::MAX - 1)
+                .access_eligible_ev_unobserved(MemoryOrigin::Global, 0, u64::MAX - 1)
                 .unwrap(),
             EvAccessUnobserved::Hit
         );
@@ -1756,7 +2093,7 @@ mod tests {
         let before = l1.clone();
 
         assert!(matches!(
-            l1.access_eligible_unobserved(0, u64::MAX - 1),
+            l1.access_eligible_unobserved(MemoryOrigin::Global,0, u64::MAX - 1),
             Err(L1AccessError::TimeOverflow {
                 operation: "miss visibility",
                 base,
@@ -1777,7 +2114,7 @@ mod tests {
         };
         let mut l1 = L1Cache::new(config).unwrap();
         assert_eq!(
-            l1.access_eligible(0, 0).unwrap(),
+            l1.access_eligible(MemoryOrigin::Global, 0, 0).unwrap(),
             (AccessOutcome::MissLineAlloc, u64::MAX)
         );
         assert_eq!(l1.min_fill_due, Some(u64::MAX));
@@ -1794,7 +2131,7 @@ mod tests {
         let mut overflow = L1Cache::new(config).unwrap();
         let before = overflow.clone();
         assert_eq!(
-            overflow.access_eligible(0, 1),
+            overflow.access_eligible(MemoryOrigin::Global, 0, 1),
             Err(L1AccessError::TimeOverflow {
                 operation: "miss visibility",
                 base: 1,
@@ -1815,12 +2152,14 @@ mod tests {
         })
         .unwrap();
         assert_eq!(
-            l1.access_eligible(0, u64::MAX - 2).unwrap(),
+            l1.access_eligible(MemoryOrigin::Global, 0, u64::MAX - 2)
+                .unwrap(),
             (AccessOutcome::MissLineAlloc, u64::MAX)
         );
 
         assert_eq!(
-            l1.access_eligible(1, u64::MAX - 1).unwrap(),
+            l1.access_eligible(MemoryOrigin::Global, 1, u64::MAX - 1)
+                .unwrap(),
             (AccessOutcome::Merge, u64::MAX)
         );
         assert!(l1.is_fill_in_flight(FillKey::Line(0)));
@@ -1839,26 +2178,29 @@ mod tests {
         })
         .unwrap();
         assert_eq!(
-            l1.access_eligible_ev(0, u64::MAX).unwrap(),
+            l1.access_eligible_ev(MemoryOrigin::Global, 0, u64::MAX)
+                .unwrap(),
             EvAccess::MissRequest {
                 fill: FillKey::Line(0),
             }
         );
         assert_eq!(
-            l1.access_eligible_ev(1, u64::MAX).unwrap(),
+            l1.access_eligible_ev(MemoryOrigin::Global, 1, u64::MAX)
+                .unwrap(),
             EvAccess::MergedPending {
                 fill: FillKey::Line(0),
             }
         );
         assert_eq!(
-            l1.access_eligible_ev(4, u64::MAX).unwrap(),
+            l1.access_eligible_ev(MemoryOrigin::Global, 4, u64::MAX)
+                .unwrap(),
             EvAccess::Stalled
         );
 
         assert!(l1.complete_fill(FillKey::Line(0)).unwrap());
         let before = l1.clone();
         assert_eq!(
-            l1.access_eligible_ev(0, u64::MAX),
+            l1.access_eligible_ev(MemoryOrigin::Global, 0, u64::MAX),
             Err(L1AccessError::TimeOverflow {
                 operation: "event hit visibility",
                 base: u64::MAX,
@@ -1896,13 +2238,16 @@ mod tests {
         l1.sectors.insert(0, 1);
         l1.next_stamp = NextSequence::Available(u64::MAX);
 
-        assert_eq!(l1.access_eligible_ev(0, 0), Ok(EvAccess::Hit { ready: 34 }));
+        assert_eq!(
+            l1.access_eligible_ev(MemoryOrigin::Global, 0, 0),
+            Ok(EvAccess::Hit { ready: 34 })
+        );
         assert_eq!(l1.next_stamp, NextSequence::Exhausted);
         assert_eq!(l1.stamp_of.get(&0), Some(&u64::MAX));
         let before = l1.clone();
 
         assert_eq!(
-            l1.access_eligible_ev(0, 1),
+            l1.access_eligible_ev(MemoryOrigin::Global, 0, 1),
             Err(L1AccessError::SequenceOverflow {
                 sequence: "recency",
                 current: u64::MAX,
@@ -1917,7 +2262,7 @@ mod tests {
         l1.fill_seq = NextSequence::Available(u64::MAX);
 
         assert_eq!(
-            l1.access_eligible_ev(0, 0),
+            l1.access_eligible_ev(MemoryOrigin::Global, 0, 0),
             Ok(EvAccess::MissRequest {
                 fill: FillKey::Line(0),
             })
@@ -1927,7 +2272,7 @@ mod tests {
         let before = l1.clone();
 
         assert_eq!(
-            l1.access_eligible_ev(4, 1),
+            l1.access_eligible_ev(MemoryOrigin::Global, 4, 1),
             Err(L1AccessError::SequenceOverflow {
                 sequence: "fill",
                 current: u64::MAX,
@@ -2023,6 +2368,36 @@ mod tests {
         let (o, _) = access(&mut l1, 4, 1001);
         assert_eq!(o, AccessOutcome::MissLineAlloc);
         counters_invariant(&l1.counters);
+    }
+
+    #[test]
+    fn origins_partition_counters_but_share_one_physical_cache() {
+        let mut l1 = cache(8, None);
+        assert_eq!(
+            l1.access_eligible(MemoryOrigin::Global, 0, 0).unwrap().0,
+            AccessOutcome::MissLineAlloc
+        );
+        assert_eq!(
+            l1.access_eligible(MemoryOrigin::Local, 0, 300).unwrap().0,
+            AccessOutcome::Hit,
+            "Local must hit the line installed by Global traffic"
+        );
+        assert!(l1.probe_store(MemoryOrigin::Local, 0, 300).unwrap());
+        l1.count_bypass(MemoryOrigin::Global, 3, false).unwrap();
+        l1.count_bypass(MemoryOrigin::Global, 2, true).unwrap();
+        l1.count_untagged(MemoryOrigin::Local, 4).unwrap();
+
+        let global = l1.counters.origin(MemoryOrigin::Global);
+        let local = l1.counters.origin(MemoryOrigin::Local);
+        assert_eq!(global.line_alloc_misses, 1);
+        assert_eq!(global.misses, 1);
+        assert_eq!(global.bypass_sectors, 5);
+        assert_eq!(global.bypass_atom_sectors, 2);
+        assert_eq!(local.hits, 1);
+        assert_eq!(local.store_sectors, 1);
+        assert_eq!(local.store_hits, 1);
+        assert_eq!(local.untagged_sectors, 4);
+        assert_origin_partition(&l1.counters);
     }
 
     #[test]
@@ -2182,7 +2557,7 @@ mod tests {
         access(&mut l1, 0, 0); // latches Constant
         let before = l1.counters;
         assert_eq!(
-            l1.access_eligible_ev(4, 1),
+            l1.access_eligible_ev(MemoryOrigin::Global, 4, 1),
             Err(L1AccessError::FillTimingMismatch {
                 latched: "constant",
                 requested: "event",
@@ -2199,7 +2574,7 @@ mod tests {
         let before = l1.clone();
 
         assert_eq!(
-            l1.access_eligible(8, 1),
+            l1.access_eligible(MemoryOrigin::Global, 8, 1),
             Err(L1AccessError::Counter(L1CounterError::Overflow {
                 field: L1CounterField::Misses,
             }))
@@ -2214,7 +2589,7 @@ mod tests {
         let before = l1.clone();
 
         assert_eq!(
-            l1.access_eligible_ev(0, 0),
+            l1.access_eligible_ev(MemoryOrigin::Global, 0, 0),
             Err(L1AccessError::Counter(L1CounterError::Overflow {
                 field: L1CounterField::Misses,
             }))
@@ -2228,7 +2603,7 @@ mod tests {
         l1.counters.hits = u64::MAX;
 
         assert_eq!(
-            l1.access_eligible_ev(0, 0).unwrap(),
+            l1.access_eligible_ev(MemoryOrigin::Global, 0, 0).unwrap(),
             EvAccess::MissRequest {
                 fill: FillKey::Line(0),
             }
@@ -2246,7 +2621,7 @@ mod tests {
         let before = l1.clone();
 
         assert_eq!(
-            l1.probe_store(4, 300),
+            l1.probe_store(MemoryOrigin::Global, 4, 300),
             Err(L1AccessError::Counter(L1CounterError::Overflow {
                 field: L1CounterField::StoreSectors,
             }))
@@ -2360,6 +2735,47 @@ mod tests {
     }
 
     #[test]
+    fn counter_aggregation_preserves_both_origin_lanes() {
+        let mut global_cache = cache(8, None);
+        global_cache
+            .access_eligible(MemoryOrigin::Global, 0, 0)
+            .unwrap();
+        let mut local_cache = cache(8, None);
+        local_cache
+            .access_eligible(MemoryOrigin::Local, 4, 0)
+            .unwrap();
+
+        let mut total = global_cache.counters;
+        total.add_checked(&local_cache.counters).unwrap();
+        assert_eq!(total.misses, 2);
+        assert_eq!(total.origin(MemoryOrigin::Global).misses, 1);
+        assert_eq!(total.origin(MemoryOrigin::Local).misses, 1);
+        assert_origin_partition(&total);
+    }
+
+    #[test]
+    fn unified_counter_overflow_precedes_origin_lane_overflow() {
+        let mut counters = L1Counters::for_arch(ArchId::Sm86);
+        counters.hits = u64::MAX;
+        counters.by_origin[MemoryOrigin::Local.index()].hits = u64::MAX;
+        assert_eq!(
+            counters.add_fields_checked(MemoryOrigin::Local, &[(L1CounterField::Hits, 1)]),
+            Err(L1CounterError::Overflow {
+                field: L1CounterField::Hits,
+            })
+        );
+
+        counters.hits = 0;
+        assert_eq!(
+            counters.add_fields_checked(MemoryOrigin::Local, &[(L1CounterField::Hits, 1)]),
+            Err(L1CounterError::OriginOverflow {
+                origin: MemoryOrigin::Local,
+                field: L1CounterField::Hits,
+            })
+        );
+    }
+
+    #[test]
     fn counter_aggregation_rejects_mixed_architecture() {
         let mut sm86 = L1Counters::for_arch(ArchId::Sm86);
         let sm120 = L1Counters::for_arch(ArchId::Sm120);
@@ -2418,6 +2834,25 @@ mod tests {
     }
 
     #[test]
+    fn counter_aggregation_rejects_incoherent_origin_partition_transactionally() {
+        let mut total = L1Counters::for_arch(ArchId::Sm86);
+        total.hits = 1;
+        let addend = L1Counters::for_arch(ArchId::Sm86);
+        let before = total;
+
+        assert_eq!(
+            total.add_checked(&addend),
+            Err(L1CounterError::OriginPartitionMismatch {
+                field: L1CounterField::Hits,
+                unified: 1,
+                global: 0,
+                local: 0,
+            })
+        );
+        assert_eq!(total, before);
+    }
+
+    #[test]
     fn counter_aggregation_commits_every_field() {
         let mut total = L1Counters::for_arch(ArchId::Sm86);
         total.hits = 1;
@@ -2433,6 +2868,7 @@ mod tests {
         total.store_sectors = 11;
         total.store_hits = 12;
         total.store_tag_hits = 13;
+        total = total.with_unified_origin(MemoryOrigin::Global);
 
         let mut addend = L1Counters::for_arch(ArchId::Sm86);
         addend.hits = 20;
@@ -2448,6 +2884,7 @@ mod tests {
         addend.store_sectors = 30;
         addend.store_hits = 31;
         addend.store_tag_hits = 32;
+        addend = addend.with_unified_origin(MemoryOrigin::Local);
 
         total.add_checked(&addend).unwrap();
         assert_eq!(total.arch(), Some(ArchId::Sm86));
@@ -2469,8 +2906,8 @@ mod tests {
     #[test]
     fn bypass_atom_subset_counter_tracks_only_the_atom_stream() {
         let mut l1 = cache(8, None);
-        l1.count_bypass(3, false).unwrap();
-        l1.count_bypass(2, true).unwrap();
+        l1.count_bypass(MemoryOrigin::Global, 3, false).unwrap();
+        l1.count_bypass(MemoryOrigin::Global, 2, true).unwrap();
         assert_eq!(l1.counters.bypass_sectors, 5);
         assert_eq!(l1.counters.bypass_atom_sectors, 2);
     }

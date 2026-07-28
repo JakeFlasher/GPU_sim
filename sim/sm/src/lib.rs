@@ -37,5 +37,6 @@ pub use program::{FunctionSchedule, IssueSlot, OpClass, ProgramError, build_sche
 pub use replay::{KernelReplayResult, ReplayError, ReplayMemMode, replay_kernel};
 pub use sim_mem::MemRole;
 pub use system::{
-    DramBw, DramStats, L2SourceSplit, SystemError, SystemResult, simulate_kernel_shared,
+    DramBw, DramOriginStats, DramStats, L2OriginSourceStats, L2SourceSplit, SystemCounterError,
+    SystemError, SystemResult, simulate_kernel_shared,
 };

@@ -97,7 +97,7 @@ impl UnpricedBounds {
 
 use sim_arch::ArchId;
 use sim_engine::{EngineError, EventQueue, TargetId};
-use sim_mem::{L1Config, L2Counters, L2Model, L2Source};
+use sim_mem::{L1Config, L2Counters, L2Model, L2Source, MemoryOrigin};
 
 /// Per-actor pending due-times with the one choreography the driver
 /// repeats for responses and wakes: `push` at scheduling, `pop_expect`
@@ -138,6 +138,13 @@ impl DueTimes {
     }
 }
 
+/// One address-space origin's per-[`L2Source`] observer lanes.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct L2OriginSourceStats {
+    pub sectors: [u64; 4],
+    pub hits: [u64; 4],
+}
+
 /// Per-[`L2Source`] sector/hit split — the driver-side EMISSION observer
 /// (the cache model itself no longer counts provenance; gate-3 altitude
 /// note c). Indexed by discriminant order.
@@ -146,6 +153,8 @@ pub struct L2SourceSplit {
     arch: Option<ArchId>,
     pub sectors: [u64; 4],
     pub hits: [u64; 4],
+    origin_sectors: [[u64; 4]; 2],
+    origin_hits: [[u64; 4]; 2],
 }
 
 impl Default for L2SourceSplit {
@@ -154,9 +163,18 @@ impl Default for L2SourceSplit {
             arch: None,
             sectors: [0; 4],
             hits: [0; 4],
+            origin_sectors: [[0; 4]; 2],
+            origin_hits: [[0; 4]; 2],
         }
     }
 }
+
+const L2_SOURCES: [L2Source; 4] = [
+    L2Source::L1Fill,
+    L2Source::Bypass,
+    L2Source::Untagged,
+    L2Source::Store,
+];
 
 impl L2SourceSplit {
     pub fn for_arch(arch: ArchId) -> Self {
@@ -172,6 +190,111 @@ impl L2SourceSplit {
 
     pub fn source(&self, s: L2Source) -> (u64, u64) {
         (self.sectors[s as usize], self.hits[s as usize])
+    }
+
+    pub fn source_for_origin(&self, origin: MemoryOrigin, source: L2Source) -> (u64, u64) {
+        let origin_ix = origin.index();
+        let source_ix = source as usize;
+        (
+            self.origin_sectors[origin_ix][source_ix],
+            self.origin_hits[origin_ix][source_ix],
+        )
+    }
+
+    pub fn origin(&self, origin: MemoryOrigin) -> L2OriginSourceStats {
+        L2OriginSourceStats {
+            sectors: self.origin_sectors[origin.index()],
+            hits: self.origin_hits[origin.index()],
+        }
+    }
+
+    /// Build a coherent synthetic observer from explicit origin lanes.
+    pub fn from_origins(
+        arch: ArchId,
+        global: L2OriginSourceStats,
+        local: L2OriginSourceStats,
+    ) -> Result<Self, SystemCounterError> {
+        let mut split = Self::for_arch(arch);
+        split.origin_sectors[MemoryOrigin::Global.index()] = global.sectors;
+        split.origin_hits[MemoryOrigin::Global.index()] = global.hits;
+        split.origin_sectors[MemoryOrigin::Local.index()] = local.sectors;
+        split.origin_hits[MemoryOrigin::Local.index()] = local.hits;
+        for source in L2_SOURCES {
+            let source_ix = source as usize;
+            split.sectors[source_ix] = global.sectors[source_ix]
+                .checked_add(local.sectors[source_ix])
+                .ok_or(SystemCounterError::L2OriginPartitionOverflow {
+                    counter: "sectors",
+                    l2_source: source,
+                    global: global.sectors[source_ix],
+                    local: local.sectors[source_ix],
+                })?;
+            split.hits[source_ix] = global.hits[source_ix]
+                .checked_add(local.hits[source_ix])
+                .ok_or(SystemCounterError::L2OriginPartitionOverflow {
+                    counter: "hits",
+                    l2_source: source,
+                    global: global.hits[source_ix],
+                    local: local.hits[source_ix],
+                })?;
+        }
+        Ok(split)
+    }
+
+    /// Explicitly attribute an already-built unified synthetic observer to one
+    /// origin. Modeled requests always mutate an explicit lane directly.
+    pub fn with_unified_origin(mut self, origin: MemoryOrigin) -> Self {
+        self.origin_sectors = [[0; 4]; 2];
+        self.origin_hits = [[0; 4]; 2];
+        self.origin_sectors[origin.index()] = self.sectors;
+        self.origin_hits[origin.index()] = self.hits;
+        self
+    }
+
+    pub fn validate_origin_partition(&self) -> Result<(), SystemCounterError> {
+        for source in L2_SOURCES {
+            let source_ix = source as usize;
+            let global_sectors = self.origin_sectors[MemoryOrigin::Global.index()][source_ix];
+            let local_sectors = self.origin_sectors[MemoryOrigin::Local.index()][source_ix];
+            let sectors = global_sectors.checked_add(local_sectors).ok_or(
+                SystemCounterError::L2OriginPartitionOverflow {
+                    counter: "sectors",
+                    l2_source: source,
+                    global: global_sectors,
+                    local: local_sectors,
+                },
+            )?;
+            if self.sectors[source_ix] != sectors {
+                return Err(SystemCounterError::L2OriginPartitionMismatch {
+                    counter: "sectors",
+                    l2_source: source,
+                    unified: self.sectors[source_ix],
+                    global: global_sectors,
+                    local: local_sectors,
+                });
+            }
+
+            let global_hits = self.origin_hits[MemoryOrigin::Global.index()][source_ix];
+            let local_hits = self.origin_hits[MemoryOrigin::Local.index()][source_ix];
+            let hits = global_hits.checked_add(local_hits).ok_or(
+                SystemCounterError::L2OriginPartitionOverflow {
+                    counter: "hits",
+                    l2_source: source,
+                    global: global_hits,
+                    local: local_hits,
+                },
+            )?;
+            if self.hits[source_ix] != hits {
+                return Err(SystemCounterError::L2OriginPartitionMismatch {
+                    counter: "hits",
+                    l2_source: source,
+                    unified: self.hits[source_ix],
+                    global: global_hits,
+                    local: local_hits,
+                });
+            }
+        }
+        Ok(())
     }
 
     pub fn add_checked(&mut self, other: &L2SourceSplit) -> Result<(), SystemCounterError> {
@@ -208,8 +331,34 @@ impl L2SourceSplit {
                         counter: "L2 source hits",
                     })?;
         }
-        self.sectors = sectors;
-        self.hits = hits;
+        let mut origin_sectors = [[0; 4]; 2];
+        let mut origin_hits = [[0; 4]; 2];
+        for origin in MemoryOrigin::ALL {
+            let origin_ix = origin.index();
+            for source_ix in 0..4 {
+                origin_sectors[origin_ix][source_ix] = self.origin_sectors[origin_ix][source_ix]
+                    .checked_add(other.origin_sectors[origin_ix][source_ix])
+                    .ok_or(SystemCounterError::Overflow {
+                        counter: "L2 origin/source sectors",
+                    })?;
+                origin_hits[origin_ix][source_ix] = self.origin_hits[origin_ix][source_ix]
+                    .checked_add(other.origin_hits[origin_ix][source_ix])
+                    .ok_or(SystemCounterError::Overflow {
+                        counter: "L2 origin/source hits",
+                    })?;
+            }
+        }
+        let next = Self {
+            arch: self.arch,
+            sectors,
+            hits,
+            origin_sectors,
+            origin_hits,
+        };
+        self.validate_origin_partition()?;
+        other.validate_origin_partition()?;
+        next.validate_origin_partition()?;
+        *self = next;
         Ok(())
     }
 }
@@ -220,12 +369,46 @@ use crate::issue::{
 };
 use crate::program::FunctionSchedule;
 
-#[derive(Debug, thiserror::Error)]
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
 pub enum SystemCounterError {
     #[error(transparent)]
     Architecture(#[from] sim_arch::ArchitectureProvenanceError),
     #[error("{counter} counter overflows u64")]
     Overflow { counter: &'static str },
+    #[error(
+        "L2 {l2_source:?} origin partition for {counter} overflows u64: Global={global}, Local={local}"
+    )]
+    L2OriginPartitionOverflow {
+        counter: &'static str,
+        l2_source: L2Source,
+        global: u64,
+        local: u64,
+    },
+    #[error(
+        "L2 {l2_source:?} origin partition mismatch for {counter}: unified={unified}, Global={global}, Local={local}"
+    )]
+    L2OriginPartitionMismatch {
+        counter: &'static str,
+        l2_source: L2Source,
+        unified: u64,
+        global: u64,
+        local: u64,
+    },
+    #[error("DRAM origin partition for {counter} overflows u64: Global={global}, Local={local}")]
+    DramOriginPartitionOverflow {
+        counter: &'static str,
+        global: u64,
+        local: u64,
+    },
+    #[error(
+        "DRAM origin partition mismatch for {counter}: unified={unified}, Global={global}, Local={local}"
+    )]
+    DramOriginPartitionMismatch {
+        counter: &'static str,
+        unified: u64,
+        global: u64,
+        local: u64,
+    },
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -458,14 +641,19 @@ enum Ev {
 struct L2ResponseCommit {
     ready: u64,
     next_delayed: u64,
+    next_origin_delayed: u64,
     unpriced_removal: UnpricedRemoval,
 }
 
 struct L2SystemCommit {
     source_ix: usize,
+    origin_ix: usize,
     source_sectors: u64,
     source_hits: u64,
+    origin_source_sectors: u64,
+    origin_source_hits: u64,
     read_sectors: u64,
+    origin_read_sectors: u64,
     dram_free_fp: Option<u128>,
     response: Option<L2ResponseCommit>,
 }
@@ -572,6 +760,13 @@ impl DramServer {
     }
 }
 
+/// One address-space origin's DRAM observer lane.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct DramOriginStats {
+    pub read_sectors: u64,
+    pub bw_delayed_responses: u64,
+}
+
 /// Driver-side DRAM traffic observer.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct DramStats {
@@ -590,6 +785,7 @@ pub struct DramStats {
     /// whichever reply-carrying request queues next — this counter
     /// localizes congestion in TIME, not to the causing warp.
     pub bw_delayed_responses: u64,
+    by_origin: [DramOriginStats; 2],
 }
 
 impl Default for DramStats {
@@ -598,6 +794,7 @@ impl Default for DramStats {
             arch: None,
             read_sectors: 0,
             bw_delayed_responses: 0,
+            by_origin: [DramOriginStats::default(); 2],
         }
     }
 }
@@ -612,6 +809,88 @@ impl DramStats {
 
     pub fn arch(&self) -> Option<ArchId> {
         self.arch
+    }
+
+    pub fn origin(&self, origin: MemoryOrigin) -> DramOriginStats {
+        self.by_origin[origin.index()]
+    }
+
+    /// Build a coherent synthetic observer from explicit origin lanes.
+    pub fn from_origins(
+        arch: ArchId,
+        global: DramOriginStats,
+        local: DramOriginStats,
+    ) -> Result<Self, SystemCounterError> {
+        let read_sectors = global.read_sectors.checked_add(local.read_sectors).ok_or(
+            SystemCounterError::DramOriginPartitionOverflow {
+                counter: "read sectors",
+                global: global.read_sectors,
+                local: local.read_sectors,
+            },
+        )?;
+        let bw_delayed_responses = global
+            .bw_delayed_responses
+            .checked_add(local.bw_delayed_responses)
+            .ok_or(SystemCounterError::DramOriginPartitionOverflow {
+                counter: "bandwidth-delayed responses",
+                global: global.bw_delayed_responses,
+                local: local.bw_delayed_responses,
+            })?;
+        Ok(Self {
+            arch: Some(arch),
+            read_sectors,
+            bw_delayed_responses,
+            by_origin: [global, local],
+        })
+    }
+
+    /// Explicitly attribute an already-built unified synthetic observer to one
+    /// origin. Modeled requests always mutate an explicit lane directly.
+    pub fn with_unified_origin(mut self, origin: MemoryOrigin) -> Self {
+        let unified = DramOriginStats {
+            read_sectors: self.read_sectors,
+            bw_delayed_responses: self.bw_delayed_responses,
+        };
+        self.by_origin = [DramOriginStats::default(); 2];
+        self.by_origin[origin.index()] = unified;
+        self
+    }
+
+    pub fn validate_origin_partition(&self) -> Result<(), SystemCounterError> {
+        let global = self.origin(MemoryOrigin::Global);
+        let local = self.origin(MemoryOrigin::Local);
+        let read_sectors = global.read_sectors.checked_add(local.read_sectors).ok_or(
+            SystemCounterError::DramOriginPartitionOverflow {
+                counter: "read sectors",
+                global: global.read_sectors,
+                local: local.read_sectors,
+            },
+        )?;
+        if self.read_sectors != read_sectors {
+            return Err(SystemCounterError::DramOriginPartitionMismatch {
+                counter: "read sectors",
+                unified: self.read_sectors,
+                global: global.read_sectors,
+                local: local.read_sectors,
+            });
+        }
+        let bw_delayed_responses = global
+            .bw_delayed_responses
+            .checked_add(local.bw_delayed_responses)
+            .ok_or(SystemCounterError::DramOriginPartitionOverflow {
+                counter: "bandwidth-delayed responses",
+                global: global.bw_delayed_responses,
+                local: local.bw_delayed_responses,
+            })?;
+        if self.bw_delayed_responses != bw_delayed_responses {
+            return Err(SystemCounterError::DramOriginPartitionMismatch {
+                counter: "bandwidth-delayed responses",
+                unified: self.bw_delayed_responses,
+                global: global.bw_delayed_responses,
+                local: local.bw_delayed_responses,
+            });
+        }
+        Ok(())
     }
 
     pub fn add_checked(&mut self, other: &DramStats) -> Result<(), SystemCounterError> {
@@ -644,8 +923,32 @@ impl DramStats {
             .ok_or(SystemCounterError::Overflow {
                 counter: "DRAM bandwidth-delayed responses",
             })?;
-        self.read_sectors = read_sectors;
-        self.bw_delayed_responses = bw_delayed_responses;
+        let mut by_origin = self.by_origin;
+        for origin in MemoryOrigin::ALL {
+            let origin_ix = origin.index();
+            by_origin[origin_ix].read_sectors = self.by_origin[origin_ix]
+                .read_sectors
+                .checked_add(other.by_origin[origin_ix].read_sectors)
+                .ok_or(SystemCounterError::Overflow {
+                    counter: "DRAM origin read sectors",
+                })?;
+            by_origin[origin_ix].bw_delayed_responses = self.by_origin[origin_ix]
+                .bw_delayed_responses
+                .checked_add(other.by_origin[origin_ix].bw_delayed_responses)
+                .ok_or(SystemCounterError::Overflow {
+                    counter: "DRAM origin bandwidth-delayed responses",
+                })?;
+        }
+        let next = Self {
+            arch: self.arch,
+            read_sectors,
+            bw_delayed_responses,
+            by_origin,
+        };
+        self.validate_origin_partition()?;
+        other.validate_origin_partition()?;
+        next.validate_origin_partition()?;
+        *self = next;
         Ok(())
     }
 }
@@ -826,6 +1129,7 @@ pub fn simulate_kernel_shared(
                         let requested_sectors = u64::from(preview.sectors);
                         let counted_hits = u64::from(preview.counted_hits);
                         let source_ix = req.source as usize;
+                        let origin_ix = req.origin.index();
                         let next_source_sectors = l2_by_source.sectors[source_ix]
                             .checked_add(requested_sectors)
                             .ok_or(SystemCounterError::Overflow {
@@ -835,6 +1139,18 @@ pub fn simulate_kernel_shared(
                             .checked_add(counted_hits)
                             .ok_or(SystemCounterError::Overflow {
                                 counter: "L2 source hits",
+                            })?;
+                        let next_origin_source_sectors = l2_by_source.origin_sectors[origin_ix]
+                            [source_ix]
+                            .checked_add(requested_sectors)
+                            .ok_or(SystemCounterError::Overflow {
+                                counter: "L2 origin/source sectors",
+                            })?;
+                        let next_origin_source_hits = l2_by_source.origin_hits[origin_ix]
+                            [source_ix]
+                            .checked_add(counted_hits)
+                            .ok_or(SystemCounterError::Overflow {
+                                counter: "L2 origin/source hits",
                             })?;
 
                         let can_fetch =
@@ -853,6 +1169,12 @@ pub fn simulate_kernel_shared(
                             .checked_add(fetch_sectors)
                             .ok_or(SystemError::CounterOverflow {
                                 counter: "DRAM read sectors",
+                            })?;
+                        let next_origin_read_sectors = dram_stats.by_origin[origin_ix]
+                            .read_sectors
+                            .checked_add(fetch_sectors)
+                            .ok_or(SystemError::CounterOverflow {
+                                counter: "DRAM origin read sectors",
                             })?;
                         let service_preview = if fetch_sectors > 0 {
                             let bytes = fetch_sectors.checked_mul(32).ok_or(
@@ -893,16 +1215,24 @@ pub fn simulate_kernel_shared(
                                     bound,
                                 });
                             }
+                            let delayed = u64::from(ready > latency_ready);
                             let next_delayed = dram_stats
                                 .bw_delayed_responses
-                                .checked_add(u64::from(ready > latency_ready))
+                                .checked_add(delayed)
                                 .ok_or(SystemError::CounterOverflow {
                                     counter: "DRAM bandwidth-delayed responses",
+                                })?;
+                            let next_origin_delayed = dram_stats.by_origin[origin_ix]
+                                .bw_delayed_responses
+                                .checked_add(delayed)
+                                .ok_or(SystemError::CounterOverflow {
+                                    counter: "DRAM origin bandwidth-delayed responses",
                                 })?;
                             queue.schedule_at(ready, ev.target, Ev::MemResponse(req.reply))?;
                             Some(L2ResponseCommit {
                                 ready,
                                 next_delayed,
+                                next_origin_delayed,
                                 unpriced_removal,
                             })
                         } else {
@@ -911,9 +1241,13 @@ pub fn simulate_kernel_shared(
 
                         Ok(L2SystemCommit {
                             source_ix,
+                            origin_ix,
                             source_sectors: next_source_sectors,
                             source_hits: next_source_hits,
+                            origin_source_sectors: next_origin_source_sectors,
+                            origin_source_hits: next_origin_source_hits,
                             read_sectors: next_read_sectors,
+                            origin_read_sectors: next_origin_read_sectors,
                             dram_free_fp: service_preview.map(|(done, _)| done),
                             response,
                         })
@@ -922,7 +1256,12 @@ pub fn simulate_kernel_shared(
 
                 l2_by_source.sectors[commit.source_ix] = commit.source_sectors;
                 l2_by_source.hits[commit.source_ix] = commit.source_hits;
+                l2_by_source.origin_sectors[commit.origin_ix][commit.source_ix] =
+                    commit.origin_source_sectors;
+                l2_by_source.origin_hits[commit.origin_ix][commit.source_ix] =
+                    commit.origin_source_hits;
                 dram_stats.read_sectors = commit.read_sectors;
+                dram_stats.by_origin[commit.origin_ix].read_sectors = commit.origin_read_sectors;
                 if let Some(done) = commit.dram_free_fp
                     && let Some(server) = &mut dram_server
                 {
@@ -930,6 +1269,8 @@ pub fn simulate_kernel_shared(
                 }
                 if let Some(response) = commit.response {
                     dram_stats.bw_delayed_responses = response.next_delayed;
+                    dram_stats.by_origin[commit.origin_ix].bw_delayed_responses =
+                        response.next_origin_delayed;
                     response_due.push(sm_ix, response.ready);
                     response.unpriced_removal.commit(&mut unpriced);
                 }
@@ -1159,6 +1500,37 @@ mod tests {
             bytes_per_sec: 1_008_000_000_000,
             sm_clock_hz: 1_350_000_000,
         }
+    }
+
+    fn assert_all_current_traffic_is_global(result: &SystemResult) {
+        for source in [
+            L2Source::L1Fill,
+            L2Source::Bypass,
+            L2Source::Untagged,
+            L2Source::Store,
+        ] {
+            let total = result.l2_by_source.source(source);
+            let global = result
+                .l2_by_source
+                .source_for_origin(MemoryOrigin::Global, source);
+            let local = result
+                .l2_by_source
+                .source_for_origin(MemoryOrigin::Local, source);
+            assert_eq!(total.0, global.0 + local.0);
+            assert_eq!(total.1, global.1 + local.1);
+            assert_eq!(local, (0, 0));
+        }
+        let global = result.dram.origin(MemoryOrigin::Global);
+        let local = result.dram.origin(MemoryOrigin::Local);
+        assert_eq!(
+            result.dram.read_sectors,
+            global.read_sectors + local.read_sectors
+        );
+        assert_eq!(
+            result.dram.bw_delayed_responses,
+            global.bw_delayed_responses + local.bw_delayed_responses
+        );
+        assert_eq!(local, DramOriginStats::default());
     }
 
     fn dependent_load_blocks(sector: i64) -> Vec<BlockReplay> {
@@ -1521,6 +1893,7 @@ mod tests {
         assert_eq!(result.per_sm[&0].instructions_issued, 1);
         assert_eq!(result.per_sm[&0].cycles, 1);
         assert_eq!(result.terminal_event_time, Some(423));
+        assert_all_current_traffic_is_global(&result);
     }
 
     #[test]
@@ -2126,6 +2499,122 @@ mod tests {
             })
         ));
         assert_eq!(dst, before);
+    }
+
+    #[test]
+    fn source_and_dram_aggregation_reject_incoherent_partitions_transactionally() {
+        let mut split = L2SourceSplit::for_arch(ArchId::Sm86);
+        split.sectors[L2Source::L1Fill as usize] = 1;
+        let split_addend = L2SourceSplit::for_arch(ArchId::Sm86);
+        let split_before = split;
+        assert_eq!(
+            split.add_checked(&split_addend),
+            Err(SystemCounterError::L2OriginPartitionMismatch {
+                counter: "sectors",
+                l2_source: L2Source::L1Fill,
+                unified: 1,
+                global: 0,
+                local: 0,
+            })
+        );
+        assert_eq!(split, split_before);
+
+        let mut dram = DramStats::for_arch(ArchId::Sm86);
+        dram.read_sectors = 1;
+        let dram_addend = DramStats::for_arch(ArchId::Sm86);
+        let dram_before = dram;
+        assert_eq!(
+            dram.add_checked(&dram_addend),
+            Err(SystemCounterError::DramOriginPartitionMismatch {
+                counter: "read sectors",
+                unified: 1,
+                global: 0,
+                local: 0,
+            })
+        );
+        assert_eq!(dram, dram_before);
+    }
+
+    #[test]
+    fn source_and_dram_aggregation_preserve_origin_partitions() {
+        let mut source_total = L2SourceSplit::from_origins(
+            ArchId::Sm86,
+            L2OriginSourceStats {
+                sectors: [2, 0, 0, 0],
+                hits: [1, 0, 0, 0],
+            },
+            L2OriginSourceStats {
+                sectors: [1, 0, 0, 0],
+                hits: [1, 0, 0, 0],
+            },
+        )
+        .unwrap();
+        let source_addend = L2SourceSplit::from_origins(
+            ArchId::Sm86,
+            L2OriginSourceStats {
+                sectors: [4, 0, 0, 0],
+                hits: [2, 0, 0, 0],
+            },
+            L2OriginSourceStats {
+                sectors: [1, 0, 0, 0],
+                hits: [1, 0, 0, 0],
+            },
+        )
+        .unwrap();
+
+        source_total.add_checked(&source_addend).unwrap();
+        assert_eq!(source_total.source(L2Source::L1Fill), (8, 5));
+        assert_eq!(
+            source_total.source_for_origin(MemoryOrigin::Global, L2Source::L1Fill),
+            (6, 3)
+        );
+        assert_eq!(
+            source_total.source_for_origin(MemoryOrigin::Local, L2Source::L1Fill),
+            (2, 2)
+        );
+
+        let mut dram_total = DramStats::from_origins(
+            ArchId::Sm86,
+            DramOriginStats {
+                read_sectors: 2,
+                bw_delayed_responses: 1,
+            },
+            DramOriginStats {
+                read_sectors: 1,
+                bw_delayed_responses: 0,
+            },
+        )
+        .unwrap();
+        let dram_addend = DramStats::from_origins(
+            ArchId::Sm86,
+            DramOriginStats {
+                read_sectors: 3,
+                bw_delayed_responses: 1,
+            },
+            DramOriginStats {
+                read_sectors: 2,
+                bw_delayed_responses: 1,
+            },
+        )
+        .unwrap();
+
+        dram_total.add_checked(&dram_addend).unwrap();
+        assert_eq!(dram_total.read_sectors, 8);
+        assert_eq!(dram_total.bw_delayed_responses, 3);
+        assert_eq!(
+            dram_total.origin(MemoryOrigin::Global),
+            DramOriginStats {
+                read_sectors: 5,
+                bw_delayed_responses: 2,
+            }
+        );
+        assert_eq!(
+            dram_total.origin(MemoryOrigin::Local),
+            DramOriginStats {
+                read_sectors: 3,
+                bw_delayed_responses: 1,
+            }
+        );
     }
 
     #[test]

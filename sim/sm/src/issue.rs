@@ -59,7 +59,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use sim_arch::ArchId;
 use sim_mem::{
     CacheOpToken, EvAccess, EvAccessUnobserved, FillKey, L1AccessError, L1Cache, L1Config,
-    L1Counters, L1MutationBudget, L2OpClass, L2Source,
+    L1Counters, L1MutationBudget, L2OpClass, L2Source, MemoryOrigin,
 };
 
 use crate::control_bits::{ControlDomainError, DepBarrier};
@@ -336,6 +336,14 @@ pub enum IssueError {
     FillMaskMissing { line: i64 },
     #[error("line {line} has sector-mask bookkeeping without an in-flight fill")]
     FillMaskWithoutFill { line: i64 },
+    #[error(
+        "line fill {line} cannot fold {incoming:?}-origin sectors into an {existing:?}-origin request"
+    )]
+    MixedOriginLineFold {
+        line: i64,
+        existing: MemoryOrigin,
+        incoming: MemoryOrigin,
+    },
     #[error("response-bearing request token {reply:?} is already outstanding")]
     ResponseTokenAlreadyOutstanding { reply: ReplyTo },
     #[error("memory response token {reply:?} disappeared after successful preflight")]
@@ -410,6 +418,9 @@ pub struct MemRequest {
     pub issue_time: u64,
     /// Global 32 B sector id (`byte_address >> 5`).
     pub sector_id: i64,
+    /// Address-space provenance for accounting only. It does not participate in
+    /// L1/L2 tags, fill keys, response identity, or event ordering.
+    pub origin: MemoryOrigin,
     /// Sectors of `sector_id`'s 128 B line carried by THIS request
     /// (bit = sector index in line; always contains `sector_id`'s own
     /// bit). More than one bit only on L1 LINE-fill requests whose
@@ -522,10 +533,17 @@ impl MemRequest {
     /// typed constructors keep the (source, class, reply) coupling in
     /// one place so an invalid combination is unwritable at emission
     /// sites (gate finding 2026-07-07).
-    fn l1_fill(issue_time: u64, sector_id: i64, fill: FillKey, response_id: ResponseId) -> Self {
+    fn l1_fill(
+        issue_time: u64,
+        sector_id: i64,
+        origin: MemoryOrigin,
+        fill: FillKey,
+        response_id: ResponseId,
+    ) -> Self {
         Self {
             issue_time,
             sector_id,
+            origin,
             sector_mask: 1 << (sector_id & 3) as u8,
             source: L2Source::L1Fill,
             class: L2OpClass::Read,
@@ -536,10 +554,11 @@ impl MemRequest {
     /// A follow-up sector fetch for a merge onto an older in-flight
     /// fill: same provenance and class as the fill, no reply (the
     /// waiter rides the original fill's response).
-    fn l1_followup_fetch(issue_time: u64, sector_id: i64) -> Self {
+    fn l1_followup_fetch(issue_time: u64, sector_id: i64, origin: MemoryOrigin) -> Self {
         Self {
             issue_time,
             sector_id,
+            origin,
             sector_mask: 1 << (sector_id & 3) as u8,
             source: L2Source::L1Fill,
             class: L2OpClass::Read,
@@ -549,10 +568,11 @@ impl MemRequest {
 
     /// A global store sector (STG/RED): write-class tag-match rule at
     /// the L2, mutation-only (no response).
-    fn store(issue_time: u64, sector_id: i64) -> Self {
+    fn store(issue_time: u64, sector_id: i64, origin: MemoryOrigin) -> Self {
         Self {
             issue_time,
             sector_id,
+            origin,
             sector_mask: 1 << (sector_id & 3) as u8,
             source: L2Source::Store,
             class: L2OpClass::WriteAtomic,
@@ -864,10 +884,11 @@ fn data_ready_time(
                     .transpose()?;
                 for &sector in &sectors[off..off + usize::from(len)] {
                     if let Some(current) = &mut ready {
-                        let (_, sector_ready) = l1.access_eligible(sector, t)?;
+                        let (_, sector_ready) =
+                            l1.access_eligible(MemoryOrigin::Global, sector, t)?;
                         *current = (*current).max(sector_ready);
                     } else {
-                        l1.access_eligible_unobserved(sector, t)?;
+                        l1.access_eligible_unobserved(MemoryOrigin::Global, sector, t)?;
                     }
                 }
                 Ok(ready)
@@ -883,7 +904,11 @@ fn data_ready_time(
         },
         AccessKind::GlobalBypass { len, token, .. } => match l1 {
             Some(l1) => {
-                l1.count_bypass(u64::from(len), token == CacheOpToken::Atom)?;
+                l1.count_bypass(
+                    MemoryOrigin::Global,
+                    u64::from(len),
+                    token == CacheOpToken::Atom,
+                )?;
                 if needs_ready {
                     params.store_visibility_ready(t).map(Some)
                 } else {
@@ -901,7 +926,7 @@ fn data_ready_time(
         },
         AccessKind::GlobalUntagged { len, .. } => match l1 {
             Some(l1) => {
-                l1.count_untagged(u64::from(len))?;
+                l1.count_untagged(MemoryOrigin::Global, u64::from(len))?;
                 if needs_ready {
                     params.store_visibility_ready(t).map(Some)
                 } else {
@@ -920,7 +945,7 @@ fn data_ready_time(
         AccessKind::GlobalStore { off, len } => match l1 {
             Some(l1) => {
                 for &sector in &sectors[off..off + usize::from(len)] {
-                    l1.probe_store(sector, t)?;
+                    l1.probe_store(MemoryOrigin::Global, sector, t)?;
                 }
                 if needs_ready {
                     params.store_visibility_ready(t).map(Some)
@@ -945,6 +970,7 @@ fn data_ready_time(
 struct Retry {
     warp: usize,
     instruction: usize,
+    origin: MemoryOrigin,
     /// The stalled instruction's optional write-dependence barrier. When
     /// present, the entry holds one pending unit until fully drained.
     barrier: Option<DepBarrier>,
@@ -1430,6 +1456,7 @@ impl<'a> SmCore<'a> {
                 }
             }
             AccessKind::GlobalEligible { off, len, .. } => {
+                let origin = MemoryOrigin::Global;
                 // The hit-pipeline floor applies to the whole dependent load
                 // (as in L1Const); misses ride their responses. Line fills
                 // emitted anywhere in THIS emission batch (st.line_folds,
@@ -1447,6 +1474,7 @@ impl<'a> SmCore<'a> {
                         warps,
                         wix,
                         write_barrier,
+                        origin,
                         sectors[i],
                         ResponseId::new(st.response_owner, wix, instruction, i),
                         t,
@@ -1465,6 +1493,7 @@ impl<'a> SmCore<'a> {
                             st.retry.push_back(Retry {
                                 warp: wix,
                                 instruction,
+                                origin,
                                 barrier: write_barrier,
                                 lo: i,
                                 hi: range.end,
@@ -1477,6 +1506,7 @@ impl<'a> SmCore<'a> {
                 Ok(known)
             }
             AccessKind::GlobalBypass { off, len, .. } | AccessKind::GlobalUntagged { off, len } => {
+                let origin = MemoryOrigin::Global;
                 let (source, counted, class) = match kind {
                     // ATOM rides bypass provenance but is write-class at
                     // the L2 (§6.4 tag-match rule); every other bypass /
@@ -1494,9 +1524,9 @@ impl<'a> SmCore<'a> {
                 };
                 if counted {
                     st.l1
-                        .count_bypass(u64::from(len), class == L2OpClass::WriteAtomic)?;
+                        .count_bypass(origin, u64::from(len), class == L2OpClass::WriteAtomic)?;
                 } else {
-                    st.l1.count_untagged(u64::from(len))?;
+                    st.l1.count_untagged(origin, u64::from(len))?;
                 }
                 if len == 0 {
                     // Degenerate record (fully predicated-off lanes are
@@ -1525,6 +1555,7 @@ impl<'a> SmCore<'a> {
                     out.push(MemRequest {
                         issue_time: t,
                         sector_id,
+                        origin,
                         sector_mask: 1 << (sector_id & 3) as u8,
                         source,
                         class,
@@ -1534,9 +1565,10 @@ impl<'a> SmCore<'a> {
                 Ok(None)
             }
             AccessKind::GlobalStore { off, len } => {
+                let origin = MemoryOrigin::Global;
                 for &sector_id in &sectors[off..off + usize::from(len)] {
-                    st.l1.probe_store(sector_id, t)?;
-                    out.push(MemRequest::store(t, sector_id));
+                    st.l1.probe_store(origin, sector_id, t)?;
+                    out.push(MemRequest::store(t, sector_id, origin));
                 }
                 // v0: a present store write barrier is priced at the L2-hit
                 // arm (as in L1Const); stores do not wait on responses.
@@ -1598,7 +1630,7 @@ impl<'a> SmCore<'a> {
             }
             let budget = L1MutationBudget {
                 recency_touches: 1,
-                ..L1MutationBudget::default()
+                ..L1MutationBudget::for_origin(MemoryOrigin::Global)
             };
             if st.l1.preflight_mutation_budget(budget).is_err() {
                 let mut shadow = st.l1.clone();
@@ -1637,10 +1669,12 @@ impl<'a> SmCore<'a> {
 
         let mut budget = L1MutationBudget {
             recency_touches: 1,
-            ..L1MutationBudget::default()
+            ..L1MutationBudget::for_origin(MemoryOrigin::Global)
         };
         let mut pending_budget_fits = true;
+        let mut requires_exact_origin_replay = false;
         for retry in &st.retry {
+            requires_exact_origin_replay |= retry.origin != MemoryOrigin::Global;
             if retry.warp >= self.warps.len() {
                 return Err(IssueError::ResponseWarpOutOfRange {
                     warp: retry.warp,
@@ -1717,11 +1751,14 @@ impl<'a> SmCore<'a> {
             }
         }
 
-        if st.l1.preflight_mutation_budget(budget).is_ok() && pending_budget_fits {
+        if !requires_exact_origin_replay
+            && st.l1.preflight_mutation_budget(budget).is_ok()
+            && pending_budget_fits
+        {
             return Ok(());
         }
 
-        // Numeric-boundary slow path: complete and retry on a shadow cache so
+        // Numeric-boundary or non-Global-origin slow path: complete and retry on a shadow cache so
         // warm hits and an atomic retry-unit replacement are charged exactly.
         let mut shadow = st.l1.clone();
         shadow.complete_fill(fill)?;
@@ -1756,7 +1793,13 @@ impl<'a> SmCore<'a> {
             }
             for sector_index in retry.lo..retry.hi {
                 let sector_id = self.warps[retry.warp].sectors[sector_index];
-                match access_shared_l1(&mut shadow, sector_id, now, retry.barrier.is_some())? {
+                match access_shared_l1(
+                    &mut shadow,
+                    retry.origin,
+                    sector_id,
+                    now,
+                    retry.barrier.is_some(),
+                )? {
                     SharedL1Access::Hit { .. } => {}
                     SharedL1Access::MissRequest { .. } | SharedL1Access::MergedPending { .. } => {
                         if let Some(barrier) = retry.barrier {
@@ -1797,6 +1840,69 @@ impl<'a> SmCore<'a> {
         Ok(())
     }
 
+    /// Replay the response-unblocked retry batch on shadow cache/mask state so
+    /// an origin conflict is rejected before the real response, fill, waiters,
+    /// retry queue, or output vector can change.
+    fn preflight_retry_line_folds(
+        &self,
+        st: &SharedL2State,
+        fill: FillKey,
+        now: u64,
+    ) -> Result<(), IssueError> {
+        if st.retry.is_empty() {
+            return Ok(());
+        }
+        let mut shadow = st.l1.clone();
+        shadow.complete_fill(fill)?;
+        let mut fill_masks = st.fill_masks.clone();
+        if let FillKey::Line(line) = fill
+            && fill_masks.remove(&line).is_none()
+        {
+            return Err(IssueError::FillMaskMissing { line });
+        }
+        let mut line_folds: Vec<(i64, MemoryOrigin)> = Vec::new();
+
+        'retries: for retry in &st.retry {
+            for sector_index in retry.lo..retry.hi {
+                let sector_id = self.warps[retry.warp].sectors[sector_index];
+                let sbit = 1u8 << (sector_id & 3) as u8;
+                let line = sector_id >> 2;
+                if shadow.is_fill_in_flight(FillKey::Line(line))
+                    && fill_masks.get(&line).is_some_and(|sent| sent & sbit == 0)
+                    && let Some(&(_, existing)) =
+                        line_folds.iter().find(|&&(fold_line, _)| fold_line == line)
+                    && existing != retry.origin
+                {
+                    return Err(IssueError::MixedOriginLineFold {
+                        line,
+                        existing,
+                        incoming: retry.origin,
+                    });
+                }
+
+                match access_shared_l1(&mut shadow, retry.origin, sector_id, now, false)? {
+                    SharedL1Access::Hit { .. } => {}
+                    SharedL1Access::MissRequest { fill } => {
+                        if let FillKey::Line(line) = fill {
+                            fill_masks.insert(line, sbit);
+                            line_folds.push((line, retry.origin));
+                        }
+                    }
+                    SharedL1Access::MergedPending { fill } => {
+                        if let FillKey::Line(line) = fill {
+                            let sent = fill_masks
+                                .get_mut(&line)
+                                .ok_or(IssueError::FillMaskMissing { line })?;
+                            *sent |= sbit;
+                        }
+                    }
+                    SharedL1Access::Stalled => break 'retries,
+                }
+            }
+        }
+        Ok(())
+    }
+
     fn preflight_retry_timing(
         &self,
         st: &SharedL2State,
@@ -1823,7 +1929,7 @@ impl<'a> SmCore<'a> {
         'retries: for retry in &st.retry {
             for sector_index in retry.lo..retry.hi {
                 let sector_id = self.warps[retry.warp].sectors[sector_index];
-                match access_shared_l1(&mut shadow, sector_id, now, false)? {
+                match access_shared_l1(&mut shadow, retry.origin, sector_id, now, false)? {
                     SharedL1Access::Hit { .. } => {
                         if retry.barrier.is_some() {
                             checked_cycle_add(
@@ -1890,6 +1996,7 @@ impl<'a> SmCore<'a> {
         // is preflighted by the system against the actual L2 outcome.
         if let ReplyTo::L1Fill { fill, .. } = reply {
             self.preflight_retry_timing(st, fill, now)?;
+            self.preflight_retry_line_folds(st, fill, now)?;
         }
         Ok(())
     }
@@ -2150,7 +2257,7 @@ impl<'a> SmCore<'a> {
             MemModel::L1Const(l1) => (l1, None),
             MemModel::L1Shared(st) => (&st.l1, Some(st)),
         };
-        let mut budget = L1MutationBudget::default();
+        let mut budget = L1MutationBudget::for_origin(MemoryOrigin::Global);
         let mut pending_budget_fits = true;
         for &wix in picks.iter().flatten() {
             let warp = &self.warps[wix];
@@ -2316,6 +2423,7 @@ impl<'a> SmCore<'a> {
                         if shared.is_some() {
                             match access_shared_l1(
                                 &mut shadow,
+                                MemoryOrigin::Global,
                                 sector_id,
                                 self.t,
                                 slot.control.write_barrier.is_some(),
@@ -2350,9 +2458,13 @@ impl<'a> SmCore<'a> {
                                 }
                             }
                         } else if slot.control.write_barrier.is_some() {
-                            shadow.access_eligible(sector_id, self.t)?;
+                            shadow.access_eligible(MemoryOrigin::Global, sector_id, self.t)?;
                         } else {
-                            shadow.access_eligible_unobserved(sector_id, self.t)?;
+                            shadow.access_eligible_unobserved(
+                                MemoryOrigin::Global,
+                                sector_id,
+                                self.t,
+                            )?;
                         }
                     }
                     if shared.is_some() {
@@ -2360,7 +2472,11 @@ impl<'a> SmCore<'a> {
                     }
                 }
                 AccessKind::GlobalBypass { len, token, .. } => {
-                    shadow.count_bypass(u64::from(len), token == CacheOpToken::Atom)?;
+                    shadow.count_bypass(
+                        MemoryOrigin::Global,
+                        u64::from(len),
+                        token == CacheOpToken::Atom,
+                    )?;
                     if shared.is_some() {
                         warp.preflight_pending_add(
                             wix,
@@ -2370,7 +2486,7 @@ impl<'a> SmCore<'a> {
                     }
                 }
                 AccessKind::GlobalUntagged { len, .. } => {
-                    shadow.count_untagged(u64::from(len))?;
+                    shadow.count_untagged(MemoryOrigin::Global, u64::from(len))?;
                     if shared.is_some() {
                         warp.preflight_pending_add(
                             wix,
@@ -2381,7 +2497,7 @@ impl<'a> SmCore<'a> {
                 }
                 AccessKind::GlobalStore { off, len } => {
                     for &sector_id in &warp.sectors[off..off + usize::from(len)] {
-                        shadow.probe_store(sector_id, self.t)?;
+                        shadow.probe_store(MemoryOrigin::Global, sector_id, self.t)?;
                     }
                 }
                 AccessKind::NonMemory | AccessKind::Shared => {}
@@ -2730,24 +2846,27 @@ enum SharedL1Access {
 
 fn access_shared_l1(
     l1: &mut L1Cache,
+    origin: MemoryOrigin,
     sector_id: i64,
     now: u64,
     observe_ready: bool,
 ) -> Result<SharedL1Access, L1AccessError> {
     if observe_ready {
-        return Ok(match l1.access_eligible_ev(sector_id, now)? {
+        return Ok(match l1.access_eligible_ev(origin, sector_id, now)? {
             EvAccess::Hit { ready } => SharedL1Access::Hit { ready: Some(ready) },
             EvAccess::MissRequest { fill } => SharedL1Access::MissRequest { fill },
             EvAccess::MergedPending { fill } => SharedL1Access::MergedPending { fill },
             EvAccess::Stalled => SharedL1Access::Stalled,
         });
     }
-    Ok(match l1.access_eligible_ev_unobserved(sector_id, now)? {
-        EvAccessUnobserved::Hit => SharedL1Access::Hit { ready: None },
-        EvAccessUnobserved::MissRequest { fill } => SharedL1Access::MissRequest { fill },
-        EvAccessUnobserved::MergedPending { fill } => SharedL1Access::MergedPending { fill },
-        EvAccessUnobserved::Stalled => SharedL1Access::Stalled,
-    })
+    Ok(
+        match l1.access_eligible_ev_unobserved(origin, sector_id, now)? {
+            EvAccessUnobserved::Hit => SharedL1Access::Hit { ready: None },
+            EvAccessUnobserved::MissRequest { fill } => SharedL1Access::MissRequest { fill },
+            EvAccessUnobserved::MergedPending { fill } => SharedL1Access::MergedPending { fill },
+            EvAccessUnobserved::Stalled => SharedL1Access::Stalled,
+        },
+    )
 }
 
 enum SharedAccessError {
@@ -2785,18 +2904,37 @@ fn access_shared(
     warps: &mut [WarpState<'_>],
     wix: usize,
     barrier: Option<DepBarrier>,
+    origin: MemoryOrigin,
     sector_id: i64,
     response_id: ResponseId,
     now: u64,
     out: &mut Vec<MemRequest>,
 ) -> Result<Option<u64>, SharedAccessError> {
     let sbit = 1u8 << (sector_id & 3) as u8;
-    match access_shared_l1(&mut st.l1, sector_id, now, barrier.is_some())
+    let line = sector_id >> 2;
+    if st.l1.is_fill_in_flight(FillKey::Line(line))
+        && st
+            .fill_masks
+            .get(&line)
+            .is_some_and(|sent| sent & sbit == 0)
+        && let Some(&(_, ix)) = st
+            .line_folds
+            .iter()
+            .find(|&&(fold_line, _)| fold_line == line)
+        && out[ix].origin != origin
+    {
+        return Err(SharedAccessError::Issue(IssueError::MixedOriginLineFold {
+            line,
+            existing: out[ix].origin,
+            incoming: origin,
+        }));
+    }
+    match access_shared_l1(&mut st.l1, origin, sector_id, now, barrier.is_some())
         .map_err(IssueError::from)?
     {
         SharedL1Access::Hit { ready } => Ok(ready),
         SharedL1Access::MissRequest { fill } => {
-            let request = MemRequest::l1_fill(now, sector_id, fill, response_id);
+            let request = MemRequest::l1_fill(now, sector_id, origin, fill, response_id);
             register_response(st, request.reply)?;
             out.push(request);
             if let FillKey::Line(line) = fill {
@@ -2825,7 +2963,7 @@ fn access_shared(
                     if let Some(&(_, ix)) = st.line_folds.iter().find(|&&(l, _)| l == line) {
                         out[ix].sector_mask |= sbit;
                     } else {
-                        out.push(MemRequest::l1_followup_fetch(now, sector_id));
+                        out.push(MemRequest::l1_followup_fetch(now, sector_id, origin));
                     }
                 }
                 // Re-touch of an already-sent sector: MSHR merge, no
@@ -2863,6 +3001,7 @@ fn drain_retries(
                 warps,
                 r.warp,
                 r.barrier,
+                r.origin,
                 sectors[r.lo],
                 ResponseId::new(st.response_owner, r.warp, r.instruction, r.lo),
                 now,
@@ -3326,16 +3465,19 @@ mod tests {
             match &mut core.mem {
                 MemModel::L1Const(l1) => {
                     assert!(matches!(
-                        l1.access_eligible(0, 0).unwrap(),
+                        l1.access_eligible(MemoryOrigin::Global, 0, 0).unwrap(),
                         (AccessOutcome::MissLineAlloc, 2)
                     ));
                     assert!(matches!(
-                        l1.access_eligible(0, 2).unwrap(),
+                        l1.access_eligible(MemoryOrigin::Global, 0, 2).unwrap(),
                         (AccessOutcome::Hit, 3)
                     ));
                 }
                 MemModel::L1Shared(st) => {
-                    let EvAccess::MissRequest { fill } = st.l1.access_eligible_ev(0, 0).unwrap()
+                    let EvAccess::MissRequest { fill } = st
+                        .l1
+                        .access_eligible_ev(MemoryOrigin::Global, 0, 0)
+                        .unwrap()
                     else {
                         panic!("expected cold prefill miss");
                     };
@@ -3384,16 +3526,19 @@ mod tests {
             match &mut core.mem {
                 MemModel::L1Const(l1) => {
                     assert!(matches!(
-                        l1.access_eligible(0, 0).unwrap(),
+                        l1.access_eligible(MemoryOrigin::Global, 0, 0).unwrap(),
                         (AccessOutcome::MissLineAlloc, 3)
                     ));
                     assert!(matches!(
-                        l1.access_eligible(0, 3).unwrap(),
+                        l1.access_eligible(MemoryOrigin::Global, 0, 3).unwrap(),
                         (AccessOutcome::Hit, 5)
                     ));
                 }
                 MemModel::L1Shared(st) => {
-                    let EvAccess::MissRequest { fill } = st.l1.access_eligible_ev(0, 0).unwrap()
+                    let EvAccess::MissRequest { fill } = st
+                        .l1
+                        .access_eligible_ev(MemoryOrigin::Global, 0, 0)
+                        .unwrap()
                     else {
                         panic!("expected cold prefill miss");
                     };
@@ -4118,7 +4263,11 @@ mod tests {
         let MemModel::L1Shared(st) = &mut core.mem else {
             panic!("expected shared mode");
         };
-        let EvAccess::MissRequest { fill } = st.l1.access_eligible_ev(0, 0).unwrap() else {
+        let EvAccess::MissRequest { fill } = st
+            .l1
+            .access_eligible_ev(MemoryOrigin::Global, 0, 0)
+            .unwrap()
+        else {
             panic!("expected cold prefill miss");
         };
         st.l1.complete_fill(fill).unwrap();
@@ -4220,7 +4369,7 @@ mod tests {
             panic!("expected constant L1 mode");
         };
         assert!(matches!(
-            l1.access_eligible(0, u64::MAX - 15).unwrap(),
+            l1.access_eligible(MemoryOrigin::Global, 0, u64::MAX - 15).unwrap(),
             (AccessOutcome::MissLineAlloc, ready) if ready == u64::MAX - 5
         ));
         core.t = u64::MAX - 14;
@@ -4476,6 +4625,7 @@ mod tests {
         st.retry.push_back(Retry {
             warp: 0,
             instruction: 0,
+            origin: MemoryOrigin::Global,
             barrier: Some(barrier(0)),
             lo: 1,
             hi: 2,
@@ -4550,6 +4700,7 @@ mod tests {
         st.retry.push_back(Retry {
             warp: 0,
             instruction: 0,
+            origin: MemoryOrigin::Global,
             barrier: Some(barrier(0)),
             lo: 1,
             hi: 3,
@@ -4821,7 +4972,11 @@ mod tests {
         let MemModel::L1Shared(st) = &mut core.mem else {
             panic!("expected shared mode");
         };
-        let EvAccess::MissRequest { fill } = st.l1.access_eligible_ev(8, 0).unwrap() else {
+        let EvAccess::MissRequest { fill } = st
+            .l1
+            .access_eligible_ev(MemoryOrigin::Global, 8, 0)
+            .unwrap()
+        else {
             panic!("expected cold prefill miss");
         };
         st.l1.complete_fill(fill).unwrap();
@@ -4839,6 +4994,7 @@ mod tests {
         st.retry.push_back(Retry {
             warp: 0,
             instruction: 0,
+            origin: MemoryOrigin::Global,
             barrier: None,
             lo: 1,
             hi: 2,
@@ -5169,6 +5325,7 @@ mod tests {
         );
         assert_eq!(out.len(), 2);
         assert!(out.iter().all(|r| r.source == L2Source::Store
+            && r.origin == MemoryOrigin::Global
             && r.class == L2OpClass::WriteAtomic
             && r.reply == ReplyTo::None));
     }
@@ -5212,6 +5369,7 @@ mod tests {
             Advance::Idle { wake_at: None }
         );
         assert_eq!(out.len(), 1, "one L2 transaction for the whole line");
+        assert_eq!(out[0].origin, MemoryOrigin::Global);
         assert_eq!(out[0].sector_mask, 0b1111);
         assert!(matches!(
             out[0].reply,
@@ -5227,6 +5385,162 @@ mod tests {
             Advance::Done
         );
         assert_eq!(core.result().cycles, 245);
+    }
+
+    #[test]
+    fn mixed_origin_same_batch_fold_fails_before_mutation() {
+        let mut load = cb(1);
+        load.write_barrier = Some(barrier(2));
+        let sched = schedule(vec![(0, slot(load, OpClass::Other, "LDG.E"))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                warp_slot: 0,
+                insts: vec![ReplayInst {
+                    pc: 0,
+                    kind: AccessKind::GlobalEligible {
+                        off: 0,
+                        len: 1,
+                        token: CacheOpToken::LdgECa,
+                    },
+                }],
+                sectors: vec![40, 41],
+            }],
+        }];
+        let mut core = shared_core(&blocks, &sched, &params());
+        let mut out = Vec::new();
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut out).unwrap(),
+            Advance::Done
+        );
+        assert_eq!(out.len(), 1);
+        assert_eq!(out[0].origin, MemoryOrigin::Global);
+
+        let (mem, warps) = (&mut core.mem, &mut core.warps);
+        let MemModel::L1Shared(st) = mem else {
+            panic!("expected shared mode");
+        };
+        let before_counters = st.l1.counters;
+        let before_masks = st.fill_masks.clone();
+        let before_out = out.clone();
+        let response_id = ResponseId::new(st.response_owner, 0, 1, 1);
+        let error = access_shared(
+            st,
+            warps,
+            0,
+            None,
+            MemoryOrigin::Local,
+            41,
+            response_id,
+            1,
+            &mut out,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            error,
+            SharedAccessError::Issue(IssueError::MixedOriginLineFold {
+                line: 10,
+                existing: MemoryOrigin::Global,
+                incoming: MemoryOrigin::Local,
+            })
+        ));
+        assert_eq!(st.l1.counters, before_counters);
+        assert_eq!(st.fill_masks, before_masks);
+        assert_eq!(out, before_out);
+    }
+
+    #[test]
+    fn mixed_origin_retry_fold_rejects_the_whole_response_transaction() {
+        let mut load = cb(1);
+        load.write_barrier = Some(barrier(2));
+        let sched = schedule(vec![(0, slot(load, OpClass::Other, "LDG.E"))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                warp_slot: 0,
+                insts: vec![ReplayInst {
+                    pc: 0,
+                    kind: AccessKind::GlobalEligible {
+                        off: 0,
+                        len: 1,
+                        token: CacheOpToken::LdgECa,
+                    },
+                }],
+                // Sector 40 owns the response. The two injected retry entries
+                // target distinct sectors of line 11.
+                sectors: vec![40, 44, 45],
+            }],
+        }];
+        let mut core = shared_core(&blocks, &sched, &params());
+        let mut requests = Vec::new();
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut requests)
+                .unwrap(),
+            Advance::Done
+        );
+        let reply = requests[0].reply;
+        let fill = match reply {
+            ReplyTo::L1Fill { fill, .. } => fill,
+            _ => panic!("expected L1 fill response"),
+        };
+
+        let (before_counters, before_masks, before_pending, before_retries);
+        {
+            let MemModel::L1Shared(st) = &mut core.mem else {
+                panic!("expected shared mode");
+            };
+            st.retry.push_back(Retry {
+                warp: 0,
+                instruction: 1,
+                origin: MemoryOrigin::Global,
+                barrier: None,
+                lo: 1,
+                hi: 2,
+            });
+            st.retry.push_back(Retry {
+                warp: 0,
+                instruction: 2,
+                origin: MemoryOrigin::Local,
+                barrier: None,
+                lo: 2,
+                hi: 3,
+            });
+            before_counters = st.l1.counters;
+            before_masks = st.fill_masks.clone();
+            before_pending = core.warps[0].barrier_pending;
+            before_retries = st.retry.len();
+        }
+        let mut emitted = Vec::new();
+
+        assert!(matches!(
+            core.on_response(reply, u64::MAX, &mut emitted),
+            Err(IssueError::TimeOverflow {
+                operation: "retry self-response horizon",
+                base: u64::MAX,
+                ..
+            })
+        ));
+        assert!(emitted.is_empty());
+
+        assert!(matches!(
+            core.on_response(reply, 244, &mut emitted),
+            Err(IssueError::MixedOriginLineFold {
+                line: 11,
+                existing: MemoryOrigin::Global,
+                incoming: MemoryOrigin::Local,
+            })
+        ));
+
+        let MemModel::L1Shared(st) = &core.mem else {
+            panic!("expected shared mode");
+        };
+        assert!(st.outstanding_replies.contains(&reply));
+        assert!(st.l1.is_fill_in_flight(fill));
+        assert_eq!(st.l1.counters, before_counters);
+        assert_eq!(st.fill_masks, before_masks);
+        assert_eq!(st.retry.len(), before_retries);
+        assert_eq!(core.warps[0].barrier_pending, before_pending);
+        assert!(emitted.is_empty());
     }
 
     /// §6.4 slice 2 — a LATER instruction merging onto an in-flight

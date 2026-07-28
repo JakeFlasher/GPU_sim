@@ -38,8 +38,8 @@
 //! whose residual localizes the un-modeled LDGSTS-L1-residency effect.
 
 use sim_arch::ArchId;
-use sim_mem::{L1Counters, L2Counters};
-use sim_sm::{DramStats, KernelReplayResult};
+use sim_mem::{L1CounterError, L1Counters, L1OriginCounters, L2Counters, MemoryOrigin};
+use sim_sm::{DramStats, KernelReplayResult, L2SourceSplit, SystemCounterError};
 
 /// The exact counter fields the emission layer reads, borrowed. Decouples
 /// emission from the full `KernelReplayResult` so a cell's counters — summed
@@ -55,6 +55,8 @@ pub struct CounterSnapshot<'a> {
     pub l1: Option<&'a L1Counters>,
     /// L2 counters, present only on the shared-L2 path.
     pub l2: Option<&'a L2Counters>,
+    /// Joint origin/source attribution for the shared physical L2.
+    pub l2_by_source: Option<&'a L2SourceSplit>,
     /// DRAM read observer, present only on the shared-L2 path.
     pub dram: Option<&'a DramStats>,
 }
@@ -67,6 +69,7 @@ impl<'a> CounterSnapshot<'a> {
             instructions_issued: r.instructions_issued,
             l1: r.l1.as_ref(),
             l2: r.l2.as_ref(),
+            l2_by_source: r.l2_by_source.as_ref(),
             dram: r.dram.as_ref(),
         }
     }
@@ -89,8 +92,20 @@ impl<'a> CounterSnapshot<'a> {
         if let Some(l2) = self.l2 {
             check("L2 counters", l2.arch())?;
         }
+        if let Some(l2_by_source) = self.l2_by_source {
+            check("L2 source split", l2_by_source.arch())?;
+        }
         if let Some(dram) = self.dram {
             check("DRAM stats", dram.arch())?;
+        }
+        if let Some(l1) = self.l1 {
+            l1.validate_origin_partition()?;
+        }
+        if let Some(l2_by_source) = self.l2_by_source {
+            l2_by_source.validate_origin_partition()?;
+        }
+        if let Some(dram) = self.dram {
+            dram.validate_origin_partition()?;
         }
         Ok(())
     }
@@ -325,6 +340,10 @@ pub enum EmitError {
         expected: ArchId,
         got: ArchId,
     },
+    #[error(transparent)]
+    L1Counters(#[from] L1CounterError),
+    #[error(transparent)]
+    SystemCounters(#[from] SystemCounterError),
 }
 
 fn checked_sum(
@@ -341,7 +360,7 @@ fn checked_sum(
 /// READ-class bypass sectors = all bypass sectors minus the ATOM write-class
 /// subset. This is the LDGSTS/bypass-LOAD stream that folds into the `op_ld`
 /// surface; the ATOM subset (booked under op_atom/op_red by NCU) stays out.
-fn bypass_read_sectors(key: &'static str, l1: &L1Counters) -> Result<u64, EmitError> {
+fn bypass_read_sectors(key: &'static str, l1: &L1OriginCounters) -> Result<u64, EmitError> {
     l1.bypass_sectors
         .checked_sub(l1.bypass_atom_sectors)
         .ok_or(EmitError::CounterInvariant {
@@ -369,11 +388,12 @@ fn emit_gmem_ld_sectors(snap: &CounterSnapshot) -> Result<EmitOutcome, EmitError
             needs: MemUnit::L1Tex,
         }));
     };
-    let bypass = bypass_read_sectors(key, l1)?;
+    let global = l1.origin(MemoryOrigin::Global);
+    let bypass = bypass_read_sectors(key, &global)?;
     let sectors = checked_sum(
         key,
         "global-load sector total",
-        &[l1.hits, l1.misses, bypass],
+        &[global.hits, global.misses, bypass],
     )?;
     Ok(EmitOutcome::Predicted(MetricValue::Exact(sectors)))
 }
@@ -385,7 +405,9 @@ fn emit_gmem_st_sectors(snap: &CounterSnapshot) -> Result<EmitOutcome, EmitError
             needs: MemUnit::L1Tex,
         }));
     };
-    Ok(EmitOutcome::Predicted(MetricValue::Exact(l1.store_sectors)))
+    Ok(EmitOutcome::Predicted(MetricValue::Exact(
+        l1.origin(MemoryOrigin::Global).store_sectors,
+    )))
 }
 
 /// `l1tex__t_sector_pipe_lsu_mem_global_op_ld_hit_rate.pct` — the op_ld sector
@@ -399,12 +421,13 @@ fn emit_l1tex_read_hit_rate(snap: &CounterSnapshot) -> Result<EmitOutcome, EmitE
             needs: MemUnit::L1Tex,
         }));
     };
-    let num = l1.hits;
-    let bypass = bypass_read_sectors(key, l1)?;
+    let global = l1.origin(MemoryOrigin::Global);
+    let num = global.hits;
+    let bypass = bypass_read_sectors(key, &global)?;
     let den = checked_sum(
         key,
         "global-load hit-rate denominator",
-        &[l1.hits, l1.misses, bypass],
+        &[global.hits, global.misses, bypass],
     )?;
     Ok(EmitOutcome::Predicted(MetricValue::fraction(
         key, num, den,
@@ -592,7 +615,7 @@ pub fn index_by_key(
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use sim_mem::{L1Counters, L2Counters};
+    use sim_mem::{L1CounterField, L1Counters, L2Counters, L2Source};
     use sim_sm::DramStats;
 
     /// A replay result carrying just the counters the emit fns read.
@@ -609,10 +632,10 @@ mod tests {
             per_sm: Default::default(),
             diagnostic_last_issue_cycles: 1,
             terminal_modeled_event_time: None,
-            l1,
+            l1: l1.map(|counters| counters.with_unified_origin(MemoryOrigin::Global)),
             l2,
             l2_by_source: None,
-            dram,
+            dram: dram.map(|stats| stats.with_unified_origin(MemoryOrigin::Global)),
         }
     }
 
@@ -662,6 +685,7 @@ mod tests {
             instructions_issued: 1,
             l1: Some(&unbound),
             l2: None,
+            l2_by_source: None,
             dram: None,
         };
         assert_eq!(
@@ -677,6 +701,7 @@ mod tests {
             instructions_issued: 1,
             l1: Some(&sm86),
             l2: None,
+            l2_by_source: None,
             dram: None,
         };
         assert_eq!(
@@ -686,6 +711,76 @@ mod tests {
                 expected: ArchId::Sm120,
                 got: ArchId::Sm86,
             })
+        );
+    }
+
+    #[test]
+    fn emission_rejects_incoherent_origin_partitions() {
+        let mut l1 = L1Counters::for_arch(ArchId::Sm86);
+        l1.hits = 1;
+        let l1_snapshot = CounterSnapshot {
+            arch: ArchId::Sm86,
+            instructions_issued: 1,
+            l1: Some(&l1),
+            l2: None,
+            l2_by_source: None,
+            dram: None,
+        };
+        assert_eq!(
+            emit_all(&l1_snapshot),
+            Err(EmitError::L1Counters(
+                L1CounterError::OriginPartitionMismatch {
+                    field: L1CounterField::Hits,
+                    unified: 1,
+                    global: 0,
+                    local: 0,
+                }
+            ))
+        );
+
+        let mut split = L2SourceSplit::for_arch(ArchId::Sm86);
+        split.sectors[L2Source::L1Fill as usize] = 1;
+        let split_snapshot = CounterSnapshot {
+            arch: ArchId::Sm86,
+            instructions_issued: 1,
+            l1: None,
+            l2: None,
+            l2_by_source: Some(&split),
+            dram: None,
+        };
+        assert_eq!(
+            emit_all(&split_snapshot),
+            Err(EmitError::SystemCounters(
+                SystemCounterError::L2OriginPartitionMismatch {
+                    counter: "sectors",
+                    l2_source: L2Source::L1Fill,
+                    unified: 1,
+                    global: 0,
+                    local: 0,
+                }
+            ))
+        );
+
+        let mut dram = DramStats::for_arch(ArchId::Sm86);
+        dram.read_sectors = 1;
+        let dram_snapshot = CounterSnapshot {
+            arch: ArchId::Sm86,
+            instructions_issued: 1,
+            l1: None,
+            l2: None,
+            l2_by_source: None,
+            dram: Some(&dram),
+        };
+        assert_eq!(
+            emit_all(&dram_snapshot),
+            Err(EmitError::SystemCounters(
+                SystemCounterError::DramOriginPartitionMismatch {
+                    counter: "read sectors",
+                    unified: 1,
+                    global: 0,
+                    local: 0,
+                }
+            ))
         );
     }
 
@@ -774,6 +869,56 @@ mod tests {
                 key: "k",
                 num: 11,
                 den: 10
+            })
+        );
+    }
+
+    #[test]
+    fn global_descriptors_exclude_local_origin_while_unified_rate_includes_it() {
+        let global = L1OriginCounters {
+            hits: 6,
+            misses: 4,
+            bypass_sectors: 3,
+            bypass_atom_sectors: 1,
+            store_sectors: 5,
+            store_hits: 2,
+            ..L1OriginCounters::default()
+        };
+        let local = L1OriginCounters {
+            hits: 20,
+            misses: 10,
+            store_sectors: 7,
+            store_hits: 3,
+            untagged_sectors: 2,
+            ..L1OriginCounters::default()
+        };
+        let l1 = L1Counters::from_origins(ArchId::Sm86, global, local).unwrap();
+        let mut result = replay(1, None, None, None);
+        result.l1 = Some(l1);
+        let preds = emit_all(&CounterSnapshot::from_replay(&result)).unwrap();
+
+        assert_eq!(
+            predicted(&preds, "traffic_gmem_ld_sectors"),
+            &EmitOutcome::Predicted(MetricValue::Exact(12))
+        );
+        assert_eq!(
+            predicted(&preds, "traffic_gmem_st_sectors"),
+            &EmitOutcome::Predicted(MetricValue::Exact(5))
+        );
+        assert_eq!(
+            predicted(&preds, "cache_hit_rate_l1tex_read_sector"),
+            &EmitOutcome::Predicted(MetricValue::Fraction {
+                value: Some(0.5),
+                numerator: 6,
+                denominator: 12,
+            })
+        );
+        assert_eq!(
+            predicted(&preds, "cache_hit_rate_l1tex_sector"),
+            &EmitOutcome::Predicted(MetricValue::Fraction {
+                value: Some(31.0 / 57.0),
+                numerator: 31,
+                denominator: 57,
             })
         );
     }

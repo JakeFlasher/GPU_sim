@@ -248,6 +248,7 @@ fn real_trace_replays_under_issue_model() {
         instructions_issued: issued,
         l1: l1_totals.as_ref(),
         l2: l2_totals.as_ref(),
+        l2_by_source: l2_totals.as_ref().map(|_| &split_totals),
         dram: dram_totals.as_ref(),
     };
     for p in sim_emit::emit_all(&snap).expect("emission contracts hold") {

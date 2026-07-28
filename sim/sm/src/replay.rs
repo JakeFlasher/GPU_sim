@@ -1521,8 +1521,10 @@ mod aggregation_tests {
     fn l1_overflow_keeps_responsible_sm_context() {
         let mut first = L1Counters::for_arch(ArchId::Sm86);
         first.hits = u64::MAX;
+        first = first.with_unified_origin(sim_mem::MemoryOrigin::Global);
         let mut second = L1Counters::for_arch(ArchId::Sm86);
         second.hits = 1;
+        second = second.with_unified_origin(sim_mem::MemoryOrigin::Global);
         let per_sm = BTreeMap::from([(0, sm(1, Some(first))), (1, sm(1, Some(second)))]);
         assert!(matches!(
             fold_kernel_result(ArchId::Sm86, per_sm, 2, true, None, None),
@@ -2217,6 +2219,35 @@ mod space_routing_tests {
             assert_eq!(sectors, vec![25]);
             assert!(sector_scratch.is_empty());
         }
+    }
+
+    #[test]
+    fn valid_local_remains_on_dormant_sectorless_route() {
+        let sched = schedule(ArchId::Sm86, MemRole::None, "LDL R0, [R1]");
+        let mut inst = global_inst();
+        inst.memory_op_class = Some(pb::MemoryOpClass::Local as i32);
+        inst.addresses[0].address_space = Some(pb::MemorySpace::Local as i32);
+
+        let flat = classify_flat(&inst, &sched, sched.arch, Path::new("local.pb"), 0, 0)
+            .expect("valid LOCAL/LOCAL remains admitted before hierarchy activation");
+        assert!(matches!(flat, AccessKind::Shared));
+
+        let mut sectors = vec![31];
+        let mut sector_scratch = vec![99];
+        let l1 = classify_with_l1(
+            &inst,
+            &sched,
+            sched.arch,
+            &mut sectors,
+            &mut sector_scratch,
+            Path::new("local.pb"),
+            0,
+            0,
+        )
+        .expect("valid LOCAL/LOCAL remains on the dormant shared timing arm");
+        assert!(matches!(l1, AccessKind::Shared));
+        assert_eq!(sectors, vec![31], "dormant LOCAL must append no sectors");
+        assert!(sector_scratch.is_empty());
     }
 
     #[test]

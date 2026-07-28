@@ -37,8 +37,8 @@ pub mod l2;
 pub mod pchase_card;
 
 pub use access::{
-    AccessKind, MemRole, MemRoleError, is_global_store_opcode, is_known_untagged_opcode,
-    mem_role_of_checked,
+    AccessKind, MemRole, MemRoleError, MemoryOrigin, is_global_store_opcode,
+    is_known_untagged_opcode, mem_role_of_checked,
 };
 pub use cache_op::{
     BARE_LDG_E_DEFAULTS_TO_CA, CacheOpError, CacheOpToken, classify_opcode_checked,
@@ -46,8 +46,8 @@ pub use cache_op::{
 };
 pub use l1::{
     AccessOutcome, EvAccess, EvAccessUnobserved, FillKey, L1AccessError, L1Cache, L1Config,
-    L1ConfigError, L1CounterError, L1CounterField, L1Counters, L1MutationBudget, LINE_BYTES,
-    PreparedSectorExpansion, SECTOR_BYTES, SECTORS_PER_LINE, SectorExpansionError,
+    L1ConfigError, L1CounterError, L1CounterField, L1Counters, L1MutationBudget, L1OriginCounters,
+    LINE_BYTES, PreparedSectorExpansion, SECTOR_BYTES, SECTORS_PER_LINE, SectorExpansionError,
     SectorExpansionPlan,
 };
 pub use l2::{

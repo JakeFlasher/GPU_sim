@@ -10,6 +10,26 @@ use crate::cache_op::{
     CacheOpError, CacheOpToken, classify_opcode_checked, derive_l1_eligible, opcode_head,
 };
 
+/// Dynamic address-space provenance for hierarchy accounting. This is
+/// deliberately orthogonal to cache source, operation class, and physical
+/// cache identity: Global and Local traffic share one cache state.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum MemoryOrigin {
+    Global,
+    Local,
+}
+
+impl MemoryOrigin {
+    pub const ALL: [Self; 2] = [Self::Global, Self::Local];
+
+    pub const fn index(self) -> usize {
+        match self {
+            Self::Global => 0,
+            Self::Local => 1,
+        }
+    }
+}
+
 /// How the memory hierarchy treats a global-class record at a static pc,
 /// classified from the sidecar's SASS text (see `cache_op` for why the
 /// Python classifier's own manifests are not consumed).
