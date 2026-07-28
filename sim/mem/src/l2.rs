@@ -15,9 +15,10 @@
 //! - a Read-class sector access HITS iff its line tag is resident in
 //!   the addressed set AND that sector's valid bit is set;
 //! - a resident line whose requested sector is not yet valid is a
-//!   sector-fill miss for reads (the bit is set immediately — the
-//!   Python replay is occupancy-only, fills are not in-flight at this
-//!   level) and a tag-match HIT for writes/atomics;
+//!   sector-fill miss for reads. The immediate API sets the bit during the
+//!   access to preserve Python parity; the event API keeps it pending until an
+//!   explicit generation-bound completion. Writes validate immediately in both
+//!   disciplines because they carry the sector data;
 //! - a non-resident line allocates a way, evicting per policy when the
 //!   set is full (LRU / SRRIP 2-bit RRPV / deterministic BIP 1-in-32);
 //! - slice/set addressing: `slice = hash(line_id)`,
@@ -33,10 +34,14 @@
 //! knobs below (same fail-closed pattern as the L1 MSHR default), to be
 //! closed by microbenchmarks — never by label fits.
 //!
-//! MSHR/fill timing: v0 models L2 occupancy only (no L2-level MSHR or
-//! in-flight fill state). The L1's MSHRs already bound the per-SM
-//! outstanding stream, and the Python reference has no L2 fill model to
-//! port — an L2 MSHR would be an uncarded invention at this point.
+//! Fill timing: the immediate API remains an occupancy-only Python-parity
+//! surface. A separate event discipline tracks pending sectors and makes them
+//! valid only through opaque, allocation-generation-bound completion tokens.
+//! This is visibility/ABA state, not an invented finite L2 MSHR: duplicate
+//! pending reads remain distinct misses and no request coalescing or capacity
+//! limit is introduced.
+
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use sim_arch::{ArchError, ArchId, CapabilityError, L2Replacement as ArchL2Replacement};
 
@@ -187,6 +192,8 @@ pub enum L2ConfigError {
 pub enum L2BuildError {
     #[error(transparent)]
     Config(#[from] L2ConfigError),
+    #[error("process-local L2 model-owner identity space is exhausted")]
+    ModelOwnerExhausted,
     #[error("L2 set count overflows u64: num_slices={num_slices}, sets_per_slice={sets_per_slice}")]
     SetCountOverflow {
         num_slices: u32,
@@ -442,12 +449,170 @@ impl L2MaskPreview {
     }
 }
 
+/// Process-local identity of one L2 model lineage. Snapshots retain the owner
+/// because they are transactional continuations of the same model; unrelated
+/// models cannot accept each other's fill capabilities.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct L2ModelOwner(u64);
+
+static NEXT_L2_MODEL_OWNER: AtomicU64 = AtomicU64::new(1);
+
+fn allocate_l2_model_owner_from(next: &AtomicU64) -> Result<L2ModelOwner, L2BuildError> {
+    next.fetch_update(
+        Ordering::Relaxed,
+        Ordering::Relaxed,
+        |current| match current {
+            0 => None,
+            u64::MAX => Some(0),
+            _ => current.checked_add(1),
+        },
+    )
+    .map(L2ModelOwner)
+    .map_err(|_| L2BuildError::ModelOwnerExhausted)
+}
+
+fn allocate_l2_model_owner() -> Result<L2ModelOwner, L2BuildError> {
+    allocate_l2_model_owner_from(&NEXT_L2_MODEL_OWNER)
+}
+
+/// Private identity of one event-discipline line allocation. Reinstalling the
+/// same tag receives a fresh generation, preventing stale/ABA completion.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+struct L2AllocationGeneration(u64);
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NextAllocationGeneration {
+    Available(u64),
+    Exhausted,
+}
+
+impl NextAllocationGeneration {
+    fn allocate(self) -> Result<(L2AllocationGeneration, NextAllocationGeneration), L2AccessError> {
+        match self {
+            Self::Available(value) => Ok((
+                L2AllocationGeneration(value),
+                match value.checked_add(1) {
+                    Some(next) => Self::Available(next),
+                    None => Self::Exhausted,
+                },
+            )),
+            Self::Exhausted => Err(L2AccessError::FillGenerationExhausted),
+        }
+    }
+}
+
+/// Which mutation family owns one model instance. Read-only previews and
+/// snapshots are neutral; the first successful mutation latches the family.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum L2AccessDiscipline {
+    Immediate,
+    Event,
+}
+
+impl L2AccessDiscipline {
+    const fn name(self) -> &'static str {
+        match self {
+            Self::Immediate => "immediate",
+            Self::Event => "event",
+        }
+    }
+}
+
+/// Opaque capability for completing sectors fetched by one event-mode read.
+/// Fields are private so callers can route but cannot mint or widen a fill.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct L2FillToken {
+    owner: L2ModelOwner,
+    line_id: i64,
+    generation: L2AllocationGeneration,
+    sector_mask: u8,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PreparedL2Fill {
+    owner: L2ModelOwner,
+    line_id: i64,
+    generation: L2AllocationGeneration,
+    sector_mask: u8,
+}
+
+impl PreparedL2Fill {
+    fn issue(self) -> L2FillToken {
+        L2FillToken {
+            owner: self.owner,
+            line_id: self.line_id,
+            generation: self.generation,
+            sector_mask: self.sector_mask,
+        }
+    }
+}
+
+/// Event-mode lookup preview available before mutation commits. `fill_mask` is
+/// only a non-completable description: a failed callback may retain this value,
+/// but no fill capability exists until the cache mutation commits successfully.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct L2EventMaskPreview {
+    pub lookup: L2MaskPreview,
+    fill_mask: u8,
+}
+
+impl L2EventMaskPreview {
+    /// Sectors whose read data must become visible at a later completion event.
+    pub const fn fill_mask(self) -> u8 {
+        self.fill_mask
+    }
+}
+
+/// Committed event-mode access outcome. Only this post-commit value can carry an
+/// opaque fill capability.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct L2EventMaskAccess {
+    pub lookup: L2MaskPreview,
+    pub fill: Option<L2FillToken>,
+}
+
+/// Deterministic result of an event fill completion. A stale allocation is a
+/// no-op, while a matching allocation reports newly valid and duplicate bits
+/// separately so partial and repeated deliveries are explicit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum L2FillCompletion {
+    Completed {
+        newly_valid_mask: u8,
+        duplicate_mask: u8,
+    },
+    Stale,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum L2AccessError {
     #[error("L2 sector {sector} is outside the 0..4 sector domain")]
     SectorOutOfRange { sector: u8 },
     #[error("L2 sector mask {sector_mask:#06b} must select one or more of bits 0..4")]
     SectorMaskInvalid { sector_mask: u8 },
+    #[error("L2 access discipline is {latched}; cannot perform a {requested} mutation")]
+    AccessDisciplineMismatch {
+        latched: &'static str,
+        requested: &'static str,
+    },
+    #[error("L2 event allocation-generation space is exhausted")]
+    FillGenerationExhausted,
+    #[error("resident event-mode L2 line {line_id} has no allocation generation")]
+    EventAllocationGenerationMissing { line_id: i64 },
+    #[error("L2 fill token belongs to a different model")]
+    FillTokenOwnerMismatch,
+    #[error(
+        "L2 completion mask {completion_mask:#06b} must be a nonempty subset of token mask {token_mask:#06b}"
+    )]
+    FillCompletionMaskInvalid { completion_mask: u8, token_mask: u8 },
+    #[error(
+        "L2 line {line_id} completion mask {completion_mask:#06b} is outside valid {valid_mask:#06b} plus pending {pending_mask:#06b} state"
+    )]
+    FillCompletionStateInvalid {
+        line_id: i64,
+        completion_mask: u8,
+        valid_mask: u8,
+        pending_mask: u8,
+    },
     #[error(transparent)]
     SetIndex(#[from] L2SetIndexError),
     #[error("L2 access clock overflows i64 at {clock}")]
@@ -624,8 +789,14 @@ struct Way {
     /// Full line id as the tag (signed: negative wire-admitted ids
     /// replay with Python's floored semantics, never wrapped).
     tag: i64,
-    /// Valid-sector bitmask (bit = sector index within the line, 0..4).
+    /// Completed/valid-sector bitmask (bit = sector index within the line).
     mask: u8,
+    /// Event-mode read sectors requested but not yet completed. Pending bits are
+    /// deliberately absent from `mask` and never count as physically present.
+    pending_mask: u8,
+    /// Event-mode allocation identity. Immediate-parity ways carry `None` and
+    /// cannot coexist with event accesses because the discipline is latched.
+    generation: Option<L2AllocationGeneration>,
     /// LRU timestamp (LRU/BIP — BIP inserts can go BELOW the current
     /// minimum, hence signed) or RRPV (SRRIP).
     recency: i64,
@@ -641,6 +812,9 @@ pub struct L2Model {
     clock: i64,
     bip_counter: u64,
     counters: L2Counters,
+    owner: L2ModelOwner,
+    next_generation: NextAllocationGeneration,
+    access_discipline: Option<L2AccessDiscipline>,
 }
 
 fn checked_set_count(num_slices: u32, sets_per_slice: u64) -> Result<usize, L2BuildError> {
@@ -684,6 +858,7 @@ impl L2Model {
         let num_sets = cfg.num_sets_per_slice()?;
         let set_count = checked_set_count(cfg.num_slices, num_sets)?;
         let sets = allocate_set_storage(set_count)?;
+        let owner = allocate_l2_model_owner()?;
         let arch = cfg.arch;
         Ok(Self {
             cfg,
@@ -692,6 +867,9 @@ impl L2Model {
             clock: 0,
             bip_counter: 0,
             counters: L2Counters::for_arch(arch),
+            owner,
+            next_generation: NextAllocationGeneration::Available(0),
+            access_discipline: None,
         })
     }
 
@@ -747,6 +925,9 @@ impl L2Model {
             clock: self.clock,
             bip_counter: self.bip_counter,
             counters: self.counters,
+            owner: self.owner,
+            next_generation: self.next_generation,
+            access_discipline: self.access_discipline,
         })
     }
 
@@ -789,6 +970,21 @@ impl L2Model {
         Ok(set_key)
     }
 
+    fn preflight_access_discipline(
+        &self,
+        requested: L2AccessDiscipline,
+    ) -> Result<(), L2AccessError> {
+        if let Some(latched) = self.access_discipline
+            && latched != requested
+        {
+            return Err(L2AccessError::AccessDisciplineMismatch {
+                latched: latched.name(),
+                requested: requested.name(),
+            });
+        }
+        Ok(())
+    }
+
     fn prepare_mask(
         &mut self,
         line_id: i64,
@@ -797,6 +993,7 @@ impl L2Model {
     ) -> Result<PreparedMaskAccess, L2AccessError> {
         validate_sector_mask(sector_mask)?;
         self.validate_counter_architecture()?;
+        self.preflight_access_discipline(L2AccessDiscipline::Immediate)?;
         let set_key = self.set_key(line_id)?;
         let associativity = usize::try_from(self.cfg.associativity).map_err(|_| {
             L2AccessError::AssociativityOutOfRange {
@@ -853,6 +1050,8 @@ impl L2Model {
                     set_key,
                     line_id,
                     bit,
+                    0,
+                    None,
                     associativity,
                     self.cfg.replacement,
                     clock,
@@ -904,6 +1103,8 @@ impl L2Model {
             clock,
             bip_counter,
             counters,
+            next_generation: self.next_generation,
+            discipline: L2AccessDiscipline::Immediate,
             preview: L2MaskPreview {
                 sectors: sector_mask.count_ones(),
                 counted_hits: counted_mask.count_ones(),
@@ -912,6 +1113,188 @@ impl L2Model {
                 present_mask,
             },
         })
+    }
+
+    fn prepare_event_mask(
+        &mut self,
+        line_id: i64,
+        sector_mask: u8,
+        class: L2OpClass,
+    ) -> Result<
+        (
+            PreparedMaskAccess,
+            L2EventMaskPreview,
+            Option<PreparedL2Fill>,
+        ),
+        L2AccessError,
+    > {
+        validate_sector_mask(sector_mask)?;
+        self.validate_counter_architecture()?;
+        self.preflight_access_discipline(L2AccessDiscipline::Event)?;
+        let set_key = self.set_key(line_id)?;
+        let associativity = usize::try_from(self.cfg.associativity).map_err(|_| {
+            L2AccessError::AssociativityOutOfRange {
+                associativity: self.cfg.associativity,
+            }
+        })?;
+        let ways = &mut self.sets[set_key];
+        if ways.len() > associativity {
+            return Err(L2AccessError::SetOverfull {
+                set_key,
+                ways: ways.len(),
+                associativity,
+            });
+        }
+        validate_srrip_recencies(ways, set_key, self.cfg.replacement)?;
+
+        let resident = ways.iter().position(|way| way.tag == line_id);
+        let mut update = resident.map(|way| PreparedSetUpdate::Update {
+            way,
+            value: ways[way],
+        });
+        let mut line_present = resident.is_some();
+        let mut valid_mask = resident.map_or(0, |way| ways[way].mask);
+        let mut allocation_generation = match resident {
+            Some(way) => Some(
+                ways[way]
+                    .generation
+                    .ok_or(L2AccessError::EventAllocationGenerationMissing { line_id })?,
+            ),
+            None => None,
+        };
+        let mut next_generation = self.next_generation;
+        let mut clock = self.clock;
+        let mut bip_counter = self.bip_counter;
+        let mut counters = self.counters;
+        let mut counted_mask = 0u8;
+        let mut present_mask = 0u8;
+        let mut fill_mask = 0u8;
+
+        for sector in 0..4u8 {
+            let bit = 1u8 << sector;
+            if sector_mask & bit == 0 {
+                continue;
+            }
+            clock = clock
+                .checked_add(1)
+                .ok_or(L2AccessError::ClockOverflow { clock })?;
+            let sector_present = line_present && valid_mask & bit != 0;
+            let counted_hit = sector_present || (line_present && class == L2OpClass::WriteAtomic);
+
+            if !line_present {
+                let next_bip_counter =
+                    if self.cfg.replacement == L2Replacement::Bip {
+                        Some(bip_counter.checked_add(1).ok_or(
+                            L2AccessError::BipCounterOverflow {
+                                counter: bip_counter,
+                            },
+                        )?)
+                    } else {
+                        None
+                    };
+                let (generation, next) = next_generation.allocate()?;
+                next_generation = next;
+                allocation_generation = Some(generation);
+                let (initial_valid, initial_pending) = match class {
+                    L2OpClass::Read => (0, bit),
+                    L2OpClass::WriteAtomic => (bit, 0),
+                };
+                update = Some(prepare_install(
+                    ways,
+                    set_key,
+                    line_id,
+                    initial_valid,
+                    initial_pending,
+                    Some(generation),
+                    associativity,
+                    self.cfg.replacement,
+                    clock,
+                    bip_counter,
+                )?);
+                let mut delta = L2Counters::for_arch(self.cfg.arch);
+                delta.misses = 1;
+                delta.line_misses = 1;
+                counters.add_checked(&delta)?;
+                if let Some(next) = next_bip_counter {
+                    bip_counter = next;
+                }
+            } else {
+                let value = update
+                    .as_mut()
+                    .ok_or(L2AccessError::ReplacementSetEmpty { set_key })?
+                    .value_mut();
+                value.recency = match self.cfg.replacement {
+                    L2Replacement::Srrip => 0,
+                    _ => clock,
+                };
+                match class {
+                    L2OpClass::Read => {
+                        if !sector_present {
+                            value.pending_mask |= bit;
+                        }
+                    }
+                    L2OpClass::WriteAtomic => {
+                        value.mask |= bit;
+                        value.pending_mask &= !bit;
+                    }
+                }
+                let mut delta = L2Counters::for_arch(self.cfg.arch);
+                if counted_hit {
+                    delta.hits = 1;
+                    if !sector_present && class == L2OpClass::WriteAtomic {
+                        delta.write_tag_hits = 1;
+                    }
+                } else {
+                    delta.misses = 1;
+                    delta.sector_fill_misses = 1;
+                }
+                counters.add_checked(&delta)?;
+            }
+
+            if counted_hit {
+                counted_mask |= bit;
+            }
+            if sector_present {
+                present_mask |= bit;
+            } else if class == L2OpClass::Read {
+                fill_mask |= bit;
+            }
+            if class == L2OpClass::WriteAtomic {
+                valid_mask |= bit;
+            }
+            line_present = true;
+        }
+
+        let generation = allocation_generation
+            .ok_or(L2AccessError::EventAllocationGenerationMissing { line_id })?;
+        let lookup = L2MaskPreview {
+            sectors: sector_mask.count_ones(),
+            counted_hits: counted_mask.count_ones(),
+            present_sectors: present_mask.count_ones(),
+            counted_hit_mask: counted_mask,
+            present_mask,
+        };
+        let event_preview = L2EventMaskPreview { lookup, fill_mask };
+        let prepared_fill = (fill_mask != 0).then_some(PreparedL2Fill {
+            owner: self.owner,
+            line_id,
+            generation,
+            sector_mask: fill_mask,
+        });
+        Ok((
+            PreparedMaskAccess {
+                set_key,
+                update: update.ok_or(L2AccessError::ReplacementSetEmpty { set_key })?,
+                clock,
+                bip_counter,
+                counters,
+                next_generation,
+                discipline: L2AccessDiscipline::Event,
+                preview: lookup,
+            },
+            event_preview,
+            prepared_fill,
+        ))
     }
 
     /// Predict an ascending walk of `sector_mask` for one line without
@@ -1004,6 +1387,100 @@ impl L2Model {
         prepared.commit(self);
         Ok((preview, value))
     }
+
+    /// Event-discipline counterpart to [`Self::access_mask_transactional`].
+    /// Read misses allocate/tag the line and set pending bits but remain absent
+    /// from physical-presence and hit accounting until the returned opaque fill
+    /// capability is completed. The callback receives only a non-completable
+    /// preview; a fill token is minted after both the callback and cache commit
+    /// succeed, so an aborted callback cannot retain a future-valid capability.
+    /// Writes validate their sectors immediately. Preparation and callback
+    /// failure leave state, discipline, and generation allocation unchanged.
+    pub fn access_mask_event_transactional<T, E>(
+        &mut self,
+        line_id: i64,
+        sector_mask: u8,
+        class: L2OpClass,
+        before_commit: impl FnOnce(L2EventMaskPreview) -> Result<T, E>,
+    ) -> Result<(L2EventMaskAccess, T), E>
+    where
+        E: From<L2AccessError>,
+    {
+        let (prepared, preview, prepared_fill) = self
+            .prepare_event_mask(line_id, sector_mask, class)
+            .map_err(E::from)?;
+        let value = before_commit(preview)?;
+        prepared.commit(self);
+        let access = L2EventMaskAccess {
+            lookup: preview.lookup,
+            fill: prepared_fill.map(PreparedL2Fill::issue),
+        };
+        Ok((access, value))
+    }
+
+    /// Complete every sector authorized by one event read capability.
+    pub fn complete_fill(&mut self, token: L2FillToken) -> Result<L2FillCompletion, L2AccessError> {
+        self.complete_fill_mask(token, token.sector_mask)
+    }
+
+    /// Complete a nonempty subset of one event read capability. Matching
+    /// completions are idempotent; eviction or same-tag reallocation returns a
+    /// stale no-op and can never resurrect the old allocation.
+    pub fn complete_fill_mask(
+        &mut self,
+        token: L2FillToken,
+        completion_mask: u8,
+    ) -> Result<L2FillCompletion, L2AccessError> {
+        self.validate_counter_architecture()?;
+        self.preflight_access_discipline(L2AccessDiscipline::Event)?;
+        if token.owner != self.owner {
+            return Err(L2AccessError::FillTokenOwnerMismatch);
+        }
+        if completion_mask == 0
+            || completion_mask & !0b1111 != 0
+            || completion_mask & !token.sector_mask != 0
+        {
+            return Err(L2AccessError::FillCompletionMaskInvalid {
+                completion_mask,
+                token_mask: token.sector_mask,
+            });
+        }
+
+        let set_key = self.set_key(token.line_id)?;
+        let Some(way) = self.sets[set_key]
+            .iter_mut()
+            .find(|way| way.tag == token.line_id)
+        else {
+            return Ok(L2FillCompletion::Stale);
+        };
+        match way.generation {
+            Some(generation) if generation == token.generation => {}
+            Some(_) => return Ok(L2FillCompletion::Stale),
+            None => {
+                return Err(L2AccessError::EventAllocationGenerationMissing {
+                    line_id: token.line_id,
+                });
+            }
+        }
+        if way.mask & way.pending_mask != 0 || completion_mask & !(way.mask | way.pending_mask) != 0
+        {
+            return Err(L2AccessError::FillCompletionStateInvalid {
+                line_id: token.line_id,
+                completion_mask,
+                valid_mask: way.mask,
+                pending_mask: way.pending_mask,
+            });
+        }
+
+        let newly_valid_mask = completion_mask & way.pending_mask;
+        let duplicate_mask = completion_mask & way.mask;
+        way.mask |= newly_valid_mask;
+        way.pending_mask &= !newly_valid_mask;
+        Ok(L2FillCompletion::Completed {
+            newly_valid_mask,
+            duplicate_mask,
+        })
+    }
 }
 
 struct PreparedMaskAccess {
@@ -1012,6 +1489,8 @@ struct PreparedMaskAccess {
     clock: i64,
     bip_counter: u64,
     counters: L2Counters,
+    next_generation: NextAllocationGeneration,
+    discipline: L2AccessDiscipline,
     preview: L2MaskPreview,
 }
 
@@ -1021,6 +1500,10 @@ impl PreparedMaskAccess {
         l2.clock = self.clock;
         l2.bip_counter = self.bip_counter;
         l2.counters = self.counters;
+        l2.next_generation = self.next_generation;
+        if l2.access_discipline.is_none() {
+            l2.access_discipline = Some(self.discipline);
+        }
     }
 }
 
@@ -1103,7 +1586,9 @@ fn prepare_install(
     ways: &mut Vec<Way>,
     set_key: usize,
     tag: i64,
-    sector_bit: u8,
+    valid_mask: u8,
+    pending_mask: u8,
+    generation: Option<L2AllocationGeneration>,
     associativity: usize,
     policy: L2Replacement,
     clock: i64,
@@ -1127,7 +1612,9 @@ fn prepare_install(
         return Ok(PreparedSetUpdate::Insert {
             value: Way {
                 tag,
-                mask: sector_bit,
+                mask: valid_mask,
+                pending_mask,
+                generation,
                 recency,
             },
         });
@@ -1170,7 +1657,9 @@ fn prepare_install(
         srrip_age,
         value: Way {
             tag,
-            mask: sector_bit,
+            mask: valid_mask,
+            pending_mask,
+            generation,
             recency,
         },
     })
@@ -1225,6 +1714,29 @@ mod tests {
             .counted_hit
     }
 
+    fn ev(l2: &mut L2Model, line: i64, sector_mask: u8, class: L2OpClass) -> L2EventMaskAccess {
+        l2.access_mask_event_transactional(
+            line,
+            sector_mask,
+            class,
+            |_| Ok::<(), L2AccessError>(()),
+        )
+        .unwrap()
+        .0
+    }
+
+    fn ev_read(l2: &mut L2Model, line: i64, sector_mask: u8) -> L2EventMaskAccess {
+        ev(l2, line, sector_mask, L2OpClass::Read)
+    }
+
+    fn resident_way(l2: &L2Model, line: i64) -> &Way {
+        let set_key = l2.set_key(line).unwrap();
+        l2.sets[set_key]
+            .iter()
+            .find(|way| way.tag == line)
+            .expect("test line is resident")
+    }
+
     #[derive(Debug, Clone, PartialEq, Eq)]
     struct L2State {
         cfg: L2Config,
@@ -1233,6 +1745,8 @@ mod tests {
         clock: i64,
         bip_counter: u64,
         counters: L2Counters,
+        next_generation: NextAllocationGeneration,
+        access_discipline: Option<L2AccessDiscipline>,
     }
 
     fn state(l2: &L2Model) -> L2State {
@@ -1243,6 +1757,8 @@ mod tests {
             clock: l2.clock,
             bip_counter: l2.bip_counter,
             counters: l2.counters,
+            next_generation: l2.next_generation,
+            access_discipline: l2.access_discipline,
         }
     }
 
@@ -1271,6 +1787,304 @@ mod tests {
             assert_eq!(state(&l2), before, "{policy:?} source was mutated");
             assert_ne!(state(&snapshot), before, "{policy:?} snapshot is aliased");
         }
+    }
+
+    #[test]
+    fn event_read_remains_invalid_until_completion() {
+        let mut l2 = L2Model::new(cfg(1024, 2, 1)).unwrap();
+        let first = ev_read(&mut l2, 3, 0b0001);
+        assert_eq!(
+            first.lookup,
+            L2MaskPreview {
+                sectors: 1,
+                counted_hits: 0,
+                present_sectors: 0,
+                counted_hit_mask: 0,
+                present_mask: 0,
+            }
+        );
+        let first_token = first.fill.expect("cold event read emits a fill");
+        assert_eq!(resident_way(&l2, 3).mask, 0);
+        assert_eq!(resident_way(&l2, 3).pending_mask, 0b0001);
+
+        let second = ev_read(&mut l2, 3, 0b0001);
+        assert_eq!(second.lookup.counted_hits, 0);
+        assert_eq!(second.lookup.present_sectors, 0);
+        assert!(
+            second.fill.is_some(),
+            "pending reads remain distinct fetches"
+        );
+        assert_eq!(l2.counters.misses, 2);
+        assert_eq!(l2.counters.line_misses, 1);
+        assert_eq!(l2.counters.sector_fill_misses, 1);
+
+        assert_eq!(
+            l2.complete_fill(first_token).unwrap(),
+            L2FillCompletion::Completed {
+                newly_valid_mask: 0b0001,
+                duplicate_mask: 0,
+            }
+        );
+        let hit = ev_read(&mut l2, 3, 0b0001);
+        assert_eq!(hit.lookup.counted_hits, 1);
+        assert_eq!(hit.lookup.present_sectors, 1);
+        assert!(hit.fill.is_none());
+        assert_eq!(l2.counters.hits, 1);
+        assert_eq!(resident_way(&l2, 3).pending_mask, 0);
+    }
+
+    #[test]
+    fn partial_and_duplicate_completion_are_idempotent() {
+        let mut l2 = L2Model::new(cfg(1024, 2, 1)).unwrap();
+        let token = ev_read(&mut l2, 3, 0b0011).fill.unwrap();
+
+        let before_invalid = state(&l2);
+        for invalid in [0, 0b0100, u8::MAX] {
+            assert!(matches!(
+                l2.complete_fill_mask(token, invalid),
+                Err(L2AccessError::FillCompletionMaskInvalid {
+                    completion_mask,
+                    token_mask: 0b0011,
+                }) if completion_mask == invalid
+            ));
+            assert_eq!(state(&l2), before_invalid);
+        }
+
+        assert_eq!(
+            l2.complete_fill_mask(token, 0b0001).unwrap(),
+            L2FillCompletion::Completed {
+                newly_valid_mask: 0b0001,
+                duplicate_mask: 0,
+            }
+        );
+        assert_eq!(
+            l2.complete_fill_mask(token, 0b0001).unwrap(),
+            L2FillCompletion::Completed {
+                newly_valid_mask: 0,
+                duplicate_mask: 0b0001,
+            }
+        );
+        assert_eq!(
+            l2.complete_fill(token).unwrap(),
+            L2FillCompletion::Completed {
+                newly_valid_mask: 0b0010,
+                duplicate_mask: 0b0001,
+            }
+        );
+        assert_eq!(
+            l2.complete_fill(token).unwrap(),
+            L2FillCompletion::Completed {
+                newly_valid_mask: 0,
+                duplicate_mask: 0b0011,
+            }
+        );
+        assert_eq!(resident_way(&l2, 3).mask, 0b0011);
+        assert_eq!(resident_way(&l2, 3).pending_mask, 0);
+    }
+
+    #[test]
+    fn completion_is_dropped_after_eviction() {
+        let mut l2 = L2Model::new(cfg(128, 1, 1)).unwrap();
+        let evicted = ev_read(&mut l2, 0, 0b0001).fill.unwrap();
+        let survivor = ev_read(&mut l2, 1, 0b0010).fill.unwrap();
+        let before = state(&l2);
+
+        assert_eq!(l2.complete_fill(evicted).unwrap(), L2FillCompletion::Stale);
+        assert_eq!(state(&l2), before, "stale completion mutated the survivor");
+        assert_eq!(resident_way(&l2, 1).tag, 1);
+        assert_eq!(
+            l2.complete_fill(survivor).unwrap(),
+            L2FillCompletion::Completed {
+                newly_valid_mask: 0b0010,
+                duplicate_mask: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn old_token_cannot_complete_same_tag_reallocation() {
+        let mut l2 = L2Model::new(cfg(128, 1, 1)).unwrap();
+        let old = ev_read(&mut l2, 0, 0b0001).fill.unwrap();
+        ev_read(&mut l2, 1, 0b0001);
+        let current = ev_read(&mut l2, 0, 0b0001).fill.unwrap();
+        assert_ne!(old.generation, current.generation);
+        let before = state(&l2);
+
+        assert_eq!(l2.complete_fill(old).unwrap(), L2FillCompletion::Stale);
+        assert_eq!(state(&l2), before, "ABA completion mutated reallocated tag");
+        assert_eq!(resident_way(&l2, 0).mask, 0);
+        assert_eq!(resident_way(&l2, 0).pending_mask, 0b0001);
+        assert_eq!(
+            l2.complete_fill(current).unwrap(),
+            L2FillCompletion::Completed {
+                newly_valid_mask: 0b0001,
+                duplicate_mask: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn event_write_validates_immediately_and_supersedes_pending() {
+        let mut l2 = L2Model::new(cfg(1024, 2, 1)).unwrap();
+        let token = ev_read(&mut l2, 3, 0b0001).fill.unwrap();
+        let write = ev(&mut l2, 3, 0b0001, L2OpClass::WriteAtomic);
+        assert_eq!(write.lookup.counted_hits, 1);
+        assert_eq!(write.lookup.present_sectors, 0);
+        assert!(write.fill.is_none());
+        assert_eq!(resident_way(&l2, 3).mask, 0b0001);
+        assert_eq!(resident_way(&l2, 3).pending_mask, 0);
+        assert_eq!(
+            l2.complete_fill(token).unwrap(),
+            L2FillCompletion::Completed {
+                newly_valid_mask: 0,
+                duplicate_mask: 0b0001,
+            }
+        );
+        assert_eq!(ev_read(&mut l2, 3, 0b0001).lookup.counted_hits, 1);
+
+        let cold_write = ev(&mut l2, 9, 0b0100, L2OpClass::WriteAtomic);
+        assert_eq!(cold_write.lookup.counted_hits, 0);
+        assert!(cold_write.fill.is_none());
+        let read = ev_read(&mut l2, 9, 0b0100);
+        assert_eq!(read.lookup.present_sectors, 1);
+        assert!(read.fill.is_none());
+    }
+
+    #[test]
+    fn immediate_and_event_disciplines_cannot_mix() {
+        let mut event = L2Model::new(cfg(1024, 2, 1)).unwrap();
+        ev_read(&mut event, 0, 1);
+        let before_event = state(&event);
+        assert!(matches!(
+            event.access(0, 0, L2OpClass::Read),
+            Err(L2AccessError::AccessDisciplineMismatch {
+                latched: "event",
+                requested: "immediate",
+            })
+        ));
+        assert_eq!(state(&event), before_event);
+
+        let mut immediate = L2Model::new(cfg(1024, 2, 1)).unwrap();
+        rd(&mut immediate, 0, 0);
+        let before_immediate = state(&immediate);
+        assert!(matches!(
+            immediate.access_mask_event_transactional(0, 1, L2OpClass::Read, |_| {
+                Ok::<(), L2AccessError>(())
+            }),
+            Err(L2AccessError::AccessDisciplineMismatch {
+                latched: "immediate",
+                requested: "event",
+            })
+        ));
+        assert_eq!(state(&immediate), before_immediate);
+
+        let neutral = L2Model::new(cfg(1024, 2, 1)).unwrap();
+        neutral.preview_mask(0, 1, L2OpClass::Read).unwrap();
+        assert_eq!(neutral.access_discipline, None);
+    }
+
+    #[test]
+    fn failed_event_callback_exposes_no_capability_or_generation_side_effect() {
+        let mut l2 = L2Model::new(cfg(128, 1, 1)).unwrap();
+        l2.next_generation = NextAllocationGeneration::Available(7);
+        let before = state(&l2);
+        let mut refused_preview = None;
+        assert_eq!(
+            l2.access_mask_event_transactional(0, 1, L2OpClass::Read, |preview| {
+                refused_preview = Some(preview);
+                Err::<(), _>(CallbackError::Refused)
+            }),
+            Err(CallbackError::Refused)
+        );
+        assert_eq!(state(&l2), before);
+        let refused_preview = refused_preview.expect("callback receives a provisional preview");
+        assert_eq!(refused_preview.lookup.present_mask, 0);
+        assert_eq!(refused_preview.fill_mask(), 1);
+
+        let admitted = ev_read(&mut l2, 0, 1).fill.unwrap();
+        assert_eq!(admitted.generation, L2AllocationGeneration(7));
+        assert_eq!(resident_way(&l2, 0).mask, 0);
+        assert_eq!(
+            l2.complete_fill(admitted).unwrap(),
+            L2FillCompletion::Completed {
+                newly_valid_mask: 1,
+                duplicate_mask: 0,
+            }
+        );
+        assert_eq!(resident_way(&l2, 0).mask, 1);
+    }
+
+    #[test]
+    fn maximum_generation_is_valid_then_exhaustion_is_transactional() {
+        let mut l2 = L2Model::new(cfg(128, 1, 1)).unwrap();
+        l2.next_generation = NextAllocationGeneration::Available(u64::MAX);
+        let token = ev_read(&mut l2, 0, 1).fill.unwrap();
+        assert_eq!(token.generation, L2AllocationGeneration(u64::MAX));
+        assert_eq!(l2.next_generation, NextAllocationGeneration::Exhausted);
+
+        let before = state(&l2);
+        let mut callback_called = false;
+        assert!(matches!(
+            l2.access_mask_event_transactional(1, 1, L2OpClass::Read, |_| {
+                callback_called = true;
+                Ok::<(), L2AccessError>(())
+            }),
+            Err(L2AccessError::FillGenerationExhausted)
+        ));
+        assert!(!callback_called);
+        assert_eq!(state(&l2), before);
+    }
+
+    #[test]
+    fn event_snapshot_copies_pending_generation_owner_and_discipline() {
+        let mut l2 = L2Model::new(cfg(1024, 2, 1)).unwrap();
+        let token = ev_read(&mut l2, 3, 0b0011).fill.unwrap();
+        let before = state(&l2);
+        let mut snapshot = l2.try_snapshot().unwrap();
+        assert_eq!(snapshot.owner, l2.owner);
+        assert_eq!(state(&snapshot), before);
+
+        assert_eq!(
+            snapshot.complete_fill_mask(token, 0b0001).unwrap(),
+            L2FillCompletion::Completed {
+                newly_valid_mask: 0b0001,
+                duplicate_mask: 0,
+            }
+        );
+        assert_eq!(state(&l2), before, "snapshot completion mutated source");
+        assert_ne!(state(&snapshot), before);
+        assert!(matches!(
+            snapshot.access(3, 0, L2OpClass::Read),
+            Err(L2AccessError::AccessDisciplineMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn foreign_model_token_is_rejected_transactionally() {
+        let mut source = L2Model::new(cfg(1024, 2, 1)).unwrap();
+        let token = ev_read(&mut source, 3, 1).fill.unwrap();
+        let mut foreign = L2Model::new(cfg(1024, 2, 1)).unwrap();
+        ev_read(&mut foreign, 3, 1);
+        let before = state(&foreign);
+
+        assert!(matches!(
+            foreign.complete_fill(token),
+            Err(L2AccessError::FillTokenOwnerMismatch)
+        ));
+        assert_eq!(state(&foreign), before);
+    }
+
+    #[test]
+    fn model_owner_uses_exact_maximum_before_exhaustion() {
+        let next = AtomicU64::new(u64::MAX);
+        assert_eq!(
+            allocate_l2_model_owner_from(&next).unwrap(),
+            L2ModelOwner(u64::MAX)
+        );
+        assert!(matches!(
+            allocate_l2_model_owner_from(&next),
+            Err(L2BuildError::ModelOwnerExhausted)
+        ));
     }
 
     fn assert_mask_error_preserves_state(
@@ -1489,6 +2303,8 @@ mod tests {
         overfull.sets[0].push(Way {
             tag: 1,
             mask: 1,
+            pending_mask: 0,
+            generation: None,
             recency: 0,
         });
         assert_mask_error_preserves_state(&mut overfull, 2, 1, L2OpClass::Read, |error| {
