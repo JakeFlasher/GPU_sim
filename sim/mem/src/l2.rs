@@ -1181,6 +1181,96 @@ mod tests {
     }
 
     #[test]
+    fn counter_error_precedence_and_maximum_total_are_pinned() {
+        let mut unbound = L2Counters::default();
+        unbound.hits = u64::MAX;
+        let mut overflowing = L2Counters::for_arch(ArchId::Sm86);
+        overflowing.hits = 1;
+        let destination_precedence_addends = [
+            L2Counters::default(),
+            L2Counters::for_arch(ArchId::Sm120),
+            overflowing,
+        ];
+        for addend in destination_precedence_addends {
+            let before = unbound;
+            assert!(matches!(
+                unbound.add_checked(&addend),
+                Err(L2CounterError::Architecture(
+                    sim_arch::ArchitectureProvenanceError::Unbound {
+                        component: "L2 counters",
+                    }
+                ))
+            ));
+            assert_eq!(unbound, before, "destination binding must fail first");
+        }
+
+        let mut bound = L2Counters::for_arch(ArchId::Sm86);
+        bound.hits = u64::MAX;
+
+        let mut unbound_addend = L2Counters::default();
+        unbound_addend.hits = 1;
+        let before = bound;
+        assert!(matches!(
+            bound.add_checked(&unbound_addend),
+            Err(L2CounterError::Architecture(
+                sim_arch::ArchitectureProvenanceError::Unbound {
+                    component: "L2 counters",
+                }
+            ))
+        ));
+        assert_eq!(bound, before, "addend binding must precede overflow");
+
+        let mut wrong_arch = L2Counters::for_arch(ArchId::Sm120);
+        wrong_arch.hits = 1;
+        assert!(matches!(
+            bound.add_checked(&wrong_arch),
+            Err(L2CounterError::Architecture(
+                sim_arch::ArchitectureProvenanceError::Mismatch {
+                    component: "L2 counters",
+                    expected: ArchId::Sm86,
+                    got: ArchId::Sm120,
+                }
+            ))
+        ));
+        assert_eq!(bound, before, "architecture mismatch must precede overflow");
+
+        type Setter = fn(&mut L2Counters, u64);
+        let order: [(L2CounterField, Setter); 5] = [
+            (L2CounterField::Hits, |c, v| c.hits = v),
+            (L2CounterField::Misses, |c, v| c.misses = v),
+            (L2CounterField::LineMisses, |c, v| c.line_misses = v),
+            (L2CounterField::SectorFillMisses, |c, v| {
+                c.sector_fill_misses = v
+            }),
+            (L2CounterField::WriteTagHits, |c, v| c.write_tag_hits = v),
+        ];
+        for (first_overflow, &(expected, _)) in order.iter().enumerate() {
+            let mut total = L2Counters::for_arch(ArchId::Sm86);
+            let mut addend = L2Counters::for_arch(ArchId::Sm86);
+            for &(_, set) in &order {
+                set(&mut total, u64::MAX);
+                set(&mut addend, 1);
+            }
+            for &(_, set) in &order[..first_overflow] {
+                set(&mut total, 0);
+            }
+            let before = total;
+            assert!(matches!(
+                total.add_checked(&addend),
+                Err(L2CounterError::Overflow { field }) if field == expected
+            ));
+            assert_eq!(total, before, "overflow order at {expected} mutated state");
+        }
+
+        for (hits, misses) in [(u64::MAX, 0), (0, u64::MAX)] {
+            let mut counters = L2Counters::for_arch(ArchId::Sm86);
+            counters.hits = hits;
+            counters.misses = misses;
+            assert_eq!(counters.total(), Ok(u64::MAX));
+        }
+    }
+
+    #[test]
     fn counter_aggregation_rejects_mixed_architecture_transactionally() {
         let mut sm86 = L2Counters::for_arch(ArchId::Sm86);
         sm86.hits = 7;
