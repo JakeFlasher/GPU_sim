@@ -21,6 +21,7 @@ use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
+use serde_json::value::RawValue;
 use sim_arch::{ArchError, ArchId};
 
 use crate::l1::LINE_BYTES;
@@ -103,7 +104,7 @@ pub enum PchaseCardError {
 struct RawProperty {
     kind: String,
     #[serde(default)]
-    value: Option<serde_json::Value>,
+    value: Option<Box<RawValue>>,
     #[serde(default)]
     typed_reason: Option<String>,
 }
@@ -206,28 +207,92 @@ impl PchaseCard {
     fn require_value<'a>(
         prop: &'a RawProperty,
         name: &str,
-    ) -> Result<&'a serde_json::Value, PchaseCardError> {
+    ) -> Result<&'a RawValue, PchaseCardError> {
         prop.value
-            .as_ref()
+            .as_deref()
             .ok_or_else(|| PchaseCardError::ValueFieldMissing {
                 property: name.to_owned(),
             })
     }
 
-    /// Audit a card-VALUED integer: positive, integral, finite, and not a
-    /// bool/string masquerading through coercion (the Python `_card_int`).
+    /// Parse a JSON number lexeme as a mathematically exact positive `u64`.
+    /// This accepts integral decimal/exponent spellings such as `128.0` and
+    /// `1.28e2`, but never rounds through `f64`.
+    fn exact_positive_integer(raw: &str) -> Option<u64> {
+        let raw = raw.trim();
+        if raw.is_empty() || raw.starts_with('-') {
+            return None;
+        }
+        let exponent_at = raw.find(['e', 'E']);
+        if exponent_at.is_some_and(|at| raw[at + 1..].contains(['e', 'E'])) {
+            return None;
+        }
+        let (mantissa, exponent) = match exponent_at {
+            Some(at) => {
+                let exponent = raw[at + 1..].parse::<i64>().ok()?;
+                (&raw[..at], exponent)
+            }
+            None => (raw, 0),
+        };
+        let mut parts = mantissa.split('.');
+        let integer = parts.next()?;
+        let fraction = parts.next().unwrap_or("");
+        if parts.next().is_some()
+            || integer.is_empty()
+            || !integer.bytes().all(|digit| digit.is_ascii_digit())
+            || !fraction.bytes().all(|digit| digit.is_ascii_digit())
+        {
+            return None;
+        }
+
+        let fraction_len = i64::try_from(fraction.len()).ok()?;
+        let scale = exponent.checked_sub(fraction_len)?;
+        let mut digits = String::with_capacity(integer.len().checked_add(fraction.len())?);
+        digits.push_str(integer);
+        digits.push_str(fraction);
+        let significant = digits.trim_start_matches('0');
+        if significant.is_empty() {
+            return None;
+        }
+
+        let (integral, trailing_zeroes) = if scale < 0 {
+            let remove = usize::try_from(scale.checked_neg()?).ok()?;
+            if remove >= significant.len()
+                || !significant[significant.len() - remove..]
+                    .bytes()
+                    .all(|digit| digit == b'0')
+            {
+                return None;
+            }
+            (&significant[..significant.len() - remove], 0usize)
+        } else {
+            (significant, usize::try_from(scale).ok()?)
+        };
+        if integral.len().checked_add(trailing_zeroes)? > 20 {
+            return None;
+        }
+        let mut value = 0u64;
+        for digit in integral.bytes() {
+            value = value
+                .checked_mul(10)?
+                .checked_add(u64::from(digit - b'0'))?;
+        }
+        for _ in 0..trailing_zeroes {
+            value = value.checked_mul(10)?;
+        }
+        (value != 0).then_some(value)
+    }
+
+    /// Audit a card-VALUED integer: positive, mathematically integral, and
+    /// not a bool/string masquerading through coercion (the Python
+    /// `_card_int` contract without its binary64 narrowing).
     fn card_int(prop: &RawProperty, name: &str) -> Result<u64, PchaseCardError> {
         let raw = Self::require_value(prop, name)?;
-        let fail = |requirement| PchaseCardError::ValueAuditFailed {
+        Self::exact_positive_integer(raw.get()).ok_or_else(|| PchaseCardError::ValueAuditFailed {
             property: name.to_owned(),
-            raw: raw.to_string(),
-            requirement,
-        };
-        let n = raw.as_f64().ok_or_else(|| fail("must be a JSON number"))?;
-        if !n.is_finite() || n.fract() != 0.0 || n < 1.0 {
-            return Err(fail("must be a positive integer"));
-        }
-        Ok(n as u64)
+            raw: raw.get().to_owned(),
+            requirement: "must be a positive integer representable as u64",
+        })
     }
 
     fn card_positive_float(prop: &RawProperty, name: &str) -> Result<f64, PchaseCardError> {
@@ -238,17 +303,17 @@ impl PchaseCard {
             });
         }
         let raw = Self::require_value(prop, name)?;
-        let n = raw
-            .as_f64()
-            .ok_or_else(|| PchaseCardError::ValueAuditFailed {
+        let n = serde_json::from_str::<f64>(raw.get()).map_err(|_| {
+            PchaseCardError::ValueAuditFailed {
                 property: name.to_owned(),
-                raw: raw.to_string(),
-                requirement: "must be a JSON number",
-            })?;
+                raw: raw.get().to_owned(),
+                requirement: "must be a JSON number representable as finite f64",
+            }
+        })?;
         if !n.is_finite() || n <= 0.0 {
             return Err(PchaseCardError::ValueAuditFailed {
                 property: name.to_owned(),
-                raw: raw.to_string(),
+                raw: raw.get().to_owned(),
                 requirement: "must be a positive finite latency",
             });
         }
@@ -301,7 +366,10 @@ impl PchaseCard {
                 count: u32::try_from(Self::card_int(prop, name)?).map_err(|_| {
                     PchaseCardError::ValueAuditFailed {
                         property: name.to_owned(),
-                        raw: format!("{:?}", prop.value),
+                        raw: prop
+                            .value
+                            .as_deref()
+                            .map_or_else(|| "null".to_owned(), |raw| raw.get().to_owned()),
                         requirement: "must fit u32",
                     }
                 })?,
@@ -337,13 +405,13 @@ impl PchaseCard {
         match prop.kind.as_str() {
             "value" => {
                 let raw = Self::require_value(prop, name)?;
-                let policy = raw
-                    .as_str()
-                    .ok_or_else(|| PchaseCardError::ValueAuditFailed {
+                let policy = serde_json::from_str::<String>(raw.get()).map_err(|_| {
+                    PchaseCardError::ValueAuditFailed {
                         property: name.to_owned(),
-                        raw: raw.to_string(),
+                        raw: raw.get().to_owned(),
                         requirement: "must be a policy name string",
-                    })?;
+                    }
+                })?;
                 if policy == "lru" {
                     Ok(GeometryPolicyConfig {
                         modeled: "lru",
@@ -377,7 +445,10 @@ impl PchaseCard {
         let prop = self.property(name)?;
         match prop.kind.as_str() {
             "value" => Err(PchaseCardError::UnmodeledSetAssociativity {
-                raw: format!("{:?}", prop.value),
+                raw: prop
+                    .value
+                    .as_deref()
+                    .map_or_else(|| "null".to_owned(), |raw| raw.get().to_owned()),
             }),
             "typed" => Ok(GeometryPolicyConfig {
                 modeled: "fully_associative",
@@ -437,9 +508,15 @@ mod tests {
     use super::*;
 
     fn card_for_arch(json: &str, arch_token: &str) -> PchaseCard {
-        let mut value: serde_json::Value = serde_json::from_str(json).unwrap();
-        value["arch"] = serde_json::Value::String(arch_token.to_owned());
-        let raw: RawCard = serde_json::from_value(value).unwrap();
+        let object = json.trim();
+        let body = object
+            .strip_prefix('{')
+            .and_then(|value| value.strip_suffix('}'))
+            .unwrap();
+        let arch = serde_json::to_string(arch_token).unwrap();
+        let separator = if body.trim().is_empty() { "" } else { "," };
+        let with_arch = format!(r#"{{"arch":{arch}{separator}{body}}}"#);
+        let raw: RawCard = serde_json::from_str(&with_arch).unwrap();
         PchaseCard {
             arch: ArchId::parse_deploy(&raw.arch).unwrap(),
             properties: raw.properties,
@@ -448,6 +525,13 @@ mod tests {
 
     fn card(json: &str) -> PchaseCard {
         card_for_arch(json, "sm_86")
+    }
+
+    fn card_integer(raw: &str) -> Result<u64, PchaseCardError> {
+        let c = card(&format!(
+            r#"{{"properties": {{"integer": {{"kind": "value", "value": {raw}}}}}}}"#
+        ));
+        PchaseCard::card_int(c.property("integer").unwrap(), "integer")
     }
 
     const GOOD: &str = r#"{"properties": {
@@ -551,6 +635,54 @@ mod tests {
     }
 
     #[test]
+    fn card_integer_conversion_is_exact_across_json_spellings() {
+        let accepted = [
+            ("1", 1),
+            ("128.0", 128),
+            ("1.28e2", 128),
+            ("100e-2", 1),
+            ("9007199254740993.0", 9_007_199_254_740_993),
+            ("18446744073709551615", u64::MAX),
+            ("18446744073709551615.0", u64::MAX),
+        ];
+        for (raw, expected) in accepted {
+            assert_eq!(card_integer(raw).unwrap(), expected, "{raw}");
+        }
+
+        for raw in [
+            "0",
+            "-1",
+            "1.5",
+            "1e-1",
+            "1.00000000000000001",
+            "18446744073709551616",
+            "18446744073709551616.0",
+            "1e999999999999999999999",
+            "true",
+            r#""1""#,
+        ] {
+            let error = card_integer(raw).unwrap_err();
+            assert!(
+                matches!(error, PchaseCardError::ValueAuditFailed { .. }),
+                "{raw}: {error:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn rejected_integer_diagnostic_preserves_the_exact_lexeme() {
+        let raw = "1.00000000000000001";
+        assert!(matches!(
+            card_integer(raw),
+            Err(PchaseCardError::ValueAuditFailed {
+                raw: rejected,
+                requirement: "must be a positive integer representable as u64",
+                ..
+            }) if rejected == raw
+        ));
+    }
+
+    #[test]
     fn valued_non_lru_policy_and_valued_ways_fail_closed() {
         let c = card(
             r#"{"properties": {"l1_replacement_policy":
@@ -567,6 +699,19 @@ mod tests {
         assert!(matches!(
             c2.resolve_set_mapping(),
             Err(PchaseCardError::UnmodeledSetAssociativity { .. })
+        ));
+    }
+
+    #[test]
+    fn out_of_range_latency_has_truthful_typed_diagnostic() {
+        let c = card(r#"{"properties": {"latency": {"kind": "value", "value": 1e309}}}"#);
+        assert!(matches!(
+            PchaseCard::card_positive_float(c.property("latency").unwrap(), "latency"),
+            Err(PchaseCardError::ValueAuditFailed {
+                raw,
+                requirement: "must be a JSON number representable as finite f64",
+                ..
+            }) if raw == "1e309"
         ));
     }
 
