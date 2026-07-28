@@ -347,6 +347,50 @@ impl L1Counters {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NextSequence {
+    Available(u64),
+    Exhausted,
+}
+
+impl NextSequence {
+    fn current(self) -> u64 {
+        match self {
+            Self::Available(current) => current,
+            Self::Exhausted => u64::MAX,
+        }
+    }
+
+    fn preflight(self, sequence: &'static str, uses: u64) -> Result<(), L1AccessError> {
+        let Some(last_offset) = uses.checked_sub(1) else {
+            return Ok(());
+        };
+        match self {
+            Self::Available(current) if current.checked_add(last_offset).is_some() => Ok(()),
+            Self::Available(current) => Err(L1AccessError::SequenceOverflow { sequence, current }),
+            Self::Exhausted => Err(L1AccessError::SequenceOverflow {
+                sequence,
+                current: u64::MAX,
+            }),
+        }
+    }
+
+    fn allocate(self, sequence: &'static str) -> Result<(u64, Self), L1AccessError> {
+        match self {
+            Self::Available(current) => Ok((
+                current,
+                current
+                    .checked_add(1)
+                    .map_or(Self::Exhausted, Self::Available),
+            )),
+            Self::Exhausted => Err(L1AccessError::SequenceOverflow {
+                sequence,
+                current: u64::MAX,
+            }),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FillDue {
     /// Constant-latency fill due at this exact cycle. `u64::MAX` is valid.
     Timed(u64),
@@ -378,7 +422,9 @@ enum SingleOutcome {
 /// The one shared classification result of [`L1Cache::access_core`];
 /// each fill-timing mode maps it to its own public outcome type.
 enum CoreAccess {
-    Hit,
+    Hit {
+        ready: u64,
+    },
     /// Merged into an in-flight line allocation. Constant mode carries the
     /// exact due cycle; event mode carries [`FillDue::Untimed`].
     LineMerge {
@@ -389,8 +435,12 @@ enum CoreAccess {
         pending: FillDue,
     },
     Stalled,
-    MissLineAlloc,
-    MissSectorResident,
+    MissLineAlloc {
+        pending: FillDue,
+    },
+    MissSectorResident {
+        pending: FillDue,
+    },
 }
 
 /// Which fill-timing discipline an [`L1Cache`] instance runs under —
@@ -403,6 +453,39 @@ enum FillTiming {
     /// Fill times decided by the next level; entries remain explicitly
     /// untimed until [`L1Cache::complete_fill`].
     Event,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum FillRequest {
+    Constant { now: u64 },
+    Event { now: u64 },
+}
+
+impl FillRequest {
+    fn timing(self) -> FillTiming {
+        match self {
+            Self::Constant { .. } => FillTiming::Constant,
+            Self::Event { .. } => FillTiming::Event,
+        }
+    }
+
+    fn hit_ready(self, hit_latency: u64) -> Result<u64, L1AccessError> {
+        match self {
+            Self::Constant { now } => L1Cache::checked_time_add("hit visibility", now, hit_latency),
+            Self::Event { now } => {
+                L1Cache::checked_time_add("event hit visibility", now, hit_latency)
+            }
+        }
+    }
+
+    fn fill_due(self, miss_latency: u64) -> Result<FillDue, L1AccessError> {
+        match self {
+            Self::Constant { now } => {
+                L1Cache::checked_time_add("miss visibility", now, miss_latency).map(FillDue::Timed)
+            }
+            Self::Event { .. } => Ok(FillDue::Untimed),
+        }
+    }
 }
 
 /// Identifies one in-flight fill for the event-driven mode: the key the
@@ -447,7 +530,7 @@ pub struct L1Cache {
     /// Fully-associative LRU line pool: monotonic recency stamps.
     by_stamp: BTreeMap<u64, i64>,
     stamp_of: HashMap<i64, u64>,
-    next_stamp: u64,
+    next_stamp: NextSequence,
     /// Per-line fetched-sector bitmask (bit = sector index in line, 0..4).
     /// Also accumulates for in-flight line allocations (the fill services
     /// every merged sector).
@@ -457,7 +540,7 @@ pub struct L1Cache {
     /// stable sort. Event fills remain explicitly untimed.
     line_fills: HashMap<i64, (FillDue, u64)>,
     sector_fills: HashMap<(i64, u8), (FillDue, u64)>,
-    fill_seq: u64,
+    fill_seq: NextSequence,
     /// Exact earliest timed in-flight fill. `None` means there is no timed
     /// fill (empty or event-driven), while `Some(u64::MAX)` is a real due
     /// cycle. `apply_fills` early-outs when `now` has not reached it.
@@ -489,11 +572,11 @@ impl L1Cache {
             cfg,
             by_stamp: BTreeMap::new(),
             stamp_of: HashMap::new(),
-            next_stamp: 0,
+            next_stamp: NextSequence::Available(0),
             sectors: HashMap::new(),
             line_fills: HashMap::new(),
             sector_fills: HashMap::new(),
-            fill_seq: 0,
+            fill_seq: NextSequence::Available(0),
             min_fill_due: None,
             fill_timing: None,
             counters: L1Counters::for_arch(arch),
@@ -525,9 +608,8 @@ impl L1Cache {
         }
     }
 
-    fn preflight_fill_due(stored: FillDue, requested: FillDue) -> Result<(), L1AccessError> {
+    fn preflight_fill_timing(stored: FillDue, requested: FillTiming) -> Result<(), L1AccessError> {
         let latched = stored.timing();
-        let requested = requested.timing();
         if latched != requested {
             return Err(L1AccessError::FillTimingMismatch {
                 latched: Self::timing_name(latched),
@@ -553,16 +635,6 @@ impl L1Cache {
         if self.fill_timing.is_none() {
             self.fill_timing = Some(mode);
         }
-    }
-
-    fn checked_sequence_add(
-        sequence: &'static str,
-        current: u64,
-        add: u64,
-    ) -> Result<u64, L1AccessError> {
-        current
-            .checked_add(add)
-            .ok_or(L1AccessError::SequenceOverflow { sequence, current })
     }
 
     fn checked_time_add(
@@ -613,16 +685,16 @@ impl L1Cache {
         let in_flight =
             u64::try_from(self.mshr_in_use()).map_err(|_| L1AccessError::SequenceOverflow {
                 sequence: "recency",
-                current: self.next_stamp,
+                current: self.next_stamp.current(),
             })?;
         let recency_touches = budget.recency_touches.checked_add(in_flight).ok_or(
             L1AccessError::SequenceOverflow {
                 sequence: "recency",
-                current: self.next_stamp,
+                current: self.next_stamp.current(),
             },
         )?;
-        Self::checked_sequence_add("recency", self.next_stamp, recency_touches)?;
-        Self::checked_sequence_add("fill", self.fill_seq, budget.new_fills)?;
+        self.next_stamp.preflight("recency", recency_touches)?;
+        self.fill_seq.preflight("fill", budget.new_fills)?;
         Ok(())
     }
 
@@ -694,11 +766,10 @@ impl L1Cache {
     }
 
     fn touch_mru(&mut self, line: i64) -> Result<(), L1AccessError> {
-        let next_stamp = Self::checked_sequence_add("recency", self.next_stamp, 1)?;
+        let (stamp, next_stamp) = self.next_stamp.allocate("recency")?;
         if let Some(old) = self.stamp_of.remove(&line) {
             self.by_stamp.remove(&old);
         }
-        let stamp = self.next_stamp;
         self.next_stamp = next_stamp;
         self.by_stamp.insert(stamp, line);
         self.stamp_of.insert(line, stamp);
@@ -785,9 +856,9 @@ impl L1Cache {
         due.sort_unstable();
         let due_count = u64::try_from(due.len()).map_err(|_| L1AccessError::SequenceOverflow {
             sequence: "recency",
-            current: self.next_stamp,
+            current: self.next_stamp.current(),
         })?;
-        if Self::checked_sequence_add("recency", self.next_stamp, due_count).is_err() {
+        if self.next_stamp.preflight("recency", due_count).is_err() {
             // Some due sector fills can be dropped after an earlier fill evicts
             // their line. Near exhaustion, classify those touches exactly on a
             // shadow cache and publish the whole transition only on success.
@@ -802,18 +873,18 @@ impl L1Cache {
     /// One classification/state step shared by BOTH fill-timing modes —
     /// the single copy of the ported ladder (line-merge → sector-present
     /// hit → sector-merge → MSHR stall → fresh miss), with all counter
-    /// accounting inside. `fill_due` is the state a fresh miss's in-flight
-    /// entry carries: an exact `now + miss_latency` in constant mode or
-    /// [`FillDue::Untimed`] in event mode.
+    /// accounting inside. [`FillRequest`] computes a hit timestamp only on a
+    /// hit and a fill due state only on a fresh miss, so an unused timing arm
+    /// cannot reject a valid merge, stall, or exact-domain result.
     fn access_core(
         &mut self,
         sector_id: i64,
-        fill_due: FillDue,
+        fill_request: FillRequest,
     ) -> Result<CoreAccess, L1AccessError> {
         let line = sector_id >> 2;
         let sector = (sector_id & 3) as u8;
         if let Some(&(pending, _)) = self.line_fills.get(&line) {
-            Self::preflight_fill_due(pending, fill_due)?;
+            Self::preflight_fill_timing(pending, fill_request.timing())?;
             let counters = self
                 .counters
                 .add_fields_checked(&[(L1CounterField::Merges, 1), (L1CounterField::Misses, 1)])?;
@@ -829,16 +900,17 @@ impl L1Cache {
                 .get(&line)
                 .is_some_and(|mask| mask & (1 << sector) != 0);
         if sector_present {
-            Self::checked_sequence_add("recency", self.next_stamp, 1)?;
+            let ready = fill_request.hit_ready(self.cfg.hit_latency)?;
+            self.next_stamp.preflight("recency", 1)?;
             let counters = self
                 .counters
                 .add_fields_checked(&[(L1CounterField::Hits, 1)])?;
             self.counters = counters;
             self.touch_mru(line)?;
-            return Ok(CoreAccess::Hit);
+            return Ok(CoreAccess::Hit { ready });
         }
         if line_resident && let Some(&(pending, _)) = self.sector_fills.get(&(line, sector)) {
-            Self::preflight_fill_due(pending, fill_due)?;
+            Self::preflight_fill_timing(pending, fill_request.timing())?;
             let counters = self
                 .counters
                 .add_fields_checked(&[(L1CounterField::Merges, 1), (L1CounterField::Misses, 1)])?;
@@ -852,7 +924,8 @@ impl L1Cache {
             self.apply_counter_deltas(&[(L1CounterField::StallEvents, 1)])?;
             return Ok(CoreAccess::Stalled);
         }
-        let next_fill_seq = Self::checked_sequence_add("fill", self.fill_seq, 1)?;
+        let fill_due = fill_request.fill_due(self.cfg.miss_latency)?;
+        let (seq, next_fill_seq) = self.fill_seq.allocate("fill")?;
         let counters = if line_resident {
             self.counters.add_fields_checked(&[
                 (L1CounterField::Misses, 1),
@@ -865,7 +938,6 @@ impl L1Cache {
                 (L1CounterField::LineFills, 1),
             ])?
         };
-        let seq = self.fill_seq;
         self.fill_seq = next_fill_seq;
         self.counters = counters;
         if let FillDue::Timed(time) = fill_due {
@@ -875,22 +947,18 @@ impl L1Cache {
             // Partial-line sector fetch: no allocation, no eviction; the
             // sector becomes resident at its FILL time (lazy).
             self.sector_fills.insert((line, sector), (fill_due, seq));
-            Ok(CoreAccess::MissSectorResident)
+            Ok(CoreAccess::MissSectorResident { pending: fill_due })
         } else {
             self.line_fills.insert(line, (fill_due, seq));
             *self.sectors.entry(line).or_default() |= 1 << sector;
-            Ok(CoreAccess::MissLineAlloc)
+            Ok(CoreAccess::MissLineAlloc { pending: fill_due })
         }
     }
 
     fn access_single(&mut self, sector_id: i64, now: u64) -> Result<SingleOutcome, L1AccessError> {
         self.apply_fills(now)?;
-        let fill_time = Self::checked_time_add("miss visibility", now, self.cfg.miss_latency)?;
-        match self.access_core(sector_id, FillDue::Timed(fill_time))? {
-            CoreAccess::Hit => Ok(SingleOutcome::Done(
-                AccessOutcome::Hit,
-                Self::checked_time_add("hit visibility", now, self.cfg.hit_latency)?,
-            )),
+        match self.access_core(sector_id, FillRequest::Constant { now })? {
+            CoreAccess::Hit { ready } => Ok(SingleOutcome::Done(AccessOutcome::Hit, ready)),
             CoreAccess::LineMerge { pending } | CoreAccess::SectorMerge { pending } => {
                 let pending = pending.timed().ok_or(L1AccessError::FillTimingMismatch {
                     latched: Self::timing_name(FillTiming::Event),
@@ -901,12 +969,22 @@ impl L1Cache {
             CoreAccess::Stalled => Ok(SingleOutcome::Stall {
                 retry_at: self.earliest_fill()?,
             }),
-            CoreAccess::MissSectorResident => Ok(SingleOutcome::Done(
-                AccessOutcome::MissSectorResident,
-                fill_time,
-            )),
-            CoreAccess::MissLineAlloc => {
-                Ok(SingleOutcome::Done(AccessOutcome::MissLineAlloc, fill_time))
+            CoreAccess::MissSectorResident { pending } => {
+                let ready = pending.timed().ok_or(L1AccessError::FillTimingMismatch {
+                    latched: Self::timing_name(FillTiming::Event),
+                    requested: Self::timing_name(FillTiming::Constant),
+                })?;
+                Ok(SingleOutcome::Done(
+                    AccessOutcome::MissSectorResident,
+                    ready,
+                ))
+            }
+            CoreAccess::MissLineAlloc { pending } => {
+                let ready = pending.timed().ok_or(L1AccessError::FillTimingMismatch {
+                    latched: Self::timing_name(FillTiming::Event),
+                    requested: Self::timing_name(FillTiming::Constant),
+                })?;
+                Ok(SingleOutcome::Done(AccessOutcome::MissLineAlloc, ready))
             }
         }
     }
@@ -958,27 +1036,29 @@ impl L1Cache {
     fn access_eligible_event_impl(
         &mut self,
         sector_id: i64,
-        hit_ready: u64,
+        now: u64,
     ) -> Result<EvAccess, L1AccessError> {
         self.commit_latch(FillTiming::Event);
         let line = sector_id >> 2;
         let sector = (sector_id & 3) as u8;
-        Ok(match self.access_core(sector_id, FillDue::Untimed)? {
-            CoreAccess::Hit => EvAccess::Hit { ready: hit_ready },
-            CoreAccess::LineMerge { .. } => EvAccess::MergedPending {
-                fill: FillKey::Line(line),
+        Ok(
+            match self.access_core(sector_id, FillRequest::Event { now })? {
+                CoreAccess::Hit { ready } => EvAccess::Hit { ready },
+                CoreAccess::LineMerge { .. } => EvAccess::MergedPending {
+                    fill: FillKey::Line(line),
+                },
+                CoreAccess::SectorMerge { .. } => EvAccess::MergedPending {
+                    fill: FillKey::Sector(line, sector),
+                },
+                CoreAccess::Stalled => EvAccess::Stalled,
+                CoreAccess::MissSectorResident { .. } => EvAccess::MissRequest {
+                    fill: FillKey::Sector(line, sector),
+                },
+                CoreAccess::MissLineAlloc { .. } => EvAccess::MissRequest {
+                    fill: FillKey::Line(line),
+                },
             },
-            CoreAccess::SectorMerge { .. } => EvAccess::MergedPending {
-                fill: FillKey::Sector(line, sector),
-            },
-            CoreAccess::Stalled => EvAccess::Stalled,
-            CoreAccess::MissSectorResident => EvAccess::MissRequest {
-                fill: FillKey::Sector(line, sector),
-            },
-            CoreAccess::MissLineAlloc => EvAccess::MissRequest {
-                fill: FillKey::Line(line),
-            },
-        })
+        )
     }
 
     /// One modeled sector access in EVENT mode (shared-L2 integration):
@@ -1003,7 +1083,6 @@ impl L1Cache {
         now: u64,
     ) -> Result<EvAccess, L1AccessError> {
         self.preflight_latch(FillTiming::Event)?;
-        let hit_ready = Self::checked_time_add("event hit visibility", now, self.cfg.hit_latency)?;
         let budget = L1MutationBudget {
             eligible_sectors: 1,
             recency_touches: 1,
@@ -1012,11 +1091,11 @@ impl L1Cache {
         };
         if self.preflight_mutation_budget(budget).is_err() {
             let mut shadow = self.clone();
-            let outcome = shadow.access_eligible_event_impl(sector_id, hit_ready)?;
+            let outcome = shadow.access_eligible_event_impl(sector_id, now)?;
             *self = shadow;
             return Ok(outcome);
         }
-        self.access_eligible_event_impl(sector_id, hit_ready)
+        self.access_eligible_event_impl(sector_id, now)
     }
 
     /// Complete an event-mode fill AT the response event's time. A
@@ -1041,7 +1120,7 @@ impl L1Cache {
             FillKey::Sector(line, _) => self.line_resident(line),
         };
         if will_touch {
-            Self::checked_sequence_add("recency", self.next_stamp, 1)?;
+            self.next_stamp.preflight("recency", 1)?;
         }
         self.commit_latch(FillTiming::Event);
         match fill {
@@ -1075,7 +1154,7 @@ impl L1Cache {
                 .get(&line)
                 .is_some_and(|mask| mask & (1 << sector) != 0);
         if hit {
-            Self::checked_sequence_add("recency", self.next_stamp, 1)?;
+            self.next_stamp.preflight("recency", 1)?;
         }
         let counters = self.counters.add_fields_checked(&[
             (L1CounterField::StoreSectors, 1),
@@ -1343,6 +1422,70 @@ mod tests {
     }
 
     #[test]
+    fn constant_merge_ignores_an_overflowing_unused_miss_arm() {
+        let mut l1 = L1Cache::new(L1Config {
+            arch: ArchId::Sm86,
+            line_capacity: 8,
+            mshr_count: Some(1),
+            hit_latency: 1,
+            miss_latency: 2,
+        })
+        .unwrap();
+        assert_eq!(
+            l1.access_eligible(0, u64::MAX - 2).unwrap(),
+            (AccessOutcome::MissLineAlloc, u64::MAX)
+        );
+
+        assert_eq!(
+            l1.access_eligible(1, u64::MAX - 1).unwrap(),
+            (AccessOutcome::Merge, u64::MAX)
+        );
+        assert!(l1.is_fill_in_flight(FillKey::Line(0)));
+        assert_eq!(l1.counters.misses, 2);
+        assert_eq!(l1.counters.merges, 1);
+    }
+
+    #[test]
+    fn event_nonhit_paths_ignore_an_overflowing_unused_hit_arm() {
+        let mut l1 = L1Cache::new(L1Config {
+            arch: ArchId::Sm86,
+            line_capacity: 8,
+            mshr_count: Some(1),
+            hit_latency: 1,
+            miss_latency: 2,
+        })
+        .unwrap();
+        assert_eq!(
+            l1.access_eligible_ev(0, u64::MAX).unwrap(),
+            EvAccess::MissRequest {
+                fill: FillKey::Line(0),
+            }
+        );
+        assert_eq!(
+            l1.access_eligible_ev(1, u64::MAX).unwrap(),
+            EvAccess::MergedPending {
+                fill: FillKey::Line(0),
+            }
+        );
+        assert_eq!(
+            l1.access_eligible_ev(4, u64::MAX).unwrap(),
+            EvAccess::Stalled
+        );
+
+        assert!(l1.complete_fill(FillKey::Line(0)).unwrap());
+        let before = l1.clone();
+        assert_eq!(
+            l1.access_eligible_ev(0, u64::MAX),
+            Err(L1AccessError::TimeOverflow {
+                operation: "event hit visibility",
+                base: u64::MAX,
+                delta: 1,
+            })
+        );
+        assert_cache_state_eq(&l1, &before);
+    }
+
+    #[test]
     fn event_fill_remains_untimed_at_maximum_cycle() {
         let mut l1 = cache(8, Some(1));
         assert_eq!(
@@ -1360,6 +1503,54 @@ mod tests {
         assert_cache_state_eq(&l1, &before);
         assert!(l1.is_fill_in_flight(FillKey::Line(0)));
         assert!(!l1.line_resident(0));
+    }
+
+    #[test]
+    fn maximum_recency_stamp_is_used_before_typed_exhaustion() {
+        let mut l1 = cache(8, None);
+        l1.by_stamp.insert(0, 0);
+        l1.stamp_of.insert(0, 0);
+        l1.sectors.insert(0, 1);
+        l1.next_stamp = NextSequence::Available(u64::MAX);
+
+        assert_eq!(l1.access_eligible_ev(0, 0), Ok(EvAccess::Hit { ready: 34 }));
+        assert_eq!(l1.next_stamp, NextSequence::Exhausted);
+        assert_eq!(l1.stamp_of.get(&0), Some(&u64::MAX));
+        let before = l1.clone();
+
+        assert_eq!(
+            l1.access_eligible_ev(0, 1),
+            Err(L1AccessError::SequenceOverflow {
+                sequence: "recency",
+                current: u64::MAX,
+            })
+        );
+        assert_cache_state_eq(&l1, &before);
+    }
+
+    #[test]
+    fn maximum_fill_sequence_is_used_before_typed_exhaustion() {
+        let mut l1 = cache(8, None);
+        l1.fill_seq = NextSequence::Available(u64::MAX);
+
+        assert_eq!(
+            l1.access_eligible_ev(0, 0),
+            Ok(EvAccess::MissRequest {
+                fill: FillKey::Line(0),
+            })
+        );
+        assert_eq!(l1.fill_seq, NextSequence::Exhausted);
+        assert_eq!(l1.line_fills.get(&0), Some(&(FillDue::Untimed, u64::MAX)));
+        let before = l1.clone();
+
+        assert_eq!(
+            l1.access_eligible_ev(4, 1),
+            Err(L1AccessError::SequenceOverflow {
+                sequence: "fill",
+                current: u64::MAX,
+            })
+        );
+        assert_cache_state_eq(&l1, &before);
     }
 
     #[test]

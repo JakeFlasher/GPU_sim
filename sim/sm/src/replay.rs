@@ -1136,6 +1136,25 @@ fn classify_flat_preflighted(
     }
 }
 
+fn checked_staged_global_kind(role: MemRole, start: usize, count: usize) -> Option<AccessKind> {
+    let len = u16::try_from(count).ok()?;
+    start.checked_add(count)?;
+    Some(match role {
+        MemRole::EligibleLoad(token) => AccessKind::GlobalEligible {
+            off: start,
+            len,
+            token,
+        },
+        MemRole::BypassLoad(token) => AccessKind::GlobalBypass {
+            off: start,
+            len,
+            token,
+        },
+        MemRole::Store => AccessKind::GlobalStore { off: start, len },
+        MemRole::None => AccessKind::GlobalUntagged { off: start, len },
+    })
+}
+
 fn append_staged_global_sectors(
     role: MemRole,
     sectors: &mut Vec<i64>,
@@ -1152,23 +1171,9 @@ fn append_staged_global_sectors(
         record_ix,
         sectors,
     };
-    u32::try_from(start).map_err(|_| overflow(start))?;
-    let len = u16::try_from(count).map_err(|_| overflow(count))?;
-    start.checked_add(count).ok_or_else(|| overflow(count))?;
-    let kind = match role {
-        MemRole::EligibleLoad(token) => AccessKind::GlobalEligible {
-            off: start,
-            len,
-            token,
-        },
-        MemRole::BypassLoad(token) => AccessKind::GlobalBypass {
-            off: start,
-            len,
-            token,
-        },
-        MemRole::Store => AccessKind::GlobalStore { off: start, len },
-        MemRole::None => AccessKind::GlobalUntagged { off: start, len },
-    };
+    // `AccessKind::off` spans the native `usize` arena domain. Only one
+    // record's compact length narrows to `u16`.
+    let kind = checked_staged_global_kind(role, start, count).ok_or_else(|| overflow(count))?;
     sectors.extend_from_slice(sector_scratch);
     Ok(kind)
 }
@@ -1779,6 +1784,20 @@ mod space_routing_tests {
         ));
         assert_eq!(sectors, vec![13]);
         assert!(sector_scratch.is_empty());
+    }
+
+    #[cfg(target_pointer_width = "64")]
+    #[test]
+    fn staged_sector_start_uses_full_usize_domain() {
+        let start = usize::try_from(1_u64 << 32).unwrap();
+        assert_eq!(
+            checked_staged_global_kind(MemRole::None, start, 1),
+            Some(AccessKind::GlobalUntagged { off: start, len: 1 })
+        );
+        assert_eq!(
+            checked_staged_global_kind(MemRole::None, usize::MAX, 1),
+            None
+        );
     }
 
     #[test]

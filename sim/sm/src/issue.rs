@@ -439,13 +439,22 @@ struct ResponseOwner(u64);
 
 static NEXT_RESPONSE_OWNER: AtomicU64 = AtomicU64::new(1);
 
+fn allocate_response_owner_from(next: &AtomicU64) -> Result<ResponseOwner, IssueError> {
+    next.fetch_update(
+        Ordering::Relaxed,
+        Ordering::Relaxed,
+        |current| match current {
+            0 => None,
+            u64::MAX => Some(0),
+            _ => current.checked_add(1),
+        },
+    )
+    .map(ResponseOwner)
+    .map_err(|_| IssueError::ResponseOwnerExhausted)
+}
+
 fn allocate_response_owner() -> Result<ResponseOwner, IssueError> {
-    NEXT_RESPONSE_OWNER
-        .fetch_update(Ordering::Relaxed, Ordering::Relaxed, |current| {
-            current.checked_add(1)
-        })
-        .map(ResponseOwner)
-        .map_err(|_| IssueError::ResponseOwnerExhausted)
+    allocate_response_owner_from(&NEXT_RESPONSE_OWNER)
 }
 
 /// Stable identity of one response-bearing request. Its fields are private:
@@ -2821,6 +2830,21 @@ mod tests {
         assert!(checked_latency("infinite", f64::INFINITY).is_err());
         assert!(checked_latency("negative", -1.0).is_err());
         assert_eq!(checked_latency("fractional", 12.01).unwrap(), 13);
+    }
+
+    #[test]
+    fn maximum_response_owner_is_allocated_before_exhaustion() {
+        let next = AtomicU64::new(u64::MAX);
+        assert_eq!(
+            allocate_response_owner_from(&next).unwrap(),
+            ResponseOwner(u64::MAX)
+        );
+        assert_eq!(next.load(Ordering::Relaxed), 0);
+        assert!(matches!(
+            allocate_response_owner_from(&next),
+            Err(IssueError::ResponseOwnerExhausted)
+        ));
+        assert_eq!(next.load(Ordering::Relaxed), 0);
     }
 
     #[test]
