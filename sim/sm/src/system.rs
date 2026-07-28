@@ -1100,7 +1100,7 @@ mod tests {
         )
         .unwrap_err();
         assert!(matches!(err, SystemError::DramCycleDomainExhausted { .. }));
-        assert_eq!(l2.counters.total(), 0);
+        assert_eq!(l2.counters.total().unwrap(), 0);
     }
 
     #[test]
@@ -1284,7 +1284,7 @@ mod tests {
         .unwrap();
         let l1 = r.per_sm[&3].l1.unwrap();
         assert_eq!((l1.hits, l1.misses), (1, 1), "second load is an L1 hit");
-        assert_eq!(r.l2.total(), 1, "only the L1 miss reached the L2");
+        assert_eq!(r.l2.total().unwrap(), 1, "only the L1 miss reached the L2");
     }
 
     /// Store sectors mutate the shared L2 in arrival order without a

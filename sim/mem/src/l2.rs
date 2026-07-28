@@ -370,6 +370,46 @@ pub struct L2Counters {
     pub write_tag_hits: u64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum L2CounterField {
+    Hits,
+    Misses,
+    LineMisses,
+    SectorFillMisses,
+    WriteTagHits,
+}
+
+impl std::fmt::Display for L2CounterField {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match self {
+            Self::Hits => "hits",
+            Self::Misses => "misses",
+            Self::LineMisses => "line_misses",
+            Self::SectorFillMisses => "sector_fill_misses",
+            Self::WriteTagHits => "write_tag_hits",
+        })
+    }
+}
+
+#[derive(Debug, thiserror::Error, PartialEq, Eq)]
+pub enum L2CounterError {
+    #[error(transparent)]
+    Architecture(#[from] sim_arch::ArchitectureProvenanceError),
+    #[error("L2 counter '{field}' overflows u64 during aggregation")]
+    Overflow { field: L2CounterField },
+    #[error("L2 counter total overflows u64: hits={hits}, misses={misses}")]
+    TotalOverflow { hits: u64, misses: u64 },
+}
+
+fn checked_counter_add(
+    field: L2CounterField,
+    left: u64,
+    right: u64,
+) -> Result<u64, L2CounterError> {
+    left.checked_add(right)
+        .ok_or(L2CounterError::Overflow { field })
+}
+
 impl Default for L2Counters {
     fn default() -> Self {
         Self {
@@ -395,10 +435,7 @@ impl L2Counters {
         self.arch
     }
 
-    pub fn add_checked(
-        &mut self,
-        other: &L2Counters,
-    ) -> Result<(), sim_arch::ArchitectureProvenanceError> {
+    pub fn add_checked(&mut self, other: &L2Counters) -> Result<(), L2CounterError> {
         let expected = self
             .arch
             .ok_or(sim_arch::ArchitectureProvenanceError::Unbound {
@@ -414,18 +451,43 @@ impl L2Counters {
                 component: "L2 counters",
                 expected,
                 got,
-            });
+            }
+            .into());
         }
-        self.hits += other.hits;
-        self.misses += other.misses;
-        self.line_misses += other.line_misses;
-        self.sector_fill_misses += other.sector_fill_misses;
-        self.write_tag_hits += other.write_tag_hits;
+
+        let hits = checked_counter_add(L2CounterField::Hits, self.hits, other.hits)?;
+        let misses = checked_counter_add(L2CounterField::Misses, self.misses, other.misses)?;
+        let line_misses = checked_counter_add(
+            L2CounterField::LineMisses,
+            self.line_misses,
+            other.line_misses,
+        )?;
+        let sector_fill_misses = checked_counter_add(
+            L2CounterField::SectorFillMisses,
+            self.sector_fill_misses,
+            other.sector_fill_misses,
+        )?;
+        let write_tag_hits = checked_counter_add(
+            L2CounterField::WriteTagHits,
+            self.write_tag_hits,
+            other.write_tag_hits,
+        )?;
+
+        self.hits = hits;
+        self.misses = misses;
+        self.line_misses = line_misses;
+        self.sector_fill_misses = sector_fill_misses;
+        self.write_tag_hits = write_tag_hits;
         Ok(())
     }
 
-    pub fn total(&self) -> u64 {
-        self.hits + self.misses
+    pub fn total(&self) -> Result<u64, L2CounterError> {
+        self.hits
+            .checked_add(self.misses)
+            .ok_or(L2CounterError::TotalOverflow {
+                hits: self.hits,
+                misses: self.misses,
+            })
     }
 }
 
@@ -871,7 +933,7 @@ mod tests {
         assert_eq!(l2.counters.line_misses, 1);
         assert_eq!(l2.counters.sector_fill_misses, 1);
         assert_eq!(l2.counters.hits, 2);
-        assert_eq!(l2.counters.total(), 4);
+        assert_eq!(l2.counters.total().unwrap(), 4);
     }
 
     #[test]
@@ -992,7 +1054,7 @@ mod tests {
                 rd(&mut l2, line, ((x >> 10) & 3) as u8);
             }
             assert_eq!(
-                (l2.counters.hits, l2.counters.total()),
+                (l2.counters.hits, l2.counters.total().unwrap()),
                 (hits, total),
                 "corpus row seed={seed} ({policy:?}, {hash:?})"
             );
@@ -1050,19 +1112,90 @@ mod tests {
         assert!(rd(&mut r, 3, 2));
     }
 
-    /// Tag-match never crosses an eviction: once the line is gone the
-    /// write-class access line-misses like everyone else.
     #[test]
-    fn counter_aggregation_rejects_mixed_architecture() {
+    fn counter_aggregation_commits_every_field_and_total() {
+        let mut total = L2Counters::for_arch(ArchId::Sm86);
+        total.hits = 1;
+        total.misses = 2;
+        total.line_misses = 3;
+        total.sector_fill_misses = 4;
+        total.write_tag_hits = 5;
+
+        let mut addend = L2Counters::for_arch(ArchId::Sm86);
+        addend.hits = 10;
+        addend.misses = 11;
+        addend.line_misses = 12;
+        addend.sector_fill_misses = 13;
+        addend.write_tag_hits = 14;
+
+        total.add_checked(&addend).unwrap();
+        assert_eq!(total.arch(), Some(ArchId::Sm86));
+        assert_eq!(total.hits, 11);
+        assert_eq!(total.misses, 13);
+        assert_eq!(total.line_misses, 15);
+        assert_eq!(total.sector_fill_misses, 17);
+        assert_eq!(total.write_tag_hits, 19);
+        assert_eq!(total.total().unwrap(), 24);
+    }
+
+    #[test]
+    fn counter_aggregation_overflow_is_typed_and_transactional() {
+        type Setter = fn(&mut L2Counters, u64);
+        let cases: [(L2CounterField, Setter); 5] = [
+            (L2CounterField::Hits, |c, v| c.hits = v),
+            (L2CounterField::Misses, |c, v| c.misses = v),
+            (L2CounterField::LineMisses, |c, v| c.line_misses = v),
+            (L2CounterField::SectorFillMisses, |c, v| {
+                c.sector_fill_misses = v
+            }),
+            (L2CounterField::WriteTagHits, |c, v| c.write_tag_hits = v),
+        ];
+        for (field, set) in cases {
+            let mut total = L2Counters::for_arch(ArchId::Sm86);
+            total.hits = 7;
+            set(&mut total, u64::MAX);
+            let before = total;
+            let mut addend = L2Counters::for_arch(ArchId::Sm86);
+            addend.misses = 11;
+            set(&mut addend, 1);
+            assert!(matches!(
+                total.add_checked(&addend),
+                Err(L2CounterError::Overflow { field: got }) if got == field
+            ));
+            assert_eq!(total, before, "overflow in {field} partially committed");
+        }
+    }
+
+    #[test]
+    fn counter_total_overflow_is_typed() {
+        let mut counters = L2Counters::for_arch(ArchId::Sm86);
+        counters.hits = u64::MAX;
+        counters.misses = 1;
+        assert_eq!(
+            counters.total(),
+            Err(L2CounterError::TotalOverflow {
+                hits: u64::MAX,
+                misses: 1,
+            })
+        );
+    }
+
+    #[test]
+    fn counter_aggregation_rejects_mixed_architecture_transactionally() {
         let mut sm86 = L2Counters::for_arch(ArchId::Sm86);
+        sm86.hits = 7;
+        let before = sm86;
         let sm120 = L2Counters::for_arch(ArchId::Sm120);
         assert!(matches!(
             sm86.add_checked(&sm120),
-            Err(sim_arch::ArchitectureProvenanceError::Mismatch {
-                component: "L2 counters",
-                expected: ArchId::Sm86,
-                got: ArchId::Sm120,
-            })
+            Err(L2CounterError::Architecture(
+                sim_arch::ArchitectureProvenanceError::Mismatch {
+                    component: "L2 counters",
+                    expected: ArchId::Sm86,
+                    got: ArchId::Sm120,
+                }
+            ))
         ));
+        assert_eq!(sm86, before);
     }
 }
