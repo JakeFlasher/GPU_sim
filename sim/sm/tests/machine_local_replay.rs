@@ -142,7 +142,7 @@ fn real_trace_replays_under_issue_model() {
     let mut kernels = 0usize;
     let mut records: u64 = 0;
     let mut issued: u64 = 0;
-    let mut max_cycles: u64 = 0;
+    let mut diagnostic_last_issue_cycles: u64 = 0;
     let mut sms = 0usize;
     let mut l1_totals: Option<sim_mem::L1Counters> = None;
     let mut l2_totals: Option<sim_mem::L2Counters> = None;
@@ -155,10 +155,15 @@ fn real_trace_replays_under_issue_model() {
             identity.deploy(),
             "every launch result must retain the composition architecture"
         );
-        kernels += 1;
-        records += result.records_seen;
-        issued += result.instructions_issued;
-        max_cycles = max_cycles.max(result.max_cycles);
+        kernels = kernels.checked_add(1).expect("kernel count fits usize");
+        records = records
+            .checked_add(result.records_seen)
+            .expect("record count fits u64");
+        issued = issued
+            .checked_add(result.instructions_issued)
+            .expect("instruction count fits u64");
+        diagnostic_last_issue_cycles =
+            diagnostic_last_issue_cycles.max(result.diagnostic_last_issue_cycles);
         sms = sms.max(result.per_sm.len());
         assert_eq!(result.instructions_issued, result.records_seen);
         if let Some(c) = &result.l1 {
@@ -187,7 +192,7 @@ fn real_trace_replays_under_issue_model() {
     }
     eprintln!(
         "smoke: replay kernels={kernels} records={records} issued={issued} \
-         max_cycles={max_cycles} sms={sms}"
+         diagnostic_last_issue_cycles={diagnostic_last_issue_cycles} sms={sms}"
     );
     if let Some(c) = &l1_totals {
         eprintln!(
@@ -262,5 +267,5 @@ fn real_trace_replays_under_issue_model() {
         eprintln!("smoke: emit {} = {}", p.key, payload);
     }
 
-    assert!(kernels > 0 && issued > 0 && max_cycles > 0 && sms > 0);
+    assert!(kernels > 0 && issued > 0 && diagnostic_last_issue_cycles > 0 && sms > 0);
 }

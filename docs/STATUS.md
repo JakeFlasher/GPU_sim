@@ -19,7 +19,8 @@ aspirational plan completion.
 | Performance benchmark/gate | Missing |
 | sm_120 validation | Deferred until final sm_86 M2 passes and the operator explicitly approves migration |
 
-`KernelReplayResult.max_cycles` is a directional diagnostic. It must not be
+`KernelReplayResult.diagnostic_last_issue_cycles` and its separate raw
+`terminal_modeled_event_time` are directional diagnostics. Neither may be
 published or emitted as `gpc__cycles_elapsed.max` until admitted silicon
 evidence establishes single-launch mapping and multi-launch composition.
 

@@ -602,6 +602,10 @@ pub struct SystemResult {
     pub l2_by_source: L2SourceSplit,
     /// DRAM read-traffic observer (server engagement diagnostics).
     pub dram: DramStats,
+    /// Raw timestamp of the last successfully processed modeled event.
+    /// `None` means the queue was empty; `Some(0)` is a real event at time zero.
+    /// This is a diagnostic timestamp, not an elapsed-cycle prediction.
+    pub terminal_event_time: Option<u64>,
 }
 
 /// Run every SM's blocks to completion over one shared L2. `l2` is
@@ -691,6 +695,7 @@ pub fn simulate_kernel_shared(
     }
 
     let mut spin = SpinGuard::new(cores.len())?;
+    let mut terminal_event_time = None;
     while let Some(ev) = queue.pop()? {
         let sm_ix =
             usize::try_from(ev.target.0).map_err(|_| SystemError::EventTargetOutOfRange {
@@ -889,6 +894,7 @@ pub fn simulate_kernel_shared(
                 spin.on_event(ev.time, false)?;
             }
         }
+        terminal_event_time = Some(ev.time);
     }
 
     let mut per_sm = BTreeMap::new();
@@ -907,6 +913,7 @@ pub fn simulate_kernel_shared(
         l2: l2.counters,
         l2_by_source,
         dram: dram_stats,
+        terminal_event_time,
     })
 }
 
@@ -1100,6 +1107,35 @@ mod tests {
     }
 
     #[test]
+    fn empty_and_time_zero_event_boundaries_remain_distinct() {
+        let sched = schedule(Vec::new());
+
+        let mut empty_l2 = l2_model();
+        let empty = simulate_kernel_shared(
+            &BTreeMap::new(),
+            &sched,
+            &params(),
+            l1_config(),
+            &mut empty_l2,
+            carded_bw(),
+        )
+        .unwrap();
+        assert_eq!(empty.terminal_event_time, None);
+
+        let mut actor_l2 = l2_model();
+        let actor = simulate_kernel_shared(
+            &BTreeMap::from([(0, Vec::new())]),
+            &sched,
+            &params(),
+            l1_config(),
+            &mut actor_l2,
+            carded_bw(),
+        )
+        .unwrap();
+        assert_eq!(actor.terminal_event_time, Some(0));
+    }
+
+    #[test]
     fn dram_server_rejects_reserved_and_overflowed_completions_transactionally() {
         let reserved = DramServer::new(DramBw::Carded {
             arch: ArchId::Sm86,
@@ -1219,6 +1255,44 @@ mod tests {
             })
         ));
         assert_eq!(due.next(0), Some(7));
+    }
+
+    /// A reply-producing load can be the final instruction. Its issue
+    /// frontier is t=1, but the modeled response event still completes at
+    /// t=423 and must remain visible as a separate diagnostic timestamp.
+    #[test]
+    fn final_load_response_survives_past_the_issue_frontier() {
+        let mut load = cb(1);
+        load.write_barrier = Some(barrier(0));
+        let sched = schedule(vec![(0, slot(load, "LDG.E"))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                warp_slot: 0,
+                insts: vec![ReplayInst {
+                    pc: 0,
+                    kind: AccessKind::GlobalEligible {
+                        off: 0,
+                        len: 1,
+                        token: CacheOpToken::LdgECa,
+                    },
+                }],
+                sectors: vec![4],
+            }],
+        }];
+        let mut l2 = l2_model();
+        let result = simulate_kernel_shared(
+            &BTreeMap::from([(0, blocks)]),
+            &sched,
+            &params(),
+            l1_config(),
+            &mut l2,
+            carded_bw(),
+        )
+        .unwrap();
+        assert_eq!(result.per_sm[&0].instructions_issued, 1);
+        assert_eq!(result.per_sm[&0].cycles, 1);
+        assert_eq!(result.terminal_event_time, Some(423));
     }
 
     /// One SM, one cold load: L2 misses → the consumer waits the DRAM
@@ -1595,6 +1669,7 @@ mod tests {
             simulate_kernel_shared(&per_sm, &sched, &params(), l1_config(), &mut l2, slow).unwrap();
         assert_eq!(r2.dram.read_sectors, 2);
         assert_eq!(r2.dram.bw_delayed_responses, 1, "second fetch queues");
+        assert_eq!(r2.terminal_event_time, Some(640));
         assert_eq!(r2.per_sm[&0].cycles, base0, "first fetch: 320 < 423 arm");
         assert!(
             r2.per_sm[&1].cycles > base1,
@@ -1673,6 +1748,7 @@ mod tests {
             assert_eq!(a.l2, b.l2);
             assert_eq!(a.dram, b.dram);
             assert_eq!(a.l2_by_source, b.l2_by_source);
+            assert_eq!(a.terminal_event_time, b.terminal_event_time);
             assert_eq!(
                 a.per_sm.values().map(|r| r.cycles).collect::<Vec<_>>(),
                 b.per_sm.values().map(|r| r.cycles).collect::<Vec<_>>()

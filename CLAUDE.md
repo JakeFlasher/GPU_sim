@@ -18,8 +18,9 @@ publication-binding headline: MAPE ≤10% meets the engineering target, >10% and
 ≤15% is floor-only, and >15% is publication failure. Cycles emission is
 deliberately `required_unimplemented` until a checked-in aggregation-semantics
 study validates the single-launch mapping and selects a multi-launch composition
-rule from admitted silicon evidence. `KernelReplayResult.max_cycles` is a
-directional diagnostic, not an admissible primary prediction. The seven current
+rule from admitted silicon evidence. `KernelReplayResult`'s
+`diagnostic_last_issue_cycles` and `terminal_modeled_event_time` fields are
+separate directional diagnostics, not admissible primary predictions. The seven current
 `sim-emit` descriptors are secondary, implemented, reported, and ungated.
 
 ## Binding rules

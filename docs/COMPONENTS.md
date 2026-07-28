@@ -18,7 +18,7 @@ Status vocabulary:
 |---|---|---|---|
 | `sim-engine` / `sim/engine` | active | Deterministic `(time, seq)` event queue | Timing-wheel/batching optimization not implemented |
 | `sim-trace` / `sim/trace` | active | Prost trace decode, lane reconstruction, completeness and identity checks | Machine-local smoke policy still being refit |
-| `sim-sm` / `sim/sm` | active | Control-bit join, four-SMSP issue, traced placement, shared-L2 event system | No production driver; `max_cycles` is diagnostic |
+| `sim-sm` / `sim/sm` | active | Control-bit join, four-SMSP issue, traced placement, shared-L2 event system | No production driver; issue/terminal timing fields are diagnostic |
 | `sim-mem` / `sim/mem` | active | Sectored L1/L2 and DRAM bandwidth model | Several microarchitecture choices remain explicit hypotheses |
 | `sim-emit` / `sim/emit` | active | Seven typed NCU-shaped secondary predictions | Primary cycles descriptor absent |
 | `sim-calib` / `sim/calib` | active | Fail-closed architecture-card loading | Not wired through a production application |

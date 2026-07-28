@@ -21,8 +21,9 @@ The sole publication-binding headline metric is
 Its engineering accuracy target is at most 10% cycle MAPE. At most 15% cycle
 MAPE is the minimum publication floor. The headline may not be claimed unless
 the applicable evidence, aggregation-semantics, coverage, and evaluation gates
-pass; `KernelReplayResult.max_cycles` is not a substitute for an admitted
-prediction.
+pass; the issue-frontier field formerly named `KernelReplayResult.max_cycles`
+(now `diagnostic_last_issue_cycles`) and the separate raw
+`terminal_modeled_event_time` are not substitutes for an admitted prediction.
 
 The following seven existing simulator descriptors remain reported secondary
 outputs and are ungated for publication:

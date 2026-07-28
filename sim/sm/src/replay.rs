@@ -223,8 +223,13 @@ pub struct KernelReplayResult {
     pub records_seen: u64,
     /// Per traced SM id.
     pub per_sm: BTreeMap<i32, SmSimResult>,
-    /// Directional v0 proxy for `gpc__cycles_elapsed.max`.
-    pub max_cycles: u64,
+    /// Maximum per-SM issue frontier (`last local issue timestamp + 1`).
+    /// This is an issue-only diagnostic, not an NCU cycle prediction.
+    pub diagnostic_last_issue_cycles: u64,
+    /// Raw timestamp of the last successfully processed shared-system event.
+    /// Modes without the shared event system report `None`. This diagnostic is
+    /// deliberately not converted into elapsed cycles or a publication metric.
+    pub terminal_modeled_event_time: Option<u64>,
     /// Kernel-level L1 counters (sum over per-SM caches) in L1 mode.
     pub l1: Option<L1Counters>,
     /// Shared-L2 counters (the `replay_kernel_shared` path only).
@@ -454,10 +459,11 @@ fn fold_kernel_result(
     per_sm: BTreeMap<i32, SmSimResult>,
     records_seen: u64,
     expect_l1: bool,
+    terminal_modeled_event_time: Option<u64>,
     l2: Option<(L2Counters, L2SourceSplit, DramStats)>,
 ) -> Result<KernelReplayResult, ReplayError> {
     let mut instructions_issued: u64 = 0;
-    let mut max_cycles: u64 = 0;
+    let mut diagnostic_last_issue_cycles: u64 = 0;
     let mut l1_totals = expect_l1.then(|| L1Counters::for_arch(arch));
     for (&sm_id, result) in &per_sm {
         instructions_issued = instructions_issued
@@ -467,7 +473,7 @@ fn fold_kernel_result(
                 accumulated: instructions_issued,
                 addend: result.instructions_issued,
             })?;
-        max_cycles = max_cycles.max(result.cycles);
+        diagnostic_last_issue_cycles = diagnostic_last_issue_cycles.max(result.cycles);
         let found_l1 = result.l1.is_some();
         if found_l1 != expect_l1 {
             return Err(ReplayError::L1PresenceMismatch {
@@ -497,7 +503,8 @@ fn fold_kernel_result(
         instructions_issued,
         records_seen,
         per_sm,
-        max_cycles,
+        diagnostic_last_issue_cycles,
+        terminal_modeled_event_time,
         l1: l1_totals,
         l2,
         l2_by_source,
@@ -602,6 +609,7 @@ pub fn replay_kernel(
                 records_seen,
                 l1_config.is_some(),
                 None,
+                None,
             )
         }
         ReplayMemMode::L1SharedL2 { l1, l2, dram } => {
@@ -613,6 +621,7 @@ pub fn replay_kernel(
                 sys.per_sm,
                 records_seen,
                 true,
+                sys.terminal_event_time,
                 Some((sys.l2, sys.l2_by_source, sys.dram)),
             )
         }
@@ -904,7 +913,7 @@ mod aggregation_tests {
     fn instruction_overflow_precedes_count_mismatch() {
         let per_sm = BTreeMap::from([(0, sm(u64::MAX, None)), (1, sm(1, None))]);
         assert!(matches!(
-            fold_kernel_result(ArchId::Sm86, per_sm, 0, false, None),
+            fold_kernel_result(ArchId::Sm86, per_sm, 0, false, None, None),
             Err(ReplayError::InstructionCountOverflow {
                 sm_id: 1,
                 accumulated: u64::MAX,
@@ -917,7 +926,7 @@ mod aggregation_tests {
     fn ordinary_count_mismatch_remains_typed() {
         let per_sm = BTreeMap::from([(0, sm(4, None))]);
         assert!(matches!(
-            fold_kernel_result(ArchId::Sm86, per_sm, 5, false, None),
+            fold_kernel_result(ArchId::Sm86, per_sm, 5, false, None, None),
             Err(ReplayError::CountMismatch {
                 issued: 4,
                 records: 5,
@@ -926,10 +935,27 @@ mod aggregation_tests {
     }
 
     #[test]
+    fn issue_and_terminal_event_diagnostics_remain_independent() {
+        let mut result = sm(1, None);
+        result.cycles = 7;
+        let folded = fold_kernel_result(
+            ArchId::Sm86,
+            BTreeMap::from([(0, result)]),
+            1,
+            false,
+            Some(423),
+            None,
+        )
+        .unwrap();
+        assert_eq!(folded.diagnostic_last_issue_cycles, 7);
+        assert_eq!(folded.terminal_modeled_event_time, Some(423));
+    }
+
+    #[test]
     fn first_l1_snapshot_must_have_matching_provenance() {
         let unbound = BTreeMap::from([(0, sm(1, Some(L1Counters::default())))]);
         assert!(matches!(
-            fold_kernel_result(ArchId::Sm86, unbound, 1, true, None),
+            fold_kernel_result(ArchId::Sm86, unbound, 1, true, None, None),
             Err(ReplayError::L1Aggregation {
                 sm_id: 0,
                 source: L1CounterError::Architecture(
@@ -942,7 +968,7 @@ mod aggregation_tests {
 
         let wrong_arch = BTreeMap::from([(0, sm(1, Some(L1Counters::for_arch(ArchId::Sm120))))]);
         assert!(matches!(
-            fold_kernel_result(ArchId::Sm86, wrong_arch, 1, true, None),
+            fold_kernel_result(ArchId::Sm86, wrong_arch, 1, true, None, None),
             Err(ReplayError::L1Aggregation {
                 sm_id: 0,
                 source: L1CounterError::Architecture(
@@ -960,7 +986,7 @@ mod aggregation_tests {
     fn l1_presence_must_match_replay_mode_for_every_sm() {
         let all_none = BTreeMap::from([(0, sm(1, None))]);
         assert!(matches!(
-            fold_kernel_result(ArchId::Sm86, all_none, 1, true, None),
+            fold_kernel_result(ArchId::Sm86, all_none, 1, true, None, None),
             Err(ReplayError::L1PresenceMismatch {
                 sm_id: 0,
                 expected: true,
@@ -970,7 +996,7 @@ mod aggregation_tests {
 
         let all_some = BTreeMap::from([(0, sm(1, Some(L1Counters::for_arch(ArchId::Sm86))))]);
         assert!(matches!(
-            fold_kernel_result(ArchId::Sm86, all_some, 1, false, None),
+            fold_kernel_result(ArchId::Sm86, all_some, 1, false, None, None),
             Err(ReplayError::L1PresenceMismatch {
                 sm_id: 0,
                 expected: false,
@@ -983,7 +1009,7 @@ mod aggregation_tests {
             (1, sm(1, None)),
         ]);
         assert!(matches!(
-            fold_kernel_result(ArchId::Sm86, missing_second, 2, true, None),
+            fold_kernel_result(ArchId::Sm86, missing_second, 2, true, None, None),
             Err(ReplayError::L1PresenceMismatch {
                 sm_id: 1,
                 expected: true,
@@ -996,7 +1022,7 @@ mod aggregation_tests {
             (1, sm(1, Some(L1Counters::for_arch(ArchId::Sm86)))),
         ]);
         assert!(matches!(
-            fold_kernel_result(ArchId::Sm86, unexpected_second, 2, false, None),
+            fold_kernel_result(ArchId::Sm86, unexpected_second, 2, false, None, None),
             Err(ReplayError::L1PresenceMismatch {
                 sm_id: 1,
                 expected: false,
@@ -1013,7 +1039,7 @@ mod aggregation_tests {
         second.hits = 1;
         let per_sm = BTreeMap::from([(0, sm(1, Some(first))), (1, sm(1, Some(second)))]);
         assert!(matches!(
-            fold_kernel_result(ArchId::Sm86, per_sm, 2, true, None),
+            fold_kernel_result(ArchId::Sm86, per_sm, 2, true, None, None),
             Err(ReplayError::L1Aggregation {
                 sm_id: 1,
                 source: L1CounterError::Overflow {

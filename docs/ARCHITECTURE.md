@@ -107,8 +107,9 @@ the simulator implements the metric.
 The sole publication-binding headline, `exec_cycles_gpc_max` /
 `gpc__cycles_elapsed.max`, is required but unimplemented. Cycles MAPE ≤10%
 meets the engineering target, >10% and ≤15% is floor-only, and >15% is
-publication failure. `KernelReplayResult.max_cycles` is a directional
-diagnostic only. Emission is blocked until silicon evidence establishes both
+publication failure. `KernelReplayResult.diagnostic_last_issue_cycles` and its
+separate raw `terminal_modeled_event_time` are directional diagnostics only.
+Emission is blocked until silicon evidence establishes both
 single-launch mapping and multi-launch aggregation semantics. The seven
 implemented descriptors remain reported secondary outputs and are ungated.
 
