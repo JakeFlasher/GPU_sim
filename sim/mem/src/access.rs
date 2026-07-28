@@ -20,7 +20,7 @@ pub enum MemRole {
     /// Load-class opcode bypassing the modeled L1 (`.cg`/`.cs`/strong
     /// scopes/LDGSTS/ATOM/TEX/OTHER).
     BypassLoad(CacheOpToken),
-    /// Global-class store head (STG / RED): sectors hit-tested against
+    /// Global-class store head (STG / RED / REDG): sectors hit-tested against
     /// the L1 without allocating; write-allocate at the L2.
     Store,
     /// Not load-class and not a store head (LD.E, LDC, LDSM, non-memory
@@ -33,7 +33,7 @@ pub enum MemRole {
 /// are not global stores (shared / local — STL is L1-eligible via its
 /// token).
 pub fn is_global_store_opcode(opcode_text: &str) -> bool {
-    matches!(opcode_head(opcode_text), "STG" | "RED")
+    matches!(opcode_head(opcode_text), "STG" | "RED" | "REDG")
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -124,6 +124,10 @@ mod tests {
         );
         assert_eq!(
             mem_role_of("RED.E.ADD.STRONG.GPU [R2.64], R0", "sm_86"),
+            MemRole::Store
+        );
+        assert_eq!(
+            mem_role_of("REDG.E.ADD.STRONG.GPU [R2.64], R0", "sm_86"),
             MemRole::Store
         );
         assert_eq!(

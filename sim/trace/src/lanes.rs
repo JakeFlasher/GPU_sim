@@ -148,7 +148,10 @@ pub fn reconstruct_lane_vector(
             vector
         }
         FORMAT_BASE_DELTA => {
-            let expected = n_active.saturating_sub(1);
+            let expected = match n_active.checked_sub(1) {
+                Some(count) => count,
+                None => 0,
+            };
             if addr.addrs.len() != expected {
                 return Err(LaneError::BaseDeltaCountInvalid {
                     got: addr.addrs.len(),
@@ -375,6 +378,18 @@ mod tests {
         let a = addr(FORMAT_BASE_DELTA, 0x3000, 0, vec![]);
         let v = reconstruct_lane_vector(&a, 0).expect("all-inactive is valid");
         assert!(v.iter().all(|&x| x == LANE_INACTIVE_SENTINEL));
+    }
+
+    #[test]
+    fn base_delta_zero_active_lanes_rejects_spurious_delta() {
+        let a = addr(FORMAT_BASE_DELTA, 0x3000, 0, vec![8]);
+        assert_eq!(
+            reconstruct_lane_vector(&a, 0),
+            Err(LaneError::BaseDeltaCountInvalid {
+                got: 1,
+                expected: 0
+            })
+        );
     }
 
     #[test]

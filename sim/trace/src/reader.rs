@@ -45,6 +45,18 @@ pub enum TraceError {
         #[source]
         source: prost::DecodeError,
     },
+    #[error(
+        "{path}: unsupported trace_contract_id {got:?}; expected empty legacy identity or sm86_addr_carry_v1"
+    )]
+    TraceContractUnsupported { path: PathBuf, got: String },
+    #[error(
+        "{path}: trace contract {contract_id:?} carries invalid memory_payload_classes {got:?}; expected exactly [GLOBAL, SHARED, LOCAL, ATOMIC, ASYNC_COPY]"
+    )]
+    MemoryPayloadCapabilitiesInvalid {
+        path: PathBuf,
+        contract_id: String,
+        got: Vec<i32>,
+    },
     #[error("kernel threadblock dir {dir} is missing or empty — the trace tree is truncated")]
     ThreadblocksMissing { dir: PathBuf },
     #[error(
@@ -153,9 +165,75 @@ pub struct KernelLoc<'a> {
     pub kernel: &'a pb::Kernel,
 }
 
+pub const ADDRESS_CARRYING_TRACE_CONTRACT_ID: &str = "sm86_addr_carry_v1";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MemoryPayloadContract {
+    LegacyExclusion,
+    AddressCarryingV1,
+}
+
+const ADDRESS_CARRYING_PAYLOAD_CLASSES: [pb::MemoryOpClass; 5] = [
+    pb::MemoryOpClass::Global,
+    pb::MemoryOpClass::Shared,
+    pb::MemoryOpClass::Local,
+    pb::MemoryOpClass::Atomic,
+    pb::MemoryOpClass::AsyncCopy,
+];
+
+fn classify_memory_payload_contract(
+    trace: &pb::Trace,
+    path: &Path,
+) -> Result<MemoryPayloadContract, TraceError> {
+    if trace.trace_contract_id.is_empty() {
+        if trace.memory_payload_classes.is_empty() {
+            return Ok(MemoryPayloadContract::LegacyExclusion);
+        }
+        return Err(TraceError::MemoryPayloadCapabilitiesInvalid {
+            path: path.to_path_buf(),
+            contract_id: trace.trace_contract_id.clone(),
+            got: trace.memory_payload_classes.clone(),
+        });
+    }
+    if trace.trace_contract_id != ADDRESS_CARRYING_TRACE_CONTRACT_ID {
+        return Err(TraceError::TraceContractUnsupported {
+            path: path.to_path_buf(),
+            got: trace.trace_contract_id.clone(),
+        });
+    }
+
+    let expected: BTreeSet<_> = ADDRESS_CARRYING_PAYLOAD_CLASSES.into_iter().collect();
+    let mut found = BTreeSet::new();
+    for &raw in &trace.memory_payload_classes {
+        let Ok(class) = pb::MemoryOpClass::try_from(raw) else {
+            return Err(TraceError::MemoryPayloadCapabilitiesInvalid {
+                path: path.to_path_buf(),
+                contract_id: trace.trace_contract_id.clone(),
+                got: trace.memory_payload_classes.clone(),
+            });
+        };
+        if !found.insert(class) {
+            return Err(TraceError::MemoryPayloadCapabilitiesInvalid {
+                path: path.to_path_buf(),
+                contract_id: trace.trace_contract_id.clone(),
+                got: trace.memory_payload_classes.clone(),
+            });
+        }
+    }
+    if found != expected {
+        return Err(TraceError::MemoryPayloadCapabilitiesInvalid {
+            path: path.to_path_buf(),
+            contract_id: trace.trace_contract_id.clone(),
+            got: trace.memory_payload_classes.clone(),
+        });
+    }
+    Ok(MemoryPayloadContract::AddressCarryingV1)
+}
+
 pub struct TraceDir {
     root: PathBuf,
     trace: pb::Trace,
+    memory_payload_contract: MemoryPayloadContract,
     allocations: Option<AllocationRegistry>,
     sampling: Option<TraceSamplingSidecar>,
 }
@@ -172,10 +250,11 @@ impl TraceDir {
             source,
         })?;
         let trace = pb::Trace::decode(raw.as_slice()).map_err(|source| TraceError::Decode {
-            path: pb_path,
+            path: pb_path.clone(),
             message_type: "dynamic_trace.Trace",
             source,
         })?;
+        let memory_payload_contract = classify_memory_payload_contract(&trace, &pb_path)?;
         let allocations = AllocationRegistry::load(&root)?;
         let sampling = TraceSamplingSidecar::load(&root)?;
         if let Some(sidecar) = sampling.as_ref() {
@@ -184,6 +263,7 @@ impl TraceDir {
         Ok(Self {
             root,
             trace,
+            memory_payload_contract,
             allocations,
             sampling,
         })
@@ -206,6 +286,11 @@ impl TraceDir {
 
     pub fn trace(&self) -> &pb::Trace {
         &self.trace
+    }
+
+    /// Validated payload-generation contract for every instruction in this trace.
+    pub fn memory_payload_contract(&self) -> MemoryPayloadContract {
+        self.memory_payload_contract
     }
 
     /// All kernel launches, in deterministic (device, stream, launch) order.
@@ -824,6 +909,10 @@ fn string_array(value: &serde_json::Value, context: &str) -> Result<(), String> 
     Ok(())
 }
 
+fn sampling_cardinalities_match(sample: u64, ids_len: u64) -> bool {
+    sample == ids_len
+}
+
 fn close_enough(left: f64, right: f64) -> bool {
     (left - right).abs() <= 1e-12_f64.max(1e-12 * left.abs().max(right.abs()))
 }
@@ -1245,7 +1334,9 @@ fn validate_subset_producer_contract(
             required(stratum, "n_h", &context)?,
             &format!("{context}.n_h"),
         )?;
-        if sample < 2 || sample > population || sample as usize != ids.len() {
+        let ids_len = u64::try_from(ids.len())
+            .map_err(|_| format!("{context}.segment_ids cardinality exceeds u64"))?;
+        if sample < 2 || sample > population || !sampling_cardinalities_match(sample, ids_len) {
             return Err(format!("{context} has inconsistent N_h/n_h/segment_ids"));
         }
         let pi = nonnegative_number(required(stratum, "pi", &context)?, &format!("{context}.pi"))?;
@@ -2085,6 +2176,52 @@ pub struct MemoryAccessMeta {
     pub and_mask: u32,
 }
 
+/// A successful full structural preflight tied to one immutable instruction.
+/// Consumers may apply semantic gates to [`Self::meta`] before invoking
+/// [`Self::visit_addresses`], which preserves structural-error precedence without
+/// decoding the complete wire record again.
+#[derive(Debug, Clone, Copy)]
+pub struct PreflightedMemoryAccess<'a> {
+    inst: &'a pb::Instruction,
+    meta: MemoryAccessMeta,
+    inst_width: i32,
+}
+
+impl<'a> PreflightedMemoryAccess<'a> {
+    pub fn instruction(self) -> &'a pb::Instruction {
+        self.inst
+    }
+
+    pub fn meta(self) -> MemoryAccessMeta {
+        self.meta
+    }
+
+    /// Reconstruct each already-validated address into stack storage in wire
+    /// order. The instruction borrow prevents mutation between preflight and
+    /// this pass, making a second decode failure an unreachable invariant.
+    pub fn visit_addresses<F>(self, mut sink: F)
+    where
+        F: FnMut(&AddressAccess),
+    {
+        if self.meta.and_mask == 0 {
+            return;
+        }
+        let no_error_context = || String::new();
+        for addr in &self.inst.addresses {
+            let access = match decode_address_access(
+                addr,
+                self.meta.and_mask,
+                self.inst_width,
+                &no_error_context,
+            ) {
+                Ok(access) => access,
+                Err(_) => unreachable!("preflighted immutable address failed a second decode"),
+            };
+            sink(&access);
+        }
+    }
+}
+
 /// A memory instruction decoded to what the memory hierarchy consumes —
 /// the ALLOCATING convenience form (one heap `Vec` per memory record).
 /// Hot walk paths (millions of records per kernel) use
@@ -2116,30 +2253,57 @@ fn known_enum<T: TryFrom<i32>>(
     })
 }
 
-/// Interpret one traced instruction per the wire contract, streaming each
-/// decoded address record into `sink` — the zero-per-record-allocation form
-/// for hot walk paths.
+fn decode_address_access(
+    addr: &pb::Address,
+    and_mask: u32,
+    inst_width: i32,
+    record: &impl Fn() -> String,
+) -> Result<AddressAccess, TraceError> {
+    let lane_vector =
+        lanes::reconstruct_lane_vector(addr, and_mask).map_err(|source| TraceError::Lane {
+            record: record(),
+            source,
+        })?;
+    let data_width_bytes = if addr.data_width > 0 {
+        addr.data_width
+    } else {
+        inst_width
+    };
+    let address_space = match addr.address_space {
+        None => None,
+        Some(raw) => Some(known_enum::<pb::MemorySpace>(raw, "address_space", record)?),
+    };
+    Ok(AddressAccess {
+        lane_vector,
+        data_width_bytes,
+        address_space,
+        allocation_id: addr.allocation_id,
+    })
+}
+
+/// Validate one traced instruction's complete memory wire contract without
+/// invoking a consumer callback. A successful token borrows the immutable
+/// instruction and may later stream its address records without another full
+/// preflight.
 ///
-/// "Memory instruction" mirrors the canonical gate (`_check_instruction`):
-/// the instruction has address records OR carries `memory_op_class`. For
-/// those: masks must be present, `memory_op_class` must be present (when
-/// addresses exist) and specified, `data_width` must be present and
-/// strictly positive, unknown enum wire values are typed schema-skew
-/// errors, and every address record must reconstruct positionally. Non-
-/// memory instructions return `Ok(None)` without touching `sink`.
-///
-/// The sink borrows a stack-resident [`AddressAccess`]; copy it out
-/// (`Copy`) only if it must outlive the call.
-pub fn visit_memory_access<F>(
-    inst: &pb::Instruction,
+/// "Memory instruction" starts with the canonical gate (`_check_instruction`):
+/// address records OR a present `memory_op_class`. This replay consumer also
+/// treats present data-width, access-kind, or cache-op metadata as memory evidence
+/// so a malformed partial producer record cannot silently downgrade to
+/// `NonMemory`. For those records, masks and `memory_op_class` must be present, the class must be
+/// specified, `data_width` must be present and strictly positive, unknown enum
+/// wire values are typed schema-skew errors, and every address record must
+/// reconstruct positionally. Non-memory instructions return `Ok(None)`.
+pub fn preflight_memory_access<'a>(
+    inst: &'a pb::Instruction,
     record: impl Fn() -> String,
-    mut sink: F,
-) -> Result<Option<MemoryAccessMeta>, TraceError>
-where
-    F: FnMut(&AddressAccess),
-{
+) -> Result<Option<PreflightedMemoryAccess<'a>>, TraceError> {
     let n_addresses = inst.addresses.len();
-    let looks_like_memory = n_addresses > 0 || inst.memory_op_class.is_some();
+    let looks_like_memory = n_addresses > 0
+        || inst.memory_op_class.is_some()
+        || inst.data_width.is_some()
+        || inst.memory_op_access_kind.is_some()
+        || inst.instruction_cache_op.is_some();
     if !looks_like_memory {
         return Ok(None);
     }
@@ -2191,47 +2355,44 @@ where
     }
 
     let and_mask = active_mask & predicate_mask;
+    // Validate every address, including zero-mask records. Those stream no
+    // callbacks, but malformed lane payloads and unknown enums remain failures.
     for addr in &inst.addresses {
-        // Reconstruct + positionally validate EVERY record — under a zero
-        // mask this is what rejects a record still carrying real payload
-        // (canonical `lane_mask_inconsistent`). Only nonzero-mask records
-        // reach the sink; canonical consumers skip zero-lane records.
-        let lane_vector =
-            lanes::reconstruct_lane_vector(addr, and_mask).map_err(|source| TraceError::Lane {
-                record: record(),
-                source,
-            })?;
-        if and_mask == 0 {
-            continue;
-        }
-        let data_width_bytes = if addr.data_width > 0 {
-            addr.data_width
-        } else {
-            inst_width
-        };
-        // Per-address space, fail-closed on schema skew (unknown raw value)
-        // exactly like op_class; absent → None (legacy fallback).
-        let address_space = match addr.address_space {
-            None => None,
-            Some(raw) => Some(known_enum::<pb::MemorySpace>(
-                raw,
-                "address_space",
-                &record,
-            )?),
-        };
-        sink(&AddressAccess {
-            lane_vector,
-            data_width_bytes,
-            address_space,
-            allocation_id: addr.allocation_id,
-        });
+        decode_address_access(addr, and_mask, inst_width, &record)?;
     }
-    Ok(Some(MemoryAccessMeta {
-        op_class,
-        access_kind,
-        cache_op,
-        and_mask,
+
+    Ok(Some(PreflightedMemoryAccess {
+        inst,
+        meta: MemoryAccessMeta {
+            op_class,
+            access_kind,
+            cache_op,
+            and_mask,
+        },
+        inst_width,
     }))
+}
+
+/// Interpret one traced instruction per the wire contract, streaming each
+/// decoded address record into `sink` — the zero-per-record-allocation form for
+/// hot walk paths. Full preflight completes before the first callback, so an
+/// error never exposes a partial callback prefix. The sink borrows a
+/// stack-resident [`AddressAccess`]; copy it out (`Copy`) only if it must outlive
+/// the call.
+pub fn visit_memory_access<F>(
+    inst: &pb::Instruction,
+    record: impl Fn() -> String,
+    sink: F,
+) -> Result<Option<MemoryAccessMeta>, TraceError>
+where
+    F: FnMut(&AddressAccess),
+{
+    let Some(preflight) = preflight_memory_access(inst, record)? else {
+        return Ok(None);
+    };
+    let meta = preflight.meta();
+    preflight.visit_addresses(sink);
+    Ok(Some(meta))
 }
 
 /// One backing allocation's device VA range.
@@ -2365,68 +2526,69 @@ fn record_requires_identity(
 }
 
 /// Enforce the Python-equivalent allocation identity on one instruction against
-/// the loaded registry (`None` = no sidecar). A GLOBAL/GENERIC-space record with
-/// active lanes MUST carry a non-zero `allocation_id` that exists in the registry
-/// and whose range contains every active non-sentinel lane address. SHARED/LOCAL
-/// records (e.g. a shared atomic ATOMS) are exempt. This is the reader-side
-/// identity gate — parity with `import_trace_contract._check_instruction`.
+/// the loaded registry (`None` = no sidecar). The complete memory wire record is
+/// preflighted before the first identity diagnosis, so an unknown enum or malformed
+/// later lane vector cannot be masked by an earlier missing allocation id. A
+/// GLOBAL/GENERIC-space record with active lanes MUST carry a non-zero
+/// `allocation_id` that exists in the registry and whose range contains every
+/// active non-sentinel lane address. SHARED/LOCAL records (e.g. a shared atomic
+/// ATOMS) are exempt. This is the reader-side identity gate — parity with
+/// `import_trace_contract._check_instruction`.
 pub fn check_allocation_identity(
     inst: &pb::Instruction,
     registry: Option<&AllocationRegistry>,
     record: impl Fn() -> String,
 ) -> Result<(), TraceError> {
-    let (Some(active_mask), Some(predicate_mask)) = (inst.active_mask, inst.predicate_mask) else {
-        // No mask → nothing requires identity (a non-memory inst; the streaming
-        // reader rejects a masked memory inst with MaskMissing separately).
+    let Some(preflight) = preflight_memory_access(inst, &record)? else {
         return Ok(());
     };
-    let and_mask = active_mask & predicate_mask;
-    if and_mask == 0 {
-        // Predicated-off: no active lane address requires identity.
-        return Ok(());
-    }
-    let inst_class = inst
-        .memory_op_class
-        .and_then(|r| pb::MemoryOpClass::try_from(r).ok());
-    for addr in &inst.addresses {
-        let space = addr
-            .address_space
-            .and_then(|r| pb::MemorySpace::try_from(r).ok());
-        if !record_requires_identity(space, inst_class) {
-            continue;
+    check_preflighted_allocation_identity(preflight, registry, record)
+}
+
+/// Apply allocation identity to an instruction whose complete wire structure was
+/// already validated. This split lets replay enforce its producer-shape route
+/// before identity without rerunning fallible structural preflight or allocating an
+/// intermediate decoded-payload vector; immutable address records are revisited by
+/// the allocation-free visitor.
+pub fn check_preflighted_allocation_identity(
+    preflight: PreflightedMemoryAccess<'_>,
+    registry: Option<&AllocationRegistry>,
+    record: impl Fn() -> String,
+) -> Result<(), TraceError> {
+    let inst_class = Some(preflight.meta().op_class);
+    let mut identity_error = None;
+    preflight.visit_addresses(|access| {
+        // Preserve the first identity diagnosis. Complete structural validation
+        // already succeeded when the preflight token was constructed.
+        if identity_error.is_some() || !record_requires_identity(access.address_space, inst_class) {
+            return;
         }
-        let alloc_id = addr.allocation_id.unwrap_or(0);
+        let alloc_id = access.allocation_id.unwrap_or(0);
         if alloc_id == 0 {
-            return Err(TraceError::AllocationIdMissing { record: record() });
+            identity_error = Some(TraceError::AllocationIdMissing { record: record() });
+            return;
         }
         let Some(reg) = registry else {
-            return Err(TraceError::AllocationsSidecarMissing { record: record() });
+            identity_error = Some(TraceError::AllocationsSidecarMissing { record: record() });
+            return;
         };
         let Some(range) = reg.by_id.get(&alloc_id) else {
-            return Err(TraceError::AllocationIdUnknown {
+            identity_error = Some(TraceError::AllocationIdUnknown {
                 record: record(),
                 allocation_id: alloc_id,
             });
+            return;
         };
-        let lane_vector =
-            lanes::reconstruct_lane_vector(addr, and_mask).map_err(|source| TraceError::Lane {
-                record: record(),
-                source,
-            })?;
         let base = u128::from(range.base);
         let end = base + u128::from(range.size);
-        for lane in 0..lanes::LANES_PER_WARP {
-            if (and_mask >> lane) & 1 == 0 {
-                continue;
-            }
-            let slot = lane_vector[lane];
+        for (lane, &slot) in access.lane_vector.iter().enumerate() {
             if slot == lanes::LANE_INACTIVE_SENTINEL {
                 continue;
             }
             let lane_addr = slot as u64;
             let lane_addr_wide = u128::from(lane_addr);
             if !(base <= lane_addr_wide && lane_addr_wide < end) {
-                return Err(TraceError::LaneOutsideAllocationRange {
+                identity_error = Some(TraceError::LaneOutsideAllocationRange {
                     record: record(),
                     lane,
                     lane_addr,
@@ -2434,10 +2596,14 @@ pub fn check_allocation_identity(
                     base: range.base,
                     end,
                 });
+                return;
             }
         }
+    });
+    match identity_error {
+        Some(error) => Err(error),
+        None => Ok(()),
     }
-    Ok(())
 }
 
 /// Allocating convenience wrapper over [`visit_memory_access`]: collects the
@@ -2463,6 +2629,69 @@ pub fn memory_access(
 mod tests {
     use super::*;
     use prost::Message;
+
+    fn address_carrying_trace() -> pb::Trace {
+        pb::Trace {
+            trace_contract_id: ADDRESS_CARRYING_TRACE_CONTRACT_ID.into(),
+            memory_payload_classes: ADDRESS_CARRYING_PAYLOAD_CLASSES
+                .into_iter()
+                .map(|class| class as i32)
+                .collect(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn memory_payload_contract_distinguishes_legacy_and_address_carrying_traces() {
+        assert_eq!(
+            classify_memory_payload_contract(&pb::Trace::default(), Path::new("legacy.pb"))
+                .expect("empty capability is the legacy signal"),
+            MemoryPayloadContract::LegacyExclusion
+        );
+        assert_eq!(
+            classify_memory_payload_contract(
+                &address_carrying_trace(),
+                Path::new("address-carrying.pb")
+            )
+            .expect("complete address-carrying capability"),
+            MemoryPayloadContract::AddressCarryingV1
+        );
+    }
+
+    #[test]
+    fn memory_payload_contract_rejects_partial_or_unbound_capabilities() {
+        let mut partial = address_carrying_trace();
+        partial
+            .memory_payload_classes
+            .retain(|&raw| raw != pb::MemoryOpClass::Atomic as i32);
+        assert!(matches!(
+            classify_memory_payload_contract(&partial, Path::new("partial.pb")),
+            Err(TraceError::MemoryPayloadCapabilitiesInvalid { .. })
+        ));
+
+        let mut duplicate = address_carrying_trace();
+        duplicate
+            .memory_payload_classes
+            .push(pb::MemoryOpClass::Global as i32);
+        assert!(matches!(
+            classify_memory_payload_contract(&duplicate, Path::new("duplicate.pb")),
+            Err(TraceError::MemoryPayloadCapabilitiesInvalid { .. })
+        ));
+
+        let mut unbound = address_carrying_trace();
+        unbound.trace_contract_id.clear();
+        assert!(matches!(
+            classify_memory_payload_contract(&unbound, Path::new("unbound.pb")),
+            Err(TraceError::MemoryPayloadCapabilitiesInvalid { .. })
+        ));
+
+        let mut unknown = address_carrying_trace();
+        unknown.trace_contract_id = "future_contract".into();
+        assert!(matches!(
+            classify_memory_payload_contract(&unknown, Path::new("unknown.pb")),
+            Err(TraceError::TraceContractUnsupported { .. })
+        ));
+    }
 
     fn mem_inst(_bx: i32) -> pb::Instruction {
         pb::Instruction {
@@ -2847,6 +3076,44 @@ mod tests {
     }
 
     #[test]
+    fn memory_only_metadata_without_class_fails_closed() {
+        let width_only = pb::Instruction {
+            active_mask: Some(0),
+            predicate_mask: Some(0),
+            data_width: Some(4),
+            ..Default::default()
+        };
+        assert!(matches!(
+            memory_access(&width_only, || "width-only".into()),
+            Err(TraceError::MemoryOpClassMissing { n_addresses: 0, .. })
+        ));
+
+        let kind_only = pb::Instruction {
+            active_mask: Some(0),
+            predicate_mask: Some(0),
+            data_width: Some(4),
+            memory_op_access_kind: Some(pb::MemoryOpAccessKind::Load as i32),
+            ..Default::default()
+        };
+        assert!(matches!(
+            memory_access(&kind_only, || "kind-only".into()),
+            Err(TraceError::MemoryOpClassMissing { n_addresses: 0, .. })
+        ));
+
+        let cache_op_only = pb::Instruction {
+            active_mask: Some(0),
+            predicate_mask: Some(0),
+            data_width: Some(4),
+            instruction_cache_op: Some(pb::InstructionCacheOp::LdgECa as i32),
+            ..Default::default()
+        };
+        assert!(matches!(
+            memory_access(&cache_op_only, || "cache-op-only".into()),
+            Err(TraceError::MemoryOpClassMissing { n_addresses: 0, .. })
+        ));
+    }
+
+    #[test]
     fn data_width_contract_enforced() {
         let mut inst = mem_inst(0);
         inst.data_width = None;
@@ -2915,6 +3182,46 @@ mod tests {
     }
 
     #[test]
+    fn later_lane_error_emits_no_callback_prefix() {
+        let mut inst = mem_inst(0);
+        inst.addresses.push(pb::Address {
+            data_width: 4,
+            compression_format: crate::lanes::FORMAT_LIST_ALL,
+            addrs: Vec::new(),
+            ..Default::default()
+        });
+        let mut callbacks = 0;
+        let err = visit_memory_access(&inst, || "t".into(), |_| callbacks += 1).unwrap_err();
+        assert!(matches!(
+            err,
+            TraceError::Lane {
+                source: LaneError::ListAllLengthInvalid { got: 0 },
+                ..
+            }
+        ));
+        assert_eq!(callbacks, 0);
+    }
+
+    #[test]
+    fn later_unknown_address_space_emits_no_callback_prefix() {
+        let mut inst = mem_inst(0);
+        let mut invalid = inst.addresses[0].clone();
+        invalid.address_space = Some(99);
+        inst.addresses.push(invalid);
+        let mut callbacks = 0;
+        let err = visit_memory_access(&inst, || "t".into(), |_| callbacks += 1).unwrap_err();
+        assert!(matches!(
+            err,
+            TraceError::UnknownEnumValue {
+                field: "address_space",
+                raw: 99,
+                ..
+            }
+        ));
+        assert_eq!(callbacks, 0);
+    }
+
+    #[test]
     fn address_space_is_decoded_onto_access() {
         // Address-carrying contract: a per-address address_space decodes onto
         // the AddressAccess; absent stays None (legacy fallback).
@@ -2966,6 +3273,7 @@ mod tests {
             active_mask: Some(0b1),
             predicate_mask: Some(0b1),
             memory_op_class: Some(op_class as i32),
+            data_width: Some(4),
             addresses: vec![pb::Address {
                 data_width: 4,
                 compression_format: crate::lanes::FORMAT_LIST_ALL,
@@ -3003,6 +3311,45 @@ mod tests {
         assert!(matches!(
             check_allocation_identity(&inst, Some(&registry()), || "t".into()),
             Err(TraceError::AllocationIdMissing { .. })
+        ));
+    }
+
+    #[test]
+    fn identity_gate_reports_unknown_space_before_missing_id() {
+        let mut inst = identity_inst(
+            pb::MemoryOpClass::Global,
+            Some(pb::MemorySpace::Global),
+            None,
+            0x7000_0000,
+        );
+        inst.addresses[0].address_space = Some(99);
+        assert!(matches!(
+            check_allocation_identity(&inst, Some(&registry()), || "t".into()),
+            Err(TraceError::UnknownEnumValue {
+                field: "address_space",
+                raw: 99,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn identity_gate_reports_later_lane_error_before_earlier_missing_id() {
+        let mut inst = identity_inst(
+            pb::MemoryOpClass::Global,
+            Some(pb::MemorySpace::Global),
+            None,
+            0x7000_0000,
+        );
+        let mut malformed_later = inst.addresses[0].clone();
+        malformed_later.addrs.clear();
+        inst.addresses.push(malformed_later);
+        assert!(matches!(
+            check_allocation_identity(&inst, Some(&registry()), || "t".into()),
+            Err(TraceError::Lane {
+                source: LaneError::ListAllLengthInvalid { got: 0 },
+                ..
+            })
         ));
     }
 
@@ -3266,6 +3613,31 @@ mod sampling_sidecar_tests {
                 assert!(message.contains("encoding overflows u64"), "{message}");
             }
             other => panic!("expected stratum overflow rejection, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn stratum_cardinality_comparison_stays_in_u64() {
+        let large_sample = 4_294_967_298_u64;
+        assert!(!sampling_cardinalities_match(
+            large_sample,
+            u64::from(2_u32)
+        ));
+
+        let mut value = subset_value();
+        value["strata"][0]["N_h"] = serde_json::json!(large_sample);
+        value["strata"][0]["n_h"] = serde_json::json!(large_sample);
+        value["strata"][0]["pi"] = serde_json::json!(1.0);
+        value["strata"][0]["neyman_weight"] = serde_json::json!(8_589_934_596.0);
+        reseal(&mut value);
+        match load_json(serde_json::to_vec(&value).unwrap()) {
+            Err(TraceError::SamplingSidecarMalformed { message, .. }) => {
+                assert!(
+                    message.contains("inconsistent N_h/n_h/segment_ids"),
+                    "{message}"
+                );
+            }
+            other => panic!("expected stratum cardinality rejection, got {other:?}"),
         }
     }
 
