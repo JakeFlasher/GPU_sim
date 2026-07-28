@@ -44,7 +44,7 @@ pub enum EngineError {
     SchedulePast { requested: Time, now: Time },
     #[error("delay {delay} from now={now} overflows the u64 cycle domain")]
     TimeOverflow { now: Time, delay: Time },
-    #[error("event insertion sequence is exhausted at {next_seq}")]
+    #[error("event insertion sequence would overflow after assigning {next_seq}")]
     SeqOverflow { next_seq: u64 },
     #[error(
         "event queue yielded t={event_time} before its current clock t={now} — queue causality is corrupt"
@@ -73,11 +73,17 @@ impl<K> Ord for HeapEntry<K> {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum NextSequence {
+    Available(u64),
+    Exhausted,
+}
+
 /// Deterministic discrete-event queue with pure next-event clock advance.
 pub struct EventQueue<K> {
     heap: BinaryHeap<Reverse<HeapEntry<K>>>,
     now: Time,
-    next_seq: u64,
+    next_seq: NextSequence,
 }
 
 impl<K> Default for EventQueue<K> {
@@ -91,7 +97,7 @@ impl<K> EventQueue<K> {
         Self {
             heap: BinaryHeap::new(),
             now: 0,
-            next_seq: 0,
+            next_seq: NextSequence::Available(0),
         }
     }
 
@@ -116,13 +122,19 @@ impl<K> EventQueue<K> {
                 now: self.now,
             });
         }
-        let seq = self.next_seq;
-        self.next_seq = self
-            .next_seq
-            .checked_add(1)
-            .ok_or(EngineError::SeqOverflow {
-                next_seq: self.next_seq,
-            })?;
+        let (seq, next_seq) = match self.next_seq {
+            NextSequence::Available(seq) => (
+                seq,
+                match seq.checked_add(1) {
+                    Some(next) => NextSequence::Available(next),
+                    None => NextSequence::Exhausted,
+                },
+            ),
+            NextSequence::Exhausted => {
+                return Err(EngineError::SeqOverflow { next_seq: u64::MAX });
+            }
+        };
+        self.next_seq = next_seq;
         self.heap.push(Reverse(HeapEntry(Event {
             time: at,
             seq,
@@ -270,20 +282,25 @@ mod tests {
     }
 
     #[test]
-    fn sequence_exhaustion_is_typed_before_insertion() {
+    fn maximum_sequence_is_inserted_before_typed_exhaustion() {
         let mut q = EventQueue::new();
-        q.next_seq = u64::MAX - 1;
+        q.next_seq = NextSequence::Available(u64::MAX - 1);
         assert_eq!(
             q.schedule_at(0, TargetId(0), Kind::IssueBatch),
             Ok(u64::MAX - 1)
         );
-        assert_eq!(q.len(), 1);
+        assert_eq!(q.schedule_at(0, TargetId(1), Kind::Drain), Ok(u64::MAX));
+        assert_eq!(q.len(), 2);
+        assert_eq!(q.next_seq, NextSequence::Exhausted);
+
         assert_eq!(
-            q.schedule_at(0, TargetId(1), Kind::Drain),
+            q.schedule_at(0, TargetId(2), Kind::MemResponse),
             Err(EngineError::SeqOverflow { next_seq: u64::MAX })
         );
-        assert_eq!(q.len(), 1);
+        assert_eq!(q.len(), 2, "exhaustion inserted a partial event");
+        assert_eq!(q.next_seq, NextSequence::Exhausted);
         assert_eq!(q.pop().unwrap().unwrap().seq, u64::MAX - 1);
+        assert_eq!(q.pop().unwrap().unwrap().seq, u64::MAX);
     }
 
     #[test]
