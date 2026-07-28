@@ -913,8 +913,20 @@ fn sampling_cardinalities_match(sample: u64, ids_len: u64) -> bool {
     sample == ids_len
 }
 
+/// Convert the complete `u64` domain through two exactly representable `u32`
+/// limbs. The final addition performs the one unavoidable binary64 rounding;
+/// no unchecked integer-to-float narrowing hides which source bits participate.
+fn sampling_u64_as_f64(value: u64) -> f64 {
+    let bytes = value.to_be_bytes();
+    let high = u32::from_be_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]);
+    let low = u32::from_be_bytes([bytes[4], bytes[5], bytes[6], bytes[7]]);
+    f64::from(high) * 4_294_967_296.0 + f64::from(low)
+}
+
 fn close_enough(left: f64, right: f64) -> bool {
-    (left - right).abs() <= 1e-12_f64.max(1e-12 * left.abs().max(right.abs()))
+    left.is_finite()
+        && right.is_finite()
+        && (left - right).abs() <= 1e-12_f64.max(1e-12 * left.abs().max(right.abs()))
 }
 
 fn validate_subset_producer_contract(
@@ -1348,11 +1360,19 @@ fn validate_subset_producer_contract(
             required(stratum, "neyman_weight", &context)?,
             &format!("{context}.neyman_weight"),
         )?;
-        if pi <= 0.0
-            || pi > 1.0
-            || !close_enough(pi, sample as f64 / population as f64)
-            || !close_enough(weight, population as f64 * stddev)
-        {
+        if pi <= 0.0 || pi > 1.0 {
+            return Err(format!("{context} has inconsistent design provenance"));
+        }
+        let population_f64 = sampling_u64_as_f64(population);
+        let expected_pi = sampling_u64_as_f64(sample) / population_f64;
+        if !close_enough(pi, expected_pi) {
+            return Err(format!("{context} has inconsistent design provenance"));
+        }
+        let expected_weight = population_f64 * stddev;
+        if !expected_weight.is_finite() {
+            return Err(format!("{context} derived neyman_weight is not finite"));
+        }
+        if !close_enough(weight, expected_weight) {
             return Err(format!("{context} has inconsistent design provenance"));
         }
         if ids.iter().any(|id| !sampled_ordinary.insert(*id)) {
@@ -3638,6 +3658,31 @@ mod sampling_sidecar_tests {
                 );
             }
             other => panic!("expected stratum cardinality rejection, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn overflowed_derived_stratum_weight_is_rejected() {
+        assert!(!close_enough(f64::MAX, f64::INFINITY));
+
+        let mut value = subset_value();
+        let population = sampling_u64_as_f64(u64::MAX);
+        value["strata"][0]["N_h"] = serde_json::json!(u64::MAX);
+        value["strata"][0]["pi"] = serde_json::json!(2.0 / population);
+        value["strata"][0]["sector_stddev"] = serde_json::json!(f64::MAX);
+        // Before the finite-derived-value gate, any finite claim compared equal
+        // to the +inf product because both the delta and tolerance became +inf.
+        value["strata"][0]["neyman_weight"] = serde_json::json!(f64::MAX);
+        reseal(&mut value);
+
+        match load_json(serde_json::to_vec(&value).unwrap()) {
+            Err(TraceError::SamplingSidecarMalformed { message, .. }) => {
+                assert!(
+                    message.contains("derived neyman_weight is not finite"),
+                    "{message}"
+                );
+            }
+            other => panic!("expected non-finite derived-weight rejection, got {other:?}"),
         }
     }
 
