@@ -30,9 +30,10 @@
 //! selection is a label-fitted artifact and is deliberately NOT consumed
 //! here. The sim's geometry comes from the arch card's vendor-documented
 //! `l2_geometry` (capacity, line/sector, slice count); associativity,
-//! slice hash and replacement policy are DOCUMENTED-DEFAULT hypothesis
-//! knobs below (same fail-closed pattern as the L1 MSHR default), to be
-//! closed by microbenchmarks — never by label fits.
+//! slice hash and replacement policy resolve through the deployment
+//! architecture's reviewed `sim-arch` capability. These remain documented
+//! hypotheses to be closed by microbenchmarks—never by label fits—and an
+//! unreviewed architecture receives a typed capability error.
 //!
 //! Fill timing: the immediate API remains an occupancy-only Python-parity
 //! surface. A separate event discipline tracks pending sectors and makes them
@@ -48,13 +49,6 @@ use sim_arch::{ArchError, ArchId, CapabilityError, L2Replacement as ArchL2Replac
 /// Number of 32 B sectors per 128 B line (fixed physical granularity;
 /// the `u8` way masks below hold exactly these four bits).
 pub const L2_SECTORS_PER_LINE: u32 = 4;
-
-/// Documented-default L2 associativity (research gap on every card):
-/// 16 ways is the Accel-Sim Ampere config family's value and the common
-/// literature assumption for NVIDIA L2s; not microbenched on this
-/// project's cards yet. Same contract as the L1 MSHR default: a
-/// documented hypothesis knob, never a silent invention.
-pub const DOCUMENTED_DEFAULT_L2_ASSOCIATIVITY: u32 = 16;
 
 /// The six pre-registered slice-hash candidates, ported bit-exactly from
 /// `SLICE_HASH_REGISTRY`. The card records only the slice COUNT
@@ -99,11 +93,6 @@ pub enum SliceHash {
     BitReverse,
 }
 
-/// Documented-default slice hash: plain line-interleaving. The Python
-/// registry existed to CALIBRATE this unknown; v0 pins the simplest
-/// candidate and records it as an approximation.
-pub const DOCUMENTED_DEFAULT_L2_SLICE_HASH: SliceHash = SliceHash::LineMod;
-
 impl SliceHash {
     /// `slice_id` for a 128 B line address. Lockstep with the Python
     /// registry functions, INCLUDING negative line ids: Python's `%` is
@@ -139,18 +128,16 @@ impl SliceHash {
     }
 }
 
-/// Replacement policy. LRU is the documented-default approximation (the
-/// same status as the L1 pool's LRU); SRRIP/BIP are ported so the
-/// lockstep differential covers the full Python surface and calibration
-/// can flip the knob later without a re-port.
+/// Replacement policy. LRU is the sm_86 reviewed approximation selected
+/// through `sim-arch`; SRRIP/BIP are ported so the lockstep differential covers
+/// the full Python surface and a future carded policy can flip the knob without
+/// a re-port.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum L2Replacement {
     Lru,
     Srrip,
     Bip,
 }
-
-pub const DOCUMENTED_DEFAULT_L2_REPLACEMENT: L2Replacement = L2Replacement::Lru;
 
 const SRRIP_RRPV_MAX: i64 = 3;
 const SRRIP_INSERT_RRPV: i64 = 2;
@@ -165,18 +152,19 @@ pub enum L2ConfigError {
     #[error("capacity {capacity} is below the {line}B line size")]
     CapacityBelowLine { capacity: u64, line: u32 },
     #[error(
-        "line/sector geometry must be 128/32 (got line={line}, sector={sector}) — the way masks are 4-bit"
+        "line/sector geometry must match the reviewed {expected_line}/{expected_sector} layout \
+         (got line={line}, sector={sector})"
     )]
-    UnsupportedGranularity { line: u32, sector: u32 },
+    UnsupportedGranularity {
+        line: u32,
+        sector: u32,
+        expected_line: u32,
+        expected_sector: u32,
+    },
     #[error("associativity must be >= 1")]
     AssociativityZero,
     #[error("num_slices must be >= 1")]
     SlicesZero,
-    #[error(
-        "arch {arch:?} has not reviewed the documented-default L2 knobs (assoc 16/LRU/line_mod \
-         were reviewed for sm_86 only) — card the fields or extend the reviewed set deliberately"
-    )]
-    DefaultsUnreviewedForArch { arch: String },
     #[error(
         "card l2_geometry.policy is absent — the model write-allocates stores, and a card \
          without a measured policy must fail closed, never assume write-allocate"
@@ -234,13 +222,6 @@ pub enum L2SnapshotError {
     },
 }
 
-/// Arches whose documented-default L2 knobs (associativity 16, LRU,
-/// line_mod) have been REVIEWED against available public evidence.
-/// Same per-arch-set pattern as `cache_op::BARE_LDG_E_DEFAULTS_TO_CA`:
-/// an unreviewed arch fails closed instead of inheriting another
-/// arch's hypotheses (CLAUDE.md architecture-coupling discipline).
-pub const L2_DEFAULTS_REVIEWED_ARCHES: [&str; 1] = ["sm_86"];
-
 /// The one write policy the store path implements (stores allocate in
 /// L2 like loads). Cards carrying anything else — or nothing — fail
 /// closed at construction.
@@ -273,11 +254,7 @@ impl L2Config {
         num_slices: u32,
         policy: Option<&str>,
     ) -> Result<Self, L2ConfigError> {
-        let defaults = arch.l2_defaults().require("l2_defaults").map_err(|_| {
-            L2ConfigError::DefaultsUnreviewedForArch {
-                arch: arch.token().to_owned(),
-            }
-        })?;
+        let defaults = arch.l2_defaults().require("l2_defaults")?;
         match policy {
             None => return Err(L2ConfigError::WritePolicyGap),
             Some(L2_WRITE_ALLOCATE_POLICY) => {}
@@ -327,15 +304,13 @@ impl L2Config {
     }
 
     pub fn validate(&self) -> Result<(), L2ConfigError> {
-        if self.arch != ArchId::Sm86 {
-            return Err(L2ConfigError::DefaultsUnreviewedForArch {
-                arch: self.arch.token().to_owned(),
-            });
-        }
-        if self.line_bytes != 128 || self.sector_bytes != 32 {
+        let defaults = self.arch.l2_defaults().require("l2_defaults")?;
+        if self.line_bytes != defaults.line_bytes || self.sector_bytes != defaults.sector_bytes {
             return Err(L2ConfigError::UnsupportedGranularity {
                 line: self.line_bytes,
                 sector: self.sector_bytes,
+                expected_line: defaults.line_bytes,
+                expected_sector: defaults.sector_bytes,
             });
         }
         if self.capacity_bytes < u64::from(self.line_bytes) {
@@ -2620,6 +2595,7 @@ mod tests {
             Err(L2ConfigError::UnsupportedGranularity {
                 line: 0,
                 sector: 32,
+                ..
             })
         ));
         assert!(matches!(
@@ -2628,6 +2604,7 @@ mod tests {
                 L2ConfigError::UnsupportedGranularity {
                     line: 0,
                     sector: 32,
+                    ..
                 }
             ))
         ));
@@ -2666,9 +2643,30 @@ mod tests {
     fn carded_constructor_applies_documented_defaults() {
         let policy = Some(L2_WRITE_ALLOCATE_POLICY);
         let c = L2Config::from_carded_geometry("sm_86", 6_291_456, 128, 32, 6, policy).unwrap();
-        assert_eq!(c.associativity, DOCUMENTED_DEFAULT_L2_ASSOCIATIVITY);
-        assert_eq!(c.replacement, L2Replacement::Lru);
-        assert_eq!(c.slice_hash, SliceHash::LineMod);
+        let defaults = ArchId::Sm86.l2_defaults().require("l2_defaults").unwrap();
+        assert_eq!(c.associativity, defaults.associativity);
+        assert_eq!(c.line_bytes, defaults.line_bytes);
+        assert_eq!(c.sector_bytes, defaults.sector_bytes);
+        assert_eq!(
+            defaults.line_bytes.checked_rem(defaults.sector_bytes),
+            Some(0)
+        );
+        assert_eq!(
+            defaults.line_bytes.checked_div(defaults.sector_bytes),
+            Some(L2_SECTORS_PER_LINE)
+        );
+        assert_eq!(
+            c.replacement,
+            match defaults.replacement {
+                ArchL2Replacement::Lru => L2Replacement::Lru,
+            }
+        );
+        assert_eq!(
+            c.slice_hash,
+            match defaults.slice_hash {
+                sim_arch::L2SliceHash::LineMod => SliceHash::LineMod,
+            }
+        );
         assert!(matches!(
             L2Config::from_carded_geometry("sm_86", 6_291_456, 256, 32, 6, policy),
             Err(L2ConfigError::UnsupportedGranularity { .. })
@@ -2689,7 +2687,39 @@ mod tests {
         let policy = Some(L2_WRITE_ALLOCATE_POLICY);
         assert!(matches!(
             L2Config::from_carded_geometry("sm_120", 33_554_432, 128, 32, 12, policy),
-            Err(L2ConfigError::DefaultsUnreviewedForArch { .. })
+            Err(L2ConfigError::Capability(CapabilityError::ResearchGap {
+                arch: ArchId::Sm120,
+                capability: "l2_defaults",
+                reason,
+            })) if !reason.is_empty()
+        ));
+        let mut direct = cfg(33_554_432, 16, 12);
+        direct.arch = ArchId::Sm120;
+        assert!(matches!(
+            direct.validate(),
+            Err(L2ConfigError::Capability(CapabilityError::ResearchGap {
+                arch: ArchId::Sm120,
+                capability: "l2_defaults",
+                ..
+            }))
+        ));
+        assert!(matches!(
+            L2Model::new(direct),
+            Err(L2BuildError::Config(L2ConfigError::Capability(
+                CapabilityError::ResearchGap {
+                    arch: ArchId::Sm120,
+                    capability: "l2_defaults",
+                    ..
+                }
+            )))
+        ));
+        assert!(matches!(
+            L2Config::from_carded_geometry("sm_120", 33_554_432, 128, 32, 12, None),
+            Err(L2ConfigError::Capability(CapabilityError::ResearchGap {
+                arch: ArchId::Sm120,
+                capability: "l2_defaults",
+                ..
+            }))
         ));
         assert!(matches!(
             L2Config::from_carded_geometry("sm_86", 6_291_456, 128, 32, 6, None),
@@ -2698,6 +2728,23 @@ mod tests {
         assert!(matches!(
             L2Config::from_carded_geometry("sm_86", 6_291_456, 128, 32, 6, Some("write_back")),
             Err(L2ConfigError::WritePolicyUnsupported { .. })
+        ));
+    }
+
+    #[test]
+    fn capability_error_taxonomy_is_preserved() {
+        let error = L2ConfigError::from(CapabilityError::Unsupported {
+            arch: ArchId::Sm120,
+            capability: "synthetic_test_capability",
+            reason: "synthetic unsupported state",
+        });
+        assert!(matches!(
+            error,
+            L2ConfigError::Capability(CapabilityError::Unsupported {
+                arch: ArchId::Sm120,
+                capability: "synthetic_test_capability",
+                reason: "synthetic unsupported state",
+            })
         ));
     }
 

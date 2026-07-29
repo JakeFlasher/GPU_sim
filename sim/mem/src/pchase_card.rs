@@ -9,28 +9,26 @@
 //! - capacity has NO default at all (missing/typed property fails closed)
 //!   and is carveout-aware via the swept
 //!   `l1_capacity_carveout_{pct}_pct_bytes` points;
-//! - a `kind: "typed"` (`geometry_unresolved`) MSHR count resolves to the
-//!   DOCUMENTED default 32 with a mandatory sensitivity note;
-//! - a typed replacement policy resolves to LRU as the documented
-//!   approximation; a card-VALUED policy other than "lru" fails closed;
+//! - a `kind: "typed"` (`geometry_unresolved`) MSHR count resolves through
+//!   the deployment architecture's reviewed L1-default capability;
+//! - typed replacement and associativity declarations resolve through that
+//!   same architecture-bound capability, so sm_120 cannot inherit sm_86's LRU
+//!   or fully-associative approximations;
+//! - a card-VALUED replacement policy other than "lru" fails closed;
 //! - a card-VALUED associativity fails closed (the set-indexed walk is not
-//!   modeled); typed resolves to the fully-associative documented
-//!   approximation.
+//!   modeled).
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 use serde_json::value::RawValue;
-use sim_arch::{ArchError, ArchId};
+use sim_arch::{
+    ArchError, ArchId, CapabilityError, L1Replacement as ArchL1Replacement,
+    L1SetMapping as ArchL1SetMapping,
+};
 
 use crate::l1::LINE_BYTES;
-
-/// Documented default when the card types the MSHR property
-/// `geometry_unresolved` (the card's own probe bounds outstanding misses
-/// from below at 32; the dossier's walker line uses 32 as the per-SM
-/// working default).
-pub const DOCUMENTED_DEFAULT_MSHR_COUNT: u32 = 32;
 
 #[derive(Debug, thiserror::Error)]
 pub enum PchaseCardError {
@@ -48,15 +46,11 @@ pub enum PchaseCardError {
     },
     #[error("invalid architecture token in P-chase card: {0}")]
     Architecture(#[from] ArchError),
+    #[error("architecture capability is unavailable: {0}")]
+    Capability(#[from] CapabilityError),
     #[error("P-chase card architecture mismatch: card is {card}, requested {requested}")]
     ArchitectureMismatch { card: ArchId, requested: ArchId },
 
-    #[error("arch {arch} cannot consume the {property} research gap: {reason}")]
-    ArchitectureCapabilityGap {
-        arch: String,
-        property: String,
-        reason: String,
-    },
     #[error("the card has no {property} property; an unsourced constant is rejected")]
     PropertyMissing { property: String },
     #[error("the card property {property} has kind=value but no value field; fail closed")]
@@ -354,9 +348,9 @@ impl PchaseCard {
         })
     }
 
-    /// Resolve MSHR capacity for a typed deployment architecture.  The
-    /// documented 32-entry approximation is admitted only for reviewed
-    /// sm_86; a typed gap on sm_120 remains a typed exclusion.
+    /// Resolve MSHR capacity for a typed deployment architecture. A typed
+    /// declaration may consume only that architecture's reviewed L1 defaults;
+    /// card-valued counts remain card evidence and do not require a default.
     pub fn resolve_mshr_count_for_arch(&self, arch: ArchId) -> Result<MshrConfig, PchaseCardError> {
         self.require_arch(arch)?;
         let name = "mshr_outstanding_misses";
@@ -376,22 +370,20 @@ impl PchaseCard {
                 source: "card",
                 sensitivity_note: None,
             }),
-            "typed" if arch == ArchId::Sm86 => Ok(MshrConfig {
-                count: DOCUMENTED_DEFAULT_MSHR_COUNT,
-                source: "documented_default",
-                sensitivity_note: Some(format!(
-                    "the card types mshr_outstanding_misses geometry_unresolved (the \
-                     single-thread probe bounds outstanding misses from below without a \
-                     saturation knee), so the walk uses the documented default \
-                     {DOCUMENTED_DEFAULT_MSHR_COUNT}; report results at counts [16, 32, 64] \
-                     for sensitivity"
-                )),
-            }),
-            "typed" => Err(PchaseCardError::ArchitectureCapabilityGap {
-                arch: arch.to_string(),
-                property: name.to_owned(),
-                reason: "the documented MSHR approximation is reviewed only for sm_86".to_owned(),
-            }),
+            "typed" => {
+                let defaults = arch.l1_defaults().require("l1_defaults")?;
+                Ok(MshrConfig {
+                    count: defaults.mshr_count,
+                    source: "documented_default",
+                    sensitivity_note: Some(format!(
+                        "the card types mshr_outstanding_misses geometry_unresolved (the \
+                         single-thread probe bounds outstanding misses from below without a \
+                         saturation knee), so the walk uses the reviewed {arch} default {}; \
+                         report results at counts [16, 32, 64] for sensitivity",
+                        defaults.mshr_count
+                    )),
+                })
+            }
             other => Err(PchaseCardError::UnrecognizedKind {
                 property: name.to_owned(),
                 kind: other.to_owned(),
@@ -399,7 +391,11 @@ impl PchaseCard {
         }
     }
 
-    fn resolve_replacement_policy(&self) -> Result<GeometryPolicyConfig, PchaseCardError> {
+    fn resolve_replacement_policy_for_arch(
+        &self,
+        arch: ArchId,
+    ) -> Result<GeometryPolicyConfig, PchaseCardError> {
+        self.require_arch(arch)?;
         let name = "l1_replacement_policy";
         let prop = self.property(name)?;
         match prop.kind.as_str() {
@@ -424,15 +420,21 @@ impl PchaseCard {
                     })
                 }
             }
-            "typed" => Ok(GeometryPolicyConfig {
-                modeled: "lru",
-                source: "documented_approximation",
-                note: Some(format!(
-                    "the card types l1_replacement_policy {:?}; LRU is the documented \
-                     approximation pending card evidence",
-                    prop.typed_reason.clone().unwrap_or_default()
-                )),
-            }),
+            "typed" => {
+                let defaults = arch.l1_defaults().require("l1_defaults")?;
+                let modeled = match defaults.replacement {
+                    ArchL1Replacement::Lru => "lru",
+                };
+                Ok(GeometryPolicyConfig {
+                    modeled,
+                    source: "documented_approximation",
+                    note: Some(format!(
+                        "the card types l1_replacement_policy {:?}; {modeled} is the reviewed \
+                         {arch} approximation pending card evidence",
+                        prop.typed_reason.clone().unwrap_or_default()
+                    )),
+                })
+            }
             other => Err(PchaseCardError::UnrecognizedKind {
                 property: name.to_owned(),
                 kind: other.to_owned(),
@@ -440,7 +442,11 @@ impl PchaseCard {
         }
     }
 
-    fn resolve_set_mapping(&self) -> Result<GeometryPolicyConfig, PchaseCardError> {
+    fn resolve_set_mapping_for_arch(
+        &self,
+        arch: ArchId,
+    ) -> Result<GeometryPolicyConfig, PchaseCardError> {
+        self.require_arch(arch)?;
         let name = "l1_associativity_ways";
         let prop = self.property(name)?;
         match prop.kind.as_str() {
@@ -450,15 +456,21 @@ impl PchaseCard {
                     .as_deref()
                     .map_or_else(|| "null".to_owned(), |raw| raw.get().to_owned()),
             }),
-            "typed" => Ok(GeometryPolicyConfig {
-                modeled: "fully_associative",
-                source: "documented_approximation",
-                note: Some(format!(
-                    "the card types l1_associativity_ways {:?}; the fully-associative walk \
-                     is the documented approximation pending card evidence",
-                    prop.typed_reason.clone().unwrap_or_default()
-                )),
-            }),
+            "typed" => {
+                let defaults = arch.l1_defaults().require("l1_defaults")?;
+                let modeled = match defaults.set_mapping {
+                    ArchL1SetMapping::FullyAssociative => "fully_associative",
+                };
+                Ok(GeometryPolicyConfig {
+                    modeled,
+                    source: "documented_approximation",
+                    note: Some(format!(
+                        "the card types l1_associativity_ways {:?}; the {modeled} walk is the \
+                         reviewed {arch} approximation pending card evidence",
+                        prop.typed_reason.clone().unwrap_or_default()
+                    )),
+                })
+            }
             other => Err(PchaseCardError::UnrecognizedKind {
                 property: name.to_owned(),
                 kind: other.to_owned(),
@@ -494,8 +506,8 @@ impl PchaseCard {
         self.require_arch(arch)?;
         Ok(WalkGeometry {
             capacity: self.resolve_line_capacity(carveout_pct)?,
-            replacement: self.resolve_replacement_policy()?,
-            set_mapping: self.resolve_set_mapping()?,
+            replacement: self.resolve_replacement_policy_for_arch(arch)?,
+            set_mapping: self.resolve_set_mapping_for_arch(arch)?,
             mshr: self.resolve_mshr_count_for_arch(arch)?,
             latencies: self.resolve_latencies()?,
         })
@@ -581,13 +593,101 @@ mod tests {
         let sm120 = card_for_arch(GOOD, "sm_120");
         assert!(matches!(
             sm120.resolve_mshr_count_for_arch(ArchId::Sm120),
-            Err(PchaseCardError::ArchitectureCapabilityGap { .. })
+            Err(PchaseCardError::Capability(CapabilityError::ResearchGap {
+                arch: ArchId::Sm120,
+                capability: "l1_defaults",
+                reason,
+            })) if !reason.is_empty()
+        ));
+        assert!(matches!(
+            sm120.resolve_replacement_policy_for_arch(ArchId::Sm120),
+            Err(PchaseCardError::Capability(CapabilityError::ResearchGap {
+                arch: ArchId::Sm120,
+                capability: "l1_defaults",
+                ..
+            }))
+        ));
+        assert!(matches!(
+            sm120.resolve_set_mapping_for_arch(ArchId::Sm120),
+            Err(PchaseCardError::Capability(CapabilityError::ResearchGap {
+                arch: ArchId::Sm120,
+                capability: "l1_defaults",
+                ..
+            }))
         ));
         assert!(matches!(
             sm120.resolve_mshr_count_for_arch(ArchId::Sm86),
             Err(PchaseCardError::ArchitectureMismatch {
                 card: ArchId::Sm120,
                 requested: ArchId::Sm86,
+            })
+        ));
+    }
+
+    #[test]
+    fn sm120_valued_mshr_cannot_launder_typed_sm86_policy_defaults() {
+        let sm120 = card_for_arch(
+            r#"{"properties": {
+                "l1_capacity_bytes": {"kind": "value", "value": 98304},
+                "l1_hit_latency_cycles": {"kind": "value", "value": 33},
+                "l2_hit_latency_cycles": {"kind": "value", "value": 243},
+                "mshr_outstanding_misses": {"kind": "value", "value": 12},
+                "l1_replacement_policy": {"kind": "typed", "typed_reason": "geometry_unresolved"},
+                "l1_associativity_ways": {"kind": "typed", "typed_reason": "geometry_unresolved"}
+            }}"#,
+            "sm_120",
+        );
+        let mshr = sm120.resolve_mshr_count_for_arch(ArchId::Sm120).unwrap();
+        assert_eq!(mshr.count, 12);
+        assert_eq!(mshr.source, "card");
+        assert!(matches!(
+            sm120.resolve_walk_geometry_for_arch(ArchId::Sm120, None),
+            Err(PchaseCardError::Capability(CapabilityError::ResearchGap {
+                arch: ArchId::Sm120,
+                capability: "l1_defaults",
+                ..
+            }))
+        ));
+    }
+
+    #[test]
+    fn sm120_valued_policy_branches_keep_card_semantics() {
+        let replacement = card_for_arch(
+            r#"{"properties": {
+                "l1_replacement_policy": {"kind": "value", "value": "lru"}
+            }}"#,
+            "sm_120",
+        )
+        .resolve_replacement_policy_for_arch(ArchId::Sm120)
+        .unwrap();
+        assert_eq!(replacement.modeled, "lru");
+        assert_eq!(replacement.source, "card");
+
+        let associativity = card_for_arch(
+            r#"{"properties": {
+                "l1_associativity_ways": {"kind": "value", "value": 4}
+            }}"#,
+            "sm_120",
+        );
+        assert!(matches!(
+            associativity.resolve_set_mapping_for_arch(ArchId::Sm120),
+            Err(PchaseCardError::UnmodeledSetAssociativity { .. })
+        ));
+    }
+
+    #[test]
+    fn capability_error_taxonomy_is_preserved() {
+        let error = PchaseCardError::from(CapabilityError::Unsupported {
+            arch: ArchId::Sm120,
+            capability: "synthetic_test_capability",
+            reason: "synthetic unsupported state",
+        });
+        assert!(matches!(
+            error,
+            PchaseCardError::Capability(CapabilityError::Unsupported {
+                arch: ArchId::Sm120,
+                capability: "synthetic_test_capability",
+                reason: "synthetic unsupported state",
             })
         ));
     }
@@ -689,7 +789,7 @@ mod tests {
             {"kind": "value", "value": "plru"}}}"#,
         );
         assert!(matches!(
-            c.resolve_replacement_policy(),
+            c.resolve_replacement_policy_for_arch(ArchId::Sm86),
             Err(PchaseCardError::UnmodeledReplacementPolicy { .. })
         ));
         let c2 = card(
@@ -697,7 +797,7 @@ mod tests {
             {"kind": "value", "value": 4}}}"#,
         );
         assert!(matches!(
-            c2.resolve_set_mapping(),
+            c2.resolve_set_mapping_for_arch(ArchId::Sm86),
             Err(PchaseCardError::UnmodeledSetAssociativity { .. })
         ));
     }
