@@ -56,6 +56,14 @@ use crate::issue::{
 use crate::program::FunctionSchedule;
 use crate::system::{DramBw, DramStats, L2SourceSplit, SystemError, simulate_kernel_shared};
 
+mod aggregation;
+pub use aggregation::{
+    FullCounterEstimatorProvenance, FullLaunchSetCounters, FullLaunchSetDeclaration,
+    FullLaunchSetDeclarationError, LaunchSetAggregationError, LaunchSetCounterComponent,
+    LaunchSetScalarCounter, LaunchSetScope, LaunchSetScopeError, ReplayLaunchCoverageBindingError,
+    aggregate_full_launch_set,
+};
+
 #[derive(Debug, thiserror::Error, Clone, Copy, PartialEq, Eq)]
 pub enum MemoryRouteError {
     #[error("GLOBAL carries {got} address records; active records require at least one operand")]
@@ -298,8 +306,9 @@ pub enum ReplayError {
 }
 
 /// Launch identity and shape bound into a verified replay-coverage witness.
-/// Construction is private to the extraction completeness gate.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// Declaration-side construction creates only an expected identity; the extraction
+/// completeness gate remains the only constructor of observed coverage witnesses.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct ReplayLaunchCoverageBinding {
     device_id: i64,
     stream_id: i64,

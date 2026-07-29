@@ -36,9 +36,13 @@ pub use issue::{
 };
 pub use program::{FunctionSchedule, IssueSlot, OpClass, ProgramError, build_schedules};
 pub use replay::{
-    FullCoverageSource, FullKernelReplayResult, FullLaunchCoverage, KernelReplayOutcome,
-    ReplayConfiguration, ReplayError, ReplayLaunchCoverageBinding, ReplayMemMode,
-    SampledKernelReplayResult, SampledLaunchCoverage, SampledObservedCounters, replay_kernel,
+    FullCounterEstimatorProvenance, FullCoverageSource, FullKernelReplayResult, FullLaunchCoverage,
+    FullLaunchSetCounters, FullLaunchSetDeclaration, FullLaunchSetDeclarationError,
+    KernelReplayOutcome, LaunchSetAggregationError, LaunchSetCounterComponent,
+    LaunchSetScalarCounter, LaunchSetScope, LaunchSetScopeError, ReplayConfiguration, ReplayError,
+    ReplayLaunchCoverageBinding, ReplayLaunchCoverageBindingError, ReplayMemMode,
+    SampledKernelReplayResult, SampledLaunchCoverage, SampledObservedCounters,
+    aggregate_full_launch_set, replay_kernel,
 };
 pub use sim_mem::MemRole;
 pub use system::{
