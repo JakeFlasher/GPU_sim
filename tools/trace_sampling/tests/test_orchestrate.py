@@ -127,7 +127,12 @@ def _install_mock_pipeline(monkeypatch, orch, pass1_stats, pass2_stats):
                   if block.block_id in selected)
         return SimpleNamespace(
             raw_bytes=raw, compressed_bytes=max(1, raw // 2),
-            decompressed_sha256="a" * 64)
+            decompressed_sha256="a" * 64,
+            per_block_raw_sha256_manifest=(
+                "trace-payload-file-manifest-v1\n"
+                f"threadblocks/device_0/stream_0/kernel_1/mock.pb\t{raw}\t"
+                + "a" * 64 + "\n"),
+        )
 
     monkeypatch.setattr(orch, "run_pass", fake_run_pass)
     monkeypatch.setattr(orch, "cell_stats_from_capture",

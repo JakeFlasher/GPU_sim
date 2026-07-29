@@ -18,6 +18,8 @@ from typing import Any
 
 import jsonschema
 
+from compression import PayloadManifestError, parse_payload_file_manifest
+
 _SCHEMA_PATH = Path(__file__).resolve().parent / "schema" / "trace_sampling.schema.json"
 _SCHEMA = json.loads(_SCHEMA_PATH.read_text())
 _VALIDATOR = jsonschema.Draft7Validator(_SCHEMA)
@@ -259,8 +261,28 @@ def _validate_subset_semantics(sidecar: dict) -> None:
         _fail("selection auxiliary selected exceeds expected_full")
 
 
+def _validate_payload_manifest(sidecar: dict) -> None:
+    manifest = sidecar["hashes"].get("per_block_raw_sha256_manifest")
+    if manifest is None:
+        return
+    try:
+        entries = parse_payload_file_manifest(manifest)
+    except PayloadManifestError as exc:
+        _fail(f"hashes.per_block_raw_sha256_manifest: {exc}")
+    bytes_envelope = sidecar.get("bytes")
+    if not isinstance(bytes_envelope, dict) or "raw" not in bytes_envelope:
+        _fail("a payload manifest requires bytes.raw")
+    manifest_bytes = sum(entry.size_bytes for entry in entries)
+    if manifest_bytes > (1 << 64) - 1:
+        _fail("hashes.per_block_raw_sha256_manifest byte total exceeds u64")
+    if manifest_bytes != bytes_envelope["raw"]:
+        _fail(
+            "hashes.per_block_raw_sha256_manifest byte total disagrees with bytes.raw")
+
+
 def _validate_semantics(sidecar: dict) -> None:
     _validate_gate_budget(sidecar["gates"])
+    _validate_payload_manifest(sidecar)
     if sidecar["method"] == "wave_segment_stratified_subset":
         _validate_subset_semantics(sidecar)
     claimed = sidecar["hashes"].get("sidecar_sha256")
@@ -319,12 +341,14 @@ def build_sidecar(*, cell_id: str, kernel_name: str, args_hash: str, stats,
                   label_pairing: str | None = None,
                   reduced_shape_variant: str | None = None,
                   decompressed_payload_sha256: str | None = None,
+                  per_block_raw_sha256_manifest: str | None = None,
                   seed: int = 0, rng_algo: str = "pcg64") -> dict:
     """Assemble a schema-valid sidecar. `segments`/`strata`/`estimator` are only
     required for the subset method; compression-only cells omit them.
     `label_pairing` defaults per method; a reduced-shape cell must supply
-    `reduced_shape_variant`. Compressed/subset methods carry the contract hash
-    over the DECOMPRESSED payload bytes (`decompressed_payload_sha256`)."""
+    `reduced_shape_variant`. Compressed/subset methods carry both the legacy
+    concatenated decompressed-payload hash and a canonical per-file path/size/hash
+    manifest, so file-boundary changes cannot preserve payload identity."""
     per_sm_resident_blocks = [
         {"sm_id": sm, "resident_blocks": resident}
         for sm, resident in sorted(stats.per_sm_resident.items())
@@ -381,6 +405,13 @@ def build_sidecar(*, cell_id: str, kernel_name: str, args_hash: str, stats,
         compression, "decompressed_sha256", None)
     if payload_hash is not None:
         sidecar["hashes"]["decompressed_payload_sha256"] = payload_hash
+    payload_manifest = (
+        per_block_raw_sha256_manifest
+        if per_block_raw_sha256_manifest is not None
+        else getattr(compression, "per_block_raw_sha256_manifest", None)
+    )
+    if payload_manifest is not None:
+        sidecar["hashes"]["per_block_raw_sha256_manifest"] = payload_manifest
     sidecar["label_pairing"] = label_pairing or _DEFAULT_LABEL_PAIRING.get(
         method, "full_shape_label")
     if reduced_shape_variant is not None:

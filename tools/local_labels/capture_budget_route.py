@@ -41,7 +41,13 @@ for _path in (str(_TRACE_SAMPLING), str(_NVBIT)):
         sys.path.insert(0, _path)
 
 from admissibility_gate import MIN_SEGMENTS, M_SUBSET, classify  # noqa: E402
-from compression import CompressionResult, _zstd, compress_trace_dir  # noqa: E402
+from compression import (  # noqa: E402
+    CompressionResult,
+    PayloadManifestEntry,
+    _zstd,
+    build_payload_file_manifest,
+    compress_trace_dir,
+)
 from counting_pass import analyze_trace_dir, cell_stats_from_capture  # noqa: E402
 from orchestrate import (  # noqa: E402
     _certainty_serialized_bytes,
@@ -65,6 +71,7 @@ from tools.local_labels import campaign_preflight as preflight  # noqa: E402
 ROUTE_SCHEMA_VERSION = 1
 ENVELOPE_SCHEMA_VERSION = 1
 TRACER_VERSION = 5
+ADMITTED_STATS_PASS_VERSION = 2
 SHA256_RE = re.compile(r"[0-9a-f]{64}\Z")
 SHA1_RE = re.compile(r"[0-9a-f]{40}\Z")
 IDENTITY_SOURCES = frozenset({"portable_lcd", "simbench_bw", "sol_execbench"})
@@ -307,12 +314,60 @@ def _safe_relative(path: Path, root: Path) -> str:
     return rel
 
 
+def _canonical_envelope_relative(value: object, field: str) -> str:
+    if (not isinstance(value, str) or not value or "\\" in value
+            or any(not character.isprintable() for character in value)):
+        raise BudgetRouteRefusal(
+            "replay_envelope_malformed", f"{field} is not a safe relative POSIX path")
+    pure = PurePosixPath(value)
+    if (pure.is_absolute() or pure.as_posix() != value
+            or any(part in {"", ".", ".."} for part in pure.parts)):
+        raise BudgetRouteRefusal(
+            "replay_envelope_malformed", f"{field} is not canonical: {value!r}")
+    return value
+
+
+def _require_admitted_producer(stats: Any, context: str) -> None:
+    stats_pass_version = getattr(stats, "stats_pass_version", None)
+    if TRACER_VERSION != 5 or stats_pass_version != ADMITTED_STATS_PASS_VERSION:
+        raise BudgetRouteRefusal(
+            "trace_sampling_producer_unsupported",
+            f"{context}: expected tracer v5/stats-pass v2 with "
+            "atomic_addr=true and ldgsts_addr=true, got "
+            f"tracer v{TRACER_VERSION}/stats-pass v{stats_pass_version!r}",
+        )
+
+
+def _is_threadblock_payload(source_rel: str) -> bool:
+    parts = PurePosixPath(source_rel).parts
+    if not parts or parts[0] != "threadblocks":
+        return False
+    if any(part.endswith(".pb") for part in parts[1:-1]):
+        raise BudgetRouteRefusal(
+            "replay_envelope_malformed",
+            f".pb-named directory in source path {source_rel!r}",
+        )
+    basename = parts[-1]
+    if not basename.endswith(".pb"):
+        return False
+    payload_stem = basename[:-3]
+    if (not source_rel.isascii()
+            or any(character.isspace() for character in source_rel)
+            or not payload_stem
+            or all(character == "." for character in payload_stem)):
+        raise BudgetRouteRefusal(
+            "replay_envelope_malformed",
+            f"invalid threadblock payload name {source_rel!r}",
+        )
+    return True
+
+
 def _tree_inventory(root: Path, *, allow_empty: bool = False) -> tuple[tuple[dict, ...], int, str]:
     if not root.is_dir() or root.is_symlink():
         raise BudgetRouteRefusal("trace_unreadable", f"not a real directory: {root}")
     rows: list[dict] = []
     total = 0
-    for path in sorted(root.rglob("*")):
+    for path in sorted(root.rglob("*"), key=lambda value: _safe_relative(value, root)):
         if path.is_symlink():
             raise BudgetRouteRefusal("trace_symlink_refused", str(path))
         if path.is_dir():
@@ -422,6 +477,7 @@ def validate_full_trace_capture(
             "trace_truncated_or_dropped", f"admitted={admitted}, expected={expected}")
     if stats.n_blocks <= 0 or stats.total_records <= 0:
         raise BudgetRouteRefusal("trace_payload_empty", "decoded stats are empty")
+    _require_admitted_producer(stats, "full trace")
 
     manifest, manifest_sha = _manifest_bytes(capture_manifest)
     _manifest_field_equal(manifest, "identity", identity)
@@ -612,19 +668,30 @@ def _copy_identity_file(source: Path, destination: Path) -> None:
         shutil.copyfileobj(src, dst, 1 << 20)
 
 
-def _seal_sidecar_block_manifest(sidecar: dict, block_manifest_sha256: str) -> dict:
+def _seal_sidecar_payload_manifest(sidecar: dict, payload_manifest: str) -> dict:
     sealed = json.loads(json.dumps(sidecar))
     sealed["hashes"].pop("sidecar_sha256", None)
-    sealed["hashes"]["per_block_raw_sha256_manifest"] = block_manifest_sha256
+    sealed["hashes"]["per_block_raw_sha256_manifest"] = payload_manifest
     sealed["hashes"]["sidecar_sha256"] = sidecar_sha256(sealed)
     validate_sidecar(sealed)
     return sealed
 
 
+def _canonical_payload_file_manifest(rows: Iterable[dict]) -> str:
+    return build_payload_file_manifest(
+        PayloadManifestEntry(
+            path=row["relative_path"],
+            size_bytes=row["size_bytes"],
+            sha256=row["sha256"],
+        )
+        for row in rows
+    )
+
+
 def _build_compressed_bundle(
     source_trace: Path,
     destination: Path,
-    sidecar_factory: Callable[[CompressionResult, str], dict],
+    sidecar_factory: Callable[[CompressionResult], dict],
 ) -> dict:
     """Create and independently verify a replayable zstd trace envelope."""
     if destination.exists() or destination.is_symlink():
@@ -680,8 +747,19 @@ def _build_compressed_bundle(
                 "retained_sha256": sha256_file(retained),
             })
         block_manifest_sha = canonical_sha256(pb_raw_manifest)
-        sidecar = _seal_sidecar_block_manifest(
-            sidecar_factory(comp, block_manifest_sha), block_manifest_sha)
+        payload_file_manifest = _canonical_payload_file_manifest(pb_raw_manifest)
+        if comp.per_block_raw_sha256_manifest != payload_file_manifest:
+            raise BudgetRouteRefusal("compression_block_manifest_mismatch")
+        try:
+            sidecar = _seal_sidecar_payload_manifest(
+                sidecar_factory(comp), payload_file_manifest)
+        except BudgetRouteRefusal:
+            raise
+        except Exception as exc:  # noqa: BLE001
+            raise BudgetRouteRefusal(
+                "trace_sampling_sidecar_invalid",
+                f"{type(exc).__name__}: {exc}",
+            ) from exc
         sidecar_path = destination / "trace_sampling.json"
         sidecar_path.write_text(json.dumps(sidecar, indent=2, sort_keys=True) + "\n")
         generated_entry = {
@@ -755,8 +833,9 @@ def verify_replay_bundle(bundle_dir: Path) -> dict:
     source_seen: set[str] = set()
     raw_inventory: list[dict] = []
     pb_manifest: list[dict] = []
-    payload_digest = hashlib.sha256()
-    payload_raw = payload_compressed = payload_count = 0
+    payload_blobs: list[tuple[str, bytes]] = []
+    payload_raw = payload_compressed = 0
+    previous_retained_rel: str | None = None
     for index, entry in enumerate(entries):
         if not isinstance(entry, dict) or set(entry) != {
             "source_relative_path", "retained_relative_path", "encoding",
@@ -765,40 +844,76 @@ def verify_replay_bundle(bundle_dir: Path) -> dict:
         }:
             raise BudgetRouteRefusal(
                 "replay_envelope_malformed", f"entry[{index}] fields")
-        retained_rel = entry["retained_relative_path"]
-        if not isinstance(retained_rel, str) or retained_rel in retained_seen:
+        retained_rel = _canonical_envelope_relative(
+            entry["retained_relative_path"],
+            f"entry[{index}].retained_relative_path",
+        )
+        if previous_retained_rel is not None and retained_rel <= previous_retained_rel:
             raise BudgetRouteRefusal(
-                "replay_envelope_malformed", f"duplicate/malformed retained path {retained_rel!r}")
+                "replay_envelope_malformed", "entries are not canonically path-ordered")
+        previous_retained_rel = retained_rel
+        if retained_rel in retained_seen:
+            raise BudgetRouteRefusal(
+                "replay_envelope_malformed", f"duplicate retained path {retained_rel!r}")
         retained_seen.add(retained_rel)
-        retained_path = bundle_dir / retained_rel
+        if (type(entry["retained_size_bytes"]) is not int
+                or entry["retained_size_bytes"] < 0
+                or not isinstance(entry["retained_sha256"], str)
+                or SHA256_RE.fullmatch(entry["retained_sha256"]) is None):
+            raise BudgetRouteRefusal(
+                "replay_envelope_malformed", f"entry[{index}] retained identity")
+        retained_path = bundle_dir.joinpath(*PurePosixPath(retained_rel).parts)
         if not retained_path.is_file() or retained_path.is_symlink():
             raise BudgetRouteRefusal("replay_payload_missing", retained_rel)
-        if retained_path.stat().st_size != entry["retained_size_bytes"] \
-                or sha256_file(retained_path) != entry["retained_sha256"]:
+        try:
+            retained_blob = retained_path.read_bytes()
+        except OSError as exc:
+            raise BudgetRouteRefusal("replay_payload_missing", retained_rel) from exc
+        if len(retained_blob) != entry["retained_size_bytes"] \
+                or hashlib.sha256(retained_blob).hexdigest() != entry["retained_sha256"]:
             raise BudgetRouteRefusal("replay_retained_hash_mismatch", retained_rel)
         encoding = entry["encoding"]
         if encoding == "generated":
-            if entry["source_relative_path"] is not None \
-                    or retained_rel != "trace_sampling.json":
+            if (entry["source_relative_path"] is not None
+                    or retained_rel != "trace_sampling.json"
+                    or entry["raw_size_bytes"] is not None
+                    or entry["raw_sha256"] is not None):
                 raise BudgetRouteRefusal("replay_envelope_malformed", "invalid generated entry")
             continue
-        source_rel = entry["source_relative_path"]
-        if not isinstance(source_rel, str) or source_rel in source_seen:
-            raise BudgetRouteRefusal("replay_envelope_malformed", "missing source path")
-        source_seen.add(source_rel)
-        try:
-            raw = (_zstd(retained_path.read_bytes(), decompress=True)
-                   if encoding == "zstd" else retained_path.read_bytes())
-        except Exception as exc:  # noqa: BLE001
-            raise BudgetRouteRefusal("replay_decompression_failed", f"{retained_rel}: {exc}") from exc
         if encoding not in {"zstd", "identity"}:
             raise BudgetRouteRefusal("replay_envelope_malformed", f"encoding={encoding!r}")
+        source_rel = _canonical_envelope_relative(
+            entry["source_relative_path"],
+            f"entry[{index}].source_relative_path",
+        )
+        if source_rel in source_seen:
+            raise BudgetRouteRefusal(
+                "replay_envelope_malformed", f"duplicate source path {source_rel!r}")
+        source_seen.add(source_rel)
+        is_payload = _is_threadblock_payload(source_rel)
+        expected_encoding = "zstd" if is_payload else "identity"
+        if encoding != expected_encoding:
+            raise BudgetRouteRefusal(
+                "replay_envelope_malformed",
+                f"{source_rel!r} requires {expected_encoding} encoding",
+            )
         if encoding == "zstd" and retained_rel != source_rel + ".zst":
             raise BudgetRouteRefusal(
                 "replay_envelope_malformed", "zstd path does not mirror its raw source")
         if encoding == "identity" and retained_rel != source_rel:
             raise BudgetRouteRefusal(
                 "replay_envelope_malformed", "identity path does not mirror its source")
+        if (type(entry["raw_size_bytes"]) is not int
+                or entry["raw_size_bytes"] < 0
+                or not isinstance(entry["raw_sha256"], str)
+                or SHA256_RE.fullmatch(entry["raw_sha256"]) is None):
+            raise BudgetRouteRefusal(
+                "replay_envelope_malformed", f"entry[{index}] raw identity")
+        try:
+            raw = (_zstd(retained_blob, decompress=True)
+                   if encoding == "zstd" else retained_blob)
+        except Exception as exc:  # noqa: BLE001
+            raise BudgetRouteRefusal("replay_decompression_failed", f"{retained_rel}: {exc}") from exc
         if len(raw) != entry["raw_size_bytes"] \
                 or hashlib.sha256(raw).hexdigest() != entry["raw_sha256"]:
             raise BudgetRouteRefusal("replay_raw_hash_mismatch", source_rel)
@@ -808,16 +923,17 @@ def verify_replay_bundle(bundle_dir: Path) -> dict:
             "sha256": entry["raw_sha256"],
         }
         raw_inventory.append(raw_row)
-        if encoding == "zstd":
-            if not source_rel.startswith("threadblocks/") or not source_rel.endswith(".pb"):
-                raise BudgetRouteRefusal("replay_envelope_malformed", source_rel)
+        if is_payload:
             pb_manifest.append(raw_row)
-            payload_digest.update(raw)
+            payload_blobs.append((source_rel, raw))
             payload_raw += len(raw)
-            payload_compressed += retained_path.stat().st_size
-            payload_count += 1
+            payload_compressed += len(retained_blob)
     raw_inventory.sort(key=lambda row: row["relative_path"])
     pb_manifest.sort(key=lambda row: row["relative_path"])
+    payload_digest = hashlib.sha256()
+    for _, raw in sorted(payload_blobs, key=lambda item: item[0]):
+        payload_digest.update(raw)
+    payload_count = len(payload_blobs)
     if canonical_sha256(raw_inventory) != envelope["source_tree_sha256"] \
             or sum(row["size_bytes"] for row in raw_inventory) != envelope["source_tree_bytes"] \
             or len(raw_inventory) != envelope["source_file_count"]:
@@ -839,7 +955,8 @@ def verify_replay_bundle(bundle_dir: Path) -> dict:
     if sidecar["method"] != envelope["method"]:
         raise BudgetRouteRefusal("trace_sampling_method_mismatch")
     if hashes.get("decompressed_payload_sha256") != payload_sha \
-            or hashes.get("per_block_raw_sha256_manifest") != canonical_sha256(pb_manifest):
+            or hashes.get("per_block_raw_sha256_manifest") \
+            != _canonical_payload_file_manifest(pb_manifest):
         raise BudgetRouteRefusal("trace_sampling_payload_hash_mismatch")
     if sidecar["bytes"]["raw"] != payload_raw \
             or sidecar["bytes"]["compressed"] != payload_compressed:
@@ -1105,7 +1222,7 @@ def route_trace_budget(
         candidate = work_root / "lossless_full_candidate"
         full_gate = classify(full.stats, sample_size=config.sample_size)
 
-        def full_sidecar(comp: CompressionResult, _block_manifest: str) -> dict:
+        def full_sidecar(comp: CompressionResult) -> dict:
             return build_sidecar(
                 cell_id=cell_id, kernel_name=full.stats.kernel_name,
                 args_hash=protocol["args_hash"], stats=full.stats,
@@ -1141,6 +1258,7 @@ def route_trace_budget(
             callbacks.counting_capture, counting_request, protocol)
         try:
             counting_stats = cell_stats_from_capture(counting_dir, cell_id)
+            _require_admitted_producer(counting_stats, "counting capture")
             _same_launch_identity(full.stats, counting_stats)
             _validate_sampling_root(counting_dir, counting_stats, mode=1)
         except BudgetRouteRefusal:
@@ -1225,7 +1343,7 @@ def route_trace_budget(
                     "reduced_shape_not_reduced", repr(reduced.stats.grid))
             candidate = work_root / "reduced_shape_candidate"
 
-            def reduced_sidecar(comp: CompressionResult, _block_manifest: str) -> dict:
+            def reduced_sidecar(comp: CompressionResult) -> dict:
                 sidecar = build_sidecar(
                     cell_id=cell_id, kernel_name=reduced.stats.kernel_name,
                     args_hash=protocol["args_hash"], stats=reduced.stats,
@@ -1286,6 +1404,7 @@ def route_trace_budget(
                 callbacks.selective_capture, request, protocol)
             try:
                 pass2_stats = cell_stats_from_capture(pass2_dir, cell_id)
+                _require_admitted_producer(pass2_stats, "selective capture")
                 _same_launch_identity(counting_stats, pass2_stats)
                 _validate_sampling_root(pass2_dir, pass2_stats, mode=2)
                 capture_stats_sha = verify_capture_selection(pass2_dir, selected)
@@ -1367,7 +1486,7 @@ def route_trace_budget(
             )
         candidate = work_root / "selective_subset_candidate"
 
-        def subset_sidecar(comp: CompressionResult, _block_manifest: str) -> dict:
+        def subset_sidecar(comp: CompressionResult) -> dict:
             if comp.raw_bytes != raw_selected:
                 raise BudgetRouteRefusal(
                     "serialized_payload_size_mismatch",

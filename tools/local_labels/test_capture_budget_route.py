@@ -261,6 +261,95 @@ def test_lossless_full_route_is_replayable_and_never_runs_callbacks(tmp_path, mo
     assert route.canonical_sha256(source_rows) == result["full_trace"]["tree_sha256"]
 
 
+def test_route_refuses_stale_full_trace_producer_with_typed_reason(
+        tmp_path, monkeypatch):
+    stats = _stats()
+    stats.stats_pass_version = 1
+    full = _write_raw_trace(
+        tmp_path / "full", stats, block_size=4000, compressible=True)
+    budget = _budget(80_000)
+    protocol = _base_protocol()
+    manifest = _write_capture_manifest(
+        tmp_path / "capture.json", full, stats, budget, protocol)
+    protocol = _protocol_with_manifest(protocol, manifest)
+    _patch_full_validation(monkeypatch, {full: stats})
+
+    with pytest.raises(route.BudgetRouteRefusal) as caught:
+        route.route_trace_budget(
+            full, manifest, tmp_path / "retained", cell_id="cell",
+            identity=_identity(), budget=budget, protocol=protocol,
+            config=_config(budget["max_trace_bytes"]),
+            callbacks=route.RouteCallbacks(_never, _never),
+        )
+    assert caught.value.reason == "trace_sampling_producer_unsupported"
+    assert "stats-pass v1" in caught.value.detail
+
+
+def test_lossless_bundle_hashes_payloads_in_canonical_relative_path_order(
+        tmp_path, monkeypatch):
+    stats = _stats(2)
+    full = _write_raw_trace(
+        tmp_path / "full", stats, block_size=1, compressible=True)
+    original = sorted((full / "threadblocks").rglob("*.pb"))
+    first = b"first" * 20_000
+    second = b"second" * 20_000
+    first_path = full / "threadblocks/a.pb"
+    second_path = full / "threadblocks/a/b.pb"
+    first_path.parent.mkdir(exist_ok=True)
+    second_path.parent.mkdir(exist_ok=True)
+    original[0].rename(first_path)
+    original[1].rename(second_path)
+    first_path.write_bytes(first)
+    second_path.write_bytes(second)
+    budget = _budget(40_000)
+    protocol = _base_protocol()
+    manifest = _write_capture_manifest(
+        tmp_path / "capture.json", full, stats, budget, protocol)
+    protocol = _protocol_with_manifest(protocol, manifest)
+    _patch_full_validation(monkeypatch, {full: stats})
+    output = tmp_path / "retained"
+
+    route.route_trace_budget(
+        full, manifest, output, cell_id="cell", identity=_identity(),
+        budget=budget, protocol=protocol, config=_config(budget["max_trace_bytes"]),
+        callbacks=route.RouteCallbacks(_never, _never),
+    )
+
+    sidecar = json.loads((output / "trace_sampling.json").read_text())
+    assert sidecar["hashes"]["decompressed_payload_sha256"] == hashlib.sha256(
+        first + second).hexdigest()
+    assert route.verify_replay_bundle(output)["status"] == "ok"
+
+
+def test_sidecar_construction_failure_is_typed_and_removes_candidate(
+        tmp_path, monkeypatch):
+    stats = _stats(2)
+    full = _write_raw_trace(
+        tmp_path / "full", stats, block_size=4000, compressible=True)
+    budget = _budget(100)
+    protocol = _base_protocol()
+    manifest = _write_capture_manifest(
+        tmp_path / "capture.json", full, stats, budget, protocol)
+    protocol = _protocol_with_manifest(protocol, manifest)
+    _patch_full_validation(monkeypatch, {full: stats})
+
+    def invalid_sidecar(**_kwargs):
+        raise ValueError("synthetic sidecar construction failure")
+
+    monkeypatch.setattr(route, "build_sidecar", invalid_sidecar)
+    output = tmp_path / "retained"
+    candidate = tmp_path / ".retained.ac9_work/lossless_full_candidate"
+    with pytest.raises(route.BudgetRouteRefusal) as caught:
+        route.route_trace_budget(
+            full, manifest, output, cell_id="cell", identity=_identity(),
+            budget=budget, protocol=protocol, config=_config(budget["max_trace_bytes"]),
+            callbacks=route.RouteCallbacks(_never, _never),
+        )
+    assert caught.value.reason == "trace_sampling_sidecar_invalid"
+    assert "synthetic sidecar construction failure" in caught.value.detail
+    assert not candidate.exists()
+
+
 @pytest.mark.parametrize(
     ("exception_type", "message"),
     [
@@ -454,9 +543,38 @@ def test_over_limit_full_routes_to_verified_schema_v2_subset(tmp_path, monkeypat
     assert result["trace_sampling_schema_version"] == 2
     sidecar = json.loads((output / "trace_sampling.json").read_text())
     assert sidecar["selection_reconciliation"]["status"] == "fixed_point"
-    assert sidecar["hashes"]["per_block_raw_sha256_manifest"]
+    payload_manifest = sidecar["hashes"]["per_block_raw_sha256_manifest"]
+    assert payload_manifest.startswith("trace-payload-file-manifest-v1\n")
+    assert payload_manifest.endswith("\n")
+    envelope = json.loads((output / "ac9_replay_envelope.json").read_text())
+    assert len(envelope["per_block_raw_sha256_manifest"]) == 64
+    assert envelope["per_block_raw_sha256_manifest"] != payload_manifest
     assert route.verify_replay_bundle(output)["status"] == "ok"
     assert result["retained"]["bytes"] <= budget["max_trace_bytes"]
+
+
+def test_route_refuses_stale_selective_producer_with_typed_reason(
+        tmp_path, monkeypatch):
+    stats = _stats()
+    full = _write_raw_trace(
+        tmp_path / "full", stats, block_size=3000, compressible=False)
+    budget = _budget(65_000)
+    protocol = _base_protocol()
+    manifest = _write_capture_manifest(
+        tmp_path / "capture.json", full, stats, budget, protocol)
+    protocol = _protocol_with_manifest(protocol, manifest)
+    _patch_full_validation(monkeypatch, {full: stats})
+    callbacks, _, pass2_stats = _install_sampling_callbacks(monkeypatch, stats)
+    pass2_stats.stats_pass_version = 1
+
+    with pytest.raises(route.BudgetRouteRefusal) as caught:
+        route.route_trace_budget(
+            full, manifest, tmp_path / "retained", cell_id="cell",
+            identity=_identity(), budget=budget, protocol=protocol,
+            config=_config(budget["max_trace_bytes"]), callbacks=callbacks,
+        )
+    assert caught.value.reason == "trace_sampling_producer_unsupported"
+    assert "selective capture" in caught.value.detail
 
 
 def test_replay_verifier_rejects_tampered_compressed_payload(tmp_path, monkeypatch):
@@ -481,6 +599,182 @@ def test_replay_verifier_rejects_tampered_compressed_payload(tmp_path, monkeypat
     target.write_bytes(raw)
     with pytest.raises(route.BudgetRouteRefusal, match="replay_retained_hash_mismatch"):
         route.verify_replay_bundle(output)
+
+
+def _reseal_envelope(output: Path, envelope: dict) -> None:
+    envelope["entries_sha256"] = route.canonical_sha256(envelope["entries"])
+    envelope.pop("envelope_sha256", None)
+    envelope["envelope_sha256"] = route.canonical_sha256(envelope)
+    (output / "ac9_replay_envelope.json").write_text(
+        json.dumps(envelope, indent=2, sort_keys=True) + "\n")
+
+
+def _lossless_bundle(tmp_path, monkeypatch) -> Path:
+    stats = _stats()
+    full = _write_raw_trace(
+        tmp_path / "full", stats, block_size=4000, compressible=True)
+    budget = _budget(80_000)
+    protocol = _base_protocol()
+    manifest = _write_capture_manifest(
+        tmp_path / "capture.json", full, stats, budget, protocol)
+    protocol = _protocol_with_manifest(protocol, manifest)
+    _patch_full_validation(monkeypatch, {full: stats})
+    output = tmp_path / "retained"
+    route.route_trace_budget(
+        full, manifest, output, cell_id="cell", identity=_identity(),
+        budget=budget, protocol=protocol, config=_config(budget["max_trace_bytes"]),
+        callbacks=route.RouteCallbacks(_never, _never),
+    )
+    return output
+
+
+def test_replay_verifier_rejects_freshly_resealed_entry_reordering(
+        tmp_path, monkeypatch):
+    output = _lossless_bundle(tmp_path, monkeypatch)
+    envelope = json.loads((output / "ac9_replay_envelope.json").read_text())
+    envelope["entries"][0], envelope["entries"][1] = (
+        envelope["entries"][1], envelope["entries"][0])
+    _reseal_envelope(output, envelope)
+
+    with pytest.raises(route.BudgetRouteRefusal) as caught:
+        route.verify_replay_bundle(output)
+    assert caught.value.reason == "replay_envelope_malformed"
+    assert "canonically path-ordered" in caught.value.detail
+
+
+def test_replay_verifier_rejects_external_retained_path_before_reading_it(
+        tmp_path, monkeypatch):
+    output = _lossless_bundle(tmp_path, monkeypatch)
+    envelope = json.loads((output / "ac9_replay_envelope.json").read_text())
+    entry = next(
+        row for row in envelope["entries"]
+        if row["source_relative_path"] == "dynamic_trace.pb")
+    outside = output.parent / "outside"
+    outside.write_bytes((output / entry["retained_relative_path"]).read_bytes())
+    entry["retained_relative_path"] = "../outside"
+    envelope["entries"].sort(key=lambda row: row["retained_relative_path"])
+    _reseal_envelope(output, envelope)
+    original_read_bytes = Path.read_bytes
+
+    def guarded_read(path):
+        if path.resolve(strict=False) == outside.resolve(strict=False):
+            raise AssertionError("verifier read outside its bundle")
+        return original_read_bytes(path)
+
+    monkeypatch.setattr(Path, "read_bytes", guarded_read)
+    with pytest.raises(route.BudgetRouteRefusal) as caught:
+        route.verify_replay_bundle(output)
+    assert caught.value.reason == "replay_envelope_malformed"
+
+
+def test_replay_verifier_rejects_resealed_identity_encoded_pb_payload(
+        tmp_path, monkeypatch):
+    output = _lossless_bundle(tmp_path, monkeypatch)
+    envelope = json.loads((output / "ac9_replay_envelope.json").read_text())
+    target = next(row for row in envelope["entries"] if row["encoding"] == "zstd")
+    packed_path = output / target["retained_relative_path"]
+    raw = route._zstd(packed_path.read_bytes(), decompress=True)
+    identity_path = output / target["source_relative_path"]
+    identity_path.write_bytes(raw)
+    packed_path.unlink()
+    target.update({
+        "retained_relative_path": target["source_relative_path"],
+        "encoding": "identity",
+        "retained_size_bytes": len(raw),
+        "retained_sha256": hashlib.sha256(raw).hexdigest(),
+    })
+
+    payload_entries = [
+        row for row in envelope["entries"] if row["encoding"] == "zstd"]
+    payload_rows = [{
+        "relative_path": row["source_relative_path"],
+        "size_bytes": row["raw_size_bytes"],
+        "sha256": row["raw_sha256"],
+    } for row in payload_entries]
+    payload_chunks = []
+    for row in sorted(payload_entries, key=lambda item: item["source_relative_path"]):
+        payload_chunks.append(route._zstd(
+            (output / row["retained_relative_path"]).read_bytes(), decompress=True))
+    payload_sha = hashlib.sha256(b"".join(payload_chunks)).hexdigest()
+
+    sidecar_path = output / "trace_sampling.json"
+    sidecar = json.loads(sidecar_path.read_text())
+    sidecar["bytes"]["raw"] = sum(row["raw_size_bytes"] for row in payload_entries)
+    sidecar["bytes"]["compressed"] = sum(
+        row["retained_size_bytes"] for row in payload_entries)
+    sidecar["hashes"]["decompressed_payload_sha256"] = payload_sha
+    sidecar["hashes"]["per_block_raw_sha256_manifest"] = (
+        route._canonical_payload_file_manifest(payload_rows))
+    sidecar["hashes"].pop("sidecar_sha256")
+    sidecar["hashes"]["sidecar_sha256"] = route.sidecar_sha256(sidecar)
+    sidecar_path.write_text(json.dumps(sidecar, indent=2, sort_keys=True) + "\n")
+
+    generated = next(
+        row for row in envelope["entries"] if row["encoding"] == "generated")
+    generated["retained_size_bytes"] = sidecar_path.stat().st_size
+    generated["retained_sha256"] = route.sha256_file(sidecar_path)
+    envelope["threadblock_count"] = len(payload_entries)
+    envelope["decompressed_threadblocks_sha256"] = payload_sha
+    envelope["per_block_raw_sha256_manifest"] = route.canonical_sha256(payload_rows)
+    envelope["entries"].sort(key=lambda row: row["retained_relative_path"])
+    _reseal_envelope(output, envelope)
+
+    with pytest.raises(route.BudgetRouteRefusal) as caught:
+        route.verify_replay_bundle(output)
+    assert caught.value.reason == "replay_envelope_malformed"
+    assert "requires zstd encoding" in caught.value.detail
+
+
+def test_replay_verifier_rejects_pb_named_source_directory(
+        tmp_path, monkeypatch):
+    output = _lossless_bundle(tmp_path, monkeypatch)
+    envelope = json.loads((output / "ac9_replay_envelope.json").read_text())
+    entry = next(
+        row for row in envelope["entries"]
+        if row["source_relative_path"] == "stats.csv")
+    old_path = output / entry["retained_relative_path"]
+    source_rel = "threadblocks/dir.pb/aux.txt"
+    new_path = output / source_rel
+    new_path.parent.mkdir()
+    old_path.rename(new_path)
+    entry["source_relative_path"] = source_rel
+    entry["retained_relative_path"] = source_rel
+    raw_rows = [{
+        "relative_path": row["source_relative_path"],
+        "size_bytes": row["raw_size_bytes"],
+        "sha256": row["raw_sha256"],
+    } for row in envelope["entries"] if row["encoding"] != "generated"]
+    raw_rows.sort(key=lambda row: row["relative_path"])
+    envelope["source_tree_sha256"] = route.canonical_sha256(raw_rows)
+    envelope["entries"].sort(key=lambda row: row["retained_relative_path"])
+    _reseal_envelope(output, envelope)
+
+    with pytest.raises(route.BudgetRouteRefusal) as caught:
+        route.verify_replay_bundle(output)
+    assert caught.value.reason == "replay_envelope_malformed"
+    assert ".pb-named directory" in caught.value.detail
+
+
+def test_replay_verifier_types_noncanonical_payload_name(
+        tmp_path, monkeypatch):
+    output = _lossless_bundle(tmp_path, monkeypatch)
+    envelope = json.loads((output / "ac9_replay_envelope.json").read_text())
+    entry = next(row for row in envelope["entries"] if row["encoding"] == "zstd")
+    old_path = output / entry["retained_relative_path"]
+    source_rel = "threadblocks/a b.pb"
+    new_rel = source_rel + ".zst"
+    new_path = output / new_rel
+    new_path.parent.mkdir(exist_ok=True)
+    old_path.rename(new_path)
+    entry["source_relative_path"] = source_rel
+    entry["retained_relative_path"] = new_rel
+    envelope["entries"].sort(key=lambda row: row["retained_relative_path"])
+    _reseal_envelope(output, envelope)
+
+    with pytest.raises(route.BudgetRouteRefusal) as caught:
+        route.verify_replay_bundle(output)
+    assert caught.value.reason == "replay_envelope_malformed"
+    assert "invalid threadblock payload name" in caught.value.detail
 
 
 def test_gate_forbidden_uses_explicit_typed_unavailable_result(tmp_path, monkeypatch):

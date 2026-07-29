@@ -12,10 +12,16 @@
       "then": {
         "required": ["wave_model", "segments", "selected_segment_ids", "certainty_segments", "force_include_blocks", "per_sm_slot_map", "strata", "selection_reconciliation", "selection_budget", "selection_auxiliary", "rng", "estimator", "label_pairing", "bytes"],
         "properties": {
-          "hashes": {"required": ["selected_block_ids_sha256", "decompressed_payload_sha256", "sidecar_sha256"]},
+          "hashes": {"required": ["selected_block_ids_sha256", "decompressed_payload_sha256", "per_block_raw_sha256_manifest", "sidecar_sha256"]},
           "tracer": {
             "properties": {
               "version": {"const": 5},
+              "features": {
+                "properties": {
+                  "atomic_addr": {"const": true},
+                  "ldgsts_addr": {"const": true}
+                }
+              },
               "stats_pass_version": {"const": 2}
             }
           },
@@ -30,10 +36,10 @@
     {
       "if": {"required": ["method"], "properties": {"method": {"const": "lossless_compressed_full"}}},
       "then": {
-        "required": ["bytes", "label_pairing"],
+        "required": ["wave_model", "per_sm_slot_map", "rng", "bytes", "label_pairing"],
         "properties": {
           "label_pairing": {"const": "full_shape_label"},
-          "hashes": {"required": ["selected_block_ids_sha256", "decompressed_payload_sha256"]},
+          "hashes": {"required": ["selected_block_ids_sha256", "decompressed_payload_sha256", "per_block_raw_sha256_manifest"]},
           "tracer": {
             "properties": {
               "version": {"const": 5},
@@ -43,7 +49,7 @@
                   "ldgsts_addr": {"const": true}
                 }
               },
-              "stats_pass_version": {"const": 1}
+              "stats_pass_version": {"const": 2}
             }
           }
         }
@@ -279,7 +285,11 @@
       "properties": {
         "selected_block_ids_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
         "decompressed_payload_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
-        "per_block_raw_sha256_manifest": {"type": "string"},
+        "per_block_raw_sha256_manifest": {
+          "type": "string",
+          "minLength": 1,
+          "description": "Canonical trace-payload-file-manifest-v1 text: one byte-sorted path<TAB>size<TAB>lowercase-SHA256 line per raw threadblocks/**/*.pb file, with a required trailing newline."
+        },
         "sidecar_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
       }
     }

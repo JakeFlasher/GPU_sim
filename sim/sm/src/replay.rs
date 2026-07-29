@@ -5246,7 +5246,7 @@ mod completeness_tests {
     use crate::control_bits::ControlBits;
     use crate::program::{FunctionSchedule, IssueSlot, OpClass};
     use prost::Message;
-    use std::collections::BTreeMap as StdMap;
+    use std::collections::{BTreeMap as StdMap, BTreeSet as StdSet};
 
     #[test]
     fn completeness_grid_overflow_is_typed() {
@@ -5271,6 +5271,18 @@ mod completeness_tests {
             warpid_tb: Some(0),
             ..Default::default()
         }
+    }
+
+    fn encoded_threadblock(bx: i32) -> Vec<u8> {
+        let warp = pb::Warp {
+            id: 0,
+            instructions: vec![simple_inst()],
+        };
+        pb::Threadblock {
+            block_id: Some(pb::Dim3d { x: bx, y: 0, z: 0 }),
+            warps: [(0i32, warp)].into_iter().collect(),
+        }
+        .encode_to_vec()
     }
 
     fn write_grid_trace(
@@ -5319,17 +5331,9 @@ mod completeness_tests {
         let tb_dir = dir.join("threadblocks/device_0/stream_0/kernel_1");
         std::fs::create_dir_all(&tb_dir).unwrap();
         for &bx in block_xs {
-            let warp = pb::Warp {
-                id: 0,
-                instructions: vec![simple_inst()],
-            };
-            let tb = pb::Threadblock {
-                block_id: Some(pb::Dim3d { x: bx, y: 0, z: 0 }),
-                warps: [(0i32, warp)].into_iter().collect(),
-            };
             std::fs::write(
                 tb_dir.join(format!("d_0_s_0_k_1_{bx},0,0.pb")),
-                tb.encode_to_vec(),
+                encoded_threadblock(bx),
             )
             .unwrap();
         }
@@ -5341,69 +5345,161 @@ mod completeness_tests {
     // Literal producer fixtures generated and sealed by Python's sidecar
     // implementation.  Consumer tests therefore exercise the real canonical
     // contract instead of manufacturing a Rust-only approximation.
-    const PYTHON_SEALED_SUBSET: &str = r#"{"schema_version":2,"cell_id":"c","kernel":{"mangled_name":"_Z1kv","args_hash":"ab"},"method":"wave_segment_stratified_subset","reason":"byte_budget","shape":{"original_grid":{"x":60,"y":1,"z":1},"original_block":{"x":32,"y":1,"z":1},"captured_grid":{"x":60,"y":1,"z":1},"captured_block":{"x":32,"y":1,"z":1},"reduced_shape_variant":null},"gates":{"coop":false,"wave_count":60,"n_measured_waves":40,"tail_measured_waves":2,"atomic_density":0.0,"hotline_share":0.0,"skew_top1pct_share":0.0,"gini":0.0,"per_sm_block_count_cv":0.0,"n_phases":1,"skew_heavy_block_count":1,"certainty_bytes":100,"max_trace_bytes":2000,"certainty_budget_exceeded":false,"verdict":"subset_admissible"},"wave_model":{"reconstruction":"launch_index","per_sm_resident_blocks":[{"sm_id":0,"resident_blocks":1}],"n_waves":60,"segment_len":3,"ghost_depth":1},"per_sm_slot_map":[{"sm_id":0,"block_ids":[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59]}],"rng":{"algo":"pcg64","seed":0},"tracer":{"version":5,"features":{"atomic_addr":true,"ldgsts_addr":true},"stats_pass_version":2},"bytes":{"raw":310,"compressed":200,"codec":"zstd","level":19,"long":27,"dict_id":null},"records":{"expected_full":6000,"captured":12},"hashes":{"selected_block_ids_sha256":"84b7ed43903cca6302ed15cf78ff507c45e575f16d7d5c12c975c5727edc37cf","decompressed_payload_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","sidecar_sha256":"331103782174538149454c35590a56994e29ffe65aa4614378df607cf993b4d9"},"label_pairing":"full_shape_label","segments":[{"id":0,"block_ids":[0,1,2]},{"id":19,"block_ids":[57,58,59]},{"id":1,"block_ids":[3,4,5]},{"id":2,"block_ids":[6,7,8]}],"selected_segment_ids":[0,19,1,2],"certainty_segments":[0,19],"force_include_blocks":[0],"strata":[{"id":0,"phase_id":0,"launch_tercile":0,"segment_ids":[1,2],"N_h":6,"n_h":2,"pi":0.3333333333333333,"sector_stddev":2.0,"neyman_weight":12.0}],"selection_reconciliation":{"status":"fixed_point","attempts":1,"max_attempts":3,"capture_stats_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},"selection_budget":{"max_trace_bytes":2000,"basis":"raw_threadblock_pb","certainty_fraction_numerator":2,"certainty_fraction_denominator":5,"certainty_bytes":100},"selection_auxiliary":{"name":"l2_sector_transactions_32b","sector_bytes":32,"scope":"pass2_all_blocks","expected_full":400,"selected":200},"estimator":{"mode":"weighted_full_shape_estimate","targets":["sectors"],"not_recoverable":["cycles"],"convergence":{"status":"converged"}}}"#;
+    const PYTHON_SEALED_SUBSET: &str = r#"{"schema_version":2,"cell_id":"c","kernel":{"mangled_name":"_Z1kv","args_hash":"ab"},"method":"wave_segment_stratified_subset","reason":"byte_budget","shape":{"original_grid":{"x":60,"y":1,"z":1},"original_block":{"x":32,"y":1,"z":1},"captured_grid":{"x":60,"y":1,"z":1},"captured_block":{"x":32,"y":1,"z":1},"reduced_shape_variant":null},"gates":{"coop":false,"wave_count":60,"n_measured_waves":40,"tail_measured_waves":2,"atomic_density":0.0,"hotline_share":0.0,"skew_top1pct_share":0.0,"gini":0.0,"per_sm_block_count_cv":0.0,"n_phases":1,"skew_heavy_block_count":1,"certainty_bytes":100,"max_trace_bytes":2000,"certainty_budget_exceeded":false,"verdict":"subset_admissible"},"wave_model":{"reconstruction":"launch_index","per_sm_resident_blocks":[{"sm_id":0,"resident_blocks":1}],"n_waves":60,"segment_len":3,"ghost_depth":1},"per_sm_slot_map":[{"sm_id":0,"block_ids":[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59]}],"rng":{"algo":"pcg64","seed":0},"tracer":{"version":5,"features":{"atomic_addr":true,"ldgsts_addr":true},"stats_pass_version":2},"bytes":{"raw":1000,"compressed":200,"codec":"zstd","level":19,"long":27,"dict_id":null},"records":{"expected_full":6000,"captured":12},"hashes":{"selected_block_ids_sha256":"84b7ed43903cca6302ed15cf78ff507c45e575f16d7d5c12c975c5727edc37cf","decompressed_payload_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","per_block_raw_sha256_manifest":"trace-payload-file-manifest-v1\nthreadblocks/device_0/stream_0/kernel_1/b_0.pb\t1000\taaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n","sidecar_sha256":"12b7fcf51dd0d4277c9268b7eda67bca6dec410d36953098f181ef0f7ce7a907"},"label_pairing":"full_shape_label","segments":[{"id":0,"block_ids":[0,1,2]},{"id":19,"block_ids":[57,58,59]},{"id":1,"block_ids":[3,4,5]},{"id":2,"block_ids":[6,7,8]}],"selected_segment_ids":[0,19,1,2],"certainty_segments":[0,19],"force_include_blocks":[0],"strata":[{"id":0,"phase_id":0,"launch_tercile":0,"segment_ids":[1,2],"N_h":6,"n_h":2,"pi":0.3333333333333333,"sector_stddev":2.0,"neyman_weight":12.0}],"selection_reconciliation":{"status":"fixed_point","attempts":1,"max_attempts":3,"capture_stats_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},"selection_budget":{"max_trace_bytes":2000,"basis":"raw_threadblock_pb","certainty_fraction_numerator":2,"certainty_fraction_denominator":5,"certainty_bytes":100},"selection_auxiliary":{"name":"l2_sector_transactions_32b","sector_bytes":32,"scope":"pass2_all_blocks","expected_full":400,"selected":200},"estimator":{"mode":"weighted_full_shape_estimate","targets":["sectors"],"not_recoverable":["cycles"],"convergence":{"status":"converged"}}}"#;
 
-    const PYTHON_SEALED_LOSSLESS: &str = r#"{"schema_version":2,"cell_id":"c","kernel":{"mangled_name":"_Z1kv","args_hash":"deadbeef"},"method":"lossless_compressed_full","reason":"byte_budget","shape":{"original_grid":{"x":60,"y":1,"z":1},"original_block":{"x":32,"y":1,"z":1},"captured_grid":{"x":60,"y":1,"z":1},"captured_block":{"x":32,"y":1,"z":1},"reduced_shape_variant":null},"gates":{"coop":false,"wave_count":60,"n_measured_waves":40,"tail_measured_waves":2,"atomic_density":0.0,"hotline_share":0.0,"skew_top1pct_share":0.0,"gini":0.0,"per_sm_block_count_cv":0.0,"n_phases":1,"skew_heavy_block_count":1,"certainty_bytes":null,"max_trace_bytes":null,"certainty_budget_exceeded":false,"verdict":"subset_admissible"},"wave_model":{"reconstruction":"launch_index","per_sm_resident_blocks":[{"sm_id":0,"resident_blocks":1}],"n_waves":60,"segment_len":3,"ghost_depth":1},"per_sm_slot_map":[{"sm_id":0,"block_ids":[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59]}],"rng":{"algo":"pcg64","seed":0},"tracer":{"version":5,"features":{"atomic_addr":true,"ldgsts_addr":true},"stats_pass_version":1},"bytes":{"raw":1000,"compressed":200,"codec":"zstd","level":19,"long":27,"dict_id":null},"records":{"expected_full":6000,"captured":60},"hashes":{"selected_block_ids_sha256":"3f3ffcf42accae1591be118baf57efb9b8d7c78028dc566674c809f210ad796a","decompressed_payload_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","sidecar_sha256":"657fd9dc2f3f0a826dfb4bb030028ea32d315af1d37b54b4ff8bc9891f54aac8"},"label_pairing":"full_shape_label"}"#;
+    const PYTHON_SEALED_LOSSLESS: &str = r#"{"schema_version":2,"cell_id":"c","kernel":{"mangled_name":"_Z1kv","args_hash":"deadbeef"},"method":"lossless_compressed_full","reason":"byte_budget","shape":{"original_grid":{"x":60,"y":1,"z":1},"original_block":{"x":32,"y":1,"z":1},"captured_grid":{"x":60,"y":1,"z":1},"captured_block":{"x":32,"y":1,"z":1},"reduced_shape_variant":null},"gates":{"coop":false,"wave_count":60,"n_measured_waves":40,"tail_measured_waves":2,"atomic_density":0.0,"hotline_share":0.0,"skew_top1pct_share":0.0,"gini":0.0,"per_sm_block_count_cv":0.0,"n_phases":1,"skew_heavy_block_count":1,"certainty_bytes":null,"max_trace_bytes":null,"certainty_budget_exceeded":false,"verdict":"subset_admissible"},"wave_model":{"reconstruction":"launch_index","per_sm_resident_blocks":[{"sm_id":0,"resident_blocks":1}],"n_waves":60,"segment_len":3,"ghost_depth":1},"per_sm_slot_map":[{"sm_id":0,"block_ids":[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59]}],"rng":{"algo":"pcg64","seed":0},"tracer":{"version":5,"features":{"atomic_addr":true,"ldgsts_addr":true},"stats_pass_version":2},"bytes":{"raw":1000,"compressed":200,"codec":"zstd","level":19,"long":27,"dict_id":null},"records":{"expected_full":6000,"captured":60},"hashes":{"selected_block_ids_sha256":"3f3ffcf42accae1591be118baf57efb9b8d7c78028dc566674c809f210ad796a","decompressed_payload_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","per_block_raw_sha256_manifest":"trace-payload-file-manifest-v1\nthreadblocks/device_0/stream_0/kernel_1/b_0.pb\t1000\taaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n","sidecar_sha256":"e6be7bb4738e3f831213a6f2eea33a0f9198909b21a5a39ce24cacf8a9e53fa9"},"label_pairing":"full_shape_label"}"#;
 
     const SELECTED_BLOCKS: [i32; 12] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 57, 58, 59];
+    // Python's canonical manifest builder hashed all 60 exact Prost fixture
+    // payloads. Subset tests filter this independent producer fixture by path.
+    const PYTHON_FULL_PAYLOAD_MANIFEST: &str =
+        include_str!("../tests/data/python_payload_file_manifest_v1.txt");
+
+    fn payload_manifest_for(block_xs: &[i32]) -> (u64, String) {
+        let mut selected: StdSet<_> = block_xs
+            .iter()
+            .map(|block| {
+                format!("threadblocks/device_0/stream_0/kernel_1/d_0_s_0_k_1_{block},0,0.pb")
+            })
+            .collect();
+        assert_eq!(selected.len(), block_xs.len());
+        let expected: StdSet<_> = (0..60)
+            .map(|block| {
+                format!("threadblocks/device_0/stream_0/kernel_1/d_0_s_0_k_1_{block},0,0.pb")
+            })
+            .collect();
+        let mut observed = StdSet::new();
+        let mut previous = None;
+        let mut total_bytes = 0_u64;
+        let mut manifest = "trace-payload-file-manifest-v1\n".to_string();
+        assert!(PYTHON_FULL_PAYLOAD_MANIFEST.ends_with('\n'));
+        assert!(!PYTHON_FULL_PAYLOAD_MANIFEST.ends_with("\n\n"));
+        let mut lines = PYTHON_FULL_PAYLOAD_MANIFEST.lines();
+        assert_eq!(lines.next(), Some("trace-payload-file-manifest-v1"));
+        for line in lines {
+            let fields: Vec<_> = line.split('\t').collect();
+            assert_eq!(fields.len(), 3, "malformed Python manifest line {line:?}");
+            let path = fields[0];
+            let size_text = fields[1];
+            let hash = fields[2];
+            assert!(previous.is_none_or(|prior| prior < path));
+            previous = Some(path);
+            let size = size_text.parse::<u64>().unwrap();
+            assert_eq!(size.to_string(), size_text);
+            assert_eq!(hash.len(), 64);
+            assert!(
+                hash.bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+            );
+            assert!(
+                observed.insert(path.to_string()),
+                "duplicate fixture path {path}"
+            );
+            if selected.remove(path) {
+                total_bytes = total_bytes.checked_add(size).unwrap();
+                manifest.push_str(line);
+                manifest.push('\n');
+            }
+        }
+        assert_eq!(observed, expected, "fixture manifest path roster drift");
+        assert!(selected.is_empty(), "fixture manifest omitted {selected:?}");
+        (total_bytes, manifest)
+    }
+
+    fn bind_payload_sidecar(
+        base: &str,
+        block_xs: &[i32],
+        aggregate_sha256: &str,
+        captured_records: u64,
+        sidecar_sha256: &str,
+    ) -> String {
+        let (raw_bytes, manifest) = payload_manifest_for(block_xs);
+        let mut value: serde_json::Value = serde_json::from_str(base).unwrap();
+        value["bytes"]["raw"] = serde_json::json!(raw_bytes);
+        value["records"]["captured"] = serde_json::json!(captured_records);
+        value["hashes"]["decompressed_payload_sha256"] = serde_json::json!(aggregate_sha256);
+        value["hashes"]["per_block_raw_sha256_manifest"] = serde_json::json!(manifest);
+        value["hashes"]["sidecar_sha256"] = serde_json::json!(sidecar_sha256);
+        serde_json::to_string(&value).unwrap()
+    }
 
     fn payload_bound_subset() -> String {
-        PYTHON_SEALED_SUBSET
-            .replace(
-                &"a".repeat(64),
-                "df85bddbdf77a2f2a75a54d3769476919fcd062c5308b03b1a389c2d3fb21355",
-            )
-            .replace(
-                "331103782174538149454c35590a56994e29ffe65aa4614378df607cf993b4d9",
-                "322b93482bd788380a65a23061ea283c7fd695de4dabe2a8126e72f474ed64b9",
-            )
+        bind_payload_sidecar(
+            PYTHON_SEALED_SUBSET,
+            &SELECTED_BLOCKS,
+            "df85bddbdf77a2f2a75a54d3769476919fcd062c5308b03b1a389c2d3fb21355",
+            12,
+            "b39d05df6a87ae14cac824c989fd20a49ec303c2171cb7255ae58ad92602aedb",
+        )
     }
 
     fn payload_bound_lossless_subset() -> String {
-        PYTHON_SEALED_LOSSLESS
-            .replace(r#""raw":1000"#, r#""raw":310"#)
-            .replace(
-                &"a".repeat(64),
-                "df85bddbdf77a2f2a75a54d3769476919fcd062c5308b03b1a389c2d3fb21355",
-            )
-            .replace(
-                "657fd9dc2f3f0a826dfb4bb030028ea32d315af1d37b54b4ff8bc9891f54aac8",
-                "627e72f732a71bd3ab0427751a978154845430cf83872c7329001c2ff78b4554",
-            )
+        bind_payload_sidecar(
+            PYTHON_SEALED_LOSSLESS,
+            &SELECTED_BLOCKS,
+            "df85bddbdf77a2f2a75a54d3769476919fcd062c5308b03b1a389c2d3fb21355",
+            60,
+            "ee771179c91f0cd298b9d7f1b82770df91e50d2ce07ec16949beace10d685ce0",
+        )
     }
 
     fn payload_bound_lossless_full() -> String {
-        PYTHON_SEALED_LOSSLESS
-            .replace(r#""raw":1000"#, r#""raw":1558"#)
-            .replace(
-                &"a".repeat(64),
-                "22203159880c6b50cea0b625110193825b8c8b311894ddff6c8cc4e7be83e115",
-            )
-            .replace(
-                "657fd9dc2f3f0a826dfb4bb030028ea32d315af1d37b54b4ff8bc9891f54aac8",
-                "3de5fe8932be3184f97eaa45ff8dd02793ee2fec77e960291c2fb125e0f64ec7",
-            )
+        let all_blocks: Vec<_> = (0..60).collect();
+        bind_payload_sidecar(
+            PYTHON_SEALED_LOSSLESS,
+            &all_blocks,
+            "22203159880c6b50cea0b625110193825b8c8b311894ddff6c8cc4e7be83e115",
+            60,
+            "677171269c1adb19868ad3c2b708a7d65328e73944f32fa9abfb86cee10b9c08",
+        )
     }
 
     fn subset_with_captured_mismatch() -> String {
-        payload_bound_subset()
-            .replace(r#""captured":12"#, r#""captured":13"#)
-            .replace(
-                "322b93482bd788380a65a23061ea283c7fd695de4dabe2a8126e72f474ed64b9",
-                "8ae92ee1c1d0e1ecdfd4b834d562f8983b5c191611298573c474e7b92fb7ff48",
-            )
+        bind_payload_sidecar(
+            PYTHON_SEALED_SUBSET,
+            &SELECTED_BLOCKS,
+            "df85bddbdf77a2f2a75a54d3769476919fcd062c5308b03b1a389c2d3fb21355",
+            13,
+            "99ccbd538cad56ab2e004d98a17fe67497d12dd2c9aa4c5417dc62c775c83cc5",
+        )
     }
 
     fn payload_bound_subset_for_different_blocks() -> String {
-        payload_bound_subset()
+        const DIFFERENT_BLOCKS: [i32; 12] = [0, 1, 2, 3, 4, 5, 6, 7, 9, 57, 58, 59];
+        bind_payload_sidecar(
+            PYTHON_SEALED_SUBSET,
+            &DIFFERENT_BLOCKS,
+            "aaa5e80fd15d9ccc91163b7495f449d7a684c70857f7f7bdb34b38ceb22595f5",
+            12,
+            "b75758b4ad0da2e37111ac2973d9205264e0045f75d8812d9182f6ff71ad5b3a",
+        )
+    }
+
+    fn python_order_sensitive_subset() -> String {
+        let (raw_bytes, manifest) = payload_manifest_for(&SELECTED_BLOCKS);
+        let manifest = manifest
             .replace(
-                "df85bddbdf77a2f2a75a54d3769476919fcd062c5308b03b1a389c2d3fb21355",
-                "aaa5e80fd15d9ccc91163b7495f449d7a684c70857f7f7bdb34b38ceb22595f5",
+                "threadblocks/device_0/stream_0/kernel_1/d_0_s_0_k_1_0,0,0.pb\t",
+                "threadblocks/a.pb\t",
             )
             .replace(
-                "322b93482bd788380a65a23061ea283c7fd695de4dabe2a8126e72f474ed64b9",
-                "b22df41d037e55bd9568e2f436bf7225717e4e6ce6be701617643fed8996894e",
-            )
+                "threadblocks/device_0/stream_0/kernel_1/d_0_s_0_k_1_1,0,0.pb\t",
+                "threadblocks/a/b.pb\t",
+            );
+        let mut lines = manifest.lines();
+        assert_eq!(lines.next(), Some("trace-payload-file-manifest-v1"));
+        assert!(lines.next().unwrap().starts_with("threadblocks/a.pb\t"));
+        assert!(lines.next().unwrap().starts_with("threadblocks/a/b.pb\t"));
+
+        let mut value: serde_json::Value = serde_json::from_str(PYTHON_SEALED_SUBSET).unwrap();
+        value["bytes"]["raw"] = serde_json::json!(raw_bytes);
+        value["records"]["captured"] = serde_json::json!(12);
+        value["hashes"]["decompressed_payload_sha256"] =
+            serde_json::json!("df85bddbdf77a2f2a75a54d3769476919fcd062c5308b03b1a389c2d3fb21355");
+        value["hashes"]["per_block_raw_sha256_manifest"] = serde_json::json!(manifest);
+        value["hashes"]["sidecar_sha256"] =
+            serde_json::json!("bbe0666a9d25ddd1a2c755cea081722444206449977de7e86cfcc0ac6f9e7b3c");
+        serde_json::to_string(&value).unwrap()
     }
 
     fn minimal_fake_sidecar() -> String {
@@ -5609,7 +5705,7 @@ mod completeness_tests {
         };
         assert_eq!(
             provenance.sidecar_sha256(),
-            "3de5fe8932be3184f97eaa45ff8dd02793ee2fec77e960291c2fb125e0f64ec7"
+            "677171269c1adb19868ad3c2b708a7d65328e73944f32fa9abfb86cee10b9c08"
         );
     }
 
@@ -5658,16 +5754,15 @@ mod completeness_tests {
     #[test]
     fn bad_seal_block_hash_and_duplicate_membership_are_rejected_on_consumer_path() {
         let valid = payload_bound_subset();
+        let mut duplicate_membership: serde_json::Value = serde_json::from_str(&valid).unwrap();
+        duplicate_membership["segments"][2]["block_ids"][0] = serde_json::json!(2);
         let cases = [
             valid.replace(r#""captured":12"#, r#""captured":13"#),
             valid.replace(
                 "84b7ed43903cca6302ed15cf78ff507c45e575f16d7d5c12c975c5727edc37cf",
                 &"0".repeat(64),
             ),
-            valid.replace(
-                r#"{"id":1,"block_ids":[3,4,5]}"#,
-                r#"{"id":1,"block_ids":[2,4,5]}"#,
-            ),
+            serde_json::to_string(&duplicate_membership).unwrap(),
         ];
         for sidecar in cases {
             let tmp = tempfile::tempdir().unwrap();
@@ -5733,7 +5828,82 @@ mod completeness_tests {
             &err,
             ReplayError::Trace(TraceError::SamplingSidecarMalformed { .. })
         ));
-        assert!(err.to_string().contains("decompressed_payload_sha256"));
+        assert!(err.to_string().contains("per_block_raw_sha256_manifest"));
+    }
+
+    #[test]
+    fn legacy_aggregate_hash_uses_python_manifest_path_order() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sidecar = python_order_sensitive_subset();
+        write_grid_trace(tmp.path(), 60, 1, &SELECTED_BLOCKS, Some(&sidecar));
+        let threadblocks = tmp.path().join("threadblocks");
+        let original = threadblocks.join("device_0/stream_0/kernel_1");
+        std::fs::rename(
+            original.join("d_0_s_0_k_1_0,0,0.pb"),
+            threadblocks.join("a.pb"),
+        )
+        .unwrap();
+        std::fs::create_dir(threadblocks.join("a")).unwrap();
+        std::fs::rename(
+            original.join("d_0_s_0_k_1_1,0,0.pb"),
+            threadblocks.join("a/b.pb"),
+        )
+        .unwrap();
+
+        TraceDir::open(tmp.path()).unwrap();
+    }
+
+    #[test]
+    fn unchanged_concatenated_bytes_cannot_hide_file_boundary_repartition() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sidecar = payload_bound_subset();
+        write_grid_trace(tmp.path(), 60, 1, &SELECTED_BLOCKS, Some(&sidecar));
+        let directory = tmp.path().join("threadblocks/device_0/stream_0/kernel_1");
+        let first = directory.join("d_0_s_0_k_1_0,0,0.pb");
+        let second = directory.join("d_0_s_0_k_1_1,0,0.pb");
+        let original_first = std::fs::read(&first).unwrap();
+        let original_second = std::fs::read(&second).unwrap();
+        let original_concatenated: Vec<_> = original_first
+            .iter()
+            .chain(&original_second)
+            .copied()
+            .collect();
+
+        // Field 2 is the complete protobuf warp-map entry. Move it across the
+        // file boundary without changing concatenated bytes; both resulting
+        // messages remain decodable, but block 0 loses its recorded warp.
+        let boundary = original_first
+            .iter()
+            .position(|byte| *byte == 0x12)
+            .unwrap();
+        let repartitioned_first = original_first[..boundary].to_vec();
+        let repartitioned_second: Vec<_> = original_first[boundary..]
+            .iter()
+            .chain(&original_second)
+            .copied()
+            .collect();
+        assert_eq!(
+            original_concatenated,
+            repartitioned_first
+                .iter()
+                .chain(&repartitioned_second)
+                .copied()
+                .collect::<Vec<_>>()
+        );
+        assert!(pb::Threadblock::decode(repartitioned_first.as_slice()).is_ok());
+        assert!(pb::Threadblock::decode(repartitioned_second.as_slice()).is_ok());
+        std::fs::write(first, repartitioned_first).unwrap();
+        std::fs::write(second, repartitioned_second).unwrap();
+
+        let error = run(tmp.path()).unwrap_err();
+        assert!(matches!(
+            &error,
+            ReplayError::Trace(TraceError::SamplingSidecarMalformed { .. })
+        ));
+        assert!(
+            error.to_string().contains("per_block_raw_sha256_manifest"),
+            "{error}"
+        );
     }
 
     #[test]
@@ -5778,6 +5948,39 @@ mod completeness_tests {
         assert!(matches!(
             TraceDir::open(tmp.path()),
             Err(TraceError::SamplingSidecarMalformed { .. })
+        ));
+    }
+
+    #[test]
+    fn sidecar_open_rejects_dot_only_pb_payload_name() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sidecar = payload_bound_subset();
+        write_grid_trace(tmp.path(), 60, 1, &SELECTED_BLOCKS, Some(&sidecar));
+        let payload = tmp
+            .path()
+            .join("threadblocks/device_0/stream_0/kernel_1/.pb");
+        std::fs::write(payload, encoded_threadblock(0)).unwrap();
+
+        assert!(matches!(
+            TraceDir::open(tmp.path()),
+            Err(TraceError::SamplingSidecarMalformed { .. })
+        ));
+    }
+
+    #[test]
+    fn sidecar_open_rejects_pb_named_directories() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sidecar = payload_bound_subset();
+        write_grid_trace(tmp.path(), 60, 1, &SELECTED_BLOCKS, Some(&sidecar));
+        let directory = tmp
+            .path()
+            .join("threadblocks/device_0/stream_0/kernel_1/extra.pb");
+        std::fs::create_dir(&directory).unwrap();
+        std::fs::write(directory.join("nested.pb"), encoded_threadblock(0)).unwrap();
+
+        assert!(matches!(
+            TraceDir::open(tmp.path()),
+            Err(TraceError::ThreadblockPayloadNotRegular { .. })
         ));
     }
 

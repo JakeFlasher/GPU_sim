@@ -548,6 +548,13 @@ impl WaveSegmentSubsetProvenance {
     }
 }
 
+/// One canonical entry from `hashes.per_block_raw_sha256_manifest`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PayloadFileManifestEntry {
+    size_bytes: u64,
+    sha256: String,
+}
+
 /// Reader-side view of a supported `<root>/trace_sampling.json` v2 sidecar.
 /// Fields are private so method-specific invariants can only be constructed by
 /// the closed parser. A sealed lossless declaration is not itself a
@@ -565,6 +572,7 @@ pub struct TraceSamplingSidecar {
     expected_full_records: u64,
     captured_records: u64,
     decompressed_payload_sha256: String,
+    payload_file_manifest: BTreeMap<String, PayloadFileManifestEntry>,
     raw_payload_bytes: u64,
     method: TraceSamplingMethod,
 }
@@ -624,6 +632,110 @@ fn is_lower_hex_sha256(value: &str) -> bool {
         && value
             .bytes()
             .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+const PAYLOAD_FILE_MANIFEST_PREFIX: &str = "trace-payload-file-manifest-v1\n";
+
+fn safe_payload_manifest_path(path: &str) -> bool {
+    if path.is_empty()
+        || !path.is_ascii()
+        || path
+            .bytes()
+            .any(|byte| !(b'!'..=b'~').contains(&byte) || byte == b'\\')
+        || !path.ends_with(".pb")
+    {
+        return false;
+    }
+    let Some(file_name) = path.rsplit('/').next() else {
+        return false;
+    };
+    let Some(file_stem) = file_name.strip_suffix(".pb") else {
+        return false;
+    };
+    if file_stem.bytes().all(|byte| byte == b'.') {
+        return false;
+    }
+    let mut parts = path.split('/');
+    if parts.next() != Some("threadblocks") {
+        return false;
+    }
+    let mut saw_payload_component = false;
+    for part in parts {
+        if part.is_empty() || part == "." || part == ".." {
+            return false;
+        }
+        saw_payload_component = true;
+    }
+    saw_payload_component
+}
+
+fn parse_payload_file_manifest(
+    manifest: &str,
+) -> Result<BTreeMap<String, PayloadFileManifestEntry>, String> {
+    let body = manifest
+        .strip_prefix(PAYLOAD_FILE_MANIFEST_PREFIX)
+        .and_then(|value| value.strip_suffix('\n'))
+        .ok_or_else(|| {
+            "per_block_raw_sha256_manifest must use the canonical v1 header and trailing newline"
+                .to_string()
+        })?;
+    if body.is_empty() {
+        return Err("per_block_raw_sha256_manifest must contain at least one .pb file".to_string());
+    }
+
+    let mut entries = BTreeMap::new();
+    let mut previous_path: Option<&str> = None;
+    for line in body.split('\n') {
+        let mut fields = line.split('\t');
+        let path = fields.next().unwrap_or_default();
+        let size_text = fields.next().ok_or_else(|| {
+            "per_block_raw_sha256_manifest entries must be path<TAB>size<TAB>sha256".to_string()
+        })?;
+        let sha256 = fields.next().ok_or_else(|| {
+            "per_block_raw_sha256_manifest entries must be path<TAB>size<TAB>sha256".to_string()
+        })?;
+        if fields.next().is_some() {
+            return Err(
+                "per_block_raw_sha256_manifest entries must be path<TAB>size<TAB>sha256"
+                    .to_string(),
+            );
+        }
+        if !safe_payload_manifest_path(path) {
+            return Err(format!(
+                "per_block_raw_sha256_manifest path is not a canonical threadblocks .pb path: {path:?}"
+            ));
+        }
+        if previous_path.is_some_and(|previous| path <= previous) {
+            return Err(
+                "per_block_raw_sha256_manifest paths must be unique and byte-sorted".to_string(),
+            );
+        }
+        if size_text.is_empty()
+            || !size_text.bytes().all(|byte| byte.is_ascii_digit())
+            || (size_text.len() > 1 && size_text.starts_with('0'))
+        {
+            return Err(format!(
+                "per_block_raw_sha256_manifest size is not canonical decimal: {size_text:?}"
+            ));
+        }
+        let size_bytes = size_text.parse::<u64>().map_err(|_| {
+            format!("per_block_raw_sha256_manifest size exceeds u64: {size_text:?}")
+        })?;
+        if !is_lower_hex_sha256(sha256) {
+            return Err(
+                "per_block_raw_sha256_manifest hashes must be lowercase SHA-256".to_string(),
+            );
+        }
+        previous_path = Some(path);
+        entries.insert(
+            path.to_string(),
+            PayloadFileManifestEntry {
+                size_bytes,
+                sha256: sha256.to_string(),
+            },
+        );
+    }
+    Ok(entries)
 }
 
 const SHA256_INITIAL: [u32; 8] = [
@@ -1291,9 +1403,9 @@ fn validate_lossless_producer_contract(
         || unsigned(
             required(tracer, "stats_pass_version", "tracer")?,
             "tracer.stats_pass_version",
-        )? != 1
+        )? != 2
     {
-        return Err("lossless compression requires tracer v5 and stats pass v1".to_string());
+        return Err("lossless compression requires tracer v5 and stats pass v2".to_string());
     }
     let features = object(required(tracer, "features", "tracer")?, "tracer.features")?;
     exact_keys(
@@ -2179,9 +2291,14 @@ fn collect_threadblock_pb_paths(dir: &Path, paths: &mut Vec<PathBuf>) -> Result<
             path: path.clone(),
             source,
         })?;
+        let pb_named = path.extension().is_some_and(|suffix| suffix == "pb")
+            || path.file_name().is_some_and(|name| name == ".pb");
         if file_type.is_dir() {
+            if pb_named {
+                return Err(TraceError::ThreadblockPayloadNotRegular { path });
+            }
             collect_threadblock_pb_paths(&path, paths)?;
-        } else if path.extension().is_some_and(|suffix| suffix == "pb") {
+        } else if pb_named {
             if !file_type.is_file() {
                 return Err(TraceError::ThreadblockPayloadNotRegular { path });
             }
@@ -2197,7 +2314,6 @@ fn verify_sampling_payload(
 ) -> Result<VerifiedSamplingPayload, TraceError> {
     let mut paths = Vec::new();
     collect_threadblock_pb_paths(&root.join("threadblocks"), &mut paths)?;
-    paths.sort();
     let sidecar_path = root.join("trace_sampling.json");
     let malformed = |message: String| TraceError::SamplingSidecarMalformed {
         path: sidecar_path.clone(),
@@ -2208,10 +2324,53 @@ fn verify_sampling_payload(
             "threadblock payload snapshot contains no regular .pb files".to_string(),
         ));
     }
+
+    let mut payload_paths = Vec::with_capacity(paths.len());
+    for path in paths {
+        let relative = path.strip_prefix(root).map_err(|_| {
+            malformed(format!(
+                "threadblock payload path is outside trace root: {}",
+                path.display()
+            ))
+        })?;
+        let relative = relative
+            .to_str()
+            .ok_or_else(|| {
+                malformed(format!(
+                    "threadblock payload path is not UTF-8: {}",
+                    path.display()
+                ))
+            })?
+            .to_string();
+        if !safe_payload_manifest_path(&relative) {
+            return Err(malformed(format!(
+                "threadblock payload path is not canonical for the per-file manifest: {relative:?}"
+            )));
+        }
+        payload_paths.push((path, relative));
+    }
+    payload_paths.sort_by(|(_, left), (_, right)| left.cmp(right));
+    let actual_paths: BTreeSet<_> = payload_paths
+        .iter()
+        .map(|(_, relative)| relative.as_str())
+        .collect();
+    let declared_paths: BTreeSet<_> = sidecar
+        .payload_file_manifest
+        .keys()
+        .map(String::as_str)
+        .collect();
+    if actual_paths != declared_paths {
+        let missing: Vec<_> = declared_paths.difference(&actual_paths).take(4).collect();
+        let unexpected: Vec<_> = actual_paths.difference(&declared_paths).take(4).collect();
+        return Err(malformed(format!(
+            "per_block_raw_sha256_manifest path set disagrees with threadblock payload: missing={missing:?}, unexpected={unexpected:?}"
+        )));
+    }
+
     let mut actual_bytes = 0_u64;
     let mut digest = Sha256::new();
     let mut by_path = BTreeMap::new();
-    for path in paths {
+    for (path, relative) in payload_paths {
         let raw = fs::read(&path).map_err(|source| TraceError::Io {
             path: path.clone(),
             source,
@@ -2222,6 +2381,19 @@ fn verify_sampling_payload(
                 path.display()
             ))
         })?;
+        let declared = &sidecar.payload_file_manifest[&relative];
+        if size != declared.size_bytes {
+            return Err(malformed(format!(
+                "per_block_raw_sha256_manifest size for {relative:?} is {}, actual {size}",
+                declared.size_bytes
+            )));
+        }
+        let file_hash = sha256_hex(&raw);
+        if file_hash != declared.sha256 {
+            return Err(malformed(format!(
+                "per_block_raw_sha256_manifest hash for {relative:?} does not match raw payload (actual {file_hash})"
+            )));
+        }
         actual_bytes = actual_bytes
             .checked_add(size)
             .ok_or_else(|| malformed("threadblock payload byte count overflows u64".to_string()))?;
@@ -2412,6 +2584,7 @@ impl TraceSamplingSidecar {
             &[
                 "selected_block_ids_sha256",
                 "decompressed_payload_sha256",
+                "per_block_raw_sha256_manifest",
                 "sidecar_sha256",
             ],
             &[
@@ -2445,6 +2618,14 @@ impl TraceSamplingSidecar {
             .as_str()
             .expect("hash string validated above")
             .to_string();
+        let payload_file_manifest = parse_payload_file_manifest(
+            get!(hashes, "per_block_raw_sha256_manifest", "hashes")
+                .as_str()
+                .ok_or_else(|| {
+                    malformed("hashes.per_block_raw_sha256_manifest must be a string".to_string())
+                })?,
+        )
+        .map_err(&malformed)?;
         let sidecar_sha256 = get!(hashes, "sidecar_sha256", "hashes")
             .as_str()
             .expect("hash string validated above")
@@ -2678,6 +2859,18 @@ impl TraceSamplingSidecar {
                 ));
             }
         };
+        let manifest_bytes = payload_file_manifest
+            .values()
+            .try_fold(0_u64, |total, entry| {
+                total.checked_add(entry.size_bytes).ok_or_else(|| {
+                    malformed("per_block_raw_sha256_manifest byte total overflows u64".to_string())
+                })
+            })?;
+        if manifest_bytes != raw_payload_bytes {
+            return Err(malformed(format!(
+                "per_block_raw_sha256_manifest byte total {manifest_bytes} disagrees with bytes.raw {raw_payload_bytes}"
+            )));
+        }
         Ok(Some(TraceSamplingSidecar {
             cell_id,
             kernel_mangled_name,
@@ -2689,6 +2882,7 @@ impl TraceSamplingSidecar {
             expected_full_records,
             captured_records,
             decompressed_payload_sha256,
+            payload_file_manifest,
             raw_payload_bytes,
             method,
         }))
@@ -4351,9 +4545,9 @@ mod sampling_sidecar_tests {
     // sealed by Python `json.dumps(sort_keys=True,separators=(",",":"))`.
     // Keeping the producer's literal seal here prevents a Rust-hashes-Rust
     // tautology in the canonicalization test.
-    const PYTHON_SEALED_SUBSET: &str = r#"{"schema_version":2,"cell_id":"c","kernel":{"mangled_name":"_Z1kv","args_hash":"ab"},"method":"wave_segment_stratified_subset","reason":"byte_budget","shape":{"original_grid":{"x":60,"y":1,"z":1},"original_block":{"x":32,"y":1,"z":1},"captured_grid":{"x":60,"y":1,"z":1},"captured_block":{"x":32,"y":1,"z":1},"reduced_shape_variant":null},"gates":{"coop":false,"wave_count":60,"n_measured_waves":40,"tail_measured_waves":2,"atomic_density":0.0,"hotline_share":0.0,"skew_top1pct_share":0.0,"gini":0.0,"per_sm_block_count_cv":0.0,"n_phases":1,"skew_heavy_block_count":1,"certainty_bytes":100,"max_trace_bytes":2000,"certainty_budget_exceeded":false,"verdict":"subset_admissible"},"wave_model":{"reconstruction":"launch_index","per_sm_resident_blocks":[{"sm_id":0,"resident_blocks":1}],"n_waves":60,"segment_len":3,"ghost_depth":1},"per_sm_slot_map":[{"sm_id":0,"block_ids":[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59]}],"rng":{"algo":"pcg64","seed":0},"tracer":{"version":5,"features":{"atomic_addr":true,"ldgsts_addr":true},"stats_pass_version":2},"bytes":{"raw":1000,"compressed":200,"codec":"zstd","level":19,"long":27,"dict_id":null},"records":{"expected_full":6000,"captured":12},"hashes":{"selected_block_ids_sha256":"84b7ed43903cca6302ed15cf78ff507c45e575f16d7d5c12c975c5727edc37cf","decompressed_payload_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","sidecar_sha256":"761eb2f77da70794ed15e952bbcd58c8824af45b2d5a1c736b3eea9ff2cb2817"},"label_pairing":"full_shape_label","segments":[{"id":0,"block_ids":[0,1,2]},{"id":19,"block_ids":[57,58,59]},{"id":1,"block_ids":[3,4,5]},{"id":2,"block_ids":[6,7,8]}],"selected_segment_ids":[0,19,1,2],"certainty_segments":[0,19],"force_include_blocks":[0],"strata":[{"id":0,"phase_id":0,"launch_tercile":0,"segment_ids":[1,2],"N_h":6,"n_h":2,"pi":0.3333333333333333,"sector_stddev":2.0,"neyman_weight":12.0}],"selection_reconciliation":{"status":"fixed_point","attempts":1,"max_attempts":3,"capture_stats_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},"selection_budget":{"max_trace_bytes":2000,"basis":"raw_threadblock_pb","certainty_fraction_numerator":2,"certainty_fraction_denominator":5,"certainty_bytes":100},"selection_auxiliary":{"name":"l2_sector_transactions_32b","sector_bytes":32,"scope":"pass2_all_blocks","expected_full":400,"selected":200},"estimator":{"mode":"weighted_full_shape_estimate","targets":["sectors"],"not_recoverable":["cycles"],"convergence":{"status":"converged"}}}"#;
+    const PYTHON_SEALED_SUBSET: &str = r#"{"schema_version":2,"cell_id":"c","kernel":{"mangled_name":"_Z1kv","args_hash":"ab"},"method":"wave_segment_stratified_subset","reason":"byte_budget","shape":{"original_grid":{"x":60,"y":1,"z":1},"original_block":{"x":32,"y":1,"z":1},"captured_grid":{"x":60,"y":1,"z":1},"captured_block":{"x":32,"y":1,"z":1},"reduced_shape_variant":null},"gates":{"coop":false,"wave_count":60,"n_measured_waves":40,"tail_measured_waves":2,"atomic_density":0.0,"hotline_share":0.0,"skew_top1pct_share":0.0,"gini":0.0,"per_sm_block_count_cv":0.0,"n_phases":1,"skew_heavy_block_count":1,"certainty_bytes":100,"max_trace_bytes":2000,"certainty_budget_exceeded":false,"verdict":"subset_admissible"},"wave_model":{"reconstruction":"launch_index","per_sm_resident_blocks":[{"sm_id":0,"resident_blocks":1}],"n_waves":60,"segment_len":3,"ghost_depth":1},"per_sm_slot_map":[{"sm_id":0,"block_ids":[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59]}],"rng":{"algo":"pcg64","seed":0},"tracer":{"version":5,"features":{"atomic_addr":true,"ldgsts_addr":true},"stats_pass_version":2},"bytes":{"raw":1000,"compressed":200,"codec":"zstd","level":19,"long":27,"dict_id":null},"records":{"expected_full":6000,"captured":12},"hashes":{"selected_block_ids_sha256":"84b7ed43903cca6302ed15cf78ff507c45e575f16d7d5c12c975c5727edc37cf","decompressed_payload_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","per_block_raw_sha256_manifest":"trace-payload-file-manifest-v1\nthreadblocks/device_0/stream_0/kernel_1/b_0.pb\t1000\taaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n","sidecar_sha256":"12b7fcf51dd0d4277c9268b7eda67bca6dec410d36953098f181ef0f7ce7a907"},"label_pairing":"full_shape_label","segments":[{"id":0,"block_ids":[0,1,2]},{"id":19,"block_ids":[57,58,59]},{"id":1,"block_ids":[3,4,5]},{"id":2,"block_ids":[6,7,8]}],"selected_segment_ids":[0,19,1,2],"certainty_segments":[0,19],"force_include_blocks":[0],"strata":[{"id":0,"phase_id":0,"launch_tercile":0,"segment_ids":[1,2],"N_h":6,"n_h":2,"pi":0.3333333333333333,"sector_stddev":2.0,"neyman_weight":12.0}],"selection_reconciliation":{"status":"fixed_point","attempts":1,"max_attempts":3,"capture_stats_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},"selection_budget":{"max_trace_bytes":2000,"basis":"raw_threadblock_pb","certainty_fraction_numerator":2,"certainty_fraction_denominator":5,"certainty_bytes":100},"selection_auxiliary":{"name":"l2_sector_transactions_32b","sector_bytes":32,"scope":"pass2_all_blocks","expected_full":400,"selected":200},"estimator":{"mode":"weighted_full_shape_estimate","targets":["sectors"],"not_recoverable":["cycles"],"convergence":{"status":"converged"}}}"#;
 
-    const PYTHON_SEALED_LOSSLESS: &str = r#"{"schema_version":2,"cell_id":"c","kernel":{"mangled_name":"_Z1kv","args_hash":"deadbeef"},"method":"lossless_compressed_full","reason":"byte_budget","shape":{"original_grid":{"x":60,"y":1,"z":1},"original_block":{"x":32,"y":1,"z":1},"captured_grid":{"x":60,"y":1,"z":1},"captured_block":{"x":32,"y":1,"z":1},"reduced_shape_variant":null},"gates":{"coop":false,"wave_count":60,"n_measured_waves":40,"tail_measured_waves":2,"atomic_density":0.0,"hotline_share":0.0,"skew_top1pct_share":0.0,"gini":0.0,"per_sm_block_count_cv":0.0,"n_phases":1,"skew_heavy_block_count":1,"certainty_bytes":null,"max_trace_bytes":null,"certainty_budget_exceeded":false,"verdict":"subset_admissible"},"wave_model":{"reconstruction":"launch_index","per_sm_resident_blocks":[{"sm_id":0,"resident_blocks":1}],"n_waves":60,"segment_len":3,"ghost_depth":1},"per_sm_slot_map":[{"sm_id":0,"block_ids":[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59]}],"rng":{"algo":"pcg64","seed":0},"tracer":{"version":5,"features":{"atomic_addr":true,"ldgsts_addr":true},"stats_pass_version":1},"bytes":{"raw":1000,"compressed":200,"codec":"zstd","level":19,"long":27,"dict_id":null},"records":{"expected_full":6000,"captured":60},"hashes":{"selected_block_ids_sha256":"3f3ffcf42accae1591be118baf57efb9b8d7c78028dc566674c809f210ad796a","decompressed_payload_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","sidecar_sha256":"657fd9dc2f3f0a826dfb4bb030028ea32d315af1d37b54b4ff8bc9891f54aac8"},"label_pairing":"full_shape_label"}"#;
+    const PYTHON_SEALED_LOSSLESS: &str = r#"{"schema_version":2,"cell_id":"c","kernel":{"mangled_name":"_Z1kv","args_hash":"deadbeef"},"method":"lossless_compressed_full","reason":"byte_budget","shape":{"original_grid":{"x":60,"y":1,"z":1},"original_block":{"x":32,"y":1,"z":1},"captured_grid":{"x":60,"y":1,"z":1},"captured_block":{"x":32,"y":1,"z":1},"reduced_shape_variant":null},"gates":{"coop":false,"wave_count":60,"n_measured_waves":40,"tail_measured_waves":2,"atomic_density":0.0,"hotline_share":0.0,"skew_top1pct_share":0.0,"gini":0.0,"per_sm_block_count_cv":0.0,"n_phases":1,"skew_heavy_block_count":1,"certainty_bytes":null,"max_trace_bytes":null,"certainty_budget_exceeded":false,"verdict":"subset_admissible"},"wave_model":{"reconstruction":"launch_index","per_sm_resident_blocks":[{"sm_id":0,"resident_blocks":1}],"n_waves":60,"segment_len":3,"ghost_depth":1},"per_sm_slot_map":[{"sm_id":0,"block_ids":[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59]}],"rng":{"algo":"pcg64","seed":0},"tracer":{"version":5,"features":{"atomic_addr":true,"ldgsts_addr":true},"stats_pass_version":2},"bytes":{"raw":1000,"compressed":200,"codec":"zstd","level":19,"long":27,"dict_id":null},"records":{"expected_full":6000,"captured":60},"hashes":{"selected_block_ids_sha256":"3f3ffcf42accae1591be118baf57efb9b8d7c78028dc566674c809f210ad796a","decompressed_payload_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","per_block_raw_sha256_manifest":"trace-payload-file-manifest-v1\nthreadblocks/device_0/stream_0/kernel_1/b_0.pb\t1000\taaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n","sidecar_sha256":"e6be7bb4738e3f831213a6f2eea33a0f9198909b21a5a39ce24cacf8a9e53fa9"},"label_pairing":"full_shape_label"}"#;
 
     fn subset_value() -> serde_json::Value {
         serde_json::from_str(PYTHON_SEALED_SUBSET).unwrap()
@@ -4409,6 +4603,11 @@ mod sampling_sidecar_tests {
         assert_eq!(sc.captured_records(), 12);
         assert_eq!(sc.decompressed_payload_sha256(), "a".repeat(64));
         assert_eq!(sc.raw_payload_bytes(), 1000);
+        assert_eq!(sc.payload_file_manifest.len(), 1);
+        assert_eq!(
+            sc.payload_file_manifest["threadblocks/device_0/stream_0/kernel_1/b_0.pb"].size_bytes,
+            1000
+        );
         let TraceSamplingMethod::WaveSegmentStratifiedSubset(provenance) = sc.method() else {
             panic!("subset sidecar lost its sampling method");
         };
@@ -4424,7 +4623,7 @@ mod sampling_sidecar_tests {
         );
         assert_eq!(
             provenance.sidecar_sha256(),
-            "761eb2f77da70794ed15e952bbcd58c8824af45b2d5a1c736b3eea9ff2cb2817"
+            "12b7fcf51dd0d4277c9268b7eda67bca6dec410d36953098f181ef0f7ce7a907"
         );
     }
 
@@ -4557,7 +4756,7 @@ mod sampling_sidecar_tests {
         );
         assert_eq!(
             provenance.sidecar_sha256(),
-            "657fd9dc2f3f0a826dfb4bb030028ea32d315af1d37b54b4ff8bc9891f54aac8"
+            "e6be7bb4738e3f831213a6f2eea33a0f9198909b21a5a39ce24cacf8a9e53fa9"
         );
     }
 
@@ -4606,12 +4805,15 @@ mod sampling_sidecar_tests {
     }
 
     #[test]
-    fn lossless_rejects_freshly_sealed_unknown_producer_versions_and_missing_features() {
+    fn lossless_rejects_freshly_sealed_stale_or_unknown_producers_and_missing_features() {
         let mut tracer_version = lossless_value();
         tracer_version["tracer"]["version"] = serde_json::json!(999);
 
-        let mut stats_pass_version = lossless_value();
-        stats_pass_version["tracer"]["stats_pass_version"] = serde_json::json!(999);
+        let mut stale_stats_pass_version = lossless_value();
+        stale_stats_pass_version["tracer"]["stats_pass_version"] = serde_json::json!(1);
+
+        let mut unknown_stats_pass_version = lossless_value();
+        unknown_stats_pass_version["tracer"]["stats_pass_version"] = serde_json::json!(999);
 
         let mut atomic_addr = lossless_value();
         atomic_addr["tracer"]["features"]["atomic_addr"] = serde_json::json!(false);
@@ -4620,8 +4822,9 @@ mod sampling_sidecar_tests {
         ldgsts_addr["tracer"]["features"]["ldgsts_addr"] = serde_json::json!(false);
 
         for (mut sidecar, expected) in [
-            (tracer_version, "tracer v5 and stats pass v1"),
-            (stats_pass_version, "tracer v5 and stats pass v1"),
+            (tracer_version, "tracer v5 and stats pass v2"),
+            (stale_stats_pass_version, "tracer v5 and stats pass v2"),
+            (unknown_stats_pass_version, "tracer v5 and stats pass v2"),
             (atomic_addr, "atomic_addr and ldgsts_addr features"),
             (ldgsts_addr, "atomic_addr and ldgsts_addr features"),
         ] {
@@ -4629,6 +4832,53 @@ mod sampling_sidecar_tests {
             let error = load_json(serde_json::to_vec(&sidecar).unwrap()).unwrap_err();
             assert!(error.to_string().contains(expected), "{error}");
         }
+    }
+
+    #[test]
+    fn supported_sidecars_require_a_canonical_per_file_payload_manifest() {
+        for mut sidecar in [subset_value(), lossless_value()] {
+            sidecar["hashes"]
+                .as_object_mut()
+                .unwrap()
+                .remove("per_block_raw_sha256_manifest");
+            reseal(&mut sidecar);
+            let error = load_json(serde_json::to_vec(&sidecar).unwrap()).unwrap_err();
+            assert!(
+                error.to_string().contains("per_block_raw_sha256_manifest"),
+                "{error}"
+            );
+        }
+
+        for manifest in [
+            "trace-payload-file-manifest-v1\nthreadblocks/../escape.pb\t1000\taaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+            "trace-payload-file-manifest-v1\nthreadblocks/..pb\t1000\taaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+        ] {
+            let mut unsafe_path = subset_value();
+            unsafe_path["hashes"]["per_block_raw_sha256_manifest"] = serde_json::json!(manifest);
+            reseal(&mut unsafe_path);
+            let error = load_json(serde_json::to_vec(&unsafe_path).unwrap()).unwrap_err();
+            assert!(
+                error.to_string().contains("canonical threadblocks"),
+                "{error}"
+            );
+        }
+
+        let mut huge_size = lossless_value();
+        huge_size["hashes"]["per_block_raw_sha256_manifest"] = serde_json::json!(format!(
+            "trace-payload-file-manifest-v1\nthreadblocks/a.pb\t{}\taaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n",
+            "9".repeat(5_000)
+        ));
+        reseal(&mut huge_size);
+        let error = load_json(serde_json::to_vec(&huge_size).unwrap()).unwrap_err();
+        assert!(error.to_string().contains("exceeds u64"), "{error}");
+
+        let mut wrong_total = lossless_value();
+        wrong_total["hashes"]["per_block_raw_sha256_manifest"] = serde_json::json!(
+            "trace-payload-file-manifest-v1\nthreadblocks/a.pb\t999\taaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n"
+        );
+        reseal(&mut wrong_total);
+        let error = load_json(serde_json::to_vec(&wrong_total).unwrap()).unwrap_err();
+        assert!(error.to_string().contains("byte total"), "{error}");
     }
 
     #[test]

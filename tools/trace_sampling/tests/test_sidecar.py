@@ -12,6 +12,11 @@ class _Comp:
     raw_bytes = 1000
     compressed_bytes = 200
     decompressed_sha256 = "a" * 64
+    per_block_raw_sha256_manifest = (
+        "trace-payload-file-manifest-v1\n"
+        "threadblocks/device_0/stream_0/kernel_1/b_0.pb\t1000\t"
+        + "a" * 64 + "\n"
+    )
 
 
 class _Gate:
@@ -60,12 +65,18 @@ def _stats(n_waves=60):
         per_sm_block_counts={0: 60})
 
 
+def _reseal(sidecar):
+    sidecar["hashes"].pop("sidecar_sha256", None)
+    sidecar["hashes"]["sidecar_sha256"] = sidecar_sha256(sidecar)
+    return sidecar
+
+
 def _compressed(**over):
     s = _stats()
     sc = build_sidecar(
         cell_id="c", kernel_name="_Z1kv", args_hash="deadbeef", stats=s,
         gate=_Gate(), compression=_Comp(), records_captured=200,
-        tracer_version=5, stats_pass_version=1,
+        tracer_version=5, stats_pass_version=2,
         method="lossless_compressed_full", reason="byte_budget")
     sc.update(over)
     return sc
@@ -114,11 +125,14 @@ def test_compressed_sidecar_is_valid_and_labels_full_shape():
     validate_sidecar(sc)
     assert sc["label_pairing"] == "full_shape_label"
     assert sc["hashes"]["decompressed_payload_sha256"] == "a" * 64
+    assert sc["hashes"]["per_block_raw_sha256_manifest"] == (
+        _Comp.per_block_raw_sha256_manifest)
 
 
 def test_compressed_sidecar_pins_admitted_producer_versions_and_features():
     for path, value in [
         (("tracer", "version"), 999),
+        (("tracer", "stats_pass_version"), 1),
         (("tracer", "stats_pass_version"), 999),
         (("tracer", "features", "atomic_addr"), False),
         (("tracer", "features", "ldgsts_addr"), False),
@@ -128,21 +142,104 @@ def test_compressed_sidecar_pins_admitted_producer_versions_and_features():
         for key in path[:-1]:
             target = target[key]
         target[path[-1]] = value
-        sidecar["hashes"].pop("sidecar_sha256")
-        sidecar["hashes"]["sidecar_sha256"] = sidecar_sha256(sidecar)
+        _reseal(sidecar)
         assert not is_valid(sidecar), path
+
+
+@pytest.mark.parametrize("feature", ["atomic_addr", "ldgsts_addr"])
+def test_subset_sidecar_pins_admitted_address_features(feature):
+    sidecar = _subset()
+    sidecar["tracer"]["features"][feature] = False
+    _reseal(sidecar)
+    assert not is_valid(sidecar)
+
+
+@pytest.mark.parametrize("field", ["wave_model", "per_sm_slot_map", "rng"])
+def test_lossless_sidecar_requires_rust_replay_fields(field):
+    sidecar = _compressed()
+    del sidecar[field]
+    _reseal(sidecar)
+    assert not is_valid(sidecar)
 
 
 def test_compressed_without_payload_hash_is_rejected():
     sc = _compressed()
     del sc["hashes"]["decompressed_payload_sha256"]
+    _reseal(sc)
     assert not is_valid(sc)  # the compression contract hash is required
+
+
+def test_compressed_without_per_file_manifest_is_rejected():
+    sc = _compressed()
+    del sc["hashes"]["per_block_raw_sha256_manifest"]
+    _reseal(sc)
+    assert not is_valid(sc)
+
+
+def test_subset_without_per_file_manifest_is_rejected():
+    sc = _subset()
+    del sc["hashes"]["per_block_raw_sha256_manifest"]
+    _reseal(sc)
+    assert not is_valid(sc)
+
+
+@pytest.mark.parametrize("manifest", [
+    # Missing the canonical trailing newline.
+    _Comp.per_block_raw_sha256_manifest.rstrip("\n"),
+    # Parent traversal is never normalized into a trusted payload path.
+    ("trace-payload-file-manifest-v1\n"
+     "threadblocks/../escape.pb\t1000\t" + "a" * 64 + "\n"),
+    # Dot-only basenames are explicitly excluded by the canonical .pb grammar.
+    ("trace-payload-file-manifest-v1\n"
+     "threadblocks/..pb\t1000\t" + "a" * 64 + "\n"),
+    # Leading-zero sizes are a second spelling of the same value.
+    ("trace-payload-file-manifest-v1\n"
+     "threadblocks/a.pb\t01000\t" + "a" * 64 + "\n"),
+    # Consumers retain byte counts as u64 and reject larger declarations.
+    ("trace-payload-file-manifest-v1\n"
+     f"threadblocks/a.pb\t{1 << 64}\t" + "a" * 64 + "\n"),
+    # Paths must be unique and strictly byte-sorted.
+    ("trace-payload-file-manifest-v1\n"
+     "threadblocks/b.pb\t500\t" + "a" * 64 + "\n"
+     "threadblocks/a.pb\t500\t" + "b" * 64 + "\n"),
+])
+def test_freshly_sealed_noncanonical_payload_manifest_is_rejected(manifest):
+    sc = _subset()
+    sc["hashes"]["per_block_raw_sha256_manifest"] = manifest
+    sc["hashes"].pop("sidecar_sha256")
+    sc["hashes"]["sidecar_sha256"] = sidecar_sha256(sc)
+    with pytest.raises(SidecarSemanticError, match="per_block_raw_sha256_manifest"):
+        validate_sidecar(sc)
+
+
+def test_freshly_sealed_huge_manifest_size_fails_typed():
+    sc = _subset()
+    sc["hashes"]["per_block_raw_sha256_manifest"] = (
+        "trace-payload-file-manifest-v1\n"
+        "threadblocks/a.pb\t" + "9" * 5000 + "\t" + "a" * 64 + "\n")
+    sc["hashes"].pop("sidecar_sha256")
+    sc["hashes"]["sidecar_sha256"] = sidecar_sha256(sc)
+
+    assert not is_valid(sc)
+    with pytest.raises(SidecarSemanticError, match="exceeds u64"):
+        validate_sidecar(sc)
+
+
+def test_freshly_sealed_manifest_byte_total_must_match_payload_bytes():
+    sc = _subset()
+    sc["hashes"]["per_block_raw_sha256_manifest"] = (
+        _Comp.per_block_raw_sha256_manifest.replace("\t1000\t", "\t999\t"))
+    sc["hashes"].pop("sidecar_sha256")
+    sc["hashes"]["sidecar_sha256"] = sidecar_sha256(sc)
+    with pytest.raises(SidecarSemanticError, match="byte total"):
+        validate_sidecar(sc)
 
 
 def test_subset_without_payload_hash_is_rejected():
     sc = _subset()
     assert sc["hashes"]["decompressed_payload_sha256"] == "a" * 64
     del sc["hashes"]["decompressed_payload_sha256"]
+    _reseal(sc)
     assert not is_valid(sc)
 
 
@@ -364,6 +461,9 @@ def test_subset_budget_and_gate_evidence_must_agree():
 
     sc = _subset()
     sc["bytes"]["raw"] = 2001
+    sc["hashes"]["per_block_raw_sha256_manifest"] = (
+        sc["hashes"]["per_block_raw_sha256_manifest"].replace(
+            "\t1000\t", "\t2001\t"))
     with pytest.raises(SidecarSemanticError, match="raw payload"):
         validate_sidecar(sc)
 
