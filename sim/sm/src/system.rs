@@ -741,7 +741,7 @@ struct L2SystemCommit {
 /// v0 scope: DRAM READS only — write data validates Store/RED sectors without
 /// a fetch, while ATOM's returning RMW read fetches missing sectors. Dirty
 /// writeback, RED's RMW read, and coherence remain typed unmodeled tails.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DramBw {
     /// Latency-only (pre-increment behavior): the ablation mode and the
     /// event-vs-const equivalence-differential mode — the constant path

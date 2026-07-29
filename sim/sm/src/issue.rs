@@ -97,7 +97,7 @@ pub struct BlockReplay {
 /// card / sim-calib (the caller maps the fields — sim-sm deliberately
 /// depends on neither); the rest are documented hypothesis knobs pending
 /// Phase-1D calibration extensions.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct IssueModelParams {
     /// Deployment architecture whose card and issue hypotheses produced these parameters.
     pub arch: ArchId,

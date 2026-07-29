@@ -422,12 +422,17 @@ struct FoldedKernelReplay {
 #[derive(Debug, Clone)]
 pub struct FullKernelReplayResult {
     coverage: FullLaunchCoverage,
+    configuration: ReplayConfiguration,
     replay: FoldedKernelReplay,
 }
 
 impl FullKernelReplayResult {
     pub fn coverage(&self) -> &FullLaunchCoverage {
         &self.coverage
+    }
+
+    pub fn configuration(&self) -> ReplayConfiguration {
+        self.configuration
     }
 
     pub fn arch(&self) -> ArchId {
@@ -532,12 +537,17 @@ impl SampledObservedCounters {
 #[derive(Debug, Clone)]
 pub struct SampledKernelReplayResult {
     coverage: SampledLaunchCoverage,
+    configuration: ReplayConfiguration,
     counters: SampledObservedCounters,
 }
 
 impl SampledKernelReplayResult {
     pub fn coverage(&self) -> &SampledLaunchCoverage {
         &self.coverage
+    }
+
+    pub fn configuration(&self) -> ReplayConfiguration {
+        self.configuration
     }
 
     pub fn counters(&self) -> &SampledObservedCounters {
@@ -897,12 +907,15 @@ fn fold_kernel_result(
 
 fn classify_kernel_result(
     coverage: ExtractedCoverage,
+    configuration: ReplayConfiguration,
     replay: FoldedKernelReplay,
 ) -> KernelReplayOutcome {
     match coverage {
-        ExtractedCoverage::Full(coverage) => {
-            KernelReplayOutcome::Full(FullKernelReplayResult { coverage, replay })
-        }
+        ExtractedCoverage::Full(coverage) => KernelReplayOutcome::Full(FullKernelReplayResult {
+            coverage,
+            configuration,
+            replay,
+        }),
         ExtractedCoverage::Sampled(coverage) => {
             let FoldedKernelReplay {
                 arch,
@@ -919,6 +932,7 @@ fn classify_kernel_result(
             } = replay;
             KernelReplayOutcome::SampledObserved(SampledKernelReplayResult {
                 coverage,
+                configuration,
                 counters: SampledObservedCounters {
                     arch,
                     instructions_issued,
@@ -949,7 +963,7 @@ fn lookup_schedule<'a>(
 /// Memory-hierarchy mode for one kernel replay — the ONE typed selector
 /// every harness goes through (a pair of optional configs would let a
 /// plumbing slip degrade a cell to the wrong mode silently).
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ReplayMemMode {
     /// No cache model (flat global latency).
     Flat,
@@ -964,6 +978,41 @@ pub enum ReplayMemMode {
         l2: L2Config,
         dram: DramBw,
     },
+}
+
+/// Exact structural identity of every issue and memory-hierarchy parameter used
+/// for one replay. No digest or caller label substitutes for these values.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReplayConfiguration {
+    issue_params: IssueModelParams,
+    memory_mode: ReplayMemMode,
+}
+
+impl ReplayConfiguration {
+    /// Build a declaration-side identity while enforcing architecture lockstep
+    /// across all nested memory configurations.
+    pub fn checked(
+        issue_params: IssueModelParams,
+        memory_mode: ReplayMemMode,
+    ) -> Result<Self, ReplayError> {
+        validate_replay_mode_architecture(issue_params.arch, memory_mode)?;
+        Ok(Self {
+            issue_params,
+            memory_mode,
+        })
+    }
+
+    pub fn arch(&self) -> ArchId {
+        self.issue_params.arch
+    }
+
+    pub fn issue_params(&self) -> IssueModelParams {
+        self.issue_params
+    }
+
+    pub fn memory_mode(&self) -> ReplayMemMode {
+        self.memory_mode
+    }
 }
 
 fn require_replay_arch(
@@ -981,13 +1030,7 @@ fn require_replay_arch(
     Ok(())
 }
 
-fn validate_replay_architecture(
-    schedule: &FunctionSchedule,
-    params: &IssueModelParams,
-    mode: ReplayMemMode,
-) -> Result<(), ReplayError> {
-    let arch = schedule.arch;
-    require_replay_arch(arch, params.arch, "issue parameters")?;
+fn validate_replay_mode_architecture(arch: ArchId, mode: ReplayMemMode) -> Result<(), ReplayError> {
     match mode {
         ReplayMemMode::Flat => {}
         ReplayMemMode::L1Const(l1) => {
@@ -1002,6 +1045,15 @@ fn validate_replay_architecture(
     Ok(())
 }
 
+fn validate_replay_architecture(
+    schedule: &FunctionSchedule,
+    params: &IssueModelParams,
+    mode: ReplayMemMode,
+) -> Result<ReplayConfiguration, ReplayError> {
+    require_replay_arch(schedule.arch, params.arch, "issue parameters")?;
+    ReplayConfiguration::checked(*params, mode)
+}
+
 /// Replay one kernel launch on its traced placement under `mode`.
 /// Caches are FRESH per kernel (cold, NCU `--cache-control all` parity).
 pub fn replay_kernel(
@@ -1012,7 +1064,7 @@ pub fn replay_kernel(
     mode: ReplayMemMode,
 ) -> Result<KernelReplayOutcome, ReplayError> {
     let schedule = lookup_schedule(schedules, loc)?;
-    validate_replay_architecture(schedule, params, mode)?;
+    let configuration = validate_replay_architecture(schedule, params, mode)?;
     let decode_sectors = !matches!(mode, ReplayMemMode::Flat);
     let ExtractedKernel {
         per_sm_blocks,
@@ -1052,7 +1104,7 @@ pub fn replay_kernel(
             )?
         }
     };
-    Ok(classify_kernel_result(coverage, replay))
+    Ok(classify_kernel_result(coverage, configuration, replay))
 }
 
 /// Resolve the two special Global routes reviewed on the active sm_86 path.
@@ -5446,6 +5498,8 @@ mod completeness_tests {
             panic!("complete unsampled trace must return full replay");
         };
         assert_eq!(full.coverage().blocks_observed(), 4);
+        assert_eq!(full.configuration().arch(), ArchId::Sm86);
+        assert_eq!(full.configuration().memory_mode(), ReplayMemMode::Flat);
         assert_eq!(full.records_seen(), 4);
         assert_eq!(full.instructions_issued(), 4);
     }
@@ -5506,6 +5560,7 @@ mod completeness_tests {
             panic!("sampled extraction must not become a full replay result");
         };
         assert_eq!(sampled.coverage().blocks_observed(), 12);
+        assert_eq!(sampled.configuration().memory_mode(), ReplayMemMode::Flat);
         assert_eq!(sampled.counters().arch(), ArchId::Sm86);
         assert_eq!(sampled.counters().instructions_issued(), 12);
         assert_eq!(sampled.counters().records_seen(), 12);

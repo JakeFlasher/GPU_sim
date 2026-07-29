@@ -48,7 +48,7 @@ pub const LINE_BYTES: u32 = SECTOR_BYTES * SECTORS_PER_LINE;
 
 /// Configuration (card-resolved by `pchase_card`; latencies are integer
 /// cycles — the caller ceils the card's fractional cycle values).
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct L1Config {
     /// Deployment architecture whose geometry/latency hypotheses produced this config.
     pub arch: ArchId,

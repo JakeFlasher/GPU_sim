@@ -37,8 +37,8 @@ pub use issue::{
 pub use program::{FunctionSchedule, IssueSlot, OpClass, ProgramError, build_schedules};
 pub use replay::{
     FullCoverageSource, FullKernelReplayResult, FullLaunchCoverage, KernelReplayOutcome,
-    ReplayError, ReplayLaunchCoverageBinding, ReplayMemMode, SampledKernelReplayResult,
-    SampledLaunchCoverage, SampledObservedCounters, replay_kernel,
+    ReplayConfiguration, ReplayError, ReplayLaunchCoverageBinding, ReplayMemMode,
+    SampledKernelReplayResult, SampledLaunchCoverage, SampledObservedCounters, replay_kernel,
 };
 pub use sim_mem::MemRole;
 pub use system::{
