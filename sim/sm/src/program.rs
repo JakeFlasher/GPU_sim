@@ -16,7 +16,7 @@
 
 use std::collections::BTreeMap;
 
-use sim_arch::{ArchError, ArchId};
+use sim_arch::{ArchError, ArchId, CapabilityError};
 use sim_mem::{MemRole, mem_role_of_checked, opcode_head};
 use sim_trace::ExecInfo;
 
@@ -39,6 +39,8 @@ pub enum ProgramError {
         #[source]
         source: ArchError,
     },
+    #[error("schedule control-layout capability is unavailable: {0}")]
+    ControlLayoutCapability(#[from] CapabilityError),
     #[error("memory-role classification failed for architecture-aware schedule join: {0}")]
     MemRoleClassification(#[from] sim_mem::MemRoleError),
     #[error("sidecar arch {arch:?} is not of the form sm_<digits>")]
@@ -134,8 +136,9 @@ pub fn build_schedules(
 ) -> Result<BTreeMap<i32, FunctionSchedule>, ProgramError> {
     let sidecar_arch = sidecar_arch_id(&sidecar.arch)?;
     let sidecar_version = sidecar_arch.numeric();
-    let mut schedules = BTreeMap::new();
-    for (&fuid, kernel) in &exec.kernels {
+    // Preserve the existing cross-artifact mismatch precedence before asking
+    // whether a same-architecture sidecar has a supported control layout.
+    for kernel in exec.kernels.values() {
         if kernel.architecture_version != sidecar_version {
             return Err(ProgramError::ArchMismatch {
                 kernel_name: kernel.kernel_name.clone(),
@@ -143,6 +146,10 @@ pub fn build_schedules(
                 sidecar_arch: sidecar.arch.clone(),
             });
         }
+    }
+    sidecar_arch.control_layout().require("control_layout")?;
+    let mut schedules = BTreeMap::new();
+    for (&fuid, kernel) in &exec.kernels {
         let function = sidecar
             .functions
             .get(&kernel.function_name)
@@ -391,16 +398,12 @@ mod tests {
     }
 
     #[test]
-    fn sm120_bare_ldg_is_a_typed_capability_gap() {
+    fn forged_sm120_sidecar_cannot_bypass_control_layout_capability() {
+        // ControlSidecar fields are public for diagnostics, so schedule
+        // construction must independently reapply the capability gate even
+        // when a caller bypasses ControlSidecar::load_for_arch.
         let mut sc = sidecar(&[0]);
         sc.arch = "sm_120".to_owned();
-        sc.functions
-            .get_mut("my_kernel")
-            .unwrap()
-            .by_pc
-            .get_mut(&0)
-            .unwrap()
-            .opcode_text = "LDG.E R0, [R2.64]".to_owned();
         let err = build_schedules(
             &ExecInfo {
                 benchmark_name: "bench_run".to_owned(),
@@ -417,6 +420,35 @@ mod tests {
             &sc,
         )
         .unwrap_err();
-        assert!(matches!(err, ProgramError::MemRoleClassification(_)));
+        assert!(matches!(
+            err,
+            ProgramError::ControlLayoutCapability(CapabilityError::Unsupported {
+                arch: ArchId::Sm120,
+                capability: "control_layout",
+                reason,
+            }) if !reason.is_empty()
+        ));
+    }
+
+    #[test]
+    fn unsupported_control_layout_is_rejected_even_without_kernels() {
+        let mut sc = sidecar(&[]);
+        sc.arch = "sm_120".to_owned();
+        let err = build_schedules(
+            &ExecInfo {
+                benchmark_name: "empty".to_owned(),
+                kernels: BTreeMap::new(),
+            },
+            &sc,
+        )
+        .unwrap_err();
+        assert!(matches!(
+            err,
+            ProgramError::ControlLayoutCapability(CapabilityError::Unsupported {
+                arch: ArchId::Sm120,
+                capability: "control_layout",
+                ..
+            })
+        ));
     }
 }
