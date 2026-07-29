@@ -16,7 +16,8 @@ pub mod reader;
 pub use exec_info::{ExecInfo, ExecInfoError, KernelStaticInfo};
 pub use lanes::{LANE_INACTIVE_SENTINEL, LANES_PER_WARP, LaneError, reconstruct_lane_vector};
 pub use reader::{
-    AddressAccess, AllocationRegistry, KernelLoc, MemoryAccess, MemoryAccessMeta, TraceDir,
-    TraceError, TraceSamplingSidecar, block_launch_index, check_allocation_identity, kernel_grid,
-    memory_access, read_threadblock, visit_memory_access,
+    AddressAccess, AllocationRegistry, KernelLoc, LosslessFullProvenance, MemoryAccess,
+    MemoryAccessMeta, TraceDir, TraceError, TraceSamplingMethod, TraceSamplingSidecar,
+    WaveSegmentSubsetProvenance, block_launch_index, check_allocation_identity, kernel_grid,
+    memory_access, visit_memory_access,
 };

@@ -41,7 +41,7 @@ use sim_trace::reader::{
     check_preflighted_allocation_identity, preflight_memory_access,
 };
 use sim_trace::{
-    KernelLoc, TraceDir, TraceError, block_launch_index, kernel_grid, read_threadblock,
+    KernelLoc, TraceDir, TraceError, TraceSamplingMethod, block_launch_index, kernel_grid,
 };
 
 use sim_mem::{
@@ -369,7 +369,7 @@ fn extract_per_sm_blocks(
     let mut records_seen: u64 = 0;
 
     for path in td.threadblock_paths(loc)? {
-        let tb = read_threadblock(&path)?;
+        let tb = td.read_threadblock(&path)?;
         let launch_index = block_launch_index(loc.kernel, &tb, &path)?;
         if !seen_indices.insert(launch_index) {
             return Err(ReplayError::DuplicateLaunchIndex {
@@ -511,41 +511,47 @@ fn extract_per_sm_blocks(
                 .filter(|dim| dim.x > 0 && dim.y > 0 && dim.z > 0)
                 .ok_or(ReplayError::BlockDimMissing)?;
             let launch_block = (block.x as u32, block.y as u32, block.z as u32);
-            if sc.kernel_mangled_name != loc.kernel.name {
+            if sc.kernel_mangled_name() != loc.kernel.name.as_str() {
                 return Err(ReplayError::SamplingKernelMismatch {
                     launch: loc.kernel.name.clone(),
-                    sidecar: sc.kernel_mangled_name.clone(),
+                    sidecar: sc.kernel_mangled_name().to_owned(),
                 });
             }
-            if sc.original_grid != (gx, gy, gz) {
+            if sc.original_grid() != (gx, gy, gz) {
                 return Err(ReplayError::GridDimRewritten {
                     launch: (gx, gy, gz),
-                    sidecar: sc.original_grid,
+                    sidecar: sc.original_grid(),
                 });
             }
-            if sc.original_block != launch_block {
+            if sc.original_block() != launch_block {
                 return Err(ReplayError::BlockDimRewritten {
                     launch: launch_block,
-                    sidecar: sc.original_block,
+                    sidecar: sc.original_block(),
                 });
             }
-            if sc.sanctions_incomplete && sc.selected_block_ids.as_ref() != Some(&seen_indices) {
-                let declared = match &sc.selected_block_ids {
-                    Some(blocks) => checked_collection_len(
-                        "trace_sampling selected block membership",
-                        blocks.len(),
-                    )?,
-                    None => 0,
-                };
-                return Err(ReplayError::SelectedBlockMembershipMismatch { seen, declared });
+            match sc.method() {
+                TraceSamplingMethod::WaveSegmentStratifiedSubset(provenance) => {
+                    if provenance.selected_block_ids() != &seen_indices {
+                        let declared = checked_collection_len(
+                            "trace_sampling selected block membership",
+                            provenance.selected_block_ids().len(),
+                        )?;
+                        return Err(ReplayError::SelectedBlockMembershipMismatch {
+                            seen,
+                            declared,
+                        });
+                    }
+                }
+                TraceSamplingMethod::LosslessCompressedFull(_) => {
+                    if seen < grid_total {
+                        return Err(ReplayError::IncompleteTrace { seen, grid_total });
+                    }
+                }
             }
-            if seen < grid_total && !sc.sanctions_incomplete {
-                return Err(ReplayError::IncompleteTrace { seen, grid_total });
-            }
-            if records_seen != sc.captured_records {
+            if records_seen != sc.captured_records() {
                 return Err(ReplayError::RecordsCapturedMismatch {
                     records_seen,
-                    captured: sc.captured_records,
+                    captured: sc.captured_records(),
                 });
             }
         }
@@ -4977,6 +4983,32 @@ mod completeness_tests {
             )
     }
 
+    fn payload_bound_lossless_subset() -> String {
+        PYTHON_SEALED_LOSSLESS
+            .replace(r#""raw":1000"#, r#""raw":310"#)
+            .replace(
+                &"a".repeat(64),
+                "df85bddbdf77a2f2a75a54d3769476919fcd062c5308b03b1a389c2d3fb21355",
+            )
+            .replace(
+                "657fd9dc2f3f0a826dfb4bb030028ea32d315af1d37b54b4ff8bc9891f54aac8",
+                "627e72f732a71bd3ab0427751a978154845430cf83872c7329001c2ff78b4554",
+            )
+    }
+
+    fn payload_bound_lossless_full() -> String {
+        PYTHON_SEALED_LOSSLESS
+            .replace(r#""raw":1000"#, r#""raw":1558"#)
+            .replace(
+                &"a".repeat(64),
+                "22203159880c6b50cea0b625110193825b8c8b311894ddff6c8cc4e7be83e115",
+            )
+            .replace(
+                "657fd9dc2f3f0a826dfb4bb030028ea32d315af1d37b54b4ff8bc9891f54aac8",
+                "3de5fe8932be3184f97eaa45ff8dd02793ee2fec77e960291c2fb125e0f64ec7",
+            )
+    }
+
     fn subset_with_captured_mismatch() -> String {
         payload_bound_subset()
             .replace(r#""captured":12"#, r#""captured":13"#)
@@ -5099,13 +5131,8 @@ mod completeness_tests {
     #[test]
     fn lossless_full_sidecar_cannot_sanction_incomplete_coverage() {
         let tmp = tempfile::tempdir().unwrap();
-        write_grid_trace(
-            tmp.path(),
-            60,
-            1,
-            &SELECTED_BLOCKS,
-            Some(PYTHON_SEALED_LOSSLESS),
-        );
+        let sidecar = payload_bound_lossless_subset();
+        write_grid_trace(tmp.path(), 60, 1, &SELECTED_BLOCKS, Some(&sidecar));
         let err = run(tmp.path()).unwrap_err();
         assert!(
             matches!(
@@ -5123,8 +5150,10 @@ mod completeness_tests {
     fn complete_trace_with_lossless_full_sidecar_ok() {
         let tmp = tempfile::tempdir().unwrap();
         let all_blocks: Vec<i32> = (0..60).collect();
-        write_grid_trace(tmp.path(), 60, 1, &all_blocks, Some(PYTHON_SEALED_LOSSLESS));
-        assert!(run(tmp.path()).is_ok());
+        let sidecar = payload_bound_lossless_full();
+        write_grid_trace(tmp.path(), 60, 1, &all_blocks, Some(&sidecar));
+        let result = run(tmp.path());
+        assert!(result.is_ok(), "{result:?}");
     }
 
     #[test]
@@ -5227,6 +5256,92 @@ mod completeness_tests {
         assert!(matches!(
             run(tmp.path()).unwrap_err(),
             ReplayError::Trace(TraceError::SamplingSidecarMalformed { .. })
+        ));
+    }
+
+    #[test]
+    fn lossless_sidecar_rejects_count_preserving_payload_tampering() {
+        let tmp = tempfile::tempdir().unwrap();
+        let all_blocks: Vec<i32> = (0..60).collect();
+        let sidecar = payload_bound_lossless_full();
+        write_grid_trace(tmp.path(), 60, 1, &all_blocks, Some(&sidecar));
+        let path = tmp
+            .path()
+            .join("threadblocks/device_0/stream_0/kernel_1/d_0_s_0_k_1_0,0,0.pb");
+        let mut raw = std::fs::read(&path).unwrap();
+        raw[0] ^= 1;
+        std::fs::write(path, raw).unwrap();
+        let err = run(tmp.path()).unwrap_err();
+        assert!(matches!(
+            &err,
+            ReplayError::Trace(TraceError::SamplingSidecarMalformed { .. })
+        ));
+        assert!(err.to_string().contains("decompressed_payload_sha256"));
+    }
+
+    #[test]
+    fn opened_sidecar_trace_reads_the_verified_payload_snapshot() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sidecar = payload_bound_subset();
+        write_grid_trace(tmp.path(), 60, 1, &SELECTED_BLOCKS, Some(&sidecar));
+        let td = TraceDir::open(tmp.path()).unwrap();
+
+        let path = tmp
+            .path()
+            .join("threadblocks/device_0/stream_0/kernel_1/d_0_s_0_k_1_0,0,0.pb");
+        let original = std::fs::read(&path).unwrap();
+        let mut replacement = pb::Threadblock::decode(original.as_slice()).unwrap();
+        replacement
+            .warps
+            .get_mut(&0)
+            .unwrap()
+            .instructions
+            .get_mut(0)
+            .unwrap()
+            .pc = 17;
+        let replacement = replacement.encode_to_vec();
+        assert_eq!(replacement.len(), original.len());
+        std::fs::write(&path, replacement).unwrap();
+
+        let loc = td.kernels().next().unwrap();
+        let blocks = td.read_threadblocks_in_launch_order(&loc).unwrap();
+        let (_, block_zero) = blocks.iter().find(|(index, _)| *index == 0).unwrap();
+        assert_eq!(block_zero.warps[&0].instructions[0].pc, 16);
+
+        let sched = FunctionSchedule {
+            arch: ArchId::Sm86,
+            function_unique_id: 1,
+            kernel_name: "_Z1kv".into(),
+            function_name: "f".into(),
+            by_pc: StdMap::new(),
+        };
+        let (per_sm_blocks, _) = extract_per_sm_blocks(&td, &loc, &sched, true).unwrap();
+        assert_eq!(per_sm_blocks[&0][0].warps[0].insts[0].pc, 16);
+
+        assert!(matches!(
+            TraceDir::open(tmp.path()),
+            Err(TraceError::SamplingSidecarMalformed { .. })
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn sidecar_open_rejects_symlinked_threadblock_payloads() {
+        use std::os::unix::fs::symlink;
+
+        let tmp = tempfile::tempdir().unwrap();
+        let sidecar = payload_bound_subset();
+        write_grid_trace(tmp.path(), 60, 1, &SELECTED_BLOCKS, Some(&sidecar));
+        let path = tmp
+            .path()
+            .join("threadblocks/device_0/stream_0/kernel_1/d_0_s_0_k_1_0,0,0.pb");
+        let retained = tmp.path().join("retained-original.bytes");
+        std::fs::rename(&path, &retained).unwrap();
+        symlink(&retained, &path).unwrap();
+
+        assert!(matches!(
+            TraceDir::open(tmp.path()),
+            Err(TraceError::ThreadblockPayloadNotRegular { .. })
         ));
     }
 

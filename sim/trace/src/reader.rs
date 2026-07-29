@@ -5,12 +5,13 @@
 //! <trace_dir>/threadblocks/device_<d>/stream_<s>/kernel_<k>/*.pb
 //!                                                 # dynamic_trace.threadblock
 //! <trace_dir>/extra_info/allocations.json         # allocation-identity registry
-//! <trace_dir>/trace_sampling.json                 # subset-trace sampling sidecar
+//! <trace_dir>/trace_sampling.json                 # sampling-provenance sidecar
 //! ```
 //!
 //! Both sidecars ARE read here: `allocations.json` feeds the allocation-identity
-//! gate, and `trace_sampling.json` (present only for a sanctioned subset trace)
-//! feeds the completeness gate (`E_INCOMPLETE_TRACE` / never-rewrite-gridDim).
+//! gate, and `trace_sampling.json` (present for a supported subset or retained
+//! lossless-compression provenance) feeds the completeness gate
+//! (`E_INCOMPLETE_TRACE` / never-rewrite-gridDim).
 //!
 //! Admission-level validation is owned by the Python gate
 //! (`tools/nvbit_tracer/import_trace_contract.py`) and already ran on every
@@ -59,6 +60,10 @@ pub enum TraceError {
     },
     #[error("kernel threadblock dir {dir} is missing or empty — the trace tree is truncated")]
     ThreadblocksMissing { dir: PathBuf },
+    #[error("threadblock payload entry {path} is not a regular file")]
+    ThreadblockPayloadNotRegular { path: PathBuf },
+    #[error("verified sampling payload snapshot is missing expected file {path}")]
+    SamplingPayloadSnapshotMissing { path: PathBuf },
     #[error(
         "{record}: instruction has memory identity but active_mask/predicate_mask absent on the wire"
     )]
@@ -239,12 +244,17 @@ fn classify_memory_payload_contract(
     Ok(MemoryPayloadContract::AddressCarryingV1)
 }
 
+struct VerifiedSamplingPayload {
+    by_path: BTreeMap<PathBuf, Vec<u8>>,
+}
+
 pub struct TraceDir {
     root: PathBuf,
     trace: pb::Trace,
     memory_payload_contract: MemoryPayloadContract,
     allocations: Option<AllocationRegistry>,
     sampling: Option<TraceSamplingSidecar>,
+    sampling_payload: Option<VerifiedSamplingPayload>,
 }
 
 impl TraceDir {
@@ -266,15 +276,17 @@ impl TraceDir {
         let memory_payload_contract = classify_memory_payload_contract(&trace, &pb_path)?;
         let allocations = AllocationRegistry::load(&root)?;
         let sampling = TraceSamplingSidecar::load(&root)?;
-        if let Some(sidecar) = sampling.as_ref() {
-            verify_sampling_payload(&root, sidecar)?;
-        }
+        let sampling_payload = sampling
+            .as_ref()
+            .map(|sidecar| verify_sampling_payload(&root, sidecar))
+            .transpose()?;
         Ok(Self {
             root,
             trace,
             memory_payload_contract,
             allocations,
             sampling,
+            sampling_payload,
         })
     }
 
@@ -283,8 +295,9 @@ impl TraceDir {
         self.allocations.as_ref()
     }
 
-    /// The trace-sampling sidecar (`trace_sampling.json`), if present — a subset
-    /// trace carries it; a full trace does not.
+    /// The validated trace-sampling sidecar (`trace_sampling.json`), if present.
+    /// Supported sidecars distinguish sampled-subset provenance from a retained
+    /// lossless-compression declaration; neither alone proves full coverage.
     pub fn sampling_sidecar(&self) -> Option<&TraceSamplingSidecar> {
         self.sampling.as_ref()
     }
@@ -320,7 +333,9 @@ impl TraceDir {
     /// deterministic FILENAME order — which is NOT flattened-block launch
     /// order (filenames embed unpadded decimal coordinates, so "10" sorts
     /// before "2"). Block identity/order must come from the proto's
-    /// `block_id`: use [`TraceDir::read_threadblocks_in_launch_order`].
+    /// `block_id`: use [`TraceDir::read_threadblocks_in_launch_order`]. When a
+    /// sampling sidecar is present, this list comes from the payload snapshot
+    /// sealed during [`TraceDir::open`], not a second directory walk.
     ///
     /// A kernel launch with a missing/empty threadblock dir is a typed
     /// error: every launched kernel has at least one block, so absence
@@ -334,29 +349,64 @@ impl TraceDir {
             .join(format!("device_{}", loc.device_id))
             .join(format!("stream_{}", loc.stream_id))
             .join(format!("kernel_{}", loc.kernel.id));
-        let entries = match fs::read_dir(&dir) {
-            Ok(entries) => entries,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                return Err(TraceError::ThreadblocksMissing { dir });
+        let mut paths = if let Some(snapshot) = &self.sampling_payload {
+            snapshot
+                .by_path
+                .keys()
+                .filter(|path| path.parent() == Some(dir.as_path()))
+                .cloned()
+                .collect()
+        } else {
+            let entries = match fs::read_dir(&dir) {
+                Ok(entries) => entries,
+                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                    return Err(TraceError::ThreadblocksMissing { dir });
+                }
+                Err(source) => return Err(TraceError::Io { path: dir, source }),
+            };
+            let mut paths = Vec::new();
+            for entry in entries {
+                let entry = entry.map_err(|source| TraceError::Io {
+                    path: dir.clone(),
+                    source,
+                })?;
+                let path = entry.path();
+                if path.extension().is_some_and(|ext| ext == "pb") {
+                    let file_type = entry.file_type().map_err(|source| TraceError::Io {
+                        path: path.clone(),
+                        source,
+                    })?;
+                    if !file_type.is_file() {
+                        return Err(TraceError::ThreadblockPayloadNotRegular { path });
+                    }
+                    paths.push(path);
+                }
             }
-            Err(source) => return Err(TraceError::Io { path: dir, source }),
+            paths
         };
-        let mut paths = Vec::new();
-        for entry in entries {
-            let entry = entry.map_err(|source| TraceError::Io {
-                path: dir.clone(),
-                source,
-            })?;
-            let p = entry.path();
-            if p.extension().is_some_and(|ext| ext == "pb") {
-                paths.push(p);
-            }
-        }
         if paths.is_empty() {
             return Err(TraceError::ThreadblocksMissing { dir });
         }
         paths.sort();
         Ok(paths)
+    }
+
+    /// Decode one threadblock path owned by this trace directory. Sidecar-bound
+    /// traces read only the immutable bytes captured and hashed by
+    /// [`TraceDir::open`]; paths outside that snapshot fail closed. Traces without
+    /// a sampling sidecar retain the ordinary filesystem reader.
+    pub fn read_threadblock(&self, path: &Path) -> Result<pb::Threadblock, TraceError> {
+        match &self.sampling_payload {
+            Some(snapshot) => {
+                let raw = snapshot.by_path.get(path).ok_or_else(|| {
+                    TraceError::SamplingPayloadSnapshotMissing {
+                        path: path.to_path_buf(),
+                    }
+                })?;
+                decode_threadblock(raw, path)
+            }
+            None => read_threadblock(path),
+        }
     }
 
     /// Read every threadblock of one kernel launch, keyed and sorted by the
@@ -367,14 +417,16 @@ impl TraceDir {
     ///
     /// Loads the whole kernel's blocks into memory (fine for the current
     /// roster; a streaming variant can land with the SM scheduler when
-    /// needed).
+    /// needed). Sidecar-bound traces decode the immutable byte snapshot captured
+    /// and hashed by [`TraceDir::open`], so later path replacement cannot change
+    /// replay under already-issued provenance.
     pub fn read_threadblocks_in_launch_order(
         &self,
         loc: &KernelLoc<'_>,
     ) -> Result<Vec<(i64, pb::Threadblock)>, TraceError> {
         let mut blocks = Vec::new();
         for path in self.threadblock_paths(loc)? {
-            let tb = read_threadblock(&path)?;
+            let tb = self.read_threadblock(&path)?;
             let index = block_launch_index(loc.kernel, &tb, &path)?;
             // Reader-side allocation-identity gate (address-carrying contract): a GLOBAL/GENERIC-
             // space active record must carry a resolvable, in-range allocation
@@ -427,23 +479,144 @@ pub fn kernel_grid(kernel: &pb::Kernel) -> Result<(u32, u32, u32), TraceError> {
     Ok((g.x as u32, g.y as u32, g.z as u32))
 }
 
-/// Reader-side view of a `<root>/trace_sampling.json` sidecar.  Rust does not
-/// duplicate the full Python JSON Schema, but it does require the versioned,
-/// sealed fixed-point envelope before an incomplete trace can be sanctioned.
-#[derive(Debug, Clone)]
+/// Method-specific provenance retained from a supported v2 sampling sidecar.
+/// Unsupported schema methods never construct this enum.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TraceSamplingMethod {
+    /// Sealed lossless-compression provenance. Replay must independently observe
+    /// full launch coverage; this variant never sanctions incompleteness.
+    LosslessCompressedFull(LosslessFullProvenance),
+    /// A deeply validated fixed-point subset envelope. The selected membership
+    /// and seals remain bound as one variant instead of a boolean plus optional
+    /// fields that callers could combine inconsistently.
+    WaveSegmentStratifiedSubset(WaveSegmentSubsetProvenance),
+}
+
+impl TraceSamplingMethod {
+    pub fn selected_block_ids(&self) -> Option<&BTreeSet<i64>> {
+        match self {
+            Self::LosslessCompressedFull(_) => None,
+            Self::WaveSegmentStratifiedSubset(provenance) => Some(&provenance.selected_block_ids),
+        }
+    }
+
+    pub fn sanctions_incomplete(&self) -> bool {
+        matches!(self, Self::WaveSegmentStratifiedSubset(_))
+    }
+}
+
+/// Hash identity retained from a sealed lossless-compression sidecar. This
+/// declaration remains distinct from the launch-bound full-coverage witness
+/// that replay establishes from the decoded block roster.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LosslessFullProvenance {
+    selected_block_ids_sha256: String,
+    sidecar_sha256: String,
+}
+
+impl LosslessFullProvenance {
+    pub fn selected_block_ids_sha256(&self) -> &str {
+        &self.selected_block_ids_sha256
+    }
+
+    pub fn sidecar_sha256(&self) -> &str {
+        &self.sidecar_sha256
+    }
+}
+
+/// Identity retained from a Python-canonical, deeply validated subset sidecar.
+/// Payload bytes are additionally verified by [`TraceDir::open`] before callers
+/// can obtain this provenance through [`TraceDir::sampling_sidecar`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WaveSegmentSubsetProvenance {
+    selected_block_ids: BTreeSet<i64>,
+    selected_block_ids_sha256: String,
+    sidecar_sha256: String,
+}
+
+impl WaveSegmentSubsetProvenance {
+    pub fn selected_block_ids(&self) -> &BTreeSet<i64> {
+        &self.selected_block_ids
+    }
+
+    pub fn selected_block_ids_sha256(&self) -> &str {
+        &self.selected_block_ids_sha256
+    }
+
+    pub fn sidecar_sha256(&self) -> &str {
+        &self.sidecar_sha256
+    }
+}
+
+/// Reader-side view of a supported `<root>/trace_sampling.json` v2 sidecar.
+/// Fields are private so method-specific invariants can only be constructed by
+/// the closed parser. A sealed lossless declaration is not itself a
+/// full-coverage witness. Launch-bound full versus sampled coverage is
+/// established later by replay after observing block membership and record counts.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TraceSamplingSidecar {
-    pub kernel_mangled_name: String,
-    pub original_grid: (u32, u32, u32),
-    pub original_block: (u32, u32, u32),
-    pub captured_records: u64,
-    pub decompressed_payload_sha256: String,
-    pub raw_payload_bytes: u64,
-    /// Only the fixed-point subset method may sanction incomplete coverage.
-    pub sanctions_incomplete: bool,
-    /// Membership reconstructed from the sealed `segments` list.  Replay must
-    /// compare this with the threadblocks it actually decoded before honoring
-    /// an incomplete-coverage sanction.
-    pub selected_block_ids: Option<BTreeSet<i64>>,
+    cell_id: String,
+    kernel_mangled_name: String,
+    kernel_args_hash: String,
+    original_grid: (u32, u32, u32),
+    original_block: (u32, u32, u32),
+    captured_grid: (u32, u32, u32),
+    captured_block: (u32, u32, u32),
+    expected_full_records: u64,
+    captured_records: u64,
+    decompressed_payload_sha256: String,
+    raw_payload_bytes: u64,
+    method: TraceSamplingMethod,
+}
+
+impl TraceSamplingSidecar {
+    pub fn cell_id(&self) -> &str {
+        &self.cell_id
+    }
+
+    pub fn kernel_mangled_name(&self) -> &str {
+        &self.kernel_mangled_name
+    }
+
+    pub fn kernel_args_hash(&self) -> &str {
+        &self.kernel_args_hash
+    }
+
+    pub fn original_grid(&self) -> (u32, u32, u32) {
+        self.original_grid
+    }
+
+    pub fn original_block(&self) -> (u32, u32, u32) {
+        self.original_block
+    }
+
+    pub fn captured_grid(&self) -> (u32, u32, u32) {
+        self.captured_grid
+    }
+
+    pub fn captured_block(&self) -> (u32, u32, u32) {
+        self.captured_block
+    }
+
+    pub fn expected_full_records(&self) -> u64 {
+        self.expected_full_records
+    }
+
+    pub fn captured_records(&self) -> u64 {
+        self.captured_records
+    }
+
+    pub fn decompressed_payload_sha256(&self) -> &str {
+        &self.decompressed_payload_sha256
+    }
+
+    pub fn raw_payload_bytes(&self) -> u64 {
+        self.raw_payload_bytes
+    }
+
+    pub fn method(&self) -> &TraceSamplingMethod {
+        &self.method
+    }
 }
 
 fn is_lower_hex_sha256(value: &str) -> bool {
@@ -942,6 +1115,413 @@ fn close_enough(left: f64, right: f64) -> bool {
     left.is_finite()
         && right.is_finite()
         && (left - right).abs() <= 1e-12_f64.max(1e-12 * left.abs().max(right.abs()))
+}
+
+fn validate_lossless_producer_contract(
+    root: &serde_json::Map<String, serde_json::Value>,
+    original_grid: (u32, u32, u32),
+    original_block: (u32, u32, u32),
+    captured_grid: (u32, u32, u32),
+    captured_block: (u32, u32, u32),
+    selected_block_ids_sha256: &str,
+) -> Result<u64, String> {
+    const LOSSLESS_FIELDS: &[&str] = &[
+        "schema_version",
+        "cell_id",
+        "kernel",
+        "method",
+        "reason",
+        "shape",
+        "gates",
+        "wave_model",
+        "per_sm_slot_map",
+        "rng",
+        "label_pairing",
+        "tracer",
+        "bytes",
+        "records",
+        "hashes",
+    ];
+    exact_keys(
+        root,
+        LOSSLESS_FIELDS,
+        LOSSLESS_FIELDS,
+        "lossless compressed sidecar",
+    )?;
+
+    let reason = string(
+        required(root, "reason", "lossless compressed sidecar")?,
+        "reason",
+    )?;
+    if ![
+        "byte_budget",
+        "walltime_budget",
+        "gate_forced",
+        "not_breaching",
+    ]
+    .contains(&reason)
+    {
+        return Err("reason is not a schema-v2 value".to_string());
+    }
+    if original_grid != captured_grid || original_block != captured_block {
+        return Err("lossless compression cannot rewrite the captured launch shape".to_string());
+    }
+    let shape = object(
+        required(root, "shape", "lossless compressed sidecar")?,
+        "shape",
+    )?;
+    if !shape
+        .get("reduced_shape_variant")
+        .is_some_and(serde_json::Value::is_null)
+    {
+        return Err("lossless compression requires reduced_shape_variant=null".to_string());
+    }
+    if string(
+        required(root, "label_pairing", "lossless compressed sidecar")?,
+        "label_pairing",
+    )? != "full_shape_label"
+    {
+        return Err("lossless compression requires full_shape_label pairing".to_string());
+    }
+
+    let gates = object(
+        required(root, "gates", "lossless compressed sidecar")?,
+        "gates",
+    )?;
+    const GATE_FIELDS: &[&str] = &[
+        "coop",
+        "wave_count",
+        "n_measured_waves",
+        "tail_measured_waves",
+        "atomic_density",
+        "hotline_share",
+        "skew_top1pct_share",
+        "gini",
+        "per_sm_block_count_cv",
+        "n_phases",
+        "skew_heavy_block_count",
+        "certainty_bytes",
+        "max_trace_bytes",
+        "certainty_budget_exceeded",
+        "verdict",
+    ];
+    exact_keys(gates, GATE_FIELDS, GATE_FIELDS, "gates")?;
+    boolean(required(gates, "coop", "gates")?, "gates.coop")?;
+    let gate_wave_count = unsigned(required(gates, "wave_count", "gates")?, "gates.wave_count")?;
+    let gate_measured = unsigned(
+        required(gates, "n_measured_waves", "gates")?,
+        "gates.n_measured_waves",
+    )?;
+    let gate_tail_measured = unsigned(
+        required(gates, "tail_measured_waves", "gates")?,
+        "gates.tail_measured_waves",
+    )?;
+    for field in [
+        "atomic_density",
+        "hotline_share",
+        "skew_top1pct_share",
+        "gini",
+        "per_sm_block_count_cv",
+    ] {
+        nonnegative_number(required(gates, field, "gates")?, &format!("gates.{field}"))?;
+    }
+    positive(required(gates, "n_phases", "gates")?, "gates.n_phases")?;
+    unsigned(
+        required(gates, "skew_heavy_block_count", "gates")?,
+        "gates.skew_heavy_block_count",
+    )?;
+    let certainty_bytes = match required(gates, "certainty_bytes", "gates")? {
+        serde_json::Value::Null => None,
+        value => Some(unsigned(value, "gates.certainty_bytes")?),
+    };
+    let max_trace_bytes = match required(gates, "max_trace_bytes", "gates")? {
+        serde_json::Value::Null => None,
+        value => Some(positive(value, "gates.max_trace_bytes")?),
+    };
+    let budget_exceeded = boolean(
+        required(gates, "certainty_budget_exceeded", "gates")?,
+        "gates.certainty_budget_exceeded",
+    )?;
+    match certainty_bytes {
+        Some(certainty) => {
+            let maximum = max_trace_bytes.ok_or_else(|| {
+                "gates.certainty_bytes requires gates.max_trace_bytes".to_string()
+            })?;
+            let expected = 5_u128 * u128::from(certainty) > 2_u128 * u128::from(maximum);
+            if budget_exceeded != expected {
+                return Err(
+                    "gates.certainty_budget_exceeded disagrees with the exact 2/5 rule".to_string(),
+                );
+            }
+        }
+        None if budget_exceeded => {
+            return Err(
+                "gates.certainty_budget_exceeded cannot be true without byte evidence".to_string(),
+            );
+        }
+        None => {}
+    }
+    let verdict = string(required(gates, "verdict", "gates")?, "gates.verdict")?;
+    if ![
+        "subset_admissible",
+        "coop_forbid",
+        "wave_forbid",
+        "tail_measurement_forbid",
+        "atomic_forbid",
+        "skew_to_reduced_shape",
+        "certainty_budget_to_reduced_shape",
+        "homogeneity_to_reduced_shape",
+    ]
+    .contains(&verdict)
+    {
+        return Err("gates.verdict is not a schema-v2 value".to_string());
+    }
+
+    let tracer = object(
+        required(root, "tracer", "lossless compressed sidecar")?,
+        "tracer",
+    )?;
+    exact_keys(
+        tracer,
+        &["version", "features", "stats_pass_version"],
+        &["version", "features", "stats_pass_version"],
+        "tracer",
+    )?;
+    positive(required(tracer, "version", "tracer")?, "tracer.version")?;
+    positive(
+        required(tracer, "stats_pass_version", "tracer")?,
+        "tracer.stats_pass_version",
+    )?;
+    let features = object(required(tracer, "features", "tracer")?, "tracer.features")?;
+    exact_keys(
+        features,
+        &["atomic_addr", "ldgsts_addr"],
+        &["atomic_addr", "ldgsts_addr"],
+        "tracer.features",
+    )?;
+    boolean(
+        required(features, "atomic_addr", "tracer.features")?,
+        "tracer.features.atomic_addr",
+    )?;
+    boolean(
+        required(features, "ldgsts_addr", "tracer.features")?,
+        "tracer.features.ldgsts_addr",
+    )?;
+
+    let rng = object(required(root, "rng", "lossless compressed sidecar")?, "rng")?;
+    exact_keys(rng, &["algo", "seed"], &["algo", "seed"], "rng")?;
+    string(required(rng, "algo", "rng")?, "rng.algo")?;
+    if required(rng, "seed", "rng")?.as_i64().is_none() {
+        return Err("rng.seed must be an integer".to_string());
+    }
+
+    let bytes = object(
+        required(root, "bytes", "lossless compressed sidecar")?,
+        "bytes",
+    )?;
+    const BYTE_FIELDS: &[&str] = &["raw", "compressed", "codec", "level", "long", "dict_id"];
+    exact_keys(bytes, &["raw", "compressed", "codec"], BYTE_FIELDS, "bytes")?;
+    let raw_bytes = unsigned(required(bytes, "raw", "bytes")?, "bytes.raw")?;
+    unsigned(required(bytes, "compressed", "bytes")?, "bytes.compressed")?;
+    string(required(bytes, "codec", "bytes")?, "bytes.codec")?;
+    for field in ["level", "long"] {
+        if bytes
+            .get(field)
+            .is_some_and(|value| value.as_i64().is_none() && value.as_u64().is_none())
+        {
+            return Err(format!("bytes.{field} must be an integer"));
+        }
+    }
+    if bytes.get("dict_id").is_some_and(|value| {
+        !value.is_null() && value.as_i64().is_none() && value.as_u64().is_none()
+    }) {
+        return Err("bytes.dict_id must be an integer or null".to_string());
+    }
+
+    let wave = object(
+        required(root, "wave_model", "lossless compressed sidecar")?,
+        "wave_model",
+    )?;
+    const WAVE_FIELDS: &[&str] = &[
+        "reconstruction",
+        "per_sm_resident_blocks",
+        "n_waves",
+        "segment_len",
+        "ghost_depth",
+    ];
+    exact_keys(wave, WAVE_FIELDS, WAVE_FIELDS, "wave_model")?;
+    if string(
+        required(wave, "reconstruction", "wave_model")?,
+        "wave_model.reconstruction",
+    )? != "launch_index"
+    {
+        return Err("wave_model.reconstruction must be launch_index".to_string());
+    }
+    let declared_n_waves = unsigned(
+        required(wave, "n_waves", "wave_model")?,
+        "wave_model.n_waves",
+    )?;
+    let segment_len = positive(
+        required(wave, "segment_len", "wave_model")?,
+        "wave_model.segment_len",
+    )?;
+    let ghost_depth = unsigned(
+        required(wave, "ghost_depth", "wave_model")?,
+        "wave_model.ghost_depth",
+    )?;
+    let residency_values = required(wave, "per_sm_resident_blocks", "wave_model")?
+        .as_array()
+        .filter(|values| !values.is_empty())
+        .ok_or_else(|| "wave_model.per_sm_resident_blocks must be a nonempty array".to_string())?;
+    let mut resident_by_sm = BTreeMap::new();
+    for (index, value) in residency_values.iter().enumerate() {
+        let context = format!("wave_model.per_sm_resident_blocks[{index}]");
+        let row = object(value, &context)?;
+        exact_keys(
+            row,
+            &["sm_id", "resident_blocks"],
+            &["sm_id", "resident_blocks"],
+            &context,
+        )?;
+        let sm = unsigned(
+            required(row, "sm_id", &context)?,
+            &format!("{context}.sm_id"),
+        )?;
+        let resident = positive(
+            required(row, "resident_blocks", &context)?,
+            &format!("{context}.resident_blocks"),
+        )?;
+        if resident_by_sm.insert(sm, resident).is_some() {
+            return Err(format!("duplicate resident-block entry for sm {sm}"));
+        }
+    }
+
+    let slot_values = required(root, "per_sm_slot_map", "lossless compressed sidecar")?
+        .as_array()
+        .filter(|values| !values.is_empty())
+        .ok_or_else(|| "per_sm_slot_map must be a nonempty array".to_string())?;
+    let mut roster_by_sm: BTreeMap<u64, Vec<u64>> = BTreeMap::new();
+    let mut roster = BTreeSet::new();
+    for (index, value) in slot_values.iter().enumerate() {
+        let context = format!("per_sm_slot_map[{index}]");
+        let row = object(value, &context)?;
+        exact_keys(
+            row,
+            &["sm_id", "block_ids"],
+            &["sm_id", "block_ids"],
+            &context,
+        )?;
+        let sm = unsigned(
+            required(row, "sm_id", &context)?,
+            &format!("{context}.sm_id"),
+        )?;
+        let values = required(row, "block_ids", &context)?
+            .as_array()
+            .filter(|values| !values.is_empty())
+            .ok_or_else(|| format!("{context}.block_ids must be a nonempty array"))?;
+        let mut block_ids = Vec::with_capacity(values.len());
+        for value in values {
+            let block = unsigned(value, &format!("{context}.block_ids entry"))?;
+            if block > i64::MAX as u64 {
+                return Err(format!(
+                    "lossless block id {block} exceeds the replay index range"
+                ));
+            }
+            if block_ids.last().is_some_and(|previous| *previous >= block) {
+                return Err(format!(
+                    "{context}.block_ids must be strictly launch-index sorted"
+                ));
+            }
+            if !roster.insert(block) {
+                return Err(format!(
+                    "block {block} occurs more than once in per_sm_slot_map"
+                ));
+            }
+            block_ids.push(block);
+        }
+        if roster_by_sm.insert(sm, block_ids).is_some() {
+            return Err(format!("duplicate per_sm_slot_map entry for sm {sm}"));
+        }
+    }
+    if resident_by_sm.keys().ne(roster_by_sm.keys()) {
+        return Err("resident-block SM keys must exactly equal per_sm_slot_map keys".to_string());
+    }
+    let grid_total = u64::from(original_grid.0)
+        .checked_mul(u64::from(original_grid.1))
+        .and_then(|value| value.checked_mul(u64::from(original_grid.2)))
+        .ok_or_else(|| "original grid size overflows u64".to_string())?;
+    let roster_len = u64::try_from(roster.len())
+        .map_err(|_| "lossless block roster cardinality exceeds u64".to_string())?;
+    if roster_len != grid_total || roster.iter().copied().ne(0..grid_total) {
+        return Err("per_sm_slot_map must exhaust launch indices 0..original_grid".to_string());
+    }
+    let reconstructed_n_waves = roster_by_sm
+        .iter()
+        .map(|(sm, blocks)| {
+            u64::try_from(blocks.len())
+                .map(|count| count.div_ceil(resident_by_sm[sm]))
+                .map_err(|_| "per-SM block roster cardinality exceeds u64".to_string())
+        })
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .max()
+        .unwrap_or(0);
+    if reconstructed_n_waves != declared_n_waves || gate_wave_count != declared_n_waves {
+        return Err("wave count disagrees with reconstructed per-SM cohorts".to_string());
+    }
+    let complete_waves = roster_by_sm
+        .iter()
+        .map(|(sm, blocks)| {
+            u64::try_from(blocks.len())
+                .map(|count| count / resident_by_sm[sm])
+                .map_err(|_| "per-SM block roster cardinality exceeds u64".to_string())
+        })
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .min()
+        .unwrap_or(0);
+    let complete_cutoff = (complete_waves / segment_len) * segment_len;
+    let residual_tail = reconstructed_n_waves > complete_cutoff;
+    let tail_wave_count = if residual_tail {
+        reconstructed_n_waves - complete_cutoff
+    } else {
+        segment_len.min(complete_cutoff)
+    };
+    let expected_tail_measured = tail_wave_count.saturating_sub(ghost_depth);
+    let segment_count = (complete_cutoff / segment_len)
+        .checked_add(u64::from(residual_tail))
+        .ok_or_else(|| "lossless segment count overflows u64".to_string())?;
+    let ghost_waves = ghost_depth
+        .checked_mul(segment_count)
+        .ok_or_else(|| "lossless ghost-wave accounting overflows u64".to_string())?;
+    let expected_measured = reconstructed_n_waves.saturating_sub(ghost_waves);
+    if gate_tail_measured != expected_tail_measured || gate_measured != expected_measured {
+        return Err("measured-wave gates disagree with reconstructed ghost accounting".to_string());
+    }
+
+    let sorted_blocks: Vec<u64> = roster.into_iter().collect();
+    let block_json = serde_json::to_string(&sorted_blocks)
+        .map_err(|error| format!("could not canonicalize lossless block ids: {error}"))?;
+    if selected_block_ids_sha256 != sha256_hex(block_json.as_bytes()) {
+        return Err("selected_block_ids_sha256 does not match the full launch roster".to_string());
+    }
+
+    let records = object(
+        required(root, "records", "lossless compressed sidecar")?,
+        "records",
+    )?;
+    let expected_records = unsigned(
+        required(records, "expected_full", "records")?,
+        "records.expected_full",
+    )?;
+    let captured_records = unsigned(
+        required(records, "captured", "records")?,
+        "records.captured",
+    )?;
+    if captured_records > expected_records {
+        return Err("records.captured cannot exceed records.expected_full".to_string());
+    }
+    Ok(raw_bytes)
 }
 
 fn validate_subset_producer_contract(
@@ -1595,17 +2175,20 @@ fn collect_threadblock_pb_paths(dir: &Path, paths: &mut Vec<PathBuf>) -> Result<
         })?;
         if file_type.is_dir() {
             collect_threadblock_pb_paths(&path, paths)?;
-        } else if file_type.is_file() && path.extension().is_some_and(|suffix| suffix == "pb") {
+        } else if path.extension().is_some_and(|suffix| suffix == "pb") {
+            if !file_type.is_file() {
+                return Err(TraceError::ThreadblockPayloadNotRegular { path });
+            }
             paths.push(path);
         }
     }
     Ok(())
 }
 
-fn verify_sampling_payload(root: &Path, sidecar: &TraceSamplingSidecar) -> Result<(), TraceError> {
-    if !sidecar.sanctions_incomplete {
-        return Ok(());
-    }
+fn verify_sampling_payload(
+    root: &Path,
+    sidecar: &TraceSamplingSidecar,
+) -> Result<VerifiedSamplingPayload, TraceError> {
     let mut paths = Vec::new();
     collect_threadblock_pb_paths(&root.join("threadblocks"), &mut paths)?;
     paths.sort();
@@ -1614,17 +2197,30 @@ fn verify_sampling_payload(root: &Path, sidecar: &TraceSamplingSidecar) -> Resul
         path: sidecar_path.clone(),
         message,
     };
+    if paths.is_empty() {
+        return Err(malformed(
+            "threadblock payload snapshot contains no regular .pb files".to_string(),
+        ));
+    }
     let mut actual_bytes = 0_u64;
-    for path in &paths {
-        let size = fs::metadata(path)
-            .map_err(|source| TraceError::Io {
-                path: path.clone(),
-                source,
-            })?
-            .len();
+    let mut digest = Sha256::new();
+    let mut by_path = BTreeMap::new();
+    for path in paths {
+        let raw = fs::read(&path).map_err(|source| TraceError::Io {
+            path: path.clone(),
+            source,
+        })?;
+        let size = u64::try_from(raw.len()).map_err(|_| {
+            malformed(format!(
+                "threadblock payload {} length exceeds u64",
+                path.display()
+            ))
+        })?;
         actual_bytes = actual_bytes
             .checked_add(size)
             .ok_or_else(|| malformed("threadblock payload byte count overflows u64".to_string()))?;
+        digest.update(&raw);
+        by_path.insert(path, raw);
     }
     if actual_bytes != sidecar.raw_payload_bytes {
         return Err(malformed(format!(
@@ -1632,28 +2228,21 @@ fn verify_sampling_payload(root: &Path, sidecar: &TraceSamplingSidecar) -> Resul
             sidecar.raw_payload_bytes
         )));
     }
-    let mut digest = Sha256::new();
-    for path in &paths {
-        let raw = fs::read(path).map_err(|source| TraceError::Io {
-            path: path.clone(),
-            source,
-        })?;
-        digest.update(&raw);
-    }
     let actual_hash = digest.finish();
     if actual_hash != sidecar.decompressed_payload_sha256 {
         return Err(malformed(format!(
             "decompressed_payload_sha256 does not match sorted threadblock bytes (actual {actual_hash})"
         )));
     }
-    Ok(())
+    Ok(VerifiedSamplingPayload { by_path })
 }
 
 impl TraceSamplingSidecar {
-    /// Load `<root>/trace_sampling.json` if present (`Ok(None)` if absent).
-    /// A lossless-full provenance sidecar may be colocated with decompressed
-    /// blocks, but only a fixed-point subset envelope sanctions incompleteness.
-    pub fn load(root: &Path) -> Result<Option<Self>, TraceError> {
+    /// Parse `<root>/trace_sampling.json` if present (`Ok(None)` if absent).
+    /// This internal stage validates and retains the JSON envelope; callers only
+    /// receive it through [`TraceDir::sampling_sidecar`] after `TraceDir::open`
+    /// has also bound the decompressed threadblock bytes.
+    fn load(root: &Path) -> Result<Option<Self>, TraceError> {
         let path = root.join("trace_sampling.json");
         let raw = match fs::read_to_string(&path) {
             Ok(s) => s,
@@ -1730,8 +2319,8 @@ impl TraceSamplingSidecar {
         let cell_id = get!(root, "cell_id", "trace_sampling.json root")
             .as_str()
             .filter(|value| !value.is_empty())
-            .ok_or_else(|| malformed("cell_id must be a non-empty string".to_string()))?;
-        let _ = cell_id;
+            .ok_or_else(|| malformed("cell_id must be a non-empty string".to_string()))?
+            .to_string();
         let kernel = object(get!(root, "kernel", "trace_sampling.json root"), "kernel")
             .map_err(&malformed)?;
         exact_keys(
@@ -1746,10 +2335,11 @@ impl TraceSamplingSidecar {
             .filter(|value| !value.is_empty())
             .ok_or_else(|| malformed("kernel.mangled_name must be nonempty".to_string()))?
             .to_string();
-        get!(kernel, "args_hash", "kernel")
+        let kernel_args_hash = get!(kernel, "args_hash", "kernel")
             .as_str()
             .filter(|value| !value.is_empty())
-            .ok_or_else(|| malformed("kernel.args_hash must be nonempty".to_string()))?;
+            .ok_or_else(|| malformed("kernel.args_hash must be nonempty".to_string()))?
+            .to_string();
         get!(root, "reason", "trace_sampling.json root")
             .as_str()
             .ok_or_else(|| malformed("reason must be a string".to_string()))?;
@@ -1802,7 +2392,7 @@ impl TraceSamplingSidecar {
             "records",
         )
         .map_err(&malformed)?;
-        get!(records, "expected_full", "records")
+        let expected_full_records = get!(records, "expected_full", "records")
             .as_u64()
             .ok_or_else(|| malformed("records.expected_full must be a u64".to_string()))?;
         let captured_records = get!(records, "captured", "records")
@@ -1841,12 +2431,20 @@ impl TraceSamplingSidecar {
                 )));
             }
         }
+        let selected_block_ids_sha256 = get!(hashes, "selected_block_ids_sha256", "hashes")
+            .as_str()
+            .expect("hash string validated above")
+            .to_string();
         let decompressed_payload_sha256 = get!(hashes, "decompressed_payload_sha256", "hashes")
             .as_str()
             .expect("hash string validated above")
             .to_string();
+        let sidecar_sha256 = get!(hashes, "sidecar_sha256", "hashes")
+            .as_str()
+            .expect("hash string validated above")
+            .to_string();
 
-        let (sanctions_incomplete, selected_block_ids, raw_payload_bytes) = match method {
+        let (method, raw_payload_bytes) = match method {
             "wave_segment_stratified_subset" => {
                 const SUBSET_REQUIRED: &[&str] = &[
                     "wave_model",
@@ -2011,27 +2609,24 @@ impl TraceSamplingSidecar {
                     ))
                 })?;
                 let expected_block_hash = sha256_hex(block_json.as_bytes());
-                let claimed_block_hash = get!(hashes, "selected_block_ids_sha256", "hashes")
-                    .as_str()
-                    .expect("hash string validated above");
-                if claimed_block_hash != expected_block_hash {
+                if selected_block_ids_sha256 != expected_block_hash {
                     return Err(malformed(
                         "selected_block_ids_sha256 does not match segment membership".to_string(),
                     ));
                 }
 
                 let expected_seal = canonical_sidecar_sha256(&parsed).map_err(&malformed)?;
-                let claimed_seal = get!(hashes, "sidecar_sha256", "hashes")
-                    .as_str()
-                    .expect("hash string validated above");
-                if claimed_seal != expected_seal {
+                if sidecar_sha256 != expected_seal {
                     return Err(malformed(
                         "hashes.sidecar_sha256 does not match Python-canonical sidecar".to_string(),
                     ));
                 }
                 (
-                    true,
-                    Some(blocks.into_iter().map(|value| value as i64).collect()),
+                    TraceSamplingMethod::WaveSegmentStratifiedSubset(WaveSegmentSubsetProvenance {
+                        selected_block_ids: blocks.into_iter().map(|value| value as i64).collect(),
+                        selected_block_ids_sha256,
+                        sidecar_sha256,
+                    }),
                     unsigned(
                         required(
                             object(get!(root, "bytes", "sampled subset"), "bytes")
@@ -2045,17 +2640,31 @@ impl TraceSamplingSidecar {
                     .map_err(&malformed)?,
                 )
             }
-            // A decompressed lossless-full artifact may retain its provenance
-            // sidecar, but that sidecar must never waive full-grid coverage.
+            // A lossless-compression declaration is sealed and payload-bound,
+            // but replay must still observe complete launch coverage itself.
             "lossless_compressed_full" => {
-                let bytes = object(get!(root, "bytes", "lossless compressed sidecar"), "bytes")
-                    .map_err(&malformed)?;
-                let raw = unsigned(
-                    required(bytes, "raw", "bytes").map_err(&malformed)?,
-                    "bytes.raw",
+                let raw = validate_lossless_producer_contract(
+                    root,
+                    original_grid,
+                    original_block,
+                    captured_grid,
+                    captured_block,
+                    &selected_block_ids_sha256,
                 )
                 .map_err(&malformed)?;
-                (false, None, raw)
+                let expected_seal = canonical_sidecar_sha256(&parsed).map_err(&malformed)?;
+                if sidecar_sha256 != expected_seal {
+                    return Err(malformed(
+                        "hashes.sidecar_sha256 does not match Python-canonical sidecar".to_string(),
+                    ));
+                }
+                (
+                    TraceSamplingMethod::LosslessCompressedFull(LosslessFullProvenance {
+                        selected_block_ids_sha256,
+                        sidecar_sha256,
+                    }),
+                    raw,
+                )
             }
             _ => {
                 return Err(malformed(
@@ -2064,14 +2673,18 @@ impl TraceSamplingSidecar {
             }
         };
         Ok(Some(TraceSamplingSidecar {
+            cell_id,
             kernel_mangled_name,
+            kernel_args_hash,
             original_grid,
             original_block,
+            captured_grid,
+            captured_block,
+            expected_full_records,
             captured_records,
             decompressed_payload_sha256,
             raw_payload_bytes,
-            sanctions_incomplete,
-            selected_block_ids,
+            method,
         }))
     }
 }
@@ -2159,16 +2772,20 @@ pub fn block_launch_index(
 }
 
 /// Read one per-threadblock `.pb` file.
-pub fn read_threadblock(path: &Path) -> Result<pb::Threadblock, TraceError> {
-    let raw = fs::read(path).map_err(|source| TraceError::Io {
-        path: path.to_path_buf(),
-        source,
-    })?;
-    pb::Threadblock::decode(raw.as_slice()).map_err(|source| TraceError::Decode {
+fn decode_threadblock(raw: &[u8], path: &Path) -> Result<pb::Threadblock, TraceError> {
+    pb::Threadblock::decode(raw).map_err(|source| TraceError::Decode {
         path: path.to_path_buf(),
         message_type: "dynamic_trace.threadblock",
         source,
     })
+}
+
+fn read_threadblock(path: &Path) -> Result<pb::Threadblock, TraceError> {
+    let raw = fs::read(path).map_err(|source| TraceError::Io {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    decode_threadblock(&raw, path)
 }
 
 /// One wire address record decoded for the memory hierarchy: the
@@ -3736,6 +4353,10 @@ mod sampling_sidecar_tests {
         serde_json::from_str(PYTHON_SEALED_SUBSET).unwrap()
     }
 
+    fn lossless_value() -> serde_json::Value {
+        serde_json::from_str(PYTHON_SEALED_LOSSLESS).unwrap()
+    }
+
     fn reseal(value: &mut serde_json::Value) {
         let seal = canonical_sidecar_sha256(value).unwrap();
         value["hashes"]["sidecar_sha256"] = serde_json::Value::String(seal);
@@ -3771,14 +4392,33 @@ mod sampling_sidecar_tests {
     #[test]
     fn python_sealed_subset_parses_and_reconstructs_membership() {
         let sc = load_json(PYTHON_SEALED_SUBSET).unwrap();
-        assert_eq!(sc.original_grid, (60, 1, 1));
-        assert_eq!(sc.captured_records, 12);
-        assert!(sc.sanctions_incomplete);
+        assert_eq!(sc.cell_id(), "c");
+        assert_eq!(sc.kernel_mangled_name(), "_Z1kv");
+        assert_eq!(sc.kernel_args_hash(), "ab");
+        assert_eq!(sc.original_grid(), (60, 1, 1));
+        assert_eq!(sc.original_block(), (32, 1, 1));
+        assert_eq!(sc.captured_grid(), (60, 1, 1));
+        assert_eq!(sc.captured_block(), (32, 1, 1));
+        assert_eq!(sc.expected_full_records(), 6000);
+        assert_eq!(sc.captured_records(), 12);
+        assert_eq!(sc.decompressed_payload_sha256(), "a".repeat(64));
+        assert_eq!(sc.raw_payload_bytes(), 1000);
+        let TraceSamplingMethod::WaveSegmentStratifiedSubset(provenance) = sc.method() else {
+            panic!("subset sidecar lost its sampling method");
+        };
         assert_eq!(
-            sc.selected_block_ids.unwrap(),
-            [0, 1, 2, 3, 4, 5, 6, 7, 8, 57, 58, 59]
+            provenance.selected_block_ids(),
+            &[0, 1, 2, 3, 4, 5, 6, 7, 8, 57, 58, 59]
                 .into_iter()
                 .collect()
+        );
+        assert_eq!(
+            provenance.selected_block_ids_sha256(),
+            "84b7ed43903cca6302ed15cf78ff507c45e575f16d7d5c12c975c5727edc37cf"
+        );
+        assert_eq!(
+            provenance.sidecar_sha256(),
+            "761eb2f77da70794ed15e952bbcd58c8824af45b2d5a1c736b3eea9ff2cb2817"
         );
     }
 
@@ -3891,8 +4531,93 @@ mod sampling_sidecar_tests {
     #[test]
     fn lossless_full_sidecar_loads_but_does_not_sanction_sampling() {
         let sc = load_json(PYTHON_SEALED_LOSSLESS).unwrap();
-        assert!(!sc.sanctions_incomplete);
-        assert!(sc.selected_block_ids.is_none());
+        assert_eq!(sc.cell_id(), "c");
+        assert_eq!(sc.kernel_mangled_name(), "_Z1kv");
+        assert_eq!(sc.kernel_args_hash(), "deadbeef");
+        assert_eq!(sc.original_grid(), (60, 1, 1));
+        assert_eq!(sc.original_block(), (32, 1, 1));
+        assert_eq!(sc.captured_grid(), (60, 1, 1));
+        assert_eq!(sc.captured_block(), (32, 1, 1));
+        assert_eq!(sc.expected_full_records(), 6000);
+        assert_eq!(sc.captured_records(), 60);
+        assert_eq!(sc.decompressed_payload_sha256(), "a".repeat(64));
+        assert_eq!(sc.raw_payload_bytes(), 1000);
+        let TraceSamplingMethod::LosslessCompressedFull(provenance) = sc.method() else {
+            panic!("lossless sidecar lost its method-specific provenance");
+        };
+        assert_eq!(
+            provenance.selected_block_ids_sha256(),
+            "3f3ffcf42accae1591be118baf57efb9b8d7c78028dc566674c809f210ad796a"
+        );
+        assert_eq!(
+            provenance.sidecar_sha256(),
+            "657fd9dc2f3f0a826dfb4bb030028ea32d315af1d37b54b4ff8bc9891f54aac8"
+        );
+    }
+
+    #[test]
+    fn lossless_rejects_stale_seal_and_freshly_sealed_wrong_pairing() {
+        let mut stale = lossless_value();
+        stale["records"]["captured"] = serde_json::json!(59);
+        let err = load_json(serde_json::to_vec(&stale).unwrap()).unwrap_err();
+        assert!(err.to_string().contains("sidecar_sha256"));
+
+        let mut wrong_pairing = lossless_value();
+        wrong_pairing["label_pairing"] = serde_json::json!("matched_reduced_shape_label");
+        reseal(&mut wrong_pairing);
+        let err = load_json(serde_json::to_vec(&wrong_pairing).unwrap()).unwrap_err();
+        assert!(err.to_string().contains("full_shape_label"));
+    }
+
+    #[test]
+    fn lossless_rejects_freshly_sealed_malformed_or_unbound_metadata() {
+        let mut cases = Vec::new();
+
+        let mut unknown_bytes = lossless_value();
+        unknown_bytes["bytes"]["surprise"] = serde_json::json!(1);
+        cases.push(unknown_bytes);
+
+        let mut malformed_feature = lossless_value();
+        malformed_feature["tracer"]["features"]["atomic_addr"] = serde_json::json!("yes");
+        cases.push(malformed_feature);
+
+        let mut rewritten_shape = lossless_value();
+        rewritten_shape["shape"]["captured_grid"]["x"] = serde_json::json!(59);
+        cases.push(rewritten_shape);
+
+        let mut wrong_roster_hash = lossless_value();
+        wrong_roster_hash["hashes"]["selected_block_ids_sha256"] =
+            serde_json::Value::String("0".repeat(64));
+        cases.push(wrong_roster_hash);
+
+        for mut case in cases {
+            reseal(&mut case);
+            assert!(matches!(
+                load_json(serde_json::to_vec(&case).unwrap()),
+                Err(TraceError::SamplingSidecarMalformed { .. })
+            ));
+        }
+    }
+
+    #[test]
+    fn lossless_equality_retains_the_exact_sealed_sidecar_identity() {
+        let original = load_json(PYTHON_SEALED_LOSSLESS).unwrap();
+        let mut changed = lossless_value();
+        changed["cell_id"] = serde_json::json!("other-cell");
+        reseal(&mut changed);
+        let changed = load_json(serde_json::to_vec(&changed).unwrap()).unwrap();
+        assert_ne!(original, changed);
+        let (
+            TraceSamplingMethod::LosslessCompressedFull(original_provenance),
+            TraceSamplingMethod::LosslessCompressedFull(changed_provenance),
+        ) = (original.method(), changed.method())
+        else {
+            panic!("lossless method provenance was not retained");
+        };
+        assert_ne!(
+            original_provenance.sidecar_sha256(),
+            changed_provenance.sidecar_sha256()
+        );
     }
 
     #[test]
