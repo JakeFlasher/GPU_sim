@@ -1,7 +1,8 @@
 //! sim-emit: the NCU-metric emission layer (design §6.4).
 //!
-//! Takes a completed kernel replay's counter snapshot and produces a typed
-//! vector of NCU metric PREDICTIONS, one per registry observation contract
+//! Takes checked counters for an exact full-coverage launch set and produces a
+//! launch-set-bound vector of NCU metric PREDICTIONS, one per registry
+//! observation contract
 //! (`tools/local_labels/metric_registry.json`). It is the ONLY sim crate that
 //! names label-pipeline contracts: metric NAMES are the output contract and
 //! are allowed here; label VALUES still never enter (Rule 1, enforced by
@@ -39,38 +40,32 @@
 
 use sim_arch::ArchId;
 use sim_mem::{L1CounterError, L1Counters, L1OriginCounters, L2Counters, MemoryOrigin};
-use sim_sm::{DramStats, FullKernelReplayResult, L2SourceSplit, SystemCounterError};
+use sim_sm::{
+    DramStats, FullCounterEstimatorProvenance, FullLaunchCoverage, FullLaunchSetCounters,
+    L2SourceSplit, LaunchSetScope, ReplayConfiguration, SystemCounterError, TailFlags,
+};
 
-/// The exact counter fields the emission layer reads, borrowed. Decouples
-/// emission from the full [`FullKernelReplayResult`] so a cell's counters — summed
-/// across its kernel launches — can be emitted directly (rates compose from
-/// summed numerators/denominators; they cannot be averaged post-hoc).
+/// The exact counter fields the emission layer reads, borrowed. The type is
+/// private so certified emission cannot be invoked over caller-forged snapshots.
 #[derive(Debug, Clone, Copy)]
-pub struct CounterSnapshot<'a> {
-    /// Deployment architecture proven by replay composition.
-    pub arch: ArchId,
-    /// `smsp__inst_executed.sum` source — total warp-instructions issued.
-    pub instructions_issued: u64,
-    /// L1TEX counters, present iff the replay attached an L1 (not `Flat`).
-    pub l1: Option<&'a L1Counters>,
-    /// L2 counters, present only on the shared-L2 path.
-    pub l2: Option<&'a L2Counters>,
-    /// Joint origin/source attribution for the shared physical L2.
-    pub l2_by_source: Option<&'a L2SourceSplit>,
-    /// DRAM read observer, present only on the shared-L2 path.
-    pub dram: Option<&'a DramStats>,
+struct CounterSnapshot<'a> {
+    arch: ArchId,
+    instructions_issued: u64,
+    l1: Option<&'a L1Counters>,
+    l2: Option<&'a L2Counters>,
+    l2_by_source: Option<&'a L2SourceSplit>,
+    dram: Option<&'a DramStats>,
 }
 
 impl<'a> CounterSnapshot<'a> {
-    /// Borrow the emission-relevant counters out of one completed replay.
-    pub fn from_replay(r: &'a FullKernelReplayResult) -> Self {
+    fn from_launch_set(counters: &'a FullLaunchSetCounters) -> Self {
         Self {
-            arch: r.arch(),
-            instructions_issued: r.instructions_issued(),
-            l1: r.l1(),
-            l2: r.l2(),
-            l2_by_source: r.l2_by_source(),
-            dram: r.dram(),
+            arch: counters.arch(),
+            instructions_issued: counters.instructions_issued(),
+            l1: counters.l1(),
+            l2: counters.l2(),
+            l2_by_source: counters.l2_by_source(),
+            dram: counters.dram(),
         }
     }
 
@@ -253,11 +248,11 @@ pub enum MetricKind {
 /// A hardware counting unit a metric needs to be predictable at all.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MemUnit {
-    /// The L1TEX cache (`FullKernelReplayResult::l1`).
+    /// The L1TEX cache (`FullLaunchSetCounters::l1`).
     L1Tex,
-    /// The L2 slices (`FullKernelReplayResult::l2`).
+    /// The L2 slices (`FullLaunchSetCounters::l2`).
     Lts,
-    /// The DRAM read observer (`FullKernelReplayResult::dram`).
+    /// The DRAM read observer (`FullLaunchSetCounters::dram`).
     Dram,
 }
 
@@ -282,16 +277,88 @@ pub enum EmitOutcome {
 
 /// One emitted metric, carrying its registry key + NCU identifier so the eval
 /// join (downstream, outside `sim/`) can match against frozen labels by key.
-#[derive(Debug, Clone, Copy, PartialEq)]
+/// Values remain borrowed from their [`FullLaunchSetPredictions`] bundle and are
+/// intentionally neither `Clone` nor `Copy`.
+///
+/// ```compile_fail
+/// use sim_emit::MetricPrediction;
+///
+/// fn detach(prediction: &MetricPrediction) -> MetricPrediction {
+///     *prediction
+/// }
+/// ```
+#[derive(Debug, PartialEq)]
 pub struct MetricPrediction {
-    /// Deployment architecture of the replay that produced this outcome.
-    pub arch: ArchId,
-    /// The registry key — the eval JOIN key.
-    pub key: &'static str,
-    /// The NCU metric identifier this predicts.
-    pub ncu_metric: &'static str,
-    pub unit: Unit,
-    pub outcome: EmitOutcome,
+    arch: ArchId,
+    key: &'static str,
+    ncu_metric: &'static str,
+    unit: Unit,
+    outcome: EmitOutcome,
+}
+
+impl MetricPrediction {
+    pub fn arch(&self) -> ArchId {
+        self.arch
+    }
+
+    pub fn key(&self) -> &'static str {
+        self.key
+    }
+
+    pub fn ncu_metric(&self) -> &'static str {
+        self.ncu_metric
+    }
+
+    pub fn unit(&self) -> Unit {
+        self.unit
+    }
+
+    pub fn outcome(&self) -> &EmitOutcome {
+        &self.outcome
+    }
+}
+
+/// Certified predictions for one exact full-coverage launch set. Construction is
+/// private to [`emit_all`], so scope/configuration/coverage cannot be detached
+/// from or relabelled onto an arbitrary metric vector.
+#[derive(Debug)]
+pub struct FullLaunchSetPredictions {
+    scope: LaunchSetScope,
+    configuration: ReplayConfiguration,
+    launch_coverages: Vec<FullLaunchCoverage>,
+    estimator_provenance: FullCounterEstimatorProvenance,
+    unmodeled_tails: TailFlags,
+    metrics: Vec<MetricPrediction>,
+}
+
+impl FullLaunchSetPredictions {
+    pub fn scope(&self) -> &LaunchSetScope {
+        &self.scope
+    }
+
+    pub fn configuration(&self) -> ReplayConfiguration {
+        self.configuration
+    }
+
+    pub fn arch(&self) -> ArchId {
+        self.configuration.arch()
+    }
+
+    pub fn launch_coverages(&self) -> &[FullLaunchCoverage] {
+        &self.launch_coverages
+    }
+
+    pub fn estimator_provenance(&self) -> FullCounterEstimatorProvenance {
+        self.estimator_provenance
+    }
+
+    pub fn unmodeled_tails(&self) -> TailFlags {
+        self.unmodeled_tails
+    }
+
+    pub fn metrics(&self) -> &[MetricPrediction] {
+        &self.metrics
+    }
 }
 
 /// A compiled row of the emission table: the binding from a sim quantity to
@@ -304,7 +371,7 @@ pub struct MetricDescriptor {
     pub kind: MetricKind,
     /// Architectures with reviewed counter semantics for this descriptor.
     pub available_on: &'static [ArchId],
-    pub emit: fn(&CounterSnapshot) -> Result<EmitOutcome, EmitError>,
+    emit: fn(&CounterSnapshot) -> Result<EmitOutcome, EmitError>,
 }
 
 /// Fail-closed emission faults. Benign "this run's mem-mode lacks the unit" is
@@ -576,10 +643,7 @@ fn shape_matches(kind: MetricKind, value: &MetricValue) -> bool {
     )
 }
 
-/// Emit every descriptor over one completed replay, in registry-table order.
-/// Genuine faults (a rate above unity, a broken subset invariant) return
-/// [`EmitError`]; benign missing-unit cases ride the [`Unavailable`] arm.
-pub fn emit_all(snap: &CounterSnapshot) -> Result<Vec<MetricPrediction>, EmitError> {
+fn emit_snapshot(snap: &CounterSnapshot) -> Result<Vec<MetricPrediction>, EmitError> {
     snap.validate_provenance()?;
     let mut out = Vec::with_capacity(DESCRIPTORS.len());
     for d in DESCRIPTORS {
@@ -606,11 +670,53 @@ pub fn emit_all(snap: &CounterSnapshot) -> Result<Vec<MetricPrediction>, EmitErr
     Ok(out)
 }
 
-/// A by-key view of a prediction vector for the eval join.
-pub fn index_by_key(
-    preds: &[MetricPrediction],
+/// Emit every descriptor from one checked, exact full-coverage launch-set
+/// aggregate, in registry-table order. No sampled observation or caller-built
+/// counter snapshot can enter this boundary.
+///
+/// ```compile_fail
+/// use sim_emit::emit_all;
+/// use sim_sm::SampledKernelReplayResult;
+///
+/// fn reject_sampled(sampled: &SampledKernelReplayResult) {
+///     let _ = emit_all(sampled);
+/// }
+/// ```
+pub fn emit_all(counters: &FullLaunchSetCounters) -> Result<FullLaunchSetPredictions, EmitError> {
+    let metrics = emit_snapshot(&CounterSnapshot::from_launch_set(counters))?;
+    Ok(FullLaunchSetPredictions {
+        scope: counters.scope().clone(),
+        configuration: counters.configuration(),
+        launch_coverages: counters.launch_coverages().to_vec(),
+        estimator_provenance: counters.estimator_provenance(),
+        unmodeled_tails: counters.unmodeled_tails(),
+        metrics,
+    })
+}
+
+fn index_metrics_by_key(
+    metrics: &[MetricPrediction],
 ) -> std::collections::BTreeMap<&'static str, &MetricPrediction> {
-    preds.iter().map(|p| (p.key, p)).collect()
+    metrics
+        .iter()
+        .map(|prediction| (prediction.key, prediction))
+        .collect()
+}
+
+/// A by-key view that remains borrowed from its certified launch-set bundle.
+/// Raw metric slices are deliberately rejected:
+///
+/// ```compile_fail
+/// use sim_emit::{MetricPrediction, index_by_key};
+///
+/// fn reject_detached(metrics: &[MetricPrediction]) {
+///     let _ = index_by_key(metrics);
+/// }
+/// ```
+pub fn index_by_key(
+    predictions: &FullLaunchSetPredictions,
+) -> std::collections::BTreeMap<&'static str, &MetricPrediction> {
+    index_metrics_by_key(predictions.metrics())
 }
 
 #[cfg(test)]
@@ -637,7 +743,7 @@ mod tests {
     ) -> Result<Vec<MetricPrediction>, EmitError> {
         let l1 = l1.map(|counters| counters.with_unified_origin(MemoryOrigin::Global));
         let dram = dram.map(|stats| stats.with_unified_origin(MemoryOrigin::Global));
-        emit_all(&CounterSnapshot {
+        emit_snapshot(&CounterSnapshot {
             arch: ArchId::Sm86,
             instructions_issued,
             l1: l1.as_ref(),
@@ -657,7 +763,7 @@ mod tests {
             l2_by_source: None,
             dram: None,
         };
-        let preds = emit_all(&snapshot).unwrap();
+        let preds = emit_snapshot(&snapshot).unwrap();
         assert!(preds.iter().all(|p| {
             p.arch == ArchId::Sm120
                 && p.outcome
@@ -679,7 +785,7 @@ mod tests {
             dram: None,
         };
         assert_eq!(
-            emit_all(&snapshot),
+            emit_snapshot(&snapshot),
             Err(EmitError::CounterArchitectureUnbound {
                 counter: "L1 counters"
             })
@@ -695,7 +801,7 @@ mod tests {
             dram: None,
         };
         assert_eq!(
-            emit_all(&relabelled),
+            emit_snapshot(&relabelled),
             Err(EmitError::CounterArchitectureMismatch {
                 counter: "L1 counters",
                 expected: ArchId::Sm120,
@@ -717,7 +823,7 @@ mod tests {
             dram: None,
         };
         assert_eq!(
-            emit_all(&l1_snapshot),
+            emit_snapshot(&l1_snapshot),
             Err(EmitError::L1Counters(
                 L1CounterError::OriginPartitionMismatch {
                     field: L1CounterField::Hits,
@@ -739,7 +845,7 @@ mod tests {
             dram: None,
         };
         assert_eq!(
-            emit_all(&split_snapshot),
+            emit_snapshot(&split_snapshot),
             Err(EmitError::SystemCounters(
                 SystemCounterError::L2OriginPartitionMismatch {
                     counter: "sectors",
@@ -762,7 +868,7 @@ mod tests {
             dram: Some(&dram),
         };
         assert_eq!(
-            emit_all(&dram_snapshot),
+            emit_snapshot(&dram_snapshot),
             Err(EmitError::SystemCounters(
                 SystemCounterError::DramOriginPartitionMismatch {
                     counter: "read sectors",
@@ -891,7 +997,7 @@ mod tests {
             l2_by_source: None,
             dram: None,
         };
-        let preds = emit_all(&snapshot).unwrap();
+        let preds = emit_snapshot(&snapshot).unwrap();
 
         assert_eq!(
             predicted(&preds, "traffic_gmem_ld_sectors"),
@@ -1142,7 +1248,7 @@ mod tests {
     #[test]
     fn index_by_key_covers_every_descriptor() {
         let preds = emit(1, None, None, None).unwrap();
-        let idx = index_by_key(&preds);
+        let idx = index_metrics_by_key(&preds);
         assert_eq!(idx.len(), DESCRIPTORS.len());
         for d in DESCRIPTORS {
             assert!(

@@ -99,8 +99,15 @@ def _load_current_rows() -> tuple[list[dict[str, str]], str | None]:
             }:
                 raise ValueError("each path-alias row must have exactly three fields")
             slug = row["slug"]
-            if not isinstance(slug, str) or not slug:
-                raise ValueError("path-alias row slug must be nonempty")
+            if (
+                not isinstance(slug, str)
+                or not slug
+                or not slug.isascii()
+                or not all(character.isprintable() and not character.isspace() for character in slug)
+            ):
+                raise ValueError(
+                    "path-alias row slug must be a nonempty ASCII-graphic scope token"
+                )
             # Deliberately retain no historical_root value after shape validation.
             current_rows.append(
                 {"slug": slug, "current_root": _safe_current_root(row["current_root"])}
@@ -194,7 +201,12 @@ def _run_rust_test(
 ) -> str:
     _require_common_prerequisites()
     env = os.environ.copy()
-    for flag in ("SIM_L1_DISABLE", "SIM_L2_DISABLE", "SIM_DRAM_BW_DISABLE"):
+    for flag in (
+        "SIM_L1_DISABLE",
+        "SIM_L2_DISABLE",
+        "SIM_DRAM_BW_DISABLE",
+        "SIM_LAUNCH_SET_SCOPE",
+    ):
         env.pop(flag, None)
     env.update(env_extra)
     env["CARGO_TARGET_DIR"] = str(_cargo_target_dir())
@@ -265,6 +277,7 @@ def _run_replay(row: dict[str, str], **mode: str) -> str:
         env_extra={
             "SIM_TRACE_SMOKE_DIR": str(trace_root),
             "SIM_CONTROL_BITS_DIR": str(_CONTROL_BITS_DIR),
+            "SIM_LAUNCH_SET_SCOPE": f"m1/{row['slug']}",
             **mode,
         },
     )
