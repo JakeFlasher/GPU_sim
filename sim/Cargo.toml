@@ -9,6 +9,7 @@ license = "MIT OR Apache-2.0"
 repository = "https://github.com/JakeFlasher/cross_arch_gpu_profiler_suite"
 
 [workspace.dependencies]
+csv = "1"
 prost = "0.14"
 rustix = { version = "1", features = ["fs"] }
 serde = { version = "1", features = ["derive"] }

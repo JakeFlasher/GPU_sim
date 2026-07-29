@@ -14,6 +14,7 @@ pub mod exec_info;
 pub mod lanes;
 pub mod pb;
 pub mod reader;
+mod wire_preflight;
 
 pub use anchored::{AnchoredDir, AnchoredFile, AnchoredReadError, FileIdentity};
 pub use digest::{CanonicalJsonError, Sha256Digest, Sha256DigestError, canonical_json};
@@ -23,6 +24,7 @@ pub use reader::{
     AddressAccess, AllocationRegistry, ArtifactDigestIdentity, KernelLoc, LosslessFullProvenance,
     MemoryAccess, MemoryAccessMeta, ThreadblockPayloadIdentity, TraceArtifactIdentity, TraceDir,
     TraceDirSnapshot, TraceError, TraceSamplingMethod, TraceSamplingSidecar, TraceSnapshotLimits,
-    WaveSegmentSubsetProvenance, block_launch_index, check_allocation_identity, kernel_grid,
-    memory_access, visit_memory_access,
+    TraceStats, TraceValidationSummary, WaveSegmentSubsetProvenance, block_launch_index,
+    check_allocation_identity, kernel_grid, memory_access, validate_threadblock_contract,
+    visit_memory_access,
 };

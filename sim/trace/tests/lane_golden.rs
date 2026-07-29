@@ -85,7 +85,7 @@ fn token(err: &LaneError) -> &'static str {
         LaneError::BaseStrideSingleLane => "stride_single_lane",
         LaneError::BaseStrideNonContiguous { .. } => "stride_non_contiguous",
         LaneError::BaseDeltaCountInvalid { .. } => "delta_count",
-        LaneError::AddressOverflow { .. } => "address_overflow_rust_only",
+        LaneError::AddressOverflow { .. } => "address_overflow",
         LaneError::UnknownFormat(_) => "unknown_format",
     }
 }

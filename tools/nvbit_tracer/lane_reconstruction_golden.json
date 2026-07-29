@@ -8,9 +8,8 @@
     "consume THIS file. Extend it in the SAME commit as any semantic change to either",
     "decoder. addrs entries and expected vectors use -1 as LANE_INACTIVE_SENTINEL;",
     "expected vectors are always 32 entries. 'error' names the shared outcome token.",
-    "Deliberately NOT covered: base_address >= 2^63 (Rust types AddressOverflow, Python",
-    "bigint reconstructs — documented Rust-only fail-closed strictness for values no",
-    "real GPU VA can reach)."
+    "Compressed reconstruction is deliberately checked in the signed int64 lane domain",
+    "in both runtimes; values outside it are typed address_overflow rather than wrapped."
   ],
   "cases": [
     {
@@ -129,6 +128,24 @@
       "addrs": [],
       "and_mask": 3,
       "error": "position_mismatch"
+    },
+    {
+      "name": "stride_base_exceeds_signed_domain",
+      "compression_format": 1,
+      "base_address": 9223372036854775808,
+      "stride": 4,
+      "addrs": [],
+      "and_mask": 3,
+      "error": "address_overflow"
+    },
+    {
+      "name": "delta_cumulative_exceeds_signed_domain",
+      "compression_format": 2,
+      "base_address": 9223372036854775807,
+      "stride": 0,
+      "addrs": [1],
+      "and_mask": 3,
+      "error": "address_overflow"
     },
     {
       "name": "delta_scattered_negative",

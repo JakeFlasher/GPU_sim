@@ -3,10 +3,12 @@
 //! `tools/nvbit_tracer/traces_enhanced/dynamic_trace/`.
 //!
 //! Run via `sim/trace/regen_pb.sh`, which pins PROTOC to the repo's
-//! `.toolchain/pb/bin/protoc` (34.1) and supplies the runtime-resolved repository
-//! and output paths. The generated file is COMMITTED so the sim workspace never
-//! needs protoc at build time; prost implements the wire format itself, so the
-//! C++ exact gencode==runtime rule does not apply here.
+//! `.toolchain/pb/bin/protoc` (34.1), generates into an external temporary
+//! directory, and diffs those bytes against the committed binding. The generator
+//! refuses repository-local outputs so verification cannot overwrite its own
+//! authority. The generated file is COMMITTED, so the sim workspace never needs
+//! protoc at build time; prost implements the wire format itself, so the C++ exact
+//! gencode==runtime rule does not apply here.
 
 use std::ffi::OsString;
 use std::path::PathBuf;
@@ -27,6 +29,19 @@ fn parse_paths(
     Ok((PathBuf::from(repo_root), PathBuf::from(out_dir)))
 }
 
+fn validate_external_output(
+    repo_root: &std::path::Path,
+    out_dir: &std::path::Path,
+) -> Result<(), String> {
+    if out_dir.starts_with(repo_root) {
+        return Err(format!(
+            "generator output must be outside the repository: {}",
+            out_dir.display()
+        ));
+    }
+    Ok(())
+}
+
 fn canonical_paths(
     repo_root: PathBuf,
     out_dir: PathBuf,
@@ -40,10 +55,10 @@ fn canonical_paths(
     let out_dir = out_dir
         .canonicalize()
         .map_err(|error| format!("canonicalize output directory: {error}"))?;
-    let expected_out = repo_root.join("sim/trace/src/pb");
-    if out_dir != expected_out {
+    validate_external_output(&repo_root, &out_dir)?;
+    if !out_dir.is_dir() {
         return Err(format!(
-            "output directory is not the repository sim/trace/src/pb: {}",
+            "generator output path is not a directory: {}",
             out_dir.display()
         ));
     }
@@ -106,6 +121,17 @@ mod tests {
 
     fn os(value: &str) -> OsString {
         OsString::from(value)
+    }
+
+    #[test]
+    fn generator_output_must_be_external_to_repository() {
+        let repo = std::path::Path::new("/repo");
+        assert!(validate_external_output(repo, std::path::Path::new("/tmp/pbgen")).is_ok());
+        assert!(
+            validate_external_output(repo, std::path::Path::new("/repo/sim/trace/src/pb"))
+                .unwrap_err()
+                .contains("outside the repository")
+        );
     }
 
     #[test]

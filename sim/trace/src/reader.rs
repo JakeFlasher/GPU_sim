@@ -13,14 +13,12 @@
 //! lossless-compression provenance) feeds the completeness gate
 //! (`E_INCOMPLETE_TRACE` / never-rewrite-gridDim).
 //!
-//! Admission-level validation is owned by the Python gate
-//! (`tools/nvbit_tracer/import_trace_contract.py`) and already ran on every
-//! M1-admitted trace (allocation-id/range identity, vpc/warpid presence, and
-//! the full per-instruction walk stay THERE). This reader re-enforces the
-//! invariants the simulator itself depends on to replay correctly — memory
-//! identity, masks, data widths, lane reconstruction, block identity — and
-//! it fail-closes on each of them: a malformed record is a typed error,
-//! never a skip.
+//! Production admission is re-enforced here over one descriptor-anchored
+//! snapshot. The reader validates the root contract, launch identities and
+//! geometry, every payload instruction, allocation/range identity, masks, VPC,
+//! warp/function identity, lane reconstruction, block identity, and optional
+//! producer counters before exposing replay inputs. A malformed record is a
+//! typed error, never a skip.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
@@ -32,6 +30,7 @@ use crate::anchored::{AnchoredDir, AnchoredFile, AnchoredReadError, FileIdentity
 use crate::digest::{Sha256, Sha256Digest, canonical_json};
 use crate::lanes::{self, LaneError};
 use crate::pb;
+use crate::wire_preflight::{self, WirePreflightError};
 
 #[derive(Debug, thiserror::Error)]
 pub enum TraceError {
@@ -67,12 +66,30 @@ pub enum TraceError {
         expected: u64,
         actual: u64,
     },
+    #[error("trace root protobuf {path} is empty")]
+    TraceRootEmpty { path: PathBuf },
     #[error("could not parse {path} as {message_type}: {source}")]
     Decode {
         path: PathBuf,
         message_type: &'static str,
         #[source]
         source: prost::DecodeError,
+    },
+    #[error("could not preflight {path} as {message_type}: malformed protobuf wire: {detail}")]
+    ProtobufWireMalformed {
+        path: PathBuf,
+        message_type: &'static str,
+        detail: &'static str,
+    },
+    #[error(
+        "{path}: {message_type} decoded resource {resource} exceeds implementation limit {limit} (observed at least {observed})"
+    )]
+    ProtobufDecodedResourceLimitExceeded {
+        path: PathBuf,
+        message_type: &'static str,
+        resource: &'static str,
+        observed: u64,
+        limit: u64,
     },
     #[error(
         "{path}: unsupported trace_contract_id {got:?}; expected empty legacy identity or sm86_addr_carry_v1"
@@ -86,7 +103,11 @@ pub enum TraceError {
         contract_id: String,
         got: Vec<i32>,
     },
-    #[error("kernel threadblock dir {dir} is missing or empty — the trace tree is truncated")]
+    #[error(
+        "trace threadblocks directory {dir} is missing or contains zero protobuf payload files"
+    )]
+    TraceThreadblocksEmpty { dir: PathBuf },
+    #[error("root launch has no threadblock payload under {dir}")]
     ThreadblocksMissing { dir: PathBuf },
     #[error("threadblock payload entry {path} is not a regular file")]
     ThreadblockPayloadNotRegular { path: PathBuf },
@@ -94,10 +115,30 @@ pub enum TraceError {
     ThreadblockPayloadSnapshotInvalid { root: PathBuf, message: String },
     #[error("verified sampling payload snapshot is missing expected file {path}")]
     SamplingPayloadSnapshotMissing { path: PathBuf },
+    #[error("{record}: warpid_tb absent on the wire (canonical: warpid_tb_missing)")]
+    WarpidTbMissing { record: String },
     #[error(
-        "{record}: instruction has memory identity but active_mask/predicate_mask absent on the wire"
+        "{record}: function_unique_id={got} is not strictly positive (canonical: function_unique_id_invalid)"
     )]
-    MaskMissing { record: String },
+    FunctionUniqueIdInvalid { record: String, got: i32 },
+    #[error("{record}: active_mask absent on the wire (canonical: active_mask_missing)")]
+    ActiveMaskMissing { record: String },
+    #[error("{record}: predicate_mask absent on the wire (canonical: predicate_mask_missing)")]
+    PredicateMaskMissing { record: String },
+    #[error("{record}: vpc absent on the wire (canonical: vpc_missing)")]
+    VpcMissing { record: String },
+    #[error(
+        "{record}: vpc low 32 bits 0x{vpc_low_32:x} disagree with pc 0x{pc:x} (canonical: vpc_inconsistent_with_pc)"
+    )]
+    VpcInconsistentWithPc {
+        record: String,
+        vpc_low_32: u32,
+        pc: u32,
+    },
+    #[error(
+        "{record}: lane address payload contradicts active_mask & predicate_mask (canonical: lane_mask_inconsistent)"
+    )]
+    LaneMaskInconsistent { record: String },
     #[error(
         "{record}: instruction has {n_addresses} address record(s) but memory_op_class is absent"
     )]
@@ -106,8 +147,28 @@ pub enum TraceError {
         "{record}: memory_op_class is present but UNSPECIFIED; the tracer should have emitted an unsupported_memory_path exclusion instead"
     )]
     MemoryOpClassUnspecified { record: String },
+    #[error(
+        "{record}: memory_op_class {class:?} is not declared by the address-carrying v1 payload capability"
+    )]
+    MemoryPayloadClassUndeclared {
+        record: String,
+        class: pb::MemoryOpClass,
+    },
+    #[error(
+        "{record}: address-carrying v1 {class:?} operand shape is invalid: {detail} (got {got})"
+    )]
+    MemoryPayloadShapeInvalid {
+        record: String,
+        class: pb::MemoryOpClass,
+        detail: &'static str,
+        got: usize,
+    },
     #[error("{record}: memory_op_access_kind is present but UNSPECIFIED on a memory instruction")]
     MemoryOpAccessKindUnspecified { record: String },
+    #[error(
+        "{record}: address operand {operand} explicitly carries MEMORY_SPACE_UNSPECIFIED (canonical: memory_space_unspecified)"
+    )]
+    MemorySpaceUnspecified { record: String, operand: usize },
     #[error(
         "{record}: address operand {operand} carries {space:?}, incompatible with memory_op_class {class:?} (memory_op_class_address_space_conflict)"
     )]
@@ -179,6 +240,10 @@ pub enum TraceError {
     )]
     AllocationsSidecarMalformed { path: PathBuf, message: String },
     #[error(
+        "allocations sidecar {path} repeats allocation_id {allocation_id} (allocation_id_duplicate)"
+    )]
+    AllocationIdDuplicate { path: PathBuf, allocation_id: u32 },
+    #[error(
         "could not parse trace-sampling sidecar {path}: {message} (sampling_sidecar_malformed)"
     )]
     SamplingSidecarMalformed { path: PathBuf, message: String },
@@ -199,6 +264,170 @@ pub enum TraceError {
         base: u64,
         end: u128,
     },
+    #[error("root Trace contains zero kernel launches")]
+    TraceLaunchesEmpty,
+    #[error("root device map key {map_key} disagrees with embedded gpu_device.id {embedded_id}")]
+    DeviceMapKeyMismatch { map_key: i64, embedded_id: u32 },
+    #[error("root stream map key {map_key} disagrees with embedded cuda_stream.id {embedded_id}")]
+    StreamMapKeyMismatch { map_key: i64, embedded_id: i64 },
+    #[error("root launch identity ({device_id}, {stream_id}, {kernel_id}) occurs more than once")]
+    LaunchIdentityDuplicate {
+        device_id: i64,
+        stream_id: i64,
+        kernel_id: i32,
+    },
+    #[error(
+        "root launch ({device_id}, {stream_id}, {kernel_id}) has absent or non-positive {field} geometry"
+    )]
+    LaunchGeometryInvalid {
+        device_id: i64,
+        stream_id: i64,
+        kernel_id: i32,
+        field: &'static str,
+    },
+    #[error("threadblock payload {path} has zero instruction records")]
+    ThreadblockRecordsEmpty { path: PathBuf },
+    #[error("threadblock payload {path} does not belong to any root launch")]
+    ThreadblockPayloadOrphan { path: PathBuf },
+    #[error(
+        "{record}: function_unique_id {actual} disagrees with root launch function_unique_id {expected}"
+    )]
+    FunctionUniqueIdMismatch {
+        record: String,
+        expected: i32,
+        actual: i32,
+    },
+    #[error("stats CSV {path} is empty")]
+    StatsEmpty { path: PathBuf },
+    #[error("stats CSV {path} has invalid schema: {message}")]
+    StatsSchemaInvalid { path: PathBuf, message: String },
+    #[error(
+        "stats CSV {path} row {row} has invalid counters: expected={expected}, admitted={admitted}"
+    )]
+    StatsCountersInvalid {
+        path: PathBuf,
+        row: u64,
+        expected: i128,
+        admitted: i128,
+    },
+    #[error(
+        "stats CSV {path} proves an empty payload: rows={rows}, expected={expected}, admitted={admitted}"
+    )]
+    TracePayloadEmpty {
+        path: PathBuf,
+        rows: u64,
+        expected: u64,
+        admitted: u64,
+    },
+    #[error("trace validation count {counter} overflows u64")]
+    TraceCountOverflow { counter: &'static str },
+}
+
+impl TraceError {
+    /// Stable cross-runtime diagnosis for failures owned by the forward wire
+    /// contract. Filesystem and simulator-only errors intentionally return
+    /// `None` rather than being mistaken for Python semantic parity.
+    pub fn typed_reason(&self) -> Option<&'static str> {
+        match self {
+            Self::TraceRootEmpty { .. } => Some("trace_root_empty"),
+            Self::Decode { message_type, .. }
+            | Self::ProtobufWireMalformed { message_type, .. } => match *message_type {
+                "dynamic_trace.Trace" => Some("trace_root_unparseable"),
+                "dynamic_trace.threadblock" => Some("trace_threadblock_unparseable"),
+                _ => None,
+            },
+            Self::ProtobufDecodedResourceLimitExceeded { .. } => {
+                Some("protobuf_decoded_resource_limit_exceeded")
+            }
+            Self::TraceContractUnsupported { .. } => Some("trace_contract_mismatch"),
+            Self::MemoryPayloadCapabilitiesInvalid { .. } => Some("trace_capabilities_invalid"),
+            Self::WarpidTbMissing { .. } => Some("warpid_tb_missing"),
+            Self::FunctionUniqueIdInvalid { .. } => Some("function_unique_id_invalid"),
+            Self::ActiveMaskMissing { .. } => Some("active_mask_missing"),
+            Self::PredicateMaskMissing { .. } => Some("predicate_mask_missing"),
+            Self::VpcMissing { .. } => Some("vpc_missing"),
+            Self::VpcInconsistentWithPc { .. } => Some("vpc_inconsistent_with_pc"),
+            Self::LaneMaskInconsistent { .. } => Some("lane_mask_inconsistent"),
+            Self::MemoryOpClassMissing { .. } => {
+                Some("memory_op_class_missing_on_memory_instruction")
+            }
+            Self::MemoryOpClassUnspecified { .. } => Some("memory_op_class_unspecified"),
+            Self::MemoryPayloadClassUndeclared { .. } => Some("memory_payload_class_undeclared"),
+            Self::MemoryPayloadShapeInvalid { .. } => Some("memory_payload_shape_invalid"),
+            Self::MemoryOpAccessKindUnspecified { .. } => Some("memory_op_access_kind_unspecified"),
+            Self::MemorySpaceUnspecified { .. } => Some("memory_space_unspecified"),
+            Self::MemoryOpClassAddressSpaceConflict { .. } => {
+                Some("memory_op_class_address_space_conflict")
+            }
+            Self::UnknownEnumValue { .. } => Some("unknown_enum_value"),
+            Self::DataWidthMissing { .. } => Some("data_width_missing"),
+            Self::DataWidthInvalid { .. } => Some("data_width_invalid"),
+            Self::BlockIdMissing { .. } => Some("block_id_missing"),
+            Self::BlockIdOutOfRange { .. } => Some("block_id_out_of_range"),
+            Self::BlockIdDuplicate { .. } => Some("block_id_duplicate"),
+            Self::GridDimMissing { .. } => Some("trace_launch_geometry_invalid"),
+            Self::GridArithmeticOverflow { .. } => Some("grid_arithmetic_overflow"),
+            Self::Lane { source, .. } => match source {
+                LaneError::ListAllLengthInvalid { .. } => Some("lane_vector_length_invalid"),
+                LaneError::LanePositionMismatch { .. } => Some("lane_position_mismatch"),
+                LaneError::BaseStrideAddrsNonEmpty { .. }
+                | LaneError::BaseStrideSingleLane
+                | LaneError::BaseStrideNonContiguous { .. }
+                | LaneError::BaseDeltaCountInvalid { .. }
+                | LaneError::AddressOverflow { .. }
+                | LaneError::UnknownFormat(_) => Some("compressed_format_malformed"),
+            },
+            Self::AllocationIdMissing { .. } => Some("allocation_id_missing"),
+            Self::AllocationsSidecarMissing { .. } => Some("allocations_sidecar_missing"),
+            Self::AllocationsSidecarMalformed { .. } => Some("allocations_sidecar_malformed"),
+            Self::AllocationIdDuplicate { .. } => Some("allocation_id_duplicate"),
+            Self::AllocationIdUnknown { .. } => Some("allocation_id_unknown"),
+            Self::LaneOutsideAllocationRange { .. } => {
+                Some("lane_address_outside_allocation_range")
+            }
+            Self::TraceLaunchesEmpty => Some("trace_launches_empty"),
+            Self::TraceThreadblocksEmpty { .. } => Some("trace_threadblocks_empty"),
+            Self::ThreadblocksMissing { .. } => Some("trace_launch_payload_missing"),
+            Self::DeviceMapKeyMismatch { .. }
+            | Self::StreamMapKeyMismatch { .. }
+            | Self::LaunchIdentityDuplicate { .. } => Some("trace_launch_identity_mismatch"),
+            Self::LaunchGeometryInvalid { .. } => Some("trace_launch_geometry_invalid"),
+            Self::ThreadblockRecordsEmpty { .. } => Some("trace_threadblock_empty"),
+            Self::ThreadblockPayloadOrphan { .. } => Some("trace_payload_orphan"),
+            Self::FunctionUniqueIdMismatch { .. } => Some("function_unique_id_mismatch"),
+            Self::StatsEmpty { .. } => Some("stats_empty"),
+            Self::StatsSchemaInvalid { .. } => Some("stats_schema_invalid"),
+            Self::StatsCountersInvalid { .. } => Some("stats_counters_invalid"),
+            Self::TracePayloadEmpty { .. } => Some("trace_payload_empty"),
+            Self::TraceCountOverflow { .. } => Some("trace_counter_overflow"),
+            _ => None,
+        }
+    }
+}
+
+fn map_wire_preflight_error(
+    path: &Path,
+    message_type: &'static str,
+    error: WirePreflightError,
+) -> TraceError {
+    match error {
+        WirePreflightError::Malformed(detail) => TraceError::ProtobufWireMalformed {
+            path: path.to_path_buf(),
+            message_type,
+            detail,
+        },
+        WirePreflightError::ResourceLimit {
+            resource,
+            observed,
+            limit,
+        } => TraceError::ProtobufDecodedResourceLimitExceeded {
+            path: path.to_path_buf(),
+            message_type,
+            resource,
+            observed,
+            limit,
+        },
+    }
 }
 
 /// One kernel launch located inside the root `Trace` message.
@@ -207,6 +436,50 @@ pub struct KernelLoc<'a> {
     pub device_id: i64,
     pub stream_id: i64,
     pub kernel: &'a pb::Kernel,
+}
+
+/// Non-vacuous producer counters parsed from snapshotted `stats.csv` bytes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TraceStats {
+    row_count: u64,
+    expected_record_count: u64,
+    admitted_record_count: u64,
+}
+
+impl TraceStats {
+    pub fn row_count(self) -> u64 {
+        self.row_count
+    }
+
+    pub fn expected_record_count(self) -> u64 {
+        self.expected_record_count
+    }
+
+    pub fn admitted_record_count(self) -> u64 {
+        self.admitted_record_count
+    }
+}
+
+/// Counts produced by the complete immutable-root and payload semantic walk.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TraceValidationSummary {
+    launch_count: u64,
+    threadblock_count: u64,
+    instruction_count: u64,
+}
+
+impl TraceValidationSummary {
+    pub fn launch_count(self) -> u64 {
+        self.launch_count
+    }
+
+    pub fn threadblock_count(self) -> u64 {
+        self.threadblock_count
+    }
+
+    pub fn instruction_count(self) -> u64 {
+        self.instruction_count
+    }
 }
 
 pub const ADDRESS_CARRYING_TRACE_CONTRACT_ID: &str = "sm86_addr_carry_v1";
@@ -337,6 +610,7 @@ pub struct TraceArtifactIdentity {
     dynamic_trace_pb: ArtifactDigestIdentity,
     allocations_json: Option<ArtifactDigestIdentity>,
     trace_sampling_json: Option<ArtifactDigestIdentity>,
+    stats_csv: Option<ArtifactDigestIdentity>,
     threadblock_payload: ThreadblockPayloadIdentity,
 }
 
@@ -351,6 +625,10 @@ impl TraceArtifactIdentity {
 
     pub fn trace_sampling_json(&self) -> Option<ArtifactDigestIdentity> {
         self.trace_sampling_json
+    }
+
+    pub fn stats_csv(&self) -> Option<ArtifactDigestIdentity> {
+        self.stats_csv
     }
 
     pub fn threadblock_payload(&self) -> &ThreadblockPayloadIdentity {
@@ -369,6 +647,7 @@ pub struct TraceSnapshotLimits {
     dynamic_trace_pb_size: u64,
     allocations_json_size: Option<u64>,
     trace_sampling_json_size: Option<u64>,
+    stats_csv_size: Option<u64>,
     threadblock_file_count: u64,
     threadblock_raw_bytes: u64,
 }
@@ -378,6 +657,7 @@ impl TraceSnapshotLimits {
         dynamic_trace_pb_size: u64,
         allocations_json_size: Option<u64>,
         trace_sampling_json_size: Option<u64>,
+        stats_csv_size: Option<u64>,
         threadblock_file_count: u64,
         threadblock_raw_bytes: u64,
     ) -> Self {
@@ -385,6 +665,7 @@ impl TraceSnapshotLimits {
             dynamic_trace_pb_size,
             allocations_json_size,
             trace_sampling_json_size,
+            stats_csv_size,
             threadblock_file_count,
             threadblock_raw_bytes,
         }
@@ -399,6 +680,7 @@ pub struct TraceDirSnapshot {
     dynamic_trace_pb: Vec<u8>,
     allocations_json: Option<Vec<u8>>,
     trace_sampling_json: Option<Vec<u8>>,
+    stats_csv: Option<Vec<u8>>,
     threadblock_payload: VerifiedSamplingPayload,
     identity: TraceArtifactIdentity,
     file_identities: BTreeMap<FileIdentity, PathBuf>,
@@ -440,6 +722,12 @@ impl TraceDirSnapshot {
             dynamic_path.clone(),
         )?;
         let dynamic_trace_pb = dynamic_file.into_raw();
+        // Root-byte failures precede payload-tree failures in both validators.
+        // Keep this byte-level check at snapshot capture so an empty root cannot
+        // be masked by an independently empty/missing payload tree.
+        if dynamic_trace_pb.is_empty() {
+            return Err(TraceError::TraceRootEmpty { path: dynamic_path });
+        }
 
         let allocations_relative = root_relative.join("extra_info/allocations.json");
         let allocations_path = root.join("extra_info/allocations.json");
@@ -475,11 +763,30 @@ impl TraceDirSnapshot {
         }
         let trace_sampling_json = sampling_file.map(AnchoredFile::into_raw);
 
+        let stats_relative = root_relative.join("stats.csv");
+        let stats_path = root.join("stats.csv");
+        let stats_file = capture_optional_snapshot_artifact(
+            reader,
+            &stats_relative,
+            limits.map(|limits| limits.stats_csv_size),
+            "stats_csv",
+        )?;
+        if let Some(file) = &stats_file {
+            insert_snapshot_file_identity(
+                &mut file_identities,
+                file.identity(),
+                stats_path.clone(),
+            )?;
+        }
+        let stats_csv = stats_file.map(AnchoredFile::into_raw);
+
         let (maximum_files, maximum_bytes) = limits.map_or((u64::MAX, u64::MAX), |limits| {
             (limits.threadblock_file_count, limits.threadblock_raw_bytes)
         });
         let tree_relative = root_relative.join("threadblocks");
-        let tree = reader.read_pb_tree(&tree_relative, maximum_files, maximum_bytes)?;
+        let mut tree = reader
+            .read_pb_tree(&tree_relative, maximum_files, maximum_bytes)
+            .map_err(|source| map_threadblock_tree_read_error(&root, source))?;
         let actual_file_count = u64::try_from(tree.files.len()).map_err(|_| {
             TraceError::SnapshotArtifactCardinalityMismatch {
                 artifact: "threadblock_payload",
@@ -504,11 +811,15 @@ impl TraceDirSnapshot {
             }
         }
         if tree.files.is_empty() {
-            return Err(TraceError::ThreadblockPayloadSnapshotInvalid {
-                root: root.clone(),
-                message: "snapshot contains no regular .pb files".to_owned(),
+            return Err(TraceError::TraceThreadblocksEmpty {
+                dir: root.join("threadblocks"),
             });
         }
+        // Python's producer hashes slash-separated manifest path spellings, not
+        // component-wise `Path` order (`a.pb` sorts before `a/b.pb` there).
+        // Re-establish that exact order after the anchored tree walk.
+        tree.files
+            .sort_by(|left, right| left.relative.to_str().cmp(&right.relative.to_str()));
         let mut raw_bytes = 0_u64;
         let mut stream_digest = Sha256::new();
         let mut manifest = String::from("trace-payload-file-manifest-v1\n");
@@ -581,6 +892,10 @@ impl TraceDirSnapshot {
                 .as_deref()
                 .map(|raw| ArtifactDigestIdentity::from_bytes(raw, &sampling_path))
                 .transpose()?,
+            stats_csv: stats_csv
+                .as_deref()
+                .map(|raw| ArtifactDigestIdentity::from_bytes(raw, &stats_path))
+                .transpose()?,
             threadblock_payload: threadblock_payload.identity.clone(),
         };
         Ok(Self {
@@ -588,6 +903,7 @@ impl TraceDirSnapshot {
             dynamic_trace_pb,
             allocations_json,
             trace_sampling_json,
+            stats_csv,
             threadblock_payload,
             identity,
             file_identities,
@@ -606,6 +922,18 @@ impl TraceDirSnapshot {
         self.file_identities
             .iter()
             .map(|(identity, path)| (*identity, path.as_path()))
+    }
+}
+
+fn map_threadblock_tree_read_error(root: &Path, source: AnchoredReadError) -> TraceError {
+    match source {
+        AnchoredReadError::Io { path, source }
+            if path == root.join("threadblocks")
+                && source.kind() == std::io::ErrorKind::NotFound =>
+        {
+            TraceError::TraceThreadblocksEmpty { dir: path }
+        }
+        other => TraceError::AnchoredSnapshot(other),
     }
 }
 
@@ -670,46 +998,328 @@ fn insert_snapshot_file_identity(
     Ok(())
 }
 
+fn parse_ascii_signed_decimal(text: &str) -> Option<i128> {
+    let digits = text.strip_prefix('-').unwrap_or(text);
+    if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_digit()) {
+        return None;
+    }
+    text.parse().ok()
+}
+
+fn parse_trace_stats(path: &Path, raw: &[u8]) -> Result<TraceStats, TraceError> {
+    if raw.is_empty() {
+        return Err(TraceError::StatsEmpty {
+            path: path.to_path_buf(),
+        });
+    }
+
+    let mut reader = csv::ReaderBuilder::new()
+        .has_headers(true)
+        .flexible(true)
+        .from_reader(raw);
+    let headers = reader
+        .headers()
+        .map_err(|error| TraceError::StatsSchemaInvalid {
+            path: path.to_path_buf(),
+            message: error.to_string(),
+        })?
+        .iter()
+        .map(str::trim)
+        .collect::<Vec<_>>();
+    let expected_index = headers
+        .iter()
+        .position(|header| *header == "total_insts")
+        .ok_or_else(|| TraceError::StatsSchemaInvalid {
+            path: path.to_path_buf(),
+            message: "stats.csv lacks total_insts".to_owned(),
+        })?;
+    let admitted_index = headers
+        .iter()
+        .position(|header| *header == "total_reported_insts")
+        .ok_or_else(|| TraceError::StatsSchemaInvalid {
+            path: path.to_path_buf(),
+            message: "stats.csv lacks total_reported_insts".to_owned(),
+        })?;
+
+    let mut rows = 0_u64;
+    let mut expected_total = 0_u64;
+    let mut admitted_total = 0_u64;
+    for (record_index, record) in reader.records().enumerate() {
+        let record = record.map_err(|error| TraceError::StatsSchemaInvalid {
+            path: path.to_path_buf(),
+            message: error.to_string(),
+        })?;
+        if record.iter().all(|cell| cell.trim().is_empty()) {
+            continue;
+        }
+        let row = u64::try_from(record_index)
+            .ok()
+            .and_then(|index| index.checked_add(2))
+            .ok_or(TraceError::TraceCountOverflow {
+                counter: "stats row number",
+            })?;
+        let expected_text =
+            record
+                .get(expected_index)
+                .ok_or_else(|| TraceError::StatsSchemaInvalid {
+                    path: path.to_path_buf(),
+                    message: format!("row {row} is truncated"),
+                })?;
+        let admitted_text =
+            record
+                .get(admitted_index)
+                .ok_or_else(|| TraceError::StatsSchemaInvalid {
+                    path: path.to_path_buf(),
+                    message: format!("row {row} is truncated"),
+                })?;
+        let expected_signed =
+            parse_ascii_signed_decimal(expected_text.trim()).ok_or_else(|| {
+                TraceError::StatsSchemaInvalid {
+                    path: path.to_path_buf(),
+                    message: format!("row {row} has a non-integer or out-of-domain total_insts"),
+                }
+            })?;
+        let admitted_signed =
+            parse_ascii_signed_decimal(admitted_text.trim()).ok_or_else(|| {
+                TraceError::StatsSchemaInvalid {
+                    path: path.to_path_buf(),
+                    message: format!(
+                        "row {row} has a non-integer or out-of-domain total_reported_insts"
+                    ),
+                }
+            })?;
+        if expected_signed < 0 || admitted_signed < 0 || admitted_signed > expected_signed {
+            return Err(TraceError::StatsCountersInvalid {
+                path: path.to_path_buf(),
+                row,
+                expected: expected_signed,
+                admitted: admitted_signed,
+            });
+        }
+        let expected =
+            u64::try_from(expected_signed).map_err(|_| TraceError::StatsSchemaInvalid {
+                path: path.to_path_buf(),
+                message: format!("row {row} total_insts exceeds u64"),
+            })?;
+        let admitted =
+            u64::try_from(admitted_signed).map_err(|_| TraceError::StatsSchemaInvalid {
+                path: path.to_path_buf(),
+                message: format!("row {row} total_reported_insts exceeds u64"),
+            })?;
+        expected_total =
+            expected_total
+                .checked_add(expected)
+                .ok_or(TraceError::TraceCountOverflow {
+                    counter: "stats expected total",
+                })?;
+        admitted_total =
+            admitted_total
+                .checked_add(admitted)
+                .ok_or(TraceError::TraceCountOverflow {
+                    counter: "stats admitted total",
+                })?;
+        rows = rows.checked_add(1).ok_or(TraceError::TraceCountOverflow {
+            counter: "stats row count",
+        })?;
+    }
+    if rows == 0 || expected_total == 0 || admitted_total == 0 {
+        return Err(TraceError::TracePayloadEmpty {
+            path: path.to_path_buf(),
+            rows,
+            expected: expected_total,
+            admitted: admitted_total,
+        });
+    }
+    Ok(TraceStats {
+        row_count: rows,
+        expected_record_count: expected_total,
+        admitted_record_count: admitted_total,
+    })
+}
+
+fn positive_geometry(dim: Option<&pb::Dim3d>) -> bool {
+    dim.is_some_and(|dim| dim.x > 0 && dim.y > 0 && dim.z > 0)
+}
+
+fn validate_trace_snapshot_semantics(
+    root: &Path,
+    trace: &pb::Trace,
+    payload: &VerifiedSamplingPayload,
+    allocations: Option<&AllocationRegistry>,
+    memory_payload_contract: MemoryPayloadContract,
+) -> Result<TraceValidationSummary, TraceError> {
+    let mut launch_ids = BTreeSet::new();
+    let mut consumed_payloads = BTreeSet::new();
+    let mut payloads_by_parent: BTreeMap<&Path, Vec<&Path>> = BTreeMap::new();
+    for path in payload.by_path.keys() {
+        let parent =
+            path.parent()
+                .ok_or_else(|| TraceError::ThreadblockPayloadSnapshotInvalid {
+                    root: root.to_path_buf(),
+                    message: format!("payload path has no launch parent: {}", path.display()),
+                })?;
+        payloads_by_parent.entry(parent).or_default().push(path);
+    }
+    let mut launch_count = 0_u64;
+    let mut threadblock_count = 0_u64;
+    let mut instruction_count = 0_u64;
+
+    for (&device_key, device) in &trace.gpu_device {
+        if u32::try_from(device_key).ok() != Some(device.id) {
+            return Err(TraceError::DeviceMapKeyMismatch {
+                map_key: device_key,
+                embedded_id: device.id,
+            });
+        }
+        for (&stream_key, stream) in &device.streams {
+            if stream_key != stream.id {
+                return Err(TraceError::StreamMapKeyMismatch {
+                    map_key: stream_key,
+                    embedded_id: stream.id,
+                });
+            }
+            for kernel in &stream.kernels {
+                if !launch_ids.insert((device_key, stream_key, kernel.id)) {
+                    return Err(TraceError::LaunchIdentityDuplicate {
+                        device_id: device_key,
+                        stream_id: stream_key,
+                        kernel_id: kernel.id,
+                    });
+                }
+                launch_count =
+                    launch_count
+                        .checked_add(1)
+                        .ok_or(TraceError::TraceCountOverflow {
+                            counter: "launch count",
+                        })?;
+                if kernel.function_unique_id <= 0 {
+                    return Err(TraceError::FunctionUniqueIdInvalid {
+                        record: format!(
+                            "root launch device={device_key} stream={stream_key} kernel={}",
+                            kernel.id
+                        ),
+                        got: kernel.function_unique_id,
+                    });
+                }
+                if !positive_geometry(kernel.grid_dim.as_ref()) {
+                    return Err(TraceError::LaunchGeometryInvalid {
+                        device_id: device_key,
+                        stream_id: stream_key,
+                        kernel_id: kernel.id,
+                        field: "grid_dim",
+                    });
+                }
+                if !positive_geometry(kernel.block_dim.as_ref()) {
+                    return Err(TraceError::LaunchGeometryInvalid {
+                        device_id: device_key,
+                        stream_id: stream_key,
+                        kernel_id: kernel.id,
+                        field: "block_dim",
+                    });
+                }
+
+                let launch_dir = root
+                    .join("threadblocks")
+                    .join(format!("device_{device_key}"))
+                    .join(format!("stream_{stream_key}"))
+                    .join(format!("kernel_{}", kernel.id));
+                let Some(paths) = payloads_by_parent.get(launch_dir.as_path()) else {
+                    return Err(TraceError::ThreadblocksMissing { dir: launch_dir });
+                };
+                let mut block_ids = BTreeSet::new();
+                for &path in paths {
+                    let raw = payload.by_path.get(path).ok_or_else(|| {
+                        TraceError::SamplingPayloadSnapshotMissing {
+                            path: path.to_path_buf(),
+                        }
+                    })?;
+                    if raw.is_empty() {
+                        return Err(TraceError::ThreadblockRecordsEmpty {
+                            path: path.to_path_buf(),
+                        });
+                    }
+                    let threadblock = decode_threadblock(raw, path)?;
+                    let block_index = block_launch_index(kernel, &threadblock, path)?;
+                    if !block_ids.insert(block_index) {
+                        return Err(TraceError::BlockIdDuplicate {
+                            path: path.to_path_buf(),
+                            index: block_index,
+                        });
+                    }
+                    let records = threadblock.warps.values().try_fold(0_u64, |total, warp| {
+                        let count = u64::try_from(warp.instructions.len()).map_err(|_| {
+                            TraceError::TraceCountOverflow {
+                                counter: "threadblock instruction count",
+                            }
+                        })?;
+                        total
+                            .checked_add(count)
+                            .ok_or(TraceError::TraceCountOverflow {
+                                counter: "threadblock instruction count",
+                            })
+                    })?;
+                    if records == 0 {
+                        return Err(TraceError::ThreadblockRecordsEmpty {
+                            path: path.to_path_buf(),
+                        });
+                    }
+                    validate_threadblock_contract(
+                        &threadblock,
+                        path.to_string_lossy(),
+                        allocations,
+                        memory_payload_contract,
+                        kernel.function_unique_id,
+                    )?;
+                    consumed_payloads.insert(path);
+                    threadblock_count =
+                        threadblock_count
+                            .checked_add(1)
+                            .ok_or(TraceError::TraceCountOverflow {
+                                counter: "threadblock count",
+                            })?;
+                    instruction_count = instruction_count.checked_add(records).ok_or(
+                        TraceError::TraceCountOverflow {
+                            counter: "instruction count",
+                        },
+                    )?;
+                }
+            }
+        }
+    }
+    if launch_count == 0 {
+        return Err(TraceError::TraceLaunchesEmpty);
+    }
+    if let Some(path) = payload
+        .by_path
+        .keys()
+        .find(|path| !consumed_payloads.contains(path.as_path()))
+    {
+        return Err(TraceError::ThreadblockPayloadOrphan { path: path.clone() });
+    }
+    Ok(TraceValidationSummary {
+        launch_count,
+        threadblock_count,
+        instruction_count,
+    })
+}
+
 pub struct TraceDir {
     root: PathBuf,
     trace: pb::Trace,
     memory_payload_contract: MemoryPayloadContract,
     allocations: Option<AllocationRegistry>,
     sampling: Option<TraceSamplingSidecar>,
-    sampling_payload: Option<VerifiedSamplingPayload>,
+    stats: Option<TraceStats>,
+    validation: TraceValidationSummary,
+    sampling_payload: VerifiedSamplingPayload,
 }
 
 impl TraceDir {
-    /// Open `<root>/dynamic_trace.pb` and hold the decoded launch metadata, plus
-    /// the `extra_info/allocations.json` registry (absent for legacy/no-identity
-    /// traces) used by the reader-side allocation-identity gate.
+    /// Snapshot and fully validate one trace directory before exposing any
+    /// decoded launch or payload. All paths are descriptor-anchored and every
+    /// payload included in the snapshot is semantically walked exactly once.
     pub fn open(root: impl Into<PathBuf>) -> Result<Self, TraceError> {
-        let root = root.into();
-        let pb_path = root.join("dynamic_trace.pb");
-        let raw = fs::read(&pb_path).map_err(|source| TraceError::Io {
-            path: pb_path.clone(),
-            source,
-        })?;
-        let trace = pb::Trace::decode(raw.as_slice()).map_err(|source| TraceError::Decode {
-            path: pb_path.clone(),
-            message_type: "dynamic_trace.Trace",
-            source,
-        })?;
-        let memory_payload_contract = classify_memory_payload_contract(&trace, &pb_path)?;
-        let allocations = AllocationRegistry::load(&root)?;
-        let sampling = TraceSamplingSidecar::load(&root)?;
-        let sampling_payload = sampling
-            .as_ref()
-            .map(|sidecar| verify_sampling_payload(&root, sidecar))
-            .transpose()?;
-        Ok(Self {
-            root,
-            trace,
-            memory_payload_contract,
-            allocations,
-            sampling,
-            sampling_payload,
-        })
+        Self::from_snapshot(TraceDirSnapshot::capture(root)?)
     }
 
     /// Decode a one-read manifest snapshot without reopening any artifact.
@@ -719,11 +1329,18 @@ impl TraceDir {
             dynamic_trace_pb,
             allocations_json,
             trace_sampling_json,
+            stats_csv,
             threadblock_payload,
             identity: _,
             file_identities: _,
         } = snapshot;
         let dynamic_path = root.join("dynamic_trace.pb");
+        if dynamic_trace_pb.is_empty() {
+            return Err(TraceError::TraceRootEmpty { path: dynamic_path });
+        }
+        wire_preflight::preflight_trace(&dynamic_trace_pb).map_err(|error| {
+            map_wire_preflight_error(&dynamic_path, "dynamic_trace.Trace", error)
+        })?;
         let trace = pb::Trace::decode(dynamic_trace_pb.as_slice()).map_err(|source| {
             TraceError::Decode {
                 path: dynamic_path.clone(),
@@ -745,13 +1362,27 @@ impl TraceDir {
         if let Some(sidecar) = sampling.as_ref() {
             validate_sampling_payload_snapshot(&root, sidecar, &threadblock_payload)?;
         }
+        let validation = validate_trace_snapshot_semantics(
+            &root,
+            &trace,
+            &threadblock_payload,
+            allocations.as_ref(),
+            memory_payload_contract,
+        )?;
+        let stats_path = root.join("stats.csv");
+        let stats = stats_csv
+            .as_deref()
+            .map(|raw| parse_trace_stats(&stats_path, raw))
+            .transpose()?;
         Ok(Self {
             root,
             trace,
             memory_payload_contract,
             allocations,
             sampling,
-            sampling_payload: Some(threadblock_payload),
+            stats,
+            validation,
+            sampling_payload: threadblock_payload,
         })
     }
 
@@ -765,6 +1396,14 @@ impl TraceDir {
     /// lossless-compression declaration; neither alone proves full coverage.
     pub fn sampling_sidecar(&self) -> Option<&TraceSamplingSidecar> {
         self.sampling.as_ref()
+    }
+
+    pub fn stats(&self) -> Option<TraceStats> {
+        self.stats
+    }
+
+    pub fn validation_summary(&self) -> TraceValidationSummary {
+        self.validation
     }
 
     pub fn root(&self) -> &Path {
@@ -798,15 +1437,11 @@ impl TraceDir {
     /// deterministic FILENAME order — which is NOT flattened-block launch
     /// order (filenames embed unpadded decimal coordinates, so "10" sorts
     /// before "2"). Block identity/order must come from the proto's
-    /// `block_id`: use [`TraceDir::read_threadblocks_in_launch_order`]. When a
-    /// sampling sidecar is present, this list comes from the payload snapshot
-    /// sealed during [`TraceDir::open`], not a second directory walk.
+    /// `block_id`: use [`TraceDir::read_threadblocks_in_launch_order`]. The list
+    /// always comes from the descriptor-anchored payload snapshot captured by
+    /// [`TraceDir::open`], never a second directory walk.
     ///
-    /// A kernel launch with a missing/empty threadblock dir is a typed
-    /// error: every launched kernel has at least one block, so absence
-    /// means the trace tree is truncated. Directory-entry read failures
-    /// propagate as typed I/O errors — a dropped entry would silently
-    /// shrink the replay set.
+    /// A kernel launch with no snapshotted payload is a typed error.
     pub fn threadblock_paths(&self, loc: &KernelLoc<'_>) -> Result<Vec<PathBuf>, TraceError> {
         let dir = self
             .root
@@ -814,41 +1449,13 @@ impl TraceDir {
             .join(format!("device_{}", loc.device_id))
             .join(format!("stream_{}", loc.stream_id))
             .join(format!("kernel_{}", loc.kernel.id));
-        let mut paths = if let Some(snapshot) = &self.sampling_payload {
-            snapshot
-                .by_path
-                .keys()
-                .filter(|path| path.parent() == Some(dir.as_path()))
-                .cloned()
-                .collect()
-        } else {
-            let entries = match fs::read_dir(&dir) {
-                Ok(entries) => entries,
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                    return Err(TraceError::ThreadblocksMissing { dir });
-                }
-                Err(source) => return Err(TraceError::Io { path: dir, source }),
-            };
-            let mut paths = Vec::new();
-            for entry in entries {
-                let entry = entry.map_err(|source| TraceError::Io {
-                    path: dir.clone(),
-                    source,
-                })?;
-                let path = entry.path();
-                if path.extension().is_some_and(|ext| ext == "pb") {
-                    let file_type = entry.file_type().map_err(|source| TraceError::Io {
-                        path: path.clone(),
-                        source,
-                    })?;
-                    if !file_type.is_file() {
-                        return Err(TraceError::ThreadblockPayloadNotRegular { path });
-                    }
-                    paths.push(path);
-                }
-            }
-            paths
-        };
+        let mut paths: Vec<_> = self
+            .sampling_payload
+            .by_path
+            .keys()
+            .filter(|path| path.parent() == Some(dir.as_path()))
+            .cloned()
+            .collect();
         if paths.is_empty() {
             return Err(TraceError::ThreadblocksMissing { dir });
         }
@@ -856,22 +1463,16 @@ impl TraceDir {
         Ok(paths)
     }
 
-    /// Decode one threadblock path owned by this trace directory. Sidecar-bound
-    /// traces read only the immutable bytes captured and hashed by
-    /// [`TraceDir::open`]; paths outside that snapshot fail closed. Traces without
-    /// a sampling sidecar retain the ordinary filesystem reader.
+    /// Decode one threadblock path from the immutable descriptor-anchored bytes
+    /// captured and hashed by [`TraceDir::open`]. Paths outside that snapshot fail
+    /// closed.
     pub fn read_threadblock(&self, path: &Path) -> Result<pb::Threadblock, TraceError> {
-        match &self.sampling_payload {
-            Some(snapshot) => {
-                let raw = snapshot.by_path.get(path).ok_or_else(|| {
-                    TraceError::SamplingPayloadSnapshotMissing {
-                        path: path.to_path_buf(),
-                    }
-                })?;
-                decode_threadblock(raw, path)
+        let raw = self.sampling_payload.by_path.get(path).ok_or_else(|| {
+            TraceError::SamplingPayloadSnapshotMissing {
+                path: path.to_path_buf(),
             }
-            None => read_threadblock(path),
-        }
+        })?;
+        decode_threadblock(raw, path)
     }
 
     /// Read every threadblock of one kernel launch, keyed and sorted by the
@@ -882,9 +1483,9 @@ impl TraceDir {
     ///
     /// Loads the whole kernel's blocks into memory (fine for the current
     /// roster; a streaming variant can land with the SM scheduler when
-    /// needed). Sidecar-bound traces decode the immutable byte snapshot captured
-    /// and hashed by [`TraceDir::open`], so later path replacement cannot change
-    /// replay under already-issued provenance.
+    /// needed). Blocks decode from the immutable bytes captured and hashed by
+    /// [`TraceDir::open`], so later path replacement cannot change replay under
+    /// already-issued provenance.
     pub fn read_threadblocks_in_launch_order(
         &self,
         loc: &KernelLoc<'_>,
@@ -2421,117 +3022,6 @@ fn validate_subset_producer_contract(
     Ok(())
 }
 
-fn collect_threadblock_pb_paths(dir: &Path, paths: &mut Vec<PathBuf>) -> Result<(), TraceError> {
-    let entries = fs::read_dir(dir).map_err(|source| TraceError::Io {
-        path: dir.to_path_buf(),
-        source,
-    })?;
-    for entry in entries {
-        let entry = entry.map_err(|source| TraceError::Io {
-            path: dir.to_path_buf(),
-            source,
-        })?;
-        let path = entry.path();
-        let file_type = entry.file_type().map_err(|source| TraceError::Io {
-            path: path.clone(),
-            source,
-        })?;
-        let pb_named = path.extension().is_some_and(|suffix| suffix == "pb")
-            || path.file_name().is_some_and(|name| name == ".pb");
-        if file_type.is_dir() {
-            if pb_named {
-                return Err(TraceError::ThreadblockPayloadNotRegular { path });
-            }
-            collect_threadblock_pb_paths(&path, paths)?;
-        } else if pb_named {
-            if !file_type.is_file() {
-                return Err(TraceError::ThreadblockPayloadNotRegular { path });
-            }
-            paths.push(path);
-        }
-    }
-    Ok(())
-}
-
-fn capture_threadblock_payload(root: &Path) -> Result<VerifiedSamplingPayload, TraceError> {
-    let mut paths = Vec::new();
-    collect_threadblock_pb_paths(&root.join("threadblocks"), &mut paths)?;
-    if paths.is_empty() {
-        return Err(TraceError::ThreadblockPayloadSnapshotInvalid {
-            root: root.to_path_buf(),
-            message: "snapshot contains no regular .pb files".to_owned(),
-        });
-    }
-
-    let mut payload_paths = Vec::with_capacity(paths.len());
-    for path in paths {
-        let relative =
-            path.strip_prefix(root)
-                .map_err(|_| TraceError::ThreadblockPayloadSnapshotInvalid {
-                    root: root.to_path_buf(),
-                    message: format!("payload path is outside trace root: {}", path.display()),
-                })?;
-        let relative =
-            relative
-                .to_str()
-                .ok_or_else(|| TraceError::ThreadblockPayloadSnapshotInvalid {
-                    root: root.to_path_buf(),
-                    message: format!("payload path is not UTF-8: {}", path.display()),
-                })?;
-        let relative = relative.to_owned();
-        if !safe_payload_manifest_path(&relative) {
-            return Err(TraceError::ThreadblockPayloadSnapshotInvalid {
-                root: root.to_path_buf(),
-                message: format!(
-                    "payload path is not canonical for the per-file manifest: {relative:?}"
-                ),
-            });
-        }
-        payload_paths.push((path, relative));
-    }
-    payload_paths.sort_by(|(_, left), (_, right)| left.cmp(right));
-
-    let file_count = u64::try_from(payload_paths.len()).map_err(|_| {
-        TraceError::ThreadblockPayloadSnapshotInvalid {
-            root: root.to_path_buf(),
-            message: "payload file count exceeds u64".to_owned(),
-        }
-    })?;
-    let mut raw_bytes = 0_u64;
-    let mut stream_digest = Sha256::new();
-    let mut manifest = String::from("trace-payload-file-manifest-v1\n");
-    let mut by_path = BTreeMap::new();
-    for (path, relative) in payload_paths {
-        let raw = fs::read(&path).map_err(|source| TraceError::Io {
-            path: path.clone(),
-            source,
-        })?;
-        let size = u64::try_from(raw.len()).map_err(|_| {
-            TraceError::ThreadblockPayloadSnapshotInvalid {
-                root: root.to_path_buf(),
-                message: format!("payload {} length exceeds u64", path.display()),
-            }
-        })?;
-        raw_bytes = raw_bytes.checked_add(size).ok_or_else(|| {
-            TraceError::ThreadblockPayloadSnapshotInvalid {
-                root: root.to_path_buf(),
-                message: "payload byte count overflows u64".to_owned(),
-            }
-        })?;
-        let file_digest = Sha256Digest::of(&raw);
-        manifest.push_str(&format!("{relative}\t{size}\t{file_digest}\n"));
-        stream_digest.update(&raw);
-        by_path.insert(path, raw);
-    }
-    let identity = ThreadblockPayloadIdentity {
-        file_count,
-        raw_bytes,
-        sorted_path_manifest_sha256: Sha256Digest::of(manifest.as_bytes()),
-        sorted_path_stream_sha256: stream_digest.finish_digest(),
-    };
-    Ok(VerifiedSamplingPayload { by_path, identity })
-}
-
 fn validate_sampling_payload_snapshot(
     root: &Path,
     sidecar: &TraceSamplingSidecar,
@@ -2607,28 +3097,12 @@ fn validate_sampling_payload_snapshot(
     Ok(())
 }
 
-fn verify_sampling_payload(
-    root: &Path,
-    sidecar: &TraceSamplingSidecar,
-) -> Result<VerifiedSamplingPayload, TraceError> {
-    let snapshot = capture_threadblock_payload(root).map_err(|error| match error {
-        TraceError::ThreadblockPayloadSnapshotInvalid { message, .. } => {
-            TraceError::SamplingSidecarMalformed {
-                path: root.join("trace_sampling.json"),
-                message,
-            }
-        }
-        other => other,
-    })?;
-    validate_sampling_payload_snapshot(root, sidecar, &snapshot)?;
-    Ok(snapshot)
-}
-
 impl TraceSamplingSidecar {
     /// Parse `<root>/trace_sampling.json` if present (`Ok(None)` if absent).
     /// This internal stage validates and retains the JSON envelope; callers only
     /// receive it through [`TraceDir::sampling_sidecar`] after `TraceDir::open`
     /// has also bound the decompressed threadblock bytes.
+    #[cfg(test)]
     fn load(root: &Path) -> Result<Option<Self>, TraceError> {
         let path = root.join("trace_sampling.json");
         let raw = match fs::read(&path) {
@@ -3180,6 +3654,8 @@ pub fn block_launch_index(
 
 /// Read one per-threadblock `.pb` file.
 fn decode_threadblock(raw: &[u8], path: &Path) -> Result<pb::Threadblock, TraceError> {
+    wire_preflight::preflight_threadblock(raw)
+        .map_err(|error| map_wire_preflight_error(path, "dynamic_trace.threadblock", error))?;
     pb::Threadblock::decode(raw).map_err(|source| TraceError::Decode {
         path: path.to_path_buf(),
         message_type: "dynamic_trace.threadblock",
@@ -3187,6 +3663,7 @@ fn decode_threadblock(raw: &[u8], path: &Path) -> Result<pb::Threadblock, TraceE
     })
 }
 
+#[cfg(test)]
 fn read_threadblock(path: &Path) -> Result<pb::Threadblock, TraceError> {
     let raw = fs::read(path).map_err(|source| TraceError::Io {
         path: path.to_path_buf(),
@@ -3346,6 +3823,29 @@ fn decode_address_access(
     inst_width: i32,
     record: &impl Fn() -> String,
 ) -> Result<AddressAccess, TraceError> {
+    // Match the Python gate's aggregate mask diagnosis before positional
+    // reconstruction. A malformed list_all length has higher precedence there;
+    // every other per-slot disagreement remains lane_position_mismatch.
+    if addr.compression_format != lanes::FORMAT_LIST_ALL
+        || addr.addrs.len() == lanes::LANES_PER_WARP
+    {
+        let real_count = if addr.compression_format == lanes::FORMAT_LIST_ALL {
+            addr.addrs
+                .iter()
+                .filter(|&&slot| slot != lanes::LANE_INACTIVE_SENTINEL)
+                .count()
+        } else {
+            addr.addrs.len()
+        };
+        if (and_mask == 0 && real_count > 0)
+            || (and_mask != 0
+                && addr.compression_format == lanes::FORMAT_LIST_ALL
+                && real_count == 0)
+        {
+            return Err(TraceError::LaneMaskInconsistent { record: record() });
+        }
+    }
+
     let lane_vector =
         lanes::reconstruct_lane_vector(addr, and_mask).map_err(|source| TraceError::Lane {
             record: record(),
@@ -3373,31 +3873,70 @@ fn decode_address_access(
 /// instruction and may later stream its address records without another full
 /// preflight.
 ///
-/// "Memory instruction" starts with the canonical gate (`_check_instruction`):
-/// address records OR a present `memory_op_class`. This replay consumer also
-/// treats present data-width, access-kind, or cache-op metadata as memory evidence
-/// so a malformed partial producer record cannot silently downgrade to
-/// `NonMemory`. For those records, masks and `memory_op_class` must be present, the class must be
-/// specified, `data_width` must be present and strictly positive, unknown enum
-/// wire values are typed schema-skew errors, and every address record must
-/// reconstruct positionally. Non-memory instructions return `Ok(None)`.
+/// "Memory instruction" uses the canonical Python predicate: address records OR
+/// a present `memory_op_class`. Data-width/access-kind/cache-op fields alone do not
+/// reclassify a non-memory record. Every instruction must carry `warpid_tb`, a
+/// positive function id, both masks, and a low-32-consistent `vpc`. Memory records
+/// additionally require a specified class and positive instruction width; unknown
+/// enum values are typed schema skew, explicit memory-space UNSPECIFIED is rejected,
+/// and every address record must reconstruct positionally. Non-memory instructions
+/// return `Ok(None)` after their universal fields have been validated.
 pub fn preflight_memory_access<'a>(
     inst: &'a pb::Instruction,
     record: impl Fn() -> String,
 ) -> Result<Option<PreflightedMemoryAccess<'a>>, TraceError> {
     let n_addresses = inst.addresses.len();
-    let looks_like_memory = n_addresses > 0
-        || inst.memory_op_class.is_some()
-        || inst.data_width.is_some()
-        || inst.memory_op_access_kind.is_some()
-        || inst.instruction_cache_op.is_some();
+    // Canonical Python predicate: data_width and additive provenance fields do
+    // not by themselves turn an otherwise non-memory instruction into memory.
+    let looks_like_memory = n_addresses > 0 || inst.memory_op_class.is_some();
+
+    // Keep the Python validator's fail-fast precedence: memory width first,
+    // followed by the fields required on every instruction.
+    let inst_width = if looks_like_memory {
+        let Some(inst_width) = inst.data_width else {
+            return Err(TraceError::DataWidthMissing { record: record() });
+        };
+        if inst_width <= 0 {
+            return Err(TraceError::DataWidthInvalid {
+                record: record(),
+                got: inst_width,
+            });
+        }
+        inst_width
+    } else {
+        0
+    };
+
+    if inst.warpid_tb.is_none() {
+        return Err(TraceError::WarpidTbMissing { record: record() });
+    }
+    if inst.function_unique_id <= 0 {
+        return Err(TraceError::FunctionUniqueIdInvalid {
+            record: record(),
+            got: inst.function_unique_id,
+        });
+    }
+    let Some(active_mask) = inst.active_mask else {
+        return Err(TraceError::ActiveMaskMissing { record: record() });
+    };
+    let Some(predicate_mask) = inst.predicate_mask else {
+        return Err(TraceError::PredicateMaskMissing { record: record() });
+    };
+    let Some(vpc) = inst.vpc else {
+        return Err(TraceError::VpcMissing { record: record() });
+    };
+    let vpc_low_32 = vpc as u32;
+    if vpc_low_32 != inst.pc {
+        return Err(TraceError::VpcInconsistentWithPc {
+            record: record(),
+            vpc_low_32,
+            pc: inst.pc,
+        });
+    }
+
     if !looks_like_memory {
         return Ok(None);
     }
-
-    let (Some(active_mask), Some(predicate_mask)) = (inst.active_mask, inst.predicate_mask) else {
-        return Err(TraceError::MaskMissing { record: record() });
-    };
 
     let Some(op_class_raw) = inst.memory_op_class else {
         return Err(TraceError::MemoryOpClassMissing {
@@ -3408,6 +3947,36 @@ pub fn preflight_memory_access<'a>(
     let op_class: pb::MemoryOpClass = known_enum(op_class_raw, "memory_op_class", &record)?;
     if op_class == pb::MemoryOpClass::Unspecified {
         return Err(TraceError::MemoryOpClassUnspecified { record: record() });
+    }
+
+    let and_mask = active_mask & predicate_mask;
+    // Validate every address, including zero-mask records. Those stream no
+    // callbacks, but malformed lane payloads and unknown enums remain failures.
+    for addr in &inst.addresses {
+        decode_address_access(addr, and_mask, inst_width, &record)?;
+    }
+    // Structural preflight above intentionally completes before this semantic
+    // compatibility gate. Explicit UNSPECIFIED is never a legacy fallback;
+    // absence alone retains the class-derived behavior.
+    for (operand, addr) in inst.addresses.iter().enumerate() {
+        let Some(raw) = addr.address_space else {
+            continue;
+        };
+        let space: pb::MemorySpace = known_enum(raw, "address_space", &record)?;
+        if space == pb::MemorySpace::Unspecified {
+            return Err(TraceError::MemorySpaceUnspecified {
+                record: record(),
+                operand,
+            });
+        }
+        if !memory_space_is_compatible(op_class, space) {
+            return Err(TraceError::MemoryOpClassAddressSpaceConflict {
+                record: record(),
+                operand,
+                class: op_class,
+                space,
+            });
+        }
     }
 
     let access_kind = match inst.memory_op_access_kind {
@@ -3428,43 +3997,6 @@ pub fn preflight_memory_access<'a>(
             &record,
         )?),
     };
-
-    // Canonical data_width contract: present and strictly positive on every
-    // memory instruction (data_width_missing / data_width_invalid).
-    let Some(inst_width) = inst.data_width else {
-        return Err(TraceError::DataWidthMissing { record: record() });
-    };
-    if inst_width <= 0 {
-        return Err(TraceError::DataWidthInvalid {
-            record: record(),
-            got: inst_width,
-        });
-    }
-
-    let and_mask = active_mask & predicate_mask;
-    // Validate every address, including zero-mask records. Those stream no
-    // callbacks, but malformed lane payloads and unknown enums remain failures.
-    for addr in &inst.addresses {
-        decode_address_access(addr, and_mask, inst_width, &record)?;
-    }
-    // Structural preflight above intentionally completes before this semantic
-    // compatibility gate. An explicit per-address space may refine ATOMIC, but
-    // it cannot cross GLOBAL/SHARED/LOCAL classes or turn ASYNC_COPY into a
-    // shared-destination record. Absence remains the admitted legacy fallback.
-    for (operand, addr) in inst.addresses.iter().enumerate() {
-        let Some(raw) = addr.address_space else {
-            continue;
-        };
-        let space: pb::MemorySpace = known_enum(raw, "address_space", &record)?;
-        if !memory_space_is_compatible(op_class, space) {
-            return Err(TraceError::MemoryOpClassAddressSpaceConflict {
-                record: record(),
-                operand,
-                class: op_class,
-                space,
-            });
-        }
-    }
 
     Ok(Some(PreflightedMemoryAccess {
         inst,
@@ -3542,10 +4074,14 @@ struct RawAllocation {
 }
 
 fn parse_hex_u64(s: &str) -> Option<u64> {
-    // Python parity: base_address MUST be a 0x-prefixed hex string; a bare or
-    // decimal value is rejected (returns None → allocations_sidecar_malformed).
-    let t = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X"))?;
-    u64::from_str_radix(t, 16).ok()
+    // Canonical cross-runtime grammar: an exact 0x/0X prefix followed by one or
+    // more ASCII hex digits. In particular, Python-style digit separators are
+    // not wire syntax.
+    let digits = s.strip_prefix("0x").or_else(|| s.strip_prefix("0X"))?;
+    if digits.is_empty() || !digits.bytes().all(|byte| byte.is_ascii_hexdigit()) {
+        return None;
+    }
+    u64::from_str_radix(digits, 16).ok()
 }
 
 impl AllocationRegistry {
@@ -3610,9 +4146,9 @@ impl AllocationRegistry {
                 )
                 .is_some()
             {
-                return Err(TraceError::AllocationsSidecarMalformed {
+                return Err(TraceError::AllocationIdDuplicate {
                     path: path.to_path_buf(),
-                    message: format!("duplicate allocation_id {}", e.allocation_id),
+                    allocation_id: e.allocation_id,
                 });
             }
         }
@@ -3635,6 +4171,65 @@ fn record_requires_identity(
     }
 }
 
+fn validate_address_carrying_v1_shape(
+    preflight: PreflightedMemoryAccess<'_>,
+    record: &impl Fn() -> String,
+) -> Result<(), TraceError> {
+    let meta = preflight.meta();
+    let instruction = preflight.instruction();
+    if !ADDRESS_CARRYING_PAYLOAD_CLASSES.contains(&meta.op_class) {
+        return Err(TraceError::MemoryPayloadClassUndeclared {
+            record: record(),
+            class: meta.op_class,
+        });
+    }
+
+    let operand_count = instruction.addresses.len();
+    let invalid = |detail| {
+        Err(TraceError::MemoryPayloadShapeInvalid {
+            record: record(),
+            class: meta.op_class,
+            detail,
+            got: operand_count,
+        })
+    };
+    match meta.op_class {
+        pb::MemoryOpClass::Global | pb::MemoryOpClass::Shared | pb::MemoryOpClass::Local => {
+            if meta.and_mask != 0 && operand_count == 0 {
+                return invalid("an active record requires at least one operand");
+            }
+        }
+        pb::MemoryOpClass::Atomic => {
+            if meta.and_mask == 0 && operand_count == 0 {
+                return Ok(());
+            }
+            if operand_count != 1 {
+                return invalid("expected exactly one operand, except zero-active may carry none");
+            }
+            if instruction.addresses[0].address_space.is_none() {
+                return invalid("the sole operand requires an explicit concrete address_space");
+            }
+        }
+        pb::MemoryOpClass::AsyncCopy => {
+            if operand_count != 1 {
+                return invalid("expected exactly one source operand");
+            }
+            if instruction.addresses[0].address_space.is_none() {
+                return invalid("the source operand requires explicit GLOBAL or GENERIC space");
+            }
+        }
+        pb::MemoryOpClass::Unspecified
+        | pb::MemoryOpClass::Texture
+        | pb::MemoryOpClass::Surface
+        | pb::MemoryOpClass::Tma
+        | pb::MemoryOpClass::ClusterDsmem
+        | pb::MemoryOpClass::Tmem => {
+            unreachable!("undeclared classes return before shape validation")
+        }
+    }
+    Ok(())
+}
+
 /// Enforce the Python-equivalent allocation identity on one instruction against
 /// the loaded registry (`None` = no sidecar). The complete memory wire record is
 /// preflighted before the first identity diagnosis, so an unknown enum or malformed
@@ -3655,6 +4250,40 @@ pub fn check_allocation_identity(
     check_preflighted_allocation_identity(preflight, registry, record)
 }
 
+/// Apply the complete Python-equivalent per-instruction contract to every
+/// record in one decoded threadblock. Iteration follows sorted protobuf map keys
+/// and then instruction order, matching `validate_threadblock`'s fail-fast walk.
+pub fn validate_threadblock_contract(
+    threadblock: &pb::Threadblock,
+    label: impl AsRef<str>,
+    registry: Option<&AllocationRegistry>,
+    payload_contract: MemoryPayloadContract,
+    expected_function_unique_id: i32,
+) -> Result<(), TraceError> {
+    let label = label.as_ref();
+    for (&warp_id, warp) in &threadblock.warps {
+        for (instruction_index, instruction) in warp.instructions.iter().enumerate() {
+            let record = || format!("{label} warp={warp_id} inst={instruction_index}");
+            let preflight = preflight_memory_access(instruction, &record)?;
+            if instruction.function_unique_id != expected_function_unique_id {
+                return Err(TraceError::FunctionUniqueIdMismatch {
+                    record: record(),
+                    expected: expected_function_unique_id,
+                    actual: instruction.function_unique_id,
+                });
+            }
+            let Some(preflight) = preflight else {
+                continue;
+            };
+            if payload_contract == MemoryPayloadContract::AddressCarryingV1 {
+                validate_address_carrying_v1_shape(preflight, &record)?;
+            }
+            check_preflighted_allocation_identity(preflight, registry, record)?;
+        }
+    }
+    Ok(())
+}
+
 /// Apply allocation identity to an instruction whose complete wire structure was
 /// already validated. This split lets replay enforce its producer-shape route
 /// before identity without rerunning fallible structural preflight or allocating an
@@ -3665,30 +4294,42 @@ pub fn check_preflighted_allocation_identity(
     registry: Option<&AllocationRegistry>,
     record: impl Fn() -> String,
 ) -> Result<(), TraceError> {
-    let inst_class = Some(preflight.meta().op_class);
-    let mut identity_error = None;
-    preflight.visit_addresses(|access| {
-        // Preserve the first identity diagnosis. Complete structural validation
-        // already succeeded when the preflight token was constructed.
-        if identity_error.is_some() || !record_requires_identity(access.address_space, inst_class) {
-            return;
-        }
-        let alloc_id = access.allocation_id.unwrap_or(0);
-        if alloc_id == 0 {
-            identity_error = Some(TraceError::AllocationIdMissing { record: record() });
-            return;
-        }
-        let Some(reg) = registry else {
-            identity_error = Some(TraceError::AllocationsSidecarMissing { record: record() });
-            return;
+    let meta = preflight.meta();
+    let inst_class = Some(meta.op_class);
+    for addr in &preflight.instruction().addresses {
+        let address_space = match addr.address_space {
+            None => None,
+            Some(raw) => Some(known_enum::<pb::MemorySpace>(
+                raw,
+                "address_space",
+                &record,
+            )?),
         };
-        let Some(range) = reg.by_id.get(&alloc_id) else {
-            identity_error = Some(TraceError::AllocationIdUnknown {
+        if !record_requires_identity(address_space, inst_class) {
+            continue;
+        }
+
+        let allocation_id = addr.allocation_id.unwrap_or(0);
+        if allocation_id == 0 {
+            if meta.and_mask != 0 {
+                return Err(TraceError::AllocationIdMissing { record: record() });
+            }
+            continue;
+        }
+        let Some(registry) = registry else {
+            return Err(TraceError::AllocationsSidecarMissing { record: record() });
+        };
+        let Some(range) = registry.by_id.get(&allocation_id) else {
+            return Err(TraceError::AllocationIdUnknown {
                 record: record(),
-                allocation_id: alloc_id,
+                allocation_id,
             });
-            return;
         };
+        if meta.and_mask == 0 {
+            continue;
+        }
+
+        let access = decode_address_access(addr, meta.and_mask, preflight.inst_width, &record)?;
         let base = u128::from(range.base);
         let end = base + u128::from(range.size);
         for (lane, &slot) in access.lane_vector.iter().enumerate() {
@@ -3698,22 +4339,18 @@ pub fn check_preflighted_allocation_identity(
             let lane_addr = slot as u64;
             let lane_addr_wide = u128::from(lane_addr);
             if !(base <= lane_addr_wide && lane_addr_wide < end) {
-                identity_error = Some(TraceError::LaneOutsideAllocationRange {
+                return Err(TraceError::LaneOutsideAllocationRange {
                     record: record(),
                     lane,
                     lane_addr,
-                    allocation_id: alloc_id,
+                    allocation_id,
                     base: range.base,
                     end,
                 });
-                return;
             }
         }
-    });
-    match identity_error {
-        Some(error) => Err(error),
-        None => Ok(()),
     }
+    Ok(())
 }
 
 /// Allocating convenience wrapper over [`visit_memory_access`]: collects the
@@ -3890,6 +4527,7 @@ mod tests {
                 active_mask: Some(0b11),
                 predicate_mask: Some(0b11),
                 function_unique_id: 1,
+                warpid_tb: Some(0),
                 vpc: Some(0),
                 ..Default::default()
             };
@@ -3907,6 +4545,169 @@ mod tests {
             )
             .unwrap();
         }
+    }
+
+    fn read_synthetic_root(dir: &Path) -> pb::Trace {
+        let raw = std::fs::read(dir.join("dynamic_trace.pb")).unwrap();
+        pb::Trace::decode(raw.as_slice()).unwrap()
+    }
+
+    fn write_synthetic_root(dir: &Path, trace: &pb::Trace) {
+        std::fs::write(dir.join("dynamic_trace.pb"), trace.encode_to_vec()).unwrap();
+    }
+
+    fn synthetic_threadblock_path(dir: &Path, kernel_id: i32) -> PathBuf {
+        dir.join(format!(
+            "threadblocks/device_0/stream_0/kernel_{kernel_id}/d_0_s_0_k_{kernel_id}_0,0,0.pb"
+        ))
+    }
+
+    #[test]
+    fn root_map_and_function_identities_fail_closed() {
+        for mutation in ["device", "stream", "function"] {
+            let tmp = tempfile::tempdir().unwrap();
+            write_synthetic_trace(tmp.path(), 1);
+            let mut trace = read_synthetic_root(tmp.path());
+            match mutation {
+                "device" => trace.gpu_device.get_mut(&0).unwrap().id = 1,
+                "stream" => {
+                    trace
+                        .gpu_device
+                        .get_mut(&0)
+                        .unwrap()
+                        .streams
+                        .get_mut(&0)
+                        .unwrap()
+                        .id = 1;
+                }
+                "function" => {
+                    trace
+                        .gpu_device
+                        .get_mut(&0)
+                        .unwrap()
+                        .streams
+                        .get_mut(&0)
+                        .unwrap()
+                        .kernels[0]
+                        .function_unique_id = 0;
+                }
+                _ => unreachable!(),
+            }
+            write_synthetic_root(tmp.path(), &trace);
+            let error = TraceDir::open(tmp.path()).err().unwrap();
+            let expected = if mutation == "function" {
+                "function_unique_id_invalid"
+            } else {
+                "trace_launch_identity_mismatch"
+            };
+            assert_eq!(
+                error.typed_reason(),
+                Some(expected),
+                "{mutation}: {error:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn duplicate_launch_identity_is_typed() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_synthetic_trace(tmp.path(), 1);
+        let mut trace = read_synthetic_root(tmp.path());
+        let stream = trace
+            .gpu_device
+            .get_mut(&0)
+            .unwrap()
+            .streams
+            .get_mut(&0)
+            .unwrap();
+        stream.kernels.push(stream.kernels[0].clone());
+        write_synthetic_root(tmp.path(), &trace);
+        let error = TraceDir::open(tmp.path()).err().unwrap();
+        assert_eq!(error.typed_reason(), Some("trace_launch_identity_mismatch"));
+    }
+
+    #[test]
+    fn every_payload_is_validated_and_joins_one_root_launch() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_synthetic_trace(tmp.path(), 1);
+        let mut trace = read_synthetic_root(tmp.path());
+        let stream = trace
+            .gpu_device
+            .get_mut(&0)
+            .unwrap()
+            .streams
+            .get_mut(&0)
+            .unwrap();
+        let mut second = stream.kernels[0].clone();
+        second.id = 2;
+        second.function_unique_id = 2;
+        stream.kernels.push(second);
+        write_synthetic_root(tmp.path(), &trace);
+
+        let first_path = synthetic_threadblock_path(tmp.path(), 1);
+        let raw = std::fs::read(&first_path).unwrap();
+        let mut threadblock = pb::Threadblock::decode(raw.as_slice()).unwrap();
+        let instructions = &mut threadblock.warps.get_mut(&0).unwrap().instructions;
+        for instruction in instructions.iter_mut() {
+            instruction.function_unique_id = 2;
+        }
+        instructions[0].warpid_tb = None;
+        let second_path = synthetic_threadblock_path(tmp.path(), 2);
+        std::fs::create_dir_all(second_path.parent().unwrap()).unwrap();
+        std::fs::write(&second_path, threadblock.encode_to_vec()).unwrap();
+        let error = TraceDir::open(tmp.path()).err().unwrap();
+        assert_eq!(error.typed_reason(), Some("warpid_tb_missing"));
+
+        std::fs::remove_file(second_path).unwrap();
+        let error = TraceDir::open(tmp.path()).err().unwrap();
+        assert_eq!(error.typed_reason(), Some("trace_launch_payload_missing"));
+    }
+
+    #[test]
+    fn orphan_payload_and_function_join_are_typed() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_synthetic_trace(tmp.path(), 1);
+        let first_path = synthetic_threadblock_path(tmp.path(), 1);
+        let orphan_path = synthetic_threadblock_path(tmp.path(), 9);
+        std::fs::create_dir_all(orphan_path.parent().unwrap()).unwrap();
+        std::fs::copy(&first_path, &orphan_path).unwrap();
+        let error = TraceDir::open(tmp.path()).err().unwrap();
+        assert_eq!(error.typed_reason(), Some("trace_payload_orphan"));
+
+        std::fs::remove_file(orphan_path).unwrap();
+        let raw = std::fs::read(&first_path).unwrap();
+        let mut threadblock = pb::Threadblock::decode(raw.as_slice()).unwrap();
+        threadblock.warps.get_mut(&0).unwrap().instructions[0].function_unique_id = 2;
+        std::fs::write(first_path, threadblock.encode_to_vec()).unwrap();
+        let error = TraceDir::open(tmp.path()).err().unwrap();
+        assert_eq!(error.typed_reason(), Some("function_unique_id_mismatch"));
+    }
+
+    #[test]
+    fn stats_parser_enforces_uint64_rows_and_checked_totals() {
+        let path = Path::new("stats.csv");
+        let maximum = format!(
+            "total_insts,total_reported_insts\n{},{}\n",
+            u64::MAX,
+            u64::MAX
+        );
+        assert_eq!(
+            parse_trace_stats(path, maximum.as_bytes()).unwrap(),
+            TraceStats {
+                row_count: 1,
+                expected_record_count: u64::MAX,
+                admitted_record_count: u64::MAX,
+            }
+        );
+
+        let too_wide = b"total_insts,total_reported_insts\n18446744073709551616,1\n";
+        assert!(matches!(
+            parse_trace_stats(path, too_wide),
+            Err(TraceError::StatsSchemaInvalid { .. })
+        ));
+        let overflow = format!("total_insts,total_reported_insts\n{},1\n1,1\n", u64::MAX);
+        let error = parse_trace_stats(path, overflow.as_bytes()).unwrap_err();
+        assert_eq!(error.typed_reason(), Some("trace_counter_overflow"));
     }
 
     #[test]
@@ -3980,7 +4781,22 @@ mod tests {
         // Overwrite the block file with one lacking block_id.
         let tb = pb::Threadblock {
             block_id: None,
-            warps: Default::default(),
+            warps: [(
+                0,
+                pb::Warp {
+                    id: 0,
+                    instructions: vec![pb::Instruction {
+                        active_mask: Some(0),
+                        predicate_mask: Some(0),
+                        function_unique_id: 1,
+                        warpid_tb: Some(0),
+                        vpc: Some(0),
+                        ..Default::default()
+                    }],
+                },
+            )]
+            .into_iter()
+            .collect(),
         };
         std::fs::write(
             tmp.path()
@@ -3988,10 +4804,8 @@ mod tests {
             tb.encode_to_vec(),
         )
         .unwrap();
-        let td = TraceDir::open(tmp.path()).unwrap();
-        let kernels: Vec<_> = td.kernels().collect();
         assert!(matches!(
-            td.read_threadblocks_in_launch_order(&kernels[0]),
+            TraceDir::open(tmp.path()),
             Err(TraceError::BlockIdMissing { .. })
         ));
     }
@@ -4010,10 +4824,8 @@ mod tests {
             tb.encode_to_vec(),
         )
         .unwrap();
-        let td = TraceDir::open(tmp.path()).unwrap();
-        let kernels: Vec<_> = td.kernels().collect();
         assert!(matches!(
-            td.read_threadblocks_in_launch_order(&kernels[0]),
+            TraceDir::open(tmp.path()),
             Err(TraceError::BlockIdOutOfRange {
                 index: 5,
                 grid: 1,
@@ -4112,11 +4924,9 @@ mod tests {
         write_synthetic_trace(tmp.path(), 2);
         std::fs::remove_dir_all(tmp.path().join("threadblocks")).unwrap();
 
-        let td = TraceDir::open(tmp.path()).unwrap();
-        let kernels: Vec<_> = td.kernels().collect();
         assert!(matches!(
-            td.threadblock_paths(&kernels[0]),
-            Err(TraceError::ThreadblocksMissing { .. })
+            TraceDir::open(tmp.path()),
+            Err(TraceError::TraceThreadblocksEmpty { .. })
         ));
     }
 
@@ -4160,13 +4970,20 @@ mod tests {
     }
 
     #[test]
-    fn masks_required_on_memory_instruction() {
+    fn masks_required_on_every_instruction() {
         let mut inst = mem_inst(0);
         inst.active_mask = None;
         inst.predicate_mask = None;
         assert!(matches!(
             memory_access(&inst, || "t".into()),
-            Err(TraceError::MaskMissing { .. })
+            Err(TraceError::ActiveMaskMissing { .. })
+        ));
+
+        let mut inst = mem_inst(0);
+        inst.predicate_mask = None;
+        assert!(matches!(
+            memory_access(&inst, || "t".into()),
+            Err(TraceError::PredicateMaskMissing { .. })
         ));
     }
 
@@ -4186,41 +5003,41 @@ mod tests {
     }
 
     #[test]
-    fn memory_only_metadata_without_class_fails_closed() {
-        let width_only = pb::Instruction {
+    fn memory_only_metadata_does_not_reclassify_nonmemory() {
+        let universal = pb::Instruction {
+            pc: 0,
             active_mask: Some(0),
             predicate_mask: Some(0),
-            data_width: Some(4),
+            function_unique_id: 1,
+            warpid_tb: Some(0),
+            vpc: Some(0),
             ..Default::default()
         };
-        assert!(matches!(
-            memory_access(&width_only, || "width-only".into()),
-            Err(TraceError::MemoryOpClassMissing { n_addresses: 0, .. })
-        ));
+        let mut width_only = universal.clone();
+        width_only.data_width = Some(4);
+        assert!(
+            memory_access(&width_only, || "width-only".into())
+                .unwrap()
+                .is_none()
+        );
 
-        let kind_only = pb::Instruction {
-            active_mask: Some(0),
-            predicate_mask: Some(0),
-            data_width: Some(4),
-            memory_op_access_kind: Some(pb::MemoryOpAccessKind::Load as i32),
-            ..Default::default()
-        };
-        assert!(matches!(
-            memory_access(&kind_only, || "kind-only".into()),
-            Err(TraceError::MemoryOpClassMissing { n_addresses: 0, .. })
-        ));
+        let mut kind_only = universal.clone();
+        kind_only.data_width = Some(4);
+        kind_only.memory_op_access_kind = Some(pb::MemoryOpAccessKind::Load as i32);
+        assert!(
+            memory_access(&kind_only, || "kind-only".into())
+                .unwrap()
+                .is_none()
+        );
 
-        let cache_op_only = pb::Instruction {
-            active_mask: Some(0),
-            predicate_mask: Some(0),
-            data_width: Some(4),
-            instruction_cache_op: Some(pb::InstructionCacheOp::LdgECa as i32),
-            ..Default::default()
-        };
-        assert!(matches!(
-            memory_access(&cache_op_only, || "cache-op-only".into()),
-            Err(TraceError::MemoryOpClassMissing { n_addresses: 0, .. })
-        ));
+        let mut cache_op_only = universal;
+        cache_op_only.data_width = Some(4);
+        cache_op_only.instruction_cache_op = Some(pb::InstructionCacheOp::LdgECa as i32);
+        assert!(
+            memory_access(&cache_op_only, || "cache-op-only".into())
+                .unwrap()
+                .is_none()
+        );
     }
 
     #[test]
@@ -4237,6 +5054,50 @@ mod tests {
             memory_access(&inst, || "t".into()),
             Err(TraceError::DataWidthInvalid { got: 0, .. })
         ));
+    }
+
+    #[test]
+    fn universal_instruction_contract_matches_python_reasons() {
+        let mut inst = mem_inst(0);
+        inst.warpid_tb = None;
+        let error = memory_access(&inst, || "t".into()).unwrap_err();
+        assert_eq!(error.typed_reason(), Some("warpid_tb_missing"));
+
+        let mut inst = mem_inst(0);
+        inst.function_unique_id = 0;
+        let error = memory_access(&inst, || "t".into()).unwrap_err();
+        assert_eq!(error.typed_reason(), Some("function_unique_id_invalid"));
+
+        let mut inst = mem_inst(0);
+        inst.vpc = None;
+        let error = memory_access(&inst, || "t".into()).unwrap_err();
+        assert_eq!(error.typed_reason(), Some("vpc_missing"));
+
+        let mut inst = mem_inst(0);
+        inst.vpc = Some((1_u64 << 32) | 17);
+        let error = memory_access(&inst, || "t".into()).unwrap_err();
+        assert_eq!(error.typed_reason(), Some("vpc_inconsistent_with_pc"));
+
+        let mut inst = mem_inst(0);
+        inst.vpc = Some((1_u64 << 32) | 16);
+        assert!(memory_access(&inst, || "t".into()).is_ok());
+    }
+
+    #[test]
+    fn lane_mask_and_explicit_unspecified_space_match_python_reasons() {
+        let mut inst = mem_inst(0);
+        inst.active_mask = Some(0);
+        inst.predicate_mask = Some(0);
+        inst.addresses[0].compression_format = lanes::FORMAT_BASE_DELTA;
+        inst.addresses[0].addrs = vec![4];
+        let error = memory_access(&inst, || "t".into()).unwrap_err();
+        assert_eq!(error.typed_reason(), Some("lane_mask_inconsistent"));
+
+        let mut inst = mem_inst(0);
+        inst.memory_op_class = Some(pb::MemoryOpClass::Atomic as i32);
+        inst.addresses[0].address_space = Some(pb::MemorySpace::Unspecified as i32);
+        let error = memory_access(&inst, || "t".into()).unwrap_err();
+        assert_eq!(error.typed_reason(), Some("memory_space_unspecified"));
     }
 
     /// Per-address width wins over the instruction-level width when the
@@ -4397,7 +5258,6 @@ mod tests {
             (pb::MemoryOpClass::Global, pb::MemorySpace::Shared),
             (pb::MemoryOpClass::Global, pb::MemorySpace::Local),
             (pb::MemoryOpClass::AsyncCopy, pb::MemorySpace::Shared),
-            (pb::MemoryOpClass::Atomic, pb::MemorySpace::Unspecified),
         ];
         for (class, space) in cases {
             let inst = identity_inst(class, Some(space), None, 0x40);
@@ -4435,7 +5295,15 @@ mod tests {
 
     #[test]
     fn non_memory_instruction_passes_through() {
-        let inst = pb::Instruction::default();
+        let inst = pb::Instruction {
+            pc: 0,
+            active_mask: Some(0),
+            predicate_mask: Some(0),
+            function_unique_id: 1,
+            warpid_tb: Some(0),
+            vpc: Some(0),
+            ..Default::default()
+        };
         assert!(memory_access(&inst, || "t".into()).unwrap().is_none());
     }
 
@@ -4460,10 +5328,14 @@ mod tests {
         let mut addrs = vec![base as i64];
         addrs.extend(std::iter::repeat(crate::lanes::LANE_INACTIVE_SENTINEL).take(31));
         pb::Instruction {
+            pc: 0,
             active_mask: Some(0b1),
             predicate_mask: Some(0b1),
+            function_unique_id: 1,
             memory_op_class: Some(op_class as i32),
             data_width: Some(4),
+            warpid_tb: Some(0),
+            vpc: Some(0),
             addresses: vec![pb::Address {
                 data_width: 4,
                 compression_format: crate::lanes::FORMAT_LIST_ALL,

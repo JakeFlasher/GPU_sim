@@ -66,15 +66,19 @@ Neither condition is encoded as trace evidence or repaired by generation.
   instruction whose op-class the tracer could not classify should
   have been emitted as a typed ``unsupported_memory_path``
   exclusion sidecar instead.
+- ``memory_space_unspecified``: an address record explicitly carries
+  ``MEMORY_SPACE_UNSPECIFIED``. Absence retains the documented legacy class
+  fallback; an explicit proto-default value is a producer contract violation.
 - ``memory_op_class_address_space_conflict``: an address record carries
   an explicit ``address_space`` incompatible with the instruction's
   operation-aware class. GLOBAL accepts GLOBAL/GENERIC, SHARED accepts
   SHARED, LOCAL accepts LOCAL, ATOMIC accepts any concrete effective
   space, and ASYNC_COPY accepts only its GLOBAL/GENERIC source. An
   absent ``address_space`` retains the legacy class fallback.
-- ``unknown_enum_value``: ``memory_op_class`` or an explicit
-  ``address_space`` carries a number outside the committed protobuf enum;
-  this is schema skew, not an unsupported known operation.
+- ``unknown_enum_value``: ``memory_op_class``, ``memory_op_access_kind``,
+  ``instruction_cache_op``, or an explicit ``address_space`` carries a number
+  outside the committed protobuf enum; this is schema skew, not an unsupported
+  known operation.
 - ``data_width_missing``: ``data_width`` is absent on the wire on
   an instruction that looks like memory (addresses non-empty or
   memory_op_class present).
@@ -263,6 +267,47 @@ _ADDRESS_FORMAT_BASE_DELTA = 2
 # The 32-entry sentinel format pins this exactly; any deviation
 # would be a contract violation worth catching at the validator.
 _LANES_PER_WARP = 32
+_I64_MIN = -(2**63)
+_I64_MAX = 2**63 - 1
+_U32_MAX = 2**32 - 1
+_U64_MAX = 2**64 - 1
+
+
+class _DuplicateJsonKeyError(ValueError):
+    pass
+
+
+def _reject_duplicate_json_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise _DuplicateJsonKeyError(f"duplicate object key {key!r}")
+        result[key] = value
+    return result
+
+
+def _parse_bounded_json_integer(token: str) -> int:
+    digits = token[1:] if token.startswith("-") else token
+    # Every integer in the closed allocation schema is at most uint64. Reject
+    # oversized tokens before Python attempts an unbounded bigint conversion.
+    if not digits or len(digits) > 20:
+        raise ValueError("allocation JSON integer exceeds the uint64 token budget")
+    return int(token, 10)
+
+
+def _parse_prefixed_ascii_hex_u64(token: str) -> int:
+    if not (token.startswith("0x") or token.startswith("0X")):
+        raise ValueError("missing 0x prefix")
+    digits = token[2:]
+    if not digits or not all(
+        "0" <= char <= "9" or "a" <= char <= "f" or "A" <= char <= "F"
+        for char in digits
+    ):
+        raise ValueError("not an ASCII hexadecimal token")
+    value = int(digits, 16)
+    if value > _U64_MAX:
+        raise ValueError("outside uint64 domain")
+    return value
 
 
 @dataclass
@@ -366,8 +411,19 @@ def _reconstruct_lane_vector(
                 f"only succeeds when active lanes form a "
                 f"contiguous run"
             )
+        if addr.base_address > _I64_MAX:
+            return None, (
+                f"base_stride base_address=0x{addr.base_address:x} "
+                "exceeds the signed reconstruction domain"
+            )
         for k, j in enumerate(active_lanes):
-            vector[j] = addr.base_address + k * addr.stride
+            value = addr.base_address + k * addr.stride
+            if not _I64_MIN <= value <= _I64_MAX:
+                return None, (
+                    f"base_stride reconstruction leaves the signed domain "
+                    f"at lane {j} (base=0x{addr.base_address:x})"
+                )
+            vector[j] = value
         return vector, None
 
     if cf == _ADDRESS_FORMAT_BASE_DELTA:
@@ -383,9 +439,20 @@ def _reconstruct_lane_vector(
         if n_active == 0:
             return vector, None
         current = addr.base_address
+        if current > _I64_MAX:
+            return None, (
+                f"base_delta base_address=0x{addr.base_address:x} "
+                "exceeds the signed reconstruction domain"
+            )
         vector[active_lanes[0]] = current
         for k in range(1, n_active):
             current = current + addr.addrs[k - 1]
+            if not _I64_MIN <= current <= _I64_MAX:
+                return None, (
+                    f"base_delta reconstruction leaves the signed domain "
+                    f"at lane {active_lanes[k]} "
+                    f"(base=0x{addr.base_address:x})"
+                )
             vector[active_lanes[k]] = current
         return vector, None
 
@@ -530,6 +597,26 @@ def _reconstruct_instruction_addresses(
                 ),
             )
         vectors.append(vector)
+
+    # Match Rust's full structural preflight: all operand lane vectors and
+    # unknown enum values are validated before a known-but-forbidden explicit
+    # UNSPECIFIED value is diagnosed in operand order.
+    if address_pb2_mod is not None:
+        for addr_index, addr in enumerate(inst.addresses):
+            if (
+                addr.HasField("address_space")
+                and addr.address_space
+                == address_pb2_mod.MEMORY_SPACE_UNSPECIFIED
+            ):
+                return None, ValidationResult(
+                    ok=False,
+                    typed_reason="memory_space_unspecified",
+                    detail=(
+                        f"{record_path}: address[{addr_index}] explicitly carries "
+                        "MEMORY_SPACE_UNSPECIFIED; only field absence retains the "
+                        "legacy memory_op_class fallback"
+                    ),
+                )
     return vectors, None
 
 
@@ -687,8 +774,12 @@ def load_allocations_sidecar(
         return None, None
     try:
         with sidecar_path.open(encoding="utf-8") as fh:
-            raw = json.load(fh)
-    except (OSError, json.JSONDecodeError) as exc:
+            raw = json.load(
+                fh,
+                object_pairs_hook=_reject_duplicate_json_keys,
+                parse_int=_parse_bounded_json_integer,
+            )
+    except (OSError, UnicodeError, ValueError) as exc:
         return None, ValidationResult(
             ok=False,
             typed_reason="allocations_sidecar_malformed",
@@ -768,7 +859,7 @@ def load_allocations_sidecar(
         if (
             isinstance(alloc_id, bool)
             or not isinstance(alloc_id, int)
-            or alloc_id <= 0
+            or not 0 < alloc_id <= _U32_MAX
         ):
             return None, ValidationResult(
                 ok=False,
@@ -778,7 +869,11 @@ def load_allocations_sidecar(
                     f"{alloc_id!r} is not a positive integer"
                 ),
             )
-        if isinstance(ctx_id, bool) or not isinstance(ctx_id, int):
+        if (
+            isinstance(ctx_id, bool)
+            or not isinstance(ctx_id, int)
+            or not _I64_MIN <= ctx_id <= _I64_MAX
+        ):
             return None, ValidationResult(
                 ok=False,
                 typed_reason="allocations_sidecar_malformed",
@@ -787,7 +882,11 @@ def load_allocations_sidecar(
                     f"{ctx_id!r} is not an integer"
                 ),
             )
-        if isinstance(dev_id, bool) or not isinstance(dev_id, int):
+        if (
+            isinstance(dev_id, bool)
+            or not isinstance(dev_id, int)
+            or not _I64_MIN <= dev_id <= _I64_MAX
+        ):
             return None, ValidationResult(
                 ok=False,
                 typed_reason="allocations_sidecar_malformed",
@@ -817,20 +916,20 @@ def load_allocations_sidecar(
                 ),
             )
         try:
-            base_address = int(base_str, 16)
+            base_address = _parse_prefixed_ascii_hex_u64(base_str)
         except ValueError:
             return None, ValidationResult(
                 ok=False,
                 typed_reason="allocations_sidecar_malformed",
                 detail=(
                     f"{sidecar_path}: entry[{index}] base_address="
-                    f"{base_str!r} does not parse as hex"
+                    f"{base_str!r} is not canonical 0x-prefixed ASCII hex"
                 ),
             )
         if (
             isinstance(size, bool)
             or not isinstance(size, int)
-            or size <= 0
+            or not 0 < size <= _U64_MAX
         ):
             return None, ValidationResult(
                 ok=False,
@@ -908,12 +1007,82 @@ def _expected_address_spaces(
     return None
 
 
+def _check_address_carrying_v1_shape(
+    inst: Any,
+    instruction_pb2_mod: Any,
+    record_path: str,
+    and_mask: int,
+) -> ValidationResult | None:
+    declared_classes = frozenset(
+        (
+            instruction_pb2_mod.MEMORY_OP_CLASS_GLOBAL,
+            instruction_pb2_mod.MEMORY_OP_CLASS_SHARED,
+            instruction_pb2_mod.MEMORY_OP_CLASS_LOCAL,
+            instruction_pb2_mod.MEMORY_OP_CLASS_ATOMIC,
+            instruction_pb2_mod.MEMORY_OP_CLASS_ASYNC_COPY,
+        )
+    )
+    memory_op_class = inst.memory_op_class
+    if memory_op_class not in declared_classes:
+        return ValidationResult(
+            ok=False,
+            typed_reason="memory_payload_class_undeclared",
+            detail=(
+                f"{record_path}: memory_op_class={memory_op_class} is not "
+                "declared by the address-carrying v1 payload capability"
+            ),
+        )
+
+    operand_count = len(inst.addresses)
+    if memory_op_class in (
+        instruction_pb2_mod.MEMORY_OP_CLASS_GLOBAL,
+        instruction_pb2_mod.MEMORY_OP_CLASS_SHARED,
+        instruction_pb2_mod.MEMORY_OP_CLASS_LOCAL,
+    ):
+        if and_mask != 0 and operand_count == 0:
+            detail = "an active record requires at least one operand"
+        else:
+            return None
+    elif memory_op_class == instruction_pb2_mod.MEMORY_OP_CLASS_ATOMIC:
+        if and_mask == 0 and operand_count == 0:
+            return None
+        if operand_count != 1:
+            detail = (
+                "expected exactly one operand, except zero-active may carry none"
+            )
+        elif not inst.addresses[0].HasField("address_space"):
+            detail = "the sole operand requires an explicit concrete address_space"
+        else:
+            return None
+    else:
+        if operand_count != 1:
+            detail = "expected exactly one source operand"
+        elif not inst.addresses[0].HasField("address_space"):
+            detail = (
+                "the source operand requires explicit GLOBAL or GENERIC space"
+            )
+        else:
+            return None
+
+    return ValidationResult(
+        ok=False,
+        typed_reason="memory_payload_shape_invalid",
+        detail=(
+            f"{record_path}: address-carrying v1 memory_op_class="
+            f"{memory_op_class} operand shape is invalid: {detail} "
+            f"(got {operand_count})"
+        ),
+    )
+
+
 def _check_instruction(
     inst: Any,
     instruction_pb2_mod: Any,
     record_path: str,
     allocations: dict[int, AllocationEntry] | None = None,
     address_pb2_mod: Any = None,
+    address_carrying_v1: bool = False,
+    expected_function_unique_id: int | None = None,
 ) -> ValidationResult | None:
     """Apply the AC4 contract clauses to a single ``instruction``.
 
@@ -1162,6 +1331,78 @@ def _check_instruction(
                         ),
                     )
 
+    # Additive instruction metadata is part of complete wire preflight and has
+    # precedence over allocation identity, matching the Rust validator.
+    if looks_like_memory and inst.HasField("memory_op_access_kind"):
+        known_access_kinds = frozenset(
+            instruction_pb2_mod.MemoryOpAccessKind.values()
+        )
+        if inst.memory_op_access_kind not in known_access_kinds:
+            return ValidationResult(
+                ok=False,
+                typed_reason="unknown_enum_value",
+                detail=(
+                    f"{record_path}: memory_op_access_kind carries value "
+                    f"{inst.memory_op_access_kind} unknown to the committed "
+                    "protobuf schema"
+                ),
+            )
+        access_kind_unspecified = (
+            instruction_pb2_mod.MEMORY_OP_ACCESS_KIND_UNSPECIFIED
+        )
+        if inst.memory_op_access_kind == access_kind_unspecified:
+            return ValidationResult(
+                ok=False,
+                typed_reason="memory_op_access_kind_unspecified",
+                detail=(
+                    f"{record_path}: memory_op_access_kind is "
+                    f"present but UNSPECIFIED; the tracer should "
+                    f"have emitted an unsupported_memory_path "
+                    f"exclusion sidecar instead"
+                ),
+            )
+
+    # Cache-op UNSPECIFIED is an admitted typed provenance gap, but an unknown
+    # numeric value is still wire-schema skew.
+    if looks_like_memory and inst.HasField("instruction_cache_op"):
+        known_cache_ops = frozenset(
+            instruction_pb2_mod.InstructionCacheOp.values()
+        )
+        if inst.instruction_cache_op not in known_cache_ops:
+            return ValidationResult(
+                ok=False,
+                typed_reason="unknown_enum_value",
+                detail=(
+                    f"{record_path}: instruction_cache_op carries value "
+                    f"{inst.instruction_cache_op} unknown to the committed "
+                    "protobuf schema"
+                ),
+            )
+
+    if (
+        expected_function_unique_id is not None
+        and inst.function_unique_id != expected_function_unique_id
+    ):
+        return ValidationResult(
+            ok=False,
+            typed_reason="function_unique_id_mismatch",
+            detail=(
+                f"{record_path}: instruction function_unique_id "
+                f"{inst.function_unique_id} disagrees with root "
+                f"{expected_function_unique_id}"
+            ),
+        )
+
+    if address_carrying_v1 and looks_like_memory:
+        shape_error = _check_address_carrying_v1_shape(
+            inst,
+            instruction_pb2_mod,
+            record_path,
+            and_mask,
+        )
+        if shape_error is not None:
+            return shape_error
+
     for addr_index, (addr, vector) in enumerate(
         zip(inst.addresses, decoded_vectors)
     ):
@@ -1297,36 +1538,6 @@ def _check_instruction(
                         ),
                     )
 
-    # memory_op_access_kind: producer-side direction tag at proto
-    # tag 12. Additive widening — legacy traces emitted before the
-    # producer-side access-kind classifier landed leave the field
-    # absent on the wire and admit; the consumer-side reader in
-    # `tools/hrd_profiler/observation_builder.py::_walk_launch`
-    # falls back to the UNSPECIFIED bucket for absent fields.
-    # However, when the field IS present on a memory instruction
-    # AND its value is UNSPECIFIED, this is a producer-side
-    # fail-closed event analogous to `memory_op_class_unspecified`:
-    # the producer encountered a memory instruction whose opcode
-    # head the classifier did not recognize and should have routed
-    # it through the typed-exclusion sidecar instead of emitting a
-    # kind-tagged-with-UNSPECIFIED wire record. Reject so the
-    # contract validator's fail-fast walk surfaces it.
-    if len(inst.addresses) > 0 and inst.HasField("memory_op_access_kind"):
-        access_kind_unspecified = (
-            instruction_pb2_mod.MEMORY_OP_ACCESS_KIND_UNSPECIFIED
-        )
-        if inst.memory_op_access_kind == access_kind_unspecified:
-            return ValidationResult(
-                ok=False,
-                typed_reason="memory_op_access_kind_unspecified",
-                detail=(
-                    f"{record_path}: memory_op_access_kind is "
-                    f"present but UNSPECIFIED; the tracer should "
-                    f"have emitted an unsupported_memory_path "
-                    f"exclusion sidecar instead"
-                ),
-            )
-
     return None
 
 
@@ -1335,6 +1546,8 @@ def validate_threadblock(
     *,
     label: str = "threadblock",
     allocations: dict[int, AllocationEntry] | None = None,
+    address_carrying_v1: bool = False,
+    expected_function_unique_id: int | None = None,
 ) -> ValidationResult:
     """Validate ``tb`` (a parsed ``dynamic_trace.threadblock`` proto)
     against the AC4 per-instruction contract.
@@ -1351,6 +1564,13 @@ def validate_threadblock(
     an ``allocation_id``; when ``None``, the check is skipped UNLESS
     a record carries ``allocation_id != 0`` (in which case
     ``allocations_sidecar_missing`` is returned).
+
+    ``address_carrying_v1`` opts the forward-capture admission path into the
+    payload-generation contract's declared class and operand-shape checks.
+    It defaults to false so historical/offline callers retain their existing
+    legacy contract. ``expected_function_unique_id`` binds each structurally
+    valid instruction to its root launch before forward payload shape and
+    allocation-identity checks.
 
     Returns a ``ValidationResult``. The first record that violates
     the contract short-circuits the walk; remaining records in this
@@ -1370,6 +1590,8 @@ def validate_threadblock(
                 record_path,
                 allocations=allocations,
                 address_pb2_mod=address_pb2_mod,
+                address_carrying_v1=address_carrying_v1,
+                expected_function_unique_id=expected_function_unique_id,
             )
             if result is not None:
                 return result

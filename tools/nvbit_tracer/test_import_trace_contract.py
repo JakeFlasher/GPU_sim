@@ -518,6 +518,20 @@ class TraceContractValidatorNegativeTest(unittest.TestCase):
                 self.assertEqual(result.typed_reason, "unknown_enum_value")
                 self.assertIn("address_space", result.detail)
 
+    def test_explicit_unspecified_address_space_is_rejected(self) -> None:
+        from import_trace_contract import validate_threadblock
+
+        _tb_pb2, instruction_pb2, address_pb2 = _import_pb()
+        tb = _make_threadblock_with_instruction(
+            add_address=True,
+            set_memory_op_class=True,
+            memory_op_class_value=instruction_pb2.MEMORY_OP_CLASS_ATOMIC,
+            address_space_value=address_pb2.MEMORY_SPACE_UNSPECIFIED,
+        )
+        result = validate_threadblock(tb)
+        self.assertFalse(result.ok)
+        self.assertEqual(result.typed_reason, "memory_space_unspecified")
+
     def test_crossed_memory_spaces_are_rejected(self) -> None:
         from import_trace_contract import validate_threadblock
 
@@ -542,10 +556,6 @@ class TraceContractValidatorNegativeTest(unittest.TestCase):
             (
                 instruction_pb2.MEMORY_OP_CLASS_ASYNC_COPY,
                 address_pb2.MEMORY_SPACE_SHARED,
-            ),
-            (
-                instruction_pb2.MEMORY_OP_CLASS_ATOMIC,
-                address_pb2.MEMORY_SPACE_UNSPECIFIED,
             ),
         )
         for op_class, address_space in cases:
@@ -715,6 +725,25 @@ class TraceContractValidatorNegativeTest(unittest.TestCase):
             result.ok,
             msg=f"LOAD admission: {result.typed_reason}: {result.detail}",
         )
+
+    def test_unknown_additive_instruction_enums_are_schema_skew(self) -> None:
+        from import_trace_contract import validate_threadblock
+
+        _tb_pb2, instruction_pb2, _addr_pb2 = _import_pb()
+        for field in ("memory_op_access_kind", "instruction_cache_op"):
+            with self.subTest(field=field):
+                tb = _make_threadblock_with_instruction(
+                    add_address=True,
+                    set_memory_op_class=True,
+                    memory_op_class_value=(
+                        instruction_pb2.MEMORY_OP_CLASS_SHARED
+                    ),
+                )
+                setattr(tb.warps[0].instructions[0], field, 99)
+                result = validate_threadblock(tb)
+                self.assertFalse(result.ok)
+                self.assertEqual(result.typed_reason, "unknown_enum_value")
+                self.assertIn(field, result.detail)
 
     def test_active_mask_missing_rejected(self) -> None:
         """active_mask is marked `optional` in the proto for

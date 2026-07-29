@@ -2475,8 +2475,12 @@ mod space_routing_tests {
         let mut addrs = vec![LANE_INACTIVE_SENTINEL; 32];
         addrs[0] = 0x1000;
         pb::Instruction {
+            pc: 0,
             active_mask: Some(1),
             predicate_mask: Some(1),
+            function_unique_id: 1,
+            warpid_tb: Some(0),
+            vpc: Some(0),
             data_width: Some(4),
             memory_op_class: Some(pb::MemoryOpClass::Atomic as i32),
             memory_op_access_kind: Some(pb::MemoryOpAccessKind::Atomic as i32),
@@ -2499,6 +2503,8 @@ mod space_routing_tests {
             active_mask: Some(1),
             predicate_mask: Some(1),
             function_unique_id: 1,
+            warpid_tb: Some(0),
+            vpc: Some(0),
             addresses: vec![pb::Address {
                 data_width: 4,
                 compression_format: sim_trace::lanes::FORMAT_LIST_ALL,
@@ -2534,6 +2540,8 @@ mod space_routing_tests {
             addresses,
             memory_op_class: Some(pb::MemoryOpClass::AsyncCopy as i32),
             data_width: Some(4),
+            warpid_tb: Some(0),
+            vpc: Some(0),
             memory_op_access_kind: Some(pb::MemoryOpAccessKind::AsyncCopy as i32),
             ..Default::default()
         }
@@ -2831,6 +2839,143 @@ mod space_routing_tests {
         assert!(sector_scratch.is_empty());
     }
 
+    fn assert_wire_contract_rejected_in_both_modes(
+        inst: &pb::Instruction,
+        sched: &FunctionSchedule,
+        expected_reason: &'static str,
+    ) {
+        let typed_reason = |result: Result<AccessKind, ReplayError>| match result.unwrap_err() {
+            ReplayError::Trace(error) => error
+                .typed_reason()
+                .unwrap_or_else(|| panic!("wire error has no stable reason: {error:?}")),
+            error => panic!("expected a wire-contract rejection, got {error:?}"),
+        };
+        assert_eq!(
+            typed_reason(classify_flat(
+                inst,
+                sched,
+                sched.arch,
+                Path::new("wire_contract.pb"),
+                11,
+                13,
+            )),
+            expected_reason
+        );
+
+        let mut sectors = vec![17];
+        let mut sector_scratch = vec![106];
+        assert_eq!(
+            typed_reason(classify_with_l1(
+                inst,
+                sched,
+                sched.arch,
+                &mut sectors,
+                &mut sector_scratch,
+                Path::new("wire_contract.pb"),
+                11,
+                13,
+            )),
+            expected_reason
+        );
+        assert_eq!(sectors, vec![17]);
+        assert!(sector_scratch.is_empty());
+    }
+
+    #[test]
+    fn flat_and_l1_modes_share_wire_contract_rejections() {
+        let sched = schedule(
+            ArchId::Sm86,
+            MemRole::EligibleLoad(CacheOpToken::LdgECa),
+            "LDG.E.CA R0, [R2.64]",
+        );
+        let cases: Vec<(pb::Instruction, &str)> = vec![
+            (
+                {
+                    let mut inst = global_inst();
+                    inst.active_mask = None;
+                    inst
+                },
+                "active_mask_missing",
+            ),
+            (
+                {
+                    let mut inst = global_inst();
+                    inst.predicate_mask = None;
+                    inst
+                },
+                "predicate_mask_missing",
+            ),
+            (
+                {
+                    let mut inst = global_inst();
+                    inst.data_width = None;
+                    inst
+                },
+                "data_width_missing",
+            ),
+            (
+                {
+                    let mut inst = global_inst();
+                    inst.memory_op_class = Some(pb::MemoryOpClass::Unspecified as i32);
+                    inst
+                },
+                "memory_op_class_unspecified",
+            ),
+            (
+                {
+                    let mut inst = global_inst();
+                    inst.memory_op_class = Some(99);
+                    inst
+                },
+                "unknown_enum_value",
+            ),
+            (
+                {
+                    let mut inst = global_inst();
+                    inst.memory_op_access_kind = Some(pb::MemoryOpAccessKind::Unspecified as i32);
+                    inst
+                },
+                "memory_op_access_kind_unspecified",
+            ),
+            (
+                {
+                    let mut inst = global_inst();
+                    inst.memory_op_access_kind = Some(99);
+                    inst
+                },
+                "unknown_enum_value",
+            ),
+            (
+                {
+                    let mut inst = global_inst();
+                    inst.instruction_cache_op = Some(99);
+                    inst
+                },
+                "unknown_enum_value",
+            ),
+            (
+                {
+                    let mut inst = global_inst();
+                    inst.addresses[0].address_space = Some(pb::MemorySpace::Unspecified as i32);
+                    inst
+                },
+                "memory_space_unspecified",
+            ),
+            (
+                {
+                    let mut inst = global_inst();
+                    inst.addresses[0].address_space = Some(99);
+                    inst
+                },
+                "unknown_enum_value",
+            ),
+        ];
+
+        for (inst, expected_reason) in cases {
+            assert_wire_contract_rejected_in_both_modes(&inst, &sched, expected_reason);
+        }
+    }
+
     #[test]
     fn sector_expansion_overflow_carries_replay_context() {
         let mut addrs = vec![LANE_INACTIVE_SENTINEL; 32];
@@ -2842,6 +2987,8 @@ mod space_routing_tests {
             active_mask: Some(1),
             predicate_mask: Some(1),
             function_unique_id: 1,
+            warpid_tb: Some(0),
+            vpc: Some(0),
             addresses: vec![
                 pb::Address {
                     data_width: 2,
@@ -2942,6 +3089,8 @@ mod space_routing_tests {
             active_mask: Some(u32::MAX),
             predicate_mask: Some(u32::MAX),
             function_unique_id: 1,
+            warpid_tb: Some(0),
+            vpc: Some(0),
             addresses: vec![
                 pb::Address {
                     data_width: WIDTH,
@@ -3064,6 +3213,8 @@ mod space_routing_tests {
             active_mask: Some(1),
             predicate_mask: Some(1),
             function_unique_id: 1,
+            warpid_tb: Some(0),
+            vpc: Some(0),
             addresses: vec![
                 pb::Address {
                     data_width: 2,
@@ -5093,14 +5244,10 @@ mod replay_identity_tests {
         missing.warpid_tb = None;
         assert!(matches!(
             replay_error(missing),
-            ReplayError::InstructionWarpIdMissing {
-                warp_id: 0,
-                record_ix: 0,
-                ..
-            }
+            ReplayError::Trace(TraceError::WarpidTbMissing { .. })
         ));
 
-        let mut mismatched = malformed_global_inst(pb::MemoryOpClass::Global);
+        let mut mismatched = bind_test_allocation(malformed_global_inst(pb::MemoryOpClass::Global));
         mismatched.warpid_tb = Some(1);
         assert!(matches!(
             replay_error(mismatched),
@@ -5145,6 +5292,13 @@ mod replay_identity_tests {
             }],
             ..Default::default()
         }
+    }
+
+    fn bind_test_allocation(mut inst: pb::Instruction) -> pb::Instruction {
+        for address in &mut inst.addresses {
+            address.allocation_id = Some(1);
+        }
+        inst
     }
 
     fn write_trace_with(dir: &std::path::Path, inst: pb::Instruction) {
@@ -5233,10 +5387,13 @@ mod replay_identity_tests {
                 let warp_id = i32::try_from(index).unwrap();
                 let instruction = pb::Instruction {
                     pc: 0,
+                    active_mask: Some(0),
+                    predicate_mask: Some(0),
                     function_unique_id: 1,
                     sm_id: Some(0),
                     warpid_sm: Some(*slot),
                     warpid_tb: Some(warp_id),
+                    vpc: Some(0),
                     ..Default::default()
                 };
                 (
@@ -5306,7 +5463,10 @@ mod replay_identity_tests {
     fn replay_error_with_schedule(inst: pb::Instruction, sched: FunctionSchedule) -> ReplayError {
         let tmp = tempfile::tempdir().unwrap();
         write_trace_with(tmp.path(), inst);
-        let td = TraceDir::open(tmp.path()).unwrap();
+        let td = match TraceDir::open(tmp.path()) {
+            Ok(trace) => trace,
+            Err(error) => return error.into(),
+        };
         let loc = td.kernels().next().unwrap();
         extract_per_sm_blocks(&td, &loc, &sched, true).unwrap_err()
     }
@@ -5365,65 +5525,64 @@ mod replay_identity_tests {
     }
 
     #[test]
-    fn foreign_function_precedes_allocation_identity_after_route_validation() {
-        let mut foreign = malformed_global_inst(pb::MemoryOpClass::Global);
+    fn root_function_join_precedes_replay_allocation_identity() {
+        let mut foreign = bind_test_allocation(malformed_global_inst(pb::MemoryOpClass::Global));
         foreign.function_unique_id = 2;
         assert!(matches!(
             replay_error(foreign),
-            ReplayError::MultiFunctionUnsupported {
+            ReplayError::Trace(TraceError::FunctionUniqueIdMismatch {
                 expected: 1,
-                found: 2,
+                actual: 2,
                 ..
-            }
+            })
         ));
 
-        let mut malformed_route = malformed_global_inst(pb::MemoryOpClass::Atomic);
+        let mut malformed_route =
+            bind_test_allocation(malformed_global_inst(pb::MemoryOpClass::Atomic));
         malformed_route.function_unique_id = 2;
         malformed_route
             .addresses
             .push(malformed_route.addresses[0].clone());
         assert!(matches!(
             replay_error(malformed_route),
-            ReplayError::MemoryRoute {
-                class: pb::MemoryOpClass::Atomic,
-                source: MemoryRouteError::AtomicOperandCount { got: 2 },
+            ReplayError::Trace(TraceError::FunctionUniqueIdMismatch {
+                expected: 1,
+                actual: 2,
                 ..
-            }
+            })
         ));
     }
 
     #[test]
-    fn replay_route_shape_precedes_allocation_identity() {
-        let mut multi_atomic = malformed_global_inst(pb::MemoryOpClass::Atomic);
+    fn wire_payload_shape_and_root_space_contract_precede_allocation_identity() {
+        let mut multi_atomic =
+            bind_test_allocation(malformed_global_inst(pb::MemoryOpClass::Atomic));
         multi_atomic
             .addresses
             .push(multi_atomic.addresses[0].clone());
         assert!(matches!(
             replay_error(multi_atomic),
-            ReplayError::MemoryRoute {
+            ReplayError::Trace(TraceError::MemoryPayloadShapeInvalid {
                 class: pb::MemoryOpClass::Atomic,
-                source: MemoryRouteError::AtomicOperandCount { got: 2 },
+                got: 2,
                 ..
-            }
+            })
         ));
 
         let shared_with_global_operand = malformed_global_inst(pb::MemoryOpClass::Shared);
         assert!(matches!(
             replay_error(shared_with_global_operand),
-            ReplayError::MemoryRoute {
+            ReplayError::Trace(TraceError::MemoryOpClassAddressSpaceConflict {
                 class: pb::MemoryOpClass::Shared,
-                source: MemoryRouteError::SharedLocalSpaceInvalid {
-                    operand: 0,
-                    space: pb::MemorySpace::Global,
-                },
+                space: pb::MemorySpace::Global,
                 ..
-            }
+            })
         ));
     }
 
     #[test]
     fn replay_access_kind_mismatch_precedes_allocation_identity() {
-        let mut inst = malformed_global_inst(pb::MemoryOpClass::AsyncCopy);
+        let mut inst = bind_test_allocation(malformed_global_inst(pb::MemoryOpClass::AsyncCopy));
         inst.memory_op_access_kind = Some(pb::MemoryOpAccessKind::Atomic as i32);
         assert!(matches!(
             replay_error(inst),
@@ -5456,7 +5615,10 @@ mod replay_identity_tests {
             )]),
         };
         assert!(matches!(
-            replay_error_with_schedule(malformed_global_inst(pb::MemoryOpClass::Global), sched,),
+            replay_error_with_schedule(
+                bind_test_allocation(malformed_global_inst(pb::MemoryOpClass::Global)),
+                sched,
+            ),
             ReplayError::MemoryRoute {
                 class: pb::MemoryOpClass::Global,
                 source: MemoryRouteError::StaticAccessKindMismatch {
@@ -5485,7 +5647,7 @@ mod replay_identity_tests {
                 },
             )]),
         };
-        let mut inst = malformed_global_inst(pb::MemoryOpClass::Global);
+        let mut inst = bind_test_allocation(malformed_global_inst(pb::MemoryOpClass::Global));
         inst.memory_op_access_kind = None;
         assert!(matches!(
             replay_error_with_schedule(inst, sched),
@@ -5518,7 +5680,10 @@ mod replay_identity_tests {
             )]),
         };
         assert!(matches!(
-            replay_error_with_schedule(malformed_global_inst(pb::MemoryOpClass::Atomic), sched,),
+            replay_error_with_schedule(
+                bind_test_allocation(malformed_global_inst(pb::MemoryOpClass::Atomic)),
+                sched,
+            ),
             ReplayError::MemoryRoute {
                 class: pb::MemoryOpClass::Atomic,
                 source: MemoryRouteError::StaticMemoryRouteMismatch {
@@ -5977,7 +6142,7 @@ mod completeness_tests {
     }
 
     #[test]
-    fn complete_legacy_trace_without_block_dim_needs_no_sampling_binding() {
+    fn complete_trace_without_block_dim_is_rejected_by_root_admission() {
         let tmp = tempfile::tempdir().unwrap();
         write_grid_trace(tmp.path(), 4, 1, &[0, 1, 2, 3], None);
         let path = tmp.path().join("dynamic_trace.pb");
@@ -5992,8 +6157,10 @@ mod completeness_tests {
             .kernels[0]
             .block_dim = None;
         std::fs::write(path, trace.encode_to_vec()).unwrap();
-        let result = run(tmp.path());
-        assert!(result.is_ok(), "{result:?}");
+        assert!(matches!(
+            run(tmp.path()),
+            Err(ReplayError::Trace(TraceError::LaunchGeometryInvalid { .. }))
+        ));
     }
 
     #[test]
@@ -6233,7 +6400,10 @@ mod completeness_tests {
         )
         .unwrap();
 
-        TraceDir::open(tmp.path()).unwrap();
+        assert!(matches!(
+            TraceDir::open(tmp.path()),
+            Err(TraceError::ThreadblockPayloadOrphan { .. })
+        ));
     }
 
     #[test]
@@ -6346,7 +6516,7 @@ mod completeness_tests {
 
         assert!(matches!(
             TraceDir::open(tmp.path()),
-            Err(TraceError::SamplingSidecarMalformed { .. })
+            Err(TraceError::ThreadblockPayloadSnapshotInvalid { .. })
         ));
     }
 
@@ -6363,7 +6533,9 @@ mod completeness_tests {
 
         assert!(matches!(
             TraceDir::open(tmp.path()),
-            Err(TraceError::ThreadblockPayloadNotRegular { .. })
+            Err(TraceError::AnchoredSnapshot(
+                sim_trace::AnchoredReadError::NotRegular { .. }
+            ))
         ));
     }
 
@@ -6384,7 +6556,9 @@ mod completeness_tests {
 
         assert!(matches!(
             TraceDir::open(tmp.path()),
-            Err(TraceError::ThreadblockPayloadNotRegular { .. })
+            Err(TraceError::AnchoredSnapshot(
+                sim_trace::AnchoredReadError::NotRegular { .. }
+            ))
         ));
     }
 

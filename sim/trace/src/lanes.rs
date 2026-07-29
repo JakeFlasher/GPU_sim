@@ -11,13 +11,10 @@
 //! is consumed by BOTH test suites; extend it in the same commit as any
 //! semantic change to either decoder.
 //!
-//! One documented Rust-only strictness: Python reconstructs with
-//! arbitrary-precision integers, Rust with checked i64 arithmetic. Any
-//! record whose reconstruction leaves the i64 domain is a typed
-//! [`LaneError::AddressOverflow`] here (never a wrap, never a panic) —
-//! real GPU virtual addresses occupy ≤57 bits, so this arm is unreachable
-//! on producer-conforming traces and exists purely to fail closed on
-//! corrupt ones.
+//! Compressed reconstruction uses checked i64 arithmetic in both runtimes.
+//! Any record whose reconstruction leaves that domain is a typed
+//! [`LaneError::AddressOverflow`] (never a wrap, never a panic); producer-
+//! conforming GPU virtual addresses occupy at most 57 bits.
 
 use crate::pb;
 

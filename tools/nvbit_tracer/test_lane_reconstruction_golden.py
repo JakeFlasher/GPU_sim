@@ -33,6 +33,7 @@ _DECODER_ERROR_SUBSTRINGS = {
     "stride_single_lane": "popcount(and_mask)=1",
     "stride_non_contiguous": "not contiguous",
     "delta_count": "delta entr",
+    "address_overflow": "signed",
     "unknown_format": "unknown compression_format",
 }
 

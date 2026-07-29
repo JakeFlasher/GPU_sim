@@ -22,7 +22,13 @@ use crate::control_bits::{ControlBitsError, ControlSidecar};
 use crate::program::{FunctionSchedule, ProgramError, build_schedules};
 use crate::replay::{ExtractedCoverage, FullCoverageSource, ReplayError, admit_launch_coverage};
 
-const MANIFEST_SCHEMA_VERSION: u32 = 1;
+const MANIFEST_SCHEMA_VERSION: u32 = 2;
+const WIRE_VALIDATOR_CONTRACT_ID: &str = "sim_trace_wire_v1";
+const MAX_MANIFEST_BYTES: u64 = 16 * 1024 * 1024;
+const MAX_REGULAR_ARTIFACT_BYTES: u64 = 64 * 1024 * 1024;
+const MAX_THREADBLOCK_PAYLOAD_FILES: u64 = 1_000_000;
+const MAX_THREADBLOCK_PAYLOAD_BYTES: u64 = 768 * 1024 * 1024;
+const MAX_EVIDENCE_SNAPSHOT_BYTES: u64 = 1024 * 1024 * 1024;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ManifestError {
@@ -77,6 +83,19 @@ pub enum ManifestError {
         expected: u64,
         actual: u64,
     },
+    #[error(
+        "artifact {artifact} declares {declared} {resource}, exceeding implementation limit {limit}"
+    )]
+    ArtifactResourceLimitExceeded {
+        artifact: &'static str,
+        resource: &'static str,
+        declared: u64,
+        limit: u64,
+    },
+    #[error(
+        "launch-evidence manifest declares {declared} aggregate artifact bytes, exceeding implementation limit {limit}"
+    )]
+    SnapshotResourceLimitExceeded { declared: u64, limit: u64 },
     #[error("trace contract/capability admission failed: {source}")]
     CapabilityMissing {
         #[source]
@@ -134,9 +153,15 @@ pub enum ManifestError {
 }
 
 #[derive(Debug, Deserialize)]
+struct ManifestVersionEnvelope {
+    schema_version: u32,
+}
+
+#[derive(Debug, Deserialize)]
 #[serde(deny_unknown_fields)]
 struct LaunchEvidenceManifest {
-    schema_version: u32,
+    #[serde(rename = "schema_version")]
+    _schema_version: u32,
     artifacts: ManifestArtifacts,
     launch_selector: ManifestLaunchSelector,
     architecture: ManifestArchitecture,
@@ -150,6 +175,7 @@ struct ManifestArtifacts {
     threadblock_payload: ManifestThreadblockPayload,
     allocations_json: ManifestOptionalArtifact,
     trace_sampling_json: ManifestOptionalArtifact,
+    stats_csv: ManifestArtifact,
     enhanced_execution_info_json: ManifestArtifact,
     control_bits_sidecar: ManifestArtifact,
     arch_card: ManifestArtifact,
@@ -246,6 +272,7 @@ struct LaunchEvidencePayload {
     geometry: GeometryIdentity,
     trace_contract_id: String,
     memory_payload_classes: BTreeSet<String>,
+    wire_admission: WireAdmissionIdentity,
     artifact_digests: ArtifactDigests,
     arch: ArchitectureIdentity,
     binary: BinaryIdentity,
@@ -278,6 +305,18 @@ struct GeometryIdentity {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(deny_unknown_fields)]
+struct WireAdmissionIdentity {
+    validator_contract_id: String,
+    launch_count: u64,
+    threadblock_count: u64,
+    instruction_count: u64,
+    stats_row_count: u64,
+    stats_expected_record_count: u64,
+    stats_admitted_record_count: u64,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(deny_unknown_fields)]
 struct ArtifactDigests {
     dynamic_trace_pb: SealedArtifact,
     threadblock_payload_file_count: u64,
@@ -287,6 +326,7 @@ struct ArtifactDigests {
     allocations_json: Option<SealedArtifact>,
     trace_sampling_json: Option<SealedArtifact>,
     trace_sampling_json_seal: Option<Sha256Digest>,
+    stats_csv: SealedArtifact,
     enhanced_execution_info_json: SealedArtifact,
     control_bits_sidecar: SealedArtifact,
 }
@@ -484,6 +524,100 @@ fn require_path(edge: &'static str, expected: PathBuf, actual: &Path) -> Result<
     Ok(())
 }
 
+fn require_resource_limit(
+    artifact: &'static str,
+    resource: &'static str,
+    declared: u64,
+    limit: u64,
+) -> Result<(), ManifestError> {
+    if declared > limit {
+        return Err(ManifestError::ArtifactResourceLimitExceeded {
+            artifact,
+            resource,
+            declared,
+            limit,
+        });
+    }
+    Ok(())
+}
+
+fn add_snapshot_bytes(total: &mut u64, bytes: u64) -> Result<(), ManifestError> {
+    *total = total
+        .checked_add(bytes)
+        .ok_or(ManifestError::SnapshotResourceLimitExceeded {
+            declared: u64::MAX,
+            limit: MAX_EVIDENCE_SNAPSHOT_BYTES,
+        })?;
+    if *total > MAX_EVIDENCE_SNAPSHOT_BYTES {
+        return Err(ManifestError::SnapshotResourceLimitExceeded {
+            declared: *total,
+            limit: MAX_EVIDENCE_SNAPSHOT_BYTES,
+        });
+    }
+    Ok(())
+}
+
+fn validate_manifest_resource_limits(artifacts: &ManifestArtifacts) -> Result<(), ManifestError> {
+    require_resource_limit(
+        "threadblock_payload",
+        "files",
+        artifacts.threadblock_payload.file_count,
+        MAX_THREADBLOCK_PAYLOAD_FILES,
+    )?;
+    require_resource_limit(
+        "threadblock_payload",
+        "bytes",
+        artifacts.threadblock_payload.raw_bytes,
+        MAX_THREADBLOCK_PAYLOAD_BYTES,
+    )?;
+
+    let mut total = artifacts.threadblock_payload.raw_bytes;
+    if total > MAX_EVIDENCE_SNAPSHOT_BYTES {
+        return Err(ManifestError::SnapshotResourceLimitExceeded {
+            declared: total,
+            limit: MAX_EVIDENCE_SNAPSHOT_BYTES,
+        });
+    }
+    for (name, artifact) in [
+        ("dynamic_trace_pb", &artifacts.dynamic_trace_pb),
+        ("stats_csv", &artifacts.stats_csv),
+        (
+            "enhanced_execution_info_json",
+            &artifacts.enhanced_execution_info_json,
+        ),
+        ("control_bits_sidecar", &artifacts.control_bits_sidecar),
+        ("arch_card", &artifacts.arch_card),
+        ("pchase_card", &artifacts.pchase_card),
+    ] {
+        require_resource_limit(
+            name,
+            "bytes",
+            artifact.size_bytes,
+            MAX_REGULAR_ARTIFACT_BYTES,
+        )?;
+        add_snapshot_bytes(&mut total, artifact.size_bytes)?;
+    }
+    for (name, artifact) in [
+        ("allocations_json", artifacts.allocations_json.artifact()),
+        (
+            "trace_sampling_json",
+            artifacts.trace_sampling_json.artifact(),
+        ),
+    ] {
+        let Some(artifact) = artifact else {
+            continue;
+        };
+        require_resource_limit(
+            name,
+            "bytes",
+            artifact.size_bytes,
+            MAX_REGULAR_ARTIFACT_BYTES,
+        )?;
+        add_snapshot_bytes(&mut total, artifact.size_bytes)?;
+    }
+    Ok(())
+}
+
 fn verify_artifact(
     artifact: &'static str,
     expected: &ManifestArtifact,
@@ -668,8 +802,6 @@ fn manifest_base(path: &Path) -> PathBuf {
 pub fn admit_launch_evidence(
     manifest_path: impl AsRef<Path>,
 ) -> Result<AdmittedLaunchEvidence, ManifestError> {
-    const MAX_MANIFEST_BYTES: u64 = 16 * 1024 * 1024;
-
     let manifest_path = manifest_path.as_ref();
     let base = manifest_base(manifest_path);
     let manifest_name = manifest_path.file_name().ok_or_else(|| {
@@ -682,17 +814,22 @@ pub fn admit_launch_evidence(
         reader.read_bounded_regular(Path::new(manifest_name), MAX_MANIFEST_BYTES)?;
     let manifest_file_identity = manifest_file.identity();
     let manifest_raw = manifest_file.into_raw();
+    let envelope: ManifestVersionEnvelope =
+        serde_json::from_slice(&manifest_raw).map_err(|source| ManifestError::Parse {
+            path: manifest_path.to_path_buf(),
+            source,
+        })?;
+    if envelope.schema_version != MANIFEST_SCHEMA_VERSION {
+        return Err(ManifestError::SchemaVersionUnsupported {
+            got: envelope.schema_version,
+            expected: MANIFEST_SCHEMA_VERSION,
+        });
+    }
     let manifest: LaunchEvidenceManifest =
         serde_json::from_slice(&manifest_raw).map_err(|source| ManifestError::Parse {
             path: manifest_path.to_path_buf(),
             source,
         })?;
-    if manifest.schema_version != MANIFEST_SCHEMA_VERSION {
-        return Err(ManifestError::SchemaVersionUnsupported {
-            got: manifest.schema_version,
-            expected: MANIFEST_SCHEMA_VERSION,
-        });
-    }
     let mut file_identities = BTreeMap::new();
     insert_manifest_file_identity(
         &mut file_identities,
@@ -700,6 +837,10 @@ pub fn admit_launch_evidence(
         manifest_path.to_path_buf(),
     )?;
     let artifacts = &manifest.artifacts;
+    // Manifest sizes are claims, not resource authority. Reject independently
+    // bounded per-artifact/cardinality and aggregate costs before any declared
+    // size reaches a reserve/read path.
+    validate_manifest_resource_limits(artifacts)?;
 
     let dynamic_path =
         resolve_manifest_path(&base, "dynamic_trace_pb", &artifacts.dynamic_trace_pb.path)?;
@@ -753,6 +894,12 @@ pub fn admit_launch_evidence(
             &path,
         )?;
     }
+    let stats_path = resolve_manifest_path(&base, "stats_csv", &artifacts.stats_csv.path)?;
+    require_path(
+        "stats_csv.trace_root",
+        trace_root.join("stats.csv"),
+        &stats_path,
+    )?;
 
     let control_path = resolve_manifest_path(
         &base,
@@ -765,6 +912,7 @@ pub fn admit_launch_evidence(
     let mut distinct_paths = BTreeSet::new();
     for path in [
         dynamic_path.clone(),
+        stats_path.clone(),
         exec_path.clone(),
         control_path.clone(),
         arch_card_path.clone(),
@@ -802,6 +950,7 @@ pub fn admit_launch_evidence(
             .trace_sampling_json
             .artifact()
             .map(|artifact| artifact.size_bytes),
+        Some(artifacts.stats_csv.size_bytes),
         artifacts.threadblock_payload.file_count,
         artifacts.threadblock_payload.raw_bytes,
     );
@@ -827,6 +976,15 @@ pub fn admit_launch_evidence(
         &artifacts.trace_sampling_json,
         trace_artifacts.trace_sampling_json(),
     )?;
+    let stats_identity =
+        trace_artifacts
+            .stats_csv()
+            .ok_or(ManifestError::ArtifactPresenceMismatch {
+                artifact: "stats_csv",
+                expected: true,
+                actual: false,
+            })?;
+    verify_artifact("stats_csv", &artifacts.stats_csv, stats_identity)?;
     let expected_payload = &artifacts.threadblock_payload;
     let actual_payload = trace_artifacts.threadblock_payload();
     if expected_payload.file_count != actual_payload.file_count() {
@@ -866,6 +1024,11 @@ pub fn admit_launch_evidence(
             reason: "legacy exclusion traces cannot mint launch evidence identity",
         });
     }
+    let wire_summary = trace_dir.validation_summary();
+    let trace_stats = trace_dir.stats().ok_or(ManifestError::EdgeUnverifiable {
+        edge: "stats_csv",
+        reason: "Q1009 launch admission requires snapshotted non-vacuous producer counters",
+    })?;
 
     let (exec_path, exec_raw, exec_digest) = read_manifest_artifact(
         &reader,
@@ -1157,6 +1320,15 @@ pub fn admit_launch_evidence(
         },
         trace_contract_id: trace_dir.trace().trace_contract_id.clone(),
         memory_payload_classes,
+        wire_admission: WireAdmissionIdentity {
+            validator_contract_id: WIRE_VALIDATOR_CONTRACT_ID.to_owned(),
+            launch_count: wire_summary.launch_count(),
+            threadblock_count: wire_summary.threadblock_count(),
+            instruction_count: wire_summary.instruction_count(),
+            stats_row_count: trace_stats.row_count(),
+            stats_expected_record_count: trace_stats.expected_record_count(),
+            stats_admitted_record_count: trace_stats.admitted_record_count(),
+        },
         artifact_digests: ArtifactDigests {
             dynamic_trace_pb: trace_identity.dynamic_trace_pb().into(),
             threadblock_payload_file_count: trace_identity.threadblock_payload().file_count(),
@@ -1170,6 +1342,7 @@ pub fn admit_launch_evidence(
             allocations_json: trace_identity.allocations_json().map(Into::into),
             trace_sampling_json: trace_identity.trace_sampling_json().map(Into::into),
             trace_sampling_json_seal: sampling_seal,
+            stats_csv: stats_identity.into(),
             enhanced_execution_info_json: exec_digest.into(),
             control_bits_sidecar: control_digest.into(),
         },

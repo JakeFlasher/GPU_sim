@@ -71,6 +71,23 @@ fn set_fixture_block_dim(fixture: &mut Fixture, block: (i32, i32, i32)) {
     write_json(&fixture.manifest_path, &fixture.manifest);
 }
 
+fn refresh_trace_artifacts(fixture: &mut Fixture) {
+    let trace_root = fixture.root.join("trace");
+    let snapshot = TraceDirSnapshot::capture(&trace_root).expect("recapture fixture trace");
+    let payload = snapshot.artifact_identity().threadblock_payload();
+    fixture.manifest["artifacts"]["dynamic_trace_pb"] =
+        artifact(&fixture.root, "trace/dynamic_trace.pb");
+    fixture.manifest["artifacts"]["threadblock_payload"] = json!({
+        "path": "trace/threadblocks",
+        "file_count": payload.file_count(),
+        "raw_bytes": payload.raw_bytes(),
+        "sorted_path_manifest_sha256": payload.sorted_path_manifest_sha256(),
+        "sorted_path_stream_sha256": payload.sorted_path_stream_sha256(),
+    });
+    fixture.manifest["artifacts"]["stats_csv"] = artifact(&fixture.root, "trace/stats.csv");
+    write_json(&fixture.manifest_path, &fixture.manifest);
+}
+
 fn opcode(pc: u64) -> &'static str {
     match pc {
         80 => "LDG.E R0, [R2.64]",
@@ -99,6 +116,11 @@ fn fixture() -> Fixture {
         source.join("threadblocks/device_0/stream_0/kernel_1/d_0_s_0_k_1_0,0,0.pb"),
         trace_root.join("threadblocks/device_0/stream_0/kernel_1/d_0_s_0_k_1_0,0,0.pb"),
     );
+    fs::write(
+        trace_root.join("stats.csv"),
+        b"total_insts,total_reported_insts\n54,54\n",
+    )
+    .expect("write producer stats");
 
     let pcs = (0_u64..=848).step_by(16).collect::<Vec<_>>();
     let instructions = pcs
@@ -181,7 +203,7 @@ fn fixture() -> Fixture {
         .allocations_json()
         .expect("canary allocations sidecar");
     let manifest = json!({
-        "schema_version": 1,
+        "schema_version": 2,
         "artifacts": {
             "dynamic_trace_pb": artifact(&root, "trace/dynamic_trace.pb"),
             "threadblock_payload": {
@@ -200,6 +222,7 @@ fn fixture() -> Fixture {
                 },
             },
             "trace_sampling_json": {"status": "absent"},
+            "stats_csv": artifact(&root, "trace/stats.csv"),
             "enhanced_execution_info_json": artifact(
                 &root,
                 "trace/extra_info/enhanced_execution_info.json",
@@ -330,7 +353,7 @@ fn canary_admits_to_one_stable_canonical_seal() {
     let first_seal = first.identity().seal_sha256();
     assert_eq!(
         first_seal.to_string(),
-        "06d9ad9c92bcde1ac78a3a72a3ffc67ba20b18113b7f6011f8949405a9eb40a2"
+        "ab173443f81eaaa5c26fabe24258d02cab2c5266207ced0f174ebd043a62ef45"
     );
     assert_eq!(
         first.identity().arch().expect("sealed arch"),
@@ -348,7 +371,7 @@ fn canary_admits_to_one_stable_canonical_seal() {
     );
 
     let reversed = format!(
-        "{{\"binary_digest\":{},\"architecture\":{},\"launch_selector\":{},\"artifacts\":{},\"schema_version\":1}}",
+        "{{\"binary_digest\":{},\"architecture\":{},\"launch_selector\":{},\"artifacts\":{},\"schema_version\":2}}",
         serde_json::to_string(&fixture.manifest["binary_digest"]).expect("serialize binary"),
         serde_json::to_string(&fixture.manifest["architecture"]).expect("serialize arch"),
         serde_json::to_string(&fixture.manifest["launch_selector"]).expect("serialize selector"),
@@ -418,10 +441,64 @@ fn full_coverage_rejects_a_cta_with_a_missing_warp() {
 }
 
 #[test]
+fn nonselected_root_payload_is_still_semantically_validated() {
+    let mut fixture = fixture();
+    let dynamic_path = fixture.root.join("trace/dynamic_trace.pb");
+    let raw = fs::read(&dynamic_path).expect("read dynamic trace");
+    let mut trace = sim_trace::pb::Trace::decode(raw.as_slice()).expect("decode dynamic trace");
+    let stream = trace
+        .gpu_device
+        .get_mut(&0)
+        .expect("fixture device")
+        .streams
+        .get_mut(&0)
+        .expect("fixture stream");
+    let mut second = stream.kernels[0].clone();
+    second.id = 2;
+    second.function_unique_id = 2;
+    stream.kernels.push(second);
+    fs::write(&dynamic_path, trace.encode_to_vec()).expect("rewrite dynamic trace");
+
+    let first_payload = fixture
+        .root
+        .join("trace/threadblocks/device_0/stream_0/kernel_1/d_0_s_0_k_1_0,0,0.pb");
+    let raw = fs::read(&first_payload).expect("read first payload");
+    let mut threadblock =
+        sim_trace::pb::Threadblock::decode(raw.as_slice()).expect("decode first threadblock");
+    for warp in threadblock.warps.values_mut() {
+        for instruction in &mut warp.instructions {
+            instruction.function_unique_id = 2;
+        }
+    }
+    threadblock
+        .warps
+        .values_mut()
+        .next()
+        .expect("fixture warp")
+        .instructions[0]
+        .warpid_tb = None;
+    let second_payload = fixture
+        .root
+        .join("trace/threadblocks/device_0/stream_0/kernel_2/d_0_s_0_k_2_0,0,0.pb");
+    fs::create_dir_all(second_payload.parent().expect("second payload parent"))
+        .expect("create second payload parent");
+    fs::write(second_payload, threadblock.encode_to_vec()).expect("write second payload");
+    refresh_trace_artifacts(&mut fixture);
+
+    assert!(matches!(
+        admit_launch_evidence(&fixture.manifest_path),
+        Err(ManifestError::Trace(
+            sim_trace::TraceError::WarpidTbMissing { .. }
+        ))
+    ));
+}
+
+#[test]
 fn stale_manifest_rejects_single_byte_mutation_of_every_artifact_class() {
     for relative in [
         "trace/dynamic_trace.pb",
         "trace/extra_info/allocations.json",
+        "trace/stats.csv",
         "trace/extra_info/enhanced_execution_info.json",
         "trace/threadblocks/device_0/stream_0/kernel_1/d_0_s_0_k_1_0,0,0.pb",
         "control/canary_sm86.control_bits.json",
@@ -442,6 +519,23 @@ fn stale_manifest_rejects_single_byte_mutation_of_every_artifact_class() {
             "{relative}: {error:?}"
         );
     }
+}
+
+#[test]
+fn resealed_stats_must_be_semantically_valid() {
+    let mut fixture = fixture();
+    let stats_path = fixture.root.join("trace/stats.csv");
+    fs::write(&stats_path, b"total_insts,total_reported_insts\n1,2\n")
+        .expect("rewrite producer stats");
+    fixture.manifest["artifacts"]["stats_csv"] = artifact(&fixture.root, "trace/stats.csv");
+    write_json(&fixture.manifest_path, &fixture.manifest);
+
+    assert!(matches!(
+        admit_launch_evidence(&fixture.manifest_path),
+        Err(ManifestError::Trace(
+            sim_trace::TraceError::StatsCountersInvalid { .. }
+        ))
+    ));
 }
 
 #[test]
@@ -580,5 +674,87 @@ fn unknown_fields_noncanonical_paths_and_digest_spelling_are_rejected() {
     assert!(matches!(
         admit_launch_evidence(&digest_fixture.manifest_path),
         Err(ManifestError::Parse { .. })
+    ));
+}
+
+#[test]
+fn unsupported_version_precedes_version_specific_shape() {
+    let future_fixture = fixture();
+    let mut manifest = future_fixture.manifest.clone();
+    manifest["schema_version"] = json!(3);
+    manifest["future_required_field"] = json!({"new_shape": true});
+    write_json(&future_fixture.manifest_path, &manifest);
+    assert!(matches!(
+        admit_launch_evidence(&future_fixture.manifest_path),
+        Err(ManifestError::SchemaVersionUnsupported {
+            got: 3,
+            expected: 2,
+        })
+    ));
+
+    let historical_fixture = fixture();
+    let mut manifest = historical_fixture.manifest.clone();
+    manifest["schema_version"] = json!(1);
+    manifest
+        .as_object_mut()
+        .expect("manifest object")
+        .remove("artifacts");
+    write_json(&historical_fixture.manifest_path, &manifest);
+    assert!(matches!(
+        admit_launch_evidence(&historical_fixture.manifest_path),
+        Err(ManifestError::SchemaVersionUnsupported {
+            got: 1,
+            expected: 2,
+        })
+    ));
+}
+
+#[test]
+fn declared_resource_costs_are_bounded_before_artifact_reads() {
+    let artifact_fixture = fixture();
+    let mut manifest = artifact_fixture.manifest.clone();
+    manifest["artifacts"]["dynamic_trace_pb"]["size_bytes"] = json!(u64::MAX);
+    write_json(&artifact_fixture.manifest_path, &manifest);
+    assert!(matches!(
+        admit_launch_evidence(&artifact_fixture.manifest_path),
+        Err(ManifestError::ArtifactResourceLimitExceeded {
+            artifact: "dynamic_trace_pb",
+            resource: "bytes",
+            ..
+        })
+    ));
+
+    let file_fixture = fixture();
+    let mut manifest = file_fixture.manifest.clone();
+    manifest["artifacts"]["threadblock_payload"]["file_count"] = json!(u64::MAX);
+    write_json(&file_fixture.manifest_path, &manifest);
+    assert!(matches!(
+        admit_launch_evidence(&file_fixture.manifest_path),
+        Err(ManifestError::ArtifactResourceLimitExceeded {
+            artifact: "threadblock_payload",
+            resource: "files",
+            ..
+        })
+    ));
+
+    let aggregate_fixture = fixture();
+    let mut manifest = aggregate_fixture.manifest.clone();
+    manifest["artifacts"]["threadblock_payload"]["raw_bytes"] = json!(768_u64 * 1024 * 1024);
+    for name in [
+        "dynamic_trace_pb",
+        "stats_csv",
+        "enhanced_execution_info_json",
+        "control_bits_sidecar",
+        "arch_card",
+        "pchase_card",
+    ] {
+        manifest["artifacts"][name]["size_bytes"] = json!(64_u64 * 1024 * 1024);
+    }
+    manifest["artifacts"]["allocations_json"]["artifact"]["size_bytes"] =
+        json!(64_u64 * 1024 * 1024);
+    write_json(&aggregate_fixture.manifest_path, &manifest);
+    assert!(matches!(
+        admit_launch_evidence(&aggregate_fixture.manifest_path),
+        Err(ManifestError::SnapshotResourceLimitExceeded { .. })
     ));
 }

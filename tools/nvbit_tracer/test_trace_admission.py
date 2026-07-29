@@ -64,6 +64,7 @@ def _write_trace(root: Path, *, launch: bool = True, instruction: bool = True,
         kernel = stream.kernels.add()
         kernel.id = 0
         kernel.name = "fixture_kernel"
+        kernel.function_unique_id = 1
         kernel.grid_dim.x = kernel.grid_dim.y = kernel.grid_dim.z = 1
         kernel.block_dim.x = 32
         kernel.block_dim.y = kernel.block_dim.z = 1
@@ -91,11 +92,34 @@ def _write_trace(root: Path, *, launch: bool = True, instruction: bool = True,
     return root
 
 
+def _read_root(trace_dir: Path):
+    trace_pb2, _threadblock_pb2 = _pb_modules()
+    root = trace_pb2.Trace()
+    root.ParseFromString((trace_dir / "dynamic_trace.pb").read_bytes())
+    return root
+
+
+def _write_root(trace_dir: Path, root) -> None:
+    (trace_dir / "dynamic_trace.pb").write_bytes(root.SerializeToString())
+
+
+def _threadblock_path(trace_dir: Path, kernel_id: int = 0) -> Path:
+    return (
+        trace_dir
+        / "threadblocks"
+        / "device_0"
+        / "stream_0"
+        / f"kernel_{kernel_id}"
+        / "0.pb"
+    )
+
+
 def test_require_trace_admission_accepts_nonvacuous_capture(tmp_path: Path) -> None:
     result = require_trace_admission(_write_trace(tmp_path / "trace"))
     assert result.launch_count == 1
     assert result.threadblock_count == 1
     assert result.instruction_count == 1
+    assert result.stats_row_count == 1
     assert result.expected_record_count == 1
     assert result.admitted_record_count == 1
 
@@ -116,6 +140,168 @@ def test_require_trace_admission_rejects_zero_admission_stats(tmp_path: Path) ->
     trace_dir = _write_trace(tmp_path / "trace", expected=0, admitted=0)
     with pytest.raises(TraceAdmissionError, match="trace_payload_empty"):
         require_trace_admission(trace_dir)
+
+
+def test_root_capabilities_are_exact_not_subset_only(tmp_path: Path) -> None:
+    trace_dir = _write_trace(tmp_path / "trace")
+    root = _read_root(trace_dir)
+    root.memory_payload_classes.append(1)
+    _write_root(trace_dir, root)
+
+    with pytest.raises(TraceAdmissionError) as caught:
+        require_trace_admission(trace_dir)
+    assert caught.value.typed_reason == "trace_capabilities_invalid"
+
+
+@pytest.mark.parametrize("field", ("device", "stream"))
+def test_root_map_keys_must_match_embedded_ids(tmp_path: Path, field: str) -> None:
+    trace_dir = _write_trace(tmp_path / "trace")
+    root = _read_root(trace_dir)
+    if field == "device":
+        root.gpu_device[0].id = 1
+    else:
+        root.gpu_device[0].streams[0].id = 1
+    _write_root(trace_dir, root)
+
+    with pytest.raises(TraceAdmissionError) as caught:
+        require_trace_admission(trace_dir)
+    assert caught.value.typed_reason == "trace_launch_identity_mismatch"
+
+
+def test_root_requires_positive_function_identity(tmp_path: Path) -> None:
+    trace_dir = _write_trace(tmp_path / "trace")
+    root = _read_root(trace_dir)
+    root.gpu_device[0].streams[0].kernels[0].function_unique_id = 0
+    _write_root(trace_dir, root)
+
+    with pytest.raises(TraceAdmissionError) as caught:
+        require_trace_admission(trace_dir)
+    assert caught.value.typed_reason == "function_unique_id_invalid"
+
+
+def test_duplicate_launch_identity_is_rejected(tmp_path: Path) -> None:
+    trace_dir = _write_trace(tmp_path / "trace")
+    root = _read_root(trace_dir)
+    stream = root.gpu_device[0].streams[0]
+    duplicate = stream.kernels.add()
+    duplicate.CopyFrom(stream.kernels[0])
+    _write_root(trace_dir, root)
+
+    with pytest.raises(TraceAdmissionError) as caught:
+        require_trace_admission(trace_dir)
+    assert caught.value.typed_reason == "trace_launch_identity_mismatch"
+
+
+def test_every_root_payload_is_semantically_walked(tmp_path: Path) -> None:
+    trace_dir = _write_trace(tmp_path / "trace")
+    root = _read_root(trace_dir)
+    stream = root.gpu_device[0].streams[0]
+    second = stream.kernels.add()
+    second.CopyFrom(stream.kernels[0])
+    second.id = 1
+    second.function_unique_id = 2
+    _write_root(trace_dir, root)
+
+    _trace_pb2, threadblock_pb2 = _pb_modules()
+    message = threadblock_pb2.threadblock()
+    message.ParseFromString(_threadblock_path(trace_dir).read_bytes())
+    instruction = message.warps[0].instructions[0]
+    instruction.function_unique_id = 2
+    instruction.ClearField("warpid_tb")
+    second_path = _threadblock_path(trace_dir, 1)
+    second_path.parent.mkdir(parents=True)
+    second_path.write_bytes(message.SerializeToString())
+
+    with pytest.raises(TraceAdmissionError) as caught:
+        require_trace_admission(trace_dir)
+    assert caught.value.typed_reason == "warpid_tb_missing"
+
+
+def test_payloads_are_bijectively_joined_to_root_launches(tmp_path: Path) -> None:
+    missing_dir = _write_trace(tmp_path / "missing")
+    _threadblock_path(missing_dir).unlink()
+    orphan = _threadblock_path(missing_dir, 9)
+    orphan.parent.mkdir(parents=True)
+    orphan.write_bytes(b"orphan")
+    with pytest.raises(TraceAdmissionError) as caught:
+        require_trace_admission(missing_dir)
+    assert caught.value.typed_reason == "trace_launch_payload_missing"
+
+    orphan_dir = _write_trace(tmp_path / "orphan")
+    orphan = _threadblock_path(orphan_dir, 9)
+    orphan.parent.mkdir(parents=True)
+    orphan.write_bytes(_threadblock_path(orphan_dir).read_bytes())
+    with pytest.raises(TraceAdmissionError) as caught:
+        require_trace_admission(orphan_dir)
+    assert caught.value.typed_reason == "trace_payload_orphan"
+
+
+def test_instruction_function_identity_must_join_root(tmp_path: Path) -> None:
+    trace_dir = _write_trace(tmp_path / "trace")
+    _trace_pb2, threadblock_pb2 = _pb_modules()
+    message = threadblock_pb2.threadblock()
+    path = _threadblock_path(trace_dir)
+    message.ParseFromString(path.read_bytes())
+    message.warps[0].instructions[0].function_unique_id = 2
+    path.write_bytes(message.SerializeToString())
+
+    with pytest.raises(TraceAdmissionError) as caught:
+        require_trace_admission(trace_dir)
+    assert caught.value.typed_reason == "function_unique_id_mismatch"
+
+
+def test_block_identity_is_required_and_range_checked(tmp_path: Path) -> None:
+    trace_dir = _write_trace(tmp_path / "missing")
+    _trace_pb2, threadblock_pb2 = _pb_modules()
+    message = threadblock_pb2.threadblock()
+    path = _threadblock_path(trace_dir)
+    message.ParseFromString(path.read_bytes())
+    message.ClearField("block_id")
+    path.write_bytes(message.SerializeToString())
+    with pytest.raises(TraceAdmissionError) as caught:
+        require_trace_admission(trace_dir)
+    assert caught.value.typed_reason == "block_id_missing"
+
+    trace_dir = _write_trace(tmp_path / "range")
+    path = _threadblock_path(trace_dir)
+    message = threadblock_pb2.threadblock()
+    message.ParseFromString(path.read_bytes())
+    message.block_id.x = 1
+    path.write_bytes(message.SerializeToString())
+    with pytest.raises(TraceAdmissionError) as caught:
+        require_trace_admission(trace_dir)
+    assert caught.value.typed_reason == "block_id_out_of_range"
+
+
+def test_stats_counters_are_uint64_and_totals_are_checked(tmp_path: Path) -> None:
+    trace_dir = _write_trace(tmp_path / "too-wide")
+    (trace_dir / "stats.csv").write_text(
+        f"total_insts,total_reported_insts\n{2**64},1\n", encoding="utf-8"
+    )
+    with pytest.raises(TraceAdmissionError) as caught:
+        require_trace_admission(trace_dir)
+    assert caught.value.typed_reason == "stats_schema_invalid"
+
+    trace_dir = _write_trace(tmp_path / "overflow")
+    (trace_dir / "stats.csv").write_text(
+        "total_insts,total_reported_insts\n"
+        f"{2**64 - 1},1\n"
+        "1,1\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(TraceAdmissionError) as caught:
+        require_trace_admission(trace_dir)
+    assert caught.value.typed_reason == "trace_counter_overflow"
+
+    trace_dir = _write_trace(tmp_path / "maximum")
+    (trace_dir / "stats.csv").write_text(
+        "total_insts,total_reported_insts\n"
+        f"{2**64 - 1},{2**64 - 1}\n",
+        encoding="utf-8",
+    )
+    admitted = require_trace_admission(trace_dir)
+    assert admitted.expected_record_count == 2**64 - 1
+    assert admitted.admitted_record_count == 2**64 - 1
 
 
 def test_trace_admission_is_forward_capture_only() -> None:
