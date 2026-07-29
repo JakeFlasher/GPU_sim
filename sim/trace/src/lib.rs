@@ -8,16 +8,21 @@
 //! Rule 1 (targets-never-features) note: this crate consumes NVBit traces
 //! only. NCU label artifacts are prediction targets and never appear here.
 
+pub mod anchored;
+pub mod digest;
 pub mod exec_info;
 pub mod lanes;
 pub mod pb;
 pub mod reader;
 
+pub use anchored::{AnchoredDir, AnchoredFile, AnchoredReadError, FileIdentity};
+pub use digest::{CanonicalJsonError, Sha256Digest, Sha256DigestError, canonical_json};
 pub use exec_info::{ExecInfo, ExecInfoError, KernelStaticInfo};
 pub use lanes::{LANE_INACTIVE_SENTINEL, LANES_PER_WARP, LaneError, reconstruct_lane_vector};
 pub use reader::{
-    AddressAccess, AllocationRegistry, KernelLoc, LosslessFullProvenance, MemoryAccess,
-    MemoryAccessMeta, TraceDir, TraceError, TraceSamplingMethod, TraceSamplingSidecar,
+    AddressAccess, AllocationRegistry, ArtifactDigestIdentity, KernelLoc, LosslessFullProvenance,
+    MemoryAccess, MemoryAccessMeta, ThreadblockPayloadIdentity, TraceArtifactIdentity, TraceDir,
+    TraceDirSnapshot, TraceError, TraceSamplingMethod, TraceSamplingSidecar, TraceSnapshotLimits,
     WaveSegmentSubsetProvenance, block_launch_index, check_allocation_identity, kernel_grid,
     memory_access, visit_memory_access,
 };

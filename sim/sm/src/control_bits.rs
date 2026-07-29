@@ -369,12 +369,21 @@ impl ControlSidecar {
 
     /// Load and validate a sidecar for a canonical deployment architecture.
     pub fn load_for_arch(path: &Path, expected_arch: ArchId) -> Result<Self, ControlBitsError> {
-        let raw = std::fs::read_to_string(path).map_err(|source| ControlBitsError::Io {
+        let raw = std::fs::read(path).map_err(|source| ControlBitsError::Io {
             path: path.display().to_string(),
             source,
         })?;
+        Self::parse_for_arch(path, &raw, expected_arch)
+    }
+
+    /// Parse already-snapshotted sidecar bytes under one deployment capability.
+    pub fn parse_for_arch(
+        path: &Path,
+        raw: &[u8],
+        expected_arch: ArchId,
+    ) -> Result<Self, ControlBitsError> {
         let sidecar: RawSidecar =
-            serde_json::from_str(&raw).map_err(|source| ControlBitsError::Parse {
+            serde_json::from_slice(raw).map_err(|source| ControlBitsError::Parse {
                 path: path.display().to_string(),
                 source,
             })?;

@@ -1,0 +1,189 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "launch_evidence_manifest.v1.schema.json",
+  "title": "Launch evidence manifest v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifacts",
+    "launch_selector",
+    "architecture",
+    "binary_digest"
+  ],
+  "properties": {
+    "schema_version": { "const": 1 },
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "dynamic_trace_pb",
+        "threadblock_payload",
+        "allocations_json",
+        "trace_sampling_json",
+        "enhanced_execution_info_json",
+        "control_bits_sidecar",
+        "arch_card",
+        "pchase_card"
+      ],
+      "properties": {
+        "dynamic_trace_pb": { "$ref": "#/definitions/artifact" },
+        "threadblock_payload": { "$ref": "#/definitions/threadblockPayload" },
+        "allocations_json": { "$ref": "#/definitions/optionalArtifact" },
+        "trace_sampling_json": { "$ref": "#/definitions/optionalArtifact" },
+        "enhanced_execution_info_json": { "$ref": "#/definitions/artifact" },
+        "control_bits_sidecar": { "$ref": "#/definitions/artifact" },
+        "arch_card": { "$ref": "#/definitions/artifact" },
+        "pchase_card": { "$ref": "#/definitions/artifact" }
+      }
+    },
+    "launch_selector": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["device_id", "stream_id", "kernel_id", "function_unique_id"],
+      "properties": {
+        "device_id": {
+          "type": "integer",
+          "minimum": -9223372036854775808,
+          "maximum": 9223372036854775807
+        },
+        "stream_id": {
+          "type": "integer",
+          "minimum": -9223372036854775808,
+          "maximum": 9223372036854775807
+        },
+        "kernel_id": { "type": "integer", "minimum": -2147483648, "maximum": 2147483647 },
+        "function_unique_id": {
+          "type": "integer",
+          "minimum": -2147483648,
+          "maximum": 2147483647
+        }
+      }
+    },
+    "architecture": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["arch_id", "sku"],
+          "properties": {
+            "arch_id": { "const": "sm_86" },
+            "sku": { "const": "rtx_3090_ti" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["arch_id", "sku"],
+          "properties": {
+            "arch_id": { "const": "sm_120" },
+            "sku": { "const": "rtx_5060_laptop" }
+          }
+        }
+      ]
+    },
+    "binary_digest": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "sha256"],
+          "properties": {
+            "status": { "const": "value" },
+            "sha256": { "$ref": "#/definitions/sha256" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "gap"],
+          "properties": {
+            "status": { "const": "typed_gap" },
+            "gap": { "const": "trace_contract_does_not_emit_binary_digest" }
+          }
+        }
+      ]
+    }
+  },
+  "definitions": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "relativePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9._/-]+$",
+      "not": {
+        "anyOf": [
+          { "pattern": "^/" },
+          { "pattern": "/$" },
+          { "pattern": "//" },
+          { "pattern": "[\\r\\n]" },
+          { "pattern": "(^|/)\\.\\.?(/|$)" }
+        ]
+      }
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "size_bytes", "sha256"],
+      "properties": {
+        "path": { "$ref": "#/definitions/relativePath" },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 18446744073709551615
+        },
+        "sha256": { "$ref": "#/definitions/sha256" }
+      }
+    },
+    "optionalArtifact": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status", "artifact"],
+          "properties": {
+            "status": { "const": "present" },
+            "artifact": { "$ref": "#/definitions/artifact" }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["status"],
+          "properties": {
+            "status": { "const": "absent" }
+          }
+        }
+      ]
+    },
+    "threadblockPayload": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "path",
+        "file_count",
+        "raw_bytes",
+        "sorted_path_manifest_sha256",
+        "sorted_path_stream_sha256"
+      ],
+      "properties": {
+        "path": { "$ref": "#/definitions/relativePath" },
+        "file_count": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 18446744073709551615
+        },
+        "raw_bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 18446744073709551615
+        },
+        "sorted_path_manifest_sha256": { "$ref": "#/definitions/sha256" },
+        "sorted_path_stream_sha256": { "$ref": "#/definitions/sha256" }
+      }
+    }
+  }
+}

@@ -28,6 +28,8 @@ use std::path::{Path, PathBuf};
 
 use prost::Message;
 
+use crate::anchored::{AnchoredDir, AnchoredFile, AnchoredReadError, FileIdentity};
+use crate::digest::{Sha256, Sha256Digest, canonical_json};
 use crate::lanes::{self, LaneError};
 use crate::pb;
 
@@ -38,6 +40,32 @@ pub enum TraceError {
         path: PathBuf,
         #[source]
         source: std::io::Error,
+    },
+    #[error("descriptor-anchored trace snapshot failed: {0}")]
+    AnchoredSnapshot(#[from] AnchoredReadError),
+    #[error(
+        "trace snapshot artifact {artifact} presence mismatch: expected {expected}, actual {actual}"
+    )]
+    SnapshotArtifactPresenceMismatch {
+        artifact: &'static str,
+        expected: bool,
+        actual: bool,
+    },
+    #[error(
+        "trace snapshot artifact {artifact} size mismatch: expected {expected}, actual {actual}"
+    )]
+    SnapshotArtifactSizeMismatch {
+        artifact: &'static str,
+        expected: u64,
+        actual: u64,
+    },
+    #[error(
+        "trace snapshot artifact {artifact} file count mismatch: expected {expected}, actual {actual}"
+    )]
+    SnapshotArtifactCardinalityMismatch {
+        artifact: &'static str,
+        expected: u64,
+        actual: u64,
     },
     #[error("could not parse {path} as {message_type}: {source}")]
     Decode {
@@ -62,6 +90,8 @@ pub enum TraceError {
     ThreadblocksMissing { dir: PathBuf },
     #[error("threadblock payload entry {path} is not a regular file")]
     ThreadblockPayloadNotRegular { path: PathBuf },
+    #[error("threadblock payload snapshot under {root} is invalid: {message}")]
+    ThreadblockPayloadSnapshotInvalid { root: PathBuf, message: String },
     #[error("verified sampling payload snapshot is missing expected file {path}")]
     SamplingPayloadSnapshotMissing { path: PathBuf },
     #[error(
@@ -244,8 +274,400 @@ fn classify_memory_payload_contract(
     Ok(MemoryPayloadContract::AddressCarryingV1)
 }
 
+/// Raw-byte identity of one snapshotted trace artifact.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ArtifactDigestIdentity {
+    size_bytes: u64,
+    sha256: Sha256Digest,
+}
+
+impl ArtifactDigestIdentity {
+    fn from_bytes(bytes: &[u8], path: &Path) -> Result<Self, TraceError> {
+        let size_bytes = u64::try_from(bytes.len()).map_err(|_| {
+            TraceError::ThreadblockPayloadSnapshotInvalid {
+                root: path.to_path_buf(),
+                message: "artifact byte length exceeds u64".to_owned(),
+            }
+        })?;
+        Ok(Self {
+            size_bytes,
+            sha256: Sha256Digest::of(bytes),
+        })
+    }
+
+    pub fn size_bytes(self) -> u64 {
+        self.size_bytes
+    }
+
+    pub fn sha256(self) -> Sha256Digest {
+        self.sha256
+    }
+}
+
+/// Deterministic identity of every threadblock payload file in a trace snapshot.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ThreadblockPayloadIdentity {
+    file_count: u64,
+    raw_bytes: u64,
+    sorted_path_manifest_sha256: Sha256Digest,
+    sorted_path_stream_sha256: Sha256Digest,
+}
+
+impl ThreadblockPayloadIdentity {
+    pub fn file_count(&self) -> u64 {
+        self.file_count
+    }
+
+    pub fn raw_bytes(&self) -> u64 {
+        self.raw_bytes
+    }
+
+    pub fn sorted_path_manifest_sha256(&self) -> Sha256Digest {
+        self.sorted_path_manifest_sha256
+    }
+
+    pub fn sorted_path_stream_sha256(&self) -> Sha256Digest {
+        self.sorted_path_stream_sha256
+    }
+}
+
+/// Raw identities captured before any trace artifact is decoded.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TraceArtifactIdentity {
+    dynamic_trace_pb: ArtifactDigestIdentity,
+    allocations_json: Option<ArtifactDigestIdentity>,
+    trace_sampling_json: Option<ArtifactDigestIdentity>,
+    threadblock_payload: ThreadblockPayloadIdentity,
+}
+
+impl TraceArtifactIdentity {
+    pub fn dynamic_trace_pb(&self) -> ArtifactDigestIdentity {
+        self.dynamic_trace_pb
+    }
+
+    pub fn allocations_json(&self) -> Option<ArtifactDigestIdentity> {
+        self.allocations_json
+    }
+
+    pub fn trace_sampling_json(&self) -> Option<ArtifactDigestIdentity> {
+        self.trace_sampling_json
+    }
+
+    pub fn threadblock_payload(&self) -> &ThreadblockPayloadIdentity {
+        &self.threadblock_payload
+    }
+}
+
 struct VerifiedSamplingPayload {
     by_path: BTreeMap<PathBuf, Vec<u8>>,
+    identity: ThreadblockPayloadIdentity,
+}
+
+/// Declared byte/cardinality bounds used before a manifest snapshot reads data.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TraceSnapshotLimits {
+    dynamic_trace_pb_size: u64,
+    allocations_json_size: Option<u64>,
+    trace_sampling_json_size: Option<u64>,
+    threadblock_file_count: u64,
+    threadblock_raw_bytes: u64,
+}
+
+impl TraceSnapshotLimits {
+    pub fn new(
+        dynamic_trace_pb_size: u64,
+        allocations_json_size: Option<u64>,
+        trace_sampling_json_size: Option<u64>,
+        threadblock_file_count: u64,
+        threadblock_raw_bytes: u64,
+    ) -> Self {
+        Self {
+            dynamic_trace_pb_size,
+            allocations_json_size,
+            trace_sampling_json_size,
+            threadblock_file_count,
+            threadblock_raw_bytes,
+        }
+    }
+}
+
+/// One-read snapshot used by manifest admission. Artifact identities are
+/// available before parsing, and [`TraceDir::from_snapshot`] consumes these exact
+/// bytes so a hash-then-reopen substitution cannot change replay inputs.
+pub struct TraceDirSnapshot {
+    root: PathBuf,
+    dynamic_trace_pb: Vec<u8>,
+    allocations_json: Option<Vec<u8>>,
+    trace_sampling_json: Option<Vec<u8>>,
+    threadblock_payload: VerifiedSamplingPayload,
+    identity: TraceArtifactIdentity,
+    file_identities: BTreeMap<FileIdentity, PathBuf>,
+}
+
+impl TraceDirSnapshot {
+    pub fn capture(root: impl Into<PathBuf>) -> Result<Self, TraceError> {
+        let root = root.into();
+        let reader = AnchoredDir::open(&root)?;
+        Self::capture_from_anchored(&reader, Path::new(""), None)
+    }
+
+    pub fn capture_anchored(
+        reader: &AnchoredDir,
+        root_relative: &Path,
+        limits: TraceSnapshotLimits,
+    ) -> Result<Self, TraceError> {
+        Self::capture_from_anchored(reader, root_relative, Some(limits))
+    }
+
+    fn capture_from_anchored(
+        reader: &AnchoredDir,
+        root_relative: &Path,
+        limits: Option<TraceSnapshotLimits>,
+    ) -> Result<Self, TraceError> {
+        let root = reader.root().join(root_relative);
+        let dynamic_relative = root_relative.join("dynamic_trace.pb");
+        let dynamic_file = match limits {
+            Some(limits) => reader
+                .read_exact_regular(&dynamic_relative, limits.dynamic_trace_pb_size)
+                .map_err(|source| map_snapshot_read_error("dynamic_trace_pb", source))?,
+            None => reader.read_bounded_regular(&dynamic_relative, u64::MAX)?,
+        };
+        let dynamic_path = root.join("dynamic_trace.pb");
+        let mut file_identities = BTreeMap::new();
+        insert_snapshot_file_identity(
+            &mut file_identities,
+            dynamic_file.identity(),
+            dynamic_path.clone(),
+        )?;
+        let dynamic_trace_pb = dynamic_file.into_raw();
+
+        let allocations_relative = root_relative.join("extra_info/allocations.json");
+        let allocations_path = root.join("extra_info/allocations.json");
+        let allocations_file = capture_optional_snapshot_artifact(
+            reader,
+            &allocations_relative,
+            limits.map(|limits| limits.allocations_json_size),
+            "allocations_json",
+        )?;
+        if let Some(file) = &allocations_file {
+            insert_snapshot_file_identity(
+                &mut file_identities,
+                file.identity(),
+                allocations_path.clone(),
+            )?;
+        }
+        let allocations_json = allocations_file.map(AnchoredFile::into_raw);
+
+        let sampling_relative = root_relative.join("trace_sampling.json");
+        let sampling_path = root.join("trace_sampling.json");
+        let sampling_file = capture_optional_snapshot_artifact(
+            reader,
+            &sampling_relative,
+            limits.map(|limits| limits.trace_sampling_json_size),
+            "trace_sampling_json",
+        )?;
+        if let Some(file) = &sampling_file {
+            insert_snapshot_file_identity(
+                &mut file_identities,
+                file.identity(),
+                sampling_path.clone(),
+            )?;
+        }
+        let trace_sampling_json = sampling_file.map(AnchoredFile::into_raw);
+
+        let (maximum_files, maximum_bytes) = limits.map_or((u64::MAX, u64::MAX), |limits| {
+            (limits.threadblock_file_count, limits.threadblock_raw_bytes)
+        });
+        let tree_relative = root_relative.join("threadblocks");
+        let tree = reader.read_pb_tree(&tree_relative, maximum_files, maximum_bytes)?;
+        let actual_file_count = u64::try_from(tree.files.len()).map_err(|_| {
+            TraceError::SnapshotArtifactCardinalityMismatch {
+                artifact: "threadblock_payload",
+                expected: maximum_files,
+                actual: u64::MAX,
+            }
+        })?;
+        if let Some(limits) = limits {
+            if actual_file_count != limits.threadblock_file_count {
+                return Err(TraceError::SnapshotArtifactCardinalityMismatch {
+                    artifact: "threadblock_payload",
+                    expected: limits.threadblock_file_count,
+                    actual: actual_file_count,
+                });
+            }
+            if tree.bytes != limits.threadblock_raw_bytes {
+                return Err(TraceError::SnapshotArtifactSizeMismatch {
+                    artifact: "threadblock_payload",
+                    expected: limits.threadblock_raw_bytes,
+                    actual: tree.bytes,
+                });
+            }
+        }
+        if tree.files.is_empty() {
+            return Err(TraceError::ThreadblockPayloadSnapshotInvalid {
+                root: root.clone(),
+                message: "snapshot contains no regular .pb files".to_owned(),
+            });
+        }
+        let mut raw_bytes = 0_u64;
+        let mut stream_digest = Sha256::new();
+        let mut manifest = String::from("trace-payload-file-manifest-v1\n");
+        let mut by_path = BTreeMap::new();
+        for entry in tree.files {
+            let relative = entry.relative.strip_prefix(root_relative).map_err(|_| {
+                TraceError::ThreadblockPayloadSnapshotInvalid {
+                    root: root.clone(),
+                    message: format!(
+                        "descriptor-anchored payload path is outside trace root: {}",
+                        entry.relative.display()
+                    ),
+                }
+            })?;
+            let relative =
+                relative
+                    .to_str()
+                    .ok_or_else(|| TraceError::ThreadblockPayloadSnapshotInvalid {
+                        root: root.clone(),
+                        message: format!("payload path is not UTF-8: {}", entry.relative.display()),
+                    })?;
+            if !safe_payload_manifest_path(relative) {
+                return Err(TraceError::ThreadblockPayloadSnapshotInvalid {
+                    root: root.clone(),
+                    message: format!(
+                        "payload path is not canonical for the per-file manifest: {relative:?}"
+                    ),
+                });
+            }
+            let path = root.join(relative);
+            insert_snapshot_file_identity(
+                &mut file_identities,
+                entry.file.identity(),
+                path.clone(),
+            )?;
+            let raw = entry.file.into_raw();
+            let size = u64::try_from(raw.len()).map_err(|_| {
+                TraceError::ThreadblockPayloadSnapshotInvalid {
+                    root: root.clone(),
+                    message: format!("payload {} length exceeds u64", path.display()),
+                }
+            })?;
+            raw_bytes = raw_bytes.checked_add(size).ok_or_else(|| {
+                TraceError::ThreadblockPayloadSnapshotInvalid {
+                    root: root.clone(),
+                    message: "payload byte count overflows u64".to_owned(),
+                }
+            })?;
+            let file_digest = Sha256Digest::of(&raw);
+            manifest.push_str(&format!("{relative}\t{size}\t{file_digest}\n"));
+            stream_digest.update(&raw);
+            by_path.insert(path, raw);
+        }
+        let threadblock_payload = VerifiedSamplingPayload {
+            by_path,
+            identity: ThreadblockPayloadIdentity {
+                file_count: actual_file_count,
+                raw_bytes,
+                sorted_path_manifest_sha256: Sha256Digest::of(manifest.as_bytes()),
+                sorted_path_stream_sha256: stream_digest.finish_digest(),
+            },
+        };
+        let identity = TraceArtifactIdentity {
+            dynamic_trace_pb: ArtifactDigestIdentity::from_bytes(&dynamic_trace_pb, &dynamic_path)?,
+            allocations_json: allocations_json
+                .as_deref()
+                .map(|raw| ArtifactDigestIdentity::from_bytes(raw, &allocations_path))
+                .transpose()?,
+            trace_sampling_json: trace_sampling_json
+                .as_deref()
+                .map(|raw| ArtifactDigestIdentity::from_bytes(raw, &sampling_path))
+                .transpose()?,
+            threadblock_payload: threadblock_payload.identity.clone(),
+        };
+        Ok(Self {
+            root,
+            dynamic_trace_pb,
+            allocations_json,
+            trace_sampling_json,
+            threadblock_payload,
+            identity,
+            file_identities,
+        })
+    }
+
+    pub fn root(&self) -> &Path {
+        &self.root
+    }
+
+    pub fn artifact_identity(&self) -> &TraceArtifactIdentity {
+        &self.identity
+    }
+
+    pub fn file_identities(&self) -> impl Iterator<Item = (FileIdentity, &Path)> {
+        self.file_identities
+            .iter()
+            .map(|(identity, path)| (*identity, path.as_path()))
+    }
+}
+
+fn map_snapshot_read_error(artifact: &'static str, source: AnchoredReadError) -> TraceError {
+    match source {
+        AnchoredReadError::SizeMismatch {
+            expected, actual, ..
+        } => TraceError::SnapshotArtifactSizeMismatch {
+            artifact,
+            expected,
+            actual,
+        },
+        other => TraceError::AnchoredSnapshot(other),
+    }
+}
+
+fn capture_optional_snapshot_artifact(
+    reader: &AnchoredDir,
+    relative: &Path,
+    expected: Option<Option<u64>>,
+    artifact: &'static str,
+) -> Result<Option<AnchoredFile>, TraceError> {
+    match expected {
+        None => reader
+            .read_optional_bounded_regular(relative, u64::MAX)
+            .map_err(TraceError::AnchoredSnapshot),
+        Some(Some(size)) => reader
+            .read_optional_exact_regular(relative, size)
+            .map_err(|source| map_snapshot_read_error(artifact, source))?
+            .ok_or(TraceError::SnapshotArtifactPresenceMismatch {
+                artifact,
+                expected: true,
+                actual: false,
+            })
+            .map(Some),
+        Some(None) => {
+            if reader.probe_optional_regular(relative)?.is_some() {
+                return Err(TraceError::SnapshotArtifactPresenceMismatch {
+                    artifact,
+                    expected: false,
+                    actual: true,
+                });
+            }
+            Ok(None)
+        }
+    }
+}
+
+fn insert_snapshot_file_identity(
+    identities: &mut BTreeMap<FileIdentity, PathBuf>,
+    identity: FileIdentity,
+    path: PathBuf,
+) -> Result<(), TraceError> {
+    if let Some(first) = identities.insert(identity, path.clone()) {
+        return Err(TraceError::AnchoredSnapshot(
+            AnchoredReadError::HardlinkAlias {
+                first,
+                second: path,
+            },
+        ));
+    }
+    Ok(())
 }
 
 pub struct TraceDir {
@@ -287,6 +709,49 @@ impl TraceDir {
             allocations,
             sampling,
             sampling_payload,
+        })
+    }
+
+    /// Decode a one-read manifest snapshot without reopening any artifact.
+    pub fn from_snapshot(snapshot: TraceDirSnapshot) -> Result<Self, TraceError> {
+        let TraceDirSnapshot {
+            root,
+            dynamic_trace_pb,
+            allocations_json,
+            trace_sampling_json,
+            threadblock_payload,
+            identity: _,
+            file_identities: _,
+        } = snapshot;
+        let dynamic_path = root.join("dynamic_trace.pb");
+        let trace = pb::Trace::decode(dynamic_trace_pb.as_slice()).map_err(|source| {
+            TraceError::Decode {
+                path: dynamic_path.clone(),
+                message_type: "dynamic_trace.Trace",
+                source,
+            }
+        })?;
+        let memory_payload_contract = classify_memory_payload_contract(&trace, &dynamic_path)?;
+        let allocations_path = root.join("extra_info/allocations.json");
+        let allocations = allocations_json
+            .as_deref()
+            .map(|raw| AllocationRegistry::parse(&allocations_path, raw))
+            .transpose()?;
+        let sampling_path = root.join("trace_sampling.json");
+        let sampling = trace_sampling_json
+            .as_deref()
+            .map(|raw| TraceSamplingSidecar::parse(&sampling_path, raw))
+            .transpose()?;
+        if let Some(sidecar) = sampling.as_ref() {
+            validate_sampling_payload_snapshot(&root, sidecar, &threadblock_payload)?;
+        }
+        Ok(Self {
+            root,
+            trace,
+            memory_payload_contract,
+            allocations,
+            sampling,
+            sampling_payload: Some(threadblock_payload),
         })
     }
 
@@ -738,196 +1203,8 @@ fn parse_payload_file_manifest(
     Ok(entries)
 }
 
-const SHA256_INITIAL: [u32; 8] = [
-    0x6a09_e667,
-    0xbb67_ae85,
-    0x3c6e_f372,
-    0xa54f_f53a,
-    0x510e_527f,
-    0x9b05_688c,
-    0x1f83_d9ab,
-    0x5be0_cd19,
-];
-const SHA256_K: [u32; 64] = [
-    0x428a_2f98,
-    0x7137_4491,
-    0xb5c0_fbcf,
-    0xe9b5_dba5,
-    0x3956_c25b,
-    0x59f1_11f1,
-    0x923f_82a4,
-    0xab1c_5ed5,
-    0xd807_aa98,
-    0x1283_5b01,
-    0x2431_85be,
-    0x550c_7dc3,
-    0x72be_5d74,
-    0x80de_b1fe,
-    0x9bdc_06a7,
-    0xc19b_f174,
-    0xe49b_69c1,
-    0xefbe_4786,
-    0x0fc1_9dc6,
-    0x240c_a1cc,
-    0x2de9_2c6f,
-    0x4a74_84aa,
-    0x5cb0_a9dc,
-    0x76f9_88da,
-    0x983e_5152,
-    0xa831_c66d,
-    0xb003_27c8,
-    0xbf59_7fc7,
-    0xc6e0_0bf3,
-    0xd5a7_9147,
-    0x06ca_6351,
-    0x1429_2967,
-    0x27b7_0a85,
-    0x2e1b_2138,
-    0x4d2c_6dfc,
-    0x5338_0d13,
-    0x650a_7354,
-    0x766a_0abb,
-    0x81c2_c92e,
-    0x9272_2c85,
-    0xa2bf_e8a1,
-    0xa81a_664b,
-    0xc24b_8b70,
-    0xc76c_51a3,
-    0xd192_e819,
-    0xd699_0624,
-    0xf40e_3585,
-    0x106a_a070,
-    0x19a4_c116,
-    0x1e37_6c08,
-    0x2748_774c,
-    0x34b0_bcb5,
-    0x391c_0cb3,
-    0x4ed8_aa4a,
-    0x5b9c_ca4f,
-    0x682e_6ff3,
-    0x748f_82ee,
-    0x78a5_636f,
-    0x84c8_7814,
-    0x8cc7_0208,
-    0x90be_fffa,
-    0xa450_6ceb,
-    0xbef9_a3f7,
-    0xc671_78f2,
-];
-
-fn sha256_compress(state: &mut [u32; 8], chunk: &[u8]) {
-    debug_assert_eq!(chunk.len(), 64);
-    let mut schedule = [0u32; 64];
-    for (index, word) in schedule[..16].iter_mut().enumerate() {
-        let offset = index * 4;
-        *word = u32::from_be_bytes([
-            chunk[offset],
-            chunk[offset + 1],
-            chunk[offset + 2],
-            chunk[offset + 3],
-        ]);
-    }
-    for index in 16..64 {
-        let s0 = schedule[index - 15].rotate_right(7)
-            ^ schedule[index - 15].rotate_right(18)
-            ^ (schedule[index - 15] >> 3);
-        let s1 = schedule[index - 2].rotate_right(17)
-            ^ schedule[index - 2].rotate_right(19)
-            ^ (schedule[index - 2] >> 10);
-        schedule[index] = schedule[index - 16]
-            .wrapping_add(s0)
-            .wrapping_add(schedule[index - 7])
-            .wrapping_add(s1);
-    }
-    let [mut a, mut b, mut c, mut d, mut e, mut f, mut g, mut h] = *state;
-    for index in 0..64 {
-        let sum1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
-        let choose = (e & f) ^ (!e & g);
-        let temp1 = h
-            .wrapping_add(sum1)
-            .wrapping_add(choose)
-            .wrapping_add(SHA256_K[index])
-            .wrapping_add(schedule[index]);
-        let sum0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
-        let majority = (a & b) ^ (a & c) ^ (b & c);
-        let temp2 = sum0.wrapping_add(majority);
-        h = g;
-        g = f;
-        f = e;
-        e = d.wrapping_add(temp1);
-        d = c;
-        c = b;
-        b = a;
-        a = temp1.wrapping_add(temp2);
-    }
-    for (slot, value) in state.iter_mut().zip([a, b, c, d, e, f, g, h].into_iter()) {
-        *slot = slot.wrapping_add(value);
-    }
-}
-
-struct Sha256 {
-    state: [u32; 8],
-    tail: [u8; 64],
-    tail_len: usize,
-    total_bytes: u64,
-}
-
-impl Sha256 {
-    fn new() -> Self {
-        Self {
-            state: SHA256_INITIAL,
-            tail: [0; 64],
-            tail_len: 0,
-            total_bytes: 0,
-        }
-    }
-
-    fn update(&mut self, mut input: &[u8]) {
-        self.total_bytes = self.total_bytes.wrapping_add(input.len() as u64);
-        if self.tail_len > 0 {
-            let copied = (64 - self.tail_len).min(input.len());
-            self.tail[self.tail_len..self.tail_len + copied].copy_from_slice(&input[..copied]);
-            self.tail_len += copied;
-            input = &input[copied..];
-            if self.tail_len < 64 {
-                return;
-            }
-            sha256_compress(&mut self.state, &self.tail);
-            self.tail_len = 0;
-        }
-        let mut chunks = input.chunks_exact(64);
-        for chunk in &mut chunks {
-            sha256_compress(&mut self.state, chunk);
-        }
-        let remainder = chunks.remainder();
-        self.tail[..remainder.len()].copy_from_slice(remainder);
-        self.tail_len = remainder.len();
-    }
-
-    fn finish(mut self) -> String {
-        let bit_len = self.total_bytes.wrapping_mul(8);
-        self.tail[self.tail_len] = 0x80;
-        self.tail_len += 1;
-        if self.tail_len > 56 {
-            self.tail[self.tail_len..].fill(0);
-            sha256_compress(&mut self.state, &self.tail);
-            self.tail = [0; 64];
-        } else {
-            self.tail[self.tail_len..56].fill(0);
-        }
-        self.tail[56..].copy_from_slice(&bit_len.to_be_bytes());
-        sha256_compress(&mut self.state, &self.tail);
-        self.state
-            .iter()
-            .map(|word| format!("{word:08x}"))
-            .collect()
-    }
-}
-
 fn sha256_hex(input: &[u8]) -> String {
-    let mut digest = Sha256::new();
-    digest.update(input);
-    digest.finish()
+    Sha256Digest::of(input).to_string()
 }
 
 fn exact_keys(
@@ -987,137 +1264,6 @@ fn parse_dim3(value: &serde_json::Value, context: &str) -> Result<(u32, u32, u32
     ))
 }
 
-fn write_python_json_number(value: &serde_json::Number, out: &mut String) {
-    let rendered = value.to_string();
-    if value.is_i64() || value.is_u64() {
-        out.push_str(&rendered);
-        return;
-    }
-
-    // serde_json and CPython use shortest-roundtrip decimal digits, but choose
-    // fixed/scientific notation at different cutovers.  Re-layout the common
-    // shortest significand using CPython's repr rule: fixed for decimal
-    // exponents -4..15, scientific otherwise, with a signed two-digit minimum
-    // exponent.  This is the spelling used by json.dumps for finite floats.
-    let (negative, unsigned) = rendered
-        .strip_prefix('-')
-        .map_or((false, rendered.as_str()), |rest| (true, rest));
-    let (mantissa, explicit_exponent) = match unsigned.find(['e', 'E']) {
-        Some(at) => (
-            &unsigned[..at],
-            unsigned[at + 1..].parse::<i32>().unwrap_or(0),
-        ),
-        None => (unsigned, 0),
-    };
-    let decimal_at = mantissa.find('.').unwrap_or(mantissa.len());
-    let digits: String = mantissa.chars().filter(|ch| *ch != '.').collect();
-    let Some(first) = digits.bytes().position(|byte| byte != b'0') else {
-        out.push_str(if negative { "-0.0" } else { "0.0" });
-        return;
-    };
-    let last = digits
-        .bytes()
-        .rposition(|byte| byte != b'0')
-        .expect("a first nonzero digit exists");
-    let significant = &digits[first..=last];
-    let exponent = explicit_exponent + decimal_at as i32 - first as i32 - 1;
-
-    if negative {
-        out.push('-');
-    }
-    if (-4..16).contains(&exponent) {
-        if exponent < 0 {
-            out.push_str("0.");
-            for _ in 0..(-exponent - 1) {
-                out.push('0');
-            }
-            out.push_str(significant);
-        } else {
-            let integer_digits = exponent as usize + 1;
-            if significant.len() <= integer_digits {
-                out.push_str(significant);
-                for _ in significant.len()..integer_digits {
-                    out.push('0');
-                }
-                out.push_str(".0");
-            } else {
-                out.push_str(&significant[..integer_digits]);
-                out.push('.');
-                out.push_str(&significant[integer_digits..]);
-            }
-        }
-    } else {
-        out.push(significant.as_bytes()[0] as char);
-        if significant.len() > 1 {
-            out.push('.');
-            out.push_str(&significant[1..]);
-        }
-        out.push('e');
-        out.push(if exponent < 0 { '-' } else { '+' });
-        let absolute = exponent.unsigned_abs();
-        if absolute < 10 {
-            out.push('0');
-        }
-        out.push_str(&absolute.to_string());
-    }
-}
-
-fn canonical_python_json(value: &serde_json::Value, out: &mut String) -> Result<(), String> {
-    match value {
-        serde_json::Value::Null => out.push_str("null"),
-        serde_json::Value::Bool(value) => out.push_str(if *value { "true" } else { "false" }),
-        serde_json::Value::Number(value) => write_python_json_number(value, out),
-        serde_json::Value::String(value) => {
-            out.push('"');
-            for ch in value.chars() {
-                match ch {
-                    '"' => out.push_str("\\\""),
-                    '\\' => out.push_str("\\\\"),
-                    '\u{08}' => out.push_str("\\b"),
-                    '\u{09}' => out.push_str("\\t"),
-                    '\n' => out.push_str("\\n"),
-                    '\u{0c}' => out.push_str("\\f"),
-                    '\r' => out.push_str("\\r"),
-                    '\u{20}'..='\u{7e}' => out.push(ch),
-                    ch if u32::from(ch) <= 0xffff => {
-                        out.push_str(&format!("\\u{:04x}", u32::from(ch)));
-                    }
-                    ch => {
-                        let code = u32::from(ch) - 0x1_0000;
-                        let high = 0xd800 + (code >> 10);
-                        let low = 0xdc00 + (code & 0x3ff);
-                        out.push_str(&format!("\\u{high:04x}\\u{low:04x}"));
-                    }
-                }
-            }
-            out.push('"');
-        }
-        serde_json::Value::Array(values) => {
-            out.push('[');
-            for (index, value) in values.iter().enumerate() {
-                if index > 0 {
-                    out.push(',');
-                }
-                canonical_python_json(value, out)?;
-            }
-            out.push(']');
-        }
-        serde_json::Value::Object(values) => {
-            out.push('{');
-            for (index, (key, value)) in values.iter().enumerate() {
-                if index > 0 {
-                    out.push(',');
-                }
-                canonical_python_json(&serde_json::Value::String(key.clone()), out)?;
-                out.push(':');
-                canonical_python_json(value, out)?;
-            }
-            out.push('}');
-        }
-    }
-    Ok(())
-}
-
 fn canonical_sidecar_sha256(sidecar: &serde_json::Value) -> Result<String, String> {
     let mut unsigned = sidecar.clone();
     let root = unsigned
@@ -1130,8 +1276,7 @@ fn canonical_sidecar_sha256(sidecar: &serde_json::Value) -> Result<String, Strin
     if hashes.remove("sidecar_sha256").is_none() {
         return Err("hashes is missing required field sidecar_sha256".to_string());
     }
-    let mut canonical = String::new();
-    canonical_python_json(&unsigned, &mut canonical)?;
+    let canonical = canonical_json(&unsigned).map_err(|error| error.to_string())?;
     Ok(sha256_hex(canonical.as_bytes()))
 }
 
@@ -2308,52 +2453,117 @@ fn collect_threadblock_pb_paths(dir: &Path, paths: &mut Vec<PathBuf>) -> Result<
     Ok(())
 }
 
-fn verify_sampling_payload(
-    root: &Path,
-    sidecar: &TraceSamplingSidecar,
-) -> Result<VerifiedSamplingPayload, TraceError> {
+fn capture_threadblock_payload(root: &Path) -> Result<VerifiedSamplingPayload, TraceError> {
     let mut paths = Vec::new();
     collect_threadblock_pb_paths(&root.join("threadblocks"), &mut paths)?;
+    if paths.is_empty() {
+        return Err(TraceError::ThreadblockPayloadSnapshotInvalid {
+            root: root.to_path_buf(),
+            message: "snapshot contains no regular .pb files".to_owned(),
+        });
+    }
+
+    let mut payload_paths = Vec::with_capacity(paths.len());
+    for path in paths {
+        let relative =
+            path.strip_prefix(root)
+                .map_err(|_| TraceError::ThreadblockPayloadSnapshotInvalid {
+                    root: root.to_path_buf(),
+                    message: format!("payload path is outside trace root: {}", path.display()),
+                })?;
+        let relative =
+            relative
+                .to_str()
+                .ok_or_else(|| TraceError::ThreadblockPayloadSnapshotInvalid {
+                    root: root.to_path_buf(),
+                    message: format!("payload path is not UTF-8: {}", path.display()),
+                })?;
+        let relative = relative.to_owned();
+        if !safe_payload_manifest_path(&relative) {
+            return Err(TraceError::ThreadblockPayloadSnapshotInvalid {
+                root: root.to_path_buf(),
+                message: format!(
+                    "payload path is not canonical for the per-file manifest: {relative:?}"
+                ),
+            });
+        }
+        payload_paths.push((path, relative));
+    }
+    payload_paths.sort_by(|(_, left), (_, right)| left.cmp(right));
+
+    let file_count = u64::try_from(payload_paths.len()).map_err(|_| {
+        TraceError::ThreadblockPayloadSnapshotInvalid {
+            root: root.to_path_buf(),
+            message: "payload file count exceeds u64".to_owned(),
+        }
+    })?;
+    let mut raw_bytes = 0_u64;
+    let mut stream_digest = Sha256::new();
+    let mut manifest = String::from("trace-payload-file-manifest-v1\n");
+    let mut by_path = BTreeMap::new();
+    for (path, relative) in payload_paths {
+        let raw = fs::read(&path).map_err(|source| TraceError::Io {
+            path: path.clone(),
+            source,
+        })?;
+        let size = u64::try_from(raw.len()).map_err(|_| {
+            TraceError::ThreadblockPayloadSnapshotInvalid {
+                root: root.to_path_buf(),
+                message: format!("payload {} length exceeds u64", path.display()),
+            }
+        })?;
+        raw_bytes = raw_bytes.checked_add(size).ok_or_else(|| {
+            TraceError::ThreadblockPayloadSnapshotInvalid {
+                root: root.to_path_buf(),
+                message: "payload byte count overflows u64".to_owned(),
+            }
+        })?;
+        let file_digest = Sha256Digest::of(&raw);
+        manifest.push_str(&format!("{relative}\t{size}\t{file_digest}\n"));
+        stream_digest.update(&raw);
+        by_path.insert(path, raw);
+    }
+    let identity = ThreadblockPayloadIdentity {
+        file_count,
+        raw_bytes,
+        sorted_path_manifest_sha256: Sha256Digest::of(manifest.as_bytes()),
+        sorted_path_stream_sha256: stream_digest.finish_digest(),
+    };
+    Ok(VerifiedSamplingPayload { by_path, identity })
+}
+
+fn validate_sampling_payload_snapshot(
+    root: &Path,
+    sidecar: &TraceSamplingSidecar,
+    snapshot: &VerifiedSamplingPayload,
+) -> Result<(), TraceError> {
     let sidecar_path = root.join("trace_sampling.json");
     let malformed = |message: String| TraceError::SamplingSidecarMalformed {
         path: sidecar_path.clone(),
         message,
     };
-    if paths.is_empty() {
-        return Err(malformed(
-            "threadblock payload snapshot contains no regular .pb files".to_string(),
-        ));
-    }
-
-    let mut payload_paths = Vec::with_capacity(paths.len());
-    for path in paths {
-        let relative = path.strip_prefix(root).map_err(|_| {
-            malformed(format!(
-                "threadblock payload path is outside trace root: {}",
-                path.display()
-            ))
-        })?;
-        let relative = relative
-            .to_str()
+    let mut actual_entries = BTreeMap::new();
+    for (path, raw) in &snapshot.by_path {
+        let relative = path
+            .strip_prefix(root)
+            .ok()
+            .and_then(Path::to_str)
             .ok_or_else(|| {
                 malformed(format!(
-                    "threadblock payload path is not UTF-8: {}",
+                    "snapshotted payload path is not canonical under the trace root: {}",
                     path.display()
                 ))
-            })?
-            .to_string();
-        if !safe_payload_manifest_path(&relative) {
-            return Err(malformed(format!(
-                "threadblock payload path is not canonical for the per-file manifest: {relative:?}"
-            )));
-        }
-        payload_paths.push((path, relative));
+            })?;
+        actual_entries.insert(
+            relative,
+            (
+                u64::try_from(raw.len())
+                    .map_err(|_| malformed(format!("payload {relative:?} length exceeds u64")))?,
+                Sha256Digest::of(raw),
+            ),
+        );
     }
-    payload_paths.sort_by(|(_, left), (_, right)| left.cmp(right));
-    let actual_paths: BTreeSet<_> = payload_paths
-        .iter()
-        .map(|(_, relative)| relative.as_str())
-        .collect();
+    let actual_paths: BTreeSet<_> = actual_entries.keys().copied().collect();
     let declared_paths: BTreeSet<_> = sidecar
         .payload_file_manifest
         .keys()
@@ -2366,53 +2576,52 @@ fn verify_sampling_payload(
             "per_block_raw_sha256_manifest path set disagrees with threadblock payload: missing={missing:?}, unexpected={unexpected:?}"
         )));
     }
-
-    let mut actual_bytes = 0_u64;
-    let mut digest = Sha256::new();
-    let mut by_path = BTreeMap::new();
-    for (path, relative) in payload_paths {
-        let raw = fs::read(&path).map_err(|source| TraceError::Io {
-            path: path.clone(),
-            source,
-        })?;
-        let size = u64::try_from(raw.len()).map_err(|_| {
-            malformed(format!(
-                "threadblock payload {} length exceeds u64",
-                path.display()
-            ))
-        })?;
-        let declared = &sidecar.payload_file_manifest[&relative];
+    for (relative, (size, digest)) in actual_entries {
+        let declared = &sidecar.payload_file_manifest[relative];
         if size != declared.size_bytes {
             return Err(malformed(format!(
                 "per_block_raw_sha256_manifest size for {relative:?} is {}, actual {size}",
                 declared.size_bytes
             )));
         }
-        let file_hash = sha256_hex(&raw);
-        if file_hash != declared.sha256 {
+        if digest.to_string() != declared.sha256 {
             return Err(malformed(format!(
-                "per_block_raw_sha256_manifest hash for {relative:?} does not match raw payload (actual {file_hash})"
+                "per_block_raw_sha256_manifest hash for {relative:?} does not match raw payload (actual {digest})"
             )));
         }
-        actual_bytes = actual_bytes
-            .checked_add(size)
-            .ok_or_else(|| malformed("threadblock payload byte count overflows u64".to_string()))?;
-        digest.update(&raw);
-        by_path.insert(path, raw);
     }
-    if actual_bytes != sidecar.raw_payload_bytes {
+    if snapshot.identity.raw_bytes != sidecar.raw_payload_bytes {
         return Err(malformed(format!(
-            "bytes.raw {} does not match threadblock payload bytes {actual_bytes}",
-            sidecar.raw_payload_bytes
+            "bytes.raw {} does not match threadblock payload bytes {}",
+            sidecar.raw_payload_bytes, snapshot.identity.raw_bytes
         )));
     }
-    let actual_hash = digest.finish();
-    if actual_hash != sidecar.decompressed_payload_sha256 {
+    if snapshot.identity.sorted_path_stream_sha256.to_string()
+        != sidecar.decompressed_payload_sha256
+    {
         return Err(malformed(format!(
-            "decompressed_payload_sha256 does not match sorted threadblock bytes (actual {actual_hash})"
+            "decompressed_payload_sha256 does not match sorted threadblock bytes (actual {})",
+            snapshot.identity.sorted_path_stream_sha256
         )));
     }
-    Ok(VerifiedSamplingPayload { by_path })
+    Ok(())
+}
+
+fn verify_sampling_payload(
+    root: &Path,
+    sidecar: &TraceSamplingSidecar,
+) -> Result<VerifiedSamplingPayload, TraceError> {
+    let snapshot = capture_threadblock_payload(root).map_err(|error| match error {
+        TraceError::ThreadblockPayloadSnapshotInvalid { message, .. } => {
+            TraceError::SamplingSidecarMalformed {
+                path: root.join("trace_sampling.json"),
+                message,
+            }
+        }
+        other => other,
+    })?;
+    validate_sampling_payload_snapshot(root, sidecar, &snapshot)?;
+    Ok(snapshot)
 }
 
 impl TraceSamplingSidecar {
@@ -2422,18 +2631,22 @@ impl TraceSamplingSidecar {
     /// has also bound the decompressed threadblock bytes.
     fn load(root: &Path) -> Result<Option<Self>, TraceError> {
         let path = root.join("trace_sampling.json");
-        let raw = match fs::read_to_string(&path) {
-            Ok(s) => s,
+        let raw = match fs::read(&path) {
+            Ok(raw) => raw,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(source) => return Err(TraceError::Io { path, source }),
         };
+        Self::parse(&path, &raw).map(Some)
+    }
+
+    fn parse(path: &Path, raw: &[u8]) -> Result<Self, TraceError> {
         let parsed: serde_json::Value =
-            serde_json::from_str(&raw).map_err(|e| TraceError::SamplingSidecarMalformed {
-                path: path.clone(),
+            serde_json::from_slice(raw).map_err(|e| TraceError::SamplingSidecarMalformed {
+                path: path.to_path_buf(),
                 message: e.to_string(),
             })?;
         let malformed = |message: String| TraceError::SamplingSidecarMalformed {
-            path: path.clone(),
+            path: path.to_path_buf(),
             message,
         };
         macro_rules! get {
@@ -2865,7 +3078,7 @@ impl TraceSamplingSidecar {
                 "per_block_raw_sha256_manifest byte total {manifest_bytes} disagrees with bytes.raw {raw_payload_bytes}"
             )));
         }
-        Ok(Some(TraceSamplingSidecar {
+        Ok(TraceSamplingSidecar {
             cell_id,
             kernel_mangled_name,
             kernel_args_hash,
@@ -2879,7 +3092,7 @@ impl TraceSamplingSidecar {
             payload_file_manifest,
             raw_payload_bytes,
             method,
-        }))
+        })
     }
 }
 
@@ -3342,17 +3555,22 @@ impl AllocationRegistry {
     /// non-hex `base_address`, or a duplicate `allocation_id`.
     pub fn load(root: &Path) -> Result<Option<Self>, TraceError> {
         let path = root.join("extra_info").join("allocations.json");
-        let raw = match fs::read_to_string(&path) {
-            Ok(s) => s,
+        let raw = match fs::read(&path) {
+            Ok(raw) => raw,
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(source) => return Err(TraceError::Io { path, source }),
         };
-        Self::from_str(&raw, &path).map(Some)
+        Self::parse(&path, &raw).map(Some)
     }
 
+    #[cfg(test)]
     fn from_str(raw: &str, path: &Path) -> Result<Self, TraceError> {
+        Self::parse(path, raw.as_bytes())
+    }
+
+    fn parse(path: &Path, raw: &[u8]) -> Result<Self, TraceError> {
         let entries: Vec<RawAllocation> =
-            serde_json::from_str(raw).map_err(|e| TraceError::AllocationsSidecarMalformed {
+            serde_json::from_slice(raw).map_err(|e| TraceError::AllocationsSidecarMalformed {
                 path: path.to_path_buf(),
                 message: e.to_string(),
             })?;
@@ -4584,6 +4802,15 @@ mod sampling_sidecar_tests {
     }
 
     #[test]
+    fn arbitrary_precision_estimator_integer_retains_python_seal_domain() {
+        let mut value = subset_value();
+        value["estimator"]["convergence"]["per_target"] =
+            serde_json::from_str(r#"{"sectors":{"population":18446744073709551616}}"#).unwrap();
+        reseal(&mut value);
+        load_json(serde_json::to_vec(&value).unwrap()).unwrap();
+    }
+
+    #[test]
     fn python_sealed_subset_parses_and_reconstructs_membership() {
         let sc = load_json(PYTHON_SEALED_SUBSET).unwrap();
         assert_eq!(sc.cell_id(), "c");
@@ -4918,7 +5145,7 @@ mod sampling_sidecar_tests {
         split.update(b"b");
         split.update(b"c");
         assert_eq!(
-            split.finish(),
+            split.finish_digest().to_string(),
             "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad"
         );
     }
@@ -4930,8 +5157,7 @@ mod sampling_sidecar_tests {
             "huge": 1e20,
             "unicode": "é😀\u{7f}",
         });
-        let mut actual = String::new();
-        canonical_python_json(&value, &mut actual).unwrap();
+        let actual = canonical_json(&value).unwrap();
         assert_eq!(
             actual,
             r#"{"huge":1e+20,"tiny":1e-07,"unicode":"\u00e9\ud83d\ude00\u007f"}"#
@@ -4945,8 +5171,7 @@ mod sampling_sidecar_tests {
             ("-0.0", "-0.0"),
         ] {
             let value: serde_json::Value = serde_json::from_str(raw).unwrap();
-            let mut actual = String::new();
-            canonical_python_json(&value, &mut actual).unwrap();
+            let actual = canonical_json(&value).unwrap();
             assert_eq!(actual, expected, "Python spelling for {raw}");
         }
     }

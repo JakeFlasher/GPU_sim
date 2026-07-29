@@ -20,6 +20,7 @@
 //! Pipe occupancy models land in later increments (design §6.2).
 
 pub mod control_bits;
+pub mod evidence;
 pub mod issue;
 pub mod program;
 pub mod replay;
@@ -28,6 +29,10 @@ pub mod system;
 pub use control_bits::{
     BARRIER_NONE, ControlBits, ControlBitsError, ControlDomainError, ControlSidecar, DepBarrier,
     FunctionControl, InstructionControl, WaitMask,
+};
+pub use evidence::{
+    AdmittedLaunchEvidence, BinaryDigestGap, LaunchEvidenceIdentity, ManifestError,
+    admit_launch_evidence,
 };
 pub use issue::{
     AccessKind, Advance, BlockReplay, IssueError, IssueModelParams, MemRequest, MemoryOperation,

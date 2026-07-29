@@ -538,7 +538,7 @@ struct RawArchCard {
 
 /// The validated subset of an ArchProfile card consumed by the simulator.
 /// Fields are private and the type is not deserializable: callers can obtain a
-/// card only through [`ArchCard::load`], so post-load identity relabeling and
+/// card only through [`ArchCard::load`] or [`ArchCard::parse`], so post-load identity relabeling and
 /// direct-deserialization access cannot detach scalar evidence from its source.
 /// Unknown JSON fields are ignored at the private raw boundary because cards
 /// also carry label-side bookkeeping that must never leak into simulator inputs.
@@ -565,11 +565,17 @@ pub struct ArchCard {
 
 impl ArchCard {
     pub fn load(path: &Path) -> Result<Self, CalibError> {
-        let raw = std::fs::read_to_string(path).map_err(|source| CalibError::Io {
+        let raw = std::fs::read(path).map_err(|source| CalibError::Io {
             path: path.display().to_string(),
             source,
         })?;
-        let raw: RawArchCard = serde_json::from_str(&raw).map_err(|source| CalibError::Parse {
+        Self::parse(path, &raw)
+    }
+
+    /// Parse already-snapshotted card bytes through the same sealed admission
+    /// boundary as [`ArchCard::load`].
+    pub fn parse(path: &Path, raw: &[u8]) -> Result<Self, CalibError> {
+        let raw: RawArchCard = serde_json::from_slice(raw).map_err(|source| CalibError::Parse {
             path: path.display().to_string(),
             source,
         })?;

@@ -120,6 +120,20 @@ def _subset():
                    "convergence": {"status": "converged"}})
 
 
+def test_unpaired_surrogate_cannot_be_validated_or_sealed():
+    sidecar = _subset()
+    sidecar["estimator"]["convergence"]["per_target"] = {
+        "sectors": chr(0xD800),
+    }
+    with pytest.raises(SidecarSemanticError, match="unpaired_surrogate"):
+        validate_sidecar(sidecar)
+    sidecar["hashes"].pop("sidecar_sha256")
+    with pytest.raises(SidecarSemanticError, match="unpaired_surrogate"):
+        sidecar_sha256(sidecar)
+    with pytest.raises(SidecarSemanticError, match="unpaired_surrogate"):
+        sidecar_sha256({"nested": (chr(0xD800),)})
+
+
 def test_compressed_sidecar_is_valid_and_labels_full_shape():
     sc = _compressed()
     validate_sidecar(sc)

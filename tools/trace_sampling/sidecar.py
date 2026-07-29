@@ -33,6 +33,38 @@ def _fail(message: str) -> None:
     raise SidecarSemanticError(message)
 
 
+def _has_unpaired_surrogate(value: str) -> bool:
+    index = 0
+    while index < len(value):
+        codepoint = ord(value[index])
+        if 0xD800 <= codepoint <= 0xDBFF:
+            if index + 1 >= len(value) or not (
+                    0xDC00 <= ord(value[index + 1]) <= 0xDFFF):
+                return True
+            index += 2
+            continue
+        if 0xDC00 <= codepoint <= 0xDFFF:
+            return True
+        index += 1
+    return False
+
+
+def _validate_unicode_scalars(value: Any, path: str = "$") -> None:
+    if isinstance(value, str):
+        if _has_unpaired_surrogate(value):
+            _fail(f"{path}: unpaired_surrogate is outside the sidecar string domain")
+        return
+    if isinstance(value, (list, tuple)):
+        for index, item in enumerate(value):
+            _validate_unicode_scalars(item, f"{path}[{index}]")
+        return
+    if isinstance(value, dict):
+        for key, item in value.items():
+            if isinstance(key, str) and _has_unpaired_surrogate(key):
+                _fail(f"{path}: unpaired_surrogate in object key")
+            _validate_unicode_scalars(item, f"{path}[{key!r}]")
+
+
 def _validate_gate_budget(gates: dict) -> None:
     certainty = gates["certainty_bytes"]
     maximum = gates["max_trace_bytes"]
@@ -293,6 +325,7 @@ def _validate_payload_manifest(sidecar: dict) -> None:
 
 
 def _validate_semantics(sidecar: dict) -> None:
+    _validate_unicode_scalars(sidecar)
     _validate_gate_budget(sidecar["gates"])
     _validate_record_coverage(sidecar)
     _validate_payload_manifest(sidecar)
@@ -321,6 +354,7 @@ def is_valid(sidecar: dict) -> bool:
 
 
 def sidecar_sha256(sidecar: dict) -> str:
+    _validate_unicode_scalars(sidecar)
     canonical = json.dumps(sidecar, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(canonical.encode()).hexdigest()
 

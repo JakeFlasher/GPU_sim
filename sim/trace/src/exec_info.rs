@@ -140,8 +140,17 @@ impl ExecInfo {
             path: path.clone(),
             source,
         })?;
+        Self::parse(&path, &raw)
+    }
+
+    /// Parse already-snapshotted exec-info bytes. The caller remains responsible
+    /// for binding the raw digest before invoking this semantic validator.
+    pub fn parse(path: &Path, raw: &[u8]) -> Result<Self, ExecInfoError> {
         let parsed: RawExecInfo =
-            serde_json::from_slice(&raw).map_err(|source| ExecInfoError::Parse { path, source })?;
+            serde_json::from_slice(raw).map_err(|source| ExecInfoError::Parse {
+                path: path.to_path_buf(),
+                source,
+            })?;
         Self::from_raw(parsed)
     }
 

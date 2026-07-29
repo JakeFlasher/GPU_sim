@@ -62,6 +62,17 @@ fn expected_launch_roster(td: &TraceDir) -> Vec<ReplayLaunchCoverageBinding> {
                     .as_ref()
                     .filter(|dim| dim.x > 0 && dim.y > 0 && dim.z > 0)
                     .map(|dim| (dim.x as u32, dim.y as u32, dim.z as u32));
+                let cluster = match kernel.cluster_dim.as_ref() {
+                    None => (1, 1, 1),
+                    Some(dim) if (dim.x, dim.y, dim.z) == (0, 0, 0) => (1, 1, 1),
+                    Some(dim) if dim.x > 0 && dim.y > 0 && dim.z > 0 => {
+                        (dim.x as u32, dim.y as u32, dim.z as u32)
+                    }
+                    Some(dim) => panic!(
+                        "invalid root cluster geometry ({}, {}, {})",
+                        dim.x, dim.y, dim.z
+                    ),
+                };
                 roster.push(
                     ReplayLaunchCoverageBinding::checked(
                         device_id,
@@ -71,6 +82,7 @@ fn expected_launch_roster(td: &TraceDir) -> Vec<ReplayLaunchCoverageBinding> {
                         kernel.name.clone(),
                         grid,
                         block,
+                        cluster,
                     )
                     .expect("root launch identity is declarable"),
                 );
@@ -185,6 +197,7 @@ fn coverage_json(coverage: &sim_sm::FullLaunchCoverage) -> serde_json::Value {
             "kernel_mangled_name": launch.kernel_mangled_name(),
             "grid": [launch.grid().0, launch.grid().1, launch.grid().2],
             "block": launch.block().map(|block| [block.0, block.1, block.2]),
+            "cluster": [launch.cluster().0, launch.cluster().1, launch.cluster().2],
         },
         "blocks_observed": coverage.blocks_observed(),
         "source": source,

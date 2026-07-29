@@ -9,13 +9,13 @@ repository.workspace = true
 sim-arch = { path = "../arch" }
 serde = { workspace = true }
 serde_json = { workspace = true }
+sim-calib = { path = "../calib" }
 sim-engine = { path = "../engine" }
 sim-mem = { path = "../mem" }
 sim-trace = { path = "../trace" }
 thiserror = { workspace = true }
 
 [dev-dependencies]
-sim-calib = { path = "../calib" }
 sim-emit = { path = "../emit" }
 prost = { workspace = true }
 tempfile = { workspace = true }

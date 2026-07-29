@@ -164,8 +164,13 @@ impl PchaseCard {
             path: path.to_path_buf(),
             source,
         })?;
+        Self::parse(path, &raw)
+    }
+
+    /// Parse already-snapshotted card bytes through the ordinary semantic gate.
+    pub fn parse(path: &Path, raw: &[u8]) -> Result<Self, PchaseCardError> {
         let card: RawCard =
-            serde_json::from_slice(&raw).map_err(|source| PchaseCardError::Parse {
+            serde_json::from_slice(raw).map_err(|source| PchaseCardError::Parse {
                 path: path.to_path_buf(),
                 source,
             })?;

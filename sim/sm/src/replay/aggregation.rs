@@ -29,6 +29,8 @@ pub enum ReplayLaunchCoverageBindingError {
     GridSizeOverflow { grid: (u32, u32, u32) },
     #[error("launch block dimensions, when present, must all be positive (got {block:?})")]
     DegenerateBlock { block: (u32, u32, u32) },
+    #[error("launch cluster dimensions must all be positive (got {cluster:?})")]
+    DegenerateCluster { cluster: (u32, u32, u32) },
 }
 
 impl ReplayLaunchCoverageBinding {
@@ -43,6 +45,7 @@ impl ReplayLaunchCoverageBinding {
         kernel_mangled_name: impl Into<String>,
         grid: (u32, u32, u32),
         block: Option<(u32, u32, u32)>,
+        cluster: (u32, u32, u32),
     ) -> Result<Self, ReplayLaunchCoverageBindingError> {
         let binding = Self {
             device_id,
@@ -52,6 +55,7 @@ impl ReplayLaunchCoverageBinding {
             kernel_mangled_name: kernel_mangled_name.into(),
             grid,
             block,
+            cluster,
         };
         binding.validate()?;
         Ok(binding)
@@ -73,6 +77,11 @@ impl ReplayLaunchCoverageBinding {
             && (block.0 == 0 || block.1 == 0 || block.2 == 0)
         {
             return Err(ReplayLaunchCoverageBindingError::DegenerateBlock { block });
+        }
+        if self.cluster.0 == 0 || self.cluster.1 == 0 || self.cluster.2 == 0 {
+            return Err(ReplayLaunchCoverageBindingError::DegenerateCluster {
+                cluster: self.cluster,
+            });
         }
         u64::from(self.grid.0)
             .checked_mul(u64::from(self.grid.1))
@@ -931,6 +940,7 @@ mod tests {
             format!("_Zkernel{kernel_id}"),
             (1, 1, 1),
             Some((32, 1, 1)),
+            (1, 1, 1),
         )
         .unwrap()
     }
@@ -1081,11 +1091,11 @@ mod tests {
     #[test]
     fn declaration_side_identity_is_checked_without_minting_coverage() {
         assert!(matches!(
-            ReplayLaunchCoverageBinding::checked(0, 0, 0, 0, "", (1, 1, 1), None),
+            ReplayLaunchCoverageBinding::checked(0, 0, 0, 0, "", (1, 1, 1), None, (1, 1, 1)),
             Err(ReplayLaunchCoverageBindingError::EmptyKernelName)
         ));
         assert!(matches!(
-            ReplayLaunchCoverageBinding::checked(0, 0, 0, 0, "k", (0, 1, 1), None),
+            ReplayLaunchCoverageBinding::checked(0, 0, 0, 0, "k", (0, 1, 1), None, (1, 1, 1)),
             Err(ReplayLaunchCoverageBindingError::DegenerateGrid { .. })
         ));
         assert!(matches!(
@@ -1096,7 +1106,8 @@ mod tests {
                 0,
                 "k",
                 (u32::MAX, u32::MAX, u32::MAX),
-                None
+                None,
+                (1, 1, 1),
             ),
             Err(ReplayLaunchCoverageBindingError::GridSizeOverflow { .. })
         ));

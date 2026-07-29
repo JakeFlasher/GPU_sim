@@ -227,6 +227,63 @@ pub enum ReplayError {
          physical warp slot (sub-core assignment), like sm_id"
     )]
     WarpSlotMissing { path: PathBuf, warp_id: i32 },
+    #[error("kernel launch block {block:?} overflows the u64 thread-count domain")]
+    BlockSizeOverflow { block: (u32, u32, u32) },
+    #[error(
+        "{path}: threadblock warp roster has {actual} entries, expected {expected} from blockDim"
+    )]
+    WarpRosterCardinalityMismatch {
+        path: PathBuf,
+        expected: u64,
+        actual: u64,
+    },
+    #[error(
+        "{path}: threadblock warp id {warp_id} is outside the expected block-local range 0..{expected_warps}"
+    )]
+    WarpIdOutOfRange {
+        path: PathBuf,
+        warp_id: i32,
+        expected_warps: u64,
+    },
+    #[error("{path}: threadblock warp map key {map_key} disagrees with embedded warp id {warp_id}")]
+    WarpIdentityMismatch {
+        path: PathBuf,
+        map_key: i32,
+        warp_id: i32,
+    },
+    #[error("{path}: warp {warp_id} record {record_ix} has no warpid_tb on the wire")]
+    InstructionWarpIdMissing {
+        path: PathBuf,
+        warp_id: i32,
+        record_ix: usize,
+    },
+    #[error(
+        "{path}: warp {warp_id} record {record_ix} carries warpid_tb {record_warp_id}, which disagrees with its enclosing warp"
+    )]
+    InstructionWarpIdMismatch {
+        path: PathBuf,
+        warp_id: i32,
+        record_ix: usize,
+        record_warp_id: i32,
+    },
+    #[error("architecture {arch} has no admitted physical-warp-slot capacity: {source}")]
+    WarpCapacityUnavailable {
+        arch: ArchId,
+        #[source]
+        source: sim_arch::CapabilityError,
+    },
+    #[error(
+        "{path}: warp {warp_id} physical slot {warp_slot} is outside architecture {arch} range 0..{max_resident_warps}"
+    )]
+    WarpSlotOutOfRange {
+        path: PathBuf,
+        warp_id: i32,
+        warp_slot: i32,
+        arch: ArchId,
+        max_resident_warps: u32,
+    },
+    #[error("{path}: physical warp slot {warp_slot} is assigned to multiple warps in one CTA")]
+    DuplicateWarpSlot { path: PathBuf, warp_slot: i32 },
     #[error(
         "{path}: warp {warp_id} record {record_ix}: {sectors} unique sectors in one record \
          overflows the u16 arena index"
@@ -298,6 +355,15 @@ pub enum ReplayError {
     SamplingKernelMismatch { launch: String, sidecar: String },
     #[error("kernel launch block_dim is absent or degenerate")]
     BlockDimMissing,
+    #[error("kernel launch cluster_dim is partially populated or has a negative axis: {cluster:?}")]
+    ClusterDimInvalid { cluster: (i32, i32, i32) },
+    #[error(
+        "kernel launch cluster geometry {cluster:?} is not modeled for architecture {arch}; only (1, 1, 1) is admissible"
+    )]
+    ClusterGeometryUnsupported {
+        arch: ArchId,
+        cluster: (u32, u32, u32),
+    },
     #[error("trace_sampling sidecar original_block {sidecar:?} != launch blockDim {launch:?}")]
     BlockDimRewritten {
         launch: (u32, u32, u32),
@@ -317,6 +383,7 @@ pub struct ReplayLaunchCoverageBinding {
     kernel_mangled_name: String,
     grid: (u32, u32, u32),
     block: Option<(u32, u32, u32)>,
+    cluster: (u32, u32, u32),
 }
 
 impl ReplayLaunchCoverageBinding {
@@ -346,6 +413,10 @@ impl ReplayLaunchCoverageBinding {
 
     pub fn block(&self) -> Option<(u32, u32, u32)> {
         self.block
+    }
+
+    pub fn cluster(&self) -> (u32, u32, u32) {
+        self.cluster
     }
 }
 
@@ -572,7 +643,7 @@ pub enum KernelReplayOutcome {
 }
 
 #[derive(Debug)]
-enum ExtractedCoverage {
+pub(crate) enum ExtractedCoverage {
     Full(FullLaunchCoverage),
     Sampled(SampledLaunchCoverage),
 }
@@ -584,11 +655,41 @@ struct ExtractedKernel {
     coverage: ExtractedCoverage,
 }
 
+fn normalized_cluster_dim(
+    kernel: &sim_trace::pb::Kernel,
+    arch: ArchId,
+) -> Result<(u32, u32, u32), ReplayError> {
+    let Some(cluster) = kernel.cluster_dim.as_ref() else {
+        return Ok((1, 1, 1));
+    };
+    let raw = (cluster.x, cluster.y, cluster.z);
+    if raw == (0, 0, 0) {
+        return Ok((1, 1, 1));
+    }
+    if raw.0 <= 0 || raw.1 <= 0 || raw.2 <= 0 {
+        return Err(ReplayError::ClusterDimInvalid { cluster: raw });
+    }
+    let cluster = (raw.0 as u32, raw.1 as u32, raw.2 as u32);
+    if cluster != (1, 1, 1) {
+        return Err(ReplayError::ClusterGeometryUnsupported { arch, cluster });
+    }
+    Ok(cluster)
+}
+
 fn checked_grid_total(grid: (u32, u32, u32)) -> Result<u64, ReplayError> {
     u64::from(grid.0)
         .checked_mul(u64::from(grid.1))
         .and_then(|value| value.checked_mul(u64::from(grid.2)))
         .ok_or(ReplayError::GridSizeOverflow { grid })
+}
+
+fn checked_block_warps(block: (u32, u32, u32)) -> Result<u64, ReplayError> {
+    const TRACE_WARP_WIDTH: u64 = 32;
+    let threads = u64::from(block.0)
+        .checked_mul(u64::from(block.1))
+        .and_then(|value| value.checked_mul(u64::from(block.2)))
+        .ok_or(ReplayError::BlockSizeOverflow { block })?;
+    Ok(threads.div_ceil(TRACE_WARP_WIDTH))
 }
 
 fn checked_record_count(
@@ -621,6 +722,27 @@ fn extract_per_sm_blocks(
     decode_sectors: bool,
 ) -> Result<ExtractedKernel, ReplayError> {
     let expected_fuid = schedule.function_unique_id;
+    let block = loc
+        .kernel
+        .block_dim
+        .as_ref()
+        .filter(|dim| dim.x > 0 && dim.y > 0 && dim.z > 0)
+        .map(|dim| (dim.x as u32, dim.y as u32, dim.z as u32));
+    let expected_block_warps = block.map(checked_block_warps).transpose()?;
+    let validate_warp_roster = expected_block_warps.is_some()
+        && td
+            .sampling_sidecar()
+            .is_none_or(|sidecar| Some(sidecar.original_block()) == block);
+    let max_resident_warps = schedule
+        .arch
+        .issue_hypotheses()
+        .require("physical warp-slot capacity")
+        .map_err(|source| ReplayError::WarpCapacityUnavailable {
+            arch: schedule.arch,
+            source,
+        })?
+        .max_resident_warps_per_sm;
+    let cluster = normalized_cluster_dim(loc.kernel, schedule.arch)?;
     // sm_id → blocks (launch index kept for in-SM ordering).
     let mut per_sm_blocks: BTreeMap<i32, Vec<BlockReplay>> = BTreeMap::new();
     let mut seen_indices: BTreeSet<i64> = BTreeSet::new();
@@ -635,14 +757,58 @@ fn extract_per_sm_blocks(
             });
         }
 
+        let admitted_block_warps = expected_block_warps.filter(|_| validate_warp_roster);
+        if let Some(expected_block_warps) = admitted_block_warps {
+            let actual_block_warps =
+                checked_collection_len("threadblock warp roster", tb.warps.len())?;
+            if actual_block_warps != expected_block_warps {
+                return Err(ReplayError::WarpRosterCardinalityMismatch {
+                    path,
+                    expected: expected_block_warps,
+                    actual: actual_block_warps,
+                });
+            }
+        }
         let mut block_sm: Option<i32> = None;
+        let mut seen_warp_slots = BTreeSet::new();
         let mut warps = Vec::with_capacity(tb.warps.len());
         for (&warp_id, warp) in &tb.warps {
+            if admitted_block_warps.is_some_and(|expected_block_warps| {
+                warp_id < 0 || u64::try_from(warp_id).unwrap_or(u64::MAX) >= expected_block_warps
+            }) {
+                return Err(ReplayError::WarpIdOutOfRange {
+                    path,
+                    warp_id,
+                    expected_warps: admitted_block_warps.expect("checked as present"),
+                });
+            }
+            if warp.id != warp_id {
+                return Err(ReplayError::WarpIdentityMismatch {
+                    path,
+                    map_key: warp_id,
+                    warp_id: warp.id,
+                });
+            }
             let mut warp_slot: Option<i32> = None;
             let mut insts = Vec::with_capacity(warp.instructions.len());
             let mut sectors: Vec<i64> = Vec::new();
             let mut sector_scratch: Vec<i64> = Vec::new();
             for (record_ix, inst) in warp.instructions.iter().enumerate() {
+                let Some(record_warp_id) = inst.warpid_tb else {
+                    return Err(ReplayError::InstructionWarpIdMissing {
+                        path,
+                        warp_id,
+                        record_ix,
+                    });
+                };
+                if record_warp_id != warp_id {
+                    return Err(ReplayError::InstructionWarpIdMismatch {
+                        path,
+                        warp_id,
+                        record_ix,
+                        record_warp_id,
+                    });
+                }
                 records_seen = checked_record_count(records_seen, &path, warp_id, record_ix)?;
                 // Complete wire and producer-shape preflight on the path the
                 // simulator consumes. Structural errors govern route errors;
@@ -726,13 +892,33 @@ fn extract_per_sm_blocks(
             // exactly like a block without sm_id (a synthetic placement
             // model is a future knob, never a silent fallback). Warps
             // with NO records carry no placement and issue nothing.
+            let has_records = !insts.is_empty();
             let warp_slot = match warp_slot {
                 Some(slot) => slot,
-                None if insts.is_empty() => warp_id,
+                None if !has_records => warp_id,
                 None => {
                     return Err(ReplayError::WarpSlotMissing { path, warp_id });
                 }
             };
+            // The fallback slot on a zero-record warp is only inert storage for
+            // `WarpReplay`; it is not traced placement evidence and must not
+            // collide with, or constrain, the observed slots of issuing warps.
+            if has_records {
+                if warp_slot < 0
+                    || u32::try_from(warp_slot).unwrap_or(u32::MAX) >= max_resident_warps
+                {
+                    return Err(ReplayError::WarpSlotOutOfRange {
+                        path,
+                        warp_id,
+                        warp_slot,
+                        arch: schedule.arch,
+                        max_resident_warps,
+                    });
+                }
+                if !seen_warp_slots.insert(warp_slot) {
+                    return Err(ReplayError::DuplicateWarpSlot { path, warp_slot });
+                }
+            }
             warps.push(WarpReplay {
                 warp_slot,
                 insts,
@@ -756,12 +942,6 @@ fn extract_per_sm_blocks(
     let grid = (gx, gy, gz);
     let grid_total = checked_grid_total(grid)?;
     let seen = checked_collection_len("replayed block membership", seen_indices.len())?;
-    let block = loc
-        .kernel
-        .block_dim
-        .as_ref()
-        .filter(|dim| dim.x > 0 && dim.y > 0 && dim.z > 0)
-        .map(|dim| (dim.x as u32, dim.y as u32, dim.z as u32));
     let launch = ReplayLaunchCoverageBinding {
         device_id: loc.device_id,
         stream_id: loc.stream_id,
@@ -770,6 +950,7 @@ fn extract_per_sm_blocks(
         kernel_mangled_name: loc.kernel.name.clone(),
         grid,
         block,
+        cluster,
     };
     let coverage = match td.sampling_sidecar() {
         None => {
@@ -849,6 +1030,16 @@ fn extract_per_sm_blocks(
         records_seen,
         coverage,
     })
+}
+
+/// Validate every consumed threadblock and classify launch coverage without
+/// running the timing model. This is the coverage edge used by manifest admission.
+pub(crate) fn admit_launch_coverage(
+    td: &TraceDir,
+    loc: &KernelLoc<'_>,
+    schedule: &FunctionSchedule,
+) -> Result<ExtractedCoverage, ReplayError> {
+    Ok(extract_per_sm_blocks(td, loc, schedule, false)?.coverage)
 }
 
 /// Fold per-SM results into the kernel-level view, enforcing the
@@ -4852,6 +5043,76 @@ mod replay_identity_tests {
     use sim_trace::reader::ADDRESS_CARRYING_TRACE_CONTRACT_ID;
     use std::collections::BTreeMap as StdMap;
 
+    #[test]
+    fn nonunit_cluster_geometry_is_not_admitted_without_a_model() {
+        let kernel = pb::Kernel {
+            cluster_dim: Some(pb::Dim3d { x: 2, y: 1, z: 1 }),
+            ..Default::default()
+        };
+        assert!(matches!(
+            normalized_cluster_dim(&kernel, ArchId::Sm86),
+            Err(ReplayError::ClusterGeometryUnsupported {
+                arch: ArchId::Sm86,
+                cluster: (2, 1, 1),
+            })
+        ));
+    }
+
+    #[test]
+    fn complete_ctas_require_exact_block_local_warps_and_physical_slots() {
+        assert!(placement_result(64, &[0, 1]).is_ok());
+        assert!(matches!(
+            placement_result(64, &[0]).unwrap_err(),
+            ReplayError::WarpRosterCardinalityMismatch {
+                expected: 2,
+                actual: 1,
+                ..
+            }
+        ));
+        assert!(matches!(
+            placement_result(64, &[0, 0]).unwrap_err(),
+            ReplayError::DuplicateWarpSlot { warp_slot: 0, .. }
+        ));
+        assert!(
+            placement_result_with_empty_warps(64, &[0, 0], &[0]).is_ok(),
+            "a synthetic slot for an inert zero-record warp is not placement evidence"
+        );
+        assert!(matches!(
+            placement_result(32, &[48]).unwrap_err(),
+            ReplayError::WarpSlotOutOfRange {
+                warp_slot: 48,
+                max_resident_warps: 48,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn instruction_warp_identity_is_present_and_matches_its_enclosing_warp() {
+        let mut missing = malformed_global_inst(pb::MemoryOpClass::Global);
+        missing.warpid_tb = None;
+        assert!(matches!(
+            replay_error(missing),
+            ReplayError::InstructionWarpIdMissing {
+                warp_id: 0,
+                record_ix: 0,
+                ..
+            }
+        ));
+
+        let mut mismatched = malformed_global_inst(pb::MemoryOpClass::Global);
+        mismatched.warpid_tb = Some(1);
+        assert!(matches!(
+            replay_error(mismatched),
+            ReplayError::InstructionWarpIdMismatch {
+                warp_id: 0,
+                record_ix: 0,
+                record_warp_id: 1,
+                ..
+            }
+        ));
+    }
+
     /// A GLOBAL-space memory instruction of `op_class` with NO allocation_id —
     /// malformed under the address-carrying contract's identity rule.
     fn malformed_global_inst(op_class: pb::MemoryOpClass) -> pb::Instruction {
@@ -4945,6 +5206,101 @@ mod replay_identity_tests {
             warps: [(0i32, warp)].into_iter().collect(),
         };
         std::fs::write(tb_dir.join("d_0_s_0_k_1_0,0,0.pb"), tb.encode_to_vec()).unwrap();
+    }
+
+    fn rewrite_block_warp_slots(dir: &std::path::Path, block_x: i32, slots: &[i32]) {
+        let trace_path = dir.join("dynamic_trace.pb");
+        let mut trace = pb::Trace::decode(std::fs::read(&trace_path).unwrap().as_slice()).unwrap();
+        trace
+            .gpu_device
+            .get_mut(&0)
+            .unwrap()
+            .streams
+            .get_mut(&0)
+            .unwrap()
+            .kernels[0]
+            .block_dim = Some(pb::Dim3d {
+            x: block_x,
+            y: 1,
+            z: 1,
+        });
+        std::fs::write(trace_path, trace.encode_to_vec()).unwrap();
+
+        let warps = slots
+            .iter()
+            .enumerate()
+            .map(|(index, slot)| {
+                let warp_id = i32::try_from(index).unwrap();
+                let instruction = pb::Instruction {
+                    pc: 0,
+                    function_unique_id: 1,
+                    sm_id: Some(0),
+                    warpid_sm: Some(*slot),
+                    warpid_tb: Some(warp_id),
+                    ..Default::default()
+                };
+                (
+                    warp_id,
+                    pb::Warp {
+                        id: warp_id,
+                        instructions: vec![instruction],
+                    },
+                )
+            })
+            .collect();
+        let block = pb::Threadblock {
+            block_id: Some(pb::Dim3d { x: 0, y: 0, z: 0 }),
+            warps,
+        };
+        std::fs::write(
+            dir.join("threadblocks/device_0/stream_0/kernel_1/d_0_s_0_k_1_0,0,0.pb"),
+            block.encode_to_vec(),
+        )
+        .unwrap();
+    }
+
+    fn placement_result_with_empty_warps(
+        block_x: i32,
+        slots: &[i32],
+        empty_warps: &[i32],
+    ) -> Result<ExtractedKernel, ReplayError> {
+        let tmp = tempfile::tempdir().unwrap();
+        write_trace_with(tmp.path(), malformed_global_inst(pb::MemoryOpClass::Global));
+        rewrite_block_warp_slots(tmp.path(), block_x, slots);
+        if !empty_warps.is_empty() {
+            let block_path = tmp
+                .path()
+                .join("threadblocks/device_0/stream_0/kernel_1/d_0_s_0_k_1_0,0,0.pb");
+            let mut block =
+                pb::Threadblock::decode(std::fs::read(&block_path).unwrap().as_slice()).unwrap();
+            for warp_id in empty_warps {
+                block
+                    .warps
+                    .get_mut(warp_id)
+                    .expect("test warp exists")
+                    .instructions
+                    .clear();
+            }
+            std::fs::write(block_path, block.encode_to_vec()).unwrap();
+        }
+        let td = TraceDir::open(tmp.path()).unwrap();
+        let loc = td.kernels().next().unwrap();
+        extract_per_sm_blocks(
+            &td,
+            &loc,
+            &FunctionSchedule {
+                arch: ArchId::Sm86,
+                function_unique_id: 1,
+                kernel_name: "k".into(),
+                function_name: "f".into(),
+                by_pc: StdMap::new(),
+            },
+            false,
+        )
+    }
+
+    fn placement_result(block_x: i32, slots: &[i32]) -> Result<ExtractedKernel, ReplayError> {
+        placement_result_with_empty_warps(block_x, slots, &[])
     }
 
     fn replay_error_with_schedule(inst: pb::Instruction, sched: FunctionSchedule) -> ReplayError {
