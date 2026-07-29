@@ -81,7 +81,7 @@ pub enum MemoryRouteError {
     AtomicSpaceMissing { operand: usize },
     #[error("ATOMIC operand {operand} carries UNSPECIFIED address_space")]
     AtomicSpaceUnspecified { operand: usize },
-    #[error("legacy ATOMIC operands carry conflicting global and shared address spaces")]
+    #[error("legacy ATOMIC operands carry conflicting address-space routes")]
     AtomicSpacesConflict,
     #[error("ASYNC_COPY carries {got} address records; expected exactly one global source")]
     AsyncCopySourceCount { got: usize },
@@ -101,10 +101,18 @@ pub enum MemoryRouteError {
         got: pb::MemoryOpAccessKind,
         expected: pb::MemoryOpAccessKind,
     },
-    #[error(
-        "joined static LDL/STL opcode or role requires LOCAL class and address-space routing, got {got:?}"
-    )]
-    StaticLocalRouteMismatch { got: pb::MemoryOpClass },
+    #[error("joined static opcode requires {expected:?} address-space routing, got {got:?}")]
+    StaticMemoryRouteMismatch {
+        expected: pb::MemorySpace,
+        got: pb::MemorySpace,
+    },
+    #[error("joined static opcode requires memory class {expected:?}, got {got:?}")]
+    StaticMemoryClassMismatch {
+        expected: pb::MemoryOpClass,
+        got: pb::MemoryOpClass,
+    },
+    #[error("static SASS family {family} has no reviewed route on architecture {arch}")]
+    StaticMemoryFamilyUnsupported { family: &'static str, arch: ArchId },
     #[error("operand {operand} carries address_space value {raw} unknown to the committed schema")]
     UnknownAddressSpace { operand: usize, raw: i32 },
 }
@@ -727,14 +735,14 @@ pub fn replay_kernel(
     }
 }
 
-/// Resolve the two special global classes reviewed on the active sm_86 path.
-/// The dynamic enum alone is not enough: the static sidecar must prove ATOM,
-/// RED, or REDG for ATOMIC, and LDGSTS for ASYNC_COPY, before the record enters
-/// replay.
+/// Resolve the two special Global routes reviewed on the active sm_86 path.
+/// The dynamic enum alone is not enough: the static sidecar must prove a
+/// Global ATOM/RED family or LDGSTS role before the record enters replay.
 fn require_sm86_special_role(
     schedule: &FunctionSchedule,
     arch: ArchId,
     pc: u32,
+    route: ReplayMemoryRoute,
     class: pb::MemoryOpClass,
 ) -> Result<(), ReplayError> {
     if arch != ArchId::Sm86 {
@@ -744,16 +752,15 @@ fn require_sm86_special_role(
         .by_pc
         .get(&u64::from(pc))
         .ok_or(ReplayError::UnsupportedMemoryPath { arch, class })?;
-    let valid = match class {
-        pb::MemoryOpClass::Atomic => match slot.mem_role {
-            MemRole::BypassLoad(CacheOpToken::Atom) => {
-                opcode_head(&slot.opcode_text).starts_with("ATOM")
-            }
-            MemRole::Reduction => matches!(opcode_head(&slot.opcode_text), "RED" | "REDG"),
+    let head = opcode_head(&slot.opcode_text);
+    let valid = match (route, class) {
+        (ReplayMemoryRoute::Global, pb::MemoryOpClass::Atomic) => match slot.mem_role {
+            MemRole::BypassLoad(CacheOpToken::Atom) => matches!(head, "ATOM" | "ATOMG"),
+            MemRole::Reduction => head == "RED",
             _ => false,
         },
-        pb::MemoryOpClass::AsyncCopy => {
-            matches!(slot.mem_role, MemRole::BypassLoad(CacheOpToken::Ldgsts))
+        (ReplayMemoryRoute::Global, pb::MemoryOpClass::AsyncCopy) => {
+            matches!(slot.mem_role, MemRole::BypassLoad(CacheOpToken::Ldgsts)) && head == "LDGSTS"
         }
         _ => false,
     };
@@ -822,16 +829,128 @@ enum ReplayMemoryRoute {
     Unsupported,
 }
 
+impl ReplayMemoryRoute {
+    const fn canonical_space(self) -> pb::MemorySpace {
+        match self {
+            Self::Global => pb::MemorySpace::Global,
+            Self::Local => pb::MemorySpace::Local,
+            Self::Shared => pb::MemorySpace::Shared,
+            Self::Unsupported => pb::MemorySpace::Unspecified,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy)]
 struct ReplayMemoryPreflight<'a> {
     memory: PreflightedMemoryAccess<'a>,
     route: ReplayMemoryRoute,
 }
 
-/// Enforce the reciprocal half of Local routing: joined LDL/STL evidence may
-/// only accompany a dynamically Local record whose operand route is Local.
-/// Exact Local opcode/role admission remains in `require_known_local_direction`
-/// so hierarchy-mode sector-expansion errors retain their established priority.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum StaticMemoryRoute {
+    Modeled {
+        route: ReplayMemoryRoute,
+        class: pb::MemoryOpClass,
+    },
+    UnsupportedClass(pb::MemoryOpClass),
+}
+
+fn opcode_has_qualifier(opcode_text: &str, qualifier: &str) -> bool {
+    opcode_text
+        .split_whitespace()
+        .next()
+        .unwrap_or("")
+        .split('.')
+        .skip(1)
+        .any(|part| part == qualifier)
+}
+
+/// Space-coded SASS heads whose storage class is part of the mnemonic rather
+/// than inferred from the dynamic record. ATOM and RED are the legacy Global
+/// forms; LDGSTS is routed by its traced Global source operand. Hopper-era REDG,
+/// LDGMC, DSMEM, and shared-matrix families are architecture-gated before any
+/// record can borrow a modeled route.
+fn static_memory_route(
+    opcode_text: &str,
+    arch: ArchId,
+) -> Result<Option<StaticMemoryRoute>, &'static str> {
+    let head = opcode_head(opcode_text);
+    if matches!(head, "LDS" | "STS" | "LDSM" | "STSM") && opcode_has_qualifier(opcode_text, "MMIO")
+    {
+        let family = match head {
+            "LDS" => "LDS.MMIO",
+            "STS" => "STS.MMIO",
+            "LDSM" => "LDSM.MMIO",
+            "STSM" => "STSM.MMIO",
+            _ => unreachable!("match guard admits only shared-memory heads"),
+        };
+        return match arch {
+            ArchId::Sm86 => Err(family),
+            ArchId::Sm120 => Ok(Some(StaticMemoryRoute::UnsupportedClass(
+                pb::MemoryOpClass::ClusterDsmem,
+            ))),
+        };
+    }
+    match head {
+        "LDG" | "STG" => Ok(Some(StaticMemoryRoute::Modeled {
+            route: ReplayMemoryRoute::Global,
+            class: pb::MemoryOpClass::Global,
+        })),
+        "LDGSTS" => Ok(Some(StaticMemoryRoute::Modeled {
+            route: ReplayMemoryRoute::Global,
+            class: pb::MemoryOpClass::AsyncCopy,
+        })),
+        "ATOM" | "ATOMG" | "RED" => Ok(Some(StaticMemoryRoute::Modeled {
+            route: ReplayMemoryRoute::Global,
+            class: pb::MemoryOpClass::Atomic,
+        })),
+        "REDG" => match arch {
+            ArchId::Sm86 => Err("REDG"),
+            ArchId::Sm120 => Ok(Some(StaticMemoryRoute::Modeled {
+                route: ReplayMemoryRoute::Global,
+                class: pb::MemoryOpClass::Atomic,
+            })),
+        },
+        // Hopper's reducing-load family has no reviewed replay semantics on
+        // either target. In particular it must never borrow Shared timing when
+        // contaminated dynamic metadata claims a Shared route.
+        "LDGMC" => Err("LDGMC"),
+        "LDS" | "STS" | "LDSM" => Ok(Some(StaticMemoryRoute::Modeled {
+            route: ReplayMemoryRoute::Shared,
+            class: pb::MemoryOpClass::Shared,
+        })),
+        "ATOMS" => Ok(Some(StaticMemoryRoute::Modeled {
+            route: ReplayMemoryRoute::Shared,
+            class: pb::MemoryOpClass::Atomic,
+        })),
+        "STSM" => match arch {
+            ArchId::Sm86 => Err("STSM"),
+            ArchId::Sm120 => Ok(Some(StaticMemoryRoute::Modeled {
+                route: ReplayMemoryRoute::Shared,
+                class: pb::MemoryOpClass::Shared,
+            })),
+        },
+        "STAS" | "REDAS" => match arch {
+            ArchId::Sm86 => Err(if head == "STAS" { "STAS" } else { "REDAS" }),
+            ArchId::Sm120 => Ok(Some(StaticMemoryRoute::UnsupportedClass(
+                pb::MemoryOpClass::ClusterDsmem,
+            ))),
+        },
+        "LDL" | "STL" => Ok(Some(StaticMemoryRoute::Modeled {
+            route: ReplayMemoryRoute::Local,
+            class: pb::MemoryOpClass::Local,
+        })),
+        "REDS" => Err("REDS"),
+        _ if head.starts_with("ATOM") => Err("ATOM*"),
+        _ if head.starts_with("RED") => Err("RED*"),
+        _ => Ok(None),
+    }
+}
+
+/// Reject disagreement between a known space-coded static SASS family and the
+/// class/route resolved from the dynamic contract. This runs before allocation
+/// identity and classification, so a contradictory record cannot borrow another
+/// operation or storage class's timing and traffic semantics.
 fn validate_static_memory_route(
     meta: MemoryAccessMeta,
     route: ReplayMemoryRoute,
@@ -844,21 +963,54 @@ fn validate_static_memory_route(
     let Some(slot) = schedule.by_pc.get(&u64::from(pc)) else {
         return Ok(());
     };
-    let local_opcode = matches!(opcode_head(&slot.opcode_text), "LDL" | "STL");
+    let contextualize = |source| ReplayError::MemoryRoute {
+        path: path.to_path_buf(),
+        warp_id,
+        record_ix,
+        class: meta.op_class,
+        source,
+    };
     let local_role = matches!(
         slot.mem_role,
         MemRole::EligibleLoad(CacheOpToken::Ldl | CacheOpToken::Stl)
     );
-    if (local_opcode || local_role) && route != ReplayMemoryRoute::Local {
-        return Err(ReplayError::MemoryRoute {
-            path: path.to_path_buf(),
-            warp_id,
-            record_ix,
-            class: meta.op_class,
-            source: MemoryRouteError::StaticLocalRouteMismatch { got: meta.op_class },
-        });
+    if local_role && route != ReplayMemoryRoute::Local {
+        return Err(contextualize(MemoryRouteError::StaticMemoryRouteMismatch {
+            expected: pb::MemorySpace::Local,
+            got: route.canonical_space(),
+        }));
     }
-    Ok(())
+    let expected = static_memory_route(&slot.opcode_text, schedule.arch).map_err(|family| {
+        contextualize(MemoryRouteError::StaticMemoryFamilyUnsupported {
+            family,
+            arch: schedule.arch,
+        })
+    })?;
+    match expected {
+        Some(StaticMemoryRoute::Modeled {
+            route: expected, ..
+        }) if expected != route => {
+            Err(contextualize(MemoryRouteError::StaticMemoryRouteMismatch {
+                expected: expected.canonical_space(),
+                got: route.canonical_space(),
+            }))
+        }
+        Some(StaticMemoryRoute::Modeled {
+            class: expected, ..
+        }) if expected != meta.op_class => {
+            Err(contextualize(MemoryRouteError::StaticMemoryClassMismatch {
+                expected,
+                got: meta.op_class,
+            }))
+        }
+        Some(StaticMemoryRoute::UnsupportedClass(expected)) if expected != meta.op_class => {
+            Err(contextualize(MemoryRouteError::StaticMemoryClassMismatch {
+                expected,
+                got: meta.op_class,
+            }))
+        }
+        _ => Ok(()),
+    }
 }
 
 fn validate_replay_access_kind(
@@ -923,7 +1075,7 @@ fn validate_static_access_kind(
     } else {
         match head {
             "LDGSTS" => Some(pb::MemoryOpAccessKind::AsyncCopy),
-            "STG" | "STL" | "STS" | "STSM" => Some(pb::MemoryOpAccessKind::Store),
+            "STG" | "STL" | "STS" | "STSM" | "STAS" => Some(pb::MemoryOpAccessKind::Store),
             _ => match slot.mem_role {
                 MemRole::EligibleLoad(CacheOpToken::Stl) => Some(pb::MemoryOpAccessKind::Store),
                 MemRole::EligibleLoad(_) => Some(pb::MemoryOpAccessKind::Load),
@@ -1050,9 +1202,8 @@ fn replay_memory_route(
                         pb::MemorySpace::Global | pb::MemorySpace::Generic => {
                             ReplayMemoryRoute::Global
                         }
-                        pb::MemorySpace::Shared | pb::MemorySpace::Local => {
-                            ReplayMemoryRoute::Shared
-                        }
+                        pb::MemorySpace::Shared => ReplayMemoryRoute::Shared,
+                        pb::MemorySpace::Local => ReplayMemoryRoute::Local,
                         pb::MemorySpace::Unspecified => {
                             return Err(contextualize(MemoryRouteError::AtomicSpaceUnspecified {
                                 operand,
@@ -1087,7 +1238,8 @@ fn replay_memory_route(
             };
             match space {
                 pb::MemorySpace::Global | pb::MemorySpace::Generic => Ok(ReplayMemoryRoute::Global),
-                pb::MemorySpace::Shared | pb::MemorySpace::Local => Ok(ReplayMemoryRoute::Shared),
+                pb::MemorySpace::Shared => Ok(ReplayMemoryRoute::Shared),
+                pb::MemorySpace::Local => Ok(ReplayMemoryRoute::Local),
                 pb::MemorySpace::Unspecified => {
                     Err(contextualize(MemoryRouteError::AtomicSpaceUnspecified {
                         operand: 0,
@@ -1276,7 +1428,7 @@ fn classify_flat_preflighted(
             ReplayMemoryRoute::Global,
             class @ (pb::MemoryOpClass::Atomic | pb::MemoryOpClass::AsyncCopy),
         ) => {
-            require_sm86_special_role(schedule, arch, inst.pc, class)?;
+            require_sm86_special_role(schedule, arch, inst.pc, preflight.route, class)?;
             let role = require_known_global_role(schedule, arch, inst.pc)?;
             Ok(flat_global_kind(role))
         }
@@ -1514,7 +1666,7 @@ fn classify_with_l1_preflighted(
             ReplayMemoryRoute::Global,
             class @ (pb::MemoryOpClass::Atomic | pb::MemoryOpClass::AsyncCopy),
         ) => {
-            require_sm86_special_role(schedule, arch, inst.pc, class)?;
+            require_sm86_special_role(schedule, arch, inst.pc, preflight.route, class)?;
             StagedHierarchyRole::Global(require_known_global_role(schedule, arch, inst.pc)?)
         }
         (ReplayMemoryRoute::Global, class) => {
@@ -1928,6 +2080,182 @@ mod space_routing_tests {
             }) if got_class == class && got_kind == got && got_expected == expected
         ));
         assert_eq!(sectors, vec![10]);
+        assert!(sector_scratch.is_empty());
+    }
+
+    fn assert_static_route_rejected_in_both_modes(
+        inst: &pb::Instruction,
+        sched: &FunctionSchedule,
+        expected: pb::MemorySpace,
+        got: pb::MemorySpace,
+    ) {
+        let class = pb::MemoryOpClass::try_from(inst.memory_op_class.unwrap()).unwrap();
+        assert!(matches!(
+            classify_flat(inst, sched, sched.arch, Path::new("route.pb"), 7, 9),
+            Err(ReplayError::MemoryRoute {
+                warp_id: 7,
+                record_ix: 9,
+                class: got_class,
+                source: MemoryRouteError::StaticMemoryRouteMismatch {
+                    expected: got_expected,
+                    got: got_route,
+                },
+                ..
+            }) if got_class == class && got_expected == expected && got_route == got
+        ));
+
+        let mut sectors = vec![12];
+        let mut sector_scratch = vec![101];
+        assert!(matches!(
+            classify_with_l1(
+                inst,
+                sched,
+                sched.arch,
+                &mut sectors,
+                &mut sector_scratch,
+                Path::new("route.pb"),
+                7,
+                9,
+            ),
+            Err(ReplayError::MemoryRoute {
+                warp_id: 7,
+                record_ix: 9,
+                class: got_class,
+                source: MemoryRouteError::StaticMemoryRouteMismatch {
+                    expected: got_expected,
+                    got: got_route,
+                },
+                ..
+            }) if got_class == class && got_expected == expected && got_route == got
+        ));
+        assert_eq!(sectors, vec![12]);
+        assert!(sector_scratch.is_empty());
+    }
+
+    fn assert_static_class_rejected_in_both_modes(
+        inst: &pb::Instruction,
+        sched: &FunctionSchedule,
+        expected: pb::MemoryOpClass,
+    ) {
+        let got = pb::MemoryOpClass::try_from(inst.memory_op_class.unwrap()).unwrap();
+        assert!(matches!(
+            classify_flat(inst, sched, sched.arch, Path::new("class.pb"), 8, 10),
+            Err(ReplayError::MemoryRoute {
+                warp_id: 8,
+                record_ix: 10,
+                class,
+                source: MemoryRouteError::StaticMemoryClassMismatch {
+                    expected: got_expected,
+                    got: got_class,
+                },
+                ..
+            }) if class == got && got_expected == expected && got_class == got
+        ));
+
+        let mut sectors = vec![13];
+        let mut sector_scratch = vec![102];
+        assert!(matches!(
+            classify_with_l1(
+                inst,
+                sched,
+                sched.arch,
+                &mut sectors,
+                &mut sector_scratch,
+                Path::new("class.pb"),
+                8,
+                10,
+            ),
+            Err(ReplayError::MemoryRoute {
+                warp_id: 8,
+                record_ix: 10,
+                class,
+                source: MemoryRouteError::StaticMemoryClassMismatch {
+                    expected: got_expected,
+                    got: got_class,
+                },
+                ..
+            }) if class == got && got_expected == expected && got_class == got
+        ));
+        assert_eq!(sectors, vec![13]);
+        assert!(sector_scratch.is_empty());
+    }
+
+    fn assert_static_family_unsupported_in_both_modes(
+        inst: &pb::Instruction,
+        sched: &FunctionSchedule,
+        family: &'static str,
+    ) {
+        let class = pb::MemoryOpClass::try_from(inst.memory_op_class.unwrap()).unwrap();
+        assert!(matches!(
+            classify_flat(inst, sched, sched.arch, Path::new("family.pb"), 9, 11),
+            Err(ReplayError::MemoryRoute {
+                warp_id: 9,
+                record_ix: 11,
+                class: got_class,
+                source: MemoryRouteError::StaticMemoryFamilyUnsupported {
+                    family: got_family,
+                    arch,
+                },
+                ..
+            }) if got_class == class && got_family == family && arch == sched.arch
+        ));
+
+        let mut sectors = vec![14];
+        let mut sector_scratch = vec![103];
+        assert!(matches!(
+            classify_with_l1(
+                inst,
+                sched,
+                sched.arch,
+                &mut sectors,
+                &mut sector_scratch,
+                Path::new("family.pb"),
+                9,
+                11,
+            ),
+            Err(ReplayError::MemoryRoute {
+                warp_id: 9,
+                record_ix: 11,
+                class: got_class,
+                source: MemoryRouteError::StaticMemoryFamilyUnsupported {
+                    family: got_family,
+                    arch,
+                },
+                ..
+            }) if got_class == class && got_family == family && arch == sched.arch
+        ));
+        assert_eq!(sectors, vec![14]);
+        assert!(sector_scratch.is_empty());
+    }
+
+    fn assert_unsupported_memory_path_in_both_modes(
+        inst: &pb::Instruction,
+        sched: &FunctionSchedule,
+        expected_class: pb::MemoryOpClass,
+    ) {
+        assert!(matches!(
+            classify_flat(inst, sched, sched.arch, Path::new("unsupported.pb"), 10, 12),
+            Err(ReplayError::UnsupportedMemoryPath { arch, class })
+                if arch == sched.arch && class == expected_class
+        ));
+
+        let mut sectors = vec![15];
+        let mut sector_scratch = vec![104];
+        assert!(matches!(
+            classify_with_l1(
+                inst,
+                sched,
+                sched.arch,
+                &mut sectors,
+                &mut sector_scratch,
+                Path::new("unsupported.pb"),
+                10,
+                12,
+            ),
+            Err(ReplayError::UnsupportedMemoryPath { arch, class })
+                if arch == sched.arch && class == expected_class
+        ));
+        assert_eq!(sectors, vec![15]);
         assert!(sector_scratch.is_empty());
     }
 
@@ -2489,11 +2817,7 @@ mod space_routing_tests {
 
     #[test]
     fn local_route_rejects_non_ldl_stl_static_roles_without_append() {
-        let sched = schedule(
-            ArchId::Sm86,
-            MemRole::EligibleLoad(CacheOpToken::LdgECa),
-            "LDG.E.CA R0, [R1]",
-        );
+        let sched = schedule(ArchId::Sm86, MemRole::None, "IADD3 R0, R1, R2, RZ");
         let mut inst = global_inst();
         inst.memory_op_class = Some(pb::MemoryOpClass::Local as i32);
         inst.addresses[0].address_space = Some(pb::MemorySpace::Local as i32);
@@ -2504,7 +2828,7 @@ mod space_routing_tests {
                 arch: ArchId::Sm86,
                 pc: 0,
                 ref opcode,
-            }) if opcode == "LDG"
+            }) if opcode == "IADD3"
         ));
         let mut sectors = vec![17];
         let mut sector_scratch = vec![99];
@@ -2523,7 +2847,7 @@ mod space_routing_tests {
                 arch: ArchId::Sm86,
                 pc: 0,
                 ref opcode,
-            }) if opcode == "LDG"
+            }) if opcode == "IADD3"
         ));
         assert_eq!(sectors, vec![17]);
         assert!(sector_scratch.is_empty());
@@ -2531,45 +2855,52 @@ mod space_routing_tests {
 
     #[test]
     fn static_ldl_stl_evidence_cannot_escape_local_route() {
-        let assert_rejected = |inst: &pb::Instruction, sched: &FunctionSchedule, expected_class| {
-            assert!(matches!(
-                classify_flat(
-                    inst,
-                    sched,
-                    sched.arch,
-                    Path::new("escaped_local.pb"),
-                    3,
-                    4,
-                ),
-                Err(ReplayError::MemoryRoute {
-                    class,
-                    source: MemoryRouteError::StaticLocalRouteMismatch { got },
-                    ..
-                }) if class == expected_class && got == expected_class
-            ));
+        let assert_rejected =
+            |inst: &pb::Instruction, sched: &FunctionSchedule, expected_class, got_space| {
+                assert!(matches!(
+                    classify_flat(
+                        inst,
+                        sched,
+                        sched.arch,
+                        Path::new("escaped_local.pb"),
+                        3,
+                        4,
+                    ),
+                    Err(ReplayError::MemoryRoute {
+                        class,
+                        source: MemoryRouteError::StaticMemoryRouteMismatch {
+                            expected: pb::MemorySpace::Local,
+                            got,
+                        },
+                        ..
+                    }) if class == expected_class && got == got_space
+                ));
 
-            let mut sectors = vec![23];
-            let mut sector_scratch = vec![99];
-            assert!(matches!(
-                classify_with_l1(
-                    inst,
-                    sched,
-                    sched.arch,
-                    &mut sectors,
-                    &mut sector_scratch,
-                    Path::new("escaped_local.pb"),
-                    3,
-                    4,
-                ),
-                Err(ReplayError::MemoryRoute {
-                    class,
-                    source: MemoryRouteError::StaticLocalRouteMismatch { got },
-                    ..
-                }) if class == expected_class && got == expected_class
-            ));
-            assert_eq!(sectors, vec![23]);
-            assert!(sector_scratch.is_empty());
-        };
+                let mut sectors = vec![23];
+                let mut sector_scratch = vec![99];
+                assert!(matches!(
+                    classify_with_l1(
+                        inst,
+                        sched,
+                        sched.arch,
+                        &mut sectors,
+                        &mut sector_scratch,
+                        Path::new("escaped_local.pb"),
+                        3,
+                        4,
+                    ),
+                    Err(ReplayError::MemoryRoute {
+                        class,
+                        source: MemoryRouteError::StaticMemoryRouteMismatch {
+                            expected: pb::MemorySpace::Local,
+                            got,
+                        },
+                        ..
+                    }) if class == expected_class && got == got_space
+                ));
+                assert_eq!(sectors, vec![23]);
+                assert!(sector_scratch.is_empty());
+            };
 
         // The concrete contamination case: STL's EligibleLoad role must never
         // become a GlobalEligible load merely because the dynamic record says
@@ -2584,6 +2915,7 @@ mod space_routing_tests {
                 "STL [R1], R0",
             ),
             pb::MemoryOpClass::Global,
+            pb::MemorySpace::Global,
         );
 
         // The reciprocal guard is independent of the additive direction field:
@@ -2600,6 +2932,7 @@ mod space_routing_tests {
                 "LDL R0, [R1]",
             ),
             pb::MemoryOpClass::Shared,
+            pb::MemorySpace::Shared,
         );
     }
 
@@ -2617,11 +2950,7 @@ mod space_routing_tests {
         assert!(matches!(
             classify_with_l1(
                 &inst,
-                &schedule(
-                    ArchId::Sm86,
-                    MemRole::EligibleLoad(CacheOpToken::LdgECa),
-                    "LDG.E.CA R0, [R1]",
-                ),
+                &schedule(ArchId::Sm86, MemRole::None, "IADD3 R0, R1, R2, RZ"),
                 ArchId::Sm86,
                 &mut sectors,
                 &mut sector_scratch,
@@ -2658,11 +2987,7 @@ mod space_routing_tests {
         assert!(matches!(
             classify_with_l1(
                 &inst,
-                &schedule(
-                    ArchId::Sm86,
-                    MemRole::EligibleLoad(CacheOpToken::LdgECa),
-                    "LDG.E.CA R0, [R1]",
-                ),
+                &schedule(ArchId::Sm86, MemRole::None, "IADD3 R0, R1, R2, RZ"),
                 ArchId::Sm86,
                 &mut sectors,
                 &mut sector_scratch,
@@ -2674,7 +2999,7 @@ mod space_routing_tests {
                 arch: ArchId::Sm86,
                 pc: 0,
                 ref opcode,
-            }) if opcode == "LDG"
+            }) if opcode == "IADD3"
         ));
         assert_eq!(sectors, vec![31]);
         assert!(sector_scratch.is_empty());
@@ -2817,15 +3142,124 @@ mod space_routing_tests {
     }
 
     #[test]
+    fn local_atomic_is_never_collapsed_into_shared_timing() {
+        let sched = schedule(ArchId::Sm86, MemRole::None, "IADD3 R0, R1, R2, RZ");
+        let mut inst = atomic_inst(Some(pb::MemorySpace::Local));
+        inst.function_unique_id = 1;
+
+        assert_eq!(
+            replay_memory_route(
+                &inst,
+                pb::MemoryOpClass::Atomic,
+                MemoryPayloadContract::AddressCarryingV1,
+                Path::new("local_atomic.pb"),
+                8,
+                10,
+            )
+            .expect("an explicit Local operand resolves to the Local route"),
+            ReplayMemoryRoute::Local
+        );
+        assert!(matches!(
+            classify_flat(
+                &inst,
+                &sched,
+                sched.arch,
+                Path::new("local_atomic.pb"),
+                8,
+                10,
+            ),
+            Err(ReplayError::UnsupportedMemoryPath {
+                arch: ArchId::Sm86,
+                class: pb::MemoryOpClass::Atomic,
+            })
+        ));
+
+        let mut sectors = vec![39];
+        let mut sector_scratch = vec![99];
+        assert!(matches!(
+            classify_with_l1(
+                &inst,
+                &sched,
+                sched.arch,
+                &mut sectors,
+                &mut sector_scratch,
+                Path::new("local_atomic.pb"),
+                8,
+                10,
+            ),
+            Err(ReplayError::UnsupportedMemoryPath {
+                arch: ArchId::Sm86,
+                class: pb::MemoryOpClass::Atomic,
+            })
+        ));
+        assert_eq!(sectors, vec![39]);
+        assert!(sector_scratch.is_empty());
+    }
+
+    #[test]
+    fn legacy_atomic_shared_and_local_operands_conflict() {
+        let sched = schedule(ArchId::Sm86, MemRole::None, "IADD3 R0, R1, R2, RZ");
+        let mut inst = atomic_inst(Some(pb::MemorySpace::Shared));
+        inst.function_unique_id = 1;
+        inst.addresses
+            .push(spaced_address(pb::MemorySpace::Local, 0x1040));
+
+        assert!(matches!(
+            classify_flat_with_contract(
+                &inst,
+                &sched,
+                sched.arch,
+                MemoryPayloadContract::LegacyExclusion,
+                Path::new("legacy_local_atomic.pb"),
+                9,
+                11,
+            ),
+            Err(ReplayError::MemoryRoute {
+                class: pb::MemoryOpClass::Atomic,
+                source: MemoryRouteError::AtomicSpacesConflict,
+                ..
+            })
+        ));
+
+        let mut sectors = vec![41];
+        let mut sector_scratch = vec![99];
+        assert!(matches!(
+            classify_with_l1_with_contract(
+                &inst,
+                &sched,
+                sched.arch,
+                MemoryPayloadContract::LegacyExclusion,
+                &mut sectors,
+                &mut sector_scratch,
+                Path::new("legacy_local_atomic.pb"),
+                9,
+                11,
+            ),
+            Err(ReplayError::MemoryRoute {
+                class: pb::MemoryOpClass::Atomic,
+                source: MemoryRouteError::AtomicSpacesConflict,
+                ..
+            })
+        ));
+        assert_eq!(sectors, vec![41]);
+        assert!(sector_scratch.is_empty());
+    }
+
+    #[test]
     fn zero_active_shared_atomic_routes_shared_in_flat_and_l1_modes() {
         let mut inst = atomic_inst(Some(pb::MemorySpace::Shared));
+        inst.function_unique_id = 1;
         inst.active_mask = Some(1);
         inst.predicate_mask = Some(0);
         inst.data_width = Some(4);
         inst.addresses[0].data_width = 4;
         inst.addresses[0].compression_format = sim_trace::lanes::FORMAT_BASE_DELTA;
         inst.addresses[0].addrs.clear();
-        let sched = schedule(ArchId::Sm120, MemRole::None, "ATOMS.E.ADD");
+        let sched = schedule(
+            ArchId::Sm120,
+            MemRole::BypassLoad(CacheOpToken::Atom),
+            "ATOMS.E.ADD",
+        );
 
         let flat = classify_flat(&inst, &sched, sched.arch, Path::new("zero.pb"), 0, 0)
             .expect("zero-active shared atomic has a reviewed flat route");
@@ -3039,6 +3473,59 @@ mod space_routing_tests {
     }
 
     #[test]
+    fn static_families_reject_class_confusion_without_access_kind() {
+        let mut atmg_as_global = global_inst();
+        atmg_as_global.memory_op_access_kind = None;
+        assert_static_class_rejected_in_both_modes(
+            &atmg_as_global,
+            &schedule(
+                ArchId::Sm86,
+                MemRole::BypassLoad(CacheOpToken::Atom),
+                "ATOMG.E.ADD.STRONG.GPU",
+            ),
+            pb::MemoryOpClass::Atomic,
+        );
+
+        let mut ldgsts_as_global = global_inst();
+        ldgsts_as_global.memory_op_access_kind = None;
+        assert_static_class_rejected_in_both_modes(
+            &ldgsts_as_global,
+            &schedule(
+                ArchId::Sm86,
+                MemRole::BypassLoad(CacheOpToken::Ldgsts),
+                "LDGSTS.E.128 [R1], [R2.64]",
+            ),
+            pb::MemoryOpClass::AsyncCopy,
+        );
+
+        let mut atoms_as_shared = global_inst();
+        atoms_as_shared.memory_op_class = Some(pb::MemoryOpClass::Shared as i32);
+        atoms_as_shared.memory_op_access_kind = None;
+        atoms_as_shared.addresses[0].address_space = Some(pb::MemorySpace::Shared as i32);
+        assert_static_class_rejected_in_both_modes(
+            &atoms_as_shared,
+            &schedule(
+                ArchId::Sm120,
+                MemRole::BypassLoad(CacheOpToken::Atom),
+                "ATOMS.E.ADD",
+            ),
+            pb::MemoryOpClass::Atomic,
+        );
+
+        let mut redg_as_global = global_inst();
+        redg_as_global.memory_op_access_kind = None;
+        assert_static_class_rejected_in_both_modes(
+            &redg_as_global,
+            &schedule(
+                ArchId::Sm120,
+                MemRole::Reduction,
+                "REDG.E.ADD.STRONG.GPU [R2.64], R0",
+            ),
+            pb::MemoryOpClass::Atomic,
+        );
+    }
+
+    #[test]
     fn explicit_access_kind_must_match_static_direction_in_both_modes() {
         let load_at_store = global_inst();
         assert_static_access_kind_rejected_in_both_modes(
@@ -3067,18 +3554,263 @@ mod space_routing_tests {
             &schedule(ArchId::Sm86, MemRole::None, "STS [R1], R0"),
             pb::MemoryOpAccessKind::Store,
         );
+    }
 
-        let mut atomic_at_async_copy = atomic_inst(Some(pb::MemorySpace::Global));
-        atomic_at_async_copy.function_unique_id = 1;
-        assert_static_access_kind_rejected_in_both_modes(
-            &atomic_at_async_copy,
+    #[test]
+    fn space_coded_sass_heads_cannot_borrow_another_dynamic_route() {
+        let mut shared_atmg = atomic_inst(Some(pb::MemorySpace::Shared));
+        shared_atmg.function_unique_id = 1;
+        assert_static_route_rejected_in_both_modes(
+            &shared_atmg,
             &schedule(
                 ArchId::Sm86,
-                MemRole::BypassLoad(CacheOpToken::Ldgsts),
-                "LDGSTS.E.128 [R1], [R2.64]",
+                MemRole::BypassLoad(CacheOpToken::Atom),
+                "ATOMG.E.ADD.STRONG.GPU",
             ),
-            pb::MemoryOpAccessKind::AsyncCopy,
+            pb::MemorySpace::Global,
+            pb::MemorySpace::Shared,
         );
+
+        let mut global_atoms = atomic_inst(Some(pb::MemorySpace::Global));
+        global_atoms.function_unique_id = 1;
+        assert_static_route_rejected_in_both_modes(
+            &global_atoms,
+            &schedule(
+                ArchId::Sm86,
+                MemRole::BypassLoad(CacheOpToken::Atom),
+                "ATOMS.E.ADD",
+            ),
+            pb::MemorySpace::Shared,
+            pb::MemorySpace::Global,
+        );
+
+        let mut shared_stg = global_inst();
+        shared_stg.memory_op_class = Some(pb::MemoryOpClass::Shared as i32);
+        shared_stg.memory_op_access_kind = Some(pb::MemoryOpAccessKind::Store as i32);
+        shared_stg.addresses[0].address_space = Some(pb::MemorySpace::Shared as i32);
+        assert_static_route_rejected_in_both_modes(
+            &shared_stg,
+            &schedule(ArchId::Sm86, MemRole::Store, "STG.E [R2.64], R0"),
+            pb::MemorySpace::Global,
+            pb::MemorySpace::Shared,
+        );
+
+        let mut global_sts = global_inst();
+        global_sts.memory_op_access_kind = Some(pb::MemoryOpAccessKind::Store as i32);
+        assert_static_route_rejected_in_both_modes(
+            &global_sts,
+            &schedule(ArchId::Sm86, MemRole::None, "STS [R1], R0"),
+            pb::MemorySpace::Shared,
+            pb::MemorySpace::Global,
+        );
+
+        let mut local_ldg = global_inst();
+        local_ldg.memory_op_class = Some(pb::MemoryOpClass::Local as i32);
+        local_ldg.addresses[0].address_space = Some(pb::MemorySpace::Local as i32);
+        assert_static_route_rejected_in_both_modes(
+            &local_ldg,
+            &schedule(
+                ArchId::Sm86,
+                MemRole::EligibleLoad(CacheOpToken::LdgECa),
+                "LDG.E.CA R0, [R1]",
+            ),
+            pb::MemorySpace::Global,
+            pb::MemorySpace::Local,
+        );
+
+        let mut shared_red = atomic_inst(Some(pb::MemorySpace::Shared));
+        shared_red.function_unique_id = 1;
+        assert_static_route_rejected_in_both_modes(
+            &shared_red,
+            &schedule(
+                ArchId::Sm86,
+                MemRole::Reduction,
+                "RED.E.ADD.STRONG.GPU [R2.64], R0",
+            ),
+            pb::MemorySpace::Global,
+            pb::MemorySpace::Shared,
+        );
+
+        let mut global_reds = atomic_inst(Some(pb::MemorySpace::Global));
+        global_reds.function_unique_id = 1;
+        assert_static_family_unsupported_in_both_modes(
+            &global_reds,
+            &schedule(ArchId::Sm86, MemRole::None, "REDS.E.ADD [R1], R0"),
+            "REDS",
+        );
+    }
+
+    #[test]
+    fn sm120_dsmem_families_remain_typed_unsupported() {
+        let mut redas = atomic_inst(Some(pb::MemorySpace::Global));
+        redas.function_unique_id = 1;
+        redas.memory_op_class = Some(pb::MemoryOpClass::ClusterDsmem as i32);
+        assert_unsupported_memory_path_in_both_modes(
+            &redas,
+            &schedule(ArchId::Sm120, MemRole::None, "REDAS.E.ADD [R1], R0"),
+            pb::MemoryOpClass::ClusterDsmem,
+        );
+
+        let mut stas = global_inst();
+        stas.memory_op_class = Some(pb::MemoryOpClass::ClusterDsmem as i32);
+        stas.memory_op_access_kind = Some(pb::MemoryOpAccessKind::Store as i32);
+        assert_unsupported_memory_path_in_both_modes(
+            &stas,
+            &schedule(ArchId::Sm120, MemRole::None, "STAS [R1], R0"),
+            pb::MemoryOpClass::ClusterDsmem,
+        );
+
+        let mut lds_mmio = global_inst();
+        lds_mmio.memory_op_class = Some(pb::MemoryOpClass::ClusterDsmem as i32);
+        assert_unsupported_memory_path_in_both_modes(
+            &lds_mmio,
+            &schedule(ArchId::Sm120, MemRole::None, "LDS.U.32.MMIO R0, [R1]"),
+            pb::MemoryOpClass::ClusterDsmem,
+        );
+    }
+
+    #[test]
+    fn sm120_dsmem_families_reject_modeled_class_contamination() {
+        let mut redas_as_atomic = atomic_inst(Some(pb::MemorySpace::Shared));
+        redas_as_atomic.function_unique_id = 1;
+        assert_static_class_rejected_in_both_modes(
+            &redas_as_atomic,
+            &schedule(ArchId::Sm120, MemRole::None, "REDAS.E.ADD [R1], R0"),
+            pb::MemoryOpClass::ClusterDsmem,
+        );
+
+        let mut stas_as_shared = global_inst();
+        stas_as_shared.memory_op_class = Some(pb::MemoryOpClass::Shared as i32);
+        stas_as_shared.memory_op_access_kind = Some(pb::MemoryOpAccessKind::Store as i32);
+        stas_as_shared.addresses[0].address_space = Some(pb::MemorySpace::Shared as i32);
+        assert_static_class_rejected_in_both_modes(
+            &stas_as_shared,
+            &schedule(ArchId::Sm120, MemRole::None, "STAS [R1], R0"),
+            pb::MemoryOpClass::ClusterDsmem,
+        );
+
+        let mut lds_mmio_as_shared = global_inst();
+        lds_mmio_as_shared.memory_op_class = Some(pb::MemoryOpClass::Shared as i32);
+        lds_mmio_as_shared.addresses[0].address_space = Some(pb::MemorySpace::Shared as i32);
+        assert_static_class_rejected_in_both_modes(
+            &lds_mmio_as_shared,
+            &schedule(ArchId::Sm120, MemRole::None, "LDS.U.32.MMIO R0, [R1]"),
+            pb::MemoryOpClass::ClusterDsmem,
+        );
+    }
+
+    #[test]
+    fn sm86_rejects_post_ampere_static_memory_families() {
+        let mut stas = global_inst();
+        stas.memory_op_class = Some(pb::MemoryOpClass::Shared as i32);
+        stas.memory_op_access_kind = Some(pb::MemoryOpAccessKind::Store as i32);
+        stas.addresses[0].address_space = Some(pb::MemorySpace::Shared as i32);
+        assert_static_family_unsupported_in_both_modes(
+            &stas,
+            &schedule(ArchId::Sm86, MemRole::None, "STAS [R1], R0"),
+            "STAS",
+        );
+
+        let mut redas = atomic_inst(Some(pb::MemorySpace::Shared));
+        redas.function_unique_id = 1;
+        assert_static_family_unsupported_in_both_modes(
+            &redas,
+            &schedule(ArchId::Sm86, MemRole::None, "REDAS.E.ADD [R1], R0"),
+            "REDAS",
+        );
+
+        let mut lds_mmio = global_inst();
+        lds_mmio.memory_op_class = Some(pb::MemoryOpClass::Shared as i32);
+        lds_mmio.addresses[0].address_space = Some(pb::MemorySpace::Shared as i32);
+        assert_static_family_unsupported_in_both_modes(
+            &lds_mmio,
+            &schedule(ArchId::Sm86, MemRole::None, "LDS.U.32.MMIO R0, [R1]"),
+            "LDS.MMIO",
+        );
+
+        let mut stsm = global_inst();
+        stsm.memory_op_class = Some(pb::MemoryOpClass::Shared as i32);
+        stsm.memory_op_access_kind = Some(pb::MemoryOpAccessKind::Store as i32);
+        stsm.addresses[0].address_space = Some(pb::MemorySpace::Shared as i32);
+        assert_static_family_unsupported_in_both_modes(
+            &stsm,
+            &schedule(ArchId::Sm86, MemRole::None, "STSM [R1], R0"),
+            "STSM",
+        );
+
+        let mut redg = atomic_inst(Some(pb::MemorySpace::Global));
+        redg.function_unique_id = 1;
+        assert_static_family_unsupported_in_both_modes(
+            &redg,
+            &schedule(
+                ArchId::Sm86,
+                MemRole::Reduction,
+                "REDG.E.ADD.STRONG.GPU [R2.64], R0",
+            ),
+            "REDG",
+        );
+
+        let mut ldgmc_as_shared = global_inst();
+        ldgmc_as_shared.memory_op_class = Some(pb::MemoryOpClass::Shared as i32);
+        ldgmc_as_shared.addresses[0].address_space = Some(pb::MemorySpace::Shared as i32);
+        assert_static_family_unsupported_in_both_modes(
+            &ldgmc_as_shared,
+            &schedule(ArchId::Sm86, MemRole::None, "LDGMC R0, [R2.64]"),
+            "LDGMC",
+        );
+    }
+
+    #[test]
+    fn sm120_ldgmc_and_redg_do_not_gain_sm86_hierarchy_semantics() {
+        let ldgmc = global_inst();
+        assert_static_family_unsupported_in_both_modes(
+            &ldgmc,
+            &schedule(ArchId::Sm120, MemRole::None, "LDGMC R0, [R2.64]"),
+            "LDGMC",
+        );
+
+        let mut redg = atomic_inst(Some(pb::MemorySpace::Global));
+        redg.function_unique_id = 1;
+        assert_unsupported_memory_path_in_both_modes(
+            &redg,
+            &schedule(
+                ArchId::Sm120,
+                MemRole::Reduction,
+                "REDG.E.ADD.STRONG.GPU [R2.64], R0",
+            ),
+            pb::MemoryOpClass::Atomic,
+        );
+    }
+
+    #[test]
+    fn sm120_stsm_uses_shared_timing_only_on_its_supported_architecture() {
+        let mut inst = global_inst();
+        inst.memory_op_class = Some(pb::MemoryOpClass::Shared as i32);
+        inst.memory_op_access_kind = Some(pb::MemoryOpAccessKind::Store as i32);
+        inst.addresses[0].address_space = Some(pb::MemorySpace::Shared as i32);
+        let sched = schedule(ArchId::Sm120, MemRole::None, "STSM [R1], R0");
+
+        assert!(matches!(
+            classify_flat(&inst, &sched, sched.arch, Path::new("stsm.pb"), 0, 0),
+            Ok(AccessKind::Shared)
+        ));
+        let mut sectors = vec![16];
+        let mut sector_scratch = vec![105];
+        assert!(matches!(
+            classify_with_l1(
+                &inst,
+                &sched,
+                sched.arch,
+                &mut sectors,
+                &mut sector_scratch,
+                Path::new("stsm.pb"),
+                0,
+                0,
+            ),
+            Ok(AccessKind::Shared)
+        ));
+        assert_eq!(sectors, vec![16]);
+        assert!(sector_scratch.is_empty());
     }
 
     #[test]
@@ -3485,8 +4217,13 @@ mod space_routing_tests {
     fn shared_atomic_routes_to_shared_in_flat_and_l1_modes() {
         // A shared atomic (op_class=ATOMIC, address_space=SHARED) must NOT
         // reach the global path, including on the template architecture.
-        let sched = schedule(ArchId::Sm120, MemRole::None, "ATOMS.E.ADD");
-        let inst = atomic_inst(Some(pb::MemorySpace::Shared));
+        let sched = schedule(
+            ArchId::Sm120,
+            MemRole::BypassLoad(CacheOpToken::Atom),
+            "ATOMS.E.ADD",
+        );
+        let mut inst = atomic_inst(Some(pb::MemorySpace::Shared));
+        inst.function_unique_id = 1;
         let flat = classify_flat(&inst, &sched, sched.arch, Path::new("t"), 0, 0).unwrap();
         assert!(matches!(flat, AccessKind::Shared));
 
@@ -3515,7 +4252,8 @@ mod space_routing_tests {
             MemRole::BypassLoad(CacheOpToken::Atom),
             "ATOMG.E.CAS.STRONG.GPU",
         );
-        let inst = atomic_inst(Some(pb::MemorySpace::Global));
+        let mut inst = atomic_inst(Some(pb::MemorySpace::Global));
+        inst.function_unique_id = 1;
         let flat = classify_flat(&inst, &sched, sched.arch, Path::new("t"), 0, 0).unwrap();
         assert!(matches!(
             flat,
@@ -3552,37 +4290,37 @@ mod space_routing_tests {
     }
 
     #[test]
-    fn global_reduction_family_remains_distinct_in_both_modes() {
-        for (opcode, path) in [
-            ("RED.E.ADD.STRONG.GPU [R2.64], R0", "red.pb"),
-            ("REDG.E.ADD.STRONG.GPU [R2.64], R0", "redg.pb"),
-        ] {
-            let sched = schedule(ArchId::Sm86, MemRole::Reduction, opcode);
-            let inst = atomic_inst(Some(pb::MemorySpace::Global));
-            let flat = classify_flat(&inst, &sched, sched.arch, Path::new(path), 0, 0)
-                .expect("reviewed reduction has a global atomic route");
-            assert!(matches!(
-                flat,
-                AccessKind::GlobalReduction { off: 0, len: 0 }
-            ));
+    fn global_reduction_remains_distinct_in_both_modes() {
+        let sched = schedule(
+            ArchId::Sm86,
+            MemRole::Reduction,
+            "RED.E.ADD.STRONG.GPU [R2.64], R0",
+        );
+        let mut inst = atomic_inst(Some(pb::MemorySpace::Global));
+        inst.function_unique_id = 1;
+        let flat = classify_flat(&inst, &sched, sched.arch, Path::new("red.pb"), 0, 0)
+            .expect("reviewed reduction has a global atomic route");
+        assert!(matches!(
+            flat,
+            AccessKind::GlobalReduction { off: 0, len: 0 }
+        ));
 
-            let mut sectors = vec![45];
-            let mut sector_scratch = vec![99];
-            let l1 = classify_with_l1(
-                &inst,
-                &sched,
-                sched.arch,
-                &mut sectors,
-                &mut sector_scratch,
-                Path::new(path),
-                0,
-                0,
-            )
-            .expect("reviewed reduction retains its static reduction role");
-            assert!(matches!(l1, AccessKind::GlobalReduction { off: 1, len: 1 }));
-            assert_eq!(sectors, vec![45, 0x1000 >> 5]);
-            assert_eq!(sector_scratch, vec![0x1000 >> 5]);
-        }
+        let mut sectors = vec![45];
+        let mut sector_scratch = vec![99];
+        let l1 = classify_with_l1(
+            &inst,
+            &sched,
+            sched.arch,
+            &mut sectors,
+            &mut sector_scratch,
+            Path::new("red.pb"),
+            0,
+            0,
+        )
+        .expect("reviewed reduction retains its static reduction role");
+        assert!(matches!(l1, AccessKind::GlobalReduction { off: 1, len: 1 }));
+        assert_eq!(sectors, vec![45, 0x1000 >> 5]);
+        assert_eq!(sector_scratch, vec![0x1000 >> 5]);
     }
 
     #[test]
@@ -3975,8 +4713,70 @@ mod replay_identity_tests {
                 IssueSlot {
                     control: ControlBits::new(0, false, 7, 7, 0, 0).expect("valid test controls"),
                     op_class: OpClass::Other,
-                    mem_role: MemRole::BypassLoad(CacheOpToken::Ldgsts),
-                    opcode_text: "LDGSTS.E.128 [R1], [R2.64]".into(),
+                    mem_role: MemRole::Store,
+                    opcode_text: "STG.E [R2.64], R0".into(),
+                },
+            )]),
+        };
+        assert!(matches!(
+            replay_error_with_schedule(malformed_global_inst(pb::MemoryOpClass::Global), sched,),
+            ReplayError::MemoryRoute {
+                class: pb::MemoryOpClass::Global,
+                source: MemoryRouteError::StaticAccessKindMismatch {
+                    got: pb::MemoryOpAccessKind::Load,
+                    expected: pb::MemoryOpAccessKind::Store,
+                },
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn replay_static_class_mismatch_precedes_allocation_identity_without_access_kind() {
+        let sched = FunctionSchedule {
+            arch: ArchId::Sm86,
+            function_unique_id: 1,
+            kernel_name: "k".into(),
+            function_name: "f".into(),
+            by_pc: StdMap::from([(
+                16,
+                IssueSlot {
+                    control: ControlBits::new(0, false, 7, 7, 0, 0).expect("valid test controls"),
+                    op_class: OpClass::Other,
+                    mem_role: MemRole::Reduction,
+                    opcode_text: "RED.E.ADD.STRONG.GPU [R2.64], R0".into(),
+                },
+            )]),
+        };
+        let mut inst = malformed_global_inst(pb::MemoryOpClass::Global);
+        inst.memory_op_access_kind = None;
+        assert!(matches!(
+            replay_error_with_schedule(inst, sched),
+            ReplayError::MemoryRoute {
+                class: pb::MemoryOpClass::Global,
+                source: MemoryRouteError::StaticMemoryClassMismatch {
+                    expected: pb::MemoryOpClass::Atomic,
+                    got: pb::MemoryOpClass::Global,
+                },
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn replay_static_route_mismatch_precedes_allocation_identity() {
+        let sched = FunctionSchedule {
+            arch: ArchId::Sm86,
+            function_unique_id: 1,
+            kernel_name: "k".into(),
+            function_name: "f".into(),
+            by_pc: StdMap::from([(
+                16,
+                IssueSlot {
+                    control: ControlBits::new(0, false, 7, 7, 0, 0).expect("valid test controls"),
+                    op_class: OpClass::Other,
+                    mem_role: MemRole::BypassLoad(CacheOpToken::Atom),
+                    opcode_text: "ATOMS.E.ADD".into(),
                 },
             )]),
         };
@@ -3984,9 +4784,9 @@ mod replay_identity_tests {
             replay_error_with_schedule(malformed_global_inst(pb::MemoryOpClass::Atomic), sched,),
             ReplayError::MemoryRoute {
                 class: pb::MemoryOpClass::Atomic,
-                source: MemoryRouteError::StaticAccessKindMismatch {
-                    got: pb::MemoryOpAccessKind::Atomic,
-                    expected: pb::MemoryOpAccessKind::AsyncCopy,
+                source: MemoryRouteError::StaticMemoryRouteMismatch {
+                    expected: pb::MemorySpace::Shared,
+                    got: pb::MemorySpace::Global,
                 },
                 ..
             }

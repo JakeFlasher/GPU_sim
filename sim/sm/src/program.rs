@@ -340,6 +340,27 @@ mod tests {
     }
 
     #[test]
+    fn sm86_schedule_join_rejects_hopper_redg() {
+        let mut sc = sidecar(&[0]);
+        sc.functions
+            .get_mut("my_kernel")
+            .unwrap()
+            .by_pc
+            .get_mut(&0)
+            .unwrap()
+            .opcode_text = "REDG.E.ADD.STRONG.GPU [R2.64], R0".to_owned();
+        assert!(matches!(
+            build_schedules(&exec_info(&[0]), &sc),
+            Err(ProgramError::MemRoleClassification(
+                sim_mem::MemRoleError::StaticMemoryFamilyUnsupported {
+                    family: "REDG",
+                    arch: ArchId::Sm86,
+                }
+            ))
+        ));
+    }
+
+    #[test]
     fn classify_uses_opcode_head_only() {
         assert_eq!(classify("BAR.SYNC.DEFER_BLOCKING"), OpClass::BlockBarrier);
         assert_eq!(

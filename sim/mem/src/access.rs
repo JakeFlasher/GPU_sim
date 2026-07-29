@@ -6,8 +6,10 @@
 //! flattening it away, so bypass/untagged/store sectors can take
 //! token-specific hierarchy paths without re-joining the sidecar.
 
+use sim_arch::ArchId;
+
 use crate::cache_op::{
-    CacheOpError, CacheOpToken, classify_opcode_checked, derive_l1_eligible, opcode_head,
+    CacheOpError, CacheOpToken, classify_opcode_for_arch, derive_l1_eligible, opcode_head,
 };
 
 /// Dynamic address-space provenance for hierarchy accounting. This is
@@ -43,9 +45,11 @@ pub enum MemRole {
     /// Plain global-store head (STG): sectors hit-tested against the L1
     /// without allocating; write-allocate at the L2.
     Store,
-    /// Non-returning global reduction (RED / REDG). It follows the physical
-    /// write-class hierarchy path, but remains distinct from both plain-store
-    /// attribution and returning ATOM semantics.
+    /// Non-returning global reduction. RED is recognized on both target
+    /// architectures; Hopper+ REDG is recognized only where the static ISA family
+    /// exists. Replay support remains a separate architecture-local gate. It
+    /// follows the physical write-class hierarchy path, but remains distinct from
+    /// both plain-store attribution and returning ATOM semantics.
     Reduction,
     /// Not load-class and not a store head (LD.E, LDC, LDSM, non-memory
     /// opcodes): counted in the unified sector denominator only when the
@@ -69,14 +73,26 @@ pub fn is_global_reduction_opcode(opcode_text: &str) -> bool {
 pub enum MemRoleError {
     #[error("cache-op classification failed: {0}")]
     CacheOp(#[from] CacheOpError),
+    #[error("static SASS family {family} is unavailable on architecture {arch}")]
+    StaticMemoryFamilyUnsupported { family: &'static str, arch: ArchId },
 }
 
 /// Checked architecture-aware classifier used by simulator composition.
 pub fn mem_role_of_checked(opcode_text: &str, arch_token: &str) -> Result<MemRole, MemRoleError> {
-    Ok(match classify_opcode_checked(opcode_text, arch_token)? {
+    let arch = ArchId::parse_deploy(arch_token).map_err(CacheOpError::from)?;
+    Ok(match classify_opcode_for_arch(opcode_text, arch)? {
         Some(token) if derive_l1_eligible(token) => MemRole::EligibleLoad(token),
         Some(token) => MemRole::BypassLoad(token),
         None if is_global_store_opcode(opcode_text) => MemRole::Store,
+        None if opcode_head(opcode_text) == "REDG" => match arch {
+            ArchId::Sm86 => {
+                return Err(MemRoleError::StaticMemoryFamilyUnsupported {
+                    family: "REDG",
+                    arch,
+                });
+            }
+            ArchId::Sm120 => MemRole::Reduction,
+        },
         None if is_global_reduction_opcode(opcode_text) => MemRole::Reduction,
         None => MemRole::None,
     })
@@ -176,8 +192,15 @@ mod tests {
             mem_role_of("RED.E.ADD.STRONG.GPU [R2.64], R0", "sm_86"),
             MemRole::Reduction
         );
+        assert!(matches!(
+            mem_role_of_checked("REDG.E.ADD.STRONG.GPU [R2.64], R0", "sm_86"),
+            Err(MemRoleError::StaticMemoryFamilyUnsupported {
+                family: "REDG",
+                arch: ArchId::Sm86,
+            })
+        ));
         assert_eq!(
-            mem_role_of("REDG.E.ADD.STRONG.GPU [R2.64], R0", "sm_86"),
+            mem_role_of("REDG.E.ADD.STRONG.GPU [R2.64], R0", "sm_120"),
             MemRole::Reduction
         );
         assert_eq!(
