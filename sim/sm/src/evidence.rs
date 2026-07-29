@@ -1200,7 +1200,7 @@ pub fn admit_launch_evidence(
         ));
     }
 
-    let coverage = admit_launch_coverage(&trace_dir, &loc, schedule)?;
+    let coverage = admit_launch_coverage(&trace_dir, &loc, schedule, &arch_card)?;
     let launch_binding = match &coverage {
         ExtractedCoverage::Full(full) => full.launch().clone(),
         ExtractedCoverage::Sampled(sampled) => sampled.launch().clone(),

@@ -1049,7 +1049,7 @@ pub struct SystemResult {
 /// `Unmodeled` is the latency-only ablation / equivalence-differential
 /// mode; `Carded` rates are validated non-zero here (typed
 /// [`SystemError::DramBandwidthInvalid`], never a clamp).
-pub fn simulate_kernel_shared(
+pub(crate) fn simulate_kernel_shared(
     per_sm_blocks: &BTreeMap<i32, Vec<BlockReplay>>,
     schedule: &FunctionSchedule,
     params: &IssueModelParams,

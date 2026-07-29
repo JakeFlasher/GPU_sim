@@ -19,8 +19,9 @@
 //!   warp of the block is waiting at it (warps that already finished do
 //!   not block release, matching Volta+ exited-thread semantics).
 //! - Block residency: blocks are admitted to the SM in launch order while
-//!   the resident warp count stays within `max_resident_warps_per_sm`;
-//!   a finished block frees its slots (wave execution).
+//!   the resident warp count stays within `max_resident_warps_per_sm` and
+//!   concurrently resident CTAs use disjoint physical warp slots; a finished
+//!   block frees its slots for a later CTA (wave execution).
 //!
 //! Memory timing comes in three modes ([`SmMemMode`]):
 //! - **Flat**: no cache model; global-class barriers clear at the flat
@@ -69,28 +70,28 @@ pub use sim_mem::AccessKind;
 
 /// One dynamic instruction, compacted for replay.
 #[derive(Debug, Clone, Copy)]
-pub struct ReplayInst {
+pub(crate) struct ReplayInst {
     /// Function-relative pc — the join key into [`FunctionSchedule`].
-    pub pc: u32,
-    pub kind: AccessKind,
+    pub(crate) pc: u32,
+    pub(crate) kind: AccessKind,
 }
 
 /// One traced warp of a block: physical slot + its dynamic stream + the
 /// sector arena its records' `off/len` payloads index.
 #[derive(Debug, Default)]
-pub struct WarpReplay {
+pub(crate) struct WarpReplay {
     /// Physical warp slot on the SM (`warpid_sm` when traced); sub-core
     /// assignment is `warp_slot % 4`.
-    pub warp_slot: i32,
-    pub insts: Vec<ReplayInst>,
-    pub sectors: Vec<i64>,
+    pub(crate) warp_slot: i32,
+    pub(crate) insts: Vec<ReplayInst>,
+    pub(crate) sectors: Vec<i64>,
 }
 
 /// One traced block assigned to this SM, in launch order.
 #[derive(Debug)]
-pub struct BlockReplay {
-    pub launch_index: i64,
-    pub warps: Vec<WarpReplay>,
+pub(crate) struct BlockReplay {
+    pub(crate) launch_index: i64,
+    pub(crate) warps: Vec<WarpReplay>,
 }
 
 /// Timing parameters. Card-derived values come from the pchase static
@@ -243,7 +244,7 @@ impl IssueModelParams {
 
 /// Memory-model mode for one SM replay.
 #[derive(Debug, Clone, Copy)]
-pub enum SmMemMode {
+pub(crate) enum SmMemMode {
     /// No cache model: flat global latency.
     Flat,
     /// Per-SM L1 with constant (L2-hit) fill latency below it.
@@ -300,6 +301,30 @@ pub enum IssueError {
     },
     #[error("block {launch_index} has {warps} live warps, which does not fit in u32")]
     LiveWarpCountOutOfRange { launch_index: i64, warps: usize },
+    #[error(
+        "block {launch_index} has {live_warps} live warps, exceeding architecture {arch} resident-warp limit {max_resident_warps}"
+    )]
+    BlockResidencyLimitExceeded {
+        launch_index: i64,
+        live_warps: u32,
+        arch: ArchId,
+        max_resident_warps: u32,
+    },
+    #[error(
+        "block {launch_index} physical warp slot {warp_slot} is outside architecture {arch} range 0..{physical_warp_slots}"
+    )]
+    WarpSlotOutOfRange {
+        launch_index: i64,
+        warp_slot: i32,
+        arch: ArchId,
+        physical_warp_slots: u32,
+    },
+    #[error("block {launch_index} assigns physical warp slot {warp_slot} more than once")]
+    DuplicateWarpSlot { launch_index: i64, warp_slot: i32 },
+    #[error(
+        "block {launch_index} released physical warp slot {warp_slot}, but that slot is not resident"
+    )]
+    ResidentWarpSlotMissing { launch_index: i64, warp_slot: i32 },
     #[error("warp {warp} was selected without a pending issue slot")]
     MissingIssueSlot { warp: usize },
     #[error("{counter} counter overflow")]
@@ -580,7 +605,7 @@ impl ResponseId {
     }
 }
 
-/// What the response to a [`MemRequest`] must do at arrival.
+/// What the response to one modeled memory request must do at arrival.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ReplyTo {
     /// Complete this L1 fill (installing the line/sector) and clear the
@@ -828,6 +853,10 @@ struct BlockState {
     unfinished: usize,
     waiting: usize,
     warp_count: u32,
+    /// Physical slots held while this block is resident. The trace does not carry
+    /// CTA lifetime, so modeled overlap may admit another block only when its slot
+    /// set is disjoint from every currently resident block.
+    warp_slots: Box<[i32]>,
     /// This block's warps occupy `warps[first_warp..first_warp +
     /// admitted_warps]` (admission pushes them contiguously), so barrier
     /// release scans only the block's own range.
@@ -1282,9 +1311,10 @@ impl MemModel {
 
 /// Resumable single-SM replay actor. See the module docs for the mode
 /// semantics and the run-ahead (horizon) contract.
-pub struct SmCore<'a> {
+pub(crate) struct SmCore<'a> {
     schedule: &'a FunctionSchedule,
     params: IssueModelParams,
+    physical_warp_slots: u32,
     mem: MemModel,
     blocks: &'a [BlockReplay],
     block_live_warps: Vec<u32>,
@@ -1298,6 +1328,7 @@ pub struct SmCore<'a> {
     t: u64,
     arrival_stamp: u64,
     resident_warps: u32,
+    resident_warp_slots: HashSet<i32>,
     unfinished_warps: usize,
     next_block: usize,
 }
@@ -1309,7 +1340,7 @@ impl<'a> SmCore<'a> {
     /// driver enforces that before calling). Cache modes attach a FRESH
     /// per-SM L1 (cold cache per kernel, NCU `--cache-control all`
     /// parity).
-    pub fn new(
+    pub(crate) fn new(
         blocks: &'a [BlockReplay],
         schedule: &'a FunctionSchedule,
         params: &IssueModelParams,
@@ -1325,6 +1356,11 @@ impl<'a> SmCore<'a> {
                 got: params.arch,
             });
         }
+        let physical_warp_slots = params
+            .arch
+            .issue_hypotheses()
+            .require("physical_warp_slots")?
+            .max_resident_warps_per_sm;
         // Validate the complete dynamic/static join and every actor-cardinality
         // conversion before constructing mutable replay state. A later block
         // admission must not discover an unknown PC or overflow after earlier
@@ -1344,6 +1380,38 @@ impl<'a> SmCore<'a> {
                     warps: live_warp_count,
                 }
             })?;
+            if live_warps > params.max_resident_warps_per_sm {
+                return Err(IssueError::BlockResidencyLimitExceeded {
+                    launch_index: block.launch_index,
+                    live_warps,
+                    arch: params.arch,
+                    max_resident_warps: params.max_resident_warps_per_sm,
+                });
+            }
+            let mut block_slots = HashSet::with_capacity(block.warps.len());
+            for warp in &block.warps {
+                let slot =
+                    u32::try_from(warp.warp_slot).map_err(|_| IssueError::WarpSlotOutOfRange {
+                        launch_index: block.launch_index,
+                        warp_slot: warp.warp_slot,
+                        arch: params.arch,
+                        physical_warp_slots,
+                    })?;
+                if slot >= physical_warp_slots {
+                    return Err(IssueError::WarpSlotOutOfRange {
+                        launch_index: block.launch_index,
+                        warp_slot: warp.warp_slot,
+                        arch: params.arch,
+                        physical_warp_slots,
+                    });
+                }
+                if !block_slots.insert(warp.warp_slot) {
+                    return Err(IssueError::DuplicateWarpSlot {
+                        launch_index: block.launch_index,
+                        warp_slot: warp.warp_slot,
+                    });
+                }
+            }
             block_live_warps.push(live_warps);
             arrival_limit = checked_u64_counter_add(
                 "warp arrival stamp",
@@ -1419,6 +1487,7 @@ impl<'a> SmCore<'a> {
         let mut core = Self {
             schedule,
             params: *params,
+            physical_warp_slots,
             mem,
             blocks,
             block_live_warps,
@@ -1432,6 +1501,7 @@ impl<'a> SmCore<'a> {
             t: 0,
             arrival_stamp: 0,
             resident_warps: 0,
+            resident_warp_slots: HashSet::new(),
             unfinished_warps: 0,
             next_block: 0,
         };
@@ -1439,22 +1509,22 @@ impl<'a> SmCore<'a> {
         Ok(core)
     }
 
-    /// The SM's local clock (time of the next unissued cycle).
-    pub fn now(&self) -> u64 {
+    #[cfg(test)]
+    fn now(&self) -> u64 {
         self.t
     }
 
-    pub fn is_done(&self) -> bool {
+    pub(crate) fn is_done(&self) -> bool {
         self.unfinished_warps == 0
     }
 
-    /// The attached L1's counters (any cache mode).
-    pub fn l1_counters(&self) -> Option<&L1Counters> {
-        self.mem.l1().map(|c| &c.counters)
+    #[cfg(test)]
+    fn l1_counters(&self) -> Option<&L1Counters> {
+        self.mem.l1().map(|cache| &cache.counters)
     }
 
     /// Responses the system still owes this SM (diagnostics).
-    pub fn outstanding_responses(&self) -> usize {
+    pub(crate) fn outstanding_responses(&self) -> usize {
         match &self.mem {
             MemModel::L1Shared(st) => st.outstanding_replies.len(),
             _ => 0,
@@ -1463,13 +1533,13 @@ impl<'a> SmCore<'a> {
 
     /// Instructions issued so far (monotonic; the system driver's
     /// progress signal).
-    pub fn instructions_issued(&self) -> u64 {
+    pub(crate) fn instructions_issued(&self) -> u64 {
         self.issued
     }
 
     /// Result snapshot; meaningful once [`Self::advance`] returned
     /// [`Advance::Done`].
-    pub fn result(&self) -> SmSimResult {
+    pub(crate) fn result(&self) -> SmSimResult {
         SmSimResult {
             instructions_issued: self.issued,
             cycles: self.t,
@@ -1478,18 +1548,19 @@ impl<'a> SmCore<'a> {
         }
     }
 
-    /// Admit blocks in launch order while the warp ceiling allows. A block
-    /// larger than the ceiling is admitted alone rather than deadlocking;
-    /// a block whose warps are ALL empty occupies no residency (it can
-    /// never retire through the issue path, so counting it would leak
-    /// warp slots and block later admissions forever).
+    /// Admit blocks in launch order while both modeled constraints allow: the
+    /// resident-warp ceiling and disjoint physical warp slots across concurrent
+    /// CTAs. A colliding later CTA waits for the earlier CTA to retire; reuse
+    /// after retirement is valid. A block whose warps are ALL empty occupies no
+    /// residency (it can never retire through the issue path, so counting it
+    /// would leak warp slots and block later admissions forever).
     fn admit_blocks(&mut self, t: u64) -> Result<(), IssueError> {
         while self.next_block < self.blocks.len() {
             let blk = &self.blocks[self.next_block];
             let live_warps = self.block_live_warps[self.next_block];
             let Some(next_resident_warps) = self.resident_warps.checked_add(live_warps) else {
-                // Any overflowing sum is above every u32 residency ceiling,
-                // so this block cannot join a non-empty wave.
+                // Construction proved this CTA fits alone, so an overflowing sum
+                // can only mean it must wait for the current wave to retire.
                 if self.resident_warps > 0 {
                     break;
                 }
@@ -1497,8 +1568,17 @@ impl<'a> SmCore<'a> {
                     counter: "resident warp",
                 });
             };
+            let pending_slots = blk
+                .warps
+                .iter()
+                .filter(|warp| !warp.insts.is_empty())
+                .map(|warp| warp.warp_slot)
+                .collect::<Vec<_>>();
+            let slots_collide = pending_slots
+                .iter()
+                .any(|slot| self.resident_warp_slots.contains(slot));
             if self.resident_warps > 0
-                && next_resident_warps > self.params.max_resident_warps_per_sm
+                && (next_resident_warps > self.params.max_resident_warps_per_sm || slots_collide)
             {
                 break;
             }
@@ -1529,7 +1609,13 @@ impl<'a> SmCore<'a> {
                 if w.insts.is_empty() {
                     continue;
                 }
-                let subcore = (w.warp_slot.rem_euclid(SUB_CORES as i32)) as usize;
+                let subcore =
+                    usize::try_from(w.warp_slot).map_err(|_| IssueError::WarpSlotOutOfRange {
+                        launch_index: blk.launch_index,
+                        warp_slot: w.warp_slot,
+                        arch: self.params.arch,
+                        physical_warp_slots: self.physical_warp_slots,
+                    })? % SUB_CORES;
                 let pos_in_subcore = checked_usize_counter_add(
                     "sub-core resident warp",
                     self.subcore_warps[subcore].len(),
@@ -1581,10 +1667,18 @@ impl<'a> SmCore<'a> {
                 self.subcore_warps[subcore].push(ix);
                 self.warps.push(warp);
             }
+            for &slot in &pending_slots {
+                let inserted = self.resident_warp_slots.insert(slot);
+                debug_assert!(
+                    inserted,
+                    "admission preflight rejected resident slot collisions"
+                );
+            }
             self.block_states.push(BlockState {
                 unfinished: admitted_warps,
                 waiting: 0,
                 warp_count: live_warps,
+                warp_slots: pending_slots.into_boxed_slice(),
                 first_warp,
                 admitted_warps,
             });
@@ -2134,7 +2228,7 @@ impl<'a> SmCore<'a> {
     /// Apply one memory response at its event time, then drain what it
     /// unblocked (fill waiters, MSHR retry queue — retries may emit new
     /// requests into `out`).
-    pub fn on_response(
+    pub(crate) fn on_response(
         &mut self,
         reply: ReplyTo,
         now: u64,
@@ -2201,7 +2295,7 @@ impl<'a> SmCore<'a> {
     /// caller cannot know them. The clock never crosses the cap, not even
     /// by skip-ahead: a response arriving at the cap may ready a warp
     /// EARLIER than the next known timer, and the clock is monotonic.
-    pub fn advance(
+    pub(crate) fn advance(
         &mut self,
         horizon: ReplayHorizon,
         out: &mut Vec<MemRequest>,
@@ -2759,6 +2853,14 @@ impl<'a> SmCore<'a> {
                 });
             }
             if unfinished == 0 {
+                for &warp_slot in &state.warp_slots {
+                    if !self.resident_warp_slots.contains(&warp_slot) {
+                        return Err(IssueError::ResidentWarpSlotMissing {
+                            launch_index: self.warps[state.first_warp].launch_index,
+                            warp_slot,
+                        });
+                    }
+                }
                 residency_released = checked_u32_counter_add(
                     "resident warp retirement",
                     residency_released,
@@ -2932,6 +3034,13 @@ impl<'a> SmCore<'a> {
                         .ok_or(IssueError::CounterUnderflow {
                             counter: "resident warp",
                         })?;
+                    for &warp_slot in &self.block_states[blk_ix].warp_slots {
+                        let removed = self.resident_warp_slots.remove(&warp_slot);
+                        debug_assert!(
+                            removed,
+                            "retirement preflight proved every resident slot present"
+                        );
+                    }
                     let admit_at = checked_cycle_add("block-wave admission", t, 1)?;
                     self.admit_blocks(admit_at)?;
                 }
@@ -3252,7 +3361,7 @@ fn lookup(
 /// [`SmCore`] + the event system). `l1_config`, when supplied, attaches
 /// a FRESH per-SM L1 (cold cache per kernel, NCU `--cache-control all`
 /// parity).
-pub fn simulate_sm(
+pub(crate) fn simulate_sm(
     blocks: &[BlockReplay],
     schedule: &FunctionSchedule,
     params: &IssueModelParams,
@@ -4216,6 +4325,127 @@ mod tests {
     }
 
     #[test]
+    fn low_level_replay_rejects_invalid_physical_warp_slots() {
+        let sched = schedule(vec![(0, slot(cb(1), OpClass::Other, "EXIT"))]);
+
+        let negative = vec![BlockReplay {
+            launch_index: 7,
+            warps: vec![warp(-1, vec![inst(0)])],
+        }];
+        assert!(matches!(
+            SmCore::new(&negative, &sched, &params(), SmMemMode::Flat),
+            Err(IssueError::WarpSlotOutOfRange {
+                launch_index: 7,
+                warp_slot: -1,
+                arch: ArchId::Sm86,
+                physical_warp_slots: 48,
+            })
+        ));
+
+        let out_of_range = vec![BlockReplay {
+            launch_index: 8,
+            warps: vec![warp(48, vec![inst(0)])],
+        }];
+        assert!(matches!(
+            SmCore::new(&out_of_range, &sched, &params(), SmMemMode::Flat),
+            Err(IssueError::WarpSlotOutOfRange {
+                launch_index: 8,
+                warp_slot: 48,
+                arch: ArchId::Sm86,
+                physical_warp_slots: 48,
+            })
+        ));
+
+        let duplicate = vec![BlockReplay {
+            launch_index: 9,
+            warps: vec![warp(3, vec![inst(0)]), warp(3, vec![inst(0)])],
+        }];
+        assert!(matches!(
+            SmCore::new(&duplicate, &sched, &params(), SmMemMode::Flat),
+            Err(IssueError::DuplicateWarpSlot {
+                launch_index: 9,
+                warp_slot: 3,
+            })
+        ));
+    }
+
+    #[test]
+    fn first_cta_must_fit_the_resident_warp_ceiling() {
+        let sched = schedule(vec![(0, slot(cb(1), OpClass::Other, "EXIT"))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 4,
+            warps: vec![warp(0, vec![inst(0)]), warp(1, vec![inst(0)])],
+        }];
+        let mut p = params();
+        p.max_resident_warps_per_sm = 1;
+        assert!(matches!(
+            SmCore::new(&blocks, &sched, &p, SmMemMode::Flat),
+            Err(IssueError::BlockResidencyLimitExceeded {
+                launch_index: 4,
+                live_warps: 2,
+                arch: ArchId::Sm86,
+                max_resident_warps: 1,
+            })
+        ));
+
+        let blocks = vec![BlockReplay {
+            launch_index: 5,
+            warps: vec![warp(0, vec![inst(0)])],
+        }];
+        p.max_resident_warps_per_sm = 0;
+        assert!(matches!(
+            SmCore::new(&blocks, &sched, &p, SmMemMode::Flat),
+            Err(IssueError::BlockResidencyLimitExceeded {
+                launch_index: 5,
+                live_warps: 1,
+                arch: ArchId::Sm86,
+                max_resident_warps: 0,
+            })
+        ));
+    }
+
+    #[test]
+    fn colliding_ctas_wait_then_reuse_the_physical_slot() {
+        let sched = schedule(vec![(0, slot(cb(1), OpClass::Other, "EXIT"))]);
+        let blocks = vec![
+            BlockReplay {
+                launch_index: 0,
+                warps: vec![warp(0, vec![inst(0)])],
+            },
+            BlockReplay {
+                launch_index: 1,
+                warps: vec![warp(0, vec![inst(0)])],
+            },
+        ];
+        let mut core = SmCore::new(&blocks, &sched, &params(), SmMemMode::Flat).unwrap();
+        assert_eq!(
+            core.next_block, 1,
+            "colliding CTA was admitted concurrently"
+        );
+        assert_eq!(core.block_states.len(), 1);
+        assert_eq!(core.resident_warp_slots, HashSet::from([0]));
+
+        let mut out = Vec::new();
+        assert_eq!(
+            core.advance(ReplayHorizon::Bounded(1), &mut out).unwrap(),
+            Advance::Idle { wake_at: Some(1) }
+        );
+        assert_eq!(
+            core.next_block, 2,
+            "retirement did not admit the waiting CTA"
+        );
+        assert_eq!(core.block_states.len(), 2);
+        assert_eq!(core.resident_warp_slots, HashSet::from([0]));
+
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut out).unwrap(),
+            Advance::Done
+        );
+        assert!(core.resident_warp_slots.is_empty());
+        assert_eq!(core.instructions_issued(), 2);
+    }
+
+    #[test]
     fn greedy_hold_then_youngest_switch() {
         // Two warps on the same sub-core (slots 0 and 4); everyone ready:
         // one issue per cycle on the shared sub-core → 4 cycles.
@@ -4370,6 +4600,36 @@ mod tests {
         assert!(!core.warps[0].done);
         assert_eq!(core.unfinished_warps, before_unfinished);
         assert_eq!(core.resident_warps, before_resident);
+    }
+
+    #[test]
+    fn missing_resident_slot_rejects_retirement_before_mutation() {
+        let sched = schedule(vec![(0, slot(cb(1), OpClass::Other, "EXIT"))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 11,
+            warps: vec![warp(2, vec![inst(0)])],
+        }];
+        let mut core = SmCore::new(&blocks, &sched, &params(), SmMemMode::Flat).unwrap();
+        assert!(core.resident_warp_slots.remove(&2));
+        let before_unfinished = core.unfinished_warps;
+        let before_resident = core.resident_warps;
+        let before_subcore = core.subcore_warps[2].clone();
+        let mut out = Vec::new();
+
+        assert!(matches!(
+            core.advance(ReplayHorizon::Unbounded, &mut out),
+            Err(IssueError::ResidentWarpSlotMissing {
+                launch_index: 11,
+                warp_slot: 2,
+            })
+        ));
+        assert!(out.is_empty());
+        assert_eq!(core.instructions_issued(), 0);
+        assert_eq!(core.warps[0].next, 0);
+        assert!(!core.warps[0].done);
+        assert_eq!(core.unfinished_warps, before_unfinished);
+        assert_eq!(core.resident_warps, before_resident);
+        assert_eq!(core.subcore_warps[2], before_subcore);
     }
 
     #[test]

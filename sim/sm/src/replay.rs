@@ -5,10 +5,12 @@
 //! manifest + per-record unique-sector expansion), and runs the issue
 //! model on every SM.
 //!
-//! Placement policy v0: the traced placement IS the model — each block
-//! runs on the SM the hardware ran it on, each warp on its physical warp
-//! slot. Traces without `sm_id` are a typed error (a synthetic placement
-//! model is a future knob, not a silent fallback).
+//! Placement policy v0: spatial placement is traced — each block runs on the
+//! SM the hardware ran it on, and each warp uses its observed physical slot.
+//! Traces without `sm_id` are a typed error (a synthetic placement model is a
+//! future knob, not a silent fallback). Exact temporal block co-residency is not
+//! present on the wire; launch-order overlap under the resident-warp ceiling and
+//! disjoint traced physical slots is explicitly typed as [`CoResidency::Modeled`].
 //!
 //! Memory-record classification (L1 mode): a global-class record takes
 //! the [`MemRole`] its pc's SIDECAR OPCODE was classified to at join
@@ -32,7 +34,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
-use sim_arch::ArchId;
+use sim_arch::{ArchId, Sku};
+use sim_calib::{ArchCard, CalibError};
 use sim_mem::{L1Config, L1CounterError, L1Counters, SectorExpansionError, SectorExpansionPlan};
 use sim_trace::lanes::LANE_INACTIVE_SENTINEL;
 use sim_trace::pb;
@@ -42,7 +45,7 @@ use sim_trace::reader::{
 };
 use sim_trace::{
     KernelLoc, LosslessFullProvenance, TraceDir, TraceError, TraceSamplingMethod,
-    WaveSegmentSubsetProvenance, block_launch_index, kernel_grid,
+    TraceSamplingSidecar, WaveSegmentSubsetProvenance, block_launch_index, kernel_grid,
 };
 
 use sim_mem::{
@@ -155,6 +158,55 @@ pub enum ReplayError {
         component: &'static str,
         expected: ArchId,
         got: ArchId,
+    },
+    #[error(
+        "trace binary_version {binary_version} is outside the unsigned architecture-version domain"
+    )]
+    TraceArchitectureVersionOutOfRange { binary_version: i32 },
+    #[error(
+        "trace binary_version {binary_version} is not an admitted deployment architecture: {source}"
+    )]
+    TraceArchitectureUnknown {
+        binary_version: u32,
+        #[source]
+        source: sim_arch::ArchError,
+    },
+    #[error("architecture-card placement authority is unavailable: {source}")]
+    ArchitectureCardPlacement {
+        #[source]
+        source: CalibError,
+    },
+    #[error(
+        "{path}: traced sm_id {sm_id} is outside architecture {arch} SKU {sku:?} range 0..{sm_count}"
+    )]
+    SmIdOutOfRange {
+        path: PathBuf,
+        sm_id: i32,
+        arch: ArchId,
+        sku: Sku,
+        sm_count: u32,
+    },
+    #[error(
+        "trace_sampling per_sm_slot_map block {launch_index} declares sm_id {sm_id} outside architecture {arch} SKU {sku:?} range 0..{sm_count}"
+    )]
+    SamplingSmIdOutOfRange {
+        launch_index: u64,
+        sm_id: u64,
+        arch: ArchId,
+        sku: Sku,
+        sm_count: u32,
+    },
+    #[error(
+        "trace_sampling per_sm_slot_map has no placement for observed launch block {launch_index}"
+    )]
+    SamplingPlacementMissing { launch_index: i64 },
+    #[error(
+        "launch block {launch_index} traced sm_id {traced_sm_id}, but trace_sampling per_sm_slot_map declares {declared_sm_id}"
+    )]
+    SamplingPlacementMismatch {
+        launch_index: i64,
+        traced_sm_id: i32,
+        declared_sm_id: u64,
     },
 
     #[error(
@@ -515,6 +567,10 @@ impl FullKernelReplayResult {
         self.configuration
     }
 
+    pub fn co_residency(&self) -> CoResidency {
+        self.configuration.co_residency()
+    }
+
     pub fn arch(&self) -> ArchId {
         self.replay.arch
     }
@@ -655,6 +711,105 @@ struct ExtractedKernel {
     coverage: ExtractedCoverage,
 }
 
+/// Card-derived spatial-placement authority. Only the architecture/SKU-local SM
+/// range crosses into replay; no label or target value is a simulator input.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct PlacementAuthority {
+    arch: ArchId,
+    sku: Sku,
+    sm_count: u32,
+}
+
+impl PlacementAuthority {
+    fn from_arch_card(card: &ArchCard, expected_arch: ArchId) -> Result<Self, ReplayError> {
+        let card_error = |source| ReplayError::ArchitectureCardPlacement { source };
+        let arch = card.arch_id().map_err(card_error)?;
+        require_replay_arch(expected_arch, arch, "architecture card")?;
+        let sku = card.sku_id().map_err(card_error)?;
+        let sm_count = card.sm_count().map_err(card_error)?;
+        Ok(Self {
+            arch,
+            sku,
+            sm_count,
+        })
+    }
+
+    fn require_traced_sm(self, path: &Path, sm_id: i32) -> Result<(), ReplayError> {
+        if sm_id < 0 || u32::try_from(sm_id).unwrap_or(u32::MAX) >= self.sm_count {
+            return Err(ReplayError::SmIdOutOfRange {
+                path: path.to_path_buf(),
+                sm_id,
+                arch: self.arch,
+                sku: self.sku,
+                sm_count: self.sm_count,
+            });
+        }
+        Ok(())
+    }
+
+    fn require_declared_sm(self, launch_index: u64, sm_id: u64) -> Result<(), ReplayError> {
+        if sm_id >= u64::from(self.sm_count) {
+            return Err(ReplayError::SamplingSmIdOutOfRange {
+                launch_index,
+                sm_id,
+                arch: self.arch,
+                sku: self.sku,
+                sm_count: self.sm_count,
+            });
+        }
+        Ok(())
+    }
+}
+
+#[cfg(test)]
+const fn sm86_test_placement() -> PlacementAuthority {
+    PlacementAuthority {
+        arch: ArchId::Sm86,
+        sku: Sku::Rtx3090Ti,
+        sm_count: 84,
+    }
+}
+
+#[cfg(test)]
+fn sm86_test_card() -> ArchCard {
+    ArchCard::parse(
+        Path::new("arch_profiles/cards/sm_86.json"),
+        include_bytes!("../../../arch_profiles/cards/sm_86.json"),
+    )
+    .expect("committed sm_86 architecture card parses")
+}
+
+fn validate_declared_sampling_sm_range(
+    declared: impl IntoIterator<Item = (u64, u64)>,
+    placement: PlacementAuthority,
+) -> Result<(), ReplayError> {
+    for (launch_index, sm_id) in declared {
+        placement.require_declared_sm(launch_index, sm_id)?;
+    }
+    Ok(())
+}
+
+fn validate_sampling_placement(
+    sidecar: &TraceSamplingSidecar,
+    traced_sm_by_launch_index: &BTreeMap<i64, i32>,
+    placement: PlacementAuthority,
+) -> Result<(), ReplayError> {
+    validate_declared_sampling_sm_range(sidecar.declared_block_placements(), placement)?;
+    for (&launch_index, &traced_sm_id) in traced_sm_by_launch_index {
+        let declared_sm_id = sidecar
+            .declared_sm_for_launch_index(launch_index)
+            .ok_or(ReplayError::SamplingPlacementMissing { launch_index })?;
+        if u64::try_from(traced_sm_id).ok() != Some(declared_sm_id) {
+            return Err(ReplayError::SamplingPlacementMismatch {
+                launch_index,
+                traced_sm_id,
+                declared_sm_id,
+            });
+        }
+    }
+    Ok(())
+}
+
 fn normalized_cluster_dim(
     kernel: &sim_trace::pb::Kernel,
     arch: ArchId,
@@ -719,6 +874,7 @@ fn extract_per_sm_blocks(
     td: &TraceDir,
     loc: &KernelLoc<'_>,
     schedule: &FunctionSchedule,
+    placement: PlacementAuthority,
     decode_sectors: bool,
 ) -> Result<ExtractedKernel, ReplayError> {
     let expected_fuid = schedule.function_unique_id;
@@ -746,6 +902,7 @@ fn extract_per_sm_blocks(
     // sm_id → blocks (launch index kept for in-SM ordering).
     let mut per_sm_blocks: BTreeMap<i32, Vec<BlockReplay>> = BTreeMap::new();
     let mut seen_indices: BTreeSet<i64> = BTreeSet::new();
+    let mut traced_sm_by_launch_index: BTreeMap<i64, i32> = BTreeMap::new();
     let mut records_seen: u64 = 0;
 
     for path in td.threadblock_paths(loc)? {
@@ -887,37 +1044,24 @@ fn extract_per_sm_blocks(
                 };
                 insts.push(ReplayInst { pc: inst.pc, kind });
             }
-            // Fail-closed traced placement: a warp that issued records
-            // without ever exposing its physical slot is a typed error,
-            // exactly like a block without sm_id (a synthetic placement
-            // model is a future knob, never a silent fallback). Warps
-            // with NO records carry no placement and issue nothing.
-            let has_records = !insts.is_empty();
-            let warp_slot = match warp_slot {
-                Some(slot) => slot,
-                None if !has_records => warp_id,
-                None => {
-                    return Err(ReplayError::WarpSlotMissing { path, warp_id });
-                }
+            // Fail-closed traced placement: every roster warp must expose its
+            // physical slot. An empty warp has no placement witness and cannot be
+            // used to prove either the architecture slot bound or modeled CTA
+            // co-residency.
+            let Some(warp_slot) = warp_slot else {
+                return Err(ReplayError::WarpSlotMissing { path, warp_id });
             };
-            // The fallback slot on a zero-record warp is only inert storage for
-            // `WarpReplay`; it is not traced placement evidence and must not
-            // collide with, or constrain, the observed slots of issuing warps.
-            if has_records {
-                if warp_slot < 0
-                    || u32::try_from(warp_slot).unwrap_or(u32::MAX) >= max_resident_warps
-                {
-                    return Err(ReplayError::WarpSlotOutOfRange {
-                        path,
-                        warp_id,
-                        warp_slot,
-                        arch: schedule.arch,
-                        max_resident_warps,
-                    });
-                }
-                if !seen_warp_slots.insert(warp_slot) {
-                    return Err(ReplayError::DuplicateWarpSlot { path, warp_slot });
-                }
+            if warp_slot < 0 || u32::try_from(warp_slot).unwrap_or(u32::MAX) >= max_resident_warps {
+                return Err(ReplayError::WarpSlotOutOfRange {
+                    path,
+                    warp_id,
+                    warp_slot,
+                    arch: schedule.arch,
+                    max_resident_warps,
+                });
+            }
+            if !seen_warp_slots.insert(warp_slot) {
+                return Err(ReplayError::DuplicateWarpSlot { path, warp_slot });
             }
             warps.push(WarpReplay {
                 warp_slot,
@@ -928,6 +1072,8 @@ fn extract_per_sm_blocks(
         let Some(sm) = block_sm else {
             return Err(ReplayError::SmIdMissing { path });
         };
+        placement.require_traced_sm(&path, sm)?;
+        traced_sm_by_launch_index.insert(launch_index, sm);
         per_sm_blocks.entry(sm).or_default().push(BlockReplay {
             launch_index,
             warps,
@@ -1013,6 +1159,7 @@ fn extract_per_sm_blocks(
                     })
                 }
             };
+            validate_sampling_placement(sc, &traced_sm_by_launch_index, placement)?;
             if records_seen != sc.captured_records() {
                 return Err(ReplayError::RecordsCapturedMismatch {
                     records_seen,
@@ -1038,8 +1185,11 @@ pub(crate) fn admit_launch_coverage(
     td: &TraceDir,
     loc: &KernelLoc<'_>,
     schedule: &FunctionSchedule,
+    arch_card: &ArchCard,
 ) -> Result<ExtractedCoverage, ReplayError> {
-    Ok(extract_per_sm_blocks(td, loc, schedule, false)?.coverage)
+    let placement = PlacementAuthority::from_arch_card(arch_card, schedule.arch)?;
+    require_trace_architecture(td, schedule.arch)?;
+    Ok(extract_per_sm_blocks(td, loc, schedule, placement, false)?.coverage)
 }
 
 /// Fold per-SM results into the kernel-level view, enforcing the
@@ -1180,12 +1330,24 @@ pub enum ReplayMemMode {
     },
 }
 
+/// Temporal CTA co-residency provenance. The current trace wire carries spatial
+/// `sm_id`/`warpid_sm` placement but no block start/end timestamps, so exact
+/// hardware co-residency cannot be claimed.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CoResidency {
+    /// Blocks are admitted in launch-index order under the modeled resident-warp
+    /// ceiling, and concurrent CTAs must use disjoint traced physical warp slots.
+    /// This is never a claim that the hardware used the same overlap.
+    Modeled,
+}
+
 /// Exact structural identity of every issue and memory-hierarchy parameter used
 /// for one replay. No digest or caller label substitutes for these values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ReplayConfiguration {
     issue_params: IssueModelParams,
     memory_mode: ReplayMemMode,
+    co_residency: CoResidency,
 }
 
 impl ReplayConfiguration {
@@ -1199,6 +1361,7 @@ impl ReplayConfiguration {
         Ok(Self {
             issue_params,
             memory_mode,
+            co_residency: CoResidency::Modeled,
         })
     }
 
@@ -1212,6 +1375,10 @@ impl ReplayConfiguration {
 
     pub fn memory_mode(&self) -> ReplayMemMode {
         self.memory_mode
+    }
+
+    pub fn co_residency(&self) -> CoResidency {
+        self.co_residency
     }
 }
 
@@ -1228,6 +1395,18 @@ fn require_replay_arch(
         });
     }
     Ok(())
+}
+
+fn require_trace_architecture(td: &TraceDir, expected: ArchId) -> Result<(), ReplayError> {
+    let binary_version = td.trace().binary_version;
+    let numeric = u32::try_from(binary_version)
+        .map_err(|_| ReplayError::TraceArchitectureVersionOutOfRange { binary_version })?;
+    let traced =
+        ArchId::from_numeric(numeric).map_err(|source| ReplayError::TraceArchitectureUnknown {
+            binary_version: numeric,
+            source,
+        })?;
+    require_replay_arch(expected, traced, "trace binary_version")
 }
 
 fn validate_replay_mode_architecture(arch: ArchId, mode: ReplayMemMode) -> Result<(), ReplayError> {
@@ -1260,17 +1439,20 @@ pub fn replay_kernel(
     td: &TraceDir,
     loc: &KernelLoc<'_>,
     schedules: &BTreeMap<i32, FunctionSchedule>,
+    arch_card: &ArchCard,
     params: &IssueModelParams,
     mode: ReplayMemMode,
 ) -> Result<KernelReplayOutcome, ReplayError> {
     let schedule = lookup_schedule(schedules, loc)?;
     let configuration = validate_replay_architecture(schedule, params, mode)?;
+    let placement = PlacementAuthority::from_arch_card(arch_card, schedule.arch)?;
+    require_trace_architecture(td, schedule.arch)?;
     let decode_sectors = !matches!(mode, ReplayMemMode::Flat);
     let ExtractedKernel {
         per_sm_blocks,
         records_seen,
         coverage,
-    } = extract_per_sm_blocks(td, loc, schedule, decode_sectors)?;
+    } = extract_per_sm_blocks(td, loc, schedule, placement, decode_sectors)?;
     let replay = match mode {
         ReplayMemMode::Flat | ReplayMemMode::L1Const(_) => {
             let l1_config = match mode {
@@ -5221,13 +5403,46 @@ mod replay_identity_tests {
             }
         ));
         assert!(matches!(
+            placement_result_with_roster(64, 0, &[(0, 0, 0), (2, 2, 1)], &[]).unwrap_err(),
+            ReplayError::WarpIdOutOfRange {
+                warp_id: 2,
+                expected_warps: 2,
+                ..
+            }
+        ));
+        assert!(matches!(
+            placement_result_with_roster(64, 0, &[(-1, -1, 0), (0, 0, 1)], &[]).unwrap_err(),
+            ReplayError::WarpIdOutOfRange {
+                warp_id: -1,
+                expected_warps: 2,
+                ..
+            }
+        ));
+        assert!(matches!(
+            placement_result_with_roster(32, 0, &[(0, 1, 0)], &[]).unwrap_err(),
+            ReplayError::WarpIdentityMismatch {
+                map_key: 0,
+                warp_id: 1,
+                ..
+            }
+        ));
+        assert!(matches!(
             placement_result(64, &[0, 0]).unwrap_err(),
             ReplayError::DuplicateWarpSlot { warp_slot: 0, .. }
         ));
-        assert!(
-            placement_result_with_empty_warps(64, &[0, 0], &[0]).is_ok(),
-            "a synthetic slot for an inert zero-record warp is not placement evidence"
-        );
+        assert!(matches!(
+            placement_result_with_empty_warps(64, &[0, 1], &[0]).unwrap_err(),
+            ReplayError::WarpSlotMissing { warp_id: 0, .. }
+        ));
+        assert!(matches!(
+            placement_result(32, &[-1]).unwrap_err(),
+            ReplayError::WarpSlotOutOfRange {
+                warp_slot: -1,
+                max_resident_warps: 48,
+                ..
+            }
+        ));
+        assert!(placement_result(32, &[47]).is_ok());
         assert!(matches!(
             placement_result(32, &[48]).unwrap_err(),
             ReplayError::WarpSlotOutOfRange {
@@ -5235,6 +5450,67 @@ mod replay_identity_tests {
                 max_resident_warps: 48,
                 ..
             }
+        ));
+        let oversized_slots = (0..49).collect::<Vec<i32>>();
+        assert!(matches!(
+            placement_result(1_568, &oversized_slots).unwrap_err(),
+            ReplayError::WarpSlotOutOfRange {
+                warp_id: 48,
+                warp_slot: 48,
+                max_resident_warps: 48,
+                ..
+            }
+        ));
+    }
+
+    #[test]
+    fn card_bounds_traced_and_declared_sm_placement() {
+        assert!(placement_result_on_sm(83).is_ok());
+        assert!(matches!(
+            placement_result_on_sm(84).unwrap_err(),
+            ReplayError::SmIdOutOfRange {
+                sm_id: 84,
+                arch: ArchId::Sm86,
+                sku: Sku::Rtx3090Ti,
+                sm_count: 84,
+                ..
+            }
+        ));
+        assert!(matches!(
+            placement_result_on_sm(-1).unwrap_err(),
+            ReplayError::SmIdOutOfRange {
+                sm_id: -1,
+                arch: ArchId::Sm86,
+                sku: Sku::Rtx3090Ti,
+                sm_count: 84,
+                ..
+            }
+        ));
+
+        // Launch 1 is absent from the observed projection. Range admission still
+        // traverses the complete declared map before any observed-side join.
+        assert!(matches!(
+            validate_declared_sampling_sm_range([(0, 0), (1, 84)], sm86_test_placement())
+                .unwrap_err(),
+            ReplayError::SamplingSmIdOutOfRange {
+                launch_index: 1,
+                sm_id: 84,
+                arch: ArchId::Sm86,
+                sku: Sku::Rtx3090Ti,
+                sm_count: 84,
+            }
+        ));
+    }
+
+    #[test]
+    fn architecture_card_must_match_the_replay_schedule() {
+        assert!(matches!(
+            PlacementAuthority::from_arch_card(&sm86_test_card(), ArchId::Sm120),
+            Err(ReplayError::ArchitectureMismatch {
+                component: "architecture card",
+                expected: ArchId::Sm120,
+                got: ArchId::Sm86,
+            })
         ));
     }
 
@@ -5325,7 +5601,7 @@ mod replay_identity_tests {
         };
         let trace = pb::Trace {
             name: "m".into(),
-            binary_version: 1,
+            binary_version: 86,
             nvbit_version: "1.8".into(),
             accelsim_version: 0,
             is_gathered_registers_values: false,
@@ -5362,7 +5638,12 @@ mod replay_identity_tests {
         std::fs::write(tb_dir.join("d_0_s_0_k_1_0,0,0.pb"), tb.encode_to_vec()).unwrap();
     }
 
-    fn rewrite_block_warp_slots(dir: &std::path::Path, block_x: i32, slots: &[i32]) {
+    fn rewrite_block_warp_roster(
+        dir: &std::path::Path,
+        block_x: i32,
+        sm_id: i32,
+        roster: &[(i32, i32, i32)],
+    ) {
         let trace_path = dir.join("dynamic_trace.pb");
         let mut trace = pb::Trace::decode(std::fs::read(&trace_path).unwrap().as_slice()).unwrap();
         trace
@@ -5380,26 +5661,24 @@ mod replay_identity_tests {
         });
         std::fs::write(trace_path, trace.encode_to_vec()).unwrap();
 
-        let warps = slots
+        let warps = roster
             .iter()
-            .enumerate()
-            .map(|(index, slot)| {
-                let warp_id = i32::try_from(index).unwrap();
+            .map(|&(map_key, embedded_id, slot)| {
                 let instruction = pb::Instruction {
                     pc: 0,
                     active_mask: Some(0),
                     predicate_mask: Some(0),
                     function_unique_id: 1,
-                    sm_id: Some(0),
-                    warpid_sm: Some(*slot),
-                    warpid_tb: Some(warp_id),
+                    sm_id: Some(sm_id),
+                    warpid_sm: Some(slot),
+                    warpid_tb: Some(map_key),
                     vpc: Some(0),
                     ..Default::default()
                 };
                 (
-                    warp_id,
+                    map_key,
                     pb::Warp {
-                        id: warp_id,
+                        id: embedded_id,
                         instructions: vec![instruction],
                     },
                 )
@@ -5416,14 +5695,15 @@ mod replay_identity_tests {
         .unwrap();
     }
 
-    fn placement_result_with_empty_warps(
+    fn placement_result_with_roster(
         block_x: i32,
-        slots: &[i32],
+        sm_id: i32,
+        roster: &[(i32, i32, i32)],
         empty_warps: &[i32],
     ) -> Result<ExtractedKernel, ReplayError> {
         let tmp = tempfile::tempdir().unwrap();
         write_trace_with(tmp.path(), malformed_global_inst(pb::MemoryOpClass::Global));
-        rewrite_block_warp_slots(tmp.path(), block_x, slots);
+        rewrite_block_warp_roster(tmp.path(), block_x, sm_id, roster);
         if !empty_warps.is_empty() {
             let block_path = tmp
                 .path()
@@ -5452,12 +5732,33 @@ mod replay_identity_tests {
                 function_name: "f".into(),
                 by_pc: StdMap::new(),
             },
+            sm86_test_placement(),
             false,
         )
     }
 
+    fn placement_result_with_empty_warps(
+        block_x: i32,
+        slots: &[i32],
+        empty_warps: &[i32],
+    ) -> Result<ExtractedKernel, ReplayError> {
+        let roster = slots
+            .iter()
+            .enumerate()
+            .map(|(index, &slot)| {
+                let warp_id = i32::try_from(index).unwrap();
+                (warp_id, warp_id, slot)
+            })
+            .collect::<Vec<_>>();
+        placement_result_with_roster(block_x, 0, &roster, empty_warps)
+    }
+
     fn placement_result(block_x: i32, slots: &[i32]) -> Result<ExtractedKernel, ReplayError> {
         placement_result_with_empty_warps(block_x, slots, &[])
+    }
+
+    fn placement_result_on_sm(sm_id: i32) -> Result<ExtractedKernel, ReplayError> {
+        placement_result_with_roster(32, sm_id, &[(0, 0, 0)], &[])
     }
 
     fn replay_error_with_schedule(inst: pb::Instruction, sched: FunctionSchedule) -> ReplayError {
@@ -5468,7 +5769,7 @@ mod replay_identity_tests {
             Err(error) => return error.into(),
         };
         let loc = td.kernels().next().unwrap();
-        extract_per_sm_blocks(&td, &loc, &sched, true).unwrap_err()
+        extract_per_sm_blocks(&td, &loc, &sched, sm86_test_placement(), true).unwrap_err()
     }
 
     fn replay_error(inst: pb::Instruction) -> ReplayError {
@@ -5729,7 +6030,7 @@ mod replay_identity_tests {
                 },
             )]),
         };
-        let extracted = extract_per_sm_blocks(&td, &loc, &sched, true)
+        let extracted = extract_per_sm_blocks(&td, &loc, &sched, sm86_test_placement(), true)
             .expect("legacy capability retains the pre-transition atomic fallback");
         assert_eq!(extracted.records_seen, 1);
         let warp = &extracted.per_sm_blocks[&0][0].warps[0];
@@ -5840,7 +6141,7 @@ mod completeness_tests {
         };
         let trace = pb::Trace {
             name: "m".into(),
-            binary_version: 1,
+            binary_version: 86,
             nvbit_version: "1.8".into(),
             accelsim_version: 0,
             is_gathered_registers_values: false,
@@ -5975,6 +6276,14 @@ mod completeness_tests {
         )
     }
 
+    fn declare_all_blocks_on_sm(sidecar: String, sm_id: u64, sidecar_sha256: &str) -> String {
+        let mut value: serde_json::Value = serde_json::from_str(&sidecar).unwrap();
+        value["wave_model"]["per_sm_resident_blocks"][0]["sm_id"] = serde_json::json!(sm_id);
+        value["per_sm_slot_map"][0]["sm_id"] = serde_json::json!(sm_id);
+        value["hashes"]["sidecar_sha256"] = serde_json::json!(sidecar_sha256);
+        serde_json::to_string(&value).unwrap()
+    }
+
     fn payload_bound_lossless_record_drop() -> String {
         let all_blocks: Vec<_> = (0..60).collect();
         bind_payload_sidecar(
@@ -6065,6 +6374,13 @@ mod completeness_tests {
         std::fs::write(path, trace.encode_to_vec()).unwrap();
     }
 
+    fn rewrite_trace_binary_version(dir: &std::path::Path, binary_version: i32) {
+        let path = dir.join("dynamic_trace.pb");
+        let mut trace = pb::Trace::decode(std::fs::read(&path).unwrap().as_slice()).unwrap();
+        trace.binary_version = binary_version;
+        std::fs::write(path, trace.encode_to_vec()).unwrap();
+    }
+
     fn extract(dir: &std::path::Path) -> Result<ExtractedKernel, ReplayError> {
         let td = TraceDir::open(dir)?;
         let loc = td.kernels().next().unwrap();
@@ -6075,7 +6391,7 @@ mod completeness_tests {
             function_name: "f".into(),
             by_pc: StdMap::new(),
         };
-        extract_per_sm_blocks(&td, &loc, &sched, true)
+        extract_per_sm_blocks(&td, &loc, &sched, sm86_test_placement(), true)
     }
 
     fn run(dir: &std::path::Path) -> Result<(), ReplayError> {
@@ -6111,7 +6427,50 @@ mod completeness_tests {
             read_barrier_latency: 1,
             max_resident_warps_per_sm: 48,
         };
-        replay_kernel(&td, &loc, &schedules, &params, ReplayMemMode::Flat)
+        replay_kernel(
+            &td,
+            &loc,
+            &schedules,
+            &sm86_test_card(),
+            &params,
+            ReplayMemMode::Flat,
+        )
+    }
+
+    #[test]
+    fn direct_replay_joins_trace_binary_version_to_schedule_architecture() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_grid_trace(tmp.path(), 1, 1, &[0], None);
+        rewrite_trace_binary_version(tmp.path(), 120);
+
+        assert!(matches!(
+            replay_outcome(tmp.path()),
+            Err(ReplayError::ArchitectureMismatch {
+                component: "trace binary_version",
+                expected: ArchId::Sm86,
+                got: ArchId::Sm120,
+            })
+        ));
+    }
+
+    #[test]
+    fn direct_replay_rejects_unknown_and_negative_trace_architectures() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_grid_trace(tmp.path(), 1, 1, &[0], None);
+        rewrite_trace_binary_version(tmp.path(), 999);
+        assert!(matches!(
+            replay_outcome(tmp.path()),
+            Err(ReplayError::TraceArchitectureUnknown {
+                binary_version: 999,
+                ..
+            })
+        ));
+
+        rewrite_trace_binary_version(tmp.path(), -1);
+        assert!(matches!(
+            replay_outcome(tmp.path()),
+            Err(ReplayError::TraceArchitectureVersionOutOfRange { binary_version: -1 })
+        ));
     }
 
     #[test]
@@ -6137,6 +6496,8 @@ mod completeness_tests {
         assert_eq!(full.coverage().blocks_observed(), 4);
         assert_eq!(full.configuration().arch(), ArchId::Sm86);
         assert_eq!(full.configuration().memory_mode(), ReplayMemMode::Flat);
+        assert_eq!(full.co_residency(), CoResidency::Modeled);
+        assert_eq!(full.configuration().co_residency(), CoResidency::Modeled);
         assert_eq!(full.records_seen(), 4);
         assert_eq!(full.instructions_issued(), 4);
     }
@@ -6200,9 +6561,50 @@ mod completeness_tests {
         };
         assert_eq!(sampled.coverage().blocks_observed(), 12);
         assert_eq!(sampled.configuration().memory_mode(), ReplayMemMode::Flat);
+        assert_eq!(sampled.configuration().co_residency(), CoResidency::Modeled);
         assert_eq!(sampled.counters().arch(), ArchId::Sm86);
         assert_eq!(sampled.counters().instructions_issued(), 12);
         assert_eq!(sampled.counters().records_seen(), 12);
+    }
+
+    #[test]
+    fn sampled_sidecar_placement_must_match_selected_payload() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sidecar = declare_all_blocks_on_sm(
+            payload_bound_subset(),
+            1,
+            "0bc32891a99b42b02f0b58a39a10e7c1c78d961467c9616bca6a2bb0486e2ef2",
+        );
+        write_grid_trace(tmp.path(), 60, 1, &SELECTED_BLOCKS, Some(&sidecar));
+        assert!(matches!(
+            run(tmp.path()).unwrap_err(),
+            ReplayError::SamplingPlacementMismatch {
+                launch_index: 0,
+                traced_sm_id: 0,
+                declared_sm_id: 1,
+            }
+        ));
+    }
+
+    #[test]
+    fn sampled_sidecar_sm_range_comes_from_the_architecture_card() {
+        let tmp = tempfile::tempdir().unwrap();
+        let sidecar = declare_all_blocks_on_sm(
+            payload_bound_subset(),
+            84,
+            "9e5191abfca5604b14fbad15bc2a8b74abcf0ea143c4e9bfa3b1cc8498837006",
+        );
+        write_grid_trace(tmp.path(), 60, 1, &SELECTED_BLOCKS, Some(&sidecar));
+        assert!(matches!(
+            run(tmp.path()).unwrap_err(),
+            ReplayError::SamplingSmIdOutOfRange {
+                launch_index: 0,
+                sm_id: 84,
+                arch: ArchId::Sm86,
+                sku: Sku::Rtx3090Ti,
+                sm_count: 84,
+            }
+        ));
     }
 
     #[test]
@@ -6241,6 +6643,26 @@ mod completeness_tests {
             provenance.sidecar_sha256(),
             "a1df48d770a14a29b0d60c5c7ec55c47eec50cf172f4fd92890caf765a810f01"
         );
+    }
+
+    #[test]
+    fn lossless_sidecar_placement_must_match_every_payload_block() {
+        let tmp = tempfile::tempdir().unwrap();
+        let all_blocks: Vec<i32> = (0..60).collect();
+        let sidecar = declare_all_blocks_on_sm(
+            payload_bound_lossless_full(),
+            1,
+            "b9197fbacad130e04d2f17c06e11c0a6194d568bfa2e9774d2726916ca1e600b",
+        );
+        write_grid_trace(tmp.path(), 60, 1, &all_blocks, Some(&sidecar));
+        assert!(matches!(
+            run(tmp.path()).unwrap_err(),
+            ReplayError::SamplingPlacementMismatch {
+                launch_index: 0,
+                traced_sm_id: 0,
+                declared_sm_id: 1,
+            }
+        ));
     }
 
     #[test]
@@ -6495,7 +6917,8 @@ mod completeness_tests {
             function_name: "f".into(),
             by_pc: StdMap::new(),
         };
-        let extracted = extract_per_sm_blocks(&td, &loc, &sched, true).unwrap();
+        let extracted =
+            extract_per_sm_blocks(&td, &loc, &sched, sm86_test_placement(), true).unwrap();
         assert_eq!(extracted.per_sm_blocks[&0][0].warps[0].insts[0].pc, 16);
 
         assert!(matches!(

@@ -1621,6 +1621,56 @@ struct PayloadFileManifestEntry {
     sha256: String,
 }
 
+/// Full-launch block-to-SM relation retained only after the sidecar parser proves
+/// that every launch index occurs exactly once. This is spatial placement; it is
+/// not evidence of temporal block co-residency.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ValidatedPerSmSlotMap {
+    sm_by_launch_index: Box<[u64]>,
+}
+
+impl ValidatedPerSmSlotMap {
+    fn retain(
+        roster_by_sm: &BTreeMap<u64, Vec<u64>>,
+        expected_blocks: u64,
+    ) -> Result<Self, String> {
+        let mut placement_by_launch_index = BTreeMap::new();
+        for (&sm_id, blocks) in roster_by_sm {
+            for &block_id in blocks {
+                if block_id >= expected_blocks {
+                    return Err(format!(
+                        "block {block_id} is outside retained per_sm_slot_map cardinality {expected_blocks}"
+                    ));
+                }
+                if placement_by_launch_index.insert(block_id, sm_id).is_some() {
+                    return Err(format!(
+                        "block {block_id} occurs more than once in retained per_sm_slot_map"
+                    ));
+                }
+            }
+        }
+        let actual_blocks = u64::try_from(placement_by_launch_index.len())
+            .map_err(|_| "per_sm_slot_map cardinality exceeds u64".to_string())?;
+        if actual_blocks != expected_blocks {
+            let first_missing = placement_by_launch_index
+                .keys()
+                .copied()
+                .zip(0_u64..)
+                .find_map(|(actual, expected)| (actual != expected).then_some(expected))
+                .unwrap_or(actual_blocks);
+            return Err(format!(
+                "launch index {first_missing} is absent from retained per_sm_slot_map"
+            ));
+        }
+        Ok(Self {
+            sm_by_launch_index: placement_by_launch_index
+                .into_values()
+                .collect::<Vec<_>>()
+                .into_boxed_slice(),
+        })
+    }
+}
+
 /// Reader-side view of a supported `<root>/trace_sampling.json` v2 sidecar.
 /// Fields are private so method-specific invariants can only be constructed by
 /// the closed parser. A sealed lossless declaration is not itself a
@@ -1640,6 +1690,7 @@ pub struct TraceSamplingSidecar {
     decompressed_payload_sha256: String,
     payload_file_manifest: BTreeMap<String, PayloadFileManifestEntry>,
     raw_payload_bytes: u64,
+    per_sm_slot_map: ValidatedPerSmSlotMap,
     method: TraceSamplingMethod,
 }
 
@@ -1686,6 +1737,25 @@ impl TraceSamplingSidecar {
 
     pub fn raw_payload_bytes(&self) -> u64 {
         self.raw_payload_bytes
+    }
+
+    /// Iterate the sidecar's validated full-launch spatial placement in launch
+    /// index order. The map says where each block was observed, not which blocks
+    /// were resident concurrently.
+    pub fn declared_block_placements(&self) -> impl ExactSizeIterator<Item = (u64, u64)> + '_ {
+        self.per_sm_slot_map
+            .sm_by_launch_index
+            .iter()
+            .copied()
+            .enumerate()
+            .map(|(launch_index, sm_id)| (launch_index as u64, sm_id))
+    }
+
+    pub fn declared_sm_for_launch_index(&self, launch_index: i64) -> Option<u64> {
+        usize::try_from(launch_index)
+            .ok()
+            .and_then(|index| self.per_sm_slot_map.sm_by_launch_index.get(index))
+            .copied()
     }
 
     pub fn method(&self) -> &TraceSamplingMethod {
@@ -1982,7 +2052,7 @@ fn validate_lossless_producer_contract(
     captured_grid: (u32, u32, u32),
     captured_block: (u32, u32, u32),
     selected_block_ids_sha256: &str,
-) -> Result<u64, String> {
+) -> Result<(u64, ValidatedPerSmSlotMap), String> {
     const LOSSLESS_FIELDS: &[&str] = &[
         "schema_version",
         "cell_id",
@@ -2385,7 +2455,10 @@ fn validate_lossless_producer_contract(
     if captured_records != expected_records {
         return Err("lossless records.captured must equal records.expected_full".to_string());
     }
-    Ok(raw_bytes)
+    Ok((
+        raw_bytes,
+        ValidatedPerSmSlotMap::retain(&roster_by_sm, grid_total)?,
+    ))
 }
 
 fn validate_subset_producer_contract(
@@ -2396,7 +2469,7 @@ fn validate_subset_producer_contract(
     selected_segments: &BTreeSet<u64>,
     certainty_segments: &BTreeSet<u64>,
     segment_blocks: &BTreeMap<u64, BTreeSet<u64>>,
-) -> Result<(), String> {
+) -> Result<ValidatedPerSmSlotMap, String> {
     let reason = string(required(root, "reason", "sampled subset")?, "reason")?;
     if ![
         "byte_budget",
@@ -2621,6 +2694,11 @@ fn validate_subset_producer_contract(
         let mut block_ids = Vec::with_capacity(values.len());
         for value in values {
             let block = unsigned(value, &format!("{context}.block_ids entry"))?;
+            if block > i64::MAX as u64 {
+                return Err(format!(
+                    "sampled block id {block} exceeds the replay index range"
+                ));
+            }
             if block_ids.last().is_some_and(|previous| *previous >= block) {
                 return Err(format!(
                     "{context}.block_ids must be strictly launch-index sorted"
@@ -3019,7 +3097,7 @@ fn validate_subset_producer_contract(
     if captured_records > expected_records {
         return Err("records.captured cannot exceed records.expected_full".to_string());
     }
-    Ok(())
+    ValidatedPerSmSlotMap::retain(&roster_by_sm, grid_total)
 }
 
 fn validate_sampling_payload_snapshot(
@@ -3324,7 +3402,7 @@ impl TraceSamplingSidecar {
             ));
         }
 
-        let (method, raw_payload_bytes) = match method {
+        let (method, raw_payload_bytes, per_sm_slot_map) = match method {
             "wave_segment_stratified_subset" => {
                 const SUBSET_REQUIRED: &[&str] = &[
                     "wave_model",
@@ -3471,7 +3549,7 @@ impl TraceSamplingSidecar {
                     ));
                 }
 
-                validate_subset_producer_contract(
+                let per_sm_slot_map = validate_subset_producer_contract(
                     root,
                     original_grid,
                     original_block,
@@ -3512,12 +3590,13 @@ impl TraceSamplingSidecar {
                         "bytes.raw",
                     )
                     .map_err(&malformed)?,
+                    per_sm_slot_map,
                 )
             }
             // A lossless-compression declaration is sealed and payload-bound,
             // but replay must still observe complete launch coverage itself.
             "lossless_compressed_full" => {
-                let raw = validate_lossless_producer_contract(
+                let (raw, per_sm_slot_map) = validate_lossless_producer_contract(
                     root,
                     original_grid,
                     original_block,
@@ -3532,6 +3611,7 @@ impl TraceSamplingSidecar {
                         sidecar_sha256,
                     }),
                     raw,
+                    per_sm_slot_map,
                 )
             }
             _ => {
@@ -3565,6 +3645,7 @@ impl TraceSamplingSidecar {
             decompressed_payload_sha256,
             payload_file_manifest,
             raw_payload_bytes,
+            per_sm_slot_map,
             method,
         })
     }
@@ -5697,6 +5778,13 @@ mod sampling_sidecar_tests {
         assert_eq!(sc.decompressed_payload_sha256(), "a".repeat(64));
         assert_eq!(sc.raw_payload_bytes(), 1000);
         assert_eq!(sc.payload_file_manifest.len(), 1);
+        assert!(
+            sc.declared_block_placements()
+                .eq((0..60).map(|block| (block, 0)))
+        );
+        assert_eq!(sc.declared_sm_for_launch_index(0), Some(0));
+        assert_eq!(sc.declared_sm_for_launch_index(59), Some(0));
+        assert_eq!(sc.declared_sm_for_launch_index(60), None);
         assert_eq!(
             sc.payload_file_manifest["threadblocks/device_0/stream_0/kernel_1/b_0.pb"].size_bytes,
             1000
@@ -5717,6 +5805,47 @@ mod sampling_sidecar_tests {
         assert_eq!(
             provenance.sidecar_sha256(),
             "12b7fcf51dd0d4277c9268b7eda67bca6dec410d36953098f181ef0f7ce7a907"
+        );
+    }
+
+    #[test]
+    fn validated_sidecar_retains_nonzero_spatial_placement() {
+        let mut value = subset_value();
+        value["wave_model"]["per_sm_resident_blocks"][0]["sm_id"] = serde_json::json!(83);
+        value["per_sm_slot_map"][0]["sm_id"] = serde_json::json!(83);
+        reseal(&mut value);
+
+        let sidecar = load_json(serde_json::to_vec(&value).unwrap()).unwrap();
+        assert!(
+            sidecar
+                .declared_block_placements()
+                .eq((0..60).map(|block| (block, 83)))
+        );
+        assert_eq!(sidecar.declared_sm_for_launch_index(8), Some(83));
+        assert_eq!(sidecar.declared_sm_for_launch_index(-1), None);
+    }
+
+    #[test]
+    fn retained_slot_map_rejects_duplicate_launch_indices() {
+        let roster = BTreeMap::from([(0, vec![0]), (1, vec![0])]);
+        let error = ValidatedPerSmSlotMap::retain(&roster, 2).unwrap_err();
+        assert!(error.contains("block 0 occurs more than once"), "{error}");
+    }
+
+    #[test]
+    fn retained_slot_map_rejects_missing_launch_indices() {
+        let roster = BTreeMap::from([(0, vec![0]), (1, vec![2])]);
+        let error = ValidatedPerSmSlotMap::retain(&roster, 3).unwrap_err();
+        assert!(error.contains("launch index 1 is absent"), "{error}");
+    }
+
+    #[test]
+    fn retained_slot_map_rejects_out_of_cardinality_launch_indices() {
+        let roster = BTreeMap::from([(0, vec![0, 3])]);
+        let error = ValidatedPerSmSlotMap::retain(&roster, 3).unwrap_err();
+        assert!(
+            error.contains("block 3 is outside retained per_sm_slot_map cardinality 3"),
+            "{error}"
         );
     }
 
@@ -5840,6 +5969,11 @@ mod sampling_sidecar_tests {
         assert_eq!(sc.captured_records(), 60);
         assert_eq!(sc.decompressed_payload_sha256(), "a".repeat(64));
         assert_eq!(sc.raw_payload_bytes(), 1000);
+        assert!(
+            sc.declared_block_placements()
+                .eq((0..60).map(|block| (block, 0)))
+        );
+        assert_eq!(sc.declared_sm_for_launch_index(31), Some(0));
         let TraceSamplingMethod::LosslessCompressedFull(provenance) = sc.method() else {
             panic!("lossless sidecar lost its method-specific provenance");
         };

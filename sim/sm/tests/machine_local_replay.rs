@@ -28,7 +28,7 @@ use sim_arch::BuildArch;
 use sim_calib::ArchCard;
 use sim_mem::{L2Config, PchaseCard};
 use sim_sm::{
-    ControlSidecar, FullCoverageSource, FullLaunchSetDeclaration, IssueModelParams,
+    CoResidency, ControlSidecar, FullCoverageSource, FullLaunchSetDeclaration, IssueModelParams,
     KernelReplayOutcome, ReplayConfiguration, ReplayLaunchCoverageBinding, ReplayMemMode,
     aggregate_full_launch_set, build_schedules, replay_kernel,
 };
@@ -161,6 +161,9 @@ fn replay_configuration_json(configuration: ReplayConfiguration) -> serde_json::
             })
         }
     };
+    let co_residency = match configuration.co_residency() {
+        CoResidency::Modeled => "modeled",
+    };
     serde_json::json!({
         "issue": {
             "arch": issue.arch.token(),
@@ -173,7 +176,28 @@ fn replay_configuration_json(configuration: ReplayConfiguration) -> serde_json::
             "max_resident_warps_per_sm": issue.max_resident_warps_per_sm,
         },
         "memory": memory,
+        "co_residency": co_residency,
     })
+}
+
+#[test]
+fn serialized_replay_configuration_marks_co_residency_modeled() {
+    let issue = IssueModelParams {
+        arch: sim_arch::ArchId::Sm86,
+        l1_hit_latency: 1,
+        l1_miss_latency: 2,
+        global_flat_latency: 3,
+        shared_write_barrier_latency: 4,
+        non_memory_write_barrier_latency: 5,
+        read_barrier_latency: 6,
+        max_resident_warps_per_sm: 48,
+    };
+    let configuration = ReplayConfiguration::checked(issue, ReplayMemMode::Flat).unwrap();
+    assert_eq!(configuration.co_residency(), CoResidency::Modeled);
+    assert_eq!(
+        replay_configuration_json(configuration)["co_residency"],
+        serde_json::json!("modeled")
+    );
 }
 
 fn coverage_json(coverage: &sim_sm::FullLaunchCoverage) -> serde_json::Value {
@@ -391,7 +415,7 @@ fn real_trace_replays_under_issue_model() {
     );
     let mut full_results = Vec::new();
     for loc in locations {
-        let outcome = replay_kernel(&td, &loc, &schedules, &params, mode).expect("replay");
+        let outcome = replay_kernel(&td, &loc, &schedules, &card, &params, mode).expect("replay");
         let full = match outcome {
             KernelReplayOutcome::Full(full) => full,
             KernelReplayOutcome::SampledObserved(sampled) => panic!(
