@@ -1636,8 +1636,8 @@ fn validate_lossless_producer_contract(
         required(records, "captured", "records")?,
         "records.captured",
     )?;
-    if captured_records > expected_records {
-        return Err("records.captured cannot exceed records.expected_full".to_string());
+    if captured_records != expected_records {
+        return Err("lossless records.captured must equal records.expected_full".to_string());
     }
     Ok(raw_bytes)
 }
@@ -2630,6 +2630,12 @@ impl TraceSamplingSidecar {
             .as_str()
             .expect("hash string validated above")
             .to_string();
+        let expected_seal = canonical_sidecar_sha256(&parsed).map_err(&malformed)?;
+        if sidecar_sha256 != expected_seal {
+            return Err(malformed(
+                "hashes.sidecar_sha256 does not match Python-canonical sidecar".to_string(),
+            ));
+        }
 
         let (method, raw_payload_bytes) = match method {
             "wave_segment_stratified_subset" => {
@@ -2802,12 +2808,6 @@ impl TraceSamplingSidecar {
                     ));
                 }
 
-                let expected_seal = canonical_sidecar_sha256(&parsed).map_err(&malformed)?;
-                if sidecar_sha256 != expected_seal {
-                    return Err(malformed(
-                        "hashes.sidecar_sha256 does not match Python-canonical sidecar".to_string(),
-                    ));
-                }
                 (
                     TraceSamplingMethod::WaveSegmentStratifiedSubset(WaveSegmentSubsetProvenance {
                         selected_block_ids: blocks.into_iter().map(|value| value as i64).collect(),
@@ -2839,12 +2839,6 @@ impl TraceSamplingSidecar {
                     &selected_block_ids_sha256,
                 )
                 .map_err(&malformed)?;
-                let expected_seal = canonical_sidecar_sha256(&parsed).map_err(&malformed)?;
-                if sidecar_sha256 != expected_seal {
-                    return Err(malformed(
-                        "hashes.sidecar_sha256 does not match Python-canonical sidecar".to_string(),
-                    ));
-                }
                 (
                     TraceSamplingMethod::LosslessCompressedFull(LosslessFullProvenance {
                         selected_block_ids_sha256,
@@ -4547,7 +4541,7 @@ mod sampling_sidecar_tests {
     // tautology in the canonicalization test.
     const PYTHON_SEALED_SUBSET: &str = r#"{"schema_version":2,"cell_id":"c","kernel":{"mangled_name":"_Z1kv","args_hash":"ab"},"method":"wave_segment_stratified_subset","reason":"byte_budget","shape":{"original_grid":{"x":60,"y":1,"z":1},"original_block":{"x":32,"y":1,"z":1},"captured_grid":{"x":60,"y":1,"z":1},"captured_block":{"x":32,"y":1,"z":1},"reduced_shape_variant":null},"gates":{"coop":false,"wave_count":60,"n_measured_waves":40,"tail_measured_waves":2,"atomic_density":0.0,"hotline_share":0.0,"skew_top1pct_share":0.0,"gini":0.0,"per_sm_block_count_cv":0.0,"n_phases":1,"skew_heavy_block_count":1,"certainty_bytes":100,"max_trace_bytes":2000,"certainty_budget_exceeded":false,"verdict":"subset_admissible"},"wave_model":{"reconstruction":"launch_index","per_sm_resident_blocks":[{"sm_id":0,"resident_blocks":1}],"n_waves":60,"segment_len":3,"ghost_depth":1},"per_sm_slot_map":[{"sm_id":0,"block_ids":[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59]}],"rng":{"algo":"pcg64","seed":0},"tracer":{"version":5,"features":{"atomic_addr":true,"ldgsts_addr":true},"stats_pass_version":2},"bytes":{"raw":1000,"compressed":200,"codec":"zstd","level":19,"long":27,"dict_id":null},"records":{"expected_full":6000,"captured":12},"hashes":{"selected_block_ids_sha256":"84b7ed43903cca6302ed15cf78ff507c45e575f16d7d5c12c975c5727edc37cf","decompressed_payload_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","per_block_raw_sha256_manifest":"trace-payload-file-manifest-v1\nthreadblocks/device_0/stream_0/kernel_1/b_0.pb\t1000\taaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n","sidecar_sha256":"12b7fcf51dd0d4277c9268b7eda67bca6dec410d36953098f181ef0f7ce7a907"},"label_pairing":"full_shape_label","segments":[{"id":0,"block_ids":[0,1,2]},{"id":19,"block_ids":[57,58,59]},{"id":1,"block_ids":[3,4,5]},{"id":2,"block_ids":[6,7,8]}],"selected_segment_ids":[0,19,1,2],"certainty_segments":[0,19],"force_include_blocks":[0],"strata":[{"id":0,"phase_id":0,"launch_tercile":0,"segment_ids":[1,2],"N_h":6,"n_h":2,"pi":0.3333333333333333,"sector_stddev":2.0,"neyman_weight":12.0}],"selection_reconciliation":{"status":"fixed_point","attempts":1,"max_attempts":3,"capture_stats_sha256":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"},"selection_budget":{"max_trace_bytes":2000,"basis":"raw_threadblock_pb","certainty_fraction_numerator":2,"certainty_fraction_denominator":5,"certainty_bytes":100},"selection_auxiliary":{"name":"l2_sector_transactions_32b","sector_bytes":32,"scope":"pass2_all_blocks","expected_full":400,"selected":200},"estimator":{"mode":"weighted_full_shape_estimate","targets":["sectors"],"not_recoverable":["cycles"],"convergence":{"status":"converged"}}}"#;
 
-    const PYTHON_SEALED_LOSSLESS: &str = r#"{"schema_version":2,"cell_id":"c","kernel":{"mangled_name":"_Z1kv","args_hash":"deadbeef"},"method":"lossless_compressed_full","reason":"byte_budget","shape":{"original_grid":{"x":60,"y":1,"z":1},"original_block":{"x":32,"y":1,"z":1},"captured_grid":{"x":60,"y":1,"z":1},"captured_block":{"x":32,"y":1,"z":1},"reduced_shape_variant":null},"gates":{"coop":false,"wave_count":60,"n_measured_waves":40,"tail_measured_waves":2,"atomic_density":0.0,"hotline_share":0.0,"skew_top1pct_share":0.0,"gini":0.0,"per_sm_block_count_cv":0.0,"n_phases":1,"skew_heavy_block_count":1,"certainty_bytes":null,"max_trace_bytes":null,"certainty_budget_exceeded":false,"verdict":"subset_admissible"},"wave_model":{"reconstruction":"launch_index","per_sm_resident_blocks":[{"sm_id":0,"resident_blocks":1}],"n_waves":60,"segment_len":3,"ghost_depth":1},"per_sm_slot_map":[{"sm_id":0,"block_ids":[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59]}],"rng":{"algo":"pcg64","seed":0},"tracer":{"version":5,"features":{"atomic_addr":true,"ldgsts_addr":true},"stats_pass_version":2},"bytes":{"raw":1000,"compressed":200,"codec":"zstd","level":19,"long":27,"dict_id":null},"records":{"expected_full":6000,"captured":60},"hashes":{"selected_block_ids_sha256":"3f3ffcf42accae1591be118baf57efb9b8d7c78028dc566674c809f210ad796a","decompressed_payload_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","per_block_raw_sha256_manifest":"trace-payload-file-manifest-v1\nthreadblocks/device_0/stream_0/kernel_1/b_0.pb\t1000\taaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n","sidecar_sha256":"e6be7bb4738e3f831213a6f2eea33a0f9198909b21a5a39ce24cacf8a9e53fa9"},"label_pairing":"full_shape_label"}"#;
+    const PYTHON_SEALED_LOSSLESS: &str = r#"{"schema_version":2,"cell_id":"c","kernel":{"mangled_name":"_Z1kv","args_hash":"deadbeef"},"method":"lossless_compressed_full","reason":"byte_budget","shape":{"original_grid":{"x":60,"y":1,"z":1},"original_block":{"x":32,"y":1,"z":1},"captured_grid":{"x":60,"y":1,"z":1},"captured_block":{"x":32,"y":1,"z":1},"reduced_shape_variant":null},"gates":{"coop":false,"wave_count":60,"n_measured_waves":40,"tail_measured_waves":2,"atomic_density":0.0,"hotline_share":0.0,"skew_top1pct_share":0.0,"gini":0.0,"per_sm_block_count_cv":0.0,"n_phases":1,"skew_heavy_block_count":1,"certainty_bytes":null,"max_trace_bytes":null,"certainty_budget_exceeded":false,"verdict":"subset_admissible"},"wave_model":{"reconstruction":"launch_index","per_sm_resident_blocks":[{"sm_id":0,"resident_blocks":1}],"n_waves":60,"segment_len":3,"ghost_depth":1},"per_sm_slot_map":[{"sm_id":0,"block_ids":[0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59]}],"rng":{"algo":"pcg64","seed":0},"tracer":{"version":5,"features":{"atomic_addr":true,"ldgsts_addr":true},"stats_pass_version":2},"bytes":{"raw":1000,"compressed":200,"codec":"zstd","level":19,"long":27,"dict_id":null},"records":{"expected_full":60,"captured":60},"hashes":{"selected_block_ids_sha256":"3f3ffcf42accae1591be118baf57efb9b8d7c78028dc566674c809f210ad796a","decompressed_payload_sha256":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","per_block_raw_sha256_manifest":"trace-payload-file-manifest-v1\nthreadblocks/device_0/stream_0/kernel_1/b_0.pb\t1000\taaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n","sidecar_sha256":"3c8a94decd2c56db2c72b25aa9b163fcc9d2a1dec13bf075546378c3ec874869"},"label_pairing":"full_shape_label"}"#;
 
     fn subset_value() -> serde_json::Value {
         serde_json::from_str(PYTHON_SEALED_SUBSET).unwrap()
@@ -4743,7 +4737,7 @@ mod sampling_sidecar_tests {
         assert_eq!(sc.original_block(), (32, 1, 1));
         assert_eq!(sc.captured_grid(), (60, 1, 1));
         assert_eq!(sc.captured_block(), (32, 1, 1));
-        assert_eq!(sc.expected_full_records(), 6000);
+        assert_eq!(sc.expected_full_records(), 60);
         assert_eq!(sc.captured_records(), 60);
         assert_eq!(sc.decompressed_payload_sha256(), "a".repeat(64));
         assert_eq!(sc.raw_payload_bytes(), 1000);
@@ -4756,16 +4750,23 @@ mod sampling_sidecar_tests {
         );
         assert_eq!(
             provenance.sidecar_sha256(),
-            "e6be7bb4738e3f831213a6f2eea33a0f9198909b21a5a39ce24cacf8a9e53fa9"
+            "3c8a94decd2c56db2c72b25aa9b163fcc9d2a1dec13bf075546378c3ec874869"
         );
     }
 
     #[test]
-    fn lossless_rejects_stale_seal_and_freshly_sealed_wrong_pairing() {
+    fn lossless_rejects_stale_seal_fresh_record_drop_and_wrong_pairing() {
         let mut stale = lossless_value();
+        stale["records"]["expected_full"] = serde_json::json!(59);
         stale["records"]["captured"] = serde_json::json!(59);
         let err = load_json(serde_json::to_vec(&stale).unwrap()).unwrap_err();
         assert!(err.to_string().contains("sidecar_sha256"));
+
+        let mut record_drop = lossless_value();
+        record_drop["records"]["captured"] = serde_json::json!(59);
+        reseal(&mut record_drop);
+        let err = load_json(serde_json::to_vec(&record_drop).unwrap()).unwrap_err();
+        assert!(err.to_string().contains("must equal records.expected_full"));
 
         let mut wrong_pairing = lossless_value();
         wrong_pairing["label_pairing"] = serde_json::json!("matched_reduced_shape_label");

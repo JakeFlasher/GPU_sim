@@ -75,7 +75,7 @@ def _compressed(**over):
     s = _stats()
     sc = build_sidecar(
         cell_id="c", kernel_name="_Z1kv", args_hash="deadbeef", stats=s,
-        gate=_Gate(), compression=_Comp(), records_captured=200,
+        gate=_Gate(), compression=_Comp(), records_captured=s.total_records,
         tracer_version=5, stats_pass_version=2,
         method="lossless_compressed_full", reason="byte_budget")
     sc.update(over)
@@ -160,6 +160,25 @@ def test_lossless_sidecar_requires_rust_replay_fields(field):
     del sidecar[field]
     _reseal(sidecar)
     assert not is_valid(sidecar)
+
+
+def test_lossless_sidecar_requires_exact_record_coverage():
+    sidecar = _compressed()
+    sidecar["records"]["captured"] -= 1
+    _reseal(sidecar)
+    with pytest.raises(SidecarSemanticError, match="records.captured =="):
+        validate_sidecar(sidecar)
+
+
+def test_subset_sidecar_retains_partial_record_coverage():
+    sidecar = _subset()
+    assert sidecar["records"]["captured"] < sidecar["records"]["expected_full"]
+    validate_sidecar(sidecar)
+
+    sidecar["records"]["captured"] = sidecar["records"]["expected_full"] + 1
+    _reseal(sidecar)
+    with pytest.raises(SidecarSemanticError, match="cannot exceed"):
+        validate_sidecar(sidecar)
 
 
 def test_compressed_without_payload_hash_is_rejected():

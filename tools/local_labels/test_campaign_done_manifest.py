@@ -199,7 +199,7 @@ def _admitted_route_case(tmp_path: Path) -> dict:
     cell_dir.mkdir(parents=True)
     gate = br.classify(stats, sample_size=br.MIN_SEGMENTS)
 
-    def sidecar(comp, _block_manifest):
+    def sidecar(comp):
         return br.build_sidecar(
             cell_id="cell", kernel_name=stats.kernel_name,
             args_hash=args_hash, stats=stats, gate=gate, compression=comp,

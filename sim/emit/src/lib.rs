@@ -234,8 +234,8 @@ pub enum Unit {
     Pct,
 }
 
-/// The numeric shape a descriptor promises to emit — asserted against the
-/// returned [`MetricValue`] so a wrong-variant slip fails loudly, and pinned
+/// The numeric shape a descriptor promises to emit — checked against the
+/// returned [`MetricValue`] with a typed error, and pinned
 /// against the registry `metric_class`/`valid_max` by the lockstep test.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MetricKind {
@@ -398,6 +398,14 @@ pub enum EmitError {
     CounterInvariant {
         key: &'static str,
         detail: &'static str,
+    },
+    #[error(
+        "metric {key}: emitted value kind {returned:?} does not match descriptor kind {declared:?}"
+    )]
+    DescriptorValueKindMismatch {
+        key: &'static str,
+        declared: MetricKind,
+        returned: MetricKind,
     },
     #[error("{counter} has no bound architecture provenance")]
     CounterArchitectureUnbound { counter: &'static str },
@@ -634,13 +642,30 @@ pub const DESCRIPTORS: &[MetricDescriptor] = &[
     },
 ];
 
-/// Assert an emit fn returned the numeric shape its descriptor promised.
-fn shape_matches(kind: MetricKind, value: &MetricValue) -> bool {
-    matches!(
-        (kind, value),
-        (MetricKind::Count, MetricValue::Exact(_))
-            | (MetricKind::Fraction, MetricValue::Fraction { .. })
-    )
+/// Return the numeric shape an emit fn actually produced.
+fn metric_value_kind(value: &MetricValue) -> MetricKind {
+    match value {
+        MetricValue::Exact(_) => MetricKind::Count,
+        MetricValue::Fraction { .. } => MetricKind::Fraction,
+    }
+}
+
+fn validate_descriptor_value_kind(
+    descriptor: &MetricDescriptor,
+    outcome: &EmitOutcome,
+) -> Result<(), EmitError> {
+    let EmitOutcome::Predicted(value) = outcome else {
+        return Ok(());
+    };
+    let returned = metric_value_kind(value);
+    if returned != descriptor.kind {
+        return Err(EmitError::DescriptorValueKindMismatch {
+            key: descriptor.key,
+            declared: descriptor.kind,
+            returned,
+        });
+    }
+    Ok(())
 }
 
 fn emit_snapshot(snap: &CounterSnapshot) -> Result<Vec<MetricPrediction>, EmitError> {
@@ -652,13 +677,7 @@ fn emit_snapshot(snap: &CounterSnapshot) -> Result<Vec<MetricPrediction>, EmitEr
         } else {
             EmitOutcome::Unavailable(Unavailable::ArchitectureUnsupported { arch: snap.arch })
         };
-        if let EmitOutcome::Predicted(v) = &outcome {
-            debug_assert!(
-                shape_matches(d.kind, v),
-                "emit fn for {} returned a value shape inconsistent with its declared kind",
-                d.key
-            );
-        }
+        validate_descriptor_value_kind(d, &outcome)?;
         out.push(MetricPrediction {
             arch: snap.arch,
             key: d.key,
@@ -751,6 +770,23 @@ mod tests {
             l2_by_source: None,
             dram: dram.as_ref(),
         })
+    }
+
+    #[test]
+    fn descriptor_value_kind_mismatch_is_typed_in_all_build_profiles() {
+        let outcome = EmitOutcome::Predicted(MetricValue::Fraction {
+            value: Some(0.5),
+            numerator: 1,
+            denominator: 2,
+        });
+        assert_eq!(
+            validate_descriptor_value_kind(&DESCRIPTORS[0], &outcome),
+            Err(EmitError::DescriptorValueKindMismatch {
+                key: "smsp_inst_executed_sum",
+                declared: MetricKind::Count,
+                returned: MetricKind::Fraction,
+            })
+        );
     }
 
     #[test]

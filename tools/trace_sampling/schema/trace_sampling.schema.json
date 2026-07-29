@@ -272,6 +272,7 @@
       }
     },
     "records": {
+      "description": "Lossless-compressed full sidecars require captured == expected_full in semantic validation; sampled subsets may declare a smaller captured count.",
       "type": "object", "additionalProperties": false,
       "required": ["expected_full", "captured"],
       "properties": {

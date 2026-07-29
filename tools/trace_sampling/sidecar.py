@@ -261,6 +261,18 @@ def _validate_subset_semantics(sidecar: dict) -> None:
         _fail("selection auxiliary selected exceeds expected_full")
 
 
+def _validate_record_coverage(sidecar: dict) -> None:
+    records = sidecar["records"]
+    expected = records["expected_full"]
+    captured = records["captured"]
+    if captured > expected:
+        _fail("records.captured cannot exceed records.expected_full")
+    if sidecar["method"] == "lossless_compressed_full" and captured != expected:
+        _fail(
+            "lossless_compressed_full requires "
+            "records.captured == records.expected_full")
+
+
 def _validate_payload_manifest(sidecar: dict) -> None:
     manifest = sidecar["hashes"].get("per_block_raw_sha256_manifest")
     if manifest is None:
@@ -282,6 +294,7 @@ def _validate_payload_manifest(sidecar: dict) -> None:
 
 def _validate_semantics(sidecar: dict) -> None:
     _validate_gate_budget(sidecar["gates"])
+    _validate_record_coverage(sidecar)
     _validate_payload_manifest(sidecar)
     if sidecar["method"] == "wave_segment_stratified_subset":
         _validate_subset_semantics(sidecar)
