@@ -2,7 +2,7 @@
 //! timing is driven by the compiler's own dependence encoding — the SASS
 //! control bits (stall counts, dependence-barrier set/wait, yield) — not by
 //! simulated scoreboards. This is the 13–17% cycles-MAPE lever the UPC
-//! MICRO'25 modern-core work identified [F6].
+//! MICRO'25 modern-core work identified `F6`.
 //!
 //! Model shape:
 //! - 4 sub-cores (SMSPs) per SM; a warp lives on sub-core
