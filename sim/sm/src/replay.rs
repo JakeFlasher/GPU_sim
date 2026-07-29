@@ -41,7 +41,8 @@ use sim_trace::reader::{
     check_preflighted_allocation_identity, preflight_memory_access,
 };
 use sim_trace::{
-    KernelLoc, TraceDir, TraceError, TraceSamplingMethod, block_launch_index, kernel_grid,
+    KernelLoc, LosslessFullProvenance, TraceDir, TraceError, TraceSamplingMethod,
+    WaveSegmentSubsetProvenance, block_launch_index, kernel_grid,
 };
 
 use sim_mem::{
@@ -296,34 +297,272 @@ pub enum ReplayError {
     },
 }
 
-/// Replay outcome for one kernel launch.
+/// Launch identity and shape bound into a verified replay-coverage witness.
+/// Construction is private to the extraction completeness gate.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ReplayLaunchCoverageBinding {
+    device_id: i64,
+    stream_id: i64,
+    kernel_id: i32,
+    function_unique_id: i32,
+    kernel_mangled_name: String,
+    grid: (u32, u32, u32),
+    block: Option<(u32, u32, u32)>,
+}
+
+impl ReplayLaunchCoverageBinding {
+    pub fn device_id(&self) -> i64 {
+        self.device_id
+    }
+
+    pub fn stream_id(&self) -> i64 {
+        self.stream_id
+    }
+
+    pub fn kernel_id(&self) -> i32 {
+        self.kernel_id
+    }
+
+    pub fn function_unique_id(&self) -> i32 {
+        self.function_unique_id
+    }
+
+    pub fn kernel_mangled_name(&self) -> &str {
+        &self.kernel_mangled_name
+    }
+
+    pub fn grid(&self) -> (u32, u32, u32) {
+        self.grid
+    }
+
+    pub fn block(&self) -> Option<(u32, u32, u32)> {
+        self.block
+    }
+}
+
+/// Provenance by which an observed complete launch became full-coverage replay.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FullCoverageSource {
+    /// No sampling declaration was present; the replay gate observed every CTA.
+    UnsampledComplete,
+    /// A validated lossless sidecar was present and replay independently observed
+    /// every CTA. The sidecar declaration alone never constructs this variant.
+    LosslessCompressedFull(LosslessFullProvenance),
+}
+
+/// Unforgeable-by-consumers witness that replay observed every block in one launch.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FullLaunchCoverage {
+    launch: ReplayLaunchCoverageBinding,
+    blocks_observed: u64,
+    source: FullCoverageSource,
+}
+
+impl FullLaunchCoverage {
+    pub fn launch(&self) -> &ReplayLaunchCoverageBinding {
+        &self.launch
+    }
+
+    pub fn blocks_observed(&self) -> u64 {
+        self.blocks_observed
+    }
+
+    pub fn source(&self) -> &FullCoverageSource {
+        &self.source
+    }
+}
+
+/// Unforgeable-by-consumers witness that replay observed exactly the block roster
+/// sealed by one validated subset sidecar.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SampledLaunchCoverage {
+    launch: ReplayLaunchCoverageBinding,
+    population_blocks: u64,
+    blocks_observed: u64,
+    provenance: WaveSegmentSubsetProvenance,
+}
+
+impl SampledLaunchCoverage {
+    pub fn launch(&self) -> &ReplayLaunchCoverageBinding {
+        &self.launch
+    }
+
+    pub fn population_blocks(&self) -> u64 {
+        self.population_blocks
+    }
+
+    pub fn blocks_observed(&self) -> u64 {
+        self.blocks_observed
+    }
+
+    pub fn provenance(&self) -> &WaveSegmentSubsetProvenance {
+        &self.provenance
+    }
+}
+
+/// Timing-bearing replay payload kept private so coverage cannot be detached or
+/// fabricated at the public API boundary.
 #[derive(Debug, Clone)]
-pub struct KernelReplayResult {
-    /// Deployment architecture validated across schedule and replay configuration.
-    pub arch: ArchId,
-    /// Exact by construction: one issue per traced record (invariant-checked
-    /// against `records_seen`).
-    pub instructions_issued: u64,
-    pub records_seen: u64,
-    /// Per traced SM id.
-    pub per_sm: BTreeMap<i32, SmSimResult>,
-    /// Maximum per-SM issue frontier (`last local issue timestamp + 1`).
-    /// This is an issue-only diagnostic, not an NCU cycle prediction.
-    pub diagnostic_last_issue_cycles: u64,
+struct FoldedKernelReplay {
+    arch: ArchId,
+    instructions_issued: u64,
+    records_seen: u64,
+    per_sm: BTreeMap<i32, SmSimResult>,
+    diagnostic_last_issue_cycles: u64,
+    terminal_modeled_event_time: Option<u64>,
+    l1: Option<L1Counters>,
+    l2: Option<L2Counters>,
+    l2_by_source: Option<L2SourceSplit>,
+    dram: Option<DramStats>,
+    unmodeled_tails: TailFlags,
+}
+
+/// Full-coverage replay result. This is the only public replay result carrying
+/// per-SM state or temporal diagnostics.
+#[derive(Debug, Clone)]
+pub struct FullKernelReplayResult {
+    coverage: FullLaunchCoverage,
+    replay: FoldedKernelReplay,
+}
+
+impl FullKernelReplayResult {
+    pub fn coverage(&self) -> &FullLaunchCoverage {
+        &self.coverage
+    }
+
+    pub fn arch(&self) -> ArchId {
+        self.replay.arch
+    }
+
+    pub fn instructions_issued(&self) -> u64 {
+        self.replay.instructions_issued
+    }
+
+    pub fn records_seen(&self) -> u64 {
+        self.replay.records_seen
+    }
+
+    pub fn per_sm(&self) -> &BTreeMap<i32, SmSimResult> {
+        &self.replay.per_sm
+    }
+
+    /// Maximum per-SM issue frontier (`last local issue timestamp + 1`). This is
+    /// an issue-only diagnostic, not an NCU cycle prediction.
+    pub fn diagnostic_last_issue_cycles(&self) -> u64 {
+        self.replay.diagnostic_last_issue_cycles
+    }
+
     /// Raw timestamp of the last successfully processed shared-system event.
-    /// Modes without the shared event system report `None`. This diagnostic is
-    /// deliberately not converted into elapsed cycles or a publication metric.
-    pub terminal_modeled_event_time: Option<u64>,
-    /// Kernel-level L1 counters (sum over per-SM caches) in L1 mode.
-    pub l1: Option<L1Counters>,
-    /// Shared-L2 counters (the `replay_kernel_shared` path only).
-    pub l2: Option<L2Counters>,
-    /// Per-source L2 split from the driver-side emission observer.
-    pub l2_by_source: Option<L2SourceSplit>,
-    /// DRAM read-traffic observer (shared mode only).
-    pub dram: Option<DramStats>,
-    /// Union of per-SM unmodeled write-class capability tails.
-    pub unmodeled_tails: TailFlags,
+    pub fn terminal_modeled_event_time(&self) -> Option<u64> {
+        self.replay.terminal_modeled_event_time
+    }
+
+    pub fn l1(&self) -> Option<&L1Counters> {
+        self.replay.l1.as_ref()
+    }
+
+    pub fn l2(&self) -> Option<&L2Counters> {
+        self.replay.l2.as_ref()
+    }
+
+    pub fn l2_by_source(&self) -> Option<&L2SourceSplit> {
+        self.replay.l2_by_source.as_ref()
+    }
+
+    pub fn dram(&self) -> Option<&DramStats> {
+        self.replay.dram.as_ref()
+    }
+
+    pub fn unmodeled_tails(&self) -> TailFlags {
+        self.replay.unmodeled_tails
+    }
+}
+
+/// Counter-only observation over a verified sampled block roster. This type is
+/// intentionally distinct from the full replay payload and contains no per-SM
+/// result, timestamp, cycle count, or timing-result conversion.
+#[derive(Debug, Clone)]
+pub struct SampledObservedCounters {
+    arch: ArchId,
+    instructions_issued: u64,
+    records_seen: u64,
+    l1: Option<L1Counters>,
+    l2: Option<L2Counters>,
+    l2_by_source: Option<L2SourceSplit>,
+    dram: Option<DramStats>,
+    unmodeled_tails: TailFlags,
+}
+
+impl SampledObservedCounters {
+    pub fn arch(&self) -> ArchId {
+        self.arch
+    }
+
+    pub fn instructions_issued(&self) -> u64 {
+        self.instructions_issued
+    }
+
+    pub fn records_seen(&self) -> u64 {
+        self.records_seen
+    }
+
+    pub fn l1(&self) -> Option<&L1Counters> {
+        self.l1.as_ref()
+    }
+
+    pub fn l2(&self) -> Option<&L2Counters> {
+        self.l2.as_ref()
+    }
+
+    pub fn l2_by_source(&self) -> Option<&L2SourceSplit> {
+        self.l2_by_source.as_ref()
+    }
+
+    pub fn dram(&self) -> Option<&DramStats> {
+        self.dram.as_ref()
+    }
+
+    pub fn unmodeled_tails(&self) -> TailFlags {
+        self.unmodeled_tails
+    }
+}
+
+/// Sampled-observed replay result. No method converts this value into a full or
+/// timing-bearing replay result.
+#[derive(Debug, Clone)]
+pub struct SampledKernelReplayResult {
+    coverage: SampledLaunchCoverage,
+    counters: SampledObservedCounters,
+}
+
+impl SampledKernelReplayResult {
+    pub fn coverage(&self) -> &SampledLaunchCoverage {
+        &self.coverage
+    }
+
+    pub fn counters(&self) -> &SampledObservedCounters {
+        &self.counters
+    }
+}
+
+/// Coverage-classified outcome for one kernel launch.
+#[derive(Debug, Clone)]
+pub enum KernelReplayOutcome {
+    Full(FullKernelReplayResult),
+    SampledObserved(SampledKernelReplayResult),
+}
+
+#[derive(Debug)]
+enum ExtractedCoverage {
+    Full(FullLaunchCoverage),
+    Sampled(SampledLaunchCoverage),
+}
+
+#[derive(Debug)]
+struct ExtractedKernel {
+    per_sm_blocks: BTreeMap<i32, Vec<BlockReplay>>,
+    records_seen: u64,
+    coverage: ExtractedCoverage,
 }
 
 fn checked_grid_total(grid: (u32, u32, u32)) -> Result<u64, ReplayError> {
@@ -361,7 +600,7 @@ fn extract_per_sm_blocks(
     loc: &KernelLoc<'_>,
     schedule: &FunctionSchedule,
     decode_sectors: bool,
-) -> Result<(BTreeMap<i32, Vec<BlockReplay>>, u64), ReplayError> {
+) -> Result<ExtractedKernel, ReplayError> {
     let expected_fuid = schedule.function_unique_id;
     // sm_id → blocks (launch index kept for in-SM ordering).
     let mut per_sm_blocks: BTreeMap<i32, Vec<BlockReplay>> = BTreeMap::new();
@@ -495,31 +734,46 @@ fn extract_per_sm_blocks(
     // (gridDim is never rewritten) and whose captured record count matches
     // records_seen. Absent/non-sampling sidecars never waive full coverage.
     let (gx, gy, gz) = kernel_grid(loc.kernel)?;
-    let grid_total = checked_grid_total((gx, gy, gz))?;
+    let grid = (gx, gy, gz);
+    let grid_total = checked_grid_total(grid)?;
     let seen = checked_collection_len("replayed block membership", seen_indices.len())?;
-    match td.sampling_sidecar() {
+    let block = loc
+        .kernel
+        .block_dim
+        .as_ref()
+        .filter(|dim| dim.x > 0 && dim.y > 0 && dim.z > 0)
+        .map(|dim| (dim.x as u32, dim.y as u32, dim.z as u32));
+    let launch = ReplayLaunchCoverageBinding {
+        device_id: loc.device_id,
+        stream_id: loc.stream_id,
+        kernel_id: loc.kernel.id,
+        function_unique_id: loc.kernel.function_unique_id,
+        kernel_mangled_name: loc.kernel.name.clone(),
+        grid,
+        block,
+    };
+    let coverage = match td.sampling_sidecar() {
         None => {
-            if seen < grid_total {
+            if seen != grid_total {
                 return Err(ReplayError::IncompleteTrace { seen, grid_total });
             }
+            ExtractedCoverage::Full(FullLaunchCoverage {
+                launch,
+                blocks_observed: seen,
+                source: FullCoverageSource::UnsampledComplete,
+            })
         }
         Some(sc) => {
-            let block = loc
-                .kernel
-                .block_dim
-                .as_ref()
-                .filter(|dim| dim.x > 0 && dim.y > 0 && dim.z > 0)
-                .ok_or(ReplayError::BlockDimMissing)?;
-            let launch_block = (block.x as u32, block.y as u32, block.z as u32);
+            let launch_block = launch.block.ok_or(ReplayError::BlockDimMissing)?;
             if sc.kernel_mangled_name() != loc.kernel.name.as_str() {
                 return Err(ReplayError::SamplingKernelMismatch {
                     launch: loc.kernel.name.clone(),
                     sidecar: sc.kernel_mangled_name().to_owned(),
                 });
             }
-            if sc.original_grid() != (gx, gy, gz) {
+            if sc.original_grid() != grid {
                 return Err(ReplayError::GridDimRewritten {
-                    launch: (gx, gy, gz),
+                    launch: grid,
                     sidecar: sc.original_grid(),
                 });
             }
@@ -529,7 +783,7 @@ fn extract_per_sm_blocks(
                     sidecar: sc.original_block(),
                 });
             }
-            match sc.method() {
+            let coverage = match sc.method() {
                 TraceSamplingMethod::WaveSegmentStratifiedSubset(provenance) => {
                     if provenance.selected_block_ids() != &seen_indices {
                         let declared = checked_collection_len(
@@ -541,25 +795,41 @@ fn extract_per_sm_blocks(
                             declared,
                         });
                     }
+                    ExtractedCoverage::Sampled(SampledLaunchCoverage {
+                        launch,
+                        population_blocks: grid_total,
+                        blocks_observed: seen,
+                        provenance: provenance.clone(),
+                    })
                 }
-                TraceSamplingMethod::LosslessCompressedFull(_) => {
-                    if seen < grid_total {
+                TraceSamplingMethod::LosslessCompressedFull(provenance) => {
+                    if seen != grid_total {
                         return Err(ReplayError::IncompleteTrace { seen, grid_total });
                     }
+                    ExtractedCoverage::Full(FullLaunchCoverage {
+                        launch,
+                        blocks_observed: seen,
+                        source: FullCoverageSource::LosslessCompressedFull(provenance.clone()),
+                    })
                 }
-            }
+            };
             if records_seen != sc.captured_records() {
                 return Err(ReplayError::RecordsCapturedMismatch {
                     records_seen,
                     captured: sc.captured_records(),
                 });
             }
+            coverage
         }
-    }
+    };
     for blocks in per_sm_blocks.values_mut() {
         blocks.sort_by_key(|b| b.launch_index);
     }
-    Ok((per_sm_blocks, records_seen))
+    Ok(ExtractedKernel {
+        per_sm_blocks,
+        records_seen,
+        coverage,
+    })
 }
 
 /// Fold per-SM results into the kernel-level view, enforcing the
@@ -571,7 +841,7 @@ fn fold_kernel_result(
     expect_l1: bool,
     terminal_modeled_event_time: Option<u64>,
     l2: Option<(L2Counters, L2SourceSplit, DramStats)>,
-) -> Result<KernelReplayResult, ReplayError> {
+) -> Result<FoldedKernelReplay, ReplayError> {
     let mut instructions_issued: u64 = 0;
     let mut diagnostic_last_issue_cycles: u64 = 0;
     let mut unmodeled_tails = TailFlags::default();
@@ -610,7 +880,7 @@ fn fold_kernel_result(
         Some((counters, split, dram)) => (Some(counters), Some(split), Some(dram)),
         None => (None, None, None),
     };
-    Ok(KernelReplayResult {
+    Ok(FoldedKernelReplay {
         arch,
         instructions_issued,
         records_seen,
@@ -623,6 +893,45 @@ fn fold_kernel_result(
         dram,
         unmodeled_tails,
     })
+}
+
+fn classify_kernel_result(
+    coverage: ExtractedCoverage,
+    replay: FoldedKernelReplay,
+) -> KernelReplayOutcome {
+    match coverage {
+        ExtractedCoverage::Full(coverage) => {
+            KernelReplayOutcome::Full(FullKernelReplayResult { coverage, replay })
+        }
+        ExtractedCoverage::Sampled(coverage) => {
+            let FoldedKernelReplay {
+                arch,
+                instructions_issued,
+                records_seen,
+                per_sm: _,
+                diagnostic_last_issue_cycles: _,
+                terminal_modeled_event_time: _,
+                l1,
+                l2,
+                l2_by_source,
+                dram,
+                unmodeled_tails,
+            } = replay;
+            KernelReplayOutcome::SampledObserved(SampledKernelReplayResult {
+                coverage,
+                counters: SampledObservedCounters {
+                    arch,
+                    instructions_issued,
+                    records_seen,
+                    l1,
+                    l2,
+                    l2_by_source,
+                    dram,
+                    unmodeled_tails,
+                },
+            })
+        }
+    }
 }
 
 fn lookup_schedule<'a>(
@@ -701,12 +1010,16 @@ pub fn replay_kernel(
     schedules: &BTreeMap<i32, FunctionSchedule>,
     params: &IssueModelParams,
     mode: ReplayMemMode,
-) -> Result<KernelReplayResult, ReplayError> {
+) -> Result<KernelReplayOutcome, ReplayError> {
     let schedule = lookup_schedule(schedules, loc)?;
     validate_replay_architecture(schedule, params, mode)?;
     let decode_sectors = !matches!(mode, ReplayMemMode::Flat);
-    let (per_sm_blocks, records_seen) = extract_per_sm_blocks(td, loc, schedule, decode_sectors)?;
-    match mode {
+    let ExtractedKernel {
+        per_sm_blocks,
+        records_seen,
+        coverage,
+    } = extract_per_sm_blocks(td, loc, schedule, decode_sectors)?;
+    let replay = match mode {
         ReplayMemMode::Flat | ReplayMemMode::L1Const(_) => {
             let l1_config = match mode {
                 ReplayMemMode::L1Const(cfg) => Some(cfg),
@@ -723,7 +1036,7 @@ pub fn replay_kernel(
                 l1_config.is_some(),
                 None,
                 None,
-            )
+            )?
         }
         ReplayMemMode::L1SharedL2 { l1, l2, dram } => {
             let mut l2 = L2Model::new(l2)?;
@@ -736,9 +1049,10 @@ pub fn replay_kernel(
                 true,
                 sys.terminal_event_time,
                 Some((sys.l2, sys.l2_by_source, sys.dram)),
-            )
+            )?
         }
-    }
+    };
+    Ok(classify_kernel_result(coverage, replay))
 }
 
 /// Resolve the two special Global routes reviewed on the active sm_86 path.
@@ -4833,10 +5147,10 @@ mod replay_identity_tests {
                 },
             )]),
         };
-        let (blocks, records) = extract_per_sm_blocks(&td, &loc, &sched, true)
+        let extracted = extract_per_sm_blocks(&td, &loc, &sched, true)
             .expect("legacy capability retains the pre-transition atomic fallback");
-        assert_eq!(records, 1);
-        let warp = &blocks[&0][0].warps[0];
+        assert_eq!(extracted.records_seen, 1);
+        let warp = &extracted.per_sm_blocks[&0][0].warps[0];
         assert!(matches!(
             warp.insts[0].kind,
             AccessKind::GlobalBypass {
@@ -4868,7 +5182,8 @@ mod completeness_tests {
     //! records_seen. A lossless-full sidecar may be present, but never sanctions
     //! incomplete coverage.
     use super::*;
-    use crate::program::FunctionSchedule;
+    use crate::control_bits::ControlBits;
+    use crate::program::{FunctionSchedule, IssueSlot, OpClass};
     use prost::Message;
     use std::collections::BTreeMap as StdMap;
 
@@ -5061,7 +5376,7 @@ mod completeness_tests {
         std::fs::write(path, trace.encode_to_vec()).unwrap();
     }
 
-    fn run(dir: &std::path::Path) -> Result<(), ReplayError> {
+    fn extract(dir: &std::path::Path) -> Result<ExtractedKernel, ReplayError> {
         let td = TraceDir::open(dir)?;
         let loc = td.kernels().next().unwrap();
         let sched = FunctionSchedule {
@@ -5071,15 +5386,68 @@ mod completeness_tests {
             function_name: "f".into(),
             by_pc: StdMap::new(),
         };
-        extract_per_sm_blocks(&td, &loc, &sched, true).map(|_| ())
+        extract_per_sm_blocks(&td, &loc, &sched, true)
+    }
+
+    fn run(dir: &std::path::Path) -> Result<(), ReplayError> {
+        extract(dir).map(|_| ())
+    }
+
+    fn replay_outcome(dir: &std::path::Path) -> Result<KernelReplayOutcome, ReplayError> {
+        let td = TraceDir::open(dir)?;
+        let loc = td.kernels().next().unwrap();
+        let schedule = FunctionSchedule {
+            arch: ArchId::Sm86,
+            function_unique_id: 1,
+            kernel_name: "_Z1kv".into(),
+            function_name: "f".into(),
+            by_pc: StdMap::from([(
+                16,
+                IssueSlot {
+                    control: ControlBits::new(0, false, 7, 7, 0, 0).unwrap(),
+                    op_class: OpClass::Other,
+                    mem_role: MemRole::None,
+                    opcode_text: "NOP".into(),
+                },
+            )]),
+        };
+        let schedules = StdMap::from([(1, schedule)]);
+        let params = IssueModelParams {
+            arch: ArchId::Sm86,
+            l1_hit_latency: 1,
+            l1_miss_latency: 1,
+            global_flat_latency: 1,
+            shared_write_barrier_latency: 1,
+            non_memory_write_barrier_latency: 1,
+            read_barrier_latency: 1,
+            max_resident_warps_per_sm: 48,
+        };
+        replay_kernel(&td, &loc, &schedules, &params, ReplayMemMode::Flat)
     }
 
     #[test]
     fn complete_trace_no_sidecar_ok() {
         let tmp = tempfile::tempdir().unwrap();
         write_grid_trace(tmp.path(), 4, 1, &[0, 1, 2, 3], None);
-        let result = run(tmp.path());
-        assert!(result.is_ok(), "{result:?}");
+        let extracted = extract(tmp.path()).unwrap();
+        let ExtractedCoverage::Full(coverage) = extracted.coverage else {
+            panic!("complete unsampled trace must carry full coverage");
+        };
+        assert_eq!(coverage.blocks_observed(), 4);
+        assert_eq!(coverage.launch().grid(), (4, 1, 1));
+        assert_eq!(coverage.launch().block(), Some((32, 1, 1)));
+        assert!(matches!(
+            coverage.source(),
+            FullCoverageSource::UnsampledComplete
+        ));
+
+        let outcome = replay_outcome(tmp.path()).unwrap();
+        let KernelReplayOutcome::Full(full) = outcome else {
+            panic!("complete unsampled trace must return full replay");
+        };
+        assert_eq!(full.coverage().blocks_observed(), 4);
+        assert_eq!(full.records_seen(), 4);
+        assert_eq!(full.instructions_issued(), 4);
     }
 
     #[test]
@@ -5124,8 +5492,23 @@ mod completeness_tests {
         let tmp = tempfile::tempdir().unwrap();
         let sidecar = payload_bound_subset();
         write_grid_trace(tmp.path(), 60, 1, &SELECTED_BLOCKS, Some(&sidecar));
-        let result = run(tmp.path());
-        assert!(result.is_ok(), "{result:?}");
+        let extracted = extract(tmp.path()).unwrap();
+        let ExtractedCoverage::Sampled(coverage) = extracted.coverage else {
+            panic!("subset method must remain sampled");
+        };
+        assert_eq!(coverage.population_blocks(), 60);
+        assert_eq!(coverage.blocks_observed(), 12);
+        assert_eq!(coverage.launch().grid(), (60, 1, 1));
+        assert_eq!(coverage.provenance().selected_block_ids().len(), 12);
+
+        let outcome = replay_outcome(tmp.path()).unwrap();
+        let KernelReplayOutcome::SampledObserved(sampled) = outcome else {
+            panic!("sampled extraction must not become a full replay result");
+        };
+        assert_eq!(sampled.coverage().blocks_observed(), 12);
+        assert_eq!(sampled.counters().arch(), ArchId::Sm86);
+        assert_eq!(sampled.counters().instructions_issued(), 12);
+        assert_eq!(sampled.counters().records_seen(), 12);
     }
 
     #[test]
@@ -5152,8 +5535,18 @@ mod completeness_tests {
         let all_blocks: Vec<i32> = (0..60).collect();
         let sidecar = payload_bound_lossless_full();
         write_grid_trace(tmp.path(), 60, 1, &all_blocks, Some(&sidecar));
-        let result = run(tmp.path());
-        assert!(result.is_ok(), "{result:?}");
+        let extracted = extract(tmp.path()).unwrap();
+        let ExtractedCoverage::Full(coverage) = extracted.coverage else {
+            panic!("lossless full trace must carry full coverage");
+        };
+        assert_eq!(coverage.blocks_observed(), 60);
+        let FullCoverageSource::LosslessCompressedFull(provenance) = coverage.source() else {
+            panic!("lossless sidecar provenance must be retained");
+        };
+        assert_eq!(
+            provenance.sidecar_sha256(),
+            "3de5fe8932be3184f97eaa45ff8dd02793ee2fec77e960291c2fb125e0f64ec7"
+        );
     }
 
     #[test]
@@ -5315,8 +5708,8 @@ mod completeness_tests {
             function_name: "f".into(),
             by_pc: StdMap::new(),
         };
-        let (per_sm_blocks, _) = extract_per_sm_blocks(&td, &loc, &sched, true).unwrap();
-        assert_eq!(per_sm_blocks[&0][0].warps[0].insts[0].pc, 16);
+        let extracted = extract_per_sm_blocks(&td, &loc, &sched, true).unwrap();
+        assert_eq!(extracted.per_sm_blocks[&0][0].warps[0].insts[0].pc, 16);
 
         assert!(matches!(
             TraceDir::open(tmp.path()),

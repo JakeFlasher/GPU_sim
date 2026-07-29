@@ -26,7 +26,10 @@ use std::path::{Path, PathBuf};
 use sim_arch::BuildArch;
 use sim_calib::ArchCard;
 use sim_mem::{L2Config, PchaseCard};
-use sim_sm::{ControlSidecar, IssueModelParams, ReplayMemMode, build_schedules, replay_kernel};
+use sim_sm::{
+    ControlSidecar, IssueModelParams, KernelReplayOutcome, ReplayMemMode, build_schedules,
+    replay_kernel,
+};
 use sim_trace::{ExecInfo, TraceDir};
 
 fn sm86_card() -> ArchCard {
@@ -149,41 +152,49 @@ fn real_trace_replays_under_issue_model() {
     let mut split_totals = sim_sm::L2SourceSplit::for_arch(identity.deploy());
     let mut dram_totals: Option<sim_sm::DramStats> = None;
     for loc in td.kernels().collect::<Vec<_>>() {
-        let result = replay_kernel(&td, &loc, &schedules, &params, mode).expect("replay");
+        let outcome = replay_kernel(&td, &loc, &schedules, &params, mode).expect("replay");
+        let full = match outcome {
+            KernelReplayOutcome::Full(full) => full,
+            KernelReplayOutcome::SampledObserved(sampled) => panic!(
+                "machine-local full replay received sampled coverage {}/{}",
+                sampled.coverage().blocks_observed(),
+                sampled.coverage().population_blocks()
+            ),
+        };
         assert_eq!(
-            result.arch,
+            full.arch(),
             identity.deploy(),
             "every launch result must retain the composition architecture"
         );
         kernels = kernels.checked_add(1).expect("kernel count fits usize");
         records = records
-            .checked_add(result.records_seen)
+            .checked_add(full.records_seen())
             .expect("record count fits u64");
         issued = issued
-            .checked_add(result.instructions_issued)
+            .checked_add(full.instructions_issued())
             .expect("instruction count fits u64");
         diagnostic_last_issue_cycles =
-            diagnostic_last_issue_cycles.max(result.diagnostic_last_issue_cycles);
-        sms = sms.max(result.per_sm.len());
-        assert_eq!(result.instructions_issued, result.records_seen);
-        if let Some(c) = &result.l1 {
+            diagnostic_last_issue_cycles.max(full.diagnostic_last_issue_cycles());
+        sms = sms.max(full.per_sm().len());
+        assert_eq!(full.instructions_issued(), full.records_seen());
+        if let Some(c) = full.l1() {
             match &mut l1_totals {
                 Some(total) => total.add_checked(c).expect("matching L1 architecture"),
                 None => l1_totals = Some(*c),
             }
         }
-        if let Some(c) = &result.l2 {
+        if let Some(c) = full.l2() {
             match &mut l2_totals {
                 Some(total) => total.add_checked(c).expect("matching L2 architecture"),
                 None => l2_totals = Some(*c),
             }
         }
-        if let Some(split) = &result.l2_by_source {
+        if let Some(split) = full.l2_by_source() {
             split_totals
                 .add_checked(split)
                 .expect("matching L2 source architecture");
         }
-        if let Some(d) = &result.dram {
+        if let Some(d) = full.dram() {
             match &mut dram_totals {
                 Some(total) => total.add_checked(d).expect("matching DRAM architecture"),
                 None => dram_totals = Some(*d),

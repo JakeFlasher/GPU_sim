@@ -39,10 +39,10 @@
 
 use sim_arch::ArchId;
 use sim_mem::{L1CounterError, L1Counters, L1OriginCounters, L2Counters, MemoryOrigin};
-use sim_sm::{DramStats, KernelReplayResult, L2SourceSplit, SystemCounterError};
+use sim_sm::{DramStats, FullKernelReplayResult, L2SourceSplit, SystemCounterError};
 
 /// The exact counter fields the emission layer reads, borrowed. Decouples
-/// emission from the full `KernelReplayResult` so a cell's counters — summed
+/// emission from the full [`FullKernelReplayResult`] so a cell's counters — summed
 /// across its kernel launches — can be emitted directly (rates compose from
 /// summed numerators/denominators; they cannot be averaged post-hoc).
 #[derive(Debug, Clone, Copy)]
@@ -63,14 +63,14 @@ pub struct CounterSnapshot<'a> {
 
 impl<'a> CounterSnapshot<'a> {
     /// Borrow the emission-relevant counters out of one completed replay.
-    pub fn from_replay(r: &'a KernelReplayResult) -> Self {
+    pub fn from_replay(r: &'a FullKernelReplayResult) -> Self {
         Self {
-            arch: r.arch,
-            instructions_issued: r.instructions_issued,
-            l1: r.l1.as_ref(),
-            l2: r.l2.as_ref(),
-            l2_by_source: r.l2_by_source.as_ref(),
-            dram: r.dram.as_ref(),
+            arch: r.arch(),
+            instructions_issued: r.instructions_issued(),
+            l1: r.l1(),
+            l2: r.l2(),
+            l2_by_source: r.l2_by_source(),
+            dram: r.dram(),
         }
     }
 
@@ -253,11 +253,11 @@ pub enum MetricKind {
 /// A hardware counting unit a metric needs to be predictable at all.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MemUnit {
-    /// The L1TEX cache (`KernelReplayResult.l1`).
+    /// The L1TEX cache (`FullKernelReplayResult::l1`).
     L1Tex,
-    /// The L2 slices (`KernelReplayResult.l2`).
+    /// The L2 slices (`FullKernelReplayResult::l2`).
     Lts,
-    /// The DRAM read observer (`KernelReplayResult.dram`).
+    /// The DRAM read observer (`FullKernelReplayResult::dram`).
     Dram,
 }
 
@@ -620,28 +620,6 @@ mod tests {
     use sim_mem::{L1CounterField, L1Counters, L2Counters, L2Source};
     use sim_sm::DramStats;
 
-    /// A replay result carrying just the counters the emit fns read.
-    fn replay(
-        instructions_issued: u64,
-        l1: Option<L1Counters>,
-        l2: Option<L2Counters>,
-        dram: Option<DramStats>,
-    ) -> KernelReplayResult {
-        KernelReplayResult {
-            arch: ArchId::Sm86,
-            instructions_issued,
-            records_seen: instructions_issued,
-            per_sm: Default::default(),
-            diagnostic_last_issue_cycles: 1,
-            terminal_modeled_event_time: None,
-            unmodeled_tails: Default::default(),
-            l1: l1.map(|counters| counters.with_unified_origin(MemoryOrigin::Global)),
-            l2,
-            l2_by_source: None,
-            dram: dram.map(|stats| stats.with_unified_origin(MemoryOrigin::Global)),
-        }
-    }
-
     fn predicted<'a>(preds: &'a [MetricPrediction], key: &str) -> &'a EmitOutcome {
         &preds
             .iter()
@@ -650,27 +628,36 @@ mod tests {
             .outcome
     }
 
-    /// Emit from owned counters (the `KernelReplayResult` temporary lives
-    /// through the `emit_all` call within this expression).
+    /// Emit from owned counters retained for the duration of this call.
     fn emit(
         instructions_issued: u64,
         l1: Option<L1Counters>,
         l2: Option<L2Counters>,
         dram: Option<DramStats>,
     ) -> Result<Vec<MetricPrediction>, EmitError> {
-        emit_all(&CounterSnapshot::from_replay(&replay(
+        let l1 = l1.map(|counters| counters.with_unified_origin(MemoryOrigin::Global));
+        let dram = dram.map(|stats| stats.with_unified_origin(MemoryOrigin::Global));
+        emit_all(&CounterSnapshot {
+            arch: ArchId::Sm86,
             instructions_issued,
-            l1,
-            l2,
-            dram,
-        )))
+            l1: l1.as_ref(),
+            l2: l2.as_ref(),
+            l2_by_source: None,
+            dram: dram.as_ref(),
+        })
     }
 
     #[test]
     fn template_architecture_is_unavailable_not_zero() {
-        let mut result = replay(17, None, None, None);
-        result.arch = ArchId::Sm120;
-        let preds = emit_all(&CounterSnapshot::from_replay(&result)).unwrap();
+        let snapshot = CounterSnapshot {
+            arch: ArchId::Sm120,
+            instructions_issued: 17,
+            l1: None,
+            l2: None,
+            l2_by_source: None,
+            dram: None,
+        };
+        let preds = emit_all(&snapshot).unwrap();
         assert!(preds.iter().all(|p| {
             p.arch == ArchId::Sm120
                 && p.outcome
@@ -896,9 +883,15 @@ mod tests {
             ..L1OriginCounters::default()
         };
         let l1 = L1Counters::from_origins(ArchId::Sm86, global, local).unwrap();
-        let mut result = replay(1, None, None, None);
-        result.l1 = Some(l1);
-        let preds = emit_all(&CounterSnapshot::from_replay(&result)).unwrap();
+        let snapshot = CounterSnapshot {
+            arch: ArchId::Sm86,
+            instructions_issued: 1,
+            l1: Some(&l1),
+            l2: None,
+            l2_by_source: None,
+            dram: None,
+        };
+        let preds = emit_all(&snapshot).unwrap();
 
         assert_eq!(
             predicted(&preds, "traffic_gmem_ld_sectors"),
@@ -1033,9 +1026,17 @@ mod tests {
         let mut l1 = L1Counters::for_arch(ArchId::Sm86);
         l1.misses = u64::MAX;
         l1.bypass_sectors = 2;
-        let result = replay(1, Some(l1), None, None);
+        let l1 = l1.with_unified_origin(MemoryOrigin::Global);
+        let snapshot = CounterSnapshot {
+            arch: ArchId::Sm86,
+            instructions_issued: 1,
+            l1: Some(&l1),
+            l2: None,
+            l2_by_source: None,
+            dram: None,
+        };
         assert_eq!(
-            emit_l1tex_read_hit_rate(&CounterSnapshot::from_replay(&result)),
+            emit_l1tex_read_hit_rate(&snapshot),
             Err(EmitError::CounterOverflow {
                 key: "cache_hit_rate_l1tex_read_sector",
                 operation: "global-load hit-rate denominator",

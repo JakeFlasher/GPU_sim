@@ -35,7 +35,11 @@ pub use issue::{
     simulate_sm,
 };
 pub use program::{FunctionSchedule, IssueSlot, OpClass, ProgramError, build_schedules};
-pub use replay::{KernelReplayResult, ReplayError, ReplayMemMode, replay_kernel};
+pub use replay::{
+    FullCoverageSource, FullKernelReplayResult, FullLaunchCoverage, KernelReplayOutcome,
+    ReplayError, ReplayLaunchCoverageBinding, ReplayMemMode, SampledKernelReplayResult,
+    SampledLaunchCoverage, SampledObservedCounters, replay_kernel,
+};
 pub use sim_mem::MemRole;
 pub use system::{
     DramBw, DramOriginStats, DramStats, L2OriginSourceStats, L2SourceSplit, SystemCounterError,
