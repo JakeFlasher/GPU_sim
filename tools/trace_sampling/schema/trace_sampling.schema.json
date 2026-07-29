@@ -33,7 +33,19 @@
         "required": ["bytes", "label_pairing"],
         "properties": {
           "label_pairing": {"const": "full_shape_label"},
-          "hashes": {"required": ["selected_block_ids_sha256", "decompressed_payload_sha256"]}
+          "hashes": {"required": ["selected_block_ids_sha256", "decompressed_payload_sha256"]},
+          "tracer": {
+            "properties": {
+              "version": {"const": 5},
+              "features": {
+                "properties": {
+                  "atomic_addr": {"const": true},
+                  "ldgsts_addr": {"const": true}
+                }
+              },
+              "stats_pass_version": {"const": 1}
+            }
+          }
         }
       }
     },

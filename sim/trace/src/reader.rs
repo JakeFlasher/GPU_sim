@@ -1287,11 +1287,14 @@ fn validate_lossless_producer_contract(
         &["version", "features", "stats_pass_version"],
         "tracer",
     )?;
-    positive(required(tracer, "version", "tracer")?, "tracer.version")?;
-    positive(
-        required(tracer, "stats_pass_version", "tracer")?,
-        "tracer.stats_pass_version",
-    )?;
+    if unsigned(required(tracer, "version", "tracer")?, "tracer.version")? != 5
+        || unsigned(
+            required(tracer, "stats_pass_version", "tracer")?,
+            "tracer.stats_pass_version",
+        )? != 1
+    {
+        return Err("lossless compression requires tracer v5 and stats pass v1".to_string());
+    }
     let features = object(required(tracer, "features", "tracer")?, "tracer.features")?;
     exact_keys(
         features,
@@ -1299,14 +1302,17 @@ fn validate_lossless_producer_contract(
         &["atomic_addr", "ldgsts_addr"],
         "tracer.features",
     )?;
-    boolean(
+    if !boolean(
         required(features, "atomic_addr", "tracer.features")?,
         "tracer.features.atomic_addr",
-    )?;
-    boolean(
+    )? || !boolean(
         required(features, "ldgsts_addr", "tracer.features")?,
         "tracer.features.ldgsts_addr",
-    )?;
+    )? {
+        return Err(
+            "lossless compression requires atomic_addr and ldgsts_addr features".to_string(),
+        );
+    }
 
     let rng = object(required(root, "rng", "lossless compressed sidecar")?, "rng")?;
     exact_keys(rng, &["algo", "seed"], &["algo", "seed"], "rng")?;
@@ -4596,6 +4602,32 @@ mod sampling_sidecar_tests {
                 load_json(serde_json::to_vec(&case).unwrap()),
                 Err(TraceError::SamplingSidecarMalformed { .. })
             ));
+        }
+    }
+
+    #[test]
+    fn lossless_rejects_freshly_sealed_unknown_producer_versions_and_missing_features() {
+        let mut tracer_version = lossless_value();
+        tracer_version["tracer"]["version"] = serde_json::json!(999);
+
+        let mut stats_pass_version = lossless_value();
+        stats_pass_version["tracer"]["stats_pass_version"] = serde_json::json!(999);
+
+        let mut atomic_addr = lossless_value();
+        atomic_addr["tracer"]["features"]["atomic_addr"] = serde_json::json!(false);
+
+        let mut ldgsts_addr = lossless_value();
+        ldgsts_addr["tracer"]["features"]["ldgsts_addr"] = serde_json::json!(false);
+
+        for (mut sidecar, expected) in [
+            (tracer_version, "tracer v5 and stats pass v1"),
+            (stats_pass_version, "tracer v5 and stats pass v1"),
+            (atomic_addr, "atomic_addr and ldgsts_addr features"),
+            (ldgsts_addr, "atomic_addr and ldgsts_addr features"),
+        ] {
+            reseal(&mut sidecar);
+            let error = load_json(serde_json::to_vec(&sidecar).unwrap()).unwrap_err();
+            assert!(error.to_string().contains(expected), "{error}");
         }
     }
 

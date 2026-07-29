@@ -116,6 +116,23 @@ def test_compressed_sidecar_is_valid_and_labels_full_shape():
     assert sc["hashes"]["decompressed_payload_sha256"] == "a" * 64
 
 
+def test_compressed_sidecar_pins_admitted_producer_versions_and_features():
+    for path, value in [
+        (("tracer", "version"), 999),
+        (("tracer", "stats_pass_version"), 999),
+        (("tracer", "features", "atomic_addr"), False),
+        (("tracer", "features", "ldgsts_addr"), False),
+    ]:
+        sidecar = _compressed()
+        target = sidecar
+        for key in path[:-1]:
+            target = target[key]
+        target[path[-1]] = value
+        sidecar["hashes"].pop("sidecar_sha256")
+        sidecar["hashes"]["sidecar_sha256"] = sidecar_sha256(sidecar)
+        assert not is_valid(sidecar), path
+
+
 def test_compressed_without_payload_hash_is_rejected():
     sc = _compressed()
     del sc["hashes"]["decompressed_payload_sha256"]
