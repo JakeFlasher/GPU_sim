@@ -40,20 +40,29 @@ pub enum MemRole {
     /// Load-class opcode bypassing the modeled L1 (`.cg`/`.cs`/strong
     /// scopes/LDGSTS/ATOM/TEX/OTHER).
     BypassLoad(CacheOpToken),
-    /// Global-class store head (STG / RED / REDG): sectors hit-tested against
-    /// the L1 without allocating; write-allocate at the L2.
+    /// Plain global-store head (STG): sectors hit-tested against the L1
+    /// without allocating; write-allocate at the L2.
     Store,
+    /// Non-returning global reduction (RED / REDG). It follows the physical
+    /// write-class hierarchy path, but remains distinct from both plain-store
+    /// attribution and returning ATOM semantics.
+    Reduction,
     /// Not load-class and not a store head (LD.E, LDC, LDSM, non-memory
     /// opcodes): counted in the unified sector denominator only when the
     /// dynamic record is global-class.
     None,
 }
 
-/// Is this opcode a global-class STORE head (STG / reduction)? STS/STL
-/// are not global stores (shared / local — STL is L1-eligible via its
-/// token).
+/// Is this opcode a plain global-store head? STS/STL are not global stores
+/// (shared / local — STL is L1-eligible via its token), and RED/REDG have a
+/// distinct non-returning reduction role.
 pub fn is_global_store_opcode(opcode_text: &str) -> bool {
-    matches!(opcode_head(opcode_text), "STG" | "RED" | "REDG")
+    opcode_head(opcode_text) == "STG"
+}
+
+/// Is this opcode a non-returning global reduction head?
+pub fn is_global_reduction_opcode(opcode_text: &str) -> bool {
+    matches!(opcode_head(opcode_text), "RED" | "REDG")
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -68,6 +77,7 @@ pub fn mem_role_of_checked(opcode_text: &str, arch_token: &str) -> Result<MemRol
         Some(token) if derive_l1_eligible(token) => MemRole::EligibleLoad(token),
         Some(token) => MemRole::BypassLoad(token),
         None if is_global_store_opcode(opcode_text) => MemRole::Store,
+        None if is_global_reduction_opcode(opcode_text) => MemRole::Reduction,
         None => MemRole::None,
     })
 }
@@ -114,16 +124,23 @@ pub enum AccessKind {
         len: u16,
         token: CacheOpToken,
     },
-    /// Global-class record whose pc the classifier did not tag and whose
-    /// opcode is not a store: counted in the unified denominator only.
+    /// Global-class record whose pc has no recognized hierarchy role: counted
+    /// in the unified denominator only.
     GlobalUntagged {
         off: usize,
         len: u16,
     },
-    /// Global-class STORE (STG/RED...): sectors hit-tested against the
-    /// L1 without allocating (v0 write-through no-allocate); allocate at
-    /// the L2 (card policy `write_allocate_non_inclusive`).
+    /// Plain global STORE (STG): sectors hit-tested against the L1 without
+    /// allocating (v0 write-through no-allocate); allocate at the L2 (card
+    /// policy `write_allocate_non_inclusive`).
     GlobalStore {
+        off: usize,
+        len: u16,
+    },
+    /// Non-returning global reduction (RED/REDG). It takes the same physical
+    /// write-class L1/L2 path as a store but is excluded from ordinary
+    /// global-store attribution; its unmodeled RMW tail is reported separately.
+    GlobalReduction {
         off: usize,
         len: u16,
     },
@@ -157,11 +174,11 @@ mod tests {
         );
         assert_eq!(
             mem_role_of("RED.E.ADD.STRONG.GPU [R2.64], R0", "sm_86"),
-            MemRole::Store
+            MemRole::Reduction
         );
         assert_eq!(
             mem_role_of("REDG.E.ADD.STRONG.GPU [R2.64], R0", "sm_86"),
-            MemRole::Store
+            MemRole::Reduction
         );
         assert_eq!(
             mem_role_of("STL [R1], R0", "sm_86"),

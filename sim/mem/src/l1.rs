@@ -29,11 +29,12 @@
 //!   merges`.
 //!
 //! v0 EXTENSIONS beyond the ported model (kept in separate counters so the
-//! ported semantics stay auditable): Global/Local STORE sectors are
-//! hit-TESTED against the same state without allocating on miss (NCU's
-//! unified `l1tex__t_sector_hit_rate.pct` counts store sectors; the L1 is
-//! write-through no-allocate for hierarchy stores in this v0 hypothesis), and
-//! bypass/untagged sector counting for the unified-denominator emission.
+//! ported semantics stay auditable): Global/Local STORE and Global RED sectors
+//! are hit-TESTED against the same state without allocating on miss (NCU's
+//! unified `l1tex__t_sector_hit_rate.pct` covers write-class sectors; the L1 is
+//! write-through no-allocate for hierarchy writes in this v0 hypothesis), and
+//! bypass/untagged sector counting for the unified-denominator emission. RED
+//! uses a distinct observer lane and never enters ordinary STG attribution.
 
 use std::collections::{BTreeMap, HashMap};
 
@@ -109,6 +110,7 @@ pub struct L1MutationBudget {
     pub bypass_atom_sectors: u64,
     pub untagged_sectors: u64,
     pub store_sectors: u64,
+    pub reduction_sectors: u64,
     pub recency_touches: u64,
     pub new_fills: u64,
 }
@@ -122,6 +124,7 @@ impl L1MutationBudget {
             bypass_atom_sectors: 0,
             untagged_sectors: 0,
             store_sectors: 0,
+            reduction_sectors: 0,
             recency_touches: 0,
             new_fills: 0,
         }
@@ -155,6 +158,9 @@ pub struct L1OriginCounters {
     pub store_sectors: u64,
     pub store_hits: u64,
     pub store_tag_hits: u64,
+    /// RED/REDG sectors and sector-valid hits, kept separate from ordinary STG.
+    pub reduction_sectors: u64,
+    pub reduction_hits: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -189,6 +195,10 @@ pub struct L1Counters {
     /// `store_hits` stays the v0 unified diagnostic until l1tex store
     /// accounting is scored against labels and one rule wins.
     pub store_tag_hits: u64,
+    /// RED/REDG sectors and sector-valid hits. They contribute to the unified
+    /// L1TEX observer but never to the plain global-store surface.
+    pub reduction_sectors: u64,
+    pub reduction_hits: u64,
     /// Accounting provenance only. Cache tags, fills, MSHRs, recency, and
     /// replacement remain unified physical state.
     by_origin: [L1OriginCounters; 2],
@@ -209,6 +219,8 @@ pub enum L1CounterField {
     StoreSectors,
     StoreHits,
     StoreTagHits,
+    ReductionSectors,
+    ReductionHits,
 }
 
 impl std::fmt::Display for L1CounterField {
@@ -227,6 +239,8 @@ impl std::fmt::Display for L1CounterField {
             Self::StoreSectors => "store_sectors",
             Self::StoreHits => "store_hits",
             Self::StoreTagHits => "store_tag_hits",
+            Self::ReductionSectors => "reduction_sectors",
+            Self::ReductionHits => "reduction_hits",
         })
     }
 }
@@ -283,6 +297,8 @@ fn origin_counter_mut(counters: &mut L1OriginCounters, field: L1CounterField) ->
         L1CounterField::StoreSectors => &mut counters.store_sectors,
         L1CounterField::StoreHits => &mut counters.store_hits,
         L1CounterField::StoreTagHits => &mut counters.store_tag_hits,
+        L1CounterField::ReductionSectors => &mut counters.reduction_sectors,
+        L1CounterField::ReductionHits => &mut counters.reduction_hits,
     }
 }
 
@@ -301,7 +317,7 @@ fn add_origin_fields_checked(
     Ok(next)
 }
 
-fn origin_deltas(counters: &L1OriginCounters) -> [(L1CounterField, u64); 13] {
+fn origin_deltas(counters: &L1OriginCounters) -> [(L1CounterField, u64); 15] {
     [
         (L1CounterField::Hits, counters.hits),
         (L1CounterField::Misses, counters.misses),
@@ -322,10 +338,12 @@ fn origin_deltas(counters: &L1OriginCounters) -> [(L1CounterField, u64); 13] {
         (L1CounterField::StoreSectors, counters.store_sectors),
         (L1CounterField::StoreHits, counters.store_hits),
         (L1CounterField::StoreTagHits, counters.store_tag_hits),
+        (L1CounterField::ReductionSectors, counters.reduction_sectors),
+        (L1CounterField::ReductionHits, counters.reduction_hits),
     ]
 }
 
-fn unified_deltas(counters: &L1Counters) -> [(L1CounterField, u64); 13] {
+fn unified_deltas(counters: &L1Counters) -> [(L1CounterField, u64); 15] {
     [
         (L1CounterField::Hits, counters.hits),
         (L1CounterField::Misses, counters.misses),
@@ -346,6 +364,8 @@ fn unified_deltas(counters: &L1Counters) -> [(L1CounterField, u64); 13] {
         (L1CounterField::StoreSectors, counters.store_sectors),
         (L1CounterField::StoreHits, counters.store_hits),
         (L1CounterField::StoreTagHits, counters.store_tag_hits),
+        (L1CounterField::ReductionSectors, counters.reduction_sectors),
+        (L1CounterField::ReductionHits, counters.reduction_hits),
     ]
 }
 
@@ -366,6 +386,8 @@ impl Default for L1Counters {
             store_sectors: 0,
             store_hits: 0,
             store_tag_hits: 0,
+            reduction_sectors: 0,
+            reduction_hits: 0,
             by_origin: [L1OriginCounters::default(); 2],
         }
     }
@@ -447,6 +469,8 @@ impl L1Counters {
             store_sectors: self.store_sectors,
             store_hits: self.store_hits,
             store_tag_hits: self.store_tag_hits,
+            reduction_sectors: self.reduction_sectors,
+            reduction_hits: self.reduction_hits,
         };
         self.by_origin = [L1OriginCounters::default(); 2];
         self.by_origin[origin.index()] = unified;
@@ -474,6 +498,8 @@ impl L1Counters {
                 L1CounterField::StoreSectors => &mut next.store_sectors,
                 L1CounterField::StoreHits => &mut next.store_hits,
                 L1CounterField::StoreTagHits => &mut next.store_tag_hits,
+                L1CounterField::ReductionSectors => &mut next.reduction_sectors,
+                L1CounterField::ReductionHits => &mut next.reduction_hits,
             };
             *counter = checked_counter_add(field, *counter, delta)?;
         }
@@ -549,6 +575,16 @@ impl L1Counters {
             self.store_tag_hits,
             other.store_tag_hits,
         )?;
+        let reduction_sectors = checked_counter_add(
+            L1CounterField::ReductionSectors,
+            self.reduction_sectors,
+            other.reduction_sectors,
+        )?;
+        let reduction_hits = checked_counter_add(
+            L1CounterField::ReductionHits,
+            self.reduction_hits,
+            other.reduction_hits,
+        )?;
         let mut by_origin = self.by_origin;
         for origin in MemoryOrigin::ALL {
             by_origin[origin.index()] = add_origin_fields_checked(
@@ -573,6 +609,8 @@ impl L1Counters {
             store_sectors,
             store_hits,
             store_tag_hits,
+            reduction_sectors,
+            reduction_hits,
             by_origin,
         };
         // Arithmetic precedence stays unified first, then origin lanes. Only
@@ -681,6 +719,12 @@ enum CoreAccess {
     MissSectorResident {
         pending: FillDue,
     },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum WriteAccounting {
+    Store,
+    Reduction,
 }
 
 /// Which fill-timing discipline an [`L1Cache`] instance runs under —
@@ -959,6 +1003,8 @@ impl L1Cache {
                     (L1CounterField::StoreSectors, budget.store_sectors),
                     (L1CounterField::StoreHits, budget.store_sectors),
                     (L1CounterField::StoreTagHits, budget.store_sectors),
+                    (L1CounterField::ReductionSectors, budget.reduction_sectors),
+                    (L1CounterField::ReductionHits, budget.reduction_sectors),
                 ],
             )?;
         }
@@ -1585,11 +1631,12 @@ impl L1Cache {
         }
     }
 
-    fn probe_store_impl(
+    fn probe_write_impl(
         &mut self,
         origin: MemoryOrigin,
         sector_id: i64,
         now: u64,
+        accounting: WriteAccounting,
     ) -> Result<bool, L1AccessError> {
         let line = sector_id >> 2;
         let sector = (sector_id & 3) as u8;
@@ -1603,15 +1650,18 @@ impl L1Cache {
         if hit {
             self.next_stamp.preflight("recency", 1)?;
         }
-        let counters = self.counters.add_fields_checked(
-            origin,
-            &[
+        let deltas: &[(L1CounterField, u64)] = match accounting {
+            WriteAccounting::Store => &[
                 (L1CounterField::StoreSectors, 1),
                 (L1CounterField::StoreTagHits, u64::from(tag_resident)),
                 (L1CounterField::StoreHits, u64::from(hit)),
             ],
-        )?;
-        self.counters = counters;
+            WriteAccounting::Reduction => &[
+                (L1CounterField::ReductionSectors, 1),
+                (L1CounterField::ReductionHits, u64::from(hit)),
+            ],
+        };
+        self.counters = self.counters.add_fields_checked(origin, deltas)?;
         if hit {
             self.touch_mru(line)?;
         }
@@ -1639,11 +1689,37 @@ impl L1Cache {
         };
         if self.preflight_mutation_budget(budget).is_err() {
             let mut shadow = self.clone();
-            let hit = shadow.probe_store_impl(origin, sector_id, now)?;
+            let hit = shadow.probe_write_impl(origin, sector_id, now, WriteAccounting::Store)?;
             *self = shadow;
             return Ok(hit);
         }
-        self.probe_store_impl(origin, sector_id, now)
+        self.probe_write_impl(origin, sector_id, now, WriteAccounting::Store)
+    }
+
+    /// Hit-test a RED/REDG sector through the same physical write path as a
+    /// store while recording a distinct reduction observer lane. RED therefore
+    /// contributes to the unified L1TEX hit rate but never to ordinary STG
+    /// attribution; its RMW/writeback/coherence tails remain explicit on the SM
+    /// result.
+    pub fn probe_reduction(
+        &mut self,
+        origin: MemoryOrigin,
+        sector_id: i64,
+        now: u64,
+    ) -> Result<bool, L1AccessError> {
+        let budget = L1MutationBudget {
+            reduction_sectors: 1,
+            recency_touches: 1,
+            ..L1MutationBudget::for_origin(origin)
+        };
+        if self.preflight_mutation_budget(budget).is_err() {
+            let mut shadow = self.clone();
+            let hit =
+                shadow.probe_write_impl(origin, sector_id, now, WriteAccounting::Reduction)?;
+            *self = shadow;
+            return Ok(hit);
+        }
+        self.probe_write_impl(origin, sector_id, now, WriteAccounting::Reduction)
     }
 
     /// Manifest-tagged ineligible sectors (the ported bypass counter).
@@ -2454,6 +2530,43 @@ mod tests {
     }
 
     #[test]
+    fn reduction_probe_preserves_write_state_without_store_attribution() {
+        let mut store_l1 = cache(8, None);
+        access(&mut store_l1, 0, 0);
+        store_l1.apply_fills(300).unwrap();
+        let mut reduction_l1 = store_l1.clone();
+
+        assert!(store_l1.probe_store(MemoryOrigin::Global, 0, 300).unwrap());
+        assert!(
+            reduction_l1
+                .probe_reduction(MemoryOrigin::Global, 0, 300)
+                .unwrap()
+        );
+
+        assert_eq!(reduction_l1.counters.store_sectors, 0);
+        assert_eq!(reduction_l1.counters.store_hits, 0);
+        assert_eq!(reduction_l1.counters.store_tag_hits, 0);
+        assert_eq!(reduction_l1.counters.reduction_sectors, 1);
+        assert_eq!(reduction_l1.counters.reduction_hits, 1);
+        assert_eq!(
+            reduction_l1
+                .counters
+                .origin(MemoryOrigin::Global)
+                .reduction_sectors,
+            1
+        );
+        assert_eq!(reduction_l1.by_stamp, store_l1.by_stamp);
+        assert_eq!(reduction_l1.stamp_of, store_l1.stamp_of);
+        assert_eq!(reduction_l1.next_stamp, store_l1.next_stamp);
+        assert_eq!(reduction_l1.sectors, store_l1.sectors);
+        assert_eq!(reduction_l1.line_fills, store_l1.line_fills);
+        assert_eq!(reduction_l1.sector_fills, store_l1.sector_fills);
+        assert_eq!(reduction_l1.fill_seq, store_l1.fill_seq);
+        assert_eq!(reduction_l1.min_fill_due, store_l1.min_fill_due);
+        assert_eq!(reduction_l1.fill_timing, store_l1.fill_timing);
+    }
+
+    #[test]
     fn unique_sector_expansion_dedups_in_first_seen_order() {
         let mut lanes = [i64::MIN; 32];
         // 4 active lanes, 4B apart starting at 0: all in sector 0.
@@ -2852,7 +2965,7 @@ mod tests {
     #[test]
     fn counter_aggregation_overflow_is_named_and_transactional() {
         type Setter = fn(&mut L1Counters, u64);
-        let cases: [(L1CounterField, Setter); 13] = [
+        let cases: [(L1CounterField, Setter); 15] = [
             (L1CounterField::Hits, |c, v| c.hits = v),
             (L1CounterField::Misses, |c, v| c.misses = v),
             (L1CounterField::Merges, |c, v| c.merges = v),
@@ -2874,6 +2987,10 @@ mod tests {
             (L1CounterField::StoreSectors, |c, v| c.store_sectors = v),
             (L1CounterField::StoreHits, |c, v| c.store_hits = v),
             (L1CounterField::StoreTagHits, |c, v| c.store_tag_hits = v),
+            (L1CounterField::ReductionSectors, |c, v| {
+                c.reduction_sectors = v
+            }),
+            (L1CounterField::ReductionHits, |c, v| c.reduction_hits = v),
         ];
         for (field, set) in cases {
             let mut total = L1Counters::for_arch(ArchId::Sm86);
@@ -2926,6 +3043,8 @@ mod tests {
         total.store_sectors = 11;
         total.store_hits = 12;
         total.store_tag_hits = 13;
+        total.reduction_sectors = 14;
+        total.reduction_hits = 15;
         total = total.with_unified_origin(MemoryOrigin::Global);
 
         let mut addend = L1Counters::for_arch(ArchId::Sm86);
@@ -2942,6 +3061,8 @@ mod tests {
         addend.store_sectors = 30;
         addend.store_hits = 31;
         addend.store_tag_hits = 32;
+        addend.reduction_sectors = 33;
+        addend.reduction_hits = 34;
         addend = addend.with_unified_origin(MemoryOrigin::Local);
 
         total.add_checked(&addend).unwrap();
@@ -2959,6 +3080,8 @@ mod tests {
         assert_eq!(total.store_sectors, 41);
         assert_eq!(total.store_hits, 43);
         assert_eq!(total.store_tag_hits, 45);
+        assert_eq!(total.reduction_sectors, 47);
+        assert_eq!(total.reduction_hits, 49);
     }
 
     #[test]

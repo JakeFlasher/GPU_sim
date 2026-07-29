@@ -18,12 +18,14 @@
 //!   the hierarchy read-miss stream exceeds the locked-operating-point
 //!   rate (it can only ever ADD delay).
 //! - `L2Fill` — installs a reply-less read fetch at its data-ready time.
+//! - `AtomicCompletion` — retains the intrinsic return-completion time of an
+//!   ATOM whose value has no dependence-barrier observer.
 //! - `MemResponse` — first completes any fill carried by the same request,
 //!   then completes the originating SM's L1 fill (or clears a direct
 //!   bypass/untagged barrier unit) at exactly the data-ready time and resumes
 //!   that SM. Stale L2 installation never suppresses the SM response.
 //!
-//! Store and other mutation-only requests take no response event: they
+//! Store and reduction mutation-only requests take no response event: they
 //! change L2 state in arrival order and nothing waits on them (v0).
 //!
 //! Determinism: SM actors are created in ascending traced `sm_id` order,
@@ -366,8 +368,8 @@ impl L2SourceSplit {
 }
 
 use crate::issue::{
-    Advance, BlockReplay, IssueError, IssueModelParams, MemRequest, ReplayHorizon, ReplyTo, SmCore,
-    SmMemMode, SmSimResult, checked_cycle_add,
+    Advance, BlockReplay, IssueError, IssueModelParams, MemRequest, MemoryOperation, ReplayHorizon,
+    ReplyTo, SmCore, SmMemMode, SmSimResult, TailFlags, checked_cycle_add,
 };
 use crate::program::FunctionSchedule;
 
@@ -497,6 +499,15 @@ pub enum SystemError {
         local_sector_mask: u8,
     },
     #[error(
+        "L2 request for sector {sector_id} has incoherent source/operation/reply contract: source={request_source:?}, operation={operation:?}, reply={reply:?}"
+    )]
+    MemoryRequestContractInvalid {
+        sector_id: i64,
+        request_source: L2Source,
+        operation: MemoryOperation,
+        reply: ReplyTo,
+    },
+    #[error(
         "L2 fill schedule mismatch for sector {sector_id}: token={has_token}, ready={has_ready}"
     )]
     FillScheduleMismatch {
@@ -538,6 +549,8 @@ thread_local! {
     static TEST_L2_ACCESS_ERROR_AFTER: std::cell::Cell<Option<usize>> =
         const { std::cell::Cell::new(None) };
     static TEST_REQUEST_MASK_OVERRIDE: std::cell::Cell<Option<TestRequestMaskOverride>> =
+        const { std::cell::Cell::new(None) };
+    static TEST_REQUEST_OPERATION_OVERRIDE: std::cell::Cell<Option<MemoryOperation>> =
         const { std::cell::Cell::new(None) };
 }
 
@@ -581,6 +594,11 @@ fn maybe_override_request_masks(req: &mut MemRequest) {
             req.origin = override_value.origin;
             req.sector_mask = override_value.sector_mask;
             req.local_sector_mask = override_value.local_sector_mask;
+        }
+    });
+    TEST_REQUEST_OPERATION_OVERRIDE.with(|value| {
+        if let Some(operation) = value.replace(None) {
+            req.operation = operation;
         }
     });
 }
@@ -676,6 +694,7 @@ enum Ev {
     SmWake,
     L2Access(MemRequest),
     L2Fill(L2FillToken),
+    AtomicCompletion,
     MemResponse {
         reply: ReplyTo,
         fill: Option<L2FillToken>,
@@ -700,6 +719,7 @@ struct L2SystemCommit {
     origin_read_sectors: [u64; 2],
     dram_free_fp: Option<u128>,
     fill_ready: Option<u64>,
+    atomic_completion_ready: Option<u64>,
     response: Option<L2ResponseCommit>,
 }
 
@@ -709,19 +729,18 @@ struct L2SystemCommit {
 /// bytes/second over the locked SM clock, ~747 B/SM-cycle on the
 /// 3090 Ti); the model is one G/D/1 byte server over the shared hierarchy
 /// read-miss sector stream: each fetching sector demands 32 B, and a
-/// reply-carrying request cannot complete before BOTH its latency arm
-/// and the server's completion of ITS OWN request's bytes. Bytes of
-/// reply-less follow-up fetches (late merges) are served but price no
-/// response — the merged waiter still clears on the original fill's
+/// reply-carrying request or intrinsically returning ATOM cannot complete
+/// before BOTH its latency arm and the server's completion of ITS OWN request's
+/// bytes. Bytes of reply-less read follow-up fetches (late merges) are served
+/// but price no response — the merged waiter still clears on the original
 /// response, so under congestion a follow-up's bytes may complete
 /// after its waiter cleared (the documented merge-timing
 /// approximation; the cost surfaces on later requests). Uncongested
 /// streams see pure latency (the server only ever ADDS delay).
 ///
-/// v0 scope: DRAM READS only — a write-allocate store validates its
-/// sector from the write data (no fetch), and write-back / RED-ATOM
-/// read-modify-write DRAM traffic is unmodeled (the atomic stream is
-/// absent from M1 traces; see the §6.4 capture-gap note).
+/// v0 scope: DRAM READS only — write data validates Store/RED sectors without
+/// a fetch, while ATOM's returning RMW read fetches missing sectors. Dirty
+/// writeback, RED's RMW read, and coherence remain typed unmodeled tails.
 #[derive(Debug, Clone, Copy)]
 pub enum DramBw {
     /// Latency-only (pre-increment behavior): the ablation mode and the
@@ -819,9 +838,10 @@ pub struct DramStats {
     /// synthetic stats are rejected before aggregation or emission.
     arch: Option<ArchId>,
     /// 32 B DRAM read fetches DEMANDED by the run (L2-missing sectors
-    /// of read class, plus reply-carrying write-class misses — the
-    /// ATOM RMW arm). Counted in BOTH modes: under `Unmodeled` it
-    /// audits the ablation's demand with no server attached.
+    /// of read operations plus missing sectors of returning ATOM RMW reads.
+    /// Counted in BOTH modes: under `Unmodeled` it audits the ablation's demand
+    /// with no server attached. Plain stores and non-returning RED never enter
+    /// this modeled read-fetch count.
     pub read_sectors: u64,
     /// Responses whose ready time the bandwidth server pushed PAST the
     /// latency arm (0 in uncongested runs and in `Unmodeled` mode).
@@ -1011,6 +1031,8 @@ pub struct SystemResult {
     pub l2_by_source: L2SourceSplit,
     /// DRAM read-traffic observer (server engagement diagnostics).
     pub dram: DramStats,
+    /// Union of per-SM unmodeled write-class capability tails.
+    pub unmodeled_tails: TailFlags,
     /// Raw timestamp of the last successfully processed modeled event.
     /// `None` means the queue was empty; `Some(0)` is a real event at time zero.
     /// This is a diagnostic timestamp, not an elapsed-cycle prediction.
@@ -1176,6 +1198,14 @@ pub fn simulate_kernel_shared(
                         local_sector_mask: req.local_sector_mask,
                     });
                 }
+                if !req.has_valid_contract() {
+                    return Err(SystemError::MemoryRequestContractInvalid {
+                        sector_id: req.sector_id,
+                        request_source: req.source,
+                        operation: req.operation,
+                        reply: req.reply,
+                    });
+                }
                 #[cfg(test)]
                 maybe_inject_l2_access_error()?;
 
@@ -1189,7 +1219,7 @@ pub fn simulate_kernel_shared(
                 let (l2_access, commit) = staged_l2.access_mask_event_transactional(
                     line,
                     req.sector_mask,
-                    req.class,
+                    req.operation.l2_class(),
                     |preview| -> Result<L2SystemCommit, SystemError> {
                         let lookup = preview.lookup;
                         let requested_sectors = u64::from(lookup.sectors);
@@ -1231,9 +1261,7 @@ pub fn simulate_kernel_shared(
                                 })?;
                         }
 
-                        let can_fetch =
-                            req.class == sim_mem::L2OpClass::Read || req.reply != ReplyTo::None;
-                        let fetch_mask = if can_fetch {
+                        let fetch_mask = if req.operation.fetches_missing_data() {
                             req.sector_mask & !lookup.present_mask
                         } else {
                             0
@@ -1321,6 +1349,26 @@ pub fn simulate_kernel_shared(
                             None
                         };
 
+                        let atomic_completion_ready =
+                            if req.operation == MemoryOperation::Atomic && response.is_none() {
+                                let latency_ready = if lookup.all_present() {
+                                    checked_cycle_add(
+                                        "unobserved ATOM L2-hit completion",
+                                        req.issue_time,
+                                        params.l1_miss_latency,
+                                    )?
+                                } else {
+                                    checked_cycle_add(
+                                        "unobserved ATOM DRAM completion",
+                                        req.issue_time,
+                                        params.global_flat_latency,
+                                    )?
+                                };
+                                Some(latency_ready.max(bw_ready))
+                            } else {
+                                None
+                            };
+
                         let fill_ready = match (preview.fill_mask(), response.as_ref()) {
                             (0, _) => None,
                             (_, Some(response)) => Some(response.ready),
@@ -1344,6 +1392,7 @@ pub fn simulate_kernel_shared(
                             origin_read_sectors: next_origin_read_sectors,
                             dram_free_fp: service_preview.map(|(done, _)| done),
                             fill_ready,
+                            atomic_completion_ready,
                             response,
                         })
                     },
@@ -1361,7 +1410,8 @@ pub fn simulate_kernel_shared(
                 // Reply-bearing fills travel in one event so completion is
                 // ordered before delivery without relying on two equal-time
                 // sequence numbers. Reply-less read fetches still receive a
-                // fill-only event; writes need neither kind of completion.
+                // fill-only event. An ATOM whose return is unobserved retains a
+                // timing-only completion event; Store/RED need no completion.
                 if let Some(response) = commit.response.as_ref() {
                     queue.schedule_at(
                         response.ready,
@@ -1373,6 +1423,8 @@ pub fn simulate_kernel_shared(
                     )?;
                 } else if let (Some(fill), Some(ready)) = (l2_access.fill, commit.fill_ready) {
                     queue.schedule_at(ready, ev.target, Ev::L2Fill(fill))?;
+                } else if let Some(ready) = commit.atomic_completion_ready {
+                    queue.schedule_at(ready, ev.target, Ev::AtomicCompletion)?;
                 }
 
                 l2_by_source.sectors[commit.source_ix] = commit.source_sectors;
@@ -1406,6 +1458,9 @@ pub fn simulate_kernel_shared(
             }
             Ev::L2Fill(fill) => {
                 let _completion = staged_l2.complete_fill(fill)?;
+                spin.on_progress_event(ev.time);
+            }
+            Ev::AtomicCompletion => {
                 spin.on_progress_event(ev.time);
             }
             Ev::MemResponse { reply, fill } => {
@@ -1448,6 +1503,7 @@ pub fn simulate_kernel_shared(
     }
 
     let mut per_sm = BTreeMap::new();
+    let mut unmodeled_tails = TailFlags::default();
     for (ix, core) in cores.iter().enumerate() {
         if !core.is_done() {
             return Err(SystemError::Deadlock {
@@ -1455,7 +1511,9 @@ pub fn simulate_kernel_shared(
                 outstanding: core.outstanding_responses(),
             });
         }
-        per_sm.insert(sm_ids[ix], core.result());
+        let sm_result = core.result();
+        unmodeled_tails = unmodeled_tails.union(sm_result.unmodeled_tails);
+        per_sm.insert(sm_ids[ix], sm_result);
     }
     let l2_counters = *checked_l2_counters(arch, &staged_l2)?;
     let result = SystemResult {
@@ -1464,6 +1522,7 @@ pub fn simulate_kernel_shared(
         l2: l2_counters,
         l2_by_source,
         dram: dram_stats,
+        unmodeled_tails,
         terminal_event_time,
     };
     *l2 = staged_l2;
@@ -1627,6 +1686,7 @@ mod tests {
             TEST_L2_COUNTER_ARCH_OVERRIDE.with(|value| value.set(None));
             TEST_L2_ACCESS_ERROR_AFTER.with(|value| value.set(None));
             TEST_REQUEST_MASK_OVERRIDE.with(|value| value.set(None));
+            TEST_REQUEST_OPERATION_OVERRIDE.with(|value| value.set(None));
         }
     }
 
@@ -1646,6 +1706,12 @@ mod tests {
     fn override_next_request_masks(override_value: TestRequestMaskOverride) -> L2TestFaultGuard {
         let previous = TEST_REQUEST_MASK_OVERRIDE.with(|value| value.replace(Some(override_value)));
         assert!(previous.is_none(), "nested request-mask override");
+        L2TestFaultGuard
+    }
+
+    fn override_next_request_operation(operation: MemoryOperation) -> L2TestFaultGuard {
+        let previous = TEST_REQUEST_OPERATION_OVERRIDE.with(|value| value.replace(Some(operation)));
+        assert!(previous.is_none(), "nested request-operation override");
         L2TestFaultGuard
     }
 
@@ -2347,6 +2413,48 @@ mod tests {
         }
     }
 
+    #[test]
+    fn invalid_operation_reply_contract_precedes_l2_mutation() {
+        let sched = load_consumer_schedule();
+        let per_sm = BTreeMap::from([(0, dependent_load_blocks(4))]);
+        let mut l2 = l2_model();
+        let before = *l2.counters().unwrap();
+        let _contract_fault = override_next_request_operation(MemoryOperation::Store);
+        let _later_l2_fault = inject_l2_error_after(0);
+
+        let error = simulate_kernel_shared(
+            &per_sm,
+            &sched,
+            &params(),
+            l1_config(),
+            &mut l2,
+            carded_bw(),
+        )
+        .unwrap_err();
+
+        assert!(matches!(
+            error,
+            SystemError::MemoryRequestContractInvalid {
+                sector_id: 4,
+                request_source: L2Source::L1Fill,
+                operation: MemoryOperation::Store,
+                reply: ReplyTo::L1Fill { .. },
+            }
+        ));
+        assert_eq!(
+            TEST_L2_ACCESS_ERROR_AFTER.with(std::cell::Cell::get),
+            Some(0),
+            "request contract validation reached the later L2 stage"
+        );
+        assert_eq!(*l2.counters().unwrap(), before);
+        assert_eq!(
+            l2.preview_mask(1, 0b0001, L2OpClass::Read)
+                .unwrap()
+                .present_sectors,
+            0
+        );
+    }
+
     /// One SM, one cold load: L2 misses → the consumer waits the DRAM
     /// arm (423), not the L2-hit arm (244).
     #[test]
@@ -2738,9 +2846,116 @@ mod tests {
             "the atomic's sector is COUNTED a hit (tag match)"
         );
         assert_eq!(r.l2.write_tag_hits, 1);
+        assert_eq!(r.dram.read_sectors, 1, "ATOM RMW fetches the absent sector");
+        assert_eq!(
+            r.unmodeled_tails,
+            TailFlags {
+                red_rmw: false,
+                dirty_writeback: true,
+                coherence: true,
+            }
+        );
         assert_eq!(
             r.per_sm[&0].cycles, 425,
             "…but the reply is PRICED on the DRAM arm (issue t=1 + 423 + 1)"
+        );
+    }
+
+    #[test]
+    fn atomic_fetch_is_intrinsic_when_no_barrier_observes_the_return() {
+        let sched = schedule(vec![(0, slot(cb(1), "ATOMG.E.ADD.STRONG.GPU"))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                warp_slot: 0,
+                insts: vec![ReplayInst {
+                    pc: 0,
+                    kind: AccessKind::GlobalBypass {
+                        off: 0,
+                        len: 1,
+                        token: CacheOpToken::Atom,
+                    },
+                }],
+                sectors: vec![4],
+            }],
+        }];
+        let mut l2 = l2_model();
+
+        let result = simulate_kernel_shared(
+            &BTreeMap::from([(0, blocks)]),
+            &sched,
+            &params(),
+            l1_config(),
+            &mut l2,
+            carded_bw(),
+        )
+        .unwrap();
+
+        assert_eq!(result.l2_by_source.source(L2Source::Bypass), (1, 0));
+        assert_eq!(result.dram.read_sectors, 1);
+        assert_eq!(result.per_sm[&0].instructions_issued, 1);
+        assert_eq!(result.per_sm[&0].cycles, 1);
+        assert_eq!(
+            result.terminal_event_time,
+            Some(423),
+            "the intrinsic ATOM return remains a modeled terminal event"
+        );
+        assert_eq!(
+            result.unmodeled_tails,
+            TailFlags {
+                red_rmw: false,
+                dirty_writeback: true,
+                coherence: true,
+            }
+        );
+    }
+
+    #[test]
+    fn reduction_is_write_class_without_read_fetch_or_store_attribution() {
+        let sched = schedule(vec![(0, slot(cb(1), "RED.E.ADD.STRONG.GPU"))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                warp_slot: 0,
+                insts: vec![ReplayInst {
+                    pc: 0,
+                    kind: AccessKind::GlobalReduction { off: 0, len: 1 },
+                }],
+                sectors: vec![4],
+            }],
+        }];
+        let mut l2 = l2_model();
+
+        let result = simulate_kernel_shared(
+            &BTreeMap::from([(0, blocks)]),
+            &sched,
+            &params(),
+            l1_config(),
+            &mut l2,
+            carded_bw(),
+        )
+        .unwrap();
+
+        assert_eq!(result.l2_by_source.source(L2Source::Store), (1, 0));
+        assert_eq!(result.dram.read_sectors, 0);
+        let l1 = result.per_sm[&0].l1.unwrap();
+        assert_eq!(l1.store_sectors, 0);
+        assert_eq!(l1.reduction_sectors, 1);
+        assert_eq!(l1.reduction_hits, 0);
+        assert_eq!(
+            result.unmodeled_tails,
+            TailFlags {
+                red_rmw: true,
+                dirty_writeback: true,
+                coherence: true,
+            }
+        );
+        assert_eq!(
+            l2.preview_mask(1, 0b0001, L2OpClass::Read)
+                .unwrap()
+                .present_sectors,
+            1,
+            "RED write data validates the sector without modeling its RMW read"
         );
     }
 

@@ -37,8 +37,8 @@ pub mod l2;
 pub mod pchase_card;
 
 pub use access::{
-    AccessKind, MemRole, MemRoleError, MemoryOrigin, is_global_store_opcode,
-    is_known_untagged_opcode, mem_role_of_checked,
+    AccessKind, MemRole, MemRoleError, MemoryOrigin, is_global_reduction_opcode,
+    is_global_store_opcode, is_known_untagged_opcode, mem_role_of_checked,
 };
 pub use cache_op::{
     BARE_LDG_E_DEFAULTS_TO_CA, CacheOpError, CacheOpToken, classify_opcode_checked,

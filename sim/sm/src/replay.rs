@@ -49,8 +49,8 @@ use sim_mem::{
 };
 
 use crate::issue::{
-    AccessKind, BlockReplay, IssueError, IssueModelParams, ReplayInst, SmSimResult, WarpReplay,
-    simulate_sm,
+    AccessKind, BlockReplay, IssueError, IssueModelParams, ReplayInst, SmSimResult, TailFlags,
+    WarpReplay, simulate_sm,
 };
 use crate::program::FunctionSchedule;
 use crate::system::{DramBw, DramStats, L2SourceSplit, SystemError, simulate_kernel_shared};
@@ -314,6 +314,8 @@ pub struct KernelReplayResult {
     pub l2_by_source: Option<L2SourceSplit>,
     /// DRAM read-traffic observer (shared mode only).
     pub dram: Option<DramStats>,
+    /// Union of per-SM unmodeled write-class capability tails.
+    pub unmodeled_tails: TailFlags,
 }
 
 fn checked_grid_total(grid: (u32, u32, u32)) -> Result<u64, ReplayError> {
@@ -558,6 +560,7 @@ fn fold_kernel_result(
 ) -> Result<KernelReplayResult, ReplayError> {
     let mut instructions_issued: u64 = 0;
     let mut diagnostic_last_issue_cycles: u64 = 0;
+    let mut unmodeled_tails = TailFlags::default();
     let mut l1_totals = expect_l1.then(|| L1Counters::for_arch(arch));
     for (&sm_id, result) in &per_sm {
         instructions_issued = instructions_issued
@@ -568,6 +571,7 @@ fn fold_kernel_result(
                 addend: result.instructions_issued,
             })?;
         diagnostic_last_issue_cycles = diagnostic_last_issue_cycles.max(result.cycles);
+        unmodeled_tails = unmodeled_tails.union(result.unmodeled_tails);
         let found_l1 = result.l1.is_some();
         if found_l1 != expect_l1 {
             return Err(ReplayError::L1PresenceMismatch {
@@ -603,6 +607,7 @@ fn fold_kernel_result(
         l2,
         l2_by_source,
         dram,
+        unmodeled_tails,
     })
 }
 
@@ -740,11 +745,13 @@ fn require_sm86_special_role(
         .get(&u64::from(pc))
         .ok_or(ReplayError::UnsupportedMemoryPath { arch, class })?;
     let valid = match class {
-        pb::MemoryOpClass::Atomic => {
-            matches!(slot.mem_role, MemRole::BypassLoad(CacheOpToken::Atom))
-                || (slot.mem_role == MemRole::Store
-                    && matches!(opcode_head(&slot.opcode_text), "RED" | "REDG"))
-        }
+        pb::MemoryOpClass::Atomic => match slot.mem_role {
+            MemRole::BypassLoad(CacheOpToken::Atom) => {
+                opcode_head(&slot.opcode_text).starts_with("ATOM")
+            }
+            MemRole::Reduction => matches!(opcode_head(&slot.opcode_text), "RED" | "REDG"),
+            _ => false,
+        },
         pb::MemoryOpClass::AsyncCopy => {
             matches!(slot.mem_role, MemRole::BypassLoad(CacheOpToken::Ldgsts))
         }
@@ -926,6 +933,7 @@ fn validate_static_access_kind(
                 }
                 MemRole::BypassLoad(_) => Some(pb::MemoryOpAccessKind::Load),
                 MemRole::Store => Some(pb::MemoryOpAccessKind::Store),
+                MemRole::Reduction => Some(pb::MemoryOpAccessKind::Atomic),
                 MemRole::None if is_known_untagged_opcode(&slot.opcode_text) => {
                     Some(pb::MemoryOpAccessKind::Load)
                 }
@@ -1176,10 +1184,9 @@ fn preflight_replay_memory<'a>(
 /// Flat-mode classification validates the complete memory wire contract without
 /// expanding sectors, then applies the same producer-shape route gate as L1.
 ///
-/// Note: flat mode reuses `GlobalUntagged { off: 0, len: 0 }` as its
-/// "global-class, sectors not decoded" encoding; `AccessKind` consumers
-/// must not read flat-mode replays as untagged-pc statistics (no L1
-/// counters exist in this mode).
+/// Flat mode preserves the joined static operation role with an empty sector
+/// span. No L1 counters exist in this mode; the role remains load-bearing for
+/// Store/ATOM/RED timing and unmodeled-tail diagnostics.
 #[cfg(test)]
 fn classify_flat(
     inst: &pb::Instruction,
@@ -1215,6 +1222,27 @@ fn classify_flat_with_contract(
     classify_flat_preflighted(preflight, schedule, arch)
 }
 
+/// Flat mode validates the same static operation role as hierarchy replay but
+/// deliberately carries an empty sector span. This preserves Store/ATOM/RED
+/// semantics for timing and capability diagnostics without decoding addresses.
+fn flat_global_kind(role: MemRole) -> AccessKind {
+    match role {
+        MemRole::EligibleLoad(token) => AccessKind::GlobalEligible {
+            off: 0,
+            len: 0,
+            token,
+        },
+        MemRole::BypassLoad(token) => AccessKind::GlobalBypass {
+            off: 0,
+            len: 0,
+            token,
+        },
+        MemRole::Store => AccessKind::GlobalStore { off: 0, len: 0 },
+        MemRole::Reduction => AccessKind::GlobalReduction { off: 0, len: 0 },
+        MemRole::None => AccessKind::GlobalUntagged { off: 0, len: 0 },
+    }
+}
+
 fn classify_flat_preflighted(
     preflight: Option<ReplayMemoryPreflight<'_>>,
     schedule: &FunctionSchedule,
@@ -1241,15 +1269,16 @@ fn classify_flat_preflighted(
             Err(ReplayError::UnsupportedMemoryPath { arch, class })
         }
         (ReplayMemoryRoute::Global, pb::MemoryOpClass::Global) => {
-            require_known_global_role(schedule, arch, inst.pc)?;
-            Ok(AccessKind::GlobalUntagged { off: 0, len: 0 })
+            let role = require_known_global_role(schedule, arch, inst.pc)?;
+            Ok(flat_global_kind(role))
         }
         (
             ReplayMemoryRoute::Global,
             class @ (pb::MemoryOpClass::Atomic | pb::MemoryOpClass::AsyncCopy),
         ) => {
             require_sm86_special_role(schedule, arch, inst.pc, class)?;
-            Ok(AccessKind::GlobalUntagged { off: 0, len: 0 })
+            let role = require_known_global_role(schedule, arch, inst.pc)?;
+            Ok(flat_global_kind(role))
         }
         (ReplayMemoryRoute::Global, class) => {
             Err(ReplayError::UnsupportedMemoryPath { arch, class })
@@ -1272,6 +1301,7 @@ fn checked_staged_global_kind(role: MemRole, start: usize, count: usize) -> Opti
             token,
         },
         MemRole::Store => AccessKind::GlobalStore { off: start, len },
+        MemRole::Reduction => AccessKind::GlobalReduction { off: start, len },
         MemRole::None => AccessKind::GlobalUntagged { off: start, len },
     })
 }
@@ -1546,6 +1576,7 @@ mod aggregation_tests {
             instructions_issued,
             cycles: 1,
             l1,
+            unmodeled_tails: TailFlags::default(),
         }
     }
 
@@ -2831,7 +2862,14 @@ mod space_routing_tests {
 
         let flat = classify_flat(&inst, &sched, sched.arch, Path::new("zero_atomic.pb"), 0, 0)
             .expect("zero-active no-payload legacy atomic retains its global route");
-        assert!(matches!(flat, AccessKind::GlobalUntagged { .. }));
+        assert!(matches!(
+            flat,
+            AccessKind::GlobalBypass {
+                off: 0,
+                len: 0,
+                token: CacheOpToken::Atom,
+            }
+        ));
 
         let mut sectors = vec![29];
         let mut sector_scratch = vec![99];
@@ -3055,7 +3093,11 @@ mod space_routing_tests {
 
         assert!(matches!(
             classify_flat(&inst, &sched, sched.arch, Path::new("legacy_kind.pb"), 0, 0),
-            Ok(AccessKind::GlobalUntagged { .. })
+            Ok(AccessKind::GlobalBypass {
+                off: 0,
+                len: 0,
+                token: CacheOpToken::Ldgsts,
+            })
         ));
         let mut sectors = vec![11];
         let mut sector_scratch = Vec::new();
@@ -3090,7 +3132,7 @@ mod space_routing_tests {
                 0,
                 0,
             ),
-            Ok(AccessKind::GlobalUntagged { .. })
+            Ok(AccessKind::GlobalStore { off: 0, len: 0 })
         ));
         let mut store_sectors = vec![12];
         let mut store_scratch = Vec::new();
@@ -3129,7 +3171,11 @@ mod space_routing_tests {
                 0,
                 0,
             ),
-            Ok(AccessKind::GlobalUntagged { .. })
+            Ok(AccessKind::GlobalBypass {
+                off: 0,
+                len: 0,
+                token: CacheOpToken::Atom,
+            })
         ));
         let mut atomic_sectors = vec![20];
         let mut atomic_scratch = vec![99];
@@ -3258,7 +3304,14 @@ mod space_routing_tests {
 
         let flat = classify_flat(&inst, &sched, sched.arch, Path::new("source.pb"), 0, 0)
             .expect("source-only LDGSTS has a reviewed flat route");
-        assert!(matches!(flat, AccessKind::GlobalUntagged { .. }));
+        assert!(matches!(
+            flat,
+            AccessKind::GlobalBypass {
+                off: 0,
+                len: 0,
+                token: CacheOpToken::Ldgsts,
+            }
+        ));
 
         let mut sectors = vec![29];
         let mut sector_scratch = vec![99];
@@ -3300,7 +3353,14 @@ mod space_routing_tests {
 
         let flat = classify_flat(&inst, &sched, sched.arch, Path::new("zero_source.pb"), 0, 0)
             .expect("zero-active source retains the global route");
-        assert!(matches!(flat, AccessKind::GlobalUntagged { .. }));
+        assert!(matches!(
+            flat,
+            AccessKind::GlobalBypass {
+                off: 0,
+                len: 0,
+                token: CacheOpToken::Ldgsts,
+            }
+        ));
 
         let mut sectors = vec![31];
         let mut sector_scratch = vec![99];
@@ -3457,7 +3517,14 @@ mod space_routing_tests {
         );
         let inst = atomic_inst(Some(pb::MemorySpace::Global));
         let flat = classify_flat(&inst, &sched, sched.arch, Path::new("t"), 0, 0).unwrap();
-        assert!(matches!(flat, AccessKind::GlobalUntagged { .. }));
+        assert!(matches!(
+            flat,
+            AccessKind::GlobalBypass {
+                off: 0,
+                len: 0,
+                token: CacheOpToken::Atom,
+            }
+        ));
 
         let mut sectors = vec![43];
         let mut sector_scratch = vec![99];
@@ -3485,16 +3552,19 @@ mod space_routing_tests {
     }
 
     #[test]
-    fn global_reduction_family_uses_atomic_route_and_store_role_in_both_modes() {
+    fn global_reduction_family_remains_distinct_in_both_modes() {
         for (opcode, path) in [
             ("RED.E.ADD.STRONG.GPU [R2.64], R0", "red.pb"),
             ("REDG.E.ADD.STRONG.GPU [R2.64], R0", "redg.pb"),
         ] {
-            let sched = schedule(ArchId::Sm86, MemRole::Store, opcode);
+            let sched = schedule(ArchId::Sm86, MemRole::Reduction, opcode);
             let inst = atomic_inst(Some(pb::MemorySpace::Global));
             let flat = classify_flat(&inst, &sched, sched.arch, Path::new(path), 0, 0)
                 .expect("reviewed reduction has a global atomic route");
-            assert!(matches!(flat, AccessKind::GlobalUntagged { .. }));
+            assert!(matches!(
+                flat,
+                AccessKind::GlobalReduction { off: 0, len: 0 }
+            ));
 
             let mut sectors = vec![45];
             let mut sector_scratch = vec![99];
@@ -3508,8 +3578,8 @@ mod space_routing_tests {
                 0,
                 0,
             )
-            .expect("reviewed reduction retains its static store role");
-            assert!(matches!(l1, AccessKind::GlobalStore { off: 1, len: 1 }));
+            .expect("reviewed reduction retains its static reduction role");
+            assert!(matches!(l1, AccessKind::GlobalReduction { off: 1, len: 1 }));
             assert_eq!(sectors, vec![45, 0x1000 >> 5]);
             assert_eq!(sector_scratch, vec![0x1000 >> 5]);
         }
@@ -3564,7 +3634,14 @@ mod space_routing_tests {
             "LDGSTS.E.128",
         );
         let k = classify_flat(&inst, &sched, sched.arch, Path::new("t"), 0, 0).unwrap();
-        assert!(matches!(k, AccessKind::GlobalUntagged { .. }));
+        assert!(matches!(
+            k,
+            AccessKind::GlobalBypass {
+                off: 0,
+                len: 0,
+                token: CacheOpToken::Ldgsts,
+            }
+        ));
     }
 
     #[test]

@@ -388,6 +388,87 @@ pub enum IssueError {
     L1Config(#[from] sim_mem::L1ConfigError),
 }
 
+/// Memory-hierarchy effects deliberately outside the modeled event stream.
+/// These flags are capability boundaries, not synthetic traffic counters: a
+/// set bit prevents consumers from mistaking a partial write-class model for a
+/// complete RMW/writeback/coherence implementation.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct TailFlags {
+    /// RED/REDG's read-modify-write read arm is not modeled.
+    pub red_rmw: bool,
+    /// Dirty eviction/writeback traffic is not modeled.
+    pub dirty_writeback: bool,
+    /// Coherence propagation and invalidation traffic is not modeled.
+    pub coherence: bool,
+}
+
+impl TailFlags {
+    pub const fn union(self, other: Self) -> Self {
+        Self {
+            red_rmw: self.red_rmw || other.red_rmw,
+            dirty_writeback: self.dirty_writeback || other.dirty_writeback,
+            coherence: self.coherence || other.coherence,
+        }
+    }
+
+    const fn for_access(kind: AccessKind) -> Self {
+        match kind {
+            AccessKind::GlobalReduction { .. } => Self {
+                red_rmw: true,
+                dirty_writeback: true,
+                coherence: true,
+            },
+            AccessKind::GlobalStore { .. } | AccessKind::LocalStore { .. } => Self {
+                red_rmw: false,
+                dirty_writeback: true,
+                coherence: true,
+            },
+            AccessKind::GlobalBypass {
+                token: CacheOpToken::Atom,
+                ..
+            } => Self {
+                red_rmw: false,
+                dirty_writeback: true,
+                coherence: true,
+            },
+            AccessKind::NonMemory
+            | AccessKind::Shared
+            | AccessKind::LocalLoad { .. }
+            | AccessKind::GlobalEligible { .. }
+            | AccessKind::GlobalBypass { .. }
+            | AccessKind::GlobalUntagged { .. } => Self {
+                red_rmw: false,
+                dirty_writeback: false,
+                coherence: false,
+            },
+        }
+    }
+}
+
+/// Semantic operation carried through the shared-memory request protocol.
+/// L2 hit policy is derived from this type so Store, returning ATOM, and
+/// non-returning RED cannot collapse into one `WriteAtomic` request class.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MemoryOperation {
+    Read,
+    Store,
+    Atomic,
+    Reduction,
+}
+
+impl MemoryOperation {
+    pub(crate) const fn l2_class(self) -> L2OpClass {
+        match self {
+            Self::Read => L2OpClass::Read,
+            Self::Store | Self::Atomic | Self::Reduction => L2OpClass::WriteAtomic,
+        }
+    }
+
+    pub(crate) const fn fetches_missing_data(self) -> bool {
+        matches!(self, Self::Read | Self::Atomic)
+    }
+}
+
 /// Result of replaying one SM's blocks to completion.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SmSimResult {
@@ -399,6 +480,8 @@ pub struct SmSimResult {
     pub cycles: u64,
     /// This SM's L1 counters when an L1 model was attached.
     pub l1: Option<L1Counters>,
+    /// Explicit capability gaps for write-class tails present in this replay.
+    pub unmodeled_tails: TailFlags,
 }
 
 /// A memory request the SM emits in L1Shared mode. The system layer
@@ -434,10 +517,10 @@ pub struct MemRequest {
     /// while allowing L2 hits and DRAM fetches to be accounted per origin.
     pub local_sector_mask: u8,
     pub source: L2Source,
-    /// Behavioral L2 hit rule for this sector (§6.4): stores/atomics
-    /// tag-match, loads need the sector — set from the record's token
-    /// at emission, orthogonal to the provenance-only `source`.
-    pub class: L2OpClass,
+    /// Semantic memory operation. The shared system derives the L2 hit rule
+    /// and DRAM-fetch requirement from this value and rejects incoherent
+    /// `(source, operation, reply)` combinations before hierarchy mutation.
+    pub operation: MemoryOperation,
     pub reply: ReplyTo,
 }
 
@@ -513,7 +596,10 @@ pub enum ReplyTo {
         barrier: DepBarrier,
         response_id: ResponseId,
     },
-    /// Mutation-only access (stores): no response event needed.
+    /// No SM dependency consumes returned data. Stores and reductions are
+    /// intrinsically non-returning; an ATOM may also use this when its returned
+    /// value has no dependence barrier, while retaining `Atomic` request
+    /// semantics and its modeled RMW fetch.
     None,
 }
 
@@ -544,7 +630,7 @@ impl MemRequest {
     /// An L1 fill request (line alloc or resident-sector fetch): Read
     /// class by construction — nothing that fills the modeled L1 is a
     /// write (stores hit-test without allocating, atomics bypass). The
-    /// typed constructors keep the (source, class, reply) coupling in
+    /// typed constructors keep the (source, operation, reply) coupling in
     /// one place so an invalid combination is unwritable at emission
     /// sites (gate finding 2026-07-07).
     fn l1_fill(
@@ -562,7 +648,7 @@ impl MemRequest {
             sector_mask: sector_bit,
             local_sector_mask: Self::local_mask(origin, sector_bit),
             source: L2Source::L1Fill,
-            class: L2OpClass::Read,
+            operation: MemoryOperation::Read,
             reply: ReplyTo::L1Fill { fill, response_id },
         }
     }
@@ -579,14 +665,35 @@ impl MemRequest {
             sector_mask: sector_bit,
             local_sector_mask: Self::local_mask(origin, sector_bit),
             source: L2Source::L1Fill,
-            class: L2OpClass::Read,
+            operation: MemoryOperation::Read,
             reply: ReplyTo::None,
         }
     }
 
-    /// A hierarchy store sector (STG/RED/STL): write-class tag-match rule at
-    /// the L2, mutation-only (no response).
+    /// A plain hierarchy store sector (STG/STL): write-class tag-match rule
+    /// at the L2, intrinsically non-returning.
     fn store(issue_time: u64, sector_id: i64, origin: MemoryOrigin) -> Self {
+        Self::write(issue_time, sector_id, origin, MemoryOperation::Store)
+    }
+
+    /// A non-returning hierarchy reduction sector (RED/REDG). Its write data
+    /// validates the sector immediately; the unmodeled RMW read is exposed in
+    /// [`TailFlags`] rather than silently fabricated as traffic.
+    fn reduction(issue_time: u64, sector_id: i64) -> Self {
+        Self::write(
+            issue_time,
+            sector_id,
+            MemoryOrigin::Global,
+            MemoryOperation::Reduction,
+        )
+    }
+
+    fn write(
+        issue_time: u64,
+        sector_id: i64,
+        origin: MemoryOrigin,
+        operation: MemoryOperation,
+    ) -> Self {
         let sector_bit = 1 << (sector_id & 3) as u8;
         Self {
             issue_time,
@@ -595,8 +702,26 @@ impl MemRequest {
             sector_mask: sector_bit,
             local_sector_mask: Self::local_mask(origin, sector_bit),
             source: L2Source::Store,
-            class: L2OpClass::WriteAtomic,
+            operation,
             reply: ReplyTo::None,
+        }
+    }
+
+    pub(crate) fn has_valid_contract(self) -> bool {
+        match (self.source, self.operation, self.reply) {
+            (L2Source::L1Fill, MemoryOperation::Read, ReplyTo::L1Fill { .. } | ReplyTo::None)
+            | (
+                L2Source::Bypass | L2Source::Untagged,
+                MemoryOperation::Read,
+                ReplyTo::Warp { .. } | ReplyTo::None,
+            )
+            | (L2Source::Bypass, MemoryOperation::Atomic, ReplyTo::Warp { .. } | ReplyTo::None)
+            | (
+                L2Source::Store,
+                MemoryOperation::Store | MemoryOperation::Reduction,
+                ReplyTo::None,
+            ) => true,
+            _ => false,
         }
     }
 }
@@ -970,16 +1095,25 @@ fn data_ready_time(
                 }
             }
         },
-        AccessKind::GlobalStore { off, len } | AccessKind::LocalStore { off, len } => {
+        AccessKind::GlobalStore { off, len }
+        | AccessKind::GlobalReduction { off, len }
+        | AccessKind::LocalStore { off, len } => {
             let origin = match kind {
-                AccessKind::GlobalStore { .. } => MemoryOrigin::Global,
+                AccessKind::GlobalStore { .. } | AccessKind::GlobalReduction { .. } => {
+                    MemoryOrigin::Global
+                }
                 AccessKind::LocalStore { .. } => MemoryOrigin::Local,
-                _ => unreachable!("match arm admits only hierarchy stores"),
+                _ => unreachable!("match arm admits only hierarchy writes"),
             };
+            let reduction = matches!(kind, AccessKind::GlobalReduction { .. });
             match l1 {
                 Some(l1) => {
                     for &sector in &sectors[off..off + usize::from(len)] {
-                        l1.probe_store(origin, sector, t)?;
+                        if reduction {
+                            l1.probe_reduction(origin, sector, t)?;
+                        } else {
+                            l1.probe_store(origin, sector, t)?;
+                        }
                     }
                     if needs_ready {
                         params.store_visibility_ready(t).map(Some)
@@ -1159,6 +1293,7 @@ pub struct SmCore<'a> {
     block_states: Vec<BlockState>,
     subcore_warps: [Vec<usize>; SUB_CORES],
     hold: [Option<usize>; SUB_CORES],
+    unmodeled_tails: TailFlags,
     issued: u64,
     t: u64,
     arrival_stamp: u64,
@@ -1245,6 +1380,13 @@ impl<'a> SmCore<'a> {
                 }
             }
         }
+        let unmodeled_tails = blocks
+            .iter()
+            .flat_map(|block| &block.warps)
+            .flat_map(|warp| &warp.insts)
+            .fold(TailFlags::default(), |flags, inst| {
+                flags.union(TailFlags::for_access(inst.kind))
+            });
         let l1_arch = match mode {
             SmMemMode::Flat => None,
             SmMemMode::L1Const(cfg) | SmMemMode::L1Shared(cfg) => Some(cfg.arch),
@@ -1285,6 +1427,7 @@ impl<'a> SmCore<'a> {
             block_states: Vec::new(),
             subcore_warps: Default::default(),
             hold: [None; SUB_CORES],
+            unmodeled_tails,
             issued: 0,
             t: 0,
             arrival_stamp: 0,
@@ -1331,6 +1474,7 @@ impl<'a> SmCore<'a> {
             instructions_issued: self.issued,
             cycles: self.t,
             l1: self.mem.l1().map(|c| c.counters),
+            unmodeled_tails: self.unmodeled_tails,
         }
     }
 
@@ -1546,24 +1690,26 @@ impl<'a> SmCore<'a> {
             }
             AccessKind::GlobalBypass { off, len, .. } | AccessKind::GlobalUntagged { off, len } => {
                 let origin = MemoryOrigin::Global;
-                let (source, counted, class) = match kind {
-                    // ATOM rides bypass provenance but is write-class at
-                    // the L2 (§6.4 tag-match rule); every other bypass /
-                    // untagged sector is a load needing the data.
+                let (source, counted, operation) = match kind {
+                    // ATOM rides bypass provenance but remains a returning RMW
+                    // operation; every other bypass / untagged sector is a read.
                     AccessKind::GlobalBypass { token, .. } => (
                         L2Source::Bypass,
                         true,
                         if token == CacheOpToken::Atom {
-                            L2OpClass::WriteAtomic
+                            MemoryOperation::Atomic
                         } else {
-                            L2OpClass::Read
+                            MemoryOperation::Read
                         },
                     ),
-                    _ => (L2Source::Untagged, false, L2OpClass::Read),
+                    _ => (L2Source::Untagged, false, MemoryOperation::Read),
                 };
                 if counted {
-                    st.l1
-                        .count_bypass(origin, u64::from(len), class == L2OpClass::WriteAtomic)?;
+                    st.l1.count_bypass(
+                        origin,
+                        u64::from(len),
+                        operation == MemoryOperation::Atomic,
+                    )?;
                 } else {
                     st.l1.count_untagged(origin, u64::from(len))?;
                 }
@@ -1598,24 +1744,34 @@ impl<'a> SmCore<'a> {
                         sector_mask: 1 << (sector_id & 3) as u8,
                         local_sector_mask: 0,
                         source,
-                        class,
+                        operation,
                         reply,
                     });
                 }
                 Ok(None)
             }
-            AccessKind::GlobalStore { off, len } | AccessKind::LocalStore { off, len } => {
+            AccessKind::GlobalStore { off, len }
+            | AccessKind::GlobalReduction { off, len }
+            | AccessKind::LocalStore { off, len } => {
                 let origin = match kind {
-                    AccessKind::GlobalStore { .. } => MemoryOrigin::Global,
+                    AccessKind::GlobalStore { .. } | AccessKind::GlobalReduction { .. } => {
+                        MemoryOrigin::Global
+                    }
                     AccessKind::LocalStore { .. } => MemoryOrigin::Local,
-                    _ => unreachable!("match arm admits only hierarchy stores"),
+                    _ => unreachable!("match arm admits only hierarchy writes"),
                 };
+                let reduction = matches!(kind, AccessKind::GlobalReduction { .. });
                 for &sector_id in &sectors[off..off + usize::from(len)] {
-                    st.l1.probe_store(origin, sector_id, t)?;
-                    out.push(MemRequest::store(t, sector_id, origin));
+                    if reduction {
+                        st.l1.probe_reduction(origin, sector_id, t)?;
+                        out.push(MemRequest::reduction(t, sector_id));
+                    } else {
+                        st.l1.probe_store(origin, sector_id, t)?;
+                        out.push(MemRequest::store(t, sector_id, origin));
+                    }
                 }
-                // v0: a present store write barrier is priced at the L2-hit
-                // arm (as in L1Const); stores do not wait on responses.
+                // A present write barrier is priced at the L2-hit arm (as in
+                // L1Const); stores and reductions do not wait on responses.
                 if write_barrier.is_some() {
                     p.store_visibility_ready(t).map(Some)
                 } else {
@@ -2208,7 +2364,9 @@ impl<'a> SmCore<'a> {
                     MemModel::Flat | MemModel::L1Const(_) | MemModel::L1Shared(_) => {}
                 }
             }
-            AccessKind::GlobalStore { .. } | AccessKind::LocalStore { .. } => match &self.mem {
+            AccessKind::GlobalStore { .. }
+            | AccessKind::GlobalReduction { .. }
+            | AccessKind::LocalStore { .. } => match &self.mem {
                 MemModel::Flat if needs_ready => {
                     checked_cycle_add(
                         "flat global visibility",
@@ -2372,15 +2530,27 @@ impl<'a> SmCore<'a> {
                         }
                     }
                 }
-                AccessKind::GlobalStore { len, .. } | AccessKind::LocalStore { len, .. } => {
+                AccessKind::GlobalStore { len, .. }
+                | AccessKind::GlobalReduction { len, .. }
+                | AccessKind::LocalStore { len, .. } => {
                     let origin = match inst.kind {
-                        AccessKind::GlobalStore { .. } => MemoryOrigin::Global,
+                        AccessKind::GlobalStore { .. } | AccessKind::GlobalReduction { .. } => {
+                            MemoryOrigin::Global
+                        }
                         AccessKind::LocalStore { .. } => MemoryOrigin::Local,
-                        _ => unreachable!("match arm admits only hierarchy stores"),
+                        _ => unreachable!("match arm admits only hierarchy writes"),
                     };
                     let budget = &mut budgets[origin.index()];
                     let sectors = u64::from(len);
-                    add_budget("L1 store-sector budget", &mut budget.store_sectors, sectors)?;
+                    if matches!(inst.kind, AccessKind::GlobalReduction { .. }) {
+                        add_budget(
+                            "L1 reduction-sector budget",
+                            &mut budget.reduction_sectors,
+                            sectors,
+                        )?;
+                    } else {
+                        add_budget("L1 store-sector budget", &mut budget.store_sectors, sectors)?;
+                    }
                     add_budget("L1 recency budget", &mut budget.recency_touches, sectors)?;
                 }
                 AccessKind::NonMemory | AccessKind::Shared => {}
@@ -2492,14 +2662,23 @@ impl<'a> SmCore<'a> {
                         )?;
                     }
                 }
-                AccessKind::GlobalStore { off, len } | AccessKind::LocalStore { off, len } => {
+                AccessKind::GlobalStore { off, len }
+                | AccessKind::GlobalReduction { off, len }
+                | AccessKind::LocalStore { off, len } => {
                     let origin = match inst.kind {
-                        AccessKind::GlobalStore { .. } => MemoryOrigin::Global,
+                        AccessKind::GlobalStore { .. } | AccessKind::GlobalReduction { .. } => {
+                            MemoryOrigin::Global
+                        }
                         AccessKind::LocalStore { .. } => MemoryOrigin::Local,
-                        _ => unreachable!("match arm admits only hierarchy stores"),
+                        _ => unreachable!("match arm admits only hierarchy writes"),
                     };
+                    let reduction = matches!(inst.kind, AccessKind::GlobalReduction { .. });
                     for &sector_id in &warp.sectors[off..off + usize::from(len)] {
-                        shadow.probe_store(origin, sector_id, self.t)?;
+                        if reduction {
+                            shadow.probe_reduction(origin, sector_id, self.t)?;
+                        } else {
+                            shadow.probe_store(origin, sector_id, self.t)?;
+                        }
                     }
                 }
                 AccessKind::NonMemory | AccessKind::Shared => {}
@@ -3023,6 +3202,7 @@ fn validate_sector_span(
         | AccessKind::GlobalBypass { off, len, .. }
         | AccessKind::GlobalUntagged { off, len }
         | AccessKind::GlobalStore { off, len }
+        | AccessKind::GlobalReduction { off, len }
         | AccessKind::LocalLoad { off, len }
         | AccessKind::LocalStore { off, len } => (off, len),
         AccessKind::NonMemory | AccessKind::Shared => return Ok(()),
@@ -5123,8 +5303,8 @@ mod tests {
         assert_eq!(out.len(), 2, "one request per bypass sector");
         assert!(out.iter().all(|r| r.source == L2Source::Bypass));
         assert!(
-            out.iter().all(|r| r.class == L2OpClass::Read),
-            ".cg bypass loads are read-class at the L2"
+            out.iter().all(|r| r.operation == MemoryOperation::Read),
+            ".cg bypass loads remain read operations"
         );
         assert!(matches!(
             out[0].reply,
@@ -5313,8 +5493,59 @@ mod tests {
         assert_eq!(out.len(), 2);
         assert!(out.iter().all(|r| r.source == L2Source::Store
             && r.origin == MemoryOrigin::Global
-            && r.class == L2OpClass::WriteAtomic
+            && r.operation == MemoryOperation::Store
             && r.reply == ReplyTo::None));
+        let result = core.result();
+        assert_eq!(result.l1.unwrap().store_sectors, 2);
+        assert_eq!(
+            result.unmodeled_tails,
+            TailFlags {
+                red_rmw: false,
+                dirty_writeback: true,
+                coherence: true,
+            }
+        );
+    }
+
+    #[test]
+    fn shared_mode_reduction_is_nonreturning_without_store_attribution() {
+        let sched = schedule(vec![(0, slot(cb(1), OpClass::Other, "RED.E.ADD"))]);
+        let blocks = vec![BlockReplay {
+            launch_index: 0,
+            warps: vec![WarpReplay {
+                warp_slot: 0,
+                insts: vec![ReplayInst {
+                    pc: 0,
+                    kind: AccessKind::GlobalReduction { off: 0, len: 2 },
+                }],
+                sectors: vec![100, 101],
+            }],
+        }];
+        let mut core = shared_core(&blocks, &sched, &params());
+        let mut out = Vec::new();
+
+        assert_eq!(
+            core.advance(ReplayHorizon::Unbounded, &mut out).unwrap(),
+            Advance::Done
+        );
+        assert_eq!(out.len(), 2);
+        assert!(out.iter().all(|request| request.source == L2Source::Store
+            && request.operation == MemoryOperation::Reduction
+            && request.reply == ReplyTo::None
+            && request.has_valid_contract()));
+        let result = core.result();
+        let l1 = result.l1.unwrap();
+        assert_eq!(l1.store_sectors, 0);
+        assert_eq!(l1.reduction_sectors, 2);
+        assert_eq!(l1.reduction_hits, 0);
+        assert_eq!(
+            result.unmodeled_tails,
+            TailFlags {
+                red_rmw: true,
+                dirty_writeback: true,
+                coherence: true,
+            }
+        );
     }
 
     /// §6.4 slice 2 — one instruction's cold 4-sector line miss reaches
@@ -5717,8 +5948,8 @@ mod tests {
     }
 
     /// ATOM records ride BYPASS provenance (they never stage into the
-    /// modeled L1) but carry the §6.4 WRITE class at the L2: the source
-    /// says who sent the sector, the class says how it hits.
+    /// modeled L1) but retain returning RMW operation semantics. The system
+    /// derives the write-class L2 rule and missing-sector fetch from that type.
     #[test]
     fn shared_mode_atom_is_bypass_provenance_write_class() {
         let mut atom = cb(1);
@@ -5755,7 +5986,8 @@ mod tests {
         );
         assert_eq!(out.len(), 1);
         assert_eq!(out[0].source, L2Source::Bypass);
-        assert_eq!(out[0].class, L2OpClass::WriteAtomic);
+        assert_eq!(out[0].operation, MemoryOperation::Atomic);
+        assert_eq!(out[0].operation.l2_class(), L2OpClass::WriteAtomic);
         assert!(
             matches!(
                 out[0].reply,

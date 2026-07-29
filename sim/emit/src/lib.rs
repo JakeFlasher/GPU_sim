@@ -435,12 +435,13 @@ fn emit_l1tex_read_hit_rate(snap: &CounterSnapshot) -> Result<EmitOutcome, EmitE
 }
 
 /// `l1tex__t_sector_hit_rate.pct` — the unified L1TEX sector hit rate over all
-/// op classes. v0 numerator uses the sector-valid store rule (`store_hits`);
-/// the §6.4 line-TAG rule (`store_tag_hits`) is the carried alternative,
-/// unresolved until l1tex store accounting is scored. The full bypass stream
-/// (atom included) is in the denominator — the unified metric covers
-/// global_atomic/global_reduction, so `bypass_atom_sectors` must NOT be added
-/// on top (it is already a subset of `bypass_sectors`).
+/// op classes. v0 numerator uses the sector-valid store/reduction rules
+/// (`store_hits` / `reduction_hits`); the §6.4 line-TAG store rule
+/// (`store_tag_hits`) is the carried alternative, unresolved until l1tex store
+/// accounting is scored. The full bypass stream (atom included) is in the
+/// denominator — `bypass_atom_sectors` must NOT be added on top because it is
+/// already a subset of `bypass_sectors`. RED uses its distinct reduction lane,
+/// so it contributes to this unified observer without entering `op_st`.
 fn emit_l1tex_unified_hit_rate(snap: &CounterSnapshot) -> Result<EmitOutcome, EmitError> {
     let key = "cache_hit_rate_l1tex_sector";
     let Some(l1) = snap.l1 else {
@@ -451,7 +452,7 @@ fn emit_l1tex_unified_hit_rate(snap: &CounterSnapshot) -> Result<EmitOutcome, Em
     let num = checked_sum(
         key,
         "unified L1TEX hit-rate numerator",
-        &[l1.hits, l1.store_hits],
+        &[l1.hits, l1.store_hits, l1.reduction_hits],
     )?;
     let den = checked_sum(
         key,
@@ -460,6 +461,7 @@ fn emit_l1tex_unified_hit_rate(snap: &CounterSnapshot) -> Result<EmitOutcome, Em
             l1.hits,
             l1.misses,
             l1.store_sectors,
+            l1.reduction_sectors,
             l1.bypass_sectors,
             l1.untagged_sectors,
         ],
@@ -632,6 +634,7 @@ mod tests {
             per_sm: Default::default(),
             diagnostic_last_issue_cycles: 1,
             terminal_modeled_event_time: None,
+            unmodeled_tails: Default::default(),
             l1: l1.map(|counters| counters.with_unified_origin(MemoryOrigin::Global)),
             l2,
             l2_by_source: None,
@@ -919,6 +922,29 @@ mod tests {
                 value: Some(31.0 / 57.0),
                 numerator: 31,
                 denominator: 57,
+            })
+        );
+    }
+
+    #[test]
+    fn reduction_contributes_only_to_the_unified_l1tex_observer() {
+        let mut l1 = L1Counters::for_arch(ArchId::Sm86);
+        l1.store_sectors = 5;
+        l1.store_hits = 1;
+        l1.reduction_sectors = 3;
+        l1.reduction_hits = 2;
+        let preds = emit(1, Some(l1), None, None).unwrap();
+
+        assert_eq!(
+            predicted(&preds, "traffic_gmem_st_sectors"),
+            &EmitOutcome::Predicted(MetricValue::Exact(5))
+        );
+        assert_eq!(
+            predicted(&preds, "cache_hit_rate_l1tex_sector"),
+            &EmitOutcome::Predicted(MetricValue::Fraction {
+                value: Some(3.0 / 8.0),
+                numerator: 3,
+                denominator: 8,
             })
         );
     }
