@@ -84,6 +84,26 @@ impl ArchId {
         }
     }
 
+    /// Reviewed L1 approximation knobs are architecture-local capabilities.
+    /// A typed card property may resolve through this capability only when its
+    /// deployment architecture has independently reviewed the approximation.
+    pub const fn l1_defaults(self) -> Capability<ReviewedL1Defaults> {
+        match self {
+            Self::Sm86 => Capability::available(
+                Self::Sm86,
+                ReviewedL1Defaults {
+                    mshr_count: 32,
+                    replacement: L1Replacement::Lru,
+                    set_mapping: L1SetMapping::FullyAssociative,
+                },
+            ),
+            Self::Sm120 => Capability::research_gap(
+                Self::Sm120,
+                "sm_120 L1 MSHR/replacement/set-mapping defaults are unreviewed",
+            ),
+        }
+    }
+
     /// Reviewed L2 defaults are architecture-local hypotheses.  The partial
     /// sm_120 card must not inherit these values.
     pub const fn l2_defaults(self) -> Capability<ReviewedL2Defaults> {
@@ -252,6 +272,16 @@ enum CapabilityState<T> {
     Unsupported { reason: &'static str },
 }
 
+/// Public capability state without exposing or fabricating an available value.
+/// Consumers can preserve research-gap versus unsupported taxonomy before they
+/// decide whether to call [`Capability::require`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CapabilityStatus {
+    Available,
+    ResearchGap { reason: &'static str },
+    Unsupported { reason: &'static str },
+}
+
 impl<T> Capability<T> {
     pub(crate) const fn available(arch: ArchId, value: T) -> Self {
         Self {
@@ -276,6 +306,18 @@ impl<T> Capability<T> {
 
     pub const fn arch(&self) -> ArchId {
         self.arch
+    }
+
+    pub const fn status(&self) -> CapabilityStatus {
+        match &self.state {
+            CapabilityState::Available(_) => CapabilityStatus::Available,
+            CapabilityState::ResearchGap { reason } => {
+                CapabilityStatus::ResearchGap { reason: *reason }
+            }
+            CapabilityState::Unsupported { reason } => {
+                CapabilityStatus::Unsupported { reason: *reason }
+            }
+        }
     }
 
     /// Consume a capability without trusting a caller-supplied architecture.
@@ -328,6 +370,12 @@ pub enum ArchError {
 }
 
 #[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
+pub enum BareLdgECardDeclarationError {
+    #[error("unknown bare-LDG card declaration token {token:?}")]
+    UnknownToken { token: String },
+}
+
+#[derive(Debug, thiserror::Error, Clone, PartialEq, Eq)]
 pub enum CapabilityError {
     #[error("{arch} capability {capability} is a research gap: {reason}")]
     ResearchGap {
@@ -348,9 +396,56 @@ pub enum BareLdgEDefault {
     CacheAtAllLevels,
 }
 
+/// Closed simulator-supported card-side declaration subset corresponding to
+/// the runtime bare-LDG capability. `TypedUnavailable` carries no value and can
+/// agree only with a research-gap or unsupported capability state. The card
+/// schema's `bypass` token remains fail-closed until the runtime capability has
+/// an independently reviewed implementation.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BareLdgECardDeclaration {
+    CacheAtAllLevels,
+    TypedUnavailable,
+}
+
+impl BareLdgECardDeclaration {
+    pub fn parse(token: &str) -> Result<Self, BareLdgECardDeclarationError> {
+        match token {
+            "ca" => Ok(Self::CacheAtAllLevels),
+            "unknown_typed_unavailable" => Ok(Self::TypedUnavailable),
+            other => Err(BareLdgECardDeclarationError::UnknownToken {
+                token: other.to_owned(),
+            }),
+        }
+    }
+
+    pub const fn token(self) -> &'static str {
+        match self {
+            Self::CacheAtAllLevels => "ca",
+            Self::TypedUnavailable => "unknown_typed_unavailable",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ControlLayout {
     AmpereHighWordV1,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum L1Replacement {
+    Lru,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum L1SetMapping {
+    FullyAssociative,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ReviewedL1Defaults {
+    pub mshr_count: u32,
+    pub replacement: L1Replacement,
+    pub set_mapping: L1SetMapping,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -429,8 +524,69 @@ mod tests {
             Err(CapabilityError::Unsupported { .. })
         ));
         assert!(matches!(
+            ArchId::Sm120.l1_defaults().require("l1_defaults"),
+            Err(CapabilityError::ResearchGap {
+                arch: ArchId::Sm120,
+                capability: "l1_defaults",
+                reason,
+            }) if !reason.is_empty()
+        ));
+        assert!(matches!(
             ArchId::Sm120.l2_defaults().require("l2_defaults"),
             Err(CapabilityError::ResearchGap { .. })
+        ));
+        assert!(matches!(
+            ArchId::Sm120.issue_hypotheses().require("issue_hypotheses"),
+            Err(CapabilityError::ResearchGap { .. })
+        ));
+    }
+
+    #[test]
+    fn capability_status_preserves_taxonomy_without_exposing_values() {
+        assert_eq!(
+            ArchId::Sm86.l1_defaults().status(),
+            CapabilityStatus::Available
+        );
+        assert_eq!(
+            ArchId::Sm86.l1_defaults().require("l1_defaults").unwrap(),
+            ReviewedL1Defaults {
+                mshr_count: 32,
+                replacement: L1Replacement::Lru,
+                set_mapping: L1SetMapping::FullyAssociative,
+            }
+        );
+        assert!(matches!(
+            ArchId::Sm120.l1_defaults().status(),
+            CapabilityStatus::ResearchGap { reason } if !reason.is_empty()
+        ));
+        assert!(matches!(
+            ArchId::Sm120.control_layout().status(),
+            CapabilityStatus::Unsupported { reason } if !reason.is_empty()
+        ));
+    }
+
+    #[test]
+    fn bare_ldg_card_declarations_are_closed() {
+        for (token, expected) in [
+            ("ca", BareLdgECardDeclaration::CacheAtAllLevels),
+            (
+                "unknown_typed_unavailable",
+                BareLdgECardDeclaration::TypedUnavailable,
+            ),
+        ] {
+            let parsed = BareLdgECardDeclaration::parse(token).unwrap();
+            assert_eq!(parsed, expected);
+            assert_eq!(parsed.token(), token);
+        }
+        // The active card schema admits this future-facing spelling, but no
+        // runtime architecture capability implements it yet.
+        assert!(matches!(
+            BareLdgECardDeclaration::parse("bypass"),
+            Err(BareLdgECardDeclarationError::UnknownToken { .. })
+        ));
+        assert!(matches!(
+            BareLdgECardDeclaration::parse("cg"),
+            Err(BareLdgECardDeclarationError::UnknownToken { .. })
         ));
     }
 }
