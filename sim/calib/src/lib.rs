@@ -16,11 +16,15 @@
 //! this crate's own lockstep test asserts the Rust loader sees the identical
 //! sm_86 values.
 
+use std::collections::BTreeSet;
 use std::path::Path;
 
 use serde::Deserialize;
 use serde::de::DeserializeOwned;
-use sim_arch::{ArchError, ArchId, ArchIdentity, BuildArch, Sku};
+use sim_arch::{
+    ArchError, ArchId, ArchIdentity, BareLdgECardDeclaration, BareLdgECardDeclarationError,
+    BareLdgEDefault, BuildArch, CapabilityError, CapabilityStatus, Sku,
+};
 
 #[derive(Debug, thiserror::Error)]
 pub enum CalibError {
@@ -38,6 +42,40 @@ pub enum CalibError {
     },
     #[error("card architecture identity is invalid: {0}")]
     Architecture(#[from] ArchError),
+    #[error("architecture capability is unavailable: {0}")]
+    Capability(#[from] CapabilityError),
+    #[error("card {arch} build_arch_family must contain at least one build token")]
+    BuildArchFamilyEmpty { arch: ArchId },
+    #[error("card build_arch_family token {token:?} is invalid: {source}")]
+    BuildArchFamilyTokenInvalid {
+        token: String,
+        #[source]
+        source: ArchError,
+    },
+    #[error("card build_arch_family repeats token {token:?}")]
+    BuildArchFamilyDuplicate { token: String },
+    #[error(
+        "card {arch} build_arch_family token {token:?} belongs to another deployment architecture"
+    )]
+    BuildArchFamilyArchitectureMismatch { arch: ArchId, token: String },
+    #[error("card {arch} build_arch_family does not admit requested build {build:?}")]
+    BuildArchNotInCardFamily { arch: ArchId, build: String },
+    #[error("card {arch} has no bare_ldg_e_default declaration")]
+    BareLdgDeclarationMissing { arch: ArchId },
+    #[error("card bare_ldg_e_default declaration is invalid: {0}")]
+    BareLdgDeclaration(#[from] BareLdgECardDeclarationError),
+    #[error(
+        "card {arch} bare_ldg_e_default declaration {declaration:?} contradicts runtime capability {status:?}"
+    )]
+    BareLdgCapabilityMismatch {
+        arch: ArchId,
+        declaration: BareLdgECardDeclaration,
+        status: CapabilityStatus,
+    },
+    #[error("loaded card architecture was relabeled from {loaded} to {current}")]
+    CardArchitectureRelabeled { loaded: ArchId, current: ArchId },
+    #[error("loaded card SKU was relabeled from {loaded:?} to {current:?}")]
+    CardSkuRelabeled { loaded: Sku, current: Sku },
     #[error(
         "card {arch_id} compute_capability={got:?} disagrees with canonical architecture {expected:?}"
     )]
@@ -58,13 +96,14 @@ pub enum CalibError {
         reason: String,
     },
     #[error(
-        "card {arch_id}: block '{block}' is a research_gap ({reason}); the consumer must \
+        "card {arch_id}: block '{block}' is a research_gap ({reason}; challenge={challenge:?}); the consumer must \
          type-exclude, never guess geometry"
     )]
     BlockResearchGap {
         arch_id: String,
         block: &'static str,
         reason: String,
+        challenge: Option<String>,
     },
     #[error("card field {field} = {value} violates '{requirement}' — fail closed, never clamp")]
     InvalidCardValue {
@@ -145,7 +184,10 @@ pub struct MeasuredValue {
 #[derive(Debug, Clone)]
 pub enum Measured {
     Value(MeasuredValue),
-    Gap { reason: Option<String> },
+    Gap {
+        reason: String,
+        challenge: Option<String>,
+    },
 }
 
 #[derive(Debug, Deserialize)]
@@ -160,6 +202,8 @@ struct RawObjOrGap {
     status: Option<GapStatus>,
     #[serde(default)]
     reason: Option<String>,
+    #[serde(default)]
+    challenge: Option<String>,
 }
 
 impl<'de> Deserialize<'de> for Measured {
@@ -167,14 +211,52 @@ impl<'de> Deserialize<'de> for Measured {
     where
         D: serde::Deserializer<'de>,
     {
-        let raw = RawObjOrGap::deserialize(deserializer)?;
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let object = value
+            .as_object()
+            .ok_or_else(|| serde::de::Error::custom("objOrGap entry must be an object"))?;
+        let has_value = object.contains_key("value");
+        let has_status = object.contains_key("status");
+
+        if has_status {
+            let foreign = object
+                .keys()
+                .any(|key| !matches!(key.as_str(), "status" | "reason" | "challenge"));
+            if has_value || foreign {
+                return Err(serde::de::Error::custom(
+                    "objOrGap entry carries BOTH value-arm payload and gap status/metadata",
+                ));
+            }
+        } else if has_value {
+            let foreign = object
+                .keys()
+                .any(|key| !matches!(key.as_str(), "value" | "dispersion" | "unit"));
+            if foreign {
+                return Err(serde::de::Error::custom(
+                    "objOrGap value entry carries BOTH value payload and gap/foreign metadata",
+                ));
+            }
+        }
+
+        let raw: RawObjOrGap = serde_json::from_value(value)
+            .map_err(|error| serde::de::Error::custom(format!("objOrGap entry: {error}")))?;
         match (raw.value, raw.status) {
             (Some(value), None) => Ok(Measured::Value(MeasuredValue {
                 value,
                 dispersion: raw.dispersion,
                 unit: raw.unit,
             })),
-            (None, Some(GapStatus::ResearchGap)) => Ok(Measured::Gap { reason: raw.reason }),
+            (None, Some(GapStatus::ResearchGap)) => {
+                let reason = raw.reason.ok_or_else(|| {
+                    serde::de::Error::custom(
+                        "objOrGap research_gap entry is missing required string `reason`",
+                    )
+                })?;
+                Ok(Measured::Gap {
+                    reason,
+                    challenge: raw.challenge,
+                })
+            }
             (Some(_), Some(_)) => Err(serde::de::Error::custom(
                 "objOrGap entry carries BOTH `value` and `status: research_gap` — \
                  half-migrated card, refusing to pick an arm",
@@ -198,7 +280,10 @@ pub struct Carded<T> {
 #[derive(Debug, Clone)]
 enum CardedState<T> {
     Present(T),
-    Gap { reason: Option<String> },
+    Gap {
+        reason: String,
+        challenge: Option<String>,
+    },
 }
 
 impl<T> Carded<T> {
@@ -213,10 +298,11 @@ impl<T> Carded<T> {
             .ok_or(CalibError::BlockArchitectureUnbound { block })?;
         match &self.state {
             CardedState::Present(t) => Ok(t),
-            CardedState::Gap { reason } => Err(CalibError::BlockResearchGap {
+            CardedState::Gap { reason, challenge } => Err(CalibError::BlockResearchGap {
                 arch_id: arch.to_string(),
                 block,
-                reason: reason.clone().unwrap_or_default(),
+                reason: reason.clone(),
+                challenge: challenge.clone(),
             }),
         }
     }
@@ -240,11 +326,11 @@ impl<T> Carded<T> {
     pub fn absent_gap() -> Self {
         Self {
             state: CardedState::Gap {
-                reason: Some(
+                reason:
                     "field absent from this card (card predates the block, OR the card's key is \
                      misspelled — unknown keys are ignored on parse)"
                         .to_owned(),
-                ),
+                challenge: None,
             },
             source_arch: None,
         }
@@ -280,10 +366,25 @@ where
             let GapStatus::ResearchGap = gap;
             let reason = raw
                 .get("reason")
-                .and_then(|r| r.as_str())
-                .map(str::to_string);
+                .and_then(|reason| reason.as_str())
+                .ok_or_else(|| {
+                    serde::de::Error::custom(
+                        "card research_gap block is missing required string `reason`",
+                    )
+                })?
+                .to_owned();
+            let challenge = raw
+                .get("challenge")
+                .map(|challenge| {
+                    challenge.as_str().map(str::to_owned).ok_or_else(|| {
+                        serde::de::Error::custom(
+                            "card research_gap block challenge must be a string",
+                        )
+                    })
+                })
+                .transpose()?;
             return Ok(Self {
-                state: CardedState::Gap { reason },
+                state: CardedState::Gap { reason, challenge },
                 source_arch: None,
             });
         }
@@ -297,6 +398,7 @@ where
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct LatenciesCycles {
     pub l1_hit: Measured,
     pub l2_hit: Measured,
@@ -412,28 +514,53 @@ pub struct RequiredLatencies {
     pub shared: f64,
 }
 
-/// The subset of an ArchProfile card the simulator consumes. Unknown fields
-/// are ignored on purpose: cards carry label-side bookkeeping (predictor
-/// state, crosswalk gates) that must never leak into simulator inputs.
-#[derive(Debug, Clone, Deserialize)]
-pub struct ArchCard {
-    pub arch_id: String,
-    pub sku: String,
-    pub compute_capability: (u32, u32),
-    pub sm_count: u32,
-    pub l1_geometry: Carded<L1Geometry>,
-    pub l2_geometry: Carded<L2Geometry>,
-    pub nvml_reference_operating_point: Carded<NvmlReferenceOperatingPoint>,
-    /// DRAM read-bandwidth covariate; research_gap on cards without a
-    /// locked operating point (sm_120-laptop). Absent on legacy cards →
-    /// treated as a gap, never a default.
+/// Raw JSON subset used only at the checked [`ArchCard::load`] boundary.
+/// Keeping this type private means callers cannot deserialize an unvalidated
+/// architecture card and then consume scalar evidence through public accessors.
+#[derive(Debug, Deserialize)]
+struct RawArchCard {
+    arch_id: String,
+    sku: String,
+    compute_capability: (u32, u32),
+    #[serde(default)]
+    build_arch_family: Vec<String>,
+    sm_count: u32,
+    l1_geometry: Carded<L1Geometry>,
+    l2_geometry: Carded<L2Geometry>,
+    nvml_reference_operating_point: Carded<NvmlReferenceOperatingPoint>,
     #[serde(default = "Carded::absent_gap")]
-    pub dram_bandwidth: Carded<DramBandwidth>,
+    dram_bandwidth: Carded<DramBandwidth>,
     #[serde(default)]
-    pub latencies_cycles: Option<LatenciesCycles>,
-    /// Load classifier default for bare LDG.E (per-arch measured fact).
+    latencies_cycles: Option<Carded<LatenciesCycles>>,
     #[serde(default)]
-    pub bare_ldg_e_default: Option<String>,
+    bare_ldg_e_default: Option<String>,
+}
+
+/// The validated subset of an ArchProfile card consumed by the simulator.
+/// Fields are private and the type is not deserializable: callers can obtain a
+/// card only through [`ArchCard::load`], so post-load identity relabeling and
+/// direct-deserialization access cannot detach scalar evidence from its source.
+/// Unknown JSON fields are ignored at the private raw boundary because cards
+/// also carry label-side bookkeeping that must never leak into simulator inputs.
+///
+/// ```compile_fail
+/// let _: sim_calib::ArchCard = serde_json::from_str("{}").unwrap();
+/// ```
+#[derive(Debug, Clone)]
+pub struct ArchCard {
+    loaded_arch: ArchId,
+    loaded_sku: Sku,
+    arch_id: String,
+    sku: String,
+    compute_capability: (u32, u32),
+    build_arch_family: Vec<String>,
+    sm_count: u32,
+    l1_geometry: Carded<L1Geometry>,
+    l2_geometry: Carded<L2Geometry>,
+    nvml_reference_operating_point: Carded<NvmlReferenceOperatingPoint>,
+    dram_bandwidth: Carded<DramBandwidth>,
+    latencies_cycles: Option<Carded<LatenciesCycles>>,
+    bare_ldg_e_default: Option<String>,
 }
 
 impl ArchCard {
@@ -442,16 +569,53 @@ impl ArchCard {
             path: path.display().to_string(),
             source,
         })?;
-        let mut card: Self = serde_json::from_str(&raw).map_err(|source| CalibError::Parse {
+        let raw: RawArchCard = serde_json::from_str(&raw).map_err(|source| CalibError::Parse {
             path: path.display().to_string(),
             source,
         })?;
+        let loaded_arch = ArchId::parse_deploy(&raw.arch_id)?;
+        let expected_compute_capability = loaded_arch.compute_capability();
+        if raw.compute_capability != expected_compute_capability {
+            return Err(CalibError::ComputeCapabilityMismatch {
+                arch_id: raw.arch_id,
+                got: raw.compute_capability,
+                expected: expected_compute_capability,
+            });
+        }
+        let loaded_sku = Sku::parse(&raw.sku)?;
+        if loaded_sku.arch() != loaded_arch {
+            return Err(CalibError::InvalidCardValue {
+                field: "sku",
+                value: raw.sku,
+                requirement: "SKU must belong to card arch_id",
+            });
+        }
+        let mut card = Self {
+            loaded_arch,
+            loaded_sku,
+            arch_id: raw.arch_id,
+            sku: raw.sku,
+            compute_capability: raw.compute_capability,
+            build_arch_family: raw.build_arch_family,
+            sm_count: raw.sm_count,
+            l1_geometry: raw.l1_geometry,
+            l2_geometry: raw.l2_geometry,
+            nvml_reference_operating_point: raw.nvml_reference_operating_point,
+            dram_bandwidth: raw.dram_bandwidth,
+            latencies_cycles: raw.latencies_cycles,
+            bare_ldg_e_default: raw.bare_ldg_e_default,
+        };
         let arch = card.arch_id()?;
         card.sku_id()?;
+        card.checked_build_arch_family_for_arch(arch)?;
+        card.checked_bare_ldg_e_declaration_for_arch(arch)?;
         card.l1_geometry = card.l1_geometry.bind_arch(arch);
         card.l2_geometry = card.l2_geometry.bind_arch(arch);
         card.nvml_reference_operating_point = card.nvml_reference_operating_point.bind_arch(arch);
         card.dram_bandwidth = card.dram_bandwidth.bind_arch(arch);
+        card.latencies_cycles = card
+            .latencies_cycles
+            .map(|latencies| latencies.bind_arch(arch));
         Ok(card)
     }
 
@@ -466,6 +630,12 @@ impl ArchCard {
                 arch_id: self.arch_id.clone(),
                 got: self.compute_capability,
                 expected,
+            });
+        }
+        if arch != self.loaded_arch {
+            return Err(CalibError::CardArchitectureRelabeled {
+                loaded: self.loaded_arch,
+                current: arch,
             });
         }
         Ok(arch)
@@ -483,13 +653,117 @@ impl ArchCard {
                 requirement: "SKU must belong to card arch_id",
             });
         }
+        if sku != self.loaded_sku {
+            return Err(CalibError::CardSkuRelabeled {
+                loaded: self.loaded_sku,
+                current: sku,
+            });
+        }
         Ok(sku)
     }
 
+    /// Return the validated card compute capability.
+    pub fn compute_capability(&self) -> Result<(u32, u32), CalibError> {
+        self.arch_id()?;
+        Ok(self.compute_capability)
+    }
+
+    /// Return the card-local SM count only after validating deployment and SKU
+    /// identity. The private field cannot be detached from the loaded card.
+    pub fn sm_count(&self) -> Result<u32, CalibError> {
+        self.sku_id()?;
+        Ok(self.sm_count)
+    }
+
+    fn checked_build_arch_family_for_arch(
+        &self,
+        arch: ArchId,
+    ) -> Result<Vec<BuildArch>, CalibError> {
+        if self.build_arch_family.is_empty() {
+            return Err(CalibError::BuildArchFamilyEmpty { arch });
+        }
+        let mut seen = BTreeSet::new();
+        let mut family = Vec::with_capacity(self.build_arch_family.len());
+        for token in &self.build_arch_family {
+            let build = BuildArch::parse(token).map_err(|source| {
+                CalibError::BuildArchFamilyTokenInvalid {
+                    token: token.clone(),
+                    source,
+                }
+            })?;
+            if build.deploy_arch() != arch {
+                return Err(CalibError::BuildArchFamilyArchitectureMismatch {
+                    arch,
+                    token: token.clone(),
+                });
+            }
+            if !seen.insert(build) {
+                return Err(CalibError::BuildArchFamilyDuplicate {
+                    token: token.clone(),
+                });
+            }
+            family.push(build);
+        }
+        Ok(family)
+    }
+
+    /// Parse and validate the card-local compile-target allowlist.
+    pub fn checked_build_arch_family(&self) -> Result<Vec<BuildArch>, CalibError> {
+        let arch = self.sku_id()?.arch();
+        self.checked_build_arch_family_for_arch(arch)
+    }
+
+    fn checked_bare_ldg_e_declaration_for_arch(
+        &self,
+        arch: ArchId,
+    ) -> Result<BareLdgECardDeclaration, CalibError> {
+        let token = self
+            .bare_ldg_e_default
+            .as_deref()
+            .ok_or(CalibError::BareLdgDeclarationMissing { arch })?;
+        let declaration = BareLdgECardDeclaration::parse(token)?;
+        let capability = arch.bare_ldg_e_default();
+        let status = capability.status();
+        match (declaration, status) {
+            (BareLdgECardDeclaration::CacheAtAllLevels, CapabilityStatus::Available) => {
+                let BareLdgEDefault::CacheAtAllLevels = capability.require("bare_ldg_e_default")?;
+                Ok(declaration)
+            }
+            (
+                BareLdgECardDeclaration::TypedUnavailable,
+                CapabilityStatus::ResearchGap { .. } | CapabilityStatus::Unsupported { .. },
+            ) => Ok(declaration),
+            _ => Err(CalibError::BareLdgCapabilityMismatch {
+                arch,
+                declaration,
+                status,
+            }),
+        }
+    }
+
+    /// Parse the closed card declaration and prove that it agrees with the
+    /// architecture-owned runtime capability without manufacturing a value for
+    /// a research gap.
+    pub fn bare_ldg_e_declaration(&self) -> Result<BareLdgECardDeclaration, CalibError> {
+        let arch = self.sku_id()?.arch();
+        self.checked_bare_ldg_e_declaration_for_arch(arch)
+    }
+
     /// Bind the card's deployment identity, SKU, and compile-time build token
-    /// before a simulator composition path selects architecture-local facts.
+    /// only after the requested build belongs to the card-local allowlist and
+    /// the bare-LDG declaration agrees with the runtime capability.
     pub fn identity(&self, build: BuildArch) -> Result<ArchIdentity, CalibError> {
-        Ok(ArchIdentity::new(self.arch_id()?, self.sku_id()?, build)?)
+        let deploy = self.arch_id()?;
+        let sku = self.sku_id()?;
+        let family = self.checked_build_arch_family_for_arch(deploy)?;
+        if !family.contains(&build) {
+            return Err(CalibError::BuildArchNotInCardFamily {
+                arch: deploy,
+                build: build.token().to_owned(),
+            });
+        }
+        self.checked_bare_ldg_e_declaration_for_arch(deploy)?;
+        Ok(ArchIdentity::new(deploy, sku, build)?)
     }
 
     /// Require a card block using the card's own validated architecture.  The
@@ -520,14 +794,16 @@ impl ArchCard {
 
     /// The latency table, or a typed error if the card predates Phase 1D.
     pub fn latencies(&self) -> Result<&LatenciesCycles, CalibError> {
-        // Latency values are architecture-local inputs; validate the card
-        // identity before exposing even a present table.
-        self.sku_id()?;
+        // Latency values are architecture-local inputs. They carry the same
+        // load-time source binding as geometry blocks, so even an internal
+        // coherent identity relabel cannot expose another architecture's table.
+        let arch = self.sku_id()?.arch();
         self.latencies_cycles
             .as_ref()
             .ok_or_else(|| CalibError::LatenciesMissing {
                 arch_id: self.arch_id.clone(),
-            })
+            })?
+            .require_for_arch(arch, "latencies_cycles")
     }
 
     /// A required latency in cycles. `research_gap` → typed error, never a
@@ -561,10 +837,10 @@ impl ArchCard {
                 }
                 Ok(v.value)
             }
-            Measured::Gap { reason } => Err(CalibError::ResearchGap {
+            Measured::Gap { reason, .. } => Err(CalibError::ResearchGap {
                 arch_id: self.arch_id.clone(),
                 kind,
-                reason: reason.clone().unwrap_or_default(),
+                reason: reason.clone(),
             }),
         }
     }
@@ -586,6 +862,7 @@ impl ArchCard {
 mod tests {
     use super::*;
     use std::path::PathBuf;
+    use tempfile::NamedTempFile;
 
     fn card_path(name: &str) -> PathBuf {
         PathBuf::from("../../arch_profiles/cards")
@@ -594,8 +871,34 @@ mod tests {
             .expect("card exists in-repo")
     }
 
+    fn load_mutated_card(
+        name: &str,
+        mutate: impl FnOnce(&mut serde_json::Value),
+    ) -> Result<ArchCard, CalibError> {
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(card_path(name)).unwrap()).unwrap();
+        mutate(&mut value);
+        let file = NamedTempFile::new().unwrap();
+        std::fs::write(file.path(), serde_json::to_vec(&value).unwrap()).unwrap();
+        ArchCard::load(file.path())
+    }
+
+    fn load_inline_card(json: &str) -> Result<ArchCard, CalibError> {
+        let file = NamedTempFile::new().unwrap();
+        std::fs::write(file.path(), json).unwrap();
+        ArchCard::load(file.path())
+    }
+
     fn measured_mut(card: &mut ArchCard, kind: LatencyKind) -> &mut MeasuredValue {
-        let latencies = card.latencies_cycles.as_mut().expect("latencies present");
+        let latencies = match &mut card
+            .latencies_cycles
+            .as_mut()
+            .expect("latencies present")
+            .state
+        {
+            CardedState::Present(latencies) => latencies,
+            CardedState::Gap { .. } => panic!("expected latency table"),
+        };
         let entry = match kind {
             LatencyKind::L1Hit => &mut latencies.l1_hit,
             LatencyKind::L2Hit => &mut latencies.l2_hit,
@@ -625,11 +928,142 @@ mod tests {
         assert_eq!(identity.deploy(), ArchId::Sm120);
         assert_eq!(identity.sku(), Sku::Rtx5060Laptop);
 
-        let mut malformed = sm86;
-        malformed.compute_capability = (12, 0);
         assert!(matches!(
-            malformed.arch_id(),
+            load_mutated_card("sm_86.json", |card| {
+                card["compute_capability"] = serde_json::json!([12, 0]);
+            }),
             Err(CalibError::ComputeCapabilityMismatch { .. })
+        ));
+    }
+
+    #[test]
+    fn card_build_family_is_closed_and_identity_enforces_membership() {
+        let sm120 = ArchCard::load(&card_path("sm_120-laptop.json")).unwrap();
+        assert_eq!(
+            sm120.checked_build_arch_family().unwrap(),
+            vec![BuildArch::Sm120, BuildArch::Sm120a, BuildArch::Sm120f]
+        );
+        for build in [BuildArch::Sm120, BuildArch::Sm120a, BuildArch::Sm120f] {
+            assert_eq!(sm120.identity(build).unwrap().build(), build);
+        }
+
+        let missing_requested = load_mutated_card("sm_120-laptop.json", |card| {
+            card["build_arch_family"]
+                .as_array_mut()
+                .unwrap()
+                .retain(|token| token != "sm_120f");
+        })
+        .unwrap();
+        assert!(matches!(
+            missing_requested.identity(BuildArch::Sm120f),
+            Err(CalibError::BuildArchNotInCardFamily {
+                arch: ArchId::Sm120,
+                ..
+            })
+        ));
+
+        assert!(matches!(
+            load_mutated_card("sm_120-laptop.json", |card| {
+                card["build_arch_family"] = serde_json::json!([]);
+            }),
+            Err(CalibError::BuildArchFamilyEmpty {
+                arch: ArchId::Sm120
+            })
+        ));
+        assert!(matches!(
+            load_mutated_card("sm_120-laptop.json", |card| {
+                card["build_arch_family"] =
+                    serde_json::json!(["sm_120", "sm_120a", "sm_120f", "sm_120"]);
+            }),
+            Err(CalibError::BuildArchFamilyDuplicate { token }) if token == "sm_120"
+        ));
+        assert!(matches!(
+            load_mutated_card("sm_120-laptop.json", |card| {
+                card["build_arch_family"] = serde_json::json!(["sm_120", "sm_86"]);
+            }),
+            Err(CalibError::BuildArchFamilyArchitectureMismatch {
+                arch: ArchId::Sm120,
+                token,
+            }) if token == "sm_86"
+        ));
+        assert!(matches!(
+            load_mutated_card("sm_120-laptop.json", |card| {
+                card["build_arch_family"] = serde_json::json!(["sm_120", "sm_120z"]);
+            }),
+            Err(CalibError::BuildArchFamilyTokenInvalid { token, .. })
+                if token == "sm_120z"
+        ));
+    }
+
+    #[test]
+    fn bare_ldg_card_declaration_must_agree_with_runtime_capability() {
+        let sm86 = ArchCard::load(&card_path("sm_86.json")).unwrap();
+        assert_eq!(
+            sm86.bare_ldg_e_declaration().unwrap(),
+            BareLdgECardDeclaration::CacheAtAllLevels
+        );
+        let sm120 = ArchCard::load(&card_path("sm_120-laptop.json")).unwrap();
+        assert_eq!(
+            sm120.bare_ldg_e_declaration().unwrap(),
+            BareLdgECardDeclaration::TypedUnavailable
+        );
+
+        assert!(matches!(
+            load_mutated_card("sm_86.json", |card| {
+                card.as_object_mut().unwrap().remove("bare_ldg_e_default");
+            }),
+            Err(CalibError::BareLdgDeclarationMissing { arch: ArchId::Sm86 })
+        ));
+        assert!(matches!(
+            load_mutated_card("sm_86.json", |card| {
+                card["bare_ldg_e_default"] = serde_json::json!("bypass");
+            }),
+            Err(CalibError::BareLdgDeclaration(_))
+        ));
+        assert!(matches!(
+            load_mutated_card("sm_86.json", |card| {
+                card["bare_ldg_e_default"] = serde_json::json!("unknown_typed_unavailable");
+            }),
+            Err(CalibError::BareLdgCapabilityMismatch {
+                arch: ArchId::Sm86,
+                declaration: BareLdgECardDeclaration::TypedUnavailable,
+                status: CapabilityStatus::Available,
+            })
+        ));
+        assert!(matches!(
+            load_mutated_card("sm_120-laptop.json", |card| {
+                card["bare_ldg_e_default"] = serde_json::json!("ca");
+            }),
+            Err(CalibError::BareLdgCapabilityMismatch {
+                arch: ArchId::Sm120,
+                declaration: BareLdgECardDeclaration::CacheAtAllLevels,
+                status: CapabilityStatus::ResearchGap { .. },
+            })
+        ));
+    }
+
+    #[test]
+    fn coherent_post_load_relabel_cannot_launder_latency_evidence() {
+        let mut card = ArchCard::load(&card_path("sm_86.json")).unwrap();
+        card.arch_id = "sm_120".to_owned();
+        card.sku = "rtx_5060_laptop".to_owned();
+        card.compute_capability = (12, 0);
+        card.build_arch_family = vec!["sm_120".to_owned()];
+        card.bare_ldg_e_default = Some("unknown_typed_unavailable".to_owned());
+
+        assert!(matches!(
+            card.identity(BuildArch::Sm120),
+            Err(CalibError::CardArchitectureRelabeled {
+                loaded: ArchId::Sm86,
+                current: ArchId::Sm120,
+            })
+        ));
+        assert!(matches!(
+            card.required_latencies(),
+            Err(CalibError::CardArchitectureRelabeled {
+                loaded: ArchId::Sm86,
+                current: ArchId::Sm120,
+            })
         ));
     }
 
@@ -638,9 +1072,9 @@ mod tests {
     #[test]
     fn sm86_card_lockstep() {
         let card = ArchCard::load(&card_path("sm_86.json")).expect("load sm_86 card");
-        assert_eq!(card.arch_id, "sm_86");
-        assert_eq!(card.compute_capability, (8, 6));
-        assert_eq!(card.sm_count, 84);
+        assert_eq!(card.arch_id().unwrap(), ArchId::Sm86);
+        assert_eq!(card.compute_capability().unwrap(), (8, 6));
+        assert_eq!(card.sm_count().unwrap(), 84);
         let l2 = card.require_l2_geometry().unwrap();
         assert_eq!(l2.capacity_bytes, 6_291_456);
         assert_eq!(l2.num_slices, 6);
@@ -649,7 +1083,10 @@ mod tests {
         let l1 = card.require_l1_geometry().unwrap();
         assert_eq!(l1.l1tex_bytes, 131_072);
         assert_eq!(l1.default_l1_bytes, 32_768);
-        assert_eq!(card.bare_ldg_e_default.as_deref(), Some("ca"));
+        assert_eq!(
+            card.bare_ldg_e_declaration().unwrap(),
+            BareLdgECardDeclaration::CacheAtAllLevels
+        );
 
         // pchase v2.1 values (protocol: -lgc 1350 + -lmc 10501).
         let l = card.required_latencies().unwrap();
@@ -759,7 +1196,7 @@ mod tests {
     #[test]
     fn sm120_partial_card_loads_with_typed_block_gaps() {
         let card = ArchCard::load(&card_path("sm_120-laptop.json")).expect("load sm_120 card");
-        assert_eq!(card.arch_id, "sm_120");
+        assert_eq!(card.arch_id().unwrap(), ArchId::Sm120);
         // l2_geometry is populated on this card.
         let l2 = card.require_l2_geometry().unwrap();
         assert_eq!(l2.capacity_bytes, 33_554_432);
@@ -789,6 +1226,29 @@ mod tests {
     }
 
     #[test]
+    fn explicit_latency_block_gap_loads_and_fails_typed() {
+        let card = load_mutated_card("sm_120-laptop.json", |card| {
+            card["latencies_cycles"] = serde_json::json!({
+                "status": "research_gap",
+                "reason": "sm_120 latency table is not measured",
+                "challenge": "requires a reviewed pchase campaign"
+            });
+        })
+        .unwrap();
+        assert!(matches!(
+            card.require_latency(LatencyKind::L1Hit),
+            Err(CalibError::BlockResearchGap {
+                arch_id,
+                block: "latencies_cycles",
+                reason,
+                challenge,
+            }) if arch_id == "sm_120"
+                && !reason.is_empty()
+                && challenge.as_deref() == Some("requires a reviewed pchase campaign")
+        ));
+    }
+
+    #[test]
     fn sm86_mshr_is_research_gap_typed() {
         let card = ArchCard::load(&card_path("sm_86.json")).expect("load sm_86 card");
         match card.require_latency(LatencyKind::MshrOutstandingMisses) {
@@ -804,14 +1264,15 @@ mod tests {
     fn missing_latency_block_is_typed() {
         let card_json = r#"{
             "arch_id": "sm_86", "sku": "rtx_3090_ti",
-            "compute_capability": [8, 6], "sm_count": 1,
+            "compute_capability": [8, 6], "build_arch_family": ["sm_86"],
+            "sm_count": 1, "bare_ldg_e_default": "ca",
             "l1_geometry": {"l1tex_bytes": 1, "ways": 1, "default_l1_bytes": 1,
                              "max_shared_bytes": 1, "sets": 1},
             "l2_geometry": {"capacity_bytes": 1, "sector_bytes": 32, "num_slices": 1,
                              "line_bytes": 128, "policy": "p", "provenance": "test"},
             "nvml_reference_operating_point": {"sm_clock_ref_mhz": 1.0, "max_sm_clock_mhz": 1.0}
         }"#;
-        let card: ArchCard = serde_json::from_str(card_json).unwrap();
+        let card = load_inline_card(card_json).unwrap();
         assert!(matches!(
             card.require_latency(LatencyKind::L1Hit),
             Err(CalibError::LatenciesMissing { .. })
@@ -835,13 +1296,87 @@ mod tests {
     }
 
     #[test]
+    fn every_scalar_value_gap_arm_contamination_is_rejected() {
+        for bad in [
+            r#"{"status":"research_gap","reason":"pending","dispersion":1.0}"#,
+            r#"{"status":"research_gap","reason":"pending","unit":"cycles"}"#,
+            r#"{"status":"research_gap","reason":"pending","unknown_payload":1}"#,
+            r#"{"value":1.0,"reason":"not value metadata"}"#,
+            r#"{"value":1.0,"challenge":"not value metadata"}"#,
+            r#"{"value":1.0,"unknown_payload":1}"#,
+        ] {
+            let error = serde_json::from_str::<Measured>(bad).expect_err(bad);
+            assert!(error.to_string().contains("BOTH"), "{bad}: {error}");
+        }
+
+        let gap = serde_json::from_str::<Measured>(
+            r#"{"status":"research_gap","reason":"pending","challenge":"retained"}"#,
+        )
+        .unwrap();
+        match gap {
+            Measured::Gap { reason, challenge } => {
+                assert_eq!(reason, "pending");
+                assert_eq!(challenge.as_deref(), Some("retained"));
+            }
+            Measured::Value(_) => panic!("expected research gap"),
+        }
+        assert!(
+            serde_json::from_str::<Measured>(
+                r#"{"status":"research_gap","reason":"pending","challenge":1}"#
+            )
+            .is_err()
+        );
+        assert!(
+            serde_json::from_str::<Measured>(r#"{"status":"research_gap"}"#).is_err(),
+            "schema-required gap reason must also be required by Rust"
+        );
+        assert!(matches!(
+            serde_json::from_str::<Measured>(r#"{"value":1.0,"dispersion":0.1,"unit":"cycles"}"#)
+                .unwrap(),
+            Measured::Value(_)
+        ));
+    }
+
+    #[test]
+    fn scalar_arm_contamination_is_rejected_at_card_load_boundary() {
+        for entry in [
+            serde_json::json!({
+                "status": "research_gap",
+                "reason": "pending",
+                "value": 1.0,
+            }),
+            serde_json::json!({"value": 1.0, "reason": "gap-only"}),
+            serde_json::json!({
+                "status": "research_gap",
+                "reason": "pending",
+                "unknown_payload": 1,
+            }),
+        ] {
+            assert!(matches!(
+                load_mutated_card("sm_86.json", |card| {
+                    card["latencies_cycles"]["l1_hit"] = entry;
+                }),
+                Err(CalibError::Parse { .. })
+            ));
+        }
+    }
+
+    #[test]
     fn empty_entry_rejected() {
         assert!(serde_json::from_str::<Measured>(r#"{"unit": "cycles"}"#).is_err());
     }
 
     #[test]
     fn carded_typo_status_rejected() {
-        let bad = r#"{"status": "reseach_gap", "reason": "typo"}"#;
-        assert!(serde_json::from_str::<Carded<L1Geometry>>(bad).is_err());
+        for bad in [
+            r#"{"status": "reseach_gap", "reason": "typo"}"#,
+            r#"{"status": "research_gap"}"#,
+            r#"{"status": "research_gap", "reason": "pending", "challenge": 1}"#,
+        ] {
+            assert!(
+                serde_json::from_str::<Carded<L1Geometry>>(bad).is_err(),
+                "{bad}"
+            );
+        }
     }
 }

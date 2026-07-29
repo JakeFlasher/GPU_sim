@@ -6,9 +6,43 @@
   "type": "object",
   "additionalProperties": true,
   "required": ["arch_id", "sku", "compute_capability", "build_arch_family", "sm_count", "bare_ldg_e_default", "cache_layers", "evidence_status"],
+  "allOf": [
+    {
+      "if": {
+        "properties": {"arch_id": {"const": "sm_86"}},
+        "required": ["arch_id"]
+      },
+      "then": {
+        "properties": {
+          "compute_capability": {"const": [8, 6]},
+          "sku": {"const": "rtx_3090_ti"},
+          "bare_ldg_e_default": {"const": "ca"},
+          "build_arch_family": {
+            "items": {"const": "sm_86"}
+          }
+        }
+      }
+    },
+    {
+      "if": {
+        "properties": {"arch_id": {"const": "sm_120"}},
+        "required": ["arch_id"]
+      },
+      "then": {
+        "properties": {
+          "compute_capability": {"const": [12, 0]},
+          "sku": {"const": "rtx_5060_laptop"},
+          "bare_ldg_e_default": {"const": "unknown_typed_unavailable"},
+          "build_arch_family": {
+            "items": {"enum": ["sm_120", "sm_120a", "sm_120f"]}
+          }
+        }
+      }
+    }
+  ],
   "properties": {
     "arch_id": {"type": "string", "enum": ["sm_86", "sm_120"], "description": "Canonical bare deploy/label arch token."},
-    "sku": {"type": "string", "description": "Device-tier SKU, e.g. rtx_3090_ti / rtx_5060_laptop."},
+    "sku": {"type": "string", "enum": ["rtx_3090_ti", "rtx_5060_laptop"], "description": "Device-tier SKU. Extend in schema/consumer lockstep before admitting another card."},
     "display_name": {"type": "string"},
     "die": {"type": "string"},
     "microarchitecture": {"type": "string"},
@@ -16,16 +50,22 @@
     "compute_capability": {"type": "array", "items": {"type": "integer"}, "minItems": 2, "maxItems": 2},
     "aliases": {"type": "array", "items": {"type": "string"}},
     "device_name_substrings": {"type": "array", "items": {"type": "string"}},
-    "build_arch_family": {"type": "array", "items": {"type": "string"}, "description": "Compile-time fatbin slices; may include server-only tokens forbidden as deploy arch_ids."},
+    "build_arch_family": {
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {"type": "string", "enum": ["sm_86", "sm_120", "sm_120a", "sm_120f"]},
+      "description": "Nonempty card-local compile-time allowlist. Tokens are closed and constrained to the card's deployment architecture by the root conditionals."
+    },
     "gencode": {"type": "string"},
     "sm_count": {"$ref": "#/$defs/intOrGap"},
     "griddim_penalty_alpha": {"$ref": "#/$defs/numOrGap"},
-    "bare_ldg_e_default": {"type": "string", "enum": ["ca", "bypass", "unknown_typed_unavailable"]},
+    "bare_ldg_e_default": {"type": "string", "enum": ["ca", "bypass", "unknown_typed_unavailable"], "description": "Closed declaration vocabulary. Architecture conditionals admit only declarations that agree with the current runtime capability; bypass remains vocabulary-known for a future lockstep capability extension."},
     "cache_layers": {"type": "array", "items": {"type": "string", "enum": ["L1", "L2"]}},
     "l2_geometry": {"$ref": "#/$defs/objOrGap"},
     "l1_geometry": {"$ref": "#/$defs/objOrGap"},
     "latencies_cycles": {
-      "$ref": "#/$defs/objOrGap",
+      "$ref": "#/$defs/latenciesOrGap",
       "description": "Measured load-to-use latencies in SM cycles from the counter-free tools/pchase harness (clock64-timed, with clock state recorded and no boost invariance assumed). Microbench-derived simulator INPUTS — never NCU counter values (Rule 1). Keys: l1_hit, l2_hit, dram, shared; unresolved probes (e.g. mshr_outstanding_misses) carry research_gap objects. provenance names the pchase static card + driver + host clock-lock state."
     },
     "nvml_reference_operating_point": {"$ref": "#/$defs/objOrGap"},
@@ -40,6 +80,7 @@
   "$defs": {
     "researchGap": {
       "type": "object",
+      "additionalProperties": false,
       "required": ["status", "reason"],
       "properties": {
         "status": {"const": "research_gap"},
@@ -47,8 +88,50 @@
         "challenge": {"type": "string"}
       }
     },
+    "measuredValue": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["value"],
+      "properties": {
+        "value": {"type": "number"},
+        "dispersion": {"type": "number"},
+        "unit": {"type": "string"}
+      }
+    },
+    "measuredScalar": {
+      "anyOf": [
+        {"$ref": "#/$defs/measuredValue"},
+        {"$ref": "#/$defs/researchGap"}
+      ]
+    },
+    "latencies": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["l1_hit", "l2_hit", "dram", "shared", "mshr_outstanding_misses", "provenance"],
+      "properties": {
+        "l1_hit": {"$ref": "#/$defs/measuredScalar"},
+        "l2_hit": {"$ref": "#/$defs/measuredScalar"},
+        "dram": {"$ref": "#/$defs/measuredScalar"},
+        "shared": {"$ref": "#/$defs/measuredScalar"},
+        "mshr_outstanding_misses": {"$ref": "#/$defs/measuredScalar"},
+        "provenance": {"type": "string"}
+      }
+    },
+    "latenciesOrGap": {
+      "anyOf": [
+        {"$ref": "#/$defs/latencies"},
+        {"$ref": "#/$defs/researchGap"},
+        {"type": "null"}
+      ]
+    },
     "intOrGap": {"anyOf": [{"type": "integer"}, {"$ref": "#/$defs/researchGap"}]},
     "numOrGap": {"anyOf": [{"type": "number"}, {"$ref": "#/$defs/researchGap"}]},
-    "objOrGap": {"anyOf": [{"type": "object"}, {"$ref": "#/$defs/researchGap"}, {"type": "null"}]}
+    "objOrGap": {
+      "anyOf": [
+        {"type": "object", "not": {"required": ["status"]}},
+        {"$ref": "#/$defs/researchGap"},
+        {"type": "null"}
+      ]
+    }
   }
 }

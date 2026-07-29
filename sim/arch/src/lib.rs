@@ -578,8 +578,9 @@ mod tests {
             assert_eq!(parsed, expected);
             assert_eq!(parsed.token(), token);
         }
-        // The active card schema admits this future-facing spelling, but no
-        // runtime architecture capability implements it yet.
+        // The active card-schema vocabulary retains this future-facing
+        // spelling, while every current architecture branch and runtime
+        // capability reject it until an implementation lands in lockstep.
         assert!(matches!(
             BareLdgECardDeclaration::parse("bypass"),
             Err(BareLdgECardDeclarationError::UnknownToken { .. })
