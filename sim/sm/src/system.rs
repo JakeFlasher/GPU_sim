@@ -1591,7 +1591,10 @@ fn run_sm(
 mod tests {
     use std::collections::BTreeMap;
 
-    use sim_mem::{CacheOpToken, L2Config, L2CounterError, L2OpClass, L2Replacement, SliceHash};
+    use sim_mem::{
+        CacheOpToken, L2Config, L2CounterError, L2FillCompletion, L2OpClass, L2Replacement,
+        SliceHash,
+    };
 
     use super::*;
     use crate::control_bits::{ControlBits, DepBarrier, WaitMask};
@@ -2506,6 +2509,123 @@ mod tests {
         assert_eq!(r.per_sm[&7].cycles, 424);
     }
 
+    #[test]
+    fn equal_time_fill_and_read_follow_event_sequence_order() {
+        #[derive(Clone, Copy)]
+        enum TieEvent {
+            Fill(L2FillToken),
+            Read,
+        }
+
+        for fill_first in [true, false] {
+            let mut l2 = single_way_l2_model();
+            let initial = l2
+                .access_mask_event_transactional(0, 0b0001, L2OpClass::Read, |_| {
+                    Ok::<(), sim_mem::L2AccessError>(())
+                })
+                .unwrap()
+                .0;
+            let fill = initial.fill.expect("cold event read mints a fill token");
+            let ordered = if fill_first {
+                [TieEvent::Fill(fill), TieEvent::Read]
+            } else {
+                [TieEvent::Read, TieEvent::Fill(fill)]
+            };
+            let mut queue = EventQueue::new();
+            for event in ordered {
+                queue.schedule_at(17, TargetId(0), event).unwrap();
+            }
+
+            let mut read_present = None;
+            while let Some(event) = queue.pop().unwrap() {
+                match event.kind {
+                    TieEvent::Fill(token) => {
+                        assert!(matches!(
+                            l2.complete_fill(token).unwrap(),
+                            L2FillCompletion::Completed { .. }
+                        ));
+                    }
+                    TieEvent::Read => {
+                        let access = l2
+                            .access_mask_event_transactional(0, 0b0001, L2OpClass::Read, |_| {
+                                Ok::<(), sim_mem::L2AccessError>(())
+                            })
+                            .unwrap()
+                            .0;
+                        read_present = Some(access.lookup.present_sectors);
+                    }
+                }
+            }
+            assert_eq!(read_present, Some(u32::from(fill_first)));
+        }
+    }
+
+    #[test]
+    fn equal_time_eviction_and_old_fill_follow_event_sequence_order() {
+        #[derive(Clone, Copy)]
+        enum TieEvent {
+            Fill(L2FillToken),
+            Evict,
+        }
+
+        for fill_first in [true, false] {
+            let mut l2 = single_way_l2_model();
+            let initial = l2
+                .access_mask_event_transactional(0, 0b0001, L2OpClass::Read, |_| {
+                    Ok::<(), sim_mem::L2AccessError>(())
+                })
+                .unwrap()
+                .0;
+            let old_fill = initial.fill.expect("cold event read mints a fill token");
+            let ordered = if fill_first {
+                [TieEvent::Fill(old_fill), TieEvent::Evict]
+            } else {
+                [TieEvent::Evict, TieEvent::Fill(old_fill)]
+            };
+            let mut queue = EventQueue::new();
+            for event in ordered {
+                queue.schedule_at(23, TargetId(0), event).unwrap();
+            }
+
+            let mut completion = None;
+            while let Some(event) = queue.pop().unwrap() {
+                match event.kind {
+                    TieEvent::Fill(token) => {
+                        completion = Some(l2.complete_fill(token).unwrap());
+                    }
+                    TieEvent::Evict => {
+                        let access = l2
+                            .access_mask_event_transactional(1, 0b0001, L2OpClass::Read, |_| {
+                                Ok::<(), sim_mem::L2AccessError>(())
+                            })
+                            .unwrap()
+                            .0;
+                        assert!(access.fill.is_some());
+                    }
+                }
+            }
+
+            if fill_first {
+                assert!(matches!(
+                    completion,
+                    Some(L2FillCompletion::Completed {
+                        newly_valid_mask: 0b0001,
+                        duplicate_mask: 0,
+                    })
+                ));
+            } else {
+                assert_eq!(completion, Some(L2FillCompletion::Stale));
+            }
+            assert_eq!(
+                l2.preview_mask(0, 0b0001, L2OpClass::Read)
+                    .unwrap()
+                    .present_sectors,
+                0,
+                "same-cycle ordering must never resurrect the evicted line"
+            );
+        }
+    }
+
     /// A fill may lose its allocation before data returns. Installation is then
     /// stale, but the data-ready event must still clear the originating SM's
     /// barrier; stale cache state is not permission to drop a response.
@@ -2854,6 +2974,7 @@ mod tests {
                 red_rmw: false,
                 dirty_writeback: true,
                 coherence: true,
+                ldgsts_dst_shared_timing: false,
             }
         );
         assert_eq!(
@@ -2907,6 +3028,7 @@ mod tests {
                 red_rmw: false,
                 dirty_writeback: true,
                 coherence: true,
+                ldgsts_dst_shared_timing: false,
             }
         );
     }
@@ -2949,6 +3071,7 @@ mod tests {
                 red_rmw: true,
                 dirty_writeback: true,
                 coherence: true,
+                ldgsts_dst_shared_timing: false,
             }
         );
         assert_eq!(

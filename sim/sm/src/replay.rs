@@ -609,7 +609,10 @@ impl FullKernelReplayResult {
         self.replay.diagnostic_last_issue_cycles
     }
 
-    /// Raw timestamp of the last successfully processed shared-system event.
+    /// Maximum timestamp covered by the modeled event set: the checked issue
+    /// frontier (`last local issue timestamp + 1`) and any successfully processed
+    /// shared-system event. This remains a directional diagnostic, not an NCU
+    /// cycle prediction.
     pub fn terminal_modeled_event_time(&self) -> Option<u64> {
         self.replay.terminal_modeled_event_time
     }
@@ -1365,7 +1368,7 @@ fn fold_kernel_result(
     per_sm: BTreeMap<i32, SmSimResult>,
     records_seen: u64,
     expect_l1: bool,
-    terminal_modeled_event_time: Option<u64>,
+    last_processed_system_event_time: Option<u64>,
     l2: Option<(L2Counters, L2SourceSplit, DramStats)>,
 ) -> Result<FoldedKernelReplay, ReplayError> {
     let mut instructions_issued: u64 = 0;
@@ -1402,6 +1405,12 @@ fn fold_kernel_result(
             records: records_seen,
         });
     }
+    let issue_frontier = (instructions_issued != 0).then_some(diagnostic_last_issue_cycles);
+    let terminal_modeled_event_time = match (issue_frontier, last_processed_system_event_time) {
+        (Some(issue), Some(system)) => Some(issue.max(system)),
+        (Some(issue), None) => Some(issue),
+        (None, system) => system,
+    };
     let (l2, l2_by_source, dram) = match l2 {
         Some((counters, split, dram)) => (Some(counters), Some(split), Some(dram)),
         None => (None, None, None),
@@ -2771,10 +2780,10 @@ mod aggregation_tests {
     }
 
     #[test]
-    fn issue_and_terminal_event_diagnostics_remain_independent() {
+    fn terminal_modeled_time_is_the_maximum_modeled_frontier() {
         let mut result = sm(1, None);
         result.cycles = 7;
-        let folded = fold_kernel_result(
+        let system_dominates = fold_kernel_result(
             ArchId::Sm86,
             BTreeMap::from([(0, result)]),
             1,
@@ -2783,8 +2792,34 @@ mod aggregation_tests {
             None,
         )
         .unwrap();
-        assert_eq!(folded.diagnostic_last_issue_cycles, 7);
-        assert_eq!(folded.terminal_modeled_event_time, Some(423));
+        assert_eq!(system_dominates.diagnostic_last_issue_cycles, 7);
+        assert_eq!(system_dominates.terminal_modeled_event_time, Some(423));
+
+        let issue_dominates = fold_kernel_result(
+            ArchId::Sm86,
+            BTreeMap::from([(0, result)]),
+            1,
+            false,
+            Some(3),
+            None,
+        )
+        .unwrap();
+        assert_eq!(issue_dominates.terminal_modeled_event_time, Some(7));
+
+        let issue_only = fold_kernel_result(
+            ArchId::Sm86,
+            BTreeMap::from([(0, result)]),
+            1,
+            false,
+            None,
+            None,
+        )
+        .unwrap();
+        assert_eq!(issue_only.terminal_modeled_event_time, Some(7));
+
+        let empty =
+            fold_kernel_result(ArchId::Sm86, BTreeMap::new(), 0, false, None, None).unwrap();
+        assert_eq!(empty.terminal_modeled_event_time, None);
     }
 
     #[test]

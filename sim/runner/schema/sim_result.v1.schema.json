@@ -715,7 +715,7 @@
           "required": ["status", "reason"],
           "properties": {
             "status": { "const": "unavailable" },
-            "reason": { "const": "no_shared_system_event" }
+            "reason": { "const": "no_modeled_issue_or_system_event" }
           }
         }
       ]
@@ -737,11 +737,17 @@
     "tailFlags": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["red_rmw", "dirty_writeback", "coherence"],
+      "required": [
+        "red_rmw",
+        "dirty_writeback",
+        "coherence",
+        "ldgsts_dst_shared_timing"
+      ],
       "properties": {
         "red_rmw": { "type": "boolean" },
         "dirty_writeback": { "type": "boolean" },
-        "coherence": { "type": "boolean" }
+        "coherence": { "type": "boolean" },
+        "ldgsts_dst_shared_timing": { "type": "boolean" }
       }
     },
     "l1OriginCounters": {

@@ -141,6 +141,23 @@ def test_result_schema_pins_registry_and_blocks_binding_cycles() -> None:
         jsonschema.validate(duplicate_cycles, schema)
 
 
+def test_result_schema_requires_complete_unmodeled_tail_contract() -> None:
+    schema = _load(SCHEMA_ROOT / "sim_result.v1.schema.json")
+    result = _load(FIXTURE_ROOT / "result.golden.json")
+
+    for path in (
+        ("aggregate", "unmodeled_tails"),
+        ("launches", 0, "unmodeled_tails"),
+    ):
+        incomplete = copy.deepcopy(result)
+        tails = _resolve_path(incomplete, path)
+        assert isinstance(tails, dict)
+        tails.pop("ldgsts_dst_shared_timing")
+        _reseal(incomplete, "result_sha256")
+        with pytest.raises(jsonschema.ValidationError):
+            jsonschema.validate(incomplete, schema)
+
+
 def test_result_schema_rejects_aggregate_cycles_and_nested_targets() -> None:
     schema = _load(SCHEMA_ROOT / "sim_result.v1.schema.json")
     result = _load(FIXTURE_ROOT / "result.golden.json")

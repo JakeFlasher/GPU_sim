@@ -425,6 +425,9 @@ pub struct TailFlags {
     pub dirty_writeback: bool,
     /// Coherence propagation and invalidation traffic is not modeled.
     pub coherence: bool,
+    /// LDGSTS global-source timing is modeled, but its shared-memory
+    /// destination visibility is not.
+    pub ldgsts_dst_shared_timing: bool,
 }
 
 impl TailFlags {
@@ -433,6 +436,8 @@ impl TailFlags {
             red_rmw: self.red_rmw || other.red_rmw,
             dirty_writeback: self.dirty_writeback || other.dirty_writeback,
             coherence: self.coherence || other.coherence,
+            ldgsts_dst_shared_timing: self.ldgsts_dst_shared_timing
+                || other.ldgsts_dst_shared_timing,
         }
     }
 
@@ -442,11 +447,13 @@ impl TailFlags {
                 red_rmw: true,
                 dirty_writeback: true,
                 coherence: true,
+                ldgsts_dst_shared_timing: false,
             },
             AccessKind::GlobalStore { .. } | AccessKind::LocalStore { .. } => Self {
                 red_rmw: false,
                 dirty_writeback: true,
                 coherence: true,
+                ldgsts_dst_shared_timing: false,
             },
             AccessKind::GlobalBypass {
                 token: CacheOpToken::Atom,
@@ -455,6 +462,16 @@ impl TailFlags {
                 red_rmw: false,
                 dirty_writeback: true,
                 coherence: true,
+                ldgsts_dst_shared_timing: false,
+            },
+            AccessKind::GlobalBypass {
+                token: CacheOpToken::Ldgsts,
+                ..
+            } => Self {
+                red_rmw: false,
+                dirty_writeback: false,
+                coherence: false,
+                ldgsts_dst_shared_timing: true,
             },
             AccessKind::NonMemory
             | AccessKind::Shared
@@ -465,6 +482,7 @@ impl TailFlags {
                 red_rmw: false,
                 dirty_writeback: false,
                 coherence: false,
+                ldgsts_dst_shared_timing: false,
             },
         }
     }
@@ -5725,6 +5743,21 @@ mod tests {
     }
 
     #[test]
+    fn ldgsts_marks_only_the_unmodeled_shared_destination_timing_tail() {
+        assert_eq!(
+            TailFlags::for_access(AccessKind::GlobalBypass {
+                off: 0,
+                len: 1,
+                token: CacheOpToken::Ldgsts,
+            }),
+            TailFlags {
+                ldgsts_dst_shared_timing: true,
+                ..TailFlags::default()
+            }
+        );
+    }
+
+    #[test]
     fn shared_mode_store_emits_mutation_only_requests() {
         let sched = schedule(vec![
             (0, slot(cb(1), OpClass::Other, "STG.E")),
@@ -5763,6 +5796,7 @@ mod tests {
                 red_rmw: false,
                 dirty_writeback: true,
                 coherence: true,
+                ldgsts_dst_shared_timing: false,
             }
         );
     }
@@ -5804,6 +5838,7 @@ mod tests {
                 red_rmw: true,
                 dirty_writeback: true,
                 coherence: true,
+                ldgsts_dst_shared_timing: false,
             }
         );
     }

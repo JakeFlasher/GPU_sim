@@ -296,6 +296,18 @@ fn canary_result_is_byte_stable_canonical_and_golden() {
     assert_eq!(result["launches"].as_array().unwrap().len(), 1);
     assert_eq!(result["aggregate"]["counters"]["instructions_issued"], 54);
     assert_eq!(result["aggregate"]["counters"]["l1"]["status"], "unmodeled");
+    assert_eq!(
+        result["aggregate"]["unmodeled_tails"]["ldgsts_dst_shared_timing"],
+        true
+    );
+    assert_eq!(
+        result["launches"][0]["timing_diagnostics"]["terminal_modeled_event_time"],
+        json!({"status": "modeled", "value": 54})
+    );
+    assert_eq!(
+        result["launches"][0]["unmodeled_tails"]["ldgsts_dst_shared_timing"],
+        true
+    );
     assert!(result["aggregate"].get("cycles").is_none());
     let cycles = result["emissions"]
         .as_array()

@@ -1026,7 +1026,7 @@ fn modeled_event_time_wire(value: Option<u64>) -> ModeledEventTimeWire {
     match value {
         Some(value) => ModeledEventTimeWire::Modeled { value },
         None => ModeledEventTimeWire::Unavailable {
-            reason: "no_shared_system_event",
+            reason: "no_modeled_issue_or_system_event",
         },
     }
 }
@@ -1043,6 +1043,7 @@ struct TailFlagsWire {
     red_rmw: bool,
     dirty_writeback: bool,
     coherence: bool,
+    ldgsts_dst_shared_timing: bool,
 }
 
 impl From<TailFlags> for TailFlagsWire {
@@ -1051,6 +1052,7 @@ impl From<TailFlags> for TailFlagsWire {
             red_rmw: flags.red_rmw,
             dirty_writeback: flags.dirty_writeback,
             coherence: flags.coherence,
+            ldgsts_dst_shared_timing: flags.ldgsts_dst_shared_timing,
         }
     }
 }
