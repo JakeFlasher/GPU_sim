@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "scope": "fixture/addr-carry-canary:v1",
+  "architecture": {
+    "arch_id": "sm_86",
+    "sku": "rtx_3090_ti"
+  },
+  "configuration_evidence": {
+    "arch_card_sha256": "12c72f8b16ac369fe8ab877f39850bfc1e5cbb3b16d0b2d45a43b14c66ffe1da",
+    "pchase_card_sha256": "e87d2e208f5326a8083d1a54799864953a62ed1fece1b628583cf8d5cafc581d"
+  },
+  "launches": [
+    {
+      "launch_evidence_manifest_path": "launch_evidence.json",
+      "expected_identity_sha256": "39ef24ba06dfba4025c8912813fff8155dd22a5a05c8676b9c7041eb8ee2937d"
+    }
+  ],
+  "replay_mode": {
+    "mode": "flat"
+  }
+}

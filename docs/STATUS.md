@@ -1,6 +1,6 @@
 # Project status
 
-Updated 2026-07-18. This file reports implemented and admitted state, not
+Updated 2026-07-29. This file reports implemented and admitted state, not
 aspirational plan completion.
 
 ## Simulator
@@ -10,22 +10,25 @@ aspirational plan completion.
 | Rust event queue | Implemented and deterministic |
 | NVBit protobuf reader | Implemented with committed Prost bindings |
 | Static control-bit join | Implemented, fail-closed |
-| SM replay | Implemented as a library over traced placement |
-| L1/shared-L2/DRAM path | Implemented as a library |
-| NCU-shaped emission | Seven secondary descriptors implemented |
-| Primary cycles output | Required but unimplemented |
-| Production CLI | Missing |
+| SM replay | Implemented over manifest-admitted traced placement |
+| L1/shared-L2/DRAM path | Implemented and selectable only through typed run-manifest modes |
+| Launch-set aggregation | Exact full-coverage roster implemented with checked arithmetic |
+| NCU-shaped emission | Seven secondary descriptors plus a mandatory blocked cycles row |
+| Primary cycles output | `required_unimplemented` pending admitted aggregation semantics |
+| Production runner/CLI | Implemented with strict manifests and sealed canonical JSON |
+| Production launch-manifest producer | Missing; checked-in canary is fixture-only |
 | Evaluation join/reporter | Missing |
 | Performance benchmark/gate | Missing |
 | sm_120 validation | Deferred until final sm_86 M2 passes and the operator explicitly approves migration |
 
-`KernelReplayResult.diagnostic_last_issue_cycles` and its separate raw
+`FullKernelReplayResult.diagnostic_last_issue_cycles` and its separate raw
 `terminal_modeled_event_time` are directional diagnostics. Neither may be
 published or emitted as `gpc__cycles_elapsed.max` until admitted silicon
-evidence establishes single-launch mapping and multi-launch composition.
+evidence establishes single-launch mapping and multi-launch composition. The
+runner retains both per launch and deliberately emits no composed timing scalar.
 
-The current Rust workspace gate reports 201 passing tests and three explicitly
-ignored machine-local evidence tests. The default Python boundary is
+The current release Rust workspace gate reports 543 passing tests and three
+explicitly ignored machine-local evidence tests. The default Python boundary is
 self-contained and excludes explicit `campaign_evidence` and
 `hardware_evidence` markers. A green default suite does not claim that external
 GPU evidence was exercised.
@@ -120,9 +123,10 @@ proven.
   owning provenance and campaign gates.
 - Production M5, M6, and M7 entry points and a distinct M7 completion gate are
   still missing.
-- The simulator still needs production admission/identity, corrected memory and
-  SM semantics, a runner/CLI, admitted cycle semantics, evaluation, and the
-  pinned Accel-Sim speed comparison.
+- The simulator still needs the remaining resource/timing scaffolds, a production
+  launch-manifest producer, admitted cycle semantics, evaluation, and the pinned
+  Accel-Sim speed comparison. The offline runner/CLI satisfies none of those
+  external or scientific predicates.
 
 Archive-integrity, offline/frozen-hardware, live-campaign, M7 completion, and
 final M2 are independent gates; passing or authorizing one satisfies none of

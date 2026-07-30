@@ -1,0 +1,21 @@
+[package]
+name = "sim-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "sim-cli"
+path = "src/main.rs"
+
+[dependencies]
+sim-runner = { path = "../runner" }
+
+[dev-dependencies]
+serde_json = { workspace = true }
+sim-trace = { path = "../trace" }
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

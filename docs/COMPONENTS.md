@@ -1,6 +1,6 @@
 # Component inventory
 
-This inventory describes the cleanup boundary as of 2026-07-18. `cargo
+This inventory describes the cleanup boundary as of 2026-07-29. `cargo
 metadata` is authoritative for Rust workspace membership; this document is a
 reviewable snapshot until a tracked generator is added.
 
@@ -18,14 +18,17 @@ Status vocabulary:
 |---|---|---|---|
 | `sim-engine` / `sim/engine` | active | Deterministic `(time, seq)` event queue | Timing-wheel/batching optimization not implemented |
 | `sim-trace` / `sim/trace` | active | Prost trace decode, lane reconstruction, completeness and identity checks | Machine-local smoke policy still being refit |
-| `sim-sm` / `sim/sm` | active | Control-bit join, four-SMSP issue, traced placement, shared-L2 event system | No production driver; issue/terminal timing fields are diagnostic |
+| `sim-sm` / `sim/sm` | active | Control-bit join, four-SMSP issue, traced placement, admitted launch replay, and checked full-launch aggregation | Per-launch issue/terminal timing fields remain diagnostic |
 | `sim-mem` / `sim/mem` | active | Sectored L1/L2 and DRAM bandwidth model | Several microarchitecture choices remain explicit hypotheses |
-| `sim-emit` / `sim/emit` | active | Seven typed NCU-shaped secondary predictions | Primary cycles descriptor absent |
-| `sim-calib` / `sim/calib` | active | Fail-closed architecture-card loading | Not wired through a production application |
+| `sim-emit` / `sim/emit` | active | Seven typed NCU-shaped secondary predictions plus the mandatory blocked cycles row | Binding-cycle implementation awaits admitted aggregation semantics |
+| `sim-calib` / `sim/calib` | active | Fail-closed architecture-card loading | Production runner supports `sm_86`; `sm_120` gaps remain closed |
+| `sim-runner` / `sim/runner` | active | Strict run-manifest admission, card-derived configuration, replay, checked aggregation, and canonical sealed results | No production launch-manifest producer or admitted cycle semantics |
+| `sim-cli` / `sim/cli` | active | One-manifest command-line boundary with canonical result/error streams | Offline execution confers no hardware readiness |
 | `sim-ffi` / `sim/ffi` | retire | Three-line unused placeholder | Already excluded from Cargo workspace; leftover path is HEAD-only cleanup, not active architecture |
 | `sim/trace/pbgen` | build helper | One-shot Prost binding generation | Not a workspace member; generated target is disposable |
 
-There is no simulator binary or benchmark crate yet.
+The workspace now has a production simulator binary. No performance benchmark
+crate or production evaluator is present yet.
 
 ## Core capture and modeling tools
 

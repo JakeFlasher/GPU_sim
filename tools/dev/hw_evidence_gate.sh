@@ -122,13 +122,13 @@ rows = re.findall(
     text,
     flags=re.MULTILINE,
 )
-if len(rows) != 13:
-    raise SystemExit(f"expected 13 libtest result lines, got {len(rows)}")
+if len(rows) != 20:
+    raise SystemExit(f"expected 20 libtest result lines, got {len(rows)}")
 totals = tuple(sum(int(row[i]) for row in rows) for i in range(3))
-if totals != (201, 0, 3):
-    raise SystemExit(f"Rust libtest totals mismatch: expected=(201, 0, 3) actual={totals}")
+if totals != (543, 0, 3):
+    raise SystemExit(f"Rust libtest totals mismatch: expected=(543, 0, 3) actual={totals}")
 print(f"RUST_LIBTEST_LINES={len(rows)}")
-print("RUST_TOTALS=201/0/3")
+print("RUST_TOTALS=543/0/3")
 PY
 
 COLLECT_LOG="$TMP_ROOT/python-collect.log"

@@ -20,7 +20,10 @@ use sim_trace::{
 
 use crate::control_bits::{ControlBitsError, ControlSidecar};
 use crate::program::{FunctionSchedule, ProgramError, build_schedules};
-use crate::replay::{ExtractedCoverage, FullCoverageSource, ReplayError, admit_launch_coverage};
+use crate::replay::{
+    ExtractedCoverage, FullCoverageSource, ReplayError, ReplayLaunchCoverageBinding,
+    ReplayLaunchCoverageBindingError, admit_launch_coverage,
+};
 
 const MANIFEST_SCHEMA_VERSION: u32 = 2;
 const WIRE_VALIDATOR_CONTRACT_ID: &str = "sim_trace_wire_v1";
@@ -434,6 +437,31 @@ impl LaunchEvidenceIdentity {
 
     pub fn function_unique_id(&self) -> i32 {
         self.payload.launch.function_unique_id
+    }
+
+    pub fn arch_card_sha256(&self) -> Sha256Digest {
+        self.payload.arch.arch_card.sha256
+    }
+
+    pub fn pchase_card_sha256(&self) -> Sha256Digest {
+        self.payload.arch.pchase_card.sha256
+    }
+
+    /// Reconstruct the declaration-side launch identity sealed by admission.
+    /// This does not create an observed coverage witness.
+    pub fn launch_binding(
+        &self,
+    ) -> Result<ReplayLaunchCoverageBinding, ReplayLaunchCoverageBindingError> {
+        ReplayLaunchCoverageBinding::checked(
+            self.payload.launch.device_id,
+            self.payload.launch.stream_id,
+            self.payload.launch.kernel_id,
+            self.payload.launch.function_unique_id,
+            self.payload.kernel.mangled_name.clone(),
+            self.payload.geometry.grid_dim,
+            Some(self.payload.geometry.block_dim),
+            self.payload.geometry.cluster_dim,
+        )
     }
 
     pub fn binary_digest_gap(&self) -> BinaryDigestGap {

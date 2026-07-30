@@ -83,6 +83,21 @@ Undocumented replacement, associativity, hash, and latency choices remain
 explicit architecture hypotheses or typed gaps. NCU labels are not used to
 fill them per scored cell.
 
+`sim-runner` is the production composition boundary. A strict
+`sim_run_manifest.v1` selects only a scope, architecture/SKU, sealed v2 launch
+evidence, expected card digests, and a typed memory mode. It admits every launch
+before constructing one shared card-derived configuration, rejects sampled
+launches from exact aggregation, calls only the admitted `replay_kernel` path,
+and passes the complete roster through `aggregate_full_launch_set` and
+`sim-emit`. Configuration values cannot be supplied as manifest scalars or
+environment overrides. `sim-cli` accepts exactly one manifest path and emits a
+sealed canonical result or typed canonical error.
+
+The result preserves per-launch last-issue and terminal-event diagnostics without
+composing them into a launch-set timing scalar. Counter availability and
+unmodeled tails are tagged states rather than null-as-zero. Offline results
+explicitly confer no hardware or scientific authority.
+
 ## Output contracts
 
 `sim-emit` converts raw replay counters into typed NCU-shaped predictions. Raw
@@ -105,13 +120,14 @@ The registry contains 61 capture targets, but registry membership does not mean
 the simulator implements the metric.
 
 The sole publication-binding headline, `exec_cycles_gpc_max` /
-`gpc__cycles_elapsed.max`, is required but unimplemented. Cycles MAPE ≤10%
-meets the engineering target, >10% and ≤15% is floor-only, and >15% is
-publication failure. `KernelReplayResult.diagnostic_last_issue_cycles` and its
-separate raw `terminal_modeled_event_time` are directional diagnostics only.
-Emission is blocked until silicon evidence establishes both
-single-launch mapping and multi-launch aggregation semantics. The seven
-implemented descriptors remain reported secondary outputs and are ungated.
+`gpc__cycles_elapsed.max`, is a mandatory descriptor whose outcome remains
+`required_unimplemented`. Cycles MAPE ≤10% meets the engineering target, >10%
+and ≤15% is floor-only, and >15% is publication failure.
+`FullKernelReplayResult.diagnostic_last_issue_cycles` and its separate raw
+`terminal_modeled_event_time` are directional diagnostics only. Emission is
+blocked until silicon evidence establishes both single-launch mapping and
+multi-launch aggregation semantics. The seven implemented descriptors remain
+reported secondary outputs and are ungated.
 
 ## Label and evidence path
 
@@ -148,19 +164,28 @@ whose number is occupied by another decision, so its relocation chain is
 blocked pending an explicitly accepted versioned repair. POSIX mode `0444` is
 advisory, not authority, because Git cannot reproduce it for ordinary files.
 
-## Integration gaps
+## Remaining integration gaps
 
-The core is currently a set of libraries and tests, not a runnable product.
-The next integration work must add, without weakening the boundaries above:
+The core now has an offline production runner and thin CLI. A strict versioned
+run manifest binds admitted launch evidence and architecture-local cards,
+`sim-runner` replays only through `replay_kernel`, exact full-coverage launch
+sets use checked aggregation, and all descriptors are emitted through
+`sim-emit` as sealed canonical JSON. Sampled coverage is rejected from this
+exact aggregation path, and the CLI does not accept numeric configuration or
+label inputs.
 
-- a thin CLI that loads trace, sidecar, and architecture inputs and invokes
-  `replay_kernel`;
-- aggregation and emission wiring across launches;
-- a cycles-semantics study before the primary emitter;
+Remaining integration work must add, without weakening those boundaries:
+
+- a production launch-evidence manifest producer;
+- the remaining architecture-local resource and timing scaffolds;
+- a cycles-semantics study before the blocked primary outcome can be
+  implemented;
 - an evaluation join that compares predictions with admitted NCU labels;
 - a performance benchmark and enforceable events-per-second threshold.
 
-These are feature milestones, not claims made by the current implementation.
+The offline runner confers no scientific, reviewer, operator, campaign, or
+hardware authority. These remaining items are feature and evidence milestones,
+not claims made by the current implementation.
 
 ## Contract ownership
 
@@ -172,5 +197,5 @@ These are feature milestones, not claims made by the current implementation.
 | Workload provenance | active measurement-manifest v2 schema | Additively extensible active contract |
 | Silicon labels | three-part v5 label authority | Additively extensible, lockstep tested |
 | Historical CUPTI duration | frozen v1 schema and hash manifest | Byte-frozen; explicit version dispatch only |
-| Simulator predictions | `sim-emit` descriptor set | Seven secondary descriptors implemented; primary cycles absent |
+| Simulator predictions | `sim-emit` descriptor set | Seven secondary descriptors implemented; primary cycles descriptor present with mandatory `required_unimplemented` outcome |
 | Migrated Round-28 bytes | `evidence/MANIFEST.sha256`; v1 alias resolution remains blocked on missing decision authority | Hash and clean-tree verified; relocation fails closed |

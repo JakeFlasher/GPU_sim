@@ -40,17 +40,21 @@ Markdown rows.
 
 The repository has working Rust libraries for deterministic event scheduling,
 NVBit trace decoding, SM replay, L1/L2/DRAM modeling, architecture-card
-loading, and seven NCU-shaped secondary metric emitters. The current Rust
-workspace gate reports 201 passing tests and three explicitly ignored
-machine-local evidence tests.
+loading, checked launch-set aggregation, and NCU-shaped emission. `sim-runner`
+and `sim-cli` now provide a strict manifest-only production composition path and
+canonical sealed JSON output. The current release Rust workspace gate reports
+543 passing tests and three explicitly ignored machine-local evidence tests.
 
-This is not yet an end-to-end simulator application:
+This is an offline simulator application boundary, not publication closure:
 
-- there is no production `sim-cli` binary;
-- no non-test consumer drives `replay_kernel` end to end;
-- `gpc__cycles_elapsed.max` is required but not emitted;
-- `KernelReplayResult.max_cycles` is only a directional diagnostic;
-- no benchmark enforces the events-per-second or 100–1000x speed objective.
+- the CLI accepts only a versioned run manifest and admitted launch-evidence
+  manifests; there is not yet a production launch-manifest producer;
+- `gpc__cycles_elapsed.max` is a mandatory `required_unimplemented` output until
+  an admitted aggregation-semantics study exists;
+- per-launch last-issue and terminal-event values remain directional diagnostics;
+- the production evaluator and performance benchmark/gate remain incomplete;
+- an offline runner result confers no hardware, campaign, reviewer, or scientific
+  authority.
 
 See [current status](docs/STATUS.md) for the campaign and cleanup state.
 
@@ -82,6 +86,20 @@ cd ..
 .venv/bin/python -m pytest -q
 .venv/bin/python workloads/simbench_bw/validate.py --all
 ```
+
+The checked-in offline canary exercises the manifest-only CLI without GPU or
+hardware authority:
+
+```bash
+cargo run --manifest-path sim/Cargo.toml -p sim-cli -- \
+  sim/runner/tests/fixtures/addr_carry_canary_bundle/run_manifest.json
+```
+
+The command writes one canonical `sim_result.v1` document to stdout. Typed input
+or replay failures write one canonical `sim_error.v1` document to stderr; exit 2
+means a prerequisite is absent, while exit 1 means the supplied run failed
+validation or execution. A blocked binding-cycle metric remains a successful
+per-metric `required_unimplemented` outcome and does not change process success.
 
 The Python default excludes tests marked `campaign_evidence` and
 `hardware_evidence`. Those tests require machine-local artifacts and must run

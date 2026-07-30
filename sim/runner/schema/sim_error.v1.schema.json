@@ -1,0 +1,104 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "sim_error.v1.schema.json",
+  "title": "Canonical simulator error v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "error_sha256",
+    "code",
+    "category",
+    "exit_code",
+    "message"
+  ],
+  "properties": {
+    "schema_version": { "const": "sim_error.v1" },
+    "error_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "code": {
+      "enum": [
+        "run_manifest_read",
+        "run_manifest_rejected",
+        "launch_evidence_rejected",
+        "identity_mismatch",
+        "configuration_unavailable",
+        "configuration_rejected",
+        "architecture_not_enabled",
+        "coverage_not_aggregatable",
+        "replay_failed",
+        "launch_set_declaration_rejected",
+        "launch_set_aggregation_failed",
+        "emission_failed",
+        "output_serialization_failed",
+        "output_write_failed",
+        "cli_usage"
+      ]
+    },
+    "category": { "enum": ["failure", "prerequisite_missing"] },
+    "exit_code": { "enum": [1, 2] },
+    "message": { "type": "string", "minLength": 1 }
+  },
+  "allOf": [
+    {
+      "oneOf": [
+        {
+          "properties": {
+            "code": {
+              "enum": [
+                "run_manifest_rejected",
+                "identity_mismatch",
+                "configuration_rejected",
+                "coverage_not_aggregatable",
+                "replay_failed",
+                "launch_set_declaration_rejected",
+                "launch_set_aggregation_failed",
+                "emission_failed",
+                "output_serialization_failed",
+                "output_write_failed"
+              ]
+            },
+            "category": { "const": "failure" },
+            "exit_code": { "const": 1 }
+          }
+        },
+        {
+          "properties": {
+            "code": {
+              "enum": [
+                "configuration_unavailable",
+                "architecture_not_enabled",
+                "cli_usage"
+              ]
+            },
+            "category": { "const": "prerequisite_missing" },
+            "exit_code": { "const": 2 }
+          }
+        },
+        {
+          "properties": {
+            "code": {
+              "enum": ["run_manifest_read", "launch_evidence_rejected"]
+            }
+          },
+          "oneOf": [
+            {
+              "properties": {
+                "category": { "const": "failure" },
+                "exit_code": { "const": 1 }
+              }
+            },
+            {
+              "properties": {
+                "category": { "const": "prerequisite_missing" },
+                "exit_code": { "const": 2 }
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

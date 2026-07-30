@@ -12,8 +12,10 @@ phases A→E (engine → memory → trace → modern features → accuracy tunin
 | `sim-sm` | Generic 4-sub-core issue/replay algorithms. Static control decoding is capability-gated: the checked-in Ampere sidecar path is active for `sm_86`; no unproven Blackwell decoder is implied. |
 | `sim-mem` | Generic sectored L1/L2 state machines and warp-pool interleave. Geometry, cache-op defaults, MSHR approximations, and latency ladders enter through typed architecture/card resolvers; an `sm_120` gap cannot inherit an `sm_86` hypothesis. |
 | `sim-trace` | NVBit protobuf trace ingestion through the committed Rust/prost bindings for the existing `traces_enhanced` wire format. Wire decoding remains architecture-neutral. |
-| `sim-emit` | NCU-metric emission layer — every metric implements its `tools/local_labels/metric_registry.json` v2 `ncu_observation_contract`, incl. sector-accounting semantics + cold-cache-per-kernel (`--cache-control all`) parity. |
+| `sim-emit` | NCU-metric emission boundary — seven implemented secondary descriptors plus the mandatory `exec_cycles_gpc_max` row, which remains `required_unimplemented` pending admitted aggregation semantics. The descriptor/exclusion tables partition the 61-row registry exactly. |
 | `sim-calib` | Card loader and typed provenance boundary for per-architecture latencies/throughputs. Cards are simulator inputs; NCU labels remain targets and never enter this crate's feature/configuration path. |
+| `sim-runner` | Manifest-only production composition: sealed launch admission, architecture-local configuration resolution, full-coverage replay, checked launch-set aggregation, emission, and sealed canonical `sim_result.v1` output. |
+| `sim-cli` | Thin one-argument binary over `sim-runner`; stdout is result-only, stderr is typed canonical error-only, and no replay setting comes from flags or environment variables. |
 
 ## Architecture scope
 
@@ -37,3 +39,16 @@ per-cycle global ticking hidden inside "event-driven" naming; no per-instruction
 events (SM mini-loop batches issue cycles).
 
 Build: `cargo build` from this directory (workspace).
+
+Run the self-contained offline canary from the repository root:
+
+```bash
+cargo run --manifest-path sim/Cargo.toml -p sim-cli -- \
+  sim/runner/tests/fixtures/addr_carry_canary_bundle/run_manifest.json
+```
+
+`sim_run_manifest.v1` is strict and versioned. It names one admitted v2
+launch-evidence manifest per launch, expected launch/card digests, architecture
+and SKU, scope, and one typed memory mode. It has no numeric configuration
+overrides or target-value fields. `sm_120` remains a typed disabled prerequisite
+at this boundary. The fixture result confers no hardware or scientific credit.

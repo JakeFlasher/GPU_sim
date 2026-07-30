@@ -368,6 +368,36 @@ fn canary_admits_to_one_stable_canonical_seal() {
         first.identity().binary_digest_gap(),
         BinaryDigestGap::TraceContractDoesNotEmitBinaryDigest
     );
+    assert_eq!(
+        first.identity().arch_card_sha256(),
+        Sha256Digest::parse(
+            fixture.manifest["artifacts"]["arch_card"]["sha256"]
+                .as_str()
+                .expect("fixture arch-card digest is a string")
+        )
+        .expect("fixture arch-card digest parses")
+    );
+    assert_eq!(
+        first.identity().pchase_card_sha256(),
+        Sha256Digest::parse(
+            fixture.manifest["artifacts"]["pchase_card"]["sha256"]
+                .as_str()
+                .expect("fixture P-chase-card digest is a string")
+        )
+        .expect("fixture P-chase-card digest parses")
+    );
+    let binding = first
+        .identity()
+        .launch_binding()
+        .expect("admitted identity reconstructs a declaration binding");
+    assert_eq!(binding.device_id(), 0);
+    assert_eq!(binding.stream_id(), 0);
+    assert_eq!(binding.kernel_id(), 1);
+    assert_eq!(binding.function_unique_id(), 1);
+    assert_eq!(binding.kernel_mangled_name(), KERNEL_NAME);
+    assert_eq!(binding.grid(), (1, 1, 1));
+    assert_eq!(binding.block(), Some((32, 1, 1)));
+    assert_eq!(binding.cluster(), (1, 1, 1));
     assert!(
         first
             .identity()
