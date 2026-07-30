@@ -1,6 +1,6 @@
 # Project status
 
-Updated 2026-07-29. This file reports implemented and admitted state, not
+Updated 2026-07-30. This file reports implemented and admitted state, not
 aspirational plan completion.
 
 ## Simulator
@@ -11,6 +11,7 @@ aspirational plan completion.
 | NVBit protobuf reader | Implemented with committed Prost bindings |
 | Static control-bit join | Implemented, fail-closed |
 | SM replay | Implemented over manifest-admitted traced placement |
+| Issue-resource authority | Five optional strict card blocks and typed gaps are implemented; production cards omit them, and carded replay remains typed-deferred while structural fields are dormant |
 | L1/shared-L2/DRAM path | Implemented and selectable only through typed run-manifest modes |
 | Launch-set aggregation | Exact full-coverage roster implemented with checked arithmetic |
 | NCU-shaped emission | Seven secondary descriptors plus a mandatory blocked cycles row |
@@ -27,7 +28,13 @@ published or emitted as `gpc__cycles_elapsed.max` until admitted silicon
 evidence establishes single-launch mapping and multi-launch composition. The
 runner retains both per launch and deliberately emits no composed timing scalar.
 
-The current release Rust workspace gate reports 543 passing tests and three
+The executable `sm_86` issue-resource lane still uses the explicit 25/8/48
+architecture-local hypotheses with carded latency inputs. The strict card
+constructor fails closed on any missing resource block and cannot enter replay
+until SMSP count/ports, block occupancy, dependence-barrier storage, and
+dual-issue behavior are modeled. Synthetic tests confer no card or M5 authority.
+
+The current release Rust workspace gate reports 556 passing tests and three
 explicitly ignored machine-local evidence tests. The default Python boundary is
 self-contained and excludes explicit `campaign_evidence` and
 `hardware_evidence` markers. A green default suite does not claim that external
