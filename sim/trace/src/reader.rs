@@ -277,6 +277,15 @@ pub enum TraceError {
         kernel_id: i32,
     },
     #[error(
+        "kernel locator ({device_id}, {stream_id}, {kernel_id}) does not belong to trace root {root}"
+    )]
+    KernelLocatorForeign {
+        root: PathBuf,
+        device_id: i64,
+        stream_id: i64,
+        kernel_id: i32,
+    },
+    #[error(
         "root launch ({device_id}, {stream_id}, {kernel_id}) has absent or non-positive {field} geometry"
     )]
     LaunchGeometryInvalid {
@@ -391,6 +400,7 @@ impl TraceError {
             Self::DeviceMapKeyMismatch { .. }
             | Self::StreamMapKeyMismatch { .. }
             | Self::LaunchIdentityDuplicate { .. } => Some("trace_launch_identity_mismatch"),
+            Self::KernelLocatorForeign { .. } => Some("kernel_locator_foreign"),
             Self::LaunchGeometryInvalid { .. } => Some("trace_launch_geometry_invalid"),
             Self::ThreadblockRecordsEmpty { .. } => Some("trace_threadblock_empty"),
             Self::ThreadblockPayloadOrphan { .. } => Some("trace_payload_orphan"),
@@ -430,12 +440,40 @@ fn map_wire_preflight_error(
     }
 }
 
-/// One kernel launch located inside the root `Trace` message.
+/// One kernel launch located inside the root `Trace` message. Fields are private
+/// so callers cannot pair arbitrary geometry with a trace payload; consuming
+/// `TraceDir` methods also verify pointer identity against their own root.
+///
+/// ```compile_fail
+/// use sim_trace::{KernelLoc, pb};
+///
+/// fn forge(kernel: &pb::Kernel) -> KernelLoc<'_> {
+///     KernelLoc {
+///         device_id: 0,
+///         stream_id: 0,
+///         kernel,
+///     }
+/// }
+/// ```
 #[derive(Debug, Clone, Copy)]
 pub struct KernelLoc<'a> {
-    pub device_id: i64,
-    pub stream_id: i64,
-    pub kernel: &'a pb::Kernel,
+    device_id: i64,
+    stream_id: i64,
+    kernel: &'a pb::Kernel,
+}
+
+impl<'a> KernelLoc<'a> {
+    pub fn device_id(self) -> i64 {
+        self.device_id
+    }
+
+    pub fn stream_id(self) -> i64 {
+        self.stream_id
+    }
+
+    pub fn kernel(self) -> &'a pb::Kernel {
+        self.kernel
+    }
 }
 
 /// Non-vacuous producer counters parsed from snapshotted `stats.csv` bytes.
@@ -1433,6 +1471,29 @@ impl TraceDir {
         })
     }
 
+    fn require_kernel_loc(&self, loc: &KernelLoc<'_>) -> Result<(), TraceError> {
+        let belongs_to_root = self
+            .trace
+            .gpu_device
+            .get(&loc.device_id)
+            .and_then(|device| device.streams.get(&loc.stream_id))
+            .is_some_and(|stream| {
+                stream
+                    .kernels
+                    .iter()
+                    .any(|kernel| std::ptr::eq(kernel, loc.kernel))
+            });
+        if !belongs_to_root {
+            return Err(TraceError::KernelLocatorForeign {
+                root: self.root.clone(),
+                device_id: loc.device_id,
+                stream_id: loc.stream_id,
+                kernel_id: loc.kernel.id,
+            });
+        }
+        Ok(())
+    }
+
     /// Paths of the per-threadblock `.pb` files for one kernel launch, in
     /// deterministic FILENAME order — which is NOT flattened-block launch
     /// order (filenames embed unpadded decimal coordinates, so "10" sorts
@@ -1443,6 +1504,7 @@ impl TraceDir {
     ///
     /// A kernel launch with no snapshotted payload is a typed error.
     pub fn threadblock_paths(&self, loc: &KernelLoc<'_>) -> Result<Vec<PathBuf>, TraceError> {
+        self.require_kernel_loc(loc)?;
         let dir = self
             .root
             .join("threadblocks")
@@ -4827,6 +4889,29 @@ mod tests {
         }
         assert_eq!(mem_insts, 2);
         assert_eq!(alu_insts, 2);
+    }
+
+    #[test]
+    fn kernel_locator_is_bound_to_its_trace_root() {
+        let first = tempfile::tempdir().unwrap();
+        let second = tempfile::tempdir().unwrap();
+        write_synthetic_trace(first.path(), 1);
+        write_synthetic_trace(second.path(), 1);
+
+        let first_trace = TraceDir::open(first.path()).unwrap();
+        let second_trace = TraceDir::open(second.path()).unwrap();
+        let foreign = first_trace.kernels().next().unwrap();
+        let error = second_trace.threadblock_paths(&foreign).unwrap_err();
+        assert!(matches!(
+            &error,
+            TraceError::KernelLocatorForeign {
+                device_id: 0,
+                stream_id: 0,
+                kernel_id: 1,
+                ..
+            }
+        ));
+        assert_eq!(error.typed_reason(), Some("kernel_locator_foreign"));
     }
 
     /// Lexicographic filename order is NOT launch order once a coordinate

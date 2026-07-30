@@ -52,6 +52,7 @@ use sim_mem::{
     CacheOpToken, L2Config, L2Counters, L2Model, MemRole, is_known_untagged_opcode, opcode_head,
 };
 
+use crate::evidence::AdmittedLaunchEvidence;
 use crate::issue::{
     AccessKind, BlockReplay, IssueError, IssueModelParams, ReplayInst, SmSimResult, TailFlags,
     WarpReplay, simulate_sm,
@@ -247,6 +248,14 @@ pub enum ReplayError {
     #[error("no issue schedule for function_unique_id {function_unique_id}")]
     ScheduleMissing { function_unique_id: i32 },
     #[error(
+        "admitted launch ({device_id}, {stream_id}, {kernel_id}) is absent from its retained trace snapshot"
+    )]
+    AdmittedLaunchMissing {
+        device_id: i64,
+        stream_id: i64,
+        kernel_id: i32,
+    },
+    #[error(
         "{path}: warp {warp_id} record {record_ix} carries function_unique_id {found}, launch \
          kernel is {expected} — multi-function replay is not supported in v0"
     )]
@@ -376,6 +385,13 @@ pub enum ReplayError {
     },
     #[error("duplicate block launch index {index} across threadblock files")]
     DuplicateLaunchIndex { index: i64 },
+    #[error(
+        "shared-system unmodeled-tail aggregate mismatch: system={system:?}, per_sm={per_sm:?}"
+    )]
+    SystemTailMismatch {
+        system: TailFlags,
+        per_sm: TailFlags,
+    },
     #[error(
         "issued {issued} != records {records} — replay invariant broken (every traced record \
          must issue exactly once)"
@@ -698,6 +714,156 @@ pub enum KernelReplayOutcome {
     SampledObserved(SampledKernelReplayResult),
 }
 
+/// Coverage classification retained by an explicitly unadmitted diagnostic replay.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnadmittedCoverage {
+    Full,
+    SampledObserved,
+}
+
+/// Read-only diagnostics from raw trace/sidecar inputs. This type deliberately
+/// cannot be converted into [`FullKernelReplayResult`] or passed to
+/// [`aggregate_full_launch_set`]; only [`replay_kernel`] over
+/// [`AdmittedLaunchEvidence`] can mint an aggregatable replay result.
+///
+/// ```compile_fail
+/// use sim_sm::{
+///     FullLaunchSetDeclaration, UnadmittedReplayDiagnostics,
+///     aggregate_full_launch_set,
+/// };
+///
+/// fn reject(
+///     declaration: FullLaunchSetDeclaration,
+///     diagnostic: UnadmittedReplayDiagnostics,
+/// ) {
+///     let _ = aggregate_full_launch_set(declaration, [diagnostic]);
+/// }
+/// ```
+#[derive(Debug, Clone)]
+pub struct UnadmittedReplayDiagnostics {
+    coverage: UnadmittedCoverage,
+    configuration: ReplayConfiguration,
+    arch: ArchId,
+    blocks_observed: u64,
+    population_blocks: u64,
+    instructions_issued: u64,
+    records_seen: u64,
+    per_sm_count: Option<usize>,
+    diagnostic_last_issue_cycles: Option<u64>,
+    terminal_modeled_event_time: Option<u64>,
+    l1: Option<L1Counters>,
+    l2: Option<L2Counters>,
+    l2_by_source: Option<L2SourceSplit>,
+    dram: Option<DramStats>,
+    unmodeled_tails: TailFlags,
+}
+
+impl UnadmittedReplayDiagnostics {
+    fn from_outcome(outcome: KernelReplayOutcome) -> Self {
+        match outcome {
+            KernelReplayOutcome::Full(result) => Self {
+                coverage: UnadmittedCoverage::Full,
+                configuration: result.configuration(),
+                arch: result.arch(),
+                blocks_observed: result.coverage().blocks_observed(),
+                population_blocks: result.coverage().blocks_observed(),
+                instructions_issued: result.instructions_issued(),
+                records_seen: result.records_seen(),
+                per_sm_count: Some(result.per_sm().len()),
+                diagnostic_last_issue_cycles: Some(result.diagnostic_last_issue_cycles()),
+                terminal_modeled_event_time: result.terminal_modeled_event_time(),
+                l1: result.l1().copied(),
+                l2: result.l2().copied(),
+                l2_by_source: result.l2_by_source().copied(),
+                dram: result.dram().copied(),
+                unmodeled_tails: result.unmodeled_tails(),
+            },
+            KernelReplayOutcome::SampledObserved(result) => {
+                let counters = result.counters();
+                Self {
+                    coverage: UnadmittedCoverage::SampledObserved,
+                    configuration: result.configuration(),
+                    arch: counters.arch(),
+                    blocks_observed: result.coverage().blocks_observed(),
+                    population_blocks: result.coverage().population_blocks(),
+                    instructions_issued: counters.instructions_issued(),
+                    records_seen: counters.records_seen(),
+                    per_sm_count: None,
+                    diagnostic_last_issue_cycles: None,
+                    terminal_modeled_event_time: None,
+                    l1: counters.l1().copied(),
+                    l2: counters.l2().copied(),
+                    l2_by_source: counters.l2_by_source().copied(),
+                    dram: counters.dram().copied(),
+                    unmodeled_tails: counters.unmodeled_tails(),
+                }
+            }
+        }
+    }
+
+    pub fn coverage(&self) -> UnadmittedCoverage {
+        self.coverage
+    }
+
+    pub fn configuration(&self) -> ReplayConfiguration {
+        self.configuration
+    }
+
+    pub fn arch(&self) -> ArchId {
+        self.arch
+    }
+
+    pub fn blocks_observed(&self) -> u64 {
+        self.blocks_observed
+    }
+
+    pub fn population_blocks(&self) -> u64 {
+        self.population_blocks
+    }
+
+    pub fn instructions_issued(&self) -> u64 {
+        self.instructions_issued
+    }
+
+    pub fn records_seen(&self) -> u64 {
+        self.records_seen
+    }
+
+    pub fn per_sm_count(&self) -> Option<usize> {
+        self.per_sm_count
+    }
+
+    /// Present only for full-coverage diagnostics. This remains an issue-frontier
+    /// diagnostic, never a publication-cycle prediction.
+    pub fn diagnostic_last_issue_cycles(&self) -> Option<u64> {
+        self.diagnostic_last_issue_cycles
+    }
+
+    pub fn terminal_modeled_event_time(&self) -> Option<u64> {
+        self.terminal_modeled_event_time
+    }
+
+    pub fn l1(&self) -> Option<&L1Counters> {
+        self.l1.as_ref()
+    }
+
+    pub fn l2(&self) -> Option<&L2Counters> {
+        self.l2.as_ref()
+    }
+
+    pub fn l2_by_source(&self) -> Option<&L2SourceSplit> {
+        self.l2_by_source.as_ref()
+    }
+
+    pub fn dram(&self) -> Option<&DramStats> {
+        self.dram.as_ref()
+    }
+
+    pub fn unmodeled_tails(&self) -> TailFlags {
+        self.unmodeled_tails
+    }
+}
+
 #[derive(Debug)]
 pub(crate) enum ExtractedCoverage {
     Full(FullLaunchCoverage),
@@ -879,7 +1045,7 @@ fn extract_per_sm_blocks(
 ) -> Result<ExtractedKernel, ReplayError> {
     let expected_fuid = schedule.function_unique_id;
     let block = loc
-        .kernel
+        .kernel()
         .block_dim
         .as_ref()
         .filter(|dim| dim.x > 0 && dim.y > 0 && dim.z > 0)
@@ -898,7 +1064,7 @@ fn extract_per_sm_blocks(
             source,
         })?
         .max_resident_warps_per_sm;
-    let cluster = normalized_cluster_dim(loc.kernel, schedule.arch)?;
+    let cluster = normalized_cluster_dim(loc.kernel(), schedule.arch)?;
     // sm_id → blocks (launch index kept for in-SM ordering).
     let mut per_sm_blocks: BTreeMap<i32, Vec<BlockReplay>> = BTreeMap::new();
     let mut seen_indices: BTreeSet<i64> = BTreeSet::new();
@@ -907,7 +1073,7 @@ fn extract_per_sm_blocks(
 
     for path in td.threadblock_paths(loc)? {
         let tb = td.read_threadblock(&path)?;
-        let launch_index = block_launch_index(loc.kernel, &tb, &path)?;
+        let launch_index = block_launch_index(loc.kernel(), &tb, &path)?;
         if !seen_indices.insert(launch_index) {
             return Err(ReplayError::DuplicateLaunchIndex {
                 index: launch_index,
@@ -1084,16 +1250,16 @@ fn extract_per_sm_blocks(
     // trace_sampling.json sidecar whose original_grid matches the launch record
     // (gridDim is never rewritten) and whose captured record count matches
     // records_seen. Absent/non-sampling sidecars never waive full coverage.
-    let (gx, gy, gz) = kernel_grid(loc.kernel)?;
+    let (gx, gy, gz) = kernel_grid(loc.kernel())?;
     let grid = (gx, gy, gz);
     let grid_total = checked_grid_total(grid)?;
     let seen = checked_collection_len("replayed block membership", seen_indices.len())?;
     let launch = ReplayLaunchCoverageBinding {
-        device_id: loc.device_id,
-        stream_id: loc.stream_id,
-        kernel_id: loc.kernel.id,
-        function_unique_id: loc.kernel.function_unique_id,
-        kernel_mangled_name: loc.kernel.name.clone(),
+        device_id: loc.device_id(),
+        stream_id: loc.stream_id(),
+        kernel_id: loc.kernel().id,
+        function_unique_id: loc.kernel().function_unique_id,
+        kernel_mangled_name: loc.kernel().name.clone(),
         grid,
         block,
         cluster,
@@ -1111,9 +1277,9 @@ fn extract_per_sm_blocks(
         }
         Some(sc) => {
             let launch_block = launch.block.ok_or(ReplayError::BlockDimMissing)?;
-            if sc.kernel_mangled_name() != loc.kernel.name.as_str() {
+            if sc.kernel_mangled_name() != loc.kernel().name.as_str() {
                 return Err(ReplayError::SamplingKernelMismatch {
-                    launch: loc.kernel.name.clone(),
+                    launch: loc.kernel().name.clone(),
                     sidecar: sc.kernel_mangled_name().to_owned(),
                 });
             }
@@ -1255,6 +1421,16 @@ fn fold_kernel_result(
     })
 }
 
+fn require_system_tail_consistency(
+    system: TailFlags,
+    per_sm: TailFlags,
+) -> Result<(), ReplayError> {
+    if system != per_sm {
+        return Err(ReplayError::SystemTailMismatch { system, per_sm });
+    }
+    Ok(())
+}
+
 fn classify_kernel_result(
     coverage: ExtractedCoverage,
     configuration: ReplayConfiguration,
@@ -1302,7 +1478,7 @@ fn lookup_schedule<'a>(
     schedules: &'a BTreeMap<i32, FunctionSchedule>,
     loc: &KernelLoc<'_>,
 ) -> Result<&'a FunctionSchedule, ReplayError> {
-    let expected_fuid = loc.kernel.function_unique_id;
+    let expected_fuid = loc.kernel().function_unique_id;
     schedules
         .get(&expected_fuid)
         .ok_or(ReplayError::ScheduleMissing {
@@ -1433,17 +1609,14 @@ fn validate_replay_architecture(
     ReplayConfiguration::checked(*params, mode)
 }
 
-/// Replay one kernel launch on its traced placement under `mode`.
-/// Caches are FRESH per kernel (cold, NCU `--cache-control all` parity).
-pub fn replay_kernel(
+fn replay_kernel_with_schedule(
     td: &TraceDir,
     loc: &KernelLoc<'_>,
-    schedules: &BTreeMap<i32, FunctionSchedule>,
+    schedule: &FunctionSchedule,
     arch_card: &ArchCard,
     params: &IssueModelParams,
     mode: ReplayMemMode,
 ) -> Result<KernelReplayOutcome, ReplayError> {
-    let schedule = lookup_schedule(schedules, loc)?;
     let configuration = validate_replay_architecture(schedule, params, mode)?;
     let placement = PlacementAuthority::from_arch_card(arch_card, schedule.arch)?;
     require_trace_architecture(td, schedule.arch)?;
@@ -1476,17 +1649,73 @@ pub fn replay_kernel(
             let mut l2 = L2Model::new(l2)?;
             let sys = simulate_kernel_shared(&per_sm_blocks, schedule, params, l1, &mut l2, dram)?;
             require_replay_arch(schedule.arch, sys.arch, "system result")?;
-            fold_kernel_result(
+            let system_unmodeled_tails = sys.unmodeled_tails;
+            let replay = fold_kernel_result(
                 schedule.arch,
                 sys.per_sm,
                 records_seen,
                 true,
                 sys.terminal_event_time,
                 Some((sys.l2, sys.l2_by_source, sys.dram)),
-            )?
+            )?;
+            require_system_tail_consistency(system_unmodeled_tails, replay.unmodeled_tails)?;
+            replay
         }
     };
     Ok(classify_kernel_result(coverage, configuration, replay))
+}
+
+/// Replay the one launch sealed into [`AdmittedLaunchEvidence`]. This is the only
+/// public constructor of aggregatable [`KernelReplayOutcome`] values: the trace,
+/// schedule, architecture card, and selected launch were joined transitively by
+/// manifest admission before this boundary.
+///
+/// Caches are fresh per kernel (cold, NCU `--cache-control all` parity).
+pub fn replay_kernel(
+    evidence: &AdmittedLaunchEvidence,
+    params: &IssueModelParams,
+    mode: ReplayMemMode,
+) -> Result<KernelReplayOutcome, ReplayError> {
+    let identity = evidence.identity();
+    let td = evidence.trace_dir();
+    let loc = td
+        .kernels()
+        .find(|loc| {
+            loc.device_id() == identity.device_id()
+                && loc.stream_id() == identity.stream_id()
+                && loc.kernel().id == identity.kernel_id()
+                && loc.kernel().function_unique_id == identity.function_unique_id()
+        })
+        .ok_or(ReplayError::AdmittedLaunchMissing {
+            device_id: identity.device_id(),
+            stream_id: identity.stream_id(),
+            kernel_id: identity.kernel_id(),
+        })?;
+    replay_kernel_with_schedule(
+        td,
+        &loc,
+        evidence.schedule(),
+        evidence.arch_card(),
+        params,
+        mode,
+    )
+}
+
+/// Replay caller-supplied trace/schedule inputs for debugging only. The returned
+/// diagnostics retain counters and directional timestamps but erase the
+/// unforgeable full-replay type, so they cannot enter launch-set aggregation or
+/// certified emission.
+pub fn replay_unadmitted_diagnostics(
+    td: &TraceDir,
+    loc: &KernelLoc<'_>,
+    schedules: &BTreeMap<i32, FunctionSchedule>,
+    arch_card: &ArchCard,
+    params: &IssueModelParams,
+    mode: ReplayMemMode,
+) -> Result<UnadmittedReplayDiagnostics, ReplayError> {
+    let schedule = lookup_schedule(schedules, loc)?;
+    let outcome = replay_kernel_with_schedule(td, loc, schedule, arch_card, params, mode)?;
+    Ok(UnadmittedReplayDiagnostics::from_outcome(outcome))
 }
 
 /// Resolve the two special Global routes reviewed on the active sm_86 path.
@@ -2497,6 +2726,22 @@ mod aggregation_tests {
                 record_ix: 11,
                 accumulated: u64::MAX,
             }) if got == path
+        ));
+    }
+
+    #[test]
+    fn system_tail_mismatch_is_typed() {
+        let system = TailFlags {
+            red_rmw: true,
+            ..TailFlags::default()
+        };
+        let per_sm = TailFlags::default();
+        assert!(matches!(
+            require_system_tail_consistency(system, per_sm),
+            Err(ReplayError::SystemTailMismatch {
+                system: got_system,
+                per_sm: got_per_sm,
+            }) if got_system == system && got_per_sm == per_sm
         ));
     }
 
@@ -6416,7 +6661,6 @@ mod completeness_tests {
                 },
             )]),
         };
-        let schedules = StdMap::from([(1, schedule)]);
         let params = IssueModelParams {
             arch: ArchId::Sm86,
             l1_hit_latency: 1,
@@ -6427,14 +6671,30 @@ mod completeness_tests {
             read_barrier_latency: 1,
             max_resident_warps_per_sm: 48,
         };
-        replay_kernel(
+        replay_kernel_with_schedule(
             &td,
             &loc,
-            &schedules,
+            &schedule,
             &sm86_test_card(),
             &params,
             ReplayMemMode::Flat,
         )
+    }
+
+    #[test]
+    fn unadmitted_diagnostics_erase_the_aggregatable_result_type() {
+        let tmp = tempfile::tempdir().unwrap();
+        write_grid_trace(tmp.path(), 1, 1, &[0], None);
+
+        let diagnostic =
+            UnadmittedReplayDiagnostics::from_outcome(replay_outcome(tmp.path()).unwrap());
+        assert_eq!(diagnostic.coverage(), UnadmittedCoverage::Full);
+        assert_eq!(diagnostic.blocks_observed(), 1);
+        assert_eq!(diagnostic.population_blocks(), 1);
+        assert_eq!(diagnostic.instructions_issued(), 1);
+        assert_eq!(diagnostic.records_seen(), 1);
+        assert_eq!(diagnostic.per_sm_count(), Some(1));
+        assert_eq!(diagnostic.diagnostic_last_issue_cycles(), Some(1));
     }
 
     #[test]

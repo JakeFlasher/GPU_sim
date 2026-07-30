@@ -90,26 +90,97 @@ pub enum OpClass {
 
 /// Per-pc issue control: the sidecar's decoded control word plus the opcode
 /// classifications the scheduler and the L1 model need.
+///
+/// ```compile_fail
+/// use sim_sm::{ControlBits, IssueSlot};
+///
+/// fn overwrite(slot: &mut IssueSlot, control: ControlBits) {
+///     slot.control = control;
+/// }
+/// ```
 #[derive(Debug, Clone)]
 pub struct IssueSlot {
-    pub control: ControlBits,
-    pub op_class: OpClass,
-    pub mem_role: MemRole,
+    pub(crate) control: ControlBits,
+    pub(crate) op_class: OpClass,
+    pub(crate) mem_role: MemRole,
     /// Full nvdisasm text, kept for diagnostics (static tables are small).
-    pub opcode_text: String,
+    pub(crate) opcode_text: String,
 }
 
-/// The replayable issue-control table for one traced function.
+impl IssueSlot {
+    pub fn control(&self) -> &ControlBits {
+        &self.control
+    }
+
+    pub fn op_class(&self) -> OpClass {
+        self.op_class
+    }
+
+    pub fn mem_role(&self) -> MemRole {
+        self.mem_role
+    }
+
+    pub fn opcode_text(&self) -> &str {
+        &self.opcode_text
+    }
+}
+
+/// The replayable issue-control table for one traced function. Construction is
+/// restricted to [`build_schedules`], so external replay callers cannot forge
+/// opcode roles or control words.
+///
+/// ```compile_fail
+/// use std::collections::BTreeMap;
+///
+/// use sim_arch::ArchId;
+/// use sim_sm::FunctionSchedule;
+///
+/// fn forge() -> FunctionSchedule {
+///     FunctionSchedule {
+///         arch: ArchId::Sm86,
+///         function_unique_id: 1,
+///         kernel_name: String::new(),
+///         function_name: String::new(),
+///         by_pc: BTreeMap::new(),
+///     }
+/// }
+/// ```
 #[derive(Debug, Clone)]
 pub struct FunctionSchedule {
-    /// Deployment architecture proven by the trace/sidecar join.  Consumers
-    /// must match this identity before pairing the schedule with any
-    /// architecture-local timing or memory configuration.
-    pub arch: ArchId,
-    pub function_unique_id: i32,
-    pub kernel_name: String,
-    pub function_name: String,
-    pub by_pc: BTreeMap<u64, IssueSlot>,
+    /// Deployment architecture proven by the trace/sidecar join. Consumers must
+    /// match this identity before pairing the schedule with architecture-local
+    /// timing or memory configuration.
+    pub(crate) arch: ArchId,
+    pub(crate) function_unique_id: i32,
+    pub(crate) kernel_name: String,
+    pub(crate) function_name: String,
+    pub(crate) by_pc: BTreeMap<u64, IssueSlot>,
+}
+
+impl FunctionSchedule {
+    pub fn arch(&self) -> ArchId {
+        self.arch
+    }
+
+    pub fn function_unique_id(&self) -> i32 {
+        self.function_unique_id
+    }
+
+    pub fn kernel_name(&self) -> &str {
+        &self.kernel_name
+    }
+
+    pub fn function_name(&self) -> &str {
+        &self.function_name
+    }
+
+    pub fn issue_slot(&self, pc: u64) -> Option<&IssueSlot> {
+        self.by_pc.get(&pc)
+    }
+
+    pub fn static_pcs(&self) -> impl ExactSizeIterator<Item = u64> + '_ {
+        self.by_pc.keys().copied()
+    }
 }
 
 fn classify(opcode_text: &str) -> OpClass {

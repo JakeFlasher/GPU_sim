@@ -1142,9 +1142,9 @@ pub fn admit_launch_evidence(
     let mut matching = trace_dir
         .kernels()
         .filter(|loc| {
-            loc.device_id == selector.device_id
-                && loc.stream_id == selector.stream_id
-                && loc.kernel.id == selector.kernel_id
+            loc.device_id() == selector.device_id
+                && loc.stream_id() == selector.stream_id
+                && loc.kernel().id == selector.kernel_id
         })
         .collect::<Vec<_>>();
     if matching.is_empty() {
@@ -1162,14 +1162,14 @@ pub fn admit_launch_evidence(
         });
     }
     let loc = matching.pop().expect("nonempty launch match was checked");
-    if loc.kernel.function_unique_id != selector.function_unique_id {
+    if loc.kernel().function_unique_id != selector.function_unique_id {
         return Err(identity_mismatch(
             "manifest function_unique_id->root launch",
             selector.function_unique_id,
-            loc.kernel.function_unique_id,
+            loc.kernel().function_unique_id,
         ));
     }
-    if loc.kernel.name.is_empty() {
+    if loc.kernel().name.is_empty() {
         return Err(ManifestError::IdentityFieldMissing {
             field: "dynamic_trace.kernel.name",
         });
@@ -1179,10 +1179,10 @@ pub fn admit_launch_evidence(
             field: "enhanced_execution_info_json function_unique_id",
         },
     )?;
-    if exec_kernel.kernel_name != loc.kernel.name {
+    if exec_kernel.kernel_name != loc.kernel().name {
         return Err(identity_mismatch(
             "root kernel name->exec-info kernel name",
-            &loc.kernel.name,
+            &loc.kernel().name,
             &exec_kernel.kernel_name,
         ));
     }
@@ -1304,7 +1304,7 @@ pub fn admit_launch_evidence(
         schema_version: MANIFEST_SCHEMA_VERSION,
         cell_id,
         kernel: KernelIdentity {
-            mangled_name: loc.kernel.name.clone(),
+            mangled_name: loc.kernel().name.clone(),
             args_hash,
         },
         launch: LaunchIdentity {

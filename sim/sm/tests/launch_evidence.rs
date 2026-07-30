@@ -4,7 +4,10 @@ use std::path::{Path, PathBuf};
 
 use prost::Message;
 use serde_json::{Value, json};
-use sim_sm::{BinaryDigestGap, ManifestError, ReplayError, admit_launch_evidence};
+use sim_sm::{
+    BinaryDigestGap, IssueModelParams, KernelReplayOutcome, ManifestError, ReplayError,
+    ReplayMemMode, admit_launch_evidence, replay_kernel,
+};
 use sim_trace::{Sha256Digest, TraceDirSnapshot, canonical_json};
 use tempfile::TempDir;
 
@@ -385,6 +388,36 @@ fn canary_admits_to_one_stable_canonical_seal() {
         reordered.identity().canonical_json(),
         first.identity().canonical_json()
     );
+}
+
+#[test]
+fn admitted_evidence_mints_the_public_replay_result() {
+    let fixture = fixture();
+    let evidence =
+        admit_launch_evidence(&fixture.manifest_path).expect("admit canary launch evidence");
+    let latencies = evidence
+        .arch_card()
+        .required_latencies()
+        .expect("fixture architecture card has required latencies");
+    let params = IssueModelParams::from_card_latencies_for_arch(
+        evidence
+            .identity()
+            .arch()
+            .expect("sealed architecture parses"),
+        latencies.l1_hit,
+        latencies.l2_hit,
+        latencies.dram,
+        latencies.shared,
+    )
+    .expect("fixture issue parameters resolve");
+
+    let outcome =
+        replay_kernel(&evidence, &params, ReplayMemMode::Flat).expect("admitted launch replays");
+    let KernelReplayOutcome::Full(result) = outcome else {
+        panic!("unsampled admitted fixture must produce full coverage");
+    };
+    assert_eq!(result.instructions_issued(), result.records_seen());
+    assert_eq!(result.coverage().blocks_observed(), 1);
 }
 
 #[test]

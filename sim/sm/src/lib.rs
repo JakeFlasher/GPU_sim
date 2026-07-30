@@ -18,6 +18,12 @@
 //!   traced hardware placement (`sm_id` / `warpid_sm`).
 //!
 //! Pipe occupancy models land in later increments (design §6.2).
+//!
+//! Low-level shared-system results are intentionally not part of the public API:
+//!
+//! ```compile_fail
+//! use sim_sm::SystemResult;
+//! ```
 
 pub mod control_bits;
 pub mod evidence;
@@ -45,10 +51,12 @@ pub use replay::{
     LaunchSetCounterComponent, LaunchSetScalarCounter, LaunchSetScope, LaunchSetScopeError,
     ReplayConfiguration, ReplayError, ReplayLaunchCoverageBinding,
     ReplayLaunchCoverageBindingError, ReplayMemMode, SampledKernelReplayResult,
-    SampledLaunchCoverage, SampledObservedCounters, aggregate_full_launch_set, replay_kernel,
+    SampledLaunchCoverage, SampledObservedCounters, UnadmittedCoverage,
+    UnadmittedReplayDiagnostics, aggregate_full_launch_set, replay_kernel,
+    replay_unadmitted_diagnostics,
 };
 pub use sim_mem::MemRole;
 pub use system::{
     DramBw, DramOriginStats, DramStats, L2OriginSourceStats, L2SourceSplit, SystemCounterError,
-    SystemError, SystemResult,
+    SystemError,
 };

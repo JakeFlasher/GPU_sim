@@ -1018,25 +1018,26 @@ impl DramStats {
     }
 }
 
-/// Result of one kernel launch through the shared-L2 system.
+/// Internal result of one kernel launch through the shared-L2 system. Public
+/// consumers receive only the configuration-bound replay result.
 #[derive(Debug, Clone)]
-pub struct SystemResult {
+pub(crate) struct SystemResult {
     /// Deployment architecture validated across schedule and all hierarchy configs.
-    pub arch: ArchId,
+    pub(crate) arch: ArchId,
     /// Per traced SM id.
-    pub per_sm: BTreeMap<i32, SmSimResult>,
+    pub(crate) per_sm: BTreeMap<i32, SmSimResult>,
     /// Shared-L2 counters for the whole launch.
-    pub l2: L2Counters,
+    pub(crate) l2: L2Counters,
     /// Per-source L2 sector/hit split (driver-side emission observer).
-    pub l2_by_source: L2SourceSplit,
+    pub(crate) l2_by_source: L2SourceSplit,
     /// DRAM read-traffic observer (server engagement diagnostics).
-    pub dram: DramStats,
+    pub(crate) dram: DramStats,
     /// Union of per-SM unmodeled write-class capability tails.
-    pub unmodeled_tails: TailFlags,
+    pub(crate) unmodeled_tails: TailFlags,
     /// Raw timestamp of the last successfully processed modeled event.
     /// `None` means the queue was empty; `Some(0)` is a real event at time zero.
     /// This is a diagnostic timestamp, not an elapsed-cycle prediction.
-    pub terminal_event_time: Option<u64>,
+    pub(crate) terminal_event_time: Option<u64>,
 }
 
 /// Run every SM's blocks to completion over one shared L2. `l2` is

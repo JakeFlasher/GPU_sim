@@ -205,7 +205,6 @@ def _run_rust_test(
         "SIM_L1_DISABLE",
         "SIM_L2_DISABLE",
         "SIM_DRAM_BW_DISABLE",
-        "SIM_LAUNCH_SET_SCOPE",
     ):
         env.pop(flag, None)
     env.update(env_extra)
@@ -277,7 +276,6 @@ def _run_replay(row: dict[str, str], **mode: str) -> str:
         env_extra={
             "SIM_TRACE_SMOKE_DIR": str(trace_root),
             "SIM_CONTROL_BITS_DIR": str(_CONTROL_BITS_DIR),
-            "SIM_LAUNCH_SET_SCOPE": f"m1/{row['slug']}",
             **mode,
         },
     )
