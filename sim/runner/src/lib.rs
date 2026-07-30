@@ -608,16 +608,19 @@ fn configuration_rejected(component: &'static str, reason: impl ToString) -> Run
     }
 }
 
-fn calib_configuration_error(component: &'static str, error: CalibError) -> RunError {
-    let unavailable = match &error {
+fn calib_error_is_unavailable(error: &CalibError) -> bool {
+    match error {
         CalibError::Io { source, .. } => source.kind() == std::io::ErrorKind::NotFound,
         CalibError::Capability(_)
         | CalibError::LatenciesMissing { .. }
         | CalibError::ResearchGap { .. }
         | CalibError::BlockResearchGap { .. } => true,
         _ => false,
-    };
-    if unavailable {
+    }
+}
+
+fn calib_configuration_error(component: &'static str, error: CalibError) -> RunError {
+    if calib_error_is_unavailable(&error) {
         configuration_unavailable(component, error)
     } else {
         configuration_rejected(component, error)
@@ -625,10 +628,14 @@ fn calib_configuration_error(component: &'static str, error: CalibError) -> RunE
 }
 
 fn issue_configuration_error(component: &'static str, error: IssueError) -> RunError {
-    if matches!(
-        &error,
-        IssueError::ArchitectureUnsupported { .. } | IssueError::Capability(_)
-    ) {
+    let unavailable = match &error {
+        IssueError::ArchitectureUnsupported { .. }
+        | IssueError::CardedResourceExecutionDeferred { .. }
+        | IssueError::Capability(_) => true,
+        IssueError::Calibration(source) => calib_error_is_unavailable(source),
+        _ => false,
+    };
+    if unavailable {
         configuration_unavailable(component, error)
     } else {
         configuration_rejected(component, error)
@@ -674,7 +681,7 @@ fn resolve_configuration(
         .arch_card()
         .required_latencies()
         .map_err(|source| calib_configuration_error("architecture-card latencies", source))?;
-    let issue_params = sim_sm::IssueModelParams::from_card_latencies_for_arch(
+    let issue_params = sim_sm::IssueModelParams::from_legacy_card_latencies_for_arch(
         arch,
         latencies.l1_hit,
         latencies.l2_hit,
@@ -848,16 +855,16 @@ struct IssueConfigurationWire {
 impl From<sim_sm::IssueModelParams> for IssueConfigurationWire {
     fn from(params: sim_sm::IssueModelParams) -> Self {
         Self {
-            arch: params.arch.token(),
-            l1_hit_latency_cycles: params.l1_hit_latency,
-            l1_miss_latency_cycles: params.l1_miss_latency,
-            global_flat_latency_cycles: params.global_flat_latency,
-            shared_write_barrier_latency_cycles: params.shared_write_barrier_latency,
-            non_memory_write_barrier_latency_cycles: params.non_memory_write_barrier_latency,
-            read_barrier_latency_cycles: params.read_barrier_latency,
-            max_resident_warps_per_sm: params.max_resident_warps_per_sm,
+            arch: params.arch().token(),
+            l1_hit_latency_cycles: params.l1_hit_latency(),
+            l1_miss_latency_cycles: params.l1_miss_latency(),
+            global_flat_latency_cycles: params.global_flat_latency(),
+            shared_write_barrier_latency_cycles: params.shared_write_barrier_latency(),
+            non_memory_write_barrier_latency_cycles: params.non_memory_write_barrier_latency(),
+            read_barrier_latency_cycles: params.read_barrier_latency(),
+            max_resident_warps_per_sm: params.max_resident_warps_per_sm(),
             latency_provenance: "architecture_card",
-            issue_hypothesis_provenance: "architecture_local_reviewed_hypothesis",
+            issue_hypothesis_provenance: params.resource_lane().provenance(),
         }
     }
 }

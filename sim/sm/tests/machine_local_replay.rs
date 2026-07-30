@@ -123,14 +123,14 @@ fn replay_configuration_json(configuration: ReplayConfiguration) -> serde_json::
     };
     serde_json::json!({
         "issue": {
-            "arch": issue.arch.token(),
-            "l1_hit_latency": issue.l1_hit_latency,
-            "l1_miss_latency": issue.l1_miss_latency,
-            "global_flat_latency": issue.global_flat_latency,
-            "shared_write_barrier_latency": issue.shared_write_barrier_latency,
-            "non_memory_write_barrier_latency": issue.non_memory_write_barrier_latency,
-            "read_barrier_latency": issue.read_barrier_latency,
-            "max_resident_warps_per_sm": issue.max_resident_warps_per_sm,
+            "arch": issue.arch().token(),
+            "l1_hit_latency": issue.l1_hit_latency(),
+            "l1_miss_latency": issue.l1_miss_latency(),
+            "global_flat_latency": issue.global_flat_latency(),
+            "shared_write_barrier_latency": issue.shared_write_barrier_latency(),
+            "non_memory_write_barrier_latency": issue.non_memory_write_barrier_latency(),
+            "read_barrier_latency": issue.read_barrier_latency(),
+            "max_resident_warps_per_sm": issue.max_resident_warps_per_sm(),
         },
         "memory": memory,
         "co_residency": co_residency,
@@ -139,16 +139,14 @@ fn replay_configuration_json(configuration: ReplayConfiguration) -> serde_json::
 
 #[test]
 fn serialized_replay_configuration_marks_co_residency_modeled() {
-    let issue = IssueModelParams {
-        arch: sim_arch::ArchId::Sm86,
-        l1_hit_latency: 1,
-        l1_miss_latency: 2,
-        global_flat_latency: 3,
-        shared_write_barrier_latency: 4,
-        non_memory_write_barrier_latency: 5,
-        read_barrier_latency: 6,
-        max_resident_warps_per_sm: 48,
-    };
+    let issue = IssueModelParams::from_legacy_card_latencies_for_arch(
+        sim_arch::ArchId::Sm86,
+        1.0,
+        2.0,
+        3.0,
+        4.0,
+    )
+    .unwrap();
     let configuration = ReplayConfiguration::checked(issue, ReplayMemMode::Flat).unwrap();
     assert_eq!(configuration.co_residency(), CoResidency::Modeled);
     assert_eq!(
@@ -183,7 +181,7 @@ fn real_trace_replays_under_issue_model() {
     let lat = card
         .required_latencies()
         .expect("sm_86 card has no latency gaps");
-    let params = IssueModelParams::from_card_latencies_for_arch(
+    let params = IssueModelParams::from_legacy_card_latencies_for_arch(
         identity.deploy(),
         lat.l1_hit,
         lat.l2_hit,

@@ -1543,6 +1543,7 @@ impl ReplayConfiguration {
         memory_mode: ReplayMemMode,
     ) -> Result<Self, ReplayError> {
         validate_replay_mode_architecture(issue_params.arch, memory_mode)?;
+        issue_params.require_executable_resource_lane()?;
         Ok(Self {
             issue_params,
             memory_mode,
@@ -6346,6 +6347,7 @@ mod completeness_tests {
     //! incomplete coverage.
     use super::*;
     use crate::control_bits::ControlBits;
+    use crate::issue::IssueResourceLane;
     use crate::program::{FunctionSchedule, IssueSlot, OpClass};
     use prost::Message;
     use std::collections::{BTreeMap as StdMap, BTreeSet as StdSet};
@@ -6698,6 +6700,7 @@ mod completeness_tests {
         };
         let params = IssueModelParams {
             arch: ArchId::Sm86,
+            resource_lane: IssueResourceLane::SyntheticTestFixture,
             l1_hit_latency: 1,
             l1_miss_latency: 1,
             global_flat_latency: 1,

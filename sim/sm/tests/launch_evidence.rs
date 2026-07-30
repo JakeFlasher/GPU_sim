@@ -431,7 +431,7 @@ fn admitted_evidence_mints_the_public_replay_result() {
         .arch_card()
         .required_latencies()
         .expect("fixture architecture card has required latencies");
-    let params = IssueModelParams::from_card_latencies_for_arch(
+    let params = IssueModelParams::from_legacy_card_latencies_for_arch(
         evidence
             .identity()
             .arch()

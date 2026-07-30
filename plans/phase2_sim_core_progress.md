@@ -129,7 +129,8 @@ where they differ):
   `l2_geometry.policy` is nullable on that card.
 - **sim-sm**: the producer legitimately writes `unknown_encoding` records
   (and `_flush_pending` omits `high_word` entirely) — the loader now parses
-  those files and rejects typed (`UnknownEncodingsPresent{count}`), plus
+  those files and rejects typed (`UnsupportedEncoding{count}`: absent simulator
+  decode, not absent hardware operation), plus
   honest variants for structural corruption (`MissingControlBlock`,
   `MissingHighWord`) instead of smuggled strings.
 - **Gencode drift guard**: `sim/trace/tests/proto_schema_pin.rs` pins

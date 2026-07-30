@@ -58,6 +58,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use sim_arch::ArchId;
+use sim_calib::{ArchCard, CalibError, RequiredIssueResources};
 use sim_mem::{
     CacheOpToken, EvAccess, EvAccessUnobserved, FillKey, L1AccessError, L1Cache, L1Config,
     L1Counters, L1MutationBudget, L2OpClass, L2Source, MemoryOrigin,
@@ -94,39 +95,67 @@ pub(crate) struct BlockReplay {
     pub(crate) warps: Vec<WarpReplay>,
 }
 
-/// Timing parameters. Card-derived values come from the pchase static
-/// card / sim-calib (the caller maps the fields — sim-sm deliberately
-/// depends on neither); the rest are documented hypothesis knobs pending
-/// Phase-1D calibration extensions.
+/// Authority lane for scheduler-resource values. The legacy lane is the only
+/// executable one until every field in the strict carded lane is consumed by
+/// the scheduler rather than shadowed by structural constants.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IssueResourceLane {
+    /// Existing sm_86-only 25/8/48 architecture-local hypotheses.
+    LegacyArchitectureHypotheses,
+    /// Strict architecture-card resources. Construction is supported, but replay
+    /// remains typed-deferred while structural fields are dormant.
+    Carded(RequiredIssueResources),
+    /// Unit-test-only lane for boundary tests that need synthetic scheduler
+    /// values. This variant does not exist in production builds.
+    #[cfg(test)]
+    SyntheticTestFixture,
+}
+
+impl IssueResourceLane {
+    pub const fn provenance(self) -> &'static str {
+        match self {
+            Self::LegacyArchitectureHypotheses => "architecture_local_reviewed_hypothesis",
+            Self::Carded(_) => "architecture_card",
+            #[cfg(test)]
+            Self::SyntheticTestFixture => "synthetic_test_fixture",
+        }
+    }
+}
+
+/// Timing parameters. Latencies and issue resources retain distinct authority
+/// lanes: the executable legacy lane combines card latencies with explicit
+/// architecture-local hypotheses, while [`IssueModelParams::from_card`] admits a
+/// complete strict card projection that remains non-executable.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct IssueModelParams {
     /// Deployment architecture whose card and issue hypotheses produced these parameters.
-    pub arch: ArchId,
+    pub(crate) arch: ArchId,
+    pub(crate) resource_lane: IssueResourceLane,
     /// L1 hit data-ready latency (card `l1_hit_latency_cycles`, ceiled).
-    pub l1_hit_latency: u64,
+    pub(crate) l1_hit_latency: u64,
     /// End-to-end L1-miss/L2-HIT data-ready latency (card
     /// `l2_hit_latency_cycles`, ceiled). In L1Const mode every miss is
     /// priced at this (the L2-hit assumption); in L1Shared mode it is
     /// the L2-hit arm of the ladder AND the lower bound on any response.
-    pub l1_miss_latency: u64,
+    pub(crate) l1_miss_latency: u64,
     /// End-to-end L1-miss/L2-MISS data-ready latency (card
     /// `dram_latency_cycles`, ceiled): the DRAM arm of the ladder in
     /// L1Shared mode, and the flat global barrier latency in Flat mode.
-    pub global_flat_latency: u64,
+    pub(crate) global_flat_latency: u64,
     /// Shared-class barrier latency (card `shared_latency_cycles`).
-    pub shared_write_barrier_latency: u64,
+    pub(crate) shared_write_barrier_latency: u64,
     /// Write-barrier clear latency for non-memory producers (S2R, MUFU,
     /// I2F, HMMA & co). Hypothesis knob: ~20–25 cycles is the
     /// special-register/SFU class in Abdelkhalik et al. (HPEC'22, A100);
     /// not yet microbenched on this project's cards.
-    pub non_memory_write_barrier_latency: u64,
+    pub(crate) non_memory_write_barrier_latency: u64,
     /// Read-dependence barrier clear latency (operand consumption).
     /// Hypothesis knob: source operands are read a few cycles after issue.
-    pub read_barrier_latency: u64,
+    pub(crate) read_barrier_latency: u64,
     /// Resident-warp ceiling per SM. The reviewed sm_86 hypothesis is 48;
     /// template architectures return a typed capability gap until their
     /// occupancy evidence is carded.
-    pub max_resident_warps_per_sm: u32,
+    pub(crate) max_resident_warps_per_sm: u32,
 }
 
 pub(crate) fn checked_cycle_add(
@@ -155,10 +184,12 @@ fn checked_latency(name: &'static str, value: f64) -> Result<u64, IssueError> {
 }
 
 impl IssueModelParams {
-    /// Resolve card latencies plus reviewed architecture-local issue
-    /// hypotheses.  A template architecture with missing scheduler facts
-    /// returns a typed capability error instead of inheriting sm_86 knobs.
-    pub fn from_card_latencies_for_arch(
+    /// Resolve card latencies plus the retained architecture-local issue
+    /// hypotheses. The name is intentionally explicit: this executable lane does
+    /// not upgrade 25/8/48 to card facts. A template architecture with missing
+    /// scheduler facts returns a typed capability error instead of inheriting
+    /// sm_86 knobs.
+    pub fn from_legacy_card_latencies_for_arch(
         arch: ArchId,
         l1_hit_cycles: f64,
         l2_hit_cycles: f64,
@@ -168,6 +199,7 @@ impl IssueModelParams {
         let hypotheses = arch.issue_hypotheses().require("issue_hypotheses")?;
         Ok(Self {
             arch,
+            resource_lane: IssueResourceLane::LegacyArchitectureHypotheses,
             l1_hit_latency: checked_latency("l1_hit_cycles", l1_hit_cycles)?,
             l1_miss_latency: checked_latency("l2_hit_cycles", l2_hit_cycles)?,
             global_flat_latency: checked_latency("dram_cycles", dram_cycles)?,
@@ -176,6 +208,112 @@ impl IssueModelParams {
             read_barrier_latency: hypotheses.read_barrier_latency,
             max_resident_warps_per_sm: hypotheses.max_resident_warps_per_sm,
         })
+    }
+
+    /// Construct the strict carded resource lane without a legacy fallback.
+    /// Successful construction proves all five resource blocks and all required
+    /// latency entries came from the same architecture-bound card. It does not
+    /// authorize replay: dormant structural fields must first be wired into the
+    /// scheduler in a separately reviewed increment.
+    pub fn from_card(expected_arch: ArchId, card: &ArchCard) -> Result<Self, IssueError> {
+        let arch = card.arch_id()?;
+        if arch != expected_arch {
+            return Err(IssueError::ArchitectureMismatch {
+                component: "strict issue architecture card",
+                expected: expected_arch,
+                got: arch,
+            });
+        }
+        let latencies = card.required_latencies()?;
+        let resources = card.required_issue_resources()?;
+        Ok(Self {
+            arch,
+            resource_lane: IssueResourceLane::Carded(resources),
+            l1_hit_latency: checked_latency("l1_hit_cycles", latencies.l1_hit)?,
+            l1_miss_latency: checked_latency("l2_hit_cycles", latencies.l2_hit)?,
+            global_flat_latency: checked_latency("dram_cycles", latencies.dram)?,
+            shared_write_barrier_latency: checked_latency("shared_cycles", latencies.shared)?,
+            non_memory_write_barrier_latency: resources.barrier_latencies.non_memory_write,
+            read_barrier_latency: resources.barrier_latencies.read,
+            max_resident_warps_per_sm: resources.occupancy.max_resident_warps_per_sm,
+        })
+    }
+
+    pub const fn arch(&self) -> ArchId {
+        self.arch
+    }
+
+    pub const fn resource_lane(&self) -> IssueResourceLane {
+        self.resource_lane
+    }
+
+    pub const fn l1_hit_latency(&self) -> u64 {
+        self.l1_hit_latency
+    }
+
+    pub const fn l1_miss_latency(&self) -> u64 {
+        self.l1_miss_latency
+    }
+
+    pub const fn global_flat_latency(&self) -> u64 {
+        self.global_flat_latency
+    }
+
+    pub const fn shared_write_barrier_latency(&self) -> u64 {
+        self.shared_write_barrier_latency
+    }
+
+    pub const fn non_memory_write_barrier_latency(&self) -> u64 {
+        self.non_memory_write_barrier_latency
+    }
+
+    pub const fn read_barrier_latency(&self) -> u64 {
+        self.read_barrier_latency
+    }
+
+    pub const fn max_resident_warps_per_sm(&self) -> u32 {
+        self.max_resident_warps_per_sm
+    }
+
+    pub(crate) fn require_executable_resource_lane(&self) -> Result<(), IssueError> {
+        match self.resource_lane {
+            IssueResourceLane::LegacyArchitectureHypotheses => {
+                let hypotheses = self.arch.issue_hypotheses().require("issue_hypotheses")?;
+                let fields = [
+                    (
+                        "non_memory_write_barrier_latency",
+                        hypotheses.non_memory_write_barrier_latency,
+                        self.non_memory_write_barrier_latency,
+                    ),
+                    (
+                        "read_barrier_latency",
+                        hypotheses.read_barrier_latency,
+                        self.read_barrier_latency,
+                    ),
+                    (
+                        "max_resident_warps_per_sm",
+                        u64::from(hypotheses.max_resident_warps_per_sm),
+                        u64::from(self.max_resident_warps_per_sm),
+                    ),
+                ];
+                for (field, expected, got) in fields {
+                    if got != expected {
+                        return Err(IssueError::LegacyHypothesisDrift {
+                            arch: self.arch,
+                            field,
+                            expected,
+                            got,
+                        });
+                    }
+                }
+                Ok(())
+            }
+            IssueResourceLane::Carded(_) => {
+                Err(IssueError::CardedResourceExecutionDeferred { arch: self.arch })
+            }
+            #[cfg(test)]
+            IssueResourceLane::SyntheticTestFixture => Ok(()),
+        }
     }
 
     /// Non-memory producer visibility (one copy for BOTH memory modes).
@@ -257,6 +395,21 @@ pub(crate) enum SmMemMode {
 pub enum IssueError {
     #[error("issue model is unsupported for deployment architecture {arch}")]
     ArchitectureUnsupported { arch: ArchId },
+    #[error(
+        "carded issue-resource execution is deferred for architecture {arch}: the executor does not yet consume smsp.count, smsp.issue_ports, occupancy.max_blocks, dep_barriers.count/storage, or dual_issue.supported"
+    )]
+    CardedResourceExecutionDeferred { arch: ArchId },
+    #[error(
+        "legacy issue hypothesis drift for architecture {arch}: {field} is {got}, expected reviewed value {expected}"
+    )]
+    LegacyHypothesisDrift {
+        arch: ArchId,
+        field: &'static str,
+        expected: u64,
+        got: u64,
+    },
+    #[error("strict issue-card admission failed: {0}")]
+    Calibration(#[from] CalibError),
     #[error(
         "pc {pc} (block {launch_index}, warp slot {warp_slot}) not in the issue schedule of \
          {function_name:?} — dynamic trace and static table disagree"
@@ -1364,6 +1517,7 @@ impl<'a> SmCore<'a> {
         params: &IssueModelParams,
         mode: SmMemMode,
     ) -> Result<Self, IssueError> {
+        params.require_executable_resource_lane()?;
         if params.arch != ArchId::Sm86 {
             return Err(IssueError::ArchitectureUnsupported { arch: params.arch });
         }
@@ -3403,6 +3557,7 @@ pub(crate) fn simulate_sm(
 #[allow(clippy::unwrap_used)]
 mod tests {
     use std::collections::BTreeMap;
+    use std::path::PathBuf;
 
     use sim_mem::{AccessOutcome, CacheOpToken, L1CounterError, L1CounterField};
 
@@ -3444,6 +3599,7 @@ mod tests {
     fn params() -> IssueModelParams {
         IssueModelParams {
             arch: ArchId::Sm86,
+            resource_lane: IssueResourceLane::SyntheticTestFixture,
             l1_hit_latency: 34,
             l1_miss_latency: 244,
             global_flat_latency: 400,
@@ -3452,6 +3608,182 @@ mod tests {
             read_barrier_latency: 8,
             max_resident_warps_per_sm: 48,
         }
+    }
+
+    fn card_path(name: &str) -> PathBuf {
+        PathBuf::from("../../arch_profiles/cards")
+            .join(name)
+            .canonicalize()
+            .expect("card exists in-repo")
+    }
+
+    fn synthetic_carded_issue_resources() -> ArchCard {
+        let path = card_path("sm_86.json");
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&path).unwrap()).unwrap();
+        // Fixture-only sentinels. Matching legacy values exercises lane
+        // separation; it does not confer architecture-card authority on them.
+        value["smsp"] = serde_json::json!({"count": 4, "issue_ports": 1});
+        value["occupancy"] = serde_json::json!({
+            "max_resident_warps_per_sm": 48,
+            "max_blocks": 16,
+        });
+        value["dep_barriers"] = serde_json::json!({"count": 6});
+        value["barrier_latencies"] = serde_json::json!({
+            "read": 8,
+            "non_memory_write": 25,
+        });
+        value["dual_issue"] = serde_json::json!({"supported": false});
+        ArchCard::parse(&path, &serde_json::to_vec(&value).unwrap()).unwrap()
+    }
+
+    #[test]
+    fn legacy_issue_lane_is_explicit_and_sm86_only() {
+        let legacy = IssueModelParams::from_legacy_card_latencies_for_arch(
+            ArchId::Sm86,
+            34.0,
+            244.0,
+            423.0,
+            24.0,
+        )
+        .unwrap();
+        assert_eq!(
+            legacy.resource_lane(),
+            IssueResourceLane::LegacyArchitectureHypotheses
+        );
+        assert_eq!(legacy.non_memory_write_barrier_latency, 25);
+        assert_eq!(legacy.read_barrier_latency, 8);
+        assert_eq!(legacy.max_resident_warps_per_sm, 48);
+        legacy.require_executable_resource_lane().unwrap();
+
+        assert!(matches!(
+            IssueModelParams::from_legacy_card_latencies_for_arch(
+                ArchId::Sm120,
+                34.0,
+                244.0,
+                423.0,
+                24.0,
+            ),
+            Err(IssueError::Capability(
+                sim_arch::CapabilityError::ResearchGap {
+                    arch: ArchId::Sm120,
+                    ..
+                }
+            ))
+        ));
+    }
+
+    #[test]
+    fn mutated_legacy_hypotheses_cannot_retain_provenance_or_execute() {
+        let baseline = IssueModelParams::from_legacy_card_latencies_for_arch(
+            ArchId::Sm86,
+            34.0,
+            244.0,
+            423.0,
+            24.0,
+        )
+        .unwrap();
+        let mut non_memory = baseline;
+        non_memory.non_memory_write_barrier_latency += 1;
+        let mut read = baseline;
+        read.read_barrier_latency += 1;
+        let mut occupancy = baseline;
+        occupancy.max_resident_warps_per_sm += 1;
+
+        for (field, params, expected, got) in [
+            (
+                "non_memory_write_barrier_latency",
+                non_memory,
+                25_u64,
+                26_u64,
+            ),
+            ("read_barrier_latency", read, 8_u64, 9_u64),
+            ("max_resident_warps_per_sm", occupancy, 48_u64, 49_u64),
+        ] {
+            assert!(matches!(
+                params.require_executable_resource_lane(),
+                Err(IssueError::LegacyHypothesisDrift {
+                    arch: ArchId::Sm86,
+                    field: got_field,
+                    expected: got_expected,
+                    got: got_value,
+                }) if got_field == field && got_expected == expected && got_value == got
+            ));
+        }
+
+        assert!(matches!(
+            crate::replay::ReplayConfiguration::checked(
+                non_memory,
+                crate::replay::ReplayMemMode::Flat,
+            ),
+            Err(crate::replay::ReplayError::Issue(
+                IssueError::LegacyHypothesisDrift {
+                    arch: ArchId::Sm86,
+                    field: "non_memory_write_barrier_latency",
+                    expected: 25,
+                    got: 26,
+                }
+            ))
+        ));
+    }
+
+    #[test]
+    fn strict_card_constructor_requires_same_architecture_and_all_resources() {
+        let production_sm86 = ArchCard::load(&card_path("sm_86.json")).unwrap();
+        assert!(matches!(
+            IssueModelParams::from_card(ArchId::Sm86, &production_sm86),
+            Err(IssueError::Calibration(CalibError::BlockResearchGap {
+                block: "smsp",
+                ..
+            }))
+        ));
+
+        let production_sm120 = ArchCard::load(&card_path("sm_120-laptop.json")).unwrap();
+        assert!(matches!(
+            IssueModelParams::from_card(ArchId::Sm86, &production_sm120),
+            Err(IssueError::ArchitectureMismatch {
+                component: "strict issue architecture card",
+                expected: ArchId::Sm86,
+                got: ArchId::Sm120,
+            })
+        ));
+    }
+
+    #[test]
+    fn complete_strict_card_lane_constructs_but_cannot_execute() {
+        let strict =
+            IssueModelParams::from_card(ArchId::Sm86, &synthetic_carded_issue_resources()).unwrap();
+        let IssueResourceLane::Carded(resources) = strict.resource_lane() else {
+            panic!("strict constructor must preserve its carded lane")
+        };
+        assert_eq!(resources.smsp.count, 4);
+        assert_eq!(resources.smsp.issue_ports, 1);
+        assert_eq!(resources.occupancy.max_resident_warps_per_sm, 48);
+        assert_eq!(resources.occupancy.max_blocks, 16);
+        assert_eq!(resources.dep_barriers.count, 6);
+        assert_eq!(resources.barrier_latencies.read, 8);
+        assert_eq!(resources.barrier_latencies.non_memory_write, 25);
+        assert!(!resources.dual_issue_supported);
+        assert_eq!(strict.non_memory_write_barrier_latency, 25);
+        assert_eq!(strict.read_barrier_latency, 8);
+        assert_eq!(strict.max_resident_warps_per_sm, 48);
+
+        assert!(matches!(
+            strict.require_executable_resource_lane(),
+            Err(IssueError::CardedResourceExecutionDeferred { arch: ArchId::Sm86 })
+        ));
+        assert!(matches!(
+            crate::replay::ReplayConfiguration::checked(strict, crate::replay::ReplayMemMode::Flat,),
+            Err(crate::replay::ReplayError::Issue(
+                IssueError::CardedResourceExecutionDeferred { arch: ArchId::Sm86 }
+            ))
+        ));
+
+        let sched = schedule(Vec::new());
+        assert!(matches!(
+            SmCore::new(&[], &sched, &strict, SmMemMode::Flat),
+            Err(IssueError::CardedResourceExecutionDeferred { arch: ArchId::Sm86 })
+        ));
     }
 
     #[test]

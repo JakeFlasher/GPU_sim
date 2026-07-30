@@ -908,7 +908,7 @@ mod tests {
         L1Config, L1Counters, L2Config, L2Counters, L2Replacement, MemoryOrigin, SliceHash,
     };
 
-    use crate::issue::{IssueModelParams, TailFlags};
+    use crate::issue::{IssueModelParams, IssueResourceLane, TailFlags};
     use crate::system::DramBw;
 
     use super::*;
@@ -917,6 +917,7 @@ mod tests {
     fn params(arch: ArchId) -> IssueModelParams {
         IssueModelParams {
             arch,
+            resource_lane: IssueResourceLane::SyntheticTestFixture,
             l1_hit_latency: 2,
             l1_miss_latency: 20,
             global_flat_latency: 100,

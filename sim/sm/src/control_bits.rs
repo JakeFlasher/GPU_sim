@@ -173,11 +173,17 @@ pub enum ControlBitsError {
     )]
     MissingHighWord { function: String, pc: u64 },
     #[error(
-        "sidecar reports {count} unknown_encoding instruction(s) (e.g. {function} pc={pc}); the \
-         SM model needs complete static scheduling info — type-exclude this binary or extend the \
-         extractor"
+        "function {function} pc={pc}: unrecognized control-record status {status:?}; expected 'decoded' or 'unknown_encoding' (structurally corrupt sidecar)"
     )]
-    UnknownEncodingsPresent {
+    InvalidRecordStatus {
+        function: String,
+        pc: u64,
+        status: String,
+    },
+    #[error(
+        "sidecar reports {count} unsupported control encoding(s) (e.g. {function} pc={pc}); the simulator has no admitted decode for these records — type-exclude this binary or extend the extractor (this does not assert that hardware lacks the instruction)"
+    )]
+    UnsupportedEncoding {
         count: u64,
         function: String,
         pc: u64,
@@ -434,18 +440,33 @@ impl ControlSidecar {
         // inadmissible for the SM model, which needs complete static
         // scheduling info. Count them and reject typed — never per-record
         // silently, never via a serde explosion.
+        let mut invalid_status: Option<(String, u64, String)> = None;
         let mut unknown: Option<(String, u64)> = None;
         let mut unknown_count: u64 = 0;
         for (fname, records) in &raw.functions {
             for rec in records {
-                if rec.status != "decoded" {
-                    unknown_count += 1;
-                    unknown.get_or_insert_with(|| (fname.clone(), rec.pc));
+                match rec.status.as_str() {
+                    "decoded" => {}
+                    "unknown_encoding" => {
+                        unknown_count += 1;
+                        unknown.get_or_insert_with(|| (fname.clone(), rec.pc));
+                    }
+                    status => {
+                        invalid_status
+                            .get_or_insert_with(|| (fname.clone(), rec.pc, status.to_owned()));
+                    }
                 }
             }
         }
+        if let Some((function, pc, status)) = invalid_status {
+            return Err(ControlBitsError::InvalidRecordStatus {
+                function,
+                pc,
+                status,
+            });
+        }
         if let Some((function, pc)) = unknown {
-            return Err(ControlBitsError::UnknownEncodingsPresent {
+            return Err(ControlBitsError::UnsupportedEncoding {
                 count: unknown_count,
                 function,
                 pc,
@@ -749,9 +770,29 @@ mod tests {
         let json = mini_sidecar_json()
             .replace(r#""status": "decoded""#, r#""status": "unknown_encoding""#);
         let raw: RawSidecar = serde_json::from_str(&json).unwrap();
+        let error = ControlSidecar::from_raw(raw, "sm_86").unwrap_err();
+        assert!(matches!(
+            &error,
+            ControlBitsError::UnsupportedEncoding { count: 1, .. }
+        ));
+        assert!(
+            error
+                .to_string()
+                .contains("does not assert that hardware lacks the instruction")
+        );
+    }
+
+    #[test]
+    fn unrecognized_record_status_is_structural_corruption() {
+        let json = mini_sidecar_json().replace(r#""status": "decoded""#, r#""status": "decodedd""#);
+        let raw: RawSidecar = serde_json::from_str(&json).unwrap();
         assert!(matches!(
             ControlSidecar::from_raw(raw, "sm_86"),
-            Err(ControlBitsError::UnknownEncodingsPresent { count: 1, .. })
+            Err(ControlBitsError::InvalidRecordStatus {
+                function,
+                pc: 0,
+                status,
+            }) if function == "k" && status == "decodedd"
         ));
     }
 
@@ -766,7 +807,7 @@ mod tests {
         let raw: RawSidecar = serde_json::from_str(&json).expect("must parse without high_word");
         assert!(matches!(
             ControlSidecar::from_raw(raw, "sm_86"),
-            Err(ControlBitsError::UnknownEncodingsPresent { .. })
+            Err(ControlBitsError::UnsupportedEncoding { .. })
         ));
     }
 

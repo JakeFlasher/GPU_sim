@@ -41,7 +41,8 @@ pub use evidence::{
     admit_launch_evidence,
 };
 pub use issue::{
-    AccessKind, IssueError, IssueModelParams, MemoryOperation, ReplyTo, SmSimResult, TailFlags,
+    AccessKind, IssueError, IssueModelParams, IssueResourceLane, MemoryOperation, ReplyTo,
+    SmSimResult, TailFlags,
 };
 pub use program::{FunctionSchedule, IssueSlot, OpClass, ProgramError, build_schedules};
 pub use replay::{
