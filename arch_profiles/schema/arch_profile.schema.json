@@ -74,6 +74,11 @@
       "$ref": "#/$defs/objOrGap",
       "description": "Aggregate DRAM read-bandwidth covariate at the LOCKED operating point: peak_bytes_per_second (vendor bus-width x data-rate spec), locked_sm_clock_mhz / locked_mem_clock_mhz (the -lgc/-lmc protocol locks the latencies_cycles table was measured under), provenance. Vendor-documented + protocol-derived simulator INPUT — never an NCU value (Rule 1). Peak is a documented-default service-rate hypothesis until a locked-protocol bandwidth microbench supersedes it; cards without a locked operating point carry research_gap."
     },
+    "smsp": {"$ref": "#/$defs/smspResourcesOrGap"},
+    "occupancy": {"$ref": "#/$defs/occupancyResourcesOrGap"},
+    "dep_barriers": {"$ref": "#/$defs/depBarrierResourcesOrGap"},
+    "barrier_latencies": {"$ref": "#/$defs/barrierLatencyResourcesOrGap"},
+    "dual_issue": {"$ref": "#/$defs/dualIssueResourcesOrGap"},
     "evidence_status": {"type": "string"},
     "predictor_state": {"type": "object"}
   },
@@ -122,6 +127,96 @@
         {"$ref": "#/$defs/latencies"},
         {"$ref": "#/$defs/researchGap"},
         {"type": "null"}
+      ]
+    },
+    "positiveU32": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 4294967295
+    },
+    "positiveU64": {
+      "description": "Positive u64 carried within the exact cross-language JSON integer range.",
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "smspResources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["count", "issue_ports"],
+      "properties": {
+        "count": {"$ref": "#/$defs/positiveU32"},
+        "issue_ports": {"$ref": "#/$defs/positiveU32"}
+      }
+    },
+    "smspResourcesOrGap": {
+      "oneOf": [
+        {"$ref": "#/$defs/smspResources"},
+        {"$ref": "#/$defs/researchGap"}
+      ]
+    },
+    "occupancyResources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["max_resident_warps_per_sm", "max_blocks"],
+      "properties": {
+        "max_resident_warps_per_sm": {"$ref": "#/$defs/positiveU32"},
+        "max_blocks": {"$ref": "#/$defs/positiveU32"}
+      }
+    },
+    "occupancyResourcesOrGap": {
+      "oneOf": [
+        {"$ref": "#/$defs/occupancyResources"},
+        {"$ref": "#/$defs/researchGap"}
+      ]
+    },
+    "depBarrierResources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["count"],
+      "properties": {
+        "count": {"$ref": "#/$defs/positiveU32"}
+      }
+    },
+    "depBarrierResourcesOrGap": {
+      "oneOf": [
+        {"$ref": "#/$defs/depBarrierResources"},
+        {"$ref": "#/$defs/researchGap"}
+      ]
+    },
+    "barrierLatencyResources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["read", "non_memory_write"],
+      "properties": {
+        "read": {"$ref": "#/$defs/positiveU64"},
+        "non_memory_write": {"$ref": "#/$defs/positiveU64"}
+      }
+    },
+    "barrierLatencyResourcesOrGap": {
+      "oneOf": [
+        {"$ref": "#/$defs/barrierLatencyResources"},
+        {"$ref": "#/$defs/researchGap"}
+      ]
+    },
+    "boolOrResearchGap": {
+      "oneOf": [
+        {"type": "boolean"},
+        {"$ref": "#/$defs/researchGap"}
+      ]
+    },
+    "dualIssueResources": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["supported"],
+      "properties": {
+        "supported": {"$ref": "#/$defs/boolOrResearchGap"}
+      }
+    },
+    "dualIssueResourcesOrGap": {
+      "oneOf": [
+        {"$ref": "#/$defs/dualIssueResources"},
+        {"$ref": "#/$defs/researchGap"}
       ]
     },
     "intOrGap": {"anyOf": [{"type": "integer"}, {"$ref": "#/$defs/researchGap"}]},

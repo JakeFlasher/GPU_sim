@@ -268,6 +268,56 @@ impl<'de> Deserialize<'de> for Measured {
     }
 }
 
+/// A boolean declaration that may remain a nested research gap. Manual
+/// deserialization keeps the boolean and gap arms closed and disjoint.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum BoolOrResearchGap {
+    Value(bool),
+    Gap {
+        reason: String,
+        challenge: Option<String>,
+    },
+}
+
+#[derive(Debug, Deserialize)]
+struct RawBoolResearchGap {
+    status: GapStatus,
+    reason: String,
+    #[serde(default)]
+    challenge: Option<String>,
+}
+
+impl<'de> Deserialize<'de> for BoolOrResearchGap {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        if let Some(value) = value.as_bool() {
+            return Ok(Self::Value(value));
+        }
+        let object = value.as_object().ok_or_else(|| {
+            serde::de::Error::custom("boolOrResearchGap must be a boolean or research_gap object")
+        })?;
+        if object
+            .keys()
+            .any(|key| !matches!(key.as_str(), "status" | "reason" | "challenge"))
+        {
+            return Err(serde::de::Error::custom(
+                "boolOrResearchGap research_gap arm carries foreign payload",
+            ));
+        }
+        let raw: RawBoolResearchGap = serde_json::from_value(value).map_err(|error| {
+            serde::de::Error::custom(format!("boolOrResearchGap entry: {error}"))
+        })?;
+        let GapStatus::ResearchGap = raw.status;
+        Ok(Self::Gap {
+            reason: raw.reason,
+            challenge: raw.challenge,
+        })
+    }
+}
+
 /// A whole card block whose payload is bound to the architecture card that
 /// supplied it.  The source binding prevents a caller from presenting a
 /// present sm_86 geometry block as sm_120 data.
@@ -408,6 +458,104 @@ pub struct LatenciesCycles {
     pub provenance: String,
 }
 
+fn deserialize_positive_u32<'de, D>(deserializer: D) -> Result<u32, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let number = serde_json::Number::deserialize(deserializer)?;
+    if let Some(value) = number.as_u64()
+        && (1..=u64::from(u32::MAX)).contains(&value)
+    {
+        return Ok(value as u32);
+    }
+    if let Some(value) = number.as_f64()
+        && value.is_finite()
+        && value.fract() == 0.0
+        && (1.0..=f64::from(u32::MAX)).contains(&value)
+    {
+        return Ok(value as u32);
+    }
+    Err(serde::de::Error::custom(
+        "resource value must be a positive integer representable as u32",
+    ))
+}
+
+const MAX_EXACT_JSON_INTEGER_U64: u64 = (1_u64 << 53) - 1;
+
+fn deserialize_positive_u64<'de, D>(deserializer: D) -> Result<u64, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let number = serde_json::Number::deserialize(deserializer)?;
+    if let Some(value) = number.as_u64()
+        && (1..=MAX_EXACT_JSON_INTEGER_U64).contains(&value)
+    {
+        return Ok(value);
+    }
+    if let Some(value) = number.as_f64()
+        && value.is_finite()
+        && value.fract() == 0.0
+        && (1.0..=MAX_EXACT_JSON_INTEGER_U64 as f64).contains(&value)
+    {
+        return Ok(value as u64);
+    }
+    Err(serde::de::Error::custom(
+        "resource value must be a positive exact cross-language JSON integer",
+    ))
+}
+
+/// Structural issue resources. These types are schema scaffolding only until a
+/// production card supplies independently admitted architecture-local values.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct SmspResources {
+    #[serde(deserialize_with = "deserialize_positive_u32")]
+    pub count: u32,
+    #[serde(deserialize_with = "deserialize_positive_u32")]
+    pub issue_ports: u32,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct OccupancyResources {
+    #[serde(deserialize_with = "deserialize_positive_u32")]
+    pub max_resident_warps_per_sm: u32,
+    #[serde(deserialize_with = "deserialize_positive_u32")]
+    pub max_blocks: u32,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct DepBarrierResources {
+    #[serde(deserialize_with = "deserialize_positive_u32")]
+    pub count: u32,
+}
+
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct BarrierLatencyResources {
+    #[serde(deserialize_with = "deserialize_positive_u64")]
+    pub read: u64,
+    #[serde(deserialize_with = "deserialize_positive_u64")]
+    pub non_memory_write: u64,
+}
+
+#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[serde(deny_unknown_fields)]
+pub struct DualIssueResources {
+    pub supported: BoolOrResearchGap,
+}
+
+/// Fully resolved card projection. No gap arm or default survives this boundary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RequiredIssueResources {
+    pub smsp: SmspResources,
+    pub occupancy: OccupancyResources,
+    pub dep_barriers: DepBarrierResources,
+    pub barrier_latencies: BarrierLatencyResources,
+    pub dual_issue_supported: bool,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct L1Geometry {
     pub l1tex_bytes: u64,
@@ -530,6 +678,16 @@ struct RawArchCard {
     nvml_reference_operating_point: Carded<NvmlReferenceOperatingPoint>,
     #[serde(default = "Carded::absent_gap")]
     dram_bandwidth: Carded<DramBandwidth>,
+    #[serde(default = "Carded::absent_gap")]
+    smsp: Carded<SmspResources>,
+    #[serde(default = "Carded::absent_gap")]
+    occupancy: Carded<OccupancyResources>,
+    #[serde(default = "Carded::absent_gap")]
+    dep_barriers: Carded<DepBarrierResources>,
+    #[serde(default = "Carded::absent_gap")]
+    barrier_latencies: Carded<BarrierLatencyResources>,
+    #[serde(default = "Carded::absent_gap")]
+    dual_issue: Carded<DualIssueResources>,
     #[serde(default)]
     latencies_cycles: Option<Carded<LatenciesCycles>>,
     #[serde(default)]
@@ -559,6 +717,11 @@ pub struct ArchCard {
     l2_geometry: Carded<L2Geometry>,
     nvml_reference_operating_point: Carded<NvmlReferenceOperatingPoint>,
     dram_bandwidth: Carded<DramBandwidth>,
+    smsp: Carded<SmspResources>,
+    occupancy: Carded<OccupancyResources>,
+    dep_barriers: Carded<DepBarrierResources>,
+    barrier_latencies: Carded<BarrierLatencyResources>,
+    dual_issue: Carded<DualIssueResources>,
     latencies_cycles: Option<Carded<LatenciesCycles>>,
     bare_ldg_e_default: Option<String>,
 }
@@ -608,6 +771,11 @@ impl ArchCard {
             l2_geometry: raw.l2_geometry,
             nvml_reference_operating_point: raw.nvml_reference_operating_point,
             dram_bandwidth: raw.dram_bandwidth,
+            smsp: raw.smsp,
+            occupancy: raw.occupancy,
+            dep_barriers: raw.dep_barriers,
+            barrier_latencies: raw.barrier_latencies,
+            dual_issue: raw.dual_issue,
             latencies_cycles: raw.latencies_cycles,
             bare_ldg_e_default: raw.bare_ldg_e_default,
         };
@@ -619,6 +787,11 @@ impl ArchCard {
         card.l2_geometry = card.l2_geometry.bind_arch(arch);
         card.nvml_reference_operating_point = card.nvml_reference_operating_point.bind_arch(arch);
         card.dram_bandwidth = card.dram_bandwidth.bind_arch(arch);
+        card.smsp = card.smsp.bind_arch(arch);
+        card.occupancy = card.occupancy.bind_arch(arch);
+        card.dep_barriers = card.dep_barriers.bind_arch(arch);
+        card.barrier_latencies = card.barrier_latencies.bind_arch(arch);
+        card.dual_issue = card.dual_issue.bind_arch(arch);
         card.latencies_cycles = card
             .latencies_cycles
             .map(|latencies| latencies.bind_arch(arch));
@@ -798,6 +971,96 @@ impl ArchCard {
         self.dram_bandwidth.require_for_arch(arch, "dram_bandwidth")
     }
 
+    fn require_positive_u32(field: &'static str, value: u32) -> Result<(), CalibError> {
+        if value == 0 {
+            return Err(CalibError::InvalidCardValue {
+                field,
+                value: value.to_string(),
+                requirement: "positive integer representable as u32",
+            });
+        }
+        Ok(())
+    }
+
+    fn require_positive_u64(field: &'static str, value: u64) -> Result<(), CalibError> {
+        if !(1..=MAX_EXACT_JSON_INTEGER_U64).contains(&value) {
+            return Err(CalibError::InvalidCardValue {
+                field,
+                value: value.to_string(),
+                requirement: "positive exact cross-language JSON integer",
+            });
+        }
+        Ok(())
+    }
+
+    pub fn require_smsp_resources(&self) -> Result<&SmspResources, CalibError> {
+        let arch = self.sku_id()?.arch();
+        let resources = self.smsp.require_for_arch(arch, "smsp")?;
+        Self::require_positive_u32("smsp.count", resources.count)?;
+        Self::require_positive_u32("smsp.issue_ports", resources.issue_ports)?;
+        Ok(resources)
+    }
+
+    pub fn require_occupancy_resources(&self) -> Result<&OccupancyResources, CalibError> {
+        let arch = self.sku_id()?.arch();
+        let resources = self.occupancy.require_for_arch(arch, "occupancy")?;
+        Self::require_positive_u32(
+            "occupancy.max_resident_warps_per_sm",
+            resources.max_resident_warps_per_sm,
+        )?;
+        Self::require_positive_u32("occupancy.max_blocks", resources.max_blocks)?;
+        Ok(resources)
+    }
+
+    pub fn require_dep_barrier_resources(&self) -> Result<&DepBarrierResources, CalibError> {
+        let arch = self.sku_id()?.arch();
+        let resources = self.dep_barriers.require_for_arch(arch, "dep_barriers")?;
+        Self::require_positive_u32("dep_barriers.count", resources.count)?;
+        Ok(resources)
+    }
+
+    pub fn require_barrier_latency_resources(
+        &self,
+    ) -> Result<&BarrierLatencyResources, CalibError> {
+        let arch = self.sku_id()?.arch();
+        let resources = self
+            .barrier_latencies
+            .require_for_arch(arch, "barrier_latencies")?;
+        Self::require_positive_u64("barrier_latencies.read", resources.read)?;
+        Self::require_positive_u64(
+            "barrier_latencies.non_memory_write",
+            resources.non_memory_write,
+        )?;
+        Ok(resources)
+    }
+
+    pub fn require_dual_issue_supported(&self) -> Result<bool, CalibError> {
+        let arch = self.sku_id()?.arch();
+        let resources = self.dual_issue.require_for_arch(arch, "dual_issue")?;
+        match &resources.supported {
+            BoolOrResearchGap::Value(supported) => Ok(*supported),
+            BoolOrResearchGap::Gap { reason, challenge } => Err(CalibError::BlockResearchGap {
+                arch_id: arch.to_string(),
+                block: "dual_issue.supported",
+                reason: reason.clone(),
+                challenge: challenge.clone(),
+            }),
+        }
+    }
+
+    /// Resolve the complete issue-resource scaffold in one fail-closed step.
+    /// This projection supplies no defaults and cannot borrow another card's
+    /// values. It does not itself authorize execution of the dormant carded lane.
+    pub fn required_issue_resources(&self) -> Result<RequiredIssueResources, CalibError> {
+        Ok(RequiredIssueResources {
+            smsp: *self.require_smsp_resources()?,
+            occupancy: *self.require_occupancy_resources()?,
+            dep_barriers: *self.require_dep_barrier_resources()?,
+            barrier_latencies: *self.require_barrier_latency_resources()?,
+            dual_issue_supported: self.require_dual_issue_supported()?,
+        })
+    }
+
     /// The latency table, or a typed error if the card predates Phase 1D.
     pub fn latencies(&self) -> Result<&LatenciesCycles, CalibError> {
         // Latency values are architecture-local inputs. They carry the same
@@ -893,6 +1156,21 @@ mod tests {
         let file = NamedTempFile::new().unwrap();
         std::fs::write(file.path(), json).unwrap();
         ArchCard::load(file.path())
+    }
+
+    fn install_synthetic_issue_resources(card: &mut serde_json::Value) {
+        // Deliberately non-authoritative sentinels: fixture-only schema witnesses.
+        card["smsp"] = serde_json::json!({"count": 3, "issue_ports": 5});
+        card["occupancy"] = serde_json::json!({
+            "max_resident_warps_per_sm": 7,
+            "max_blocks": 11,
+        });
+        card["dep_barriers"] = serde_json::json!({"count": 13});
+        card["barrier_latencies"] = serde_json::json!({
+            "read": 17,
+            "non_memory_write": 19,
+        });
+        card["dual_issue"] = serde_json::json!({"supported": true});
     }
 
     fn measured_mut(card: &mut ArchCard, kind: LatencyKind) -> &mut MeasuredValue {
@@ -1153,6 +1431,212 @@ mod tests {
         assert!(l.shared < l.l1_hit);
         assert!(l.l1_hit < l.l2_hit);
         assert!(l.l2_hit < l.dram);
+    }
+
+    #[test]
+    fn production_cards_keep_issue_resources_absent_and_typed() {
+        for name in ["sm_86.json", "sm_120-laptop.json"] {
+            let value: serde_json::Value =
+                serde_json::from_slice(&std::fs::read(card_path(name)).unwrap()).unwrap();
+            for block in [
+                "smsp",
+                "occupancy",
+                "dep_barriers",
+                "barrier_latencies",
+                "dual_issue",
+            ] {
+                assert!(
+                    value.get(block).is_none(),
+                    "{name} unexpectedly carries {block}"
+                );
+            }
+
+            let card = ArchCard::load(&card_path(name)).unwrap();
+            assert!(matches!(
+                card.required_issue_resources(),
+                Err(CalibError::BlockResearchGap {
+                    block: "smsp",
+                    reason,
+                    ..
+                }) if reason.contains("field absent")
+            ));
+        }
+    }
+
+    #[test]
+    fn synthetic_issue_resources_resolve_without_defaults() {
+        let card = load_mutated_card("sm_86.json", install_synthetic_issue_resources).unwrap();
+        assert_eq!(
+            card.required_issue_resources().unwrap(),
+            RequiredIssueResources {
+                smsp: SmspResources {
+                    count: 3,
+                    issue_ports: 5,
+                },
+                occupancy: OccupancyResources {
+                    max_resident_warps_per_sm: 7,
+                    max_blocks: 11,
+                },
+                dep_barriers: DepBarrierResources { count: 13 },
+                barrier_latencies: BarrierLatencyResources {
+                    read: 17,
+                    non_memory_write: 19,
+                },
+                dual_issue_supported: true,
+            }
+        );
+
+        let integral_json_numbers = load_mutated_card("sm_86.json", |card| {
+            install_synthetic_issue_resources(card);
+            card["smsp"]["count"] = serde_json::json!(3.0);
+            card["barrier_latencies"]["read"] = serde_json::json!(17.0);
+        })
+        .unwrap();
+        let resources = integral_json_numbers.required_issue_resources().unwrap();
+        assert_eq!(resources.smsp.count, 3);
+        assert_eq!(resources.barrier_latencies.read, 17);
+    }
+
+    #[test]
+    fn whole_and_nested_issue_resource_gaps_fail_typed() {
+        for block in [
+            "smsp",
+            "occupancy",
+            "dep_barriers",
+            "barrier_latencies",
+            "dual_issue",
+        ] {
+            let card = load_mutated_card("sm_86.json", |card| {
+                install_synthetic_issue_resources(card);
+                card[block] = serde_json::json!({
+                    "status": "research_gap",
+                    "reason": format!("synthetic {block} gap"),
+                    "challenge": "fixture-only",
+                });
+            })
+            .unwrap();
+            assert!(matches!(
+                card.required_issue_resources(),
+                Err(CalibError::BlockResearchGap {
+                    block: failed,
+                    challenge,
+                    ..
+                }) if failed == block && challenge.as_deref() == Some("fixture-only")
+            ));
+        }
+
+        let card = load_mutated_card("sm_86.json", |card| {
+            install_synthetic_issue_resources(card);
+            card["dual_issue"]["supported"] = serde_json::json!({
+                "status": "research_gap",
+                "reason": "synthetic pairing gap",
+                "challenge": "fixture-only",
+            });
+        })
+        .unwrap();
+        assert!(matches!(
+            card.required_issue_resources(),
+            Err(CalibError::BlockResearchGap {
+                block: "dual_issue.supported",
+                reason,
+                challenge,
+                ..
+            }) if reason == "synthetic pairing gap"
+                && challenge.as_deref() == Some("fixture-only")
+        ));
+    }
+
+    #[test]
+    fn malformed_issue_resource_shapes_fail_at_card_parse() {
+        for (block, malformed) in [
+            ("smsp", serde_json::json!(null)),
+            ("smsp", serde_json::json!({"count": 3})),
+            (
+                "smsp",
+                serde_json::json!({"count": 3, "issue_ports": 5, "unknown": 1}),
+            ),
+            (
+                "smsp",
+                serde_json::json!({
+                    "status": "research_gap",
+                    "reason": "arm collision",
+                    "count": 3,
+                    "issue_ports": 5,
+                }),
+            ),
+            (
+                "smsp",
+                serde_json::json!({"status": "unknown", "reason": "bad status"}),
+            ),
+            ("dual_issue", serde_json::json!({"supported": "unknown"})),
+            (
+                "dual_issue",
+                serde_json::json!({"supported": {"status": "research_gap"}}),
+            ),
+            (
+                "dual_issue",
+                serde_json::json!({
+                    "supported": {
+                        "status": "research_gap",
+                        "reason": "pending",
+                        "unknown": 1,
+                    }
+                }),
+            ),
+        ] {
+            assert!(matches!(
+                load_mutated_card("sm_86.json", move |card| {
+                    install_synthetic_issue_resources(card);
+                    card[block] = malformed;
+                }),
+                Err(CalibError::Parse { .. })
+            ));
+        }
+    }
+
+    #[test]
+    fn issue_resource_numbers_are_positive_and_type_bounded() {
+        for (block, field) in [
+            ("smsp", "count"),
+            ("smsp", "issue_ports"),
+            ("occupancy", "max_resident_warps_per_sm"),
+            ("occupancy", "max_blocks"),
+            ("dep_barriers", "count"),
+            ("barrier_latencies", "read"),
+            ("barrier_latencies", "non_memory_write"),
+        ] {
+            assert!(matches!(
+                load_mutated_card("sm_86.json", |card| {
+                    install_synthetic_issue_resources(card);
+                    card[block][field] = serde_json::json!(0);
+                }),
+                Err(CalibError::Parse { .. })
+            ));
+        }
+
+        assert!(matches!(
+            load_mutated_card("sm_86.json", |card| {
+                install_synthetic_issue_resources(card);
+                card["smsp"]["count"] = serde_json::json!(u64::from(u32::MAX) + 1);
+            }),
+            Err(CalibError::Parse { .. })
+        ));
+        assert!(
+            serde_json::from_str::<BarrierLatencyResources>(
+                r#"{"read":9007199254740991,"non_memory_write":1}"#
+            )
+            .is_ok()
+        );
+        for bad in [
+            r#"{"read":9007199254740992,"non_memory_write":1}"#,
+            r#"{"read":9007199254740993.0,"non_memory_write":1}"#,
+            r#"{"read":18446744073709551616,"non_memory_write":1}"#,
+        ] {
+            assert!(
+                serde_json::from_str::<BarrierLatencyResources>(bad).is_err(),
+                "{bad}"
+            );
+        }
     }
 
     #[test]

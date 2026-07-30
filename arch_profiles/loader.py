@@ -156,6 +156,158 @@ class ArchContext:
             )
         return value
 
+    def _require_profile_binding(self) -> None:
+        """Reject directly constructed contexts that detach a card from its identity."""
+        raw = self.profile.raw
+        if (
+            self.profile.arch_id != self.arch_id
+            or raw.get("arch_id") != self.arch_id
+            or self.profile.sku != self.sku
+            or raw.get("sku") != self.sku
+        ):
+            raise ArchProfileError(
+                f"{self.arch_id}/{self.sku}: context/profile identity mismatch"
+            )
+        if resolve_sku(self.sku, strict=True) != self.sku:
+            raise ArchProfileError(
+                f"{self.arch_id}/{self.sku}: context SKU is not canonical"
+            )
+        try:
+            _card_path_for(self.arch_id, self.sku)
+        except ArchProfileError as error:
+            raise ArchProfileError(
+                f"{self.arch_id}/{self.sku}: architecture/SKU pair is not admitted"
+            ) from error
+
+        capability = raw.get("compute_capability")
+        if (
+            not isinstance(capability, list)
+            or len(capability) != 2
+            or any(isinstance(part, bool) or not isinstance(part, int) for part in capability)
+        ):
+            raise ArchProfileError(
+                f"{self.arch_id}/{self.sku}: profile compute_capability has invalid shape"
+            )
+        if resolve_arch_id((capability[0], capability[1])) != self.arch_id:
+            raise ArchProfileError(
+                f"{self.arch_id}/{self.sku}: profile compute_capability belongs to another architecture"
+            )
+
+        card_family = raw.get("build_arch_family")
+        families = _load_json(_BUILD_FAMILIES_PATH)[
+            "compute_capability_to_build_family"
+        ]
+        capability_key = f"{capability[0]}.{capability[1]}"
+        architecture_family = families.get(capability_key)
+        if (
+            not isinstance(card_family, list)
+            or self.build_arch not in card_family
+            or architecture_family is None
+            or self.build_arch not in architecture_family
+        ):
+            raise ArchProfileError(
+                f"{self.arch_id}/{self.sku}: build {self.build_arch!r} is not bound "
+                "to the profile architecture and card family"
+            )
+
+    def require_issue_resources(self) -> dict[str, dict[str, Any]]:
+        """Resolve the complete carded issue-resource scaffold without defaults.
+
+        Production cards currently omit these blocks. Synthetic tests may exercise
+        the strict shape, but absence or any whole/nested research gap remains a
+        typed failure and never falls back to another architecture.
+        """
+        self._require_profile_binding()
+
+        def closed_gap_reason(capability: str, value: dict[str, Any]) -> str:
+            keys = set(value)
+            if (
+                not {"status", "reason"} <= keys <= {
+                    "status",
+                    "reason",
+                    "challenge",
+                }
+                or not isinstance(value.get("reason"), str)
+                or (
+                    "challenge" in value
+                    and not isinstance(value.get("challenge"), str)
+                )
+            ):
+                raise ArchProfileError(
+                    f"{self.arch_id}/{self.sku}: capability {capability!r} "
+                    "has malformed research_gap shape"
+                )
+            return value["reason"]
+
+        def require_closed_block(block: str) -> Any:
+            value = self.profile.get(block)
+            if value is None:
+                raise ArchProfileError(
+                    f"{self.arch_id}/{self.sku}: capability {block!r} "
+                    "unavailable: field absent"
+                )
+            if is_research_gap(value):
+                reason = closed_gap_reason(block, value)
+                raise ArchProfileError(
+                    f"{self.arch_id}/{self.sku}: capability {block!r} "
+                    f"unavailable: {reason}"
+                )
+            return value
+
+        numeric_shapes = {
+            "smsp": (("count", "issue_ports"), (1 << 32) - 1),
+            "occupancy": (
+                ("max_resident_warps_per_sm", "max_blocks"),
+                (1 << 32) - 1,
+            ),
+            "dep_barriers": (("count",), (1 << 32) - 1),
+            # Keep JSON integer transport exact across Python and Rust. Values
+            # above 2^53-1 must use a future lossless representation.
+            "barrier_latencies": (("read", "non_memory_write"), (1 << 53) - 1),
+        }
+        resolved: dict[str, dict[str, Any]] = {}
+        for block, (fields, maximum) in numeric_shapes.items():
+            value = require_closed_block(block)
+            if not isinstance(value, dict) or set(value) != set(fields):
+                raise ArchProfileError(
+                    f"{self.arch_id}/{self.sku}: capability {block!r} has invalid shape"
+                )
+            normalized: dict[str, int] = {}
+            for field in fields:
+                scalar = value[field]
+                if (
+                    isinstance(scalar, bool)
+                    or not isinstance(scalar, (int, float))
+                    or (isinstance(scalar, float) and not scalar.is_integer())
+                    or not 1 <= scalar <= maximum
+                ):
+                    raise ArchProfileError(
+                        f"{self.arch_id}/{self.sku}: capability "
+                        f"{block}.{field} must be a positive bounded integer"
+                    )
+                normalized[field] = int(scalar)
+            resolved[block] = normalized
+
+        dual_issue = require_closed_block("dual_issue")
+        if not isinstance(dual_issue, dict) or set(dual_issue) != {"supported"}:
+            raise ArchProfileError(
+                f"{self.arch_id}/{self.sku}: capability 'dual_issue' has invalid shape"
+            )
+        supported = dual_issue["supported"]
+        if is_research_gap(supported):
+            reason = closed_gap_reason("dual_issue.supported", supported)
+            raise ArchProfileError(
+                f"{self.arch_id}/{self.sku}: capability "
+                f"'dual_issue.supported' unavailable: {reason}"
+            )
+        if not isinstance(supported, bool):
+            raise ArchProfileError(
+                f"{self.arch_id}/{self.sku}: capability "
+                "dual_issue.supported must be boolean"
+            )
+        resolved["dual_issue"] = {"supported": supported}
+        return resolved
+
 
 # ---------------------------------------------------------------------------
 # Loading

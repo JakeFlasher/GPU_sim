@@ -24,6 +24,8 @@ sys.path.insert(0, str(REPO_ROOT / "workloads" / "simbench_bw"))
 sys.path.insert(0, str(REPO_ROOT / "tools" / "cache_predictor"))
 
 from arch_profiles import (  # noqa: E402
+    ArchContext,
+    ArchProfile,
     ArchProfileError,
     load_profile,
     resolve_arch_id,
@@ -190,6 +192,163 @@ class TestSm120FailClosed:
 
     def test_griddim_alpha_uncalibrated_optout(self, sm120):
         assert sm120["griddim_penalty_alpha"] == 0.0
+
+
+# ---------- issue-resource scaffold remains synthetic and fail-closed ----------
+
+class TestIssueResourceScaffold:
+    KEYS = {
+        "smsp",
+        "occupancy",
+        "dep_barriers",
+        "barrier_latencies",
+        "dual_issue",
+    }
+
+    @staticmethod
+    def _synthetic_context(sm86: dict) -> ArchContext:
+        # Non-authoritative sentinels: these values exist only in this test object.
+        raw = dict(sm86)
+        raw.update(
+            {
+                "smsp": {"count": 3, "issue_ports": 5},
+                "occupancy": {
+                    "max_resident_warps_per_sm": 7,
+                    "max_blocks": 11,
+                },
+                "dep_barriers": {"count": 13},
+                "barrier_latencies": {
+                    "read": 17,
+                    "non_memory_write": 19,
+                },
+                "dual_issue": {"supported": True},
+            }
+        )
+        profile = ArchProfile(arch_id="sm_86", sku="rtx_3090_ti", raw=raw)
+        return ArchContext(
+            arch_id="sm_86",
+            sku="rtx_3090_ti",
+            build_arch="sm_86",
+            profile=profile,
+        )
+
+    def test_production_cards_remain_byte_authority_without_resource_blocks(
+        self, sm86, sm120
+    ):
+        assert self.KEYS.isdisjoint(sm86)
+        assert self.KEYS.isdisjoint(sm120)
+
+    def test_absence_never_falls_back_across_architectures(self):
+        for token, sku, build in (
+            ("sm_86", "rtx_3090_ti", "sm_86"),
+            ("sm_120", "rtx_5060_laptop", "sm_120"),
+        ):
+            context = resolve_context(token, sku=sku, build_arch=build)
+            with pytest.raises(ArchProfileError, match="field absent"):
+                context.require_issue_resources()
+
+    def test_complete_synthetic_resources_round_trip_without_authority(self, sm86):
+        context = self._synthetic_context(sm86)
+        resources = context.require_issue_resources()
+        assert set(resources) == self.KEYS
+        assert resources["smsp"] == {"count": 3, "issue_ports": 5}
+        assert resources["dual_issue"] == {"supported": True}
+
+        context.profile.raw["smsp"]["count"] = 3.0
+        context.profile.raw["barrier_latencies"]["read"] = 17.0
+        resources = context.require_issue_resources()
+        assert resources["smsp"]["count"] == 3
+        assert isinstance(resources["smsp"]["count"], int)
+        assert resources["barrier_latencies"]["read"] == 17
+        assert isinstance(resources["barrier_latencies"]["read"], int)
+
+    def test_direct_context_construction_cannot_launder_resource_provenance(
+        self, sm86
+    ):
+        profile = self._synthetic_context(sm86).profile
+        laundered = ArchContext(
+            arch_id="sm_120",
+            sku="rtx_5060_laptop",
+            build_arch="sm_120",
+            profile=profile,
+        )
+        with pytest.raises(ArchProfileError, match="identity mismatch"):
+            laundered.require_issue_resources()
+
+        contradictory_raw = dict(profile.raw)
+        contradictory_raw["sku"] = "rtx_5060_laptop"
+        contradictory_profile = ArchProfile(
+            arch_id="sm_86",
+            sku="rtx_5060_laptop",
+            raw=contradictory_raw,
+        )
+        contradictory_pair = ArchContext(
+            arch_id="sm_86",
+            sku="rtx_5060_laptop",
+            build_arch="sm_86",
+            profile=contradictory_profile,
+        )
+        with pytest.raises(ArchProfileError, match="pair is not admitted"):
+            contradictory_pair.require_issue_resources()
+
+        wrong_build = ArchContext(
+            arch_id="sm_86",
+            sku="rtx_3090_ti",
+            build_arch="sm_120",
+            profile=profile,
+        )
+        with pytest.raises(ArchProfileError, match="not bound"):
+            wrong_build.require_issue_resources()
+
+    def test_nested_dual_issue_gap_and_bad_integer_fail_closed(self, sm86):
+        context = self._synthetic_context(sm86)
+        context.profile.raw["dual_issue"] = {
+            "supported": {
+                "status": "research_gap",
+                "reason": "synthetic pairing gap",
+            }
+        }
+        with pytest.raises(ArchProfileError, match="dual_issue.supported"):
+            context.require_issue_resources()
+
+        context = self._synthetic_context(sm86)
+        context.profile.raw["dual_issue"] = {
+            "supported": {
+                "status": "research_gap",
+                "reason": "synthetic pairing gap",
+                "unknown": 1,
+            }
+        }
+        with pytest.raises(ArchProfileError, match="malformed research_gap"):
+            context.require_issue_resources()
+
+        context = self._synthetic_context(sm86)
+        context.profile.raw["smsp"] = {
+            "status": "research_gap",
+            "reason": "synthetic collision",
+            "count": 3,
+            "issue_ports": 5,
+        }
+        with pytest.raises(ArchProfileError, match="malformed research_gap"):
+            context.require_issue_resources()
+
+        context = self._synthetic_context(sm86)
+        context.profile.raw["smsp"] = {"count": 3, "issue_ports": 1 << 32}
+        with pytest.raises(ArchProfileError, match="positive bounded integer"):
+            context.require_issue_resources()
+
+        context = self._synthetic_context(sm86)
+        context.profile.raw["barrier_latencies"]["read"] = float(
+            (1 << 53) + 1
+        )
+        with pytest.raises(ArchProfileError, match="positive bounded integer"):
+            context.require_issue_resources()
+
+        context = self._synthetic_context(sm86)
+        context.profile.raw["barrier_latencies"]["read"] = (1 << 53) - 1
+        assert context.require_issue_resources()["barrier_latencies"]["read"] == (
+            1 << 53
+        ) - 1
 
 
 # ---------- resolver: 8 historical spellings -> canonical ----------
