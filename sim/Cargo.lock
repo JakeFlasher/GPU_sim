@@ -250,6 +250,7 @@ dependencies = [
 name = "sim-emit"
 version = "0.0.1"
 dependencies = [
+ "serde",
  "serde_json",
  "sim-arch",
  "sim-mem",

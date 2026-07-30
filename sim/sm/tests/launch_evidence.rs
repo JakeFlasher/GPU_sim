@@ -4,9 +4,11 @@ use std::path::{Path, PathBuf};
 
 use prost::Message;
 use serde_json::{Value, json};
+use sim_emit::{EmitOutcome, RequiredUnimplementedBlocker, emit_all};
 use sim_sm::{
-    BinaryDigestGap, IssueModelParams, KernelReplayOutcome, ManifestError, ReplayError,
-    ReplayMemMode, admit_launch_evidence, replay_kernel,
+    BinaryDigestGap, FullLaunchSetDeclaration, IssueModelParams, KernelReplayOutcome,
+    ManifestError, ReplayError, ReplayMemMode, admit_launch_evidence, aggregate_full_launch_set,
+    replay_kernel,
 };
 use sim_trace::{Sha256Digest, TraceDirSnapshot, canonical_json};
 use tempfile::TempDir;
@@ -418,6 +420,45 @@ fn admitted_evidence_mints_the_public_replay_result() {
     };
     assert_eq!(result.instructions_issued(), result.records_seen());
     assert_eq!(result.coverage().blocks_observed(), 1);
+
+    let launch = result.coverage().launch().clone();
+    let diagnostic_last_issue_cycles = result.diagnostic_last_issue_cycles();
+    let terminal_modeled_event_time = result.terminal_modeled_event_time();
+    let declaration = FullLaunchSetDeclaration::checked(
+        "fixture/admitted-emission:v1",
+        result.configuration(),
+        [launch.clone()],
+    )
+    .expect("declare exact fixture launch set");
+    let aggregate =
+        aggregate_full_launch_set(declaration, [result]).expect("aggregate admitted launch");
+    assert_eq!(aggregate.launch_timing_diagnostics().len(), 1);
+    assert_eq!(aggregate.launch_timing_diagnostics()[0].launch(), &launch);
+    assert_eq!(
+        aggregate.launch_timing_diagnostics()[0].diagnostic_last_issue_cycles(),
+        diagnostic_last_issue_cycles
+    );
+    assert_eq!(
+        aggregate.launch_timing_diagnostics()[0].terminal_modeled_event_time(),
+        terminal_modeled_event_time
+    );
+
+    let predictions = emit_all(&aggregate).expect("emit admitted aggregate");
+    assert_eq!(
+        predictions.launch_timing_diagnostics(),
+        aggregate.launch_timing_diagnostics()
+    );
+    let cycles = predictions
+        .metrics()
+        .iter()
+        .find(|prediction| prediction.key() == "exec_cycles_gpc_max")
+        .expect("mandatory binding-cycle row");
+    assert_eq!(
+        cycles.outcome(),
+        &EmitOutcome::RequiredUnimplemented {
+            blocking: RequiredUnimplementedBlocker::AggregationSemanticsStudy,
+        }
+    );
 }
 
 #[test]

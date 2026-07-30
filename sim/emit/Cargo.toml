@@ -9,6 +9,7 @@ repository.workspace = true
 sim-arch = { path = "../arch" }
 sim-mem = { path = "../mem" }
 sim-sm = { path = "../sm" }
+serde = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]

@@ -1,8 +1,10 @@
 //! Checked aggregation for exact, full-coverage kernel replay results.
 //!
 //! This module deliberately accepts only [`FullKernelReplayResult`]. Sampled
-//! observations have no conversion into this algebra, and launch-set aggregation
-//! carries no timing fields or aggregate-to-aggregate addition surface.
+//! observations have no conversion into this algebra. Launch-set aggregation
+//! retains temporal values only as a canonical per-launch diagnostic vector; it
+//! never composes them into a launch-set timing scalar and exposes no
+//! aggregate-to-aggregate addition surface.
 
 use std::collections::{BTreeMap, BTreeSet, btree_map::Entry};
 
@@ -202,6 +204,32 @@ pub enum FullCounterEstimatorProvenance {
     ExactFullCoverageReplay,
 }
 
+/// Temporal diagnostics for one full-coverage launch. These values remain bound
+/// to the exact launch identity and are carried in canonical roster order. They
+/// are never composed into a launch-set cycle prediction.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FullLaunchTimingDiagnostic {
+    launch: ReplayLaunchCoverageBinding,
+    diagnostic_last_issue_cycles: u64,
+    terminal_modeled_event_time: Option<u64>,
+}
+
+impl FullLaunchTimingDiagnostic {
+    pub fn launch(&self) -> &ReplayLaunchCoverageBinding {
+        &self.launch
+    }
+
+    /// Maximum per-SM issue frontier (`last local issue timestamp + 1`).
+    pub fn diagnostic_last_issue_cycles(&self) -> u64 {
+        self.diagnostic_last_issue_cycles
+    }
+
+    /// Raw timestamp of the final successfully processed modeled event.
+    pub fn terminal_modeled_event_time(&self) -> Option<u64> {
+        self.terminal_modeled_event_time
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LaunchSetCounterComponent {
     L1,
@@ -237,12 +265,14 @@ impl std::fmt::Display for LaunchSetScalarCounter {
 }
 
 /// Counter-only, full-coverage launch-set result. The constructor and fields are
-/// private; no public API adds aggregates or attaches timing state.
+/// private. Temporal replay values survive only in `launch_timing_diagnostics`;
+/// no public API composes them or attaches a launch-set timing scalar.
 #[derive(Debug)]
 pub struct FullLaunchSetCounters {
     scope: LaunchSetScope,
     configuration: ReplayConfiguration,
     launch_coverages: Vec<FullLaunchCoverage>,
+    launch_timing_diagnostics: Vec<FullLaunchTimingDiagnostic>,
     estimator_provenance: FullCounterEstimatorProvenance,
     instructions_issued: u64,
     records_seen: u64,
@@ -268,6 +298,10 @@ impl FullLaunchSetCounters {
 
     pub fn launch_coverages(&self) -> &[FullLaunchCoverage] {
         &self.launch_coverages
+    }
+
+    pub fn launch_timing_diagnostics(&self) -> &[FullLaunchTimingDiagnostic] {
+        &self.launch_timing_diagnostics
     }
 
     pub fn estimator_provenance(&self) -> FullCounterEstimatorProvenance {
@@ -707,8 +741,8 @@ fn validate_full_result(
 ///
 /// All roster, architecture, configuration, coverage, shape, and provenance
 /// checks complete before arithmetic. Aggregation order is canonical expected-
-/// roster order, independent of caller iteration order. The result contains no
-/// launch timing, per-SM state, or cycle prediction.
+/// roster order, independent of caller iteration order. Temporal values are
+/// retained one row per launch and are never reduced into a timing prediction.
 ///
 /// Sampled results are statically outside this API:
 ///
@@ -777,6 +811,7 @@ pub fn aggregate_full_launch_set(
     let mut dram = shape.dram.then(|| DramStats::for_arch(arch));
     let mut unmodeled_tails = TailFlags::default();
     let mut launch_coverages = Vec::with_capacity(declaration.expected_launches.len());
+    let mut launch_timing_diagnostics = Vec::with_capacity(declaration.expected_launches.len());
 
     for launch in &declaration.expected_launches {
         let result =
@@ -831,6 +866,11 @@ pub fn aggregate_full_launch_set(
         }
         unmodeled_tails = unmodeled_tails.union(result.unmodeled_tails());
         launch_coverages.push(result.coverage().clone());
+        launch_timing_diagnostics.push(FullLaunchTimingDiagnostic {
+            launch: launch.clone(),
+            diagnostic_last_issue_cycles: result.diagnostic_last_issue_cycles(),
+            terminal_modeled_event_time: result.terminal_modeled_event_time(),
+        });
     }
 
     if let (Some(l2), Some(split)) = (&l2, &l2_by_source) {
@@ -847,6 +887,7 @@ pub fn aggregate_full_launch_set(
         scope: declaration.scope,
         configuration: declaration.configuration,
         launch_coverages,
+        launch_timing_diagnostics,
         estimator_provenance: FullCounterEstimatorProvenance::ExactFullCoverageReplay,
         instructions_issued,
         records_seen,
@@ -993,18 +1034,20 @@ mod tests {
     }
 
     #[test]
-    fn exact_full_roster_aggregates_in_canonical_order_without_timing() {
+    fn exact_full_roster_preserves_canonical_diagnostics_without_composition() {
         let configuration = flat_configuration();
         let first = binding(1);
         let second = binding(2);
         let mut second_result = full_result(second.clone(), configuration, 5, 5);
+        second_result.replay.diagnostic_last_issue_cycles = 2_002;
+        second_result.replay.terminal_modeled_event_time = Some(2_222);
         second_result.replay.unmodeled_tails.red_rmw = true;
+        let mut first_result = full_result(first.clone(), configuration, 3, 3);
+        first_result.replay.diagnostic_last_issue_cycles = 1_001;
+        first_result.replay.terminal_modeled_event_time = Some(1_111);
         let aggregate = aggregate_full_launch_set(
             declaration(configuration, [second.clone(), first.clone()]),
-            [
-                second_result,
-                full_result(first.clone(), configuration, 3, 3),
-            ],
+            [second_result, first_result],
         )
         .unwrap();
 
@@ -1022,6 +1065,25 @@ mod tests {
         assert_eq!(
             aggregate.launch_coverages()[0].source(),
             &FullCoverageSource::UnsampledComplete
+        );
+        assert_eq!(aggregate.launch_timing_diagnostics().len(), 2);
+        assert_eq!(aggregate.launch_timing_diagnostics()[0].launch(), &first);
+        assert_eq!(
+            aggregate.launch_timing_diagnostics()[0].diagnostic_last_issue_cycles(),
+            1_001
+        );
+        assert_eq!(
+            aggregate.launch_timing_diagnostics()[0].terminal_modeled_event_time(),
+            Some(1_111)
+        );
+        assert_eq!(aggregate.launch_timing_diagnostics()[1].launch(), &second);
+        assert_eq!(
+            aggregate.launch_timing_diagnostics()[1].diagnostic_last_issue_cycles(),
+            2_002
+        );
+        assert_eq!(
+            aggregate.launch_timing_diagnostics()[1].terminal_modeled_event_time(),
+            Some(2_222)
         );
         assert!(aggregate.unmodeled_tails().red_rmw);
         assert!(aggregate.l1().is_none());

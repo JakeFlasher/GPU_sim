@@ -1,29 +1,33 @@
 //! sim-emit: the NCU-metric emission layer (design §6.4).
 //!
-//! Takes checked counters for an exact full-coverage launch set and produces a
-//! launch-set-bound vector of NCU metric PREDICTIONS, one per registry
-//! observation contract
-//! (`tools/local_labels/metric_registry.json`). It is the ONLY sim crate that
-//! names label-pipeline contracts: metric NAMES are the output contract and
-//! are allowed here; label VALUES still never enter (Rule 1, enforced by
-//! `eval/guards/test_targets_not_features_guard.py`).
+//! Takes checked counters for an exact full-coverage launch set, produces a
+//! launch-set-bound vector of NCU metric descriptor outcomes, and classifies
+//! every remaining observation contract in
+//! `tools/local_labels/metric_registry.json` with a typed exclusion.
+//! It is the only sim crate that names label-pipeline contracts: metric NAMES
+//! are the output contract and are allowed here; label VALUES still never enter
+//! (Rule 1, enforced by `eval/guards/test_targets_not_features_guard.py`).
 //!
-//! Shape (design proposal P3, "descriptor-table hybrid"): a compiled
-//! [`DESCRIPTORS`] table is the single source of truth — one row per emitted
-//! metric binds a registry key + NCU metric string + [`Unit`] + [`MetricKind`]
-//! to a pure emit fn over the raw counters. A registry-lockstep test walks the
-//! table against `metric_registry.json` so a descriptor can never drift from
-//! the contract it claims to implement. Rate accounting lives HERE, never in
-//! the cache counter structs (gate-2 altitude note c): `L1Counters`/
-//! `L2Counters` hold raw counts; the emit fns compose them.
+//! Shape (design proposal P3, "descriptor-table hybrid"): compiled
+//! [`DESCRIPTORS`] and [`TYPED_EXCLUSIONS`] tables form an exact, disjoint
+//! partition of the active registry. Descriptor rows bind complete registry
+//! contracts to pure emit fns over raw counters; exclusion rows bind the same
+//! contracts to closed typed reasons. Rate accounting lives HERE, never in the
+//! cache counter structs (gate-2 altitude note c): `L1Counters`/`L2Counters`
+//! hold raw counts; the emit fns compose them. Per-launch replay timing
+//! diagnostics are retained on the bundle but are structurally absent from the
+//! descriptor counter snapshot.
 //!
-//! Three states are kept distinct, never conflated into a silent zero:
-//!   * a real zero — `Exact(0)` / `Fraction { value: Some(0.0), .. }`
-//!     (accesses happened, none hit);
+//! Four states are kept distinct, never conflated into a silent zero:
+//!   * a real simulator-scope zero — `Exact(0)` /
+//!     `Fraction { value: Some(0.0), .. }`;
 //!   * not-applicable — `Fraction { value: None, denominator: 0, .. }`
 //!     (no accesses; NCU reports n/a — a legitimate scorable prediction);
 //!   * not-produced-by-this-run — [`EmitOutcome::Unavailable`] (the replay's
-//!     mem-mode lacks the counting unit, e.g. no L2 under `L1Const`).
+//!     mem-mode lacks the counting unit, e.g. no L2 under `L1Const`);
+//!   * mandatory but scientifically blocked —
+//!     [`EmitOutcome::RequiredUnimplemented`] for binding cycles until an
+//!     admitted aggregation-semantics study exists.
 //!
 //! LDGSTS folding (the §6.4 op_ld surface): NCU books LDGSTS (cp.async) global
 //! loads under `op_ld` on the frozen sm_86 bundle — verified against the
@@ -38,11 +42,13 @@
 //! denominator but never to the hit numerator — an honest v0 under-prediction
 //! whose residual localizes the un-modeled LDGSTS-L1-residency effect.
 
+use serde::ser::{Serialize, SerializeStruct, Serializer};
 use sim_arch::ArchId;
 use sim_mem::{L1CounterError, L1Counters, L1OriginCounters, L2Counters, MemoryOrigin};
 use sim_sm::{
     DramStats, FullCounterEstimatorProvenance, FullLaunchCoverage, FullLaunchSetCounters,
-    L2SourceSplit, LaunchSetScope, ReplayConfiguration, SystemCounterError, TailFlags,
+    FullLaunchTimingDiagnostic, L2SourceSplit, LaunchSetScope, ReplayConfiguration,
+    SystemCounterError, TailFlags,
 };
 
 /// The exact counter fields the emission layer reads, borrowed. The type is
@@ -106,12 +112,68 @@ impl<'a> CounterSnapshot<'a> {
     }
 }
 
+/// Numeric predictions are exact only within the simulator's declared model
+/// scope. This is not a silicon-accuracy claim.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NumericSemantics {
+    SimulatorScope,
+}
+
+impl NumericSemantics {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::SimulatorScope => "simulator_scope",
+        }
+    }
+}
+
+impl Serialize for NumericSemantics {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+// The binding-cycle payload is intentionally constructible only inside this
+// child module. There is no constructor until an admitted aggregation-semantics
+// study supplies the required rule identity; in particular, no `From<u64>` path
+// can turn either replay diagnostic into a binding prediction.
+mod binding_cycles {
+    #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+    pub struct BindingCycles(u64);
+
+    impl BindingCycles {
+        pub fn get(self) -> u64 {
+            self.0
+        }
+    }
+}
+
+/// Opaque binding-cycle payload. Replay timing diagnostics have no conversion
+/// into this type:
+///
+/// ```compile_fail
+/// use sim_emit::BindingCycles;
+/// use sim_sm::FullKernelReplayResult;
+///
+/// fn reject_diagnostic_as_binding(result: &FullKernelReplayResult) -> BindingCycles {
+///     result.diagnostic_last_issue_cycles().into()
+/// }
+/// ```
+pub use binding_cycles::BindingCycles;
+
 /// A predicted metric value, shaped to its NCU contract. The numeric payload
 /// carries num/den so a `None` rate is auditable in-band (None IFF den == 0).
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum MetricValue {
-    /// An exact non-negative integer count (sectors, requests, instructions).
+    /// An exact non-negative integer count within simulator scope. This does not
+    /// assert that the value is exact relative to silicon.
     Exact(u64),
+    /// A binding-cycle value. Safe construction remains unavailable until the
+    /// aggregation-semantics study is admitted.
+    BindingCycles(BindingCycles),
     /// A `[0, 1]` fraction. `value` is `None` iff `denominator == 0` (NCU
     /// reports the metric as n/a — never a fabricated 0.0).
     Fraction {
@@ -139,6 +201,43 @@ impl MetricValue {
             numerator: num,
             denominator: den,
         })
+    }
+}
+
+impl Serialize for MetricValue {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            Self::Exact(value) => {
+                let mut state = serializer.serialize_struct("MetricValue", 3)?;
+                state.serialize_field("kind", "exact")?;
+                state.serialize_field("semantics", &NumericSemantics::SimulatorScope)?;
+                state.serialize_field("value", value)?;
+                state.end()
+            }
+            Self::Fraction {
+                value,
+                numerator,
+                denominator,
+            } => {
+                let mut state = serializer.serialize_struct("MetricValue", 5)?;
+                state.serialize_field("kind", "fraction")?;
+                state.serialize_field("semantics", &NumericSemantics::SimulatorScope)?;
+                state.serialize_field("value", value)?;
+                state.serialize_field("numerator", numerator)?;
+                state.serialize_field("denominator", denominator)?;
+                state.end()
+            }
+            Self::BindingCycles(value) => {
+                let mut state = serializer.serialize_struct("MetricValue", 3)?;
+                state.serialize_field("kind", "binding_cycles")?;
+                state.serialize_field("semantics", &NumericSemantics::SimulatorScope)?;
+                state.serialize_field("value", &value.get())?;
+                state.end()
+            }
+        }
     }
 }
 
@@ -223,8 +322,7 @@ fn exact_fraction_to_f64(key: &'static str, num: u64, den: u64) -> Result<f64, E
     Ok(value)
 }
 
-/// The NCU-facing unit of a metric (the registry `unit` field). Only the
-/// variants v0 uses are declared; cycles/ns/ratio arrive with their metrics.
+/// The NCU-facing unit of a metric (the registry `unit` field).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Unit {
     /// A raw non-negative count.
@@ -232,17 +330,84 @@ pub enum Unit {
     /// A percentage in NCU's own rendering; stored as a `[0, 1]` fraction
     /// (registry `parser_transform = percent_to_fraction`).
     Pct,
+    /// A clock-cycle count. The binding cycle descriptor remains required-
+    /// unimplemented until aggregation semantics are admitted.
+    Cycles,
+    /// Elapsed nanoseconds retained only as a label-side exclusion.
+    Nanoseconds,
+}
+
+impl Unit {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Count => "count",
+            Self::Pct => "pct",
+            Self::Cycles => "cycles",
+            Self::Nanoseconds => "ns",
+        }
+    }
+}
+
+impl Serialize for Unit {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
 }
 
 /// The numeric shape a descriptor promises to emit — checked against the
 /// returned [`MetricValue`] with a typed error, and pinned
-/// against the registry `metric_class`/`valid_max` by the lockstep test.
+/// against the registry `valid_max` and parser transform.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MetricKind {
     /// Emits [`MetricValue::Exact`].
     Count,
     /// Emits [`MetricValue::Fraction`].
     Fraction,
+    /// May emit only [`MetricValue::BindingCycles`], whose safe constructor is
+    /// intentionally absent until the aggregation-semantics study is admitted.
+    BindingCycles,
+}
+
+/// Registry upper-bound contract.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RegistryValidMax {
+    Unbounded,
+    One,
+}
+
+/// Registry parser transform.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ParserTransform {
+    IdentityNonnegative,
+    PercentToFraction,
+}
+
+impl ParserTransform {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::IdentityNonnegative => "identity_nonneg",
+            Self::PercentToFraction => "percent_to_fraction",
+        }
+    }
+}
+
+/// Registry model-I/O role.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ModelIoRole {
+    Target,
+    Input,
+}
+
+impl ModelIoRole {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Target => "target",
+            Self::Input => "input",
+        }
+    }
 }
 
 /// A hardware counting unit a metric needs to be predictable at all.
@@ -254,6 +419,16 @@ pub enum MemUnit {
     Lts,
     /// The DRAM read observer (`FullLaunchSetCounters::dram`).
     Dram,
+}
+
+impl MemUnit {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::L1Tex => "l1tex",
+            Self::Lts => "lts",
+            Self::Dram => "dram",
+        }
+    }
 }
 
 /// Typed reason a metric was NOT predicted by THIS run — distinct from a
@@ -268,11 +443,90 @@ pub enum Unavailable {
     MemModeLacksUnit { needs: MemUnit },
 }
 
-/// Per-metric outcome: a genuine prediction, or a typed not-produced reason.
+impl Serialize for Unavailable {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            Self::ArchitectureUnsupported { arch } => {
+                let mut state = serializer.serialize_struct("Unavailable", 2)?;
+                state.serialize_field("reason", "architecture_unsupported")?;
+                state.serialize_field("arch", arch.token())?;
+                state.end()
+            }
+            Self::MemModeLacksUnit { needs } => {
+                let mut state = serializer.serialize_struct("Unavailable", 2)?;
+                state.serialize_field("reason", "mem_mode_lacks_unit")?;
+                state.serialize_field("needs", needs.as_str())?;
+                state.end()
+            }
+        }
+    }
+}
+
+/// Evidence prerequisite that blocks a mandatory registry output.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RequiredUnimplementedBlocker {
+    /// A checked-in study must select and bind lawful launch aggregation
+    /// semantics from admitted silicon evidence.
+    AggregationSemanticsStudy,
+}
+
+impl RequiredUnimplementedBlocker {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::AggregationSemanticsStudy => "aggregation_semantics_study",
+        }
+    }
+}
+
+impl Serialize for RequiredUnimplementedBlocker {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
+/// Per-metric outcome: a genuine simulator-scope prediction, a typed
+/// not-produced reason, or a mandatory contract blocked on explicit evidence.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum EmitOutcome {
     Predicted(MetricValue),
     Unavailable(Unavailable),
+    RequiredUnimplemented {
+        blocking: RequiredUnimplementedBlocker,
+    },
+}
+
+impl Serialize for EmitOutcome {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        match self {
+            Self::Predicted(value) => {
+                let mut state = serializer.serialize_struct("EmitOutcome", 2)?;
+                state.serialize_field("status", "predicted")?;
+                state.serialize_field("value", value)?;
+                state.end()
+            }
+            Self::Unavailable(reason) => {
+                let mut state = serializer.serialize_struct("EmitOutcome", 2)?;
+                state.serialize_field("status", "unavailable")?;
+                state.serialize_field("detail", reason)?;
+                state.end()
+            }
+            Self::RequiredUnimplemented { blocking } => {
+                let mut state = serializer.serialize_struct("EmitOutcome", 2)?;
+                state.serialize_field("status", "required_unimplemented")?;
+                state.serialize_field("blocking", blocking)?;
+                state.end()
+            }
+        }
+    }
 }
 
 /// One emitted metric, carrying its registry key + NCU identifier so the eval
@@ -316,6 +570,28 @@ impl MetricPrediction {
     pub fn outcome(&self) -> &EmitOutcome {
         &self.outcome
     }
+
+    /// Numeric outcomes are scoped to the simulator model and do not assert
+    /// silicon accuracy. Non-numeric outcomes have no numeric semantics.
+    pub fn numeric_semantics(&self) -> Option<NumericSemantics> {
+        matches!(self.outcome, EmitOutcome::Predicted(_))
+            .then_some(NumericSemantics::SimulatorScope)
+    }
+}
+
+impl Serialize for MetricPrediction {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        let mut state = serializer.serialize_struct("MetricPrediction", 5)?;
+        state.serialize_field("arch", self.arch.token())?;
+        state.serialize_field("key", self.key)?;
+        state.serialize_field("ncu_metric", self.ncu_metric)?;
+        state.serialize_field("unit", &self.unit)?;
+        state.serialize_field("outcome", &self.outcome)?;
+        state.end()
+    }
 }
 
 /// Certified predictions for one exact full-coverage launch set. Construction is
@@ -326,6 +602,7 @@ pub struct FullLaunchSetPredictions {
     scope: LaunchSetScope,
     configuration: ReplayConfiguration,
     launch_coverages: Vec<FullLaunchCoverage>,
+    launch_timing_diagnostics: Vec<FullLaunchTimingDiagnostic>,
     estimator_provenance: FullCounterEstimatorProvenance,
     unmodeled_tails: TailFlags,
     metrics: Vec<MetricPrediction>,
@@ -348,6 +625,10 @@ impl FullLaunchSetPredictions {
         &self.launch_coverages
     }
 
+    pub fn launch_timing_diagnostics(&self) -> &[FullLaunchTimingDiagnostic] {
+        &self.launch_timing_diagnostics
+    }
+
     pub fn estimator_provenance(&self) -> FullCounterEstimatorProvenance {
         self.estimator_provenance
     }
@@ -362,16 +643,40 @@ impl FullLaunchSetPredictions {
 }
 
 /// A compiled row of the emission table: the binding from a sim quantity to
-/// its registry contract. [`DESCRIPTORS`] is the single source of truth the
-/// lockstep test pins against `metric_registry.json`.
+/// its complete registry contract. [`DESCRIPTORS`] and [`TYPED_EXCLUSIONS`]
+/// form an exact, disjoint partition of the active registry.
 pub struct MetricDescriptor {
     pub key: &'static str,
     pub ncu_metric: &'static str,
     pub unit: Unit,
     pub kind: MetricKind,
+    pub valid_max: RegistryValidMax,
+    pub parser_transform: ParserTransform,
+    pub model_io_role: ModelIoRole,
     /// Architectures with reviewed counter semantics for this descriptor.
     pub available_on: &'static [ArchId],
     emit: fn(&CounterSnapshot) -> Result<EmitOutcome, EmitError>,
+}
+
+/// Closed reason that an active registry row is not a simulator descriptor.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum TypedExclusionReason {
+    MemUnitUnmodeled,
+    OpClassUnmodeled,
+    LabelOnlyNoComposition,
+    TypedUnavailableRegistryRow,
+    InputRoleNotEmitted,
+}
+
+/// One non-descriptor registry row with its complete contract and typed reason.
+pub struct TypedExclusion {
+    pub key: &'static str,
+    pub ncu_metric: &'static str,
+    pub unit: Unit,
+    pub valid_max: RegistryValidMax,
+    pub parser_transform: ParserTransform,
+    pub model_io_role: ModelIoRole,
+    pub reason: TypedExclusionReason,
 }
 
 /// Fail-closed emission faults. Benign "this run's mem-mode lacks the unit" is
@@ -406,6 +711,17 @@ pub enum EmitError {
         key: &'static str,
         declared: MetricKind,
         returned: MetricKind,
+    },
+    #[error(
+        "binding-cycle metric {key} must remain required_unimplemented until the aggregation-semantics study is admitted"
+    )]
+    BindingCyclesImplementationNotAdmitted { key: &'static str },
+    #[error(
+        "metric {key}: required_unimplemented is valid only for a binding-cycle descriptor, got {declared:?}"
+    )]
+    RequiredUnimplementedKindMismatch {
+        key: &'static str,
+        declared: MetricKind,
     },
     #[error("{counter} has no bound architecture provenance")]
     CounterArchitectureUnbound { counter: &'static str },
@@ -445,6 +761,15 @@ fn bypass_read_sectors(key: &'static str, l1: &L1OriginCounters) -> Result<u64, 
 }
 
 // ---- per-metric emit fns (the rate accounting, moved out of the counters) ----
+
+/// `gpc__cycles_elapsed.max` — mandatory publication-binding output. The
+/// counter snapshot deliberately contains no replay temporal diagnostics, so
+/// neither issue-frontier nor terminal-event timestamps can enter this row.
+fn emit_exec_cycles_gpc_max(_: &CounterSnapshot) -> Result<EmitOutcome, EmitError> {
+    Ok(EmitOutcome::RequiredUnimplemented {
+        blocking: RequiredUnimplementedBlocker::AggregationSemanticsStudy,
+    })
+}
 
 /// `smsp__inst_executed.sum` — total warp-instructions issued. One issue per
 /// traced record across every SM; always available (no mem unit needed).
@@ -579,16 +904,20 @@ fn emit_dram_read_sectors(snap: &CounterSnapshot) -> Result<EmitOutcome, EmitErr
 }
 
 const SM86_ONLY: &[ArchId] = &[ArchId::Sm86];
+const ALL_ARCHITECTURES: &[ArchId] = &[ArchId::Sm86, ArchId::Sm120];
 
-/// The v0 emission table — one row per registry contract this layer predicts.
-/// Adding a metric is a one-row append plus its emit fn; the lockstep test and
-/// the eval join need no edits.
+/// The stable emission table. Seven simulator counters retain their established
+/// evaluation order; the publication-binding cycle row is mandatory and remains
+/// required-unimplemented.
 pub const DESCRIPTORS: &[MetricDescriptor] = &[
     MetricDescriptor {
         key: "smsp_inst_executed_sum",
         ncu_metric: "smsp__inst_executed.sum",
         unit: Unit::Count,
         kind: MetricKind::Count,
+        valid_max: RegistryValidMax::Unbounded,
+        parser_transform: ParserTransform::IdentityNonnegative,
+        model_io_role: ModelIoRole::Target,
         available_on: SM86_ONLY,
         emit: emit_smsp_inst_executed,
     },
@@ -597,6 +926,9 @@ pub const DESCRIPTORS: &[MetricDescriptor] = &[
         ncu_metric: "l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum",
         unit: Unit::Count,
         kind: MetricKind::Count,
+        valid_max: RegistryValidMax::Unbounded,
+        parser_transform: ParserTransform::IdentityNonnegative,
+        model_io_role: ModelIoRole::Target,
         available_on: SM86_ONLY,
         emit: emit_gmem_ld_sectors,
     },
@@ -605,6 +937,9 @@ pub const DESCRIPTORS: &[MetricDescriptor] = &[
         ncu_metric: "l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum",
         unit: Unit::Count,
         kind: MetricKind::Count,
+        valid_max: RegistryValidMax::Unbounded,
+        parser_transform: ParserTransform::IdentityNonnegative,
+        model_io_role: ModelIoRole::Target,
         available_on: SM86_ONLY,
         emit: emit_gmem_st_sectors,
     },
@@ -613,6 +948,9 @@ pub const DESCRIPTORS: &[MetricDescriptor] = &[
         ncu_metric: "l1tex__t_sector_pipe_lsu_mem_global_op_ld_hit_rate.pct",
         unit: Unit::Pct,
         kind: MetricKind::Fraction,
+        valid_max: RegistryValidMax::One,
+        parser_transform: ParserTransform::PercentToFraction,
+        model_io_role: ModelIoRole::Target,
         available_on: SM86_ONLY,
         emit: emit_l1tex_read_hit_rate,
     },
@@ -621,6 +959,9 @@ pub const DESCRIPTORS: &[MetricDescriptor] = &[
         ncu_metric: "l1tex__t_sector_hit_rate.pct",
         unit: Unit::Pct,
         kind: MetricKind::Fraction,
+        valid_max: RegistryValidMax::One,
+        parser_transform: ParserTransform::PercentToFraction,
+        model_io_role: ModelIoRole::Target,
         available_on: SM86_ONLY,
         emit: emit_l1tex_unified_hit_rate,
     },
@@ -629,6 +970,9 @@ pub const DESCRIPTORS: &[MetricDescriptor] = &[
         ncu_metric: "lts__t_sector_hit_rate.pct",
         unit: Unit::Pct,
         kind: MetricKind::Fraction,
+        valid_max: RegistryValidMax::One,
+        parser_transform: ParserTransform::PercentToFraction,
+        model_io_role: ModelIoRole::Target,
         available_on: SM86_ONLY,
         emit: emit_l2_hit_rate,
     },
@@ -637,9 +981,364 @@ pub const DESCRIPTORS: &[MetricDescriptor] = &[
         ncu_metric: "dram__sectors_read.sum",
         unit: Unit::Count,
         kind: MetricKind::Count,
+        valid_max: RegistryValidMax::Unbounded,
+        parser_transform: ParserTransform::IdentityNonnegative,
+        model_io_role: ModelIoRole::Target,
         available_on: SM86_ONLY,
         emit: emit_dram_read_sectors,
     },
+    MetricDescriptor {
+        key: "exec_cycles_gpc_max",
+        ncu_metric: "gpc__cycles_elapsed.max",
+        unit: Unit::Cycles,
+        kind: MetricKind::BindingCycles,
+        valid_max: RegistryValidMax::Unbounded,
+        parser_transform: ParserTransform::IdentityNonnegative,
+        model_io_role: ModelIoRole::Target,
+        available_on: ALL_ARCHITECTURES,
+        emit: emit_exec_cycles_gpc_max,
+    },
+];
+
+const fn target_count_exclusion(
+    key: &'static str,
+    ncu_metric: &'static str,
+    reason: TypedExclusionReason,
+) -> TypedExclusion {
+    TypedExclusion {
+        key,
+        ncu_metric,
+        unit: Unit::Count,
+        valid_max: RegistryValidMax::Unbounded,
+        parser_transform: ParserTransform::IdentityNonnegative,
+        model_io_role: ModelIoRole::Target,
+        reason,
+    }
+}
+
+const fn target_pct_exclusion(
+    key: &'static str,
+    ncu_metric: &'static str,
+    reason: TypedExclusionReason,
+) -> TypedExclusion {
+    TypedExclusion {
+        key,
+        ncu_metric,
+        unit: Unit::Pct,
+        valid_max: RegistryValidMax::One,
+        parser_transform: ParserTransform::PercentToFraction,
+        model_io_role: ModelIoRole::Target,
+        reason,
+    }
+}
+
+const fn target_cycles_exclusion(
+    key: &'static str,
+    ncu_metric: &'static str,
+    reason: TypedExclusionReason,
+) -> TypedExclusion {
+    TypedExclusion {
+        key,
+        ncu_metric,
+        unit: Unit::Cycles,
+        valid_max: RegistryValidMax::Unbounded,
+        parser_transform: ParserTransform::IdentityNonnegative,
+        model_io_role: ModelIoRole::Target,
+        reason,
+    }
+}
+
+const fn target_ns_exclusion(
+    key: &'static str,
+    ncu_metric: &'static str,
+    reason: TypedExclusionReason,
+) -> TypedExclusion {
+    TypedExclusion {
+        key,
+        ncu_metric,
+        unit: Unit::Nanoseconds,
+        valid_max: RegistryValidMax::Unbounded,
+        parser_transform: ParserTransform::IdentityNonnegative,
+        model_io_role: ModelIoRole::Target,
+        reason,
+    }
+}
+
+const fn input_count_exclusion(key: &'static str, ncu_metric: &'static str) -> TypedExclusion {
+    TypedExclusion {
+        key,
+        ncu_metric,
+        unit: Unit::Count,
+        valid_max: RegistryValidMax::Unbounded,
+        parser_transform: ParserTransform::IdentityNonnegative,
+        model_io_role: ModelIoRole::Input,
+        reason: TypedExclusionReason::InputRoleNotEmitted,
+    }
+}
+
+/// Every active registry row that is not a descriptor, in registry order.
+pub const TYPED_EXCLUSIONS: &[TypedExclusion] = &[
+    target_ns_exclusion(
+        "exec_duration_ns",
+        "gpu__time_duration.sum",
+        TypedExclusionReason::LabelOnlyNoComposition,
+    ),
+    target_count_exclusion(
+        "traffic_gmem_ld_requests",
+        "l1tex__t_requests_pipe_lsu_mem_global_op_ld.sum",
+        TypedExclusionReason::MemUnitUnmodeled,
+    ),
+    target_count_exclusion(
+        "traffic_gmem_st_requests",
+        "l1tex__t_requests_pipe_lsu_mem_global_op_st.sum",
+        TypedExclusionReason::MemUnitUnmodeled,
+    ),
+    target_count_exclusion(
+        "traffic_dram_write_sectors",
+        "dram__sectors_write.sum",
+        TypedExclusionReason::MemUnitUnmodeled,
+    ),
+    target_count_exclusion(
+        "traffic_l2_total_requests_from_tex",
+        "lts__t_requests_srcunit_tex.sum",
+        TypedExclusionReason::MemUnitUnmodeled,
+    ),
+    target_count_exclusion(
+        "traffic_l2_read_sectors_from_l1",
+        "l1tex__m_xbar2l1tex_read_sectors_mem_lg_op_ld.sum",
+        TypedExclusionReason::MemUnitUnmodeled,
+    ),
+    target_count_exclusion(
+        "traffic_l1_write_sectors_to_l2",
+        "l1tex__m_l1tex2xbar_write_sectors_mem_lg_op_st.sum",
+        TypedExclusionReason::MemUnitUnmodeled,
+    ),
+    target_count_exclusion(
+        "traffic_gmem_atom_requests",
+        "l1tex__t_requests_pipe_lsu_mem_global_op_atom.sum",
+        TypedExclusionReason::OpClassUnmodeled,
+    ),
+    target_count_exclusion(
+        "traffic_gmem_red_requests",
+        "l1tex__t_requests_pipe_lsu_mem_global_op_red.sum",
+        TypedExclusionReason::OpClassUnmodeled,
+    ),
+    target_count_exclusion(
+        "traffic_l1_total_requests",
+        "l1tex__t_requests.sum",
+        TypedExclusionReason::MemUnitUnmodeled,
+    ),
+    target_pct_exclusion(
+        "occupancy_achieved_warps_pct",
+        "sm__warps_active.avg.pct_of_peak_sustained_active",
+        TypedExclusionReason::LabelOnlyNoComposition,
+    ),
+    target_count_exclusion(
+        "ipc_inst_per_cycle",
+        "sm__inst_executed.avg.per_cycle_elapsed",
+        TypedExclusionReason::LabelOnlyNoComposition,
+    ),
+    input_count_exclusion(
+        "occupancy_limit_warps_theoretical",
+        "launch__occupancy_limit_warps",
+    ),
+    input_count_exclusion(
+        "occupancy_limit_blocks_theoretical",
+        "launch__occupancy_limit_blocks",
+    ),
+    input_count_exclusion(
+        "occupancy_limit_registers_theoretical",
+        "launch__occupancy_limit_registers",
+    ),
+    input_count_exclusion(
+        "occupancy_limit_shared_mem_theoretical",
+        "launch__occupancy_limit_shared_mem",
+    ),
+    target_cycles_exclusion(
+        "exec_cycles_sm_active_avg",
+        "sm__cycles_active.avg",
+        TypedExclusionReason::LabelOnlyNoComposition,
+    ),
+    target_count_exclusion(
+        "warps_active_per_cycle_active_avg",
+        "sm__warps_active.avg.per_cycle_active",
+        TypedExclusionReason::LabelOnlyNoComposition,
+    ),
+    target_count_exclusion(
+        "sm_clock_hz_covariate",
+        "gpc__cycles_elapsed.avg.per_second",
+        TypedExclusionReason::LabelOnlyNoComposition,
+    ),
+    target_count_exclusion(
+        "mem_clock_hz_covariate",
+        "dram__cycles_elapsed.avg.per_second",
+        TypedExclusionReason::LabelOnlyNoComposition,
+    ),
+    target_count_exclusion(
+        "traffic_local_ld_requests",
+        "l1tex__t_requests_pipe_lsu_mem_local_op_ld.sum",
+        TypedExclusionReason::OpClassUnmodeled,
+    ),
+    target_count_exclusion(
+        "traffic_local_st_requests",
+        "l1tex__t_requests_pipe_lsu_mem_local_op_st.sum",
+        TypedExclusionReason::OpClassUnmodeled,
+    ),
+    target_count_exclusion(
+        "traffic_tex_requests",
+        "l1tex__t_requests_pipe_tex_mem_texture.sum",
+        TypedExclusionReason::OpClassUnmodeled,
+    ),
+    target_count_exclusion(
+        "traffic_surface_ld_requests",
+        "l1tex__t_requests_pipe_tex_mem_surface_op_ld.sum",
+        TypedExclusionReason::OpClassUnmodeled,
+    ),
+    target_count_exclusion(
+        "traffic_surface_st_requests",
+        "l1tex__t_requests_pipe_tex_mem_surface_op_st.sum",
+        TypedExclusionReason::OpClassUnmodeled,
+    ),
+    target_count_exclusion(
+        "traffic_surface_red_requests",
+        "l1tex__t_requests_pipe_tex_mem_surface_op_red.sum",
+        TypedExclusionReason::OpClassUnmodeled,
+    ),
+    target_count_exclusion(
+        "traffic_surface_atom_requests",
+        "l1tex__t_requests_pipe_tex_mem_surface_op_atom.sum",
+        TypedExclusionReason::OpClassUnmodeled,
+    ),
+    target_count_exclusion(
+        "dram_bytes_per_second",
+        "dram__bytes.sum.per_second",
+        TypedExclusionReason::LabelOnlyNoComposition,
+    ),
+    target_pct_exclusion(
+        "throughput_compute_mem_access_pct_peak",
+        "gpu__compute_memory_access_throughput.avg.pct_of_peak_sustained_elapsed",
+        TypedExclusionReason::LabelOnlyNoComposition,
+    ),
+    target_pct_exclusion(
+        "throughput_compute_mem_request_pct_peak",
+        "gpu__compute_memory_request_throughput.avg.pct_of_peak_sustained_elapsed",
+        TypedExclusionReason::LabelOnlyNoComposition,
+    ),
+    target_pct_exclusion(
+        "throughput_sm_memory_pct_peak",
+        "sm__memory_throughput.avg.pct_of_peak_sustained_elapsed",
+        TypedExclusionReason::LabelOnlyNoComposition,
+    ),
+    target_count_exclusion(
+        "traffic_dram_sectors_op_read",
+        "dram__sectors_op_read.sum",
+        TypedExclusionReason::TypedUnavailableRegistryRow,
+    ),
+    target_count_exclusion(
+        "traffic_dram_sectors_op_write",
+        "dram__sectors_op_write.sum",
+        TypedExclusionReason::TypedUnavailableRegistryRow,
+    ),
+    target_count_exclusion(
+        "warp_stall_barrier_per_issue_active",
+        "smsp__average_warps_issue_stalled_barrier_per_issue_active.ratio",
+        TypedExclusionReason::LabelOnlyNoComposition,
+    ),
+    target_count_exclusion(
+        "warp_stall_branch_resolving_per_issue_active",
+        "smsp__average_warps_issue_stalled_branch_resolving_per_issue_active.ratio",
+        TypedExclusionReason::LabelOnlyNoComposition,
+    ),
+    target_count_exclusion(
+        "warp_stall_dispatch_stall_per_issue_active",
+        "smsp__average_warps_issue_stalled_dispatch_stall_per_issue_active.ratio",
+        TypedExclusionReason::LabelOnlyNoComposition,
+    ),
+    target_count_exclusion(
+        "warp_stall_drain_per_issue_active",
+        "smsp__average_warps_issue_stalled_drain_per_issue_active.ratio",
+        TypedExclusionReason::LabelOnlyNoComposition,
+    ),
+    target_count_exclusion(
+        "warp_stall_imc_miss_per_issue_active",
+        "smsp__average_warps_issue_stalled_imc_miss_per_issue_active.ratio",
+        TypedExclusionReason::LabelOnlyNoComposition,
+    ),
+    target_count_exclusion(
+        "warp_stall_lg_throttle_per_issue_active",
+        "smsp__average_warps_issue_stalled_lg_throttle_per_issue_active.ratio",
+        TypedExclusionReason::LabelOnlyNoComposition,
+    ),
+    target_count_exclusion(
+        "warp_stall_long_scoreboard_per_issue_active",
+        "smsp__average_warps_issue_stalled_long_scoreboard_per_issue_active.ratio",
+        TypedExclusionReason::LabelOnlyNoComposition,
+    ),
+    target_count_exclusion(
+        "warp_stall_math_pipe_throttle_per_issue_active",
+        "smsp__average_warps_issue_stalled_math_pipe_throttle_per_issue_active.ratio",
+        TypedExclusionReason::LabelOnlyNoComposition,
+    ),
+    target_count_exclusion(
+        "warp_stall_membar_per_issue_active",
+        "smsp__average_warps_issue_stalled_membar_per_issue_active.ratio",
+        TypedExclusionReason::LabelOnlyNoComposition,
+    ),
+    target_count_exclusion(
+        "warp_stall_mio_throttle_per_issue_active",
+        "smsp__average_warps_issue_stalled_mio_throttle_per_issue_active.ratio",
+        TypedExclusionReason::LabelOnlyNoComposition,
+    ),
+    target_count_exclusion(
+        "warp_stall_misc_per_issue_active",
+        "smsp__average_warps_issue_stalled_misc_per_issue_active.ratio",
+        TypedExclusionReason::LabelOnlyNoComposition,
+    ),
+    target_count_exclusion(
+        "warp_stall_no_instruction_per_issue_active",
+        "smsp__average_warps_issue_stalled_no_instruction_per_issue_active.ratio",
+        TypedExclusionReason::LabelOnlyNoComposition,
+    ),
+    target_count_exclusion(
+        "warp_stall_not_selected_per_issue_active",
+        "smsp__average_warps_issue_stalled_not_selected_per_issue_active.ratio",
+        TypedExclusionReason::LabelOnlyNoComposition,
+    ),
+    target_count_exclusion(
+        "warp_stall_selected_per_issue_active",
+        "smsp__average_warps_issue_stalled_selected_per_issue_active.ratio",
+        TypedExclusionReason::LabelOnlyNoComposition,
+    ),
+    target_count_exclusion(
+        "warp_stall_short_scoreboard_per_issue_active",
+        "smsp__average_warps_issue_stalled_short_scoreboard_per_issue_active.ratio",
+        TypedExclusionReason::LabelOnlyNoComposition,
+    ),
+    target_count_exclusion(
+        "warp_stall_sleeping_per_issue_active",
+        "smsp__average_warps_issue_stalled_sleeping_per_issue_active.ratio",
+        TypedExclusionReason::LabelOnlyNoComposition,
+    ),
+    target_count_exclusion(
+        "warp_stall_tex_throttle_per_issue_active",
+        "smsp__average_warps_issue_stalled_tex_throttle_per_issue_active.ratio",
+        TypedExclusionReason::LabelOnlyNoComposition,
+    ),
+    target_count_exclusion(
+        "warp_stall_wait_per_issue_active",
+        "smsp__average_warps_issue_stalled_wait_per_issue_active.ratio",
+        TypedExclusionReason::LabelOnlyNoComposition,
+    ),
+    target_pct_exclusion(
+        "throughput_sm_pct_peak",
+        "sm__throughput.avg.pct_of_peak_sustained_elapsed",
+        TypedExclusionReason::LabelOnlyNoComposition,
+    ),
+    target_pct_exclusion(
+        "throughput_compute_memory_pct_peak",
+        "gpu__compute_memory_throughput.avg.pct_of_peak_sustained_elapsed",
+        TypedExclusionReason::LabelOnlyNoComposition,
+    ),
 ];
 
 /// Return the numeric shape an emit fn actually produced.
@@ -647,23 +1346,45 @@ fn metric_value_kind(value: &MetricValue) -> MetricKind {
     match value {
         MetricValue::Exact(_) => MetricKind::Count,
         MetricValue::Fraction { .. } => MetricKind::Fraction,
+        MetricValue::BindingCycles(_) => MetricKind::BindingCycles,
     }
 }
 
-fn validate_descriptor_value_kind(
+fn validate_descriptor_outcome(
     descriptor: &MetricDescriptor,
     outcome: &EmitOutcome,
 ) -> Result<(), EmitError> {
-    let EmitOutcome::Predicted(value) = outcome else {
+    if descriptor.kind == MetricKind::BindingCycles {
+        if *outcome
+            != (EmitOutcome::RequiredUnimplemented {
+                blocking: RequiredUnimplementedBlocker::AggregationSemanticsStudy,
+            })
+        {
+            return Err(EmitError::BindingCyclesImplementationNotAdmitted {
+                key: descriptor.key,
+            });
+        }
         return Ok(());
-    };
-    let returned = metric_value_kind(value);
-    if returned != descriptor.kind {
-        return Err(EmitError::DescriptorValueKindMismatch {
-            key: descriptor.key,
-            declared: descriptor.kind,
-            returned,
-        });
+    }
+
+    match outcome {
+        EmitOutcome::Predicted(value) => {
+            let returned = metric_value_kind(value);
+            if returned != descriptor.kind {
+                return Err(EmitError::DescriptorValueKindMismatch {
+                    key: descriptor.key,
+                    declared: descriptor.kind,
+                    returned,
+                });
+            }
+        }
+        EmitOutcome::RequiredUnimplemented { .. } => {
+            return Err(EmitError::RequiredUnimplementedKindMismatch {
+                key: descriptor.key,
+                declared: descriptor.kind,
+            });
+        }
+        EmitOutcome::Unavailable(_) => {}
     }
     Ok(())
 }
@@ -677,7 +1398,7 @@ fn emit_snapshot(snap: &CounterSnapshot) -> Result<Vec<MetricPrediction>, EmitEr
         } else {
             EmitOutcome::Unavailable(Unavailable::ArchitectureUnsupported { arch: snap.arch })
         };
-        validate_descriptor_value_kind(d, &outcome)?;
+        validate_descriptor_outcome(d, &outcome)?;
         out.push(MetricPrediction {
             arch: snap.arch,
             key: d.key,
@@ -690,8 +1411,10 @@ fn emit_snapshot(snap: &CounterSnapshot) -> Result<Vec<MetricPrediction>, EmitEr
 }
 
 /// Emit every descriptor from one checked, exact full-coverage launch-set
-/// aggregate, in registry-table order. No sampled observation or caller-built
-/// counter snapshot can enter this boundary.
+/// aggregate in stable descriptor order. The bundle preserves canonical
+/// per-launch timing diagnostics, but the descriptor snapshot omits them; the
+/// binding cycle row therefore remains required-unimplemented. No sampled
+/// observation or caller-built counter snapshot can enter this boundary.
 ///
 /// ```compile_fail
 /// use sim_emit::emit_all;
@@ -707,6 +1430,7 @@ pub fn emit_all(counters: &FullLaunchSetCounters) -> Result<FullLaunchSetPredict
         scope: counters.scope().clone(),
         configuration: counters.configuration(),
         launch_coverages: counters.launch_coverages().to_vec(),
+        launch_timing_diagnostics: counters.launch_timing_diagnostics().to_vec(),
         estimator_provenance: counters.estimator_provenance(),
         unmodeled_tails: counters.unmodeled_tails(),
         metrics,
@@ -774,13 +1498,17 @@ mod tests {
 
     #[test]
     fn descriptor_value_kind_mismatch_is_typed_in_all_build_profiles() {
+        let descriptor = DESCRIPTORS
+            .iter()
+            .find(|descriptor| descriptor.key == "smsp_inst_executed_sum")
+            .unwrap();
         let outcome = EmitOutcome::Predicted(MetricValue::Fraction {
             value: Some(0.5),
             numerator: 1,
             denominator: 2,
         });
         assert_eq!(
-            validate_descriptor_value_kind(&DESCRIPTORS[0], &outcome),
+            validate_descriptor_outcome(descriptor, &outcome),
             Err(EmitError::DescriptorValueKindMismatch {
                 key: "smsp_inst_executed_sum",
                 declared: MetricKind::Count,
@@ -790,7 +1518,7 @@ mod tests {
     }
 
     #[test]
-    fn template_architecture_is_unavailable_not_zero() {
+    fn template_architecture_keeps_mandatory_cycles_required_unimplemented() {
         let snapshot = CounterSnapshot {
             arch: ArchId::Sm120,
             instructions_issued: 17,
@@ -800,13 +1528,92 @@ mod tests {
             dram: None,
         };
         let preds = emit_snapshot(&snapshot).unwrap();
-        assert!(preds.iter().all(|p| {
-            p.arch == ArchId::Sm120
-                && p.outcome
-                    == EmitOutcome::Unavailable(Unavailable::ArchitectureUnsupported {
-                        arch: ArchId::Sm120,
-                    })
-        }));
+        assert_eq!(
+            predicted(&preds, "exec_cycles_gpc_max"),
+            &EmitOutcome::RequiredUnimplemented {
+                blocking: RequiredUnimplementedBlocker::AggregationSemanticsStudy,
+            }
+        );
+        assert!(
+            preds
+                .iter()
+                .filter(|prediction| prediction.key != "exec_cycles_gpc_max")
+                .all(|prediction| {
+                    prediction.arch == ArchId::Sm120
+                        && prediction.outcome
+                            == EmitOutcome::Unavailable(Unavailable::ArchitectureUnsupported {
+                                arch: ArchId::Sm120,
+                            })
+                })
+        );
+    }
+
+    #[test]
+    fn binding_cycle_descriptor_rejects_every_nonblocking_outcome() {
+        let descriptor = DESCRIPTORS
+            .iter()
+            .find(|descriptor| descriptor.key == "exec_cycles_gpc_max")
+            .unwrap();
+        assert_eq!(
+            validate_descriptor_outcome(
+                descriptor,
+                &EmitOutcome::Unavailable(Unavailable::ArchitectureUnsupported {
+                    arch: ArchId::Sm86,
+                }),
+            ),
+            Err(EmitError::BindingCyclesImplementationNotAdmitted {
+                key: "exec_cycles_gpc_max",
+            })
+        );
+    }
+
+    #[test]
+    fn emitted_wire_values_mark_simulator_scope_but_cycles_stay_blocked() {
+        let preds = emit(42, None, None, None).unwrap();
+        let instructions = preds
+            .iter()
+            .find(|prediction| prediction.key == "smsp_inst_executed_sum")
+            .unwrap();
+        assert_eq!(
+            instructions.numeric_semantics(),
+            Some(NumericSemantics::SimulatorScope)
+        );
+        assert_eq!(
+            serde_json::to_value(instructions).unwrap(),
+            serde_json::json!({
+                "arch": "sm_86",
+                "key": "smsp_inst_executed_sum",
+                "ncu_metric": "smsp__inst_executed.sum",
+                "unit": "count",
+                "outcome": {
+                    "status": "predicted",
+                    "value": {
+                        "kind": "exact",
+                        "semantics": "simulator_scope",
+                        "value": 42,
+                    },
+                },
+            })
+        );
+
+        let cycles = preds
+            .iter()
+            .find(|prediction| prediction.key == "exec_cycles_gpc_max")
+            .unwrap();
+        assert_eq!(cycles.numeric_semantics(), None);
+        assert_eq!(
+            serde_json::to_value(cycles).unwrap(),
+            serde_json::json!({
+                "arch": "sm_86",
+                "key": "exec_cycles_gpc_max",
+                "ncu_metric": "gpc__cycles_elapsed.max",
+                "unit": "cycles",
+                "outcome": {
+                    "status": "required_unimplemented",
+                    "blocking": "aggregation_semantics_study",
+                },
+            })
+        );
     }
 
     #[test]

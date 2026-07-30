@@ -63,9 +63,9 @@ use crate::system::{DramBw, DramStats, L2SourceSplit, SystemError, simulate_kern
 mod aggregation;
 pub use aggregation::{
     FullCounterEstimatorProvenance, FullLaunchSetCounters, FullLaunchSetDeclaration,
-    FullLaunchSetDeclarationError, LaunchSetAggregationError, LaunchSetCounterComponent,
-    LaunchSetScalarCounter, LaunchSetScope, LaunchSetScopeError, ReplayLaunchCoverageBindingError,
-    aggregate_full_launch_set,
+    FullLaunchSetDeclarationError, FullLaunchTimingDiagnostic, LaunchSetAggregationError,
+    LaunchSetCounterComponent, LaunchSetScalarCounter, LaunchSetScope, LaunchSetScopeError,
+    ReplayLaunchCoverageBindingError, aggregate_full_launch_set,
 };
 
 #[derive(Debug, thiserror::Error, Clone, Copy, PartialEq, Eq)]
