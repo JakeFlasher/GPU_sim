@@ -45,28 +45,33 @@ trace today (NVBit Activity captures memory transactions, not L2
 hits), so a documented modeled-hit rule is the correct pragmatic
 contract.
 
-The builder enforces the wire-contract walk before emitting any
-observation: it calls
-``import_trace_contract.validate_trace_dir(trace_dir)`` and
-returns an empty launch list when the contract fails. Callers
-(``run_suite.py::_emit_hrd_bundle_for_run_summary``) read
-``contract_typed_reason`` to surface a typed
-``hrd_skip_reason`` rather than continuing on broken evidence.
+The capability-backed builder consumes only the paths, immutable payload
+snapshots, allocations mapping, and admission metadata exposed by
+``AdmittedTraceSources``. ``build_launches_from_trace_dir`` remains a thin
+compatibility wrapper that admits and opens the capability before invoking the
+core. Admission/resource/filesystem failures propagate to the caller.
 """
 
 from __future__ import annotations
 
 import sys
+from collections.abc import Mapping
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 _HERE = Path(__file__).resolve().parent
-_TOOLS_NVBIT = _HERE.parent / "nvbit_tracer"
-if str(_TOOLS_NVBIT) not in sys.path:
-    sys.path.insert(0, str(_TOOLS_NVBIT))
+_REPO_ROOT = _HERE.parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
-import import_trace_contract  # type: ignore[import-not-found]  # noqa: E402
+from tools.nvbit_tracer import import_trace_contract  # noqa: E402
+from tools.nvbit_tracer.trace_admission import (  # noqa: E402
+    AdmittedTraceSources,
+    TraceAdmissionError,
+    open_admitted_trace_sources,
+    require_trace_admission,
+)
 
 # Use a relative-style import that works whether the package is
 # discovered as `tools.hrd_profiler` (test invocation from repo
@@ -312,7 +317,7 @@ def summarize_launch(
 
 def _allocation_identity_for_address(
     addr: int,
-    allocations: dict[int, Any] | None,
+    allocations: Mapping[int, Any] | None,
 ) -> str:
     """Look up the allocation identity for a byte address. When the
     sidecar is absent or no entry's range contains ``addr``, fall
@@ -402,9 +407,10 @@ def _seed_tracker_with_survivors(
 
 
 def _walk_launch(
-    tb_paths: list[Path],
+    threadblock_paths: list[str],
     *,
-    allocations: dict[int, Any] | None,
+    sources: AdmittedTraceSources,
+    allocations: Mapping[int, Any] | None,
     capacity_bytes: int,
     threadblock_pb2_mod: Any,
     num_l2_slices: int | None = None,
@@ -459,6 +465,9 @@ def _walk_launch(
     the walker collapses to a single sector tracker — byte-for-byte
     equivalent to the pre-Round-12 fully-associative LRU.
     """
+    if not isinstance(sources, AdmittedTraceSources):
+        raise TypeError("sources must be an AdmittedTraceSources capability")
+    sources.verify_unchanged()
     if num_l2_slices is None:
         raise ValueError(
             "cache_model_geometry_missing: num_l2_slices must be resolved "
@@ -553,8 +562,8 @@ def _walk_launch(
     # CTA execution order; fall back to lexicographic name
     # when the suffix doesn't parse as `X,Y,Z` (legacy traces
     # or non-canonical names).
-    def _tb_path_block_coord_sort_key(p):
-        name = p.stem  # filename without .pb
+    def _tb_path_block_coord_sort_key(relative_path: str):
+        name = PurePosixPath(relative_path).stem
         last_underscore = name.rfind("_")
         if last_underscore == -1:
             return (1, name)
@@ -568,11 +577,14 @@ def _walk_launch(
         except ValueError:
             return (1, name)
 
-    tb_paths = sorted(tb_paths, key=_tb_path_block_coord_sort_key)
-    for tb_path in tb_paths:
+    ordered_paths = sorted(
+        threadblock_paths, key=_tb_path_block_coord_sort_key
+    )
+    for relative_path in ordered_paths:
+        snapshot = sources.read_threadblock_snapshot(relative_path)
         tb_accesses: list[tuple[int, int, str, int, int, int]] = []
         tb = threadblock_pb2_mod.threadblock()
-        tb.ParseFromString(tb_path.read_bytes())
+        tb.ParseFromString(snapshot.payload)
         for warp_index in sorted(tb.warps.keys()):
             for inst in tb.warps[warp_index].instructions:
                 if not inst.HasField("memory_op_class"):
@@ -599,8 +611,7 @@ def _walk_launch(
                     )
                     lane_vector = recon[0]
                     if lane_vector is None:
-                        # Defensive: the upstream
-                        # validate_trace_dir already accepted this
+                        # Defensive: admission already accepted this
                         # record. A reconstruction failure here is
                         # a producer-side drift; skip so the
                         # observation list stays well-formed
@@ -715,11 +726,13 @@ def _walk_launch(
                 else ([] if hrd_second_layer_enabled else None)
             ),
         )
-        return {
+        result = {
             "observations": observations,
             "surviving_state": empty_state,
             **diagnostics,
         }
+        sources.verify_unchanged()
+        return result
 
     # Pass 2: per-slice sector trackers + 3 coarser-layer
     # trackers (line / allocation / region stay
@@ -875,31 +888,28 @@ def _walk_launch(
             else None
         ),
     )
-    return {
+    result = {
         "observations": observations,
         "surviving_state": surviving_state,
         **diagnostics,
     }
+    sources.verify_unchanged()
+    return result
 
 
-def build_launches_from_trace_dir(
-    trace_dir: Path,
+def build_launches_from_admitted_sources(
     *,
+    sources: AdmittedTraceSources,
     capacity_bytes: int,
     num_l2_slices: int | None = None,
     cta_interleave_enabled: bool = False,
     hrd_second_layer_enabled: bool = False,
     cross_launch_state_carryover: bool = False,
 ) -> _BuildResult:
-    """Walk every threadblock proto under ``trace_dir/threadblocks``
-    and emit per-launch observation lists.
+    """Walk every admitted threadblock payload and emit launch observations.
 
-    The wire contract is enforced first via
-    :func:`import_trace_contract.validate_trace_dir`. On contract
-    failure, the build result carries ``contract_ok=False`` and
-    the typed reason; ``launches`` is empty so the controller
-    surfaces a typed ``hrd_skip_reason`` rather than emitting an
-    HRD bundle from broken evidence.
+    The capability has already enforced the wire contract and immutable source
+    generation. This core never validates or inventories a raw trace path.
 
     Launch grouping: each
     ``threadblocks/device_<id>/stream_<id>/kernel_<id>/``
@@ -935,8 +945,11 @@ def build_launches_from_trace_dir(
     keeps multi-launch admitted-cell predictions stable in the
     refreshed sweep.
     """
+    if not isinstance(sources, AdmittedTraceSources):
+        raise TypeError("sources must be an AdmittedTraceSources capability")
+    sources.verify_unchanged()
     if num_l2_slices is None:
-        return _BuildResult(
+        result = _BuildResult(
             launches=[],
             contract_ok=False,
             contract_typed_reason="cache_model_geometry_missing",
@@ -947,30 +960,17 @@ def build_launches_from_trace_dir(
             total_observations=0,
             total_threadblocks=0,
         )
-    contract = import_trace_contract.validate_trace_dir(trace_dir)
-    if not contract.ok:
-        return _BuildResult(
-            launches=[],
-            contract_ok=False,
-            contract_typed_reason=contract.typed_reason,
-            contract_detail=contract.detail,
-            total_observations=0,
-            total_threadblocks=0,
+        sources.verify_unchanged()
+        return result
+    admission = sources.admission
+    threadblock_paths = sources.threadblock_paths
+    if len(threadblock_paths) != admission.threadblock_count:
+        raise TraceAdmissionError(
+            "trace_snapshot_changed",
+            "admitted threadblock path count disagrees with admission",
         )
-    allocations, alloc_err = (
-        import_trace_contract.load_allocations_sidecar(trace_dir)
-    )
-    if alloc_err is not None:
-        return _BuildResult(
-            launches=[],
-            contract_ok=False,
-            contract_typed_reason=alloc_err.typed_reason,
-            contract_detail=alloc_err.detail,
-            total_observations=0,
-            total_threadblocks=0,
-        )
+    allocations = sources.allocations
     threadblock_pb2_mod = import_trace_contract._import_pb_modules()[0]
-    threadblocks_root = trace_dir / "threadblocks"
     launches: list[dict[str, Any]] = []
     total_threadblocks = 0
     # Independent build-path diagnostic for the bundle-provenance
@@ -986,66 +986,56 @@ def build_launches_from_trace_dir(
     # claim — guards against producer-side bugs that set the
     # bundle field without threading the kwarg.
     applied_launch_count = 0
-    for device_dir in sorted(
-        d for d in threadblocks_root.glob("device_*") if d.is_dir()
-    ):
-        for stream_dir in sorted(
-            d for d in device_dir.glob("stream_*") if d.is_dir()
+    grouped: dict[tuple[str, str], dict[str, list[str]]] = {}
+    for relative_path in threadblock_paths:
+        parts = PurePosixPath(relative_path).parts
+        if (
+            len(parts) != 5
+            or parts[0] != "threadblocks"
+            or not parts[1].startswith("device_")
+            or not parts[2].startswith("stream_")
+            or not parts[3].startswith("kernel_")
         ):
-            # Cross-launch state is scoped per (device, stream): a
-            # fresh chain begins at each new stream so cross-stream
-            # state does not bleed. When carryover is disabled the
-            # variable stays None and `_walk_launch` runs cold.
-            stream_state: LaunchSurvivingState | None = None
-            # Iterate kernel_<n> directories in EXECUTION ORDER
-            # (numeric n), not lexicographic. With >=10 launches
-            # `sorted(Path)` would put `kernel_10` before
-            # `kernel_2`, causing the surviving L2 state from a
-            # later launch to warm an earlier one (the
-            # `cross_launch_state_carryover_applied_launch_count`
-            # diagnostic would still increment, but the carry
-            # direction would be wrong). Sort by the integer
-            # suffix when it parses; fall back to the lexicographic
-            # name only when the suffix is non-integer (the
-            # threadblocks-root contract is `kernel_<int>` so the
-            # fall-back exists only for forward compatibility).
-            def _kernel_dir_sort_key(p: Path) -> tuple[int, str]:
-                suffix = p.name.removeprefix("kernel_")
-                try:
-                    return (0, f"{int(suffix):020d}")
-                except ValueError:
-                    return (1, p.name)
+            sources.read_threadblock_snapshot(relative_path)
+            raise TraceAdmissionError(
+                "trace_source_not_admitted",
+                f"threadblock source has an invalid launch path: {relative_path}",
+            )
+        grouped.setdefault((parts[1], parts[2]), {}).setdefault(
+            parts[3], []
+        ).append(relative_path)
 
-            for kernel_dir in sorted(
-                (d for d in stream_dir.glob("kernel_*") if d.is_dir()),
-                key=_kernel_dir_sort_key,
-            ):
-                tb_paths = sorted(kernel_dir.rglob("*.pb"))
-                if not tb_paths:
-                    continue
-                total_threadblocks += len(tb_paths)
-                # Increment the applied counter ONLY when a real
-                # non-None state will be seeded into this launch.
-                # This makes the counter independent of the
-                # `cross_launch_state_carryover` kwarg: the walker
-                # records what it ACTUALLY did, not what the
-                # caller claimed.
-                if stream_state is not None:
-                    applied_launch_count += 1
-                record = _walk_launch(
-                    tb_paths,
-                    allocations=allocations,
-                    capacity_bytes=capacity_bytes,
-                    threadblock_pb2_mod=threadblock_pb2_mod,
-                    num_l2_slices=num_l2_slices,
-                    cta_interleave_enabled=cta_interleave_enabled,
-                    hrd_second_layer_enabled=hrd_second_layer_enabled,
-                    inbound_state=stream_state,
-                )
-                if cross_launch_state_carryover:
-                    stream_state = record.get("surviving_state")
-                launches.append(record)
-    return _BuildResult(
+    def _kernel_name_sort_key(name: str) -> tuple[int, str]:
+        suffix = name.removeprefix("kernel_")
+        try:
+            return (0, f"{int(suffix):020d}")
+        except ValueError:
+            return (1, name)
+
+    for stream_key in sorted(grouped):
+        stream_state: LaunchSurvivingState | None = None
+        for kernel_name in sorted(
+            grouped[stream_key], key=_kernel_name_sort_key
+        ):
+            launch_paths = grouped[stream_key][kernel_name]
+            total_threadblocks += len(launch_paths)
+            if stream_state is not None:
+                applied_launch_count += 1
+            record = _walk_launch(
+                launch_paths,
+                sources=sources,
+                allocations=allocations,
+                capacity_bytes=capacity_bytes,
+                threadblock_pb2_mod=threadblock_pb2_mod,
+                num_l2_slices=num_l2_slices,
+                cta_interleave_enabled=cta_interleave_enabled,
+                hrd_second_layer_enabled=hrd_second_layer_enabled,
+                inbound_state=stream_state,
+            )
+            if cross_launch_state_carryover:
+                stream_state = record.get("surviving_state")
+            launches.append(record)
+    result = _BuildResult(
         launches=launches,
         contract_ok=True,
         contract_typed_reason=None,
@@ -1058,6 +1048,32 @@ def build_launches_from_trace_dir(
             applied_launch_count
         ),
     )
+    sources.verify_unchanged()
+    return result
+
+
+def build_launches_from_trace_dir(
+    trace_dir: Path,
+    *,
+    capacity_bytes: int,
+    num_l2_slices: int | None = None,
+    cta_interleave_enabled: bool = False,
+    hrd_second_layer_enabled: bool = False,
+    cross_launch_state_carryover: bool = False,
+) -> _BuildResult:
+    """Path-compatible wrapper around the admitted-source core."""
+    admission = require_trace_admission(trace_dir)
+    with open_admitted_trace_sources(
+        trace_dir, expected_admission=admission
+    ) as sources:
+        return build_launches_from_admitted_sources(
+            sources=sources,
+            capacity_bytes=capacity_bytes,
+            num_l2_slices=num_l2_slices,
+            cta_interleave_enabled=cta_interleave_enabled,
+            hrd_second_layer_enabled=hrd_second_layer_enabled,
+            cross_launch_state_carryover=cross_launch_state_carryover,
+        )
 
 
 def emit_canonical_pre_calibration_features(
@@ -1119,6 +1135,7 @@ def emit_canonical_pre_calibration_features(
 
 
 __all__ = [
+    "build_launches_from_admitted_sources",
     "build_launches_from_trace_dir",
     "emit_canonical_pre_calibration_features",
     "summarize_launch",

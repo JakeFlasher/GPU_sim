@@ -17,53 +17,25 @@ from typing import Any
 
 _HERE = Path(__file__).resolve().parent
 _REPO_ROOT = _HERE.parent.parent
-_SIMBENCH_BW_DIR = _REPO_ROOT / "workloads" / "simbench_bw"
-_PB_GENERATED_DIR = _SIMBENCH_BW_DIR / "_pb_generated"
 
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
+from tools.nvbit_tracer.proto_binding_loader import (  # noqa: E402
+    load_dynamic_trace_bindings,
+)
+
 
 def _ensure_protobuf_bindings_available() -> tuple[Any, Any, Any]:
-    """Import the tracked authorities; dependency failures fail the suite."""
-    try:
-        import google.protobuf  # noqa: F401
-    except ImportError as exc:
-        raise AssertionError(
-            "protobuf runtime prerequisite is missing; install the exact "
-            "requirements.txt pin"
-        ) from exc
-    names = (
-        "address_pb2.py", "cuda_stream_pb2.py", "dim3d_pb2.py",
-        "gpu_device_pb2.py", "instruction_pb2.py", "kernel_pb2.py",
-        "threadblock_pb2.py", "trace_pb2.py", "warp_pb2.py",
+    """Load fixtures through the production authenticated authority."""
+    bindings = load_dynamic_trace_bindings()
+    return (
+        bindings.threadblock_pb2,
+        bindings.instruction_pb2,
+        bindings.address_pb2,
     )
-    missing = [
-        name
-        for name in names
-        if not (_PB_GENERATED_DIR / name).is_file()
-        or (_PB_GENERATED_DIR / name).is_symlink()
-    ]
-    if missing:
-        joined = " ".join(
-            f"workloads/simbench_bw/_pb_generated/{name}" for name in missing
-        )
-        raise AssertionError(
-            "tracked protobuf authority is missing; restore byte-exact "
-            "committed content with `git restore --source=HEAD --worktree -- "
-            f"{joined}`"
-        )
-    if str(_PB_GENERATED_DIR) not in sys.path:
-        sys.path.insert(0, str(_PB_GENERATED_DIR))
-    try:
-        import threadblock_pb2  # pyright: ignore[reportMissingImports]
-        import instruction_pb2  # pyright: ignore[reportMissingImports]
-        import address_pb2  # pyright: ignore[reportMissingImports]
-    except ImportError as exc:
-        raise AssertionError(
-            f"tracked protobuf authorities are not importable: {exc}"
-        ) from exc
-    return threadblock_pb2, instruction_pb2, address_pb2
 
 
 def _import_pb() -> tuple[Any, Any, Any]:
@@ -84,6 +56,8 @@ def _make_threadblock_with_instruction(
     memory_op_class_value: int | None = None,
     set_memory_op_access_kind: bool = False,
     memory_op_access_kind_value: int | None = None,
+    set_instruction_cache_op: bool = False,
+    instruction_cache_op_value: int | None = None,
     address_space_value: int | None = None,
 ) -> Any:
     """Build a one-instruction threadblock fixture and return it.
@@ -144,6 +118,9 @@ def _make_threadblock_with_instruction(
     if set_memory_op_access_kind:
         assert memory_op_access_kind_value is not None
         inst.memory_op_access_kind = memory_op_access_kind_value
+    if set_instruction_cache_op:
+        assert instruction_cache_op_value is not None
+        inst.instruction_cache_op = instruction_cache_op_value
 
     return tb
 
@@ -724,6 +701,52 @@ class TraceContractValidatorNegativeTest(unittest.TestCase):
         self.assertTrue(
             result.ok,
             msg=f"LOAD admission: {result.typed_reason}: {result.detail}",
+        )
+
+    def test_known_additive_memory_metadata_on_non_memory_rejected(self) -> None:
+        from import_trace_contract import validate_threadblock
+
+        _tb_pb2, instruction_pb2, _addr_pb2 = _import_pb()
+        cases = (
+            (
+                "memory_op_access_kind",
+                instruction_pb2.MEMORY_OP_ACCESS_KIND_LOAD,
+            ),
+            (
+                "instruction_cache_op",
+                instruction_pb2.INSTRUCTION_CACHE_OP_LDG_E_CA,
+            ),
+        )
+        for field, value in cases:
+            with self.subTest(field=field):
+                tb = _make_threadblock_with_instruction()
+                setattr(tb.warps[0].instructions[0], field, value)
+                result = validate_threadblock(tb)
+                self.assertFalse(result.ok)
+                self.assertEqual(
+                    result.typed_reason,
+                    "memory_metadata_on_non_memory_instruction",
+                )
+                self.assertIn(field, result.detail)
+
+    def test_unspecified_cache_op_on_memory_instruction_rejected(self) -> None:
+        from import_trace_contract import validate_threadblock
+
+        _tb_pb2, instruction_pb2, _addr_pb2 = _import_pb()
+        tb = _make_threadblock_with_instruction(
+            add_address=True,
+            set_memory_op_class=True,
+            memory_op_class_value=instruction_pb2.MEMORY_OP_CLASS_SHARED,
+            set_instruction_cache_op=True,
+            instruction_cache_op_value=(
+                instruction_pb2.INSTRUCTION_CACHE_OP_UNSPECIFIED
+            ),
+        )
+        result = validate_threadblock(tb)
+        self.assertFalse(result.ok)
+        self.assertEqual(
+            result.typed_reason,
+            "instruction_cache_op_unspecified",
         )
 
     def test_unknown_additive_instruction_enums_are_schema_skew(self) -> None:

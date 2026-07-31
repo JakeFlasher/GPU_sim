@@ -41,15 +41,21 @@ are bound by the per-record `oneOf` branches.
 from __future__ import annotations
 
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 _HERE = Path(__file__).resolve().parent
-_TOOLS_NVBIT = _HERE.parent / "nvbit_tracer"
-if str(_TOOLS_NVBIT) not in sys.path:
-    sys.path.insert(0, str(_TOOLS_NVBIT))
+_REPO_ROOT = _HERE.parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
-import import_trace_contract  # type: ignore[import-not-found]  # noqa: E402
+from tools.nvbit_tracer import import_trace_contract  # noqa: E402
+from tools.nvbit_tracer.trace_admission import (  # noqa: E402
+    AdmittedTraceSources,
+    TraceAdmissionError,
+    open_admitted_trace_sources,
+    require_trace_admission,
+)
 
 
 GROUNDED_CLASSES: tuple[str, ...] = (
@@ -103,9 +109,8 @@ def _walk_threadblock(
     returning a per-CTA inter-warp accumulator.
 
     ``cta_key`` is a stable string identity for THIS threadblock
-    (the path-derived
-    ``tb_path.relative_to(threadblocks_root).as_posix()`` per
-    Codex's R23 review directive). Path-derived keying avoids
+    (the admitted relative path with its leading ``threadblocks/``
+    component removed). Path-derived keying avoids
     relying on ``tb.block_id`` (which synthetic test fixtures may
     not set) and additionally encodes device/stream/kernel
     context so cross-launch caller code can stay correct.
@@ -239,17 +244,15 @@ def _projected_admitted_record(
     }
 
 
-def compute_sharing_locality(
+def compute_sharing_locality_from_admitted_sources(
     *,
-    trace_dir: Path,
+    sources: AdmittedTraceSources,
     manifest_pairing_index: dict[str, str],
     device: dict[str, Any],
     projected_inputs: dict[str, dict[str, Any]] | None = None,
     projected_counts: dict[str, tuple[int, int]] | None = None,
 ) -> dict[str, Any]:
-    """Walk every threadblock proto under ``trace_dir/threadblocks``
-    and compute the three grounded sharing-locality classes plus
-    the four projected classes.
+    """Compute sharing locality exclusively from admitted trace sources.
 
     ``projected_inputs`` (optional) maps a projected class name to
     the projection inputs the caller supplies (an SM-residency
@@ -264,12 +267,14 @@ def compute_sharing_locality(
     The bundle is the schema-conformant dict; the caller writes
     it to disk.
     """
-    contract = import_trace_contract.validate_trace_dir(trace_dir)
-    if not contract.ok:
-        raise RuntimeError(
-            f"sharing-locality classifier rejects trace_dir "
-            f"{trace_dir}: {contract.typed_reason}: "
-            f"{contract.detail}"
+    if not isinstance(sources, AdmittedTraceSources):
+        raise TypeError("sources must be an AdmittedTraceSources capability")
+    sources.verify_unchanged()
+    admission = sources.admission
+    if len(sources.threadblock_paths) != admission.threadblock_count:
+        raise TraceAdmissionError(
+            "trace_snapshot_changed",
+            "admitted threadblock path count disagrees with admission",
         )
     threadblock_pb2 = import_trace_contract._import_pb_modules()[0]
 
@@ -289,11 +294,18 @@ def compute_sharing_locality(
     inter_warp_distinct = 0
     inter_warp_reuse = 0
     total_accesses = 0
-    threadblocks_root = trace_dir / "threadblocks"
-    for tb_path in sorted(threadblocks_root.rglob("*.pb")):
+    for relative_path in sources.threadblock_paths:
+        parts = PurePosixPath(relative_path).parts
+        if not parts or parts[0] != "threadblocks":
+            sources.read_threadblock_snapshot(relative_path)
+            raise TraceAdmissionError(
+                "trace_source_not_admitted",
+                f"threadblock source has an invalid relative path: {relative_path}",
+            )
+        snapshot = sources.read_threadblock_snapshot(relative_path)
         tb = threadblock_pb2.threadblock()
-        tb.ParseFromString(tb_path.read_bytes())
-        cta_key = tb_path.relative_to(threadblocks_root).as_posix()
+        tb.ParseFromString(snapshot.payload)
+        cta_key = PurePosixPath(*parts[1:]).as_posix()
         accesses, inter_warp_per_cta = _walk_threadblock(
             tb,
             cta_key=cta_key,
@@ -371,7 +383,7 @@ def compute_sharing_locality(
         }
     ]
 
-    return {
+    bundle = {
         "schema_version": 1,
         "result_kind": "ok",
         "manifest_pairing_index": dict(manifest_pairing_index),
@@ -380,10 +392,35 @@ def compute_sharing_locality(
         "projected": projected,
         "evidence": evidence,
     }
+    sources.verify_unchanged()
+    return bundle
+
+
+def compute_sharing_locality(
+    *,
+    trace_dir: Path,
+    manifest_pairing_index: dict[str, str],
+    device: dict[str, Any],
+    projected_inputs: dict[str, dict[str, Any]] | None = None,
+    projected_counts: dict[str, tuple[int, int]] | None = None,
+) -> dict[str, Any]:
+    """Path-compatible wrapper around the admitted-source core."""
+    admission = require_trace_admission(trace_dir)
+    with open_admitted_trace_sources(
+        trace_dir, expected_admission=admission
+    ) as sources:
+        return compute_sharing_locality_from_admitted_sources(
+            sources=sources,
+            manifest_pairing_index=manifest_pairing_index,
+            device=device,
+            projected_inputs=projected_inputs,
+            projected_counts=projected_counts,
+        )
 
 
 __all__ = [
     "compute_sharing_locality",
+    "compute_sharing_locality_from_admitted_sources",
     "SHARING_LOCALITY_TYPED_REASONS",
     "GROUNDED_CLASSES",
     "PROJECTED_CLASSES",

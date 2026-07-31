@@ -88,6 +88,14 @@ _DEFAULT_OUT_DIR = (
     / "sm_86"
 )
 _DEFAULT_ARCH_DIR = "rtx_3090_ti/sm_86"
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from tools.nvbit_tracer.proto_binding_loader import (  # noqa: E402
+    ProtoBindingIntegrityError,
+    ProtoBindingRuntimePrerequisiteError,
+    load_dynamic_trace_bindings,
+)
 
 # Arch-token policy boundary mapping for the cohort sidecar emitter.
 # Imported lazily inside the helper to keep the module-load-time
@@ -123,9 +131,6 @@ def _arch_dir_for_label_arch(arch: str) -> str:
     ``workloads/simbench_bw/results/<slug>/<sku>/<arch>/``. Uses the
     shared ``arch_token_policy.platform_path_for_label_arch`` map."""
     return _atp.platform_path_for_label_arch(arch)
-_PB_GENERATED_DIR = (
-    _REPO_ROOT / "workloads" / "simbench_bw" / "_pb_generated"
-)
 _AMPERE_WARP_SIZE = 32
 
 
@@ -190,73 +195,13 @@ class LaunchGeometry:
 
 
 def _load_trace_bindings() -> Any:
-    """Return the trace_pb2 binding. Raises
-    a hard, distinct exception for tracked repository corruption or a missing
-    runtime prerequisite."""
+    """Return the centrally authenticated ``trace_pb2`` authority."""
     try:
-        import google.protobuf  # noqa: F401
-    except ImportError as exc:
-        raise LaunchParametersRuntimePrerequisiteMissing(
-            "protobuf runtime prerequisite is missing; install the exact "
-            "version pinned in requirements.txt"
-        ) from exc
-    names = (
-        "address_pb2.py", "cuda_stream_pb2.py", "dim3d_pb2.py",
-        "gpu_device_pb2.py", "instruction_pb2.py", "kernel_pb2.py",
-        "threadblock_pb2.py", "trace_pb2.py", "warp_pb2.py",
-    )
-    missing = [
-        name
-        for name in names
-        if not (_PB_GENERATED_DIR / name).is_file()
-        or (_PB_GENERATED_DIR / name).is_symlink()
-    ]
-    if missing:
-        relative = " ".join(
-            f"workloads/simbench_bw/_pb_generated/{name}" for name in missing
-        )
-        raise LaunchParametersTrackedBindingsCorrupt(
-            "tracked protobuf authority is missing; restore byte-exact "
-            "committed content with `git restore --source=HEAD --worktree -- "
-            f"{relative}`; do not regenerate bindings in the canonical checkout"
-        )
-    if str(_PB_GENERATED_DIR) not in sys.path:
-        sys.path.insert(0, str(_PB_GENERATED_DIR))
-    try:
-        import trace_pb2  # type: ignore[import-not-found]
-    except Exception as exc:
-        if exc.__class__.__module__.startswith("google.protobuf"):
-            raise LaunchParametersRuntimePrerequisiteMissing(
-                "protobuf runtime prerequisite is incompatible with the "
-                f"tracked binding: {type(exc).__name__}: {exc}"
-            ) from exc
-        raise LaunchParametersTrackedBindingsCorrupt(
-            "tracked protobuf authority trace_pb2.py is unusable; restore "
-            "its byte-exact committed content with `git restore --source=HEAD "
-            "--worktree -- workloads/simbench_bw/_pb_generated/trace_pb2.py`; "
-            f"do not regenerate it: {type(exc).__name__}: {exc}"
-        ) from exc
-    trace_pb2_file = getattr(trace_pb2, "__file__", None)
-    if trace_pb2_file is None or Path(trace_pb2_file).resolve() != (
-        _PB_GENERATED_DIR / "trace_pb2.py"
-    ).resolve():
-        raise LaunchParametersTrackedBindingsCorrupt(
-            "tracked protobuf authority trace_pb2 resolved outside its owner: "
-            f"{getattr(trace_pb2, '__file__', None)}"
-        )
-    for filename in names:
-        module = sys.modules.get(filename.removesuffix(".py"))
-        if module is None:
-            continue
-        module_file = getattr(module, "__file__", None)
-        if module_file is None or Path(module_file).resolve() != (
-            _PB_GENERATED_DIR / filename
-        ).resolve():
-            raise LaunchParametersTrackedBindingsCorrupt(
-                f"tracked protobuf authority {module.__name__} resolved "
-                f"outside {_PB_GENERATED_DIR}: {getattr(module, '__file__', None)}"
-            )
-    return trace_pb2
+        return load_dynamic_trace_bindings().trace_pb2
+    except ProtoBindingRuntimePrerequisiteError as exc:
+        raise LaunchParametersRuntimePrerequisiteMissing(str(exc)) from exc
+    except ProtoBindingIntegrityError as exc:
+        raise LaunchParametersTrackedBindingsCorrupt(str(exc)) from exc
 
 
 def _extract_first_kernel_geometry(

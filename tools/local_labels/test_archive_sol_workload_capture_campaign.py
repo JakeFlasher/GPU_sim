@@ -20,6 +20,17 @@ from tools.local_labels import test_sol_workload_capture_campaign as campaign_fi
 
 HEAD = "a" * 40
 H8 = HEAD[:8]
+_TEST_AVAILABLE_BYTES = 16 * 1024 ** 3
+
+
+@pytest.fixture(autouse=True)
+def _isolate_synthetic_capacity(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Keep fixture outcomes independent of the runner filesystem's free space."""
+    monkeypatch.setattr(
+        archive,
+        "_available_bytes",
+        lambda _path: _TEST_AVAILABLE_BYTES,
+    )
 
 
 def _write_json(path: Path, value: dict[str, Any], *, mode: int = 0o444) -> None:

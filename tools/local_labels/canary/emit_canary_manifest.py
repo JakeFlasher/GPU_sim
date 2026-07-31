@@ -44,6 +44,9 @@ REPO = Path(__file__).resolve().parents[3]
 if str(REPO) not in sys.path:
     sys.path.insert(0, str(REPO))
 
+from tools.nvbit_tracer.proto_binding_loader import (  # noqa: E402
+    load_dynamic_trace_bindings,
+)
 from tools.nvbit_tracer.runtime_env import tracer_runtime_env  # noqa: E402
 from tools.nvbit_tracer.trace_admission import (  # noqa: E402
     TraceAdmissionError,
@@ -58,7 +61,6 @@ CANARY_DIR = REPO / "tools" / "local_labels" / "canary"
 CANARY_CU = CANARY_DIR / "sm86_addr_carry_canary.cu"
 TRACER_SO = REPO / "tools" / "nvbit_tracer" / "tracer_tool" / "tracer_tool.so"
 PB_LIB = REPO / ".toolchain" / "pb" / "lib"
-PB_GEN = REPO / "workloads" / "simbench_bw" / "_pb_generated"
 NVCC = "/usr/local/cuda-13.2/bin/nvcc"
 CUDA_INC = "/usr/local/cuda-13.2/include"
 
@@ -181,11 +183,10 @@ def capture(binary: Path, out: Path) -> None:
 
 
 def analyze(out: Path) -> dict:
-    sys.path.insert(0, str(PB_GEN))
-    sys.path.insert(0, str(REPO / "tools" / "nvbit_tracer"))
-    import trace_pb2  # type: ignore
-    import threadblock_pb2  # type: ignore
-    from import_trace_contract import validate_trace_dir  # type: ignore
+    bindings = load_dynamic_trace_bindings()
+    trace_pb2 = bindings.trace_pb2
+    threadblock_pb2 = bindings.threadblock_pb2
+    from tools.nvbit_tracer.import_trace_contract import validate_trace_dir
 
     v = validate_trace_dir(out)
     t = trace_pb2.Trace()

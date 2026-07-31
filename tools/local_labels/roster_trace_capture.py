@@ -21,10 +21,12 @@ from __future__ import annotations
 
 import argparse
 import json
-import shutil
+import math
 import subprocess
 import sys
 import time
+from contextlib import ExitStack
+from dataclasses import asdict
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -33,24 +35,198 @@ sys.path.insert(0, str(REPO_ROOT / "tools" / "nvbit_tracer"))
 
 from tools.local_labels.activation_trace_orchestrator import (  # noqa: E402
     trace_activation_cell,
+    _MAX_ACTIVATION_APP_ARGS,
+    _MAX_ACTIVATION_APP_ARG_BYTES,
     _TRACER_SO,
-    _binary_sha256,
     _tracer_env,
     _activation_output_plan,
     _assert_staging_output,
+    _lock_activation_cell,
+    _new_capture_attempt_id,
+    _raw_generation_record,
     _reject_output_dir_extras,
+    _require_app_arguments,
+    _require_hex_identity,
+    _require_identity_string,
+    _require_nonnegative_integer,
+    _raise_if_descriptor_resource_unavailable,
+    _retire_matching_locator,
+    _trace_generation_commit_limits,
+    _validate_trace_admission_identities,
+    _verify_committed_trace_generation,
+)
+from tools.local_labels.immutable_artifact import (  # noqa: E402
+    VERIFY_RESOURCE_BOUND,
+    ImmutableArtifactError,
+    ImmutableArtifactResourceError,
+    MetadataSnapshot,
+    PinnedDirectoryReader,
+    RetainedRegular,
+    close_retained_regular_files_authenticated,
+    create_exclusive_directory_stage,
+    open_retained_executable,
+    open_retained_regular,
+    preserve_retained_regular_file,
+    publish_regular_file,
+    publish_retained_regular_file,
+    read_regular_snapshot,
+    require_file_descriptor_headroom,
+    retire_regular_file,
+    safe_relative_path,
+    strict_json_loads,
 )
 from tools.local_labels.roster_path_resolver import resolve_cell_root  # noqa: E402
 from tools.nvbit_tracer.trace_admission import (  # noqa: E402
+    TraceAdmission,
     TraceAdmissionError,
+    open_admitted_trace_sources,
     require_trace_admission,
 )
-from import_trace_contract import validate_trace_dir  # noqa: E402
 
 
 _DEFAULT_OUTPUT_ROOT = (
     REPO_ROOT / "results" / "nvbit_capture_staging" / "roster_trace_capture"
 )
+
+# One roster transaction retains all cell source/tree capabilities until the
+# aggregate publication closes. The canonical roster has 17 cells; 32 leaves
+# deliberate growth room while bounding descriptors, launch records, and JSON.
+MAX_RETAINED_ROSTER_CELLS = 32
+_MAX_ROSTER_LAUNCHES_PER_CELL = 1024
+_MAX_ROSTER_APP_ARGS_PER_CELL = _MAX_ACTIVATION_APP_ARGS
+_MAX_ROSTER_APP_ARG_BYTES = _MAX_ACTIVATION_APP_ARG_BYTES
+_MAX_ROSTER_INPUT_BYTES = 1024 * 1024
+# The compositional preflight below reserves 5 KiB for every admitted launch,
+# 64 KiB of fixed identity/path/diagnostic material per cell, and a 1 MiB
+# envelope. At 32 cells x 1024 launches this is < 192 MiB, so every accepted
+# roster can serialize its worst-case bounded manifest without late capture loss.
+_MAX_ROSTER_MANIFEST_BYTES = 192 * 1024 * 1024
+_MAX_ROSTER_MANIFEST_ENVELOPE_BYTES = 1024 * 1024
+_MAX_ROSTER_CELL_MANIFEST_BYTES = 64 * 1024
+_MAX_ROSTER_LAUNCH_MANIFEST_BYTES = 5 * 1024
+_MAX_ROSTER_KERNEL_NAME_BYTES = 512
+_MAX_ROSTER_JSON_INTEGER = (1 << 53) - 1
+_ROSTER_DESCRIPTOR_BASE_HEADROOM = 128
+_ROSTER_DESCRIPTOR_HEADROOM_PER_CELL = 128
+_CLOSE_DIAGNOSTIC_BYTES = 400
+
+
+def _bounded_diagnostic_text(value: object, *, max_bytes: int) -> str:
+    text = str(value)
+    encoded = text.encode("utf-8", errors="replace")[:max_bytes]
+    return encoded.decode("utf-8", errors="ignore")
+
+
+def _raise_roster_resource_error(detail: str) -> None:
+    raise ImmutableArtifactResourceError(
+        f"{VERIFY_RESOURCE_BOUND}: roster trace capture: {detail}"
+    )
+
+
+def _validate_roster_entries(
+    roster: object,
+    *,
+    require_binary: bool,
+) -> list[dict]:
+    if type(roster) is not list:
+        raise ValueError("roster must be an exact JSON array")
+    if not roster:
+        raise ValueError("roster must contain at least one cell")
+    if len(roster) > MAX_RETAINED_ROSTER_CELLS:
+        _raise_roster_resource_error(
+            f"cell count {len(roster)} exceeds retained-capability maximum "
+            f"{MAX_RETAINED_ROSTER_CELLS}"
+        )
+    total_argument_bytes = 0
+    for index, cell in enumerate(roster):
+        if type(cell) is not dict:
+            raise ValueError(f"roster row {index} must be an exact object")
+        _require_identity_string(
+            cell.get("slug"), label=f"roster row {index} slug", component=True,
+        )
+        _require_identity_string(
+            cell.get("shape_point"),
+            label=f"roster row {index} shape_point",
+            component=True,
+        )
+        app_args = cell.get("app_args", [])
+        if type(app_args) is not list:
+            raise ValueError(
+                f"roster row {index} app_args must be an exact array"
+            )
+        if len(app_args) > _MAX_ROSTER_APP_ARGS_PER_CELL:
+            _raise_roster_resource_error(
+                f"row {index} app_args count {len(app_args)} exceeds "
+                f"{_MAX_ROSTER_APP_ARGS_PER_CELL}"
+            )
+        checked_args = _require_app_arguments(
+            tuple(app_args), label=f"roster row {index} app_args",
+        )
+        total_argument_bytes += sum(
+            len(argument.encode("utf-8")) for argument in checked_args
+        )
+        if total_argument_bytes > _MAX_ROSTER_APP_ARG_BYTES:
+            _raise_roster_resource_error(
+                "aggregate app-argument bytes exceed "
+                f"{_MAX_ROSTER_APP_ARG_BYTES}"
+            )
+        if require_binary or "binary" in cell:
+            binary = _require_identity_string(
+                cell.get("binary"),
+                label=f"roster row {index} binary",
+                max_bytes=4096,
+            )
+            safe_relative_path(binary)
+    return roster
+
+
+def _validate_plan_vector(
+    plans: object,
+    *,
+    expected_cells: int,
+) -> list[dict[str, Path | bool]]:
+    if type(plans) is not list or len(plans) != expected_cells:
+        raise ValueError("roster plans must exactly match roster cell count")
+    for index, plan in enumerate(plans):
+        if type(plan) is not dict:
+            raise ValueError(f"roster plan {index} must be an exact object")
+        if type(plan.get("portable")) is not bool:
+            raise ValueError(f"roster plan {index} portable must be boolean")
+        for key in ("cell_dir", "traces_folder", "workload_output_root"):
+            if not isinstance(plan.get(key), Path):
+                raise ValueError(
+                    f"roster plan {index} {key} must be a Path capability"
+                )
+    return plans
+
+
+def _require_roster_descriptor_budget(cell_count: int) -> None:
+    _require_nonnegative_integer(cell_count, label="roster cell_count")
+    require_file_descriptor_headroom(
+        _ROSTER_DESCRIPTOR_BASE_HEADROOM
+        + cell_count * _ROSTER_DESCRIPTOR_HEADROOM_PER_CELL,
+        label="roster-wide retained capabilities",
+    )
+
+
+def _require_roster_manifest_budget(cell_count: int) -> int:
+    """Reserve enough aggregate space for every accepted launch/name bound."""
+    _require_nonnegative_integer(cell_count, label="roster cell_count")
+    worst_case_bytes = (
+        _MAX_ROSTER_MANIFEST_ENVELOPE_BYTES
+        + cell_count
+        * (
+            _MAX_ROSTER_CELL_MANIFEST_BYTES
+            + _MAX_ROSTER_LAUNCHES_PER_CELL
+            * _MAX_ROSTER_LAUNCH_MANIFEST_BYTES
+        )
+    )
+    if worst_case_bytes > _MAX_ROSTER_MANIFEST_BYTES:
+        _raise_roster_resource_error(
+            "worst-case aggregate manifest budget "
+            f"{worst_case_bytes} exceeds {_MAX_ROSTER_MANIFEST_BYTES} bytes"
+        )
+    return worst_case_bytes
 
 
 def _roster_capture_plan(
@@ -63,15 +239,31 @@ def _roster_capture_plan(
 ) -> tuple[list[dict[str, Path | bool]], Path]:
     """Clear every delegated/direct output before the first capture."""
 
+    roster = _validate_roster_entries(roster, require_binary=False)
+    _require_roster_manifest_budget(len(roster))
+    sku = _require_identity_string(sku, label="roster plan sku", component=True)
+    arch_dir = _require_identity_string(
+        arch_dir, label="roster plan arch_dir", component=True,
+    )
     root = _assert_staging_output(output_root, operation="select roster output root")
     manifest = _assert_staging_output(
         manifest_out if manifest_out is not None else root / "capture_manifest.json",
         operation="write roster capture manifest",
     )
     plans: list[dict[str, Path | bool]] = []
-    for cell in roster:
-        slug = str(cell["slug"])
-        shape_point = str(cell["shape_point"])
+    seen_identities: dict[tuple[str, str], int] = {}
+    for index, cell in enumerate(roster):
+        slug = cell["slug"]
+        shape_point = cell["shape_point"]
+        identity = (slug, shape_point)
+        prior_index = seen_identities.get(identity)
+        if prior_index is not None:
+            raise ValueError(
+                "duplicate roster trace output identity "
+                f"slug={slug!r}, shape_point={shape_point!r} at rows "
+                f"{prior_index} and {index}"
+            )
+        seen_identities[identity] = index
         extras = tuple(
             arg for arg in cell.get("app_args", [])
             if arg != f"--{shape_point}"
@@ -120,9 +312,180 @@ def _host_clock_state() -> dict:
              "--format=csv,noheader"],
             capture_output=True, text=True, timeout=10,
         ).stdout.strip()
-        return {"nvidia_smi_persistence_sm_mem": out}
+        return {"nvidia_smi_persistence_sm_mem": out[:4096]}
     except Exception as exc:  # pragma: no cover - informational only
-        return {"nvidia_smi_error": str(exc)}
+        return {"nvidia_smi_error": str(exc)[:4096]}
+
+
+def _all_admitted_launch_records(admission: TraceAdmission) -> list[dict]:
+    """Serialize the complete, deterministically indexed admitted launch vector."""
+
+    _validate_trace_admission_identities(
+        admission, producer="direct roster trace",
+    )
+    if admission.launch_count > _MAX_ROSTER_LAUNCHES_PER_CELL:
+        _raise_roster_resource_error(
+            f"direct launch_count {admission.launch_count} exceeds per-cell "
+            f"maximum {_MAX_ROSTER_LAUNCHES_PER_CELL}"
+        )
+    if admission.launch_count != len(admission.launches):
+        raise RuntimeError(
+            "direct roster trace: admitted launch_count "
+            f"{admission.launch_count} disagrees with "
+            f"{len(admission.launches)} retained launch record(s)"
+        )
+    indexes = [launch.launch_index for launch in admission.launches]
+    expected_indexes = list(range(admission.launch_count))
+    if indexes != expected_indexes:
+        raise RuntimeError(
+            "direct roster trace: admitted launch indexes must be contiguous "
+            f"and ordered; got {indexes!r}, expected {expected_indexes!r}"
+        )
+    records = [asdict(launch) for launch in admission.launches]
+    for launch_index, record in enumerate(records):
+        kernel_name = record.get("kernel_name")
+        if (
+            type(kernel_name) is str
+            and len(kernel_name.encode("utf-8")) > _MAX_ROSTER_KERNEL_NAME_BYTES
+        ):
+            _raise_roster_resource_error(
+                f"direct launch {launch_index} kernel_name exceeds "
+                f"{_MAX_ROSTER_KERNEL_NAME_BYTES} bytes"
+            )
+        for field, value in record.items():
+            if (
+                field != "kernel_name"
+                and type(value) is int
+                and value > _MAX_ROSTER_JSON_INTEGER
+            ):
+                _raise_roster_resource_error(
+                    f"direct launch {launch_index} {field} exceeds bounded "
+                    "JSON integer authority"
+                )
+        _validate_launch_record(
+            record,
+            expected_index=launch_index,
+            label=f"direct launch {launch_index}",
+        )
+    return records
+
+
+def _activation_capture_record(
+    *,
+    slug: str,
+    cell_dir: Path,
+    sidecar: dict,
+) -> dict:
+    """Project an admitted activation sidecar without dropping its identities."""
+
+    slug = _require_identity_string(
+        slug, label="activation capture record slug", component=True,
+    )
+    if type(sidecar) is not dict:
+        raise ValueError("activation sidecar must be an exact object")
+    _require_identity_string(
+        sidecar.get("trace_capture_attempt_id"),
+        label="activation trace_capture_attempt_id",
+        component=True,
+    )
+    raw_generation_model = sidecar.get("raw_trace_generation")
+    if type(raw_generation_model) is not dict:
+        raise ValueError("activation raw_trace_generation must be an exact object")
+    raw_generation = dict(raw_generation_model)
+    _require_identity_string(
+        raw_generation.get("path"),
+        label="activation raw generation path",
+        max_bytes=4096,
+    )
+    traces_folder = cell_dir / raw_generation["path"]
+    identity_keys = (
+        "binary_sha256",
+        "nvbit_tracer_build_hash",
+        "trace_admission_sha256",
+        "trace_filesystem_generation_sha256",
+        "dynamic_trace_size_bytes",
+        "dynamic_trace_sha256",
+        "allocations_sidecar_size_bytes",
+        "allocations_sidecar_sha256",
+        "stats_size_bytes",
+        "stats_sha256",
+        "threadblock_payload_size_bytes",
+        "threadblock_payload_manifest_sha256",
+    )
+    return {
+        "slug": slug,
+        "ok": True,
+        "contract_ok": True,
+        "trace_capture_attempt_id": sidecar["trace_capture_attempt_id"],
+        "raw_trace_generation": raw_generation,
+        "traces_folder": str(traces_folder),
+        "trace_bytes": sidecar["trace_bytes"],
+        "trace_pb_bytes": sidecar["trace_bytes"],
+        "records_expected": sidecar["expected_record_count"],
+        "records_admitted": sidecar["admitted_record_count"],
+        "drop_rate": sidecar["actual_drop_rate"],
+        **{key: sidecar[key] for key in identity_keys},
+    }
+
+
+class _RetainedDirectSources:
+    """Retain one direct attempt's launch and raw-tree authorities."""
+
+    def __init__(self) -> None:
+        self.capture_sources = ExitStack()
+        self.admitted_sources = ExitStack()
+        self.raw_generation = None
+        self.failure_record: dict | None = None
+
+    def bind_failure_record(self, record: dict) -> None:
+        if type(record) is not dict or record.get("ok") is not False:
+            raise TypeError("direct failure diagnostic target must be a failed record")
+        self.failure_record = record
+
+    def __enter__(self) -> "_RetainedDirectSources":
+        return self
+
+    def __exit__(self, exc_type, exc, traceback) -> bool:
+        closure_errors: list[BaseException] = []
+        for sources in (self.capture_sources, self.admitted_sources):
+            try:
+                sources.close()
+            except BaseException as closure_error:
+                closure_errors.append(closure_error)
+        if self.raw_generation is not None:
+            try:
+                _verify_committed_trace_generation(self.raw_generation)
+            except BaseException as closure_error:
+                closure_errors.append(closure_error)
+        if not closure_errors:
+            return False
+        primary = closure_errors[0]
+        for additional in closure_errors[1:]:
+            try:
+                primary.add_note(f"additional retained-source failure: {additional}")
+            except (AttributeError, TypeError):
+                pass
+        if exc is not None:
+            if self.failure_record is not None:
+                diagnostics = self.failure_record.setdefault(
+                    "close_diagnostics", []
+                )
+                if type(diagnostics) is not list:
+                    diagnostics = []
+                    self.failure_record["close_diagnostics"] = diagnostics
+                for closure_error in closure_errors:
+                    diagnostics.append({
+                        "typed_reason": "retained_source_close_failed",
+                        "detail": _bounded_diagnostic_text(
+                            closure_error, max_bytes=_CLOSE_DIAGNOSTIC_BYTES,
+                        ),
+                    })
+            try:
+                exc.add_note(f"retained direct source closure failed: {primary}")
+            except (AttributeError, TypeError):
+                pass
+            return False
+        raise primary
 
 
 def _capture_direct(
@@ -131,66 +494,1132 @@ def _capture_direct(
     app_args: list[str],
     traces_folder: Path,
     workload_output_root: Path,
+    *,
+    retention_stack: ExitStack | None = None,
+    attempt_id: str | None = None,
 ) -> dict:
-    """Direct NVBit injection for cells the orchestrator cannot route
-    (multi-case binaries needing per-case output dirs)."""
+    """Capture one direct cell as immutable, descriptor-bound attempt evidence."""
+
+    slug = _require_identity_string(
+        slug, label="direct capture slug", component=True,
+    )
+    if not isinstance(binary, Path):
+        raise ValueError("direct capture binary must be a Path")
+    if type(app_args) is not list:
+        raise ValueError("direct capture app_args must be an exact list")
+    app_args = list(
+        _require_app_arguments(tuple(app_args), label="direct capture app_args")
+    )
+    if retention_stack is not None and not isinstance(retention_stack, ExitStack):
+        raise ValueError("direct capture retention_stack must be an ExitStack")
     _reject_output_dir_extras(tuple(app_args))
-    traces_folder = _assert_staging_output(
-        traces_folder, operation="prepare direct trace",
+    generation_root = _assert_staging_output(
+        traces_folder, operation="prepare direct trace generation root",
     )
     workload_output_root = _assert_staging_output(
         workload_output_root, operation="prepare direct workload output",
     )
-    if traces_folder.exists():
-        _assert_staging_output(traces_folder, operation="remove prior direct trace")
-        shutil.rmtree(traces_folder)
-    traces_folder.mkdir(parents=True, exist_ok=True)
-    workload_output_root.mkdir(parents=True, exist_ok=True)
-    env = _tracer_env()
-    env["CUDA_INJECTION64_PATH"] = str(_TRACER_SO)
-    env["USER_DEFINED_FOLDERS"] = "1"
-    env["TRACES_FOLDER"] = str(traces_folder)
-    t0 = time.perf_counter()
-    proc = subprocess.run(
-        [
-            str(binary), *app_args,
-            "--output_dir", str(workload_output_root),
-        ], capture_output=True, text=True, env=env,
-        cwd=str(binary.parent),
+    if attempt_id is None:
+        attempt_id = _new_capture_attempt_id()
+    attempt_id = _require_identity_string(
+        attempt_id, label="direct trace_capture_attempt_id", component=True,
     )
-    elapsed = time.perf_counter() - t0
-    pb = traces_folder / "dynamic_trace.pb"
-    if proc.returncode != 0 or not pb.is_file():
-        return {
-            "slug": slug, "ok": False,
-            "typed_reason": "capture_failed",
-            "returncode": proc.returncode,
-            "stderr_tail": proc.stderr[-300:],
-        }
+    owns_sources = retention_stack is None
+    retained_guard = _RetainedDirectSources()
+    if retention_stack is None:
+        retained_guard.__enter__()
+    else:
+        retention_stack.enter_context(retained_guard)
+    sources = retained_guard.capture_sources
+
     try:
-        admission = require_trace_admission(traces_folder)
-    except TraceAdmissionError as exc:
-        return {
+        retained_binary = sources.enter_context(
+            open_retained_executable(binary)
+        )
+        retained_tracer = sources.enter_context(
+            open_retained_regular(_TRACER_SO)
+        )
+        stage = create_exclusive_directory_stage(generation_root, attempt_id)
+        with stage:
+            workload_output_root.mkdir(parents=True, exist_ok=True)
+            workload_attempt = workload_output_root / attempt_id
+            workload_attempt.mkdir(exist_ok=False)
+            retained_workload_output = sources.enter_context(
+                PinnedDirectoryReader(workload_attempt)
+            )
+
+            env = _tracer_env(
+                retained_descriptor=retained_tracer.descriptor,
+            )
+            env["CUDA_INJECTION64_PATH"] = retained_tracer.proc_path
+            env["USER_DEFINED_FOLDERS"] = "1"
+            env["TRACES_FOLDER"] = f"/proc/self/fd/{stage.descriptor}"
+            command = [
+                retained_binary.proc_path,
+                *app_args,
+                "--output_dir",
+                f"/proc/self/fd/{retained_workload_output.descriptor}",
+            ]
+            retained_binary.verify_unchanged()
+            retained_tracer.verify_unchanged()
+            retained_workload_output.verify_path()
+            t0 = time.perf_counter()
+            try:
+                proc = subprocess.run(
+                    command,
+                    capture_output=True,
+                    text=True,
+                    env=env,
+                    cwd=str(binary.parent),
+                    pass_fds=(
+                        retained_binary.descriptor,
+                        retained_tracer.descriptor,
+                        stage.descriptor,
+                        retained_workload_output.descriptor,
+                    ),
+                )
+            except OSError as descriptor_error:
+                _raise_if_descriptor_resource_unavailable(
+                    descriptor_error,
+                    label="direct subprocess execution or pipe allocation",
+                )
+                raise
+            elapsed = time.perf_counter() - t0
+            retained_binary.verify_unchanged()
+            retained_tracer.verify_unchanged()
+            retained_workload_output.verify_path()
+            binary_sha256 = _require_hex_identity(
+                retained_binary.sha256,
+                label="direct binary_sha256",
+                length=64,
+            )
+            tracer_build_sha256 = _require_hex_identity(
+                retained_tracer.sha256,
+                label="direct nvbit_tracer_build_hash",
+                length=64,
+            )
+            if proc.returncode != 0:
+                record = {
+                    "slug": slug,
+                    "ok": False,
+                    "typed_reason": "capture_failed",
+                    "trace_capture_attempt_id": attempt_id,
+                    "raw_trace_stage": str(
+                        stage.staging_path.relative_to(generation_root.parent)
+                    ),
+                    "returncode": proc.returncode,
+                    "stderr_tail": proc.stderr[-300:],
+                    "binary_sha256": binary_sha256,
+                    "nvbit_tracer_build_hash": tracer_build_sha256,
+                }
+            else:
+                raw_generation = stage.commit(
+                    require_nonempty=True,
+                    **_trace_generation_commit_limits(),
+                )
+                retained_guard.raw_generation = raw_generation
+                _verify_committed_trace_generation(raw_generation)
+                retained_binary.verify_unchanged()
+                retained_tracer.verify_unchanged()
+                retained_workload_output.verify_path()
+                record = {}
+
+        if proc.returncode == 0:
+            raw_generation_record = _raw_generation_record(
+                raw_generation,
+                cell_dir=generation_root.parent,
+                attempt_id=attempt_id,
+            )
+            _verify_committed_trace_generation(raw_generation)
+            try:
+                admission = require_trace_admission(raw_generation.path)
+            except TraceAdmissionError as exc:
+                record = {
+                    "slug": slug,
+                    "ok": False,
+                    "typed_reason": exc.typed_reason,
+                    "detail": exc.detail,
+                    "trace_capture_attempt_id": attempt_id,
+                    "raw_trace_generation": raw_generation_record,
+                    "returncode": proc.returncode,
+                    "binary_sha256": binary_sha256,
+                    "nvbit_tracer_build_hash": tracer_build_sha256,
+                }
+            else:
+                _verify_committed_trace_generation(raw_generation)
+                trace_sources = retained_guard.admitted_sources.enter_context(
+                    open_admitted_trace_sources(
+                        raw_generation.path,
+                        expected_admission=admission,
+                    )
+                )
+                trace_sources.verify_unchanged()
+                _verify_committed_trace_generation(raw_generation)
+                retained_binary.verify_unchanged()
+                retained_tracer.verify_unchanged()
+                retained_workload_output.verify_path()
+                expected = admission.expected_record_count
+                admitted = admission.admitted_record_count
+                launch_records = _all_admitted_launch_records(admission)
+                record = {
+                    "slug": slug,
+                    "ok": True,
+                    "contract_ok": True,
+                    "trace_capture_attempt_id": attempt_id,
+                    "raw_trace_generation": raw_generation_record,
+                    "traces_folder": str(raw_generation.path),
+                    "trace_bytes": admission.dynamic_trace_size_bytes,
+                    "trace_pb_bytes": admission.dynamic_trace_size_bytes,
+                    "capture_seconds": round(elapsed, 2),
+                    "records_expected": expected,
+                    "records_admitted": admitted,
+                    "drop_count": max(expected - admitted, 0),
+                    "binary_sha256": binary_sha256,
+                    "nvbit_tracer_build_hash": tracer_build_sha256,
+                    "trace_admission_sha256": admission.trace_admission_sha256,
+                    "trace_filesystem_generation_sha256": (
+                        admission.trace_filesystem_generation_sha256
+                    ),
+                    "dynamic_trace_size_bytes": (
+                        admission.dynamic_trace_size_bytes
+                    ),
+                    "dynamic_trace_sha256": admission.dynamic_trace_sha256,
+                    "allocations_sidecar_size_bytes": (
+                        admission.allocations_sidecar_size_bytes
+                    ),
+                    "allocations_sidecar_sha256": (
+                        admission.allocations_sidecar_sha256
+                    ),
+                    "stats_size_bytes": admission.stats_size_bytes,
+                    "stats_sha256": admission.stats_sha256,
+                    "threadblock_payload_size_bytes": (
+                        admission.threadblock_payload_size_bytes
+                    ),
+                    "threadblock_payload_manifest_sha256": (
+                        admission.threadblock_payload_manifest_sha256
+                    ),
+                    "launch_count": admission.launch_count,
+                    "launches": launch_records,
+                }
+    except ImmutableArtifactResourceError as capture_error:
+        record = {
             "slug": slug,
             "ok": False,
-            "typed_reason": exc.typed_reason,
-            "detail": exc.detail,
-            "returncode": proc.returncode,
+            "typed_reason": "trace_snapshot_resource_unavailable",
+            "trace_capture_attempt_id": attempt_id,
+            "detail": _bounded_diagnostic_text(
+                capture_error, max_bytes=_CLOSE_DIAGNOSTIC_BYTES,
+            ),
         }
-    expected = admission.expected_record_count
-    admitted = admission.admitted_record_count
-    return {
-        "slug": slug, "ok": True,
-        "traces_folder": str(traces_folder),
-        "trace_pb_bytes": pb.stat().st_size,
-        "capture_seconds": round(elapsed, 2),
-        "records_expected": expected,
-        "records_admitted": admitted,
-        "drop_count": max((expected or 0) - (admitted or 0), 0),
-        # Label<->trace binary-identity join key — without it the frozen
-        # bundle cannot prove the traced binary is the one NCU labeled.
-        "binary_sha256": _binary_sha256(binary),
-    }
+        retained_guard.bind_failure_record(record)
+        if owns_sources:
+            retained_guard.__exit__(
+                type(capture_error), capture_error, capture_error.__traceback__,
+            )
+        return record
+    except Exception as capture_error:
+        record = {
+            "slug": slug,
+            "ok": False,
+            "typed_reason": "capture_exception",
+            "trace_capture_attempt_id": attempt_id,
+            "detail": _bounded_diagnostic_text(
+                capture_error, max_bytes=_CLOSE_DIAGNOSTIC_BYTES,
+            ),
+        }
+        # Bind the synthesized record before any retained-source close so a
+        # close-time capability failure remains visible in attempt evidence.
+        retained_guard.bind_failure_record(record)
+        if owns_sources:
+            retained_guard.__exit__(
+                type(capture_error), capture_error, capture_error.__traceback__,
+            )
+        return record
+    except BaseException:
+        if owns_sources:
+            retained_guard.__exit__(*sys.exc_info())
+        raise
+
+    if record.get("ok") is False:
+        retained_guard.bind_failure_record(record)
+    if owns_sources:
+        if record.get("ok"):
+            retained_guard.__exit__(None, None, None)
+        else:
+            failure = RuntimeError("direct trace capture already failed")
+            retained_guard.__exit__(type(failure), failure, None)
+    return record
+
+
+_RAW_GENERATION_FIELDS = frozenset({
+    "attempt_id",
+    "path",
+    "content_manifest_sha256",
+    "filesystem_generation_sha256",
+    "file_count",
+    "directory_count",
+    "total_file_bytes",
+})
+_LAUNCH_FIELDS = frozenset({
+    "launch_index",
+    "device_id",
+    "stream_id",
+    "kernel_id",
+    "kernel_name",
+    "grid_x",
+    "grid_y",
+    "grid_z",
+    "block_x",
+    "block_y",
+    "block_z",
+    "shared_mem_static_bytes",
+    "shared_mem_dynamic_bytes",
+    "regs_per_thread",
+    "inst_count",
+})
+_SUCCESS_IDENTITY_FIELDS = frozenset({
+    "binary_sha256",
+    "nvbit_tracer_build_hash",
+    "trace_admission_sha256",
+    "trace_filesystem_generation_sha256",
+    "dynamic_trace_size_bytes",
+    "dynamic_trace_sha256",
+    "allocations_sidecar_size_bytes",
+    "allocations_sidecar_sha256",
+    "stats_size_bytes",
+    "stats_sha256",
+    "threadblock_payload_size_bytes",
+    "threadblock_payload_manifest_sha256",
+})
+_ACTIVATION_SUCCESS_FIELDS = frozenset({
+    "slug",
+    "shape_point",
+    "ok",
+    "contract_ok",
+    "trace_capture_attempt_id",
+    "raw_trace_generation",
+    "traces_folder",
+    "trace_bytes",
+    "trace_pb_bytes",
+    "records_expected",
+    "records_admitted",
+    "drop_rate",
+}) | _SUCCESS_IDENTITY_FIELDS
+_DIRECT_SUCCESS_FIELDS = frozenset({
+    "slug",
+    "shape_point",
+    "ok",
+    "contract_ok",
+    "trace_capture_attempt_id",
+    "raw_trace_generation",
+    "traces_folder",
+    "trace_bytes",
+    "trace_pb_bytes",
+    "capture_seconds",
+    "records_expected",
+    "records_admitted",
+    "drop_count",
+    "launch_count",
+    "launches",
+    "via",
+}) | _SUCCESS_IDENTITY_FIELDS
+_GENERIC_FAILURE_FIELDS = frozenset({
+    "slug", "shape_point", "ok", "typed_reason", "detail",
+})
+_DIRECT_EXCEPTION_FAILURE_FIELDS = _GENERIC_FAILURE_FIELDS | frozenset({
+    "trace_capture_attempt_id", "via",
+})
+_DIRECT_PROCESS_FAILURE_FIELDS = frozenset({
+    "slug",
+    "shape_point",
+    "ok",
+    "typed_reason",
+    "trace_capture_attempt_id",
+    "raw_trace_stage",
+    "returncode",
+    "stderr_tail",
+    "binary_sha256",
+    "nvbit_tracer_build_hash",
+    "via",
+})
+_DIRECT_ADMISSION_FAILURE_FIELDS = frozenset({
+    "slug",
+    "shape_point",
+    "ok",
+    "typed_reason",
+    "detail",
+    "trace_capture_attempt_id",
+    "raw_trace_generation",
+    "returncode",
+    "binary_sha256",
+    "nvbit_tracer_build_hash",
+    "via",
+})
+_FAILURE_FIELD_SETS = (
+    _GENERIC_FAILURE_FIELDS,
+    _DIRECT_EXCEPTION_FAILURE_FIELDS,
+    _DIRECT_PROCESS_FAILURE_FIELDS,
+    _DIRECT_ADMISSION_FAILURE_FIELDS,
+)
+_HASH_FIELDS = frozenset({
+    "dynamic_trace_sha256",
+    "stats_sha256",
+    "threadblock_payload_manifest_sha256",
+    "allocations_sidecar_sha256",
+    "trace_admission_sha256",
+    "trace_filesystem_generation_sha256",
+    "binary_sha256",
+    "nvbit_tracer_build_hash",
+})
+_RECORD_INTEGER_FIELDS = frozenset({
+    "trace_bytes",
+    "trace_pb_bytes",
+    "records_expected",
+    "records_admitted",
+    "drop_count",
+    "dynamic_trace_size_bytes",
+    "stats_size_bytes",
+    "threadblock_payload_size_bytes",
+    "allocations_sidecar_size_bytes",
+    "launch_count",
+})
+
+
+def _require_exact_field_set(
+    value: dict,
+    expected: frozenset[str],
+    *,
+    label: str,
+) -> None:
+    observed = frozenset(value)
+    if observed != expected:
+        missing = sorted(expected - observed)
+        unexpected = sorted(observed - expected)
+        raise ValueError(
+            f"{label} field set is not exact; missing={missing}, "
+            f"unexpected={unexpected}"
+        )
+
+
+def _require_exact_nonnegative_integer(value: object, *, label: str) -> int:
+    if (
+        type(value) is not int
+        or value < 0
+        or value > _MAX_ROSTER_JSON_INTEGER
+    ):
+        raise ValueError(
+            f"{label} must be a bounded nonnegative exact integer"
+        )
+    return value
+
+
+def _require_exact_signed_integer(value: object, *, label: str) -> int:
+    if (
+        type(value) is not int
+        or value < -_MAX_ROSTER_JSON_INTEGER
+        or value > _MAX_ROSTER_JSON_INTEGER
+    ):
+        raise ValueError(f"{label} must be a bounded exact signed integer")
+    return value
+
+
+def _require_finite_nonnegative_float(
+    value: object,
+    *,
+    label: str,
+    maximum: float | None = None,
+) -> float:
+    if type(value) is not float or not math.isfinite(value) or value < 0.0:
+        raise ValueError(f"{label} must be a finite nonnegative exact float")
+    if maximum is not None and value > maximum:
+        raise ValueError(f"{label} exceeds {maximum}")
+    return value
+
+
+def _require_bounded_text(value: object, *, label: str, max_bytes: int) -> str:
+    if type(value) is not str or "\x00" in value:
+        raise ValueError(f"{label} must be an exact bounded string")
+    try:
+        size_bytes = len(value.encode("utf-8", errors="strict"))
+    except UnicodeEncodeError as exc:
+        raise ValueError(f"{label} must be valid UTF-8") from exc
+    if size_bytes > max_bytes:
+        raise ValueError(f"{label} exceeds {max_bytes} bytes")
+    return value
+
+
+def _validate_raw_generation(value: object, *, label: str) -> dict:
+    if type(value) is not dict:
+        raise ValueError(f"{label} must be an exact object")
+    _require_exact_field_set(value, _RAW_GENERATION_FIELDS, label=label)
+    _require_identity_string(
+        value["attempt_id"], label=f"{label} attempt_id", component=True,
+    )
+    raw_path = _require_identity_string(
+        value["path"], label=f"{label} path", max_bytes=4096,
+    )
+    safe_relative_path(raw_path)
+    for field in ("file_count", "directory_count", "total_file_bytes"):
+        _require_exact_nonnegative_integer(
+            value[field], label=f"{label} {field}",
+        )
+    for field in (
+        "content_manifest_sha256", "filesystem_generation_sha256",
+    ):
+        _require_hex_identity(
+            value[field], label=f"{label} {field}", length=64,
+        )
+    return value
+
+
+def _validate_raw_generation_location(
+    raw_generation: dict,
+    *,
+    trace_capture_attempt_id: str,
+    traces_folder: str,
+    label: str,
+) -> None:
+    """Bind the producer-relative generation path to its attempt and locator."""
+    raw_path = safe_relative_path(raw_generation["path"])
+    if len(raw_path.parts) != 2:
+        raise ValueError(
+            f"{label} path must be <generation-root>/<attempt-id>"
+        )
+    if (
+        raw_path.parts[-1] != raw_generation["attempt_id"]
+        or raw_path.parts[-1] != trace_capture_attempt_id
+    ):
+        raise ValueError(f"{label} path attempt identity disagrees")
+
+    trace_location = Path(traces_folder)
+    if (
+        "\\" in traces_folder
+        or "\x00" in traces_folder
+        or trace_location.as_posix() != traces_folder
+        or any(part in {".", ".."} for part in trace_location.parts)
+        or len(trace_location.parts) < len(raw_path.parts)
+        or tuple(trace_location.parts[-len(raw_path.parts):])
+        != raw_path.parts
+    ):
+        raise ValueError(
+            f"{label} path disagrees with traces_folder suffix"
+        )
+
+
+def _validate_launch_record(
+    launch: object,
+    *,
+    expected_index: int,
+    label: str,
+) -> dict:
+    if type(launch) is not dict:
+        raise ValueError(f"{label} must be an exact object")
+    _require_exact_field_set(launch, _LAUNCH_FIELDS, label=label)
+    for field in _LAUNCH_FIELDS - {"kernel_name"}:
+        _require_exact_nonnegative_integer(
+            launch[field], label=f"{label} {field}",
+        )
+    if launch["launch_index"] != expected_index:
+        raise ValueError(f"{label} launch indexes are not contiguous")
+    _require_identity_string(
+        launch["kernel_name"],
+        label=f"{label} kernel_name",
+        max_bytes=_MAX_ROSTER_KERNEL_NAME_BYTES,
+    )
+    return launch
+
+
+def _validate_close_diagnostics(value: object, *, label: str) -> list[dict]:
+    if type(value) is not list or len(value) > 3:
+        raise ValueError(f"{label} is not a bounded exact array")
+    for diagnostic_index, diagnostic in enumerate(value):
+        diagnostic_label = f"{label} {diagnostic_index}"
+        if type(diagnostic) is not dict:
+            raise ValueError(f"{diagnostic_label} must be an exact object")
+        _require_exact_field_set(
+            diagnostic,
+            frozenset({"typed_reason", "detail"}),
+            label=diagnostic_label,
+        )
+        _require_identity_string(
+            diagnostic["typed_reason"],
+            label=f"{diagnostic_label} typed_reason",
+            component=True,
+        )
+        _require_bounded_text(
+            diagnostic["detail"],
+            label=f"{diagnostic_label} detail",
+            max_bytes=_CLOSE_DIAGNOSTIC_BYTES,
+        )
+    return value
+
+
+def _validate_capture_record(
+    record: object,
+    *,
+    expected_slug: str,
+    expected_shape_point: str,
+    index: int,
+) -> dict:
+    if type(record) is not dict:
+        raise ValueError(f"aggregate cell {index} must be an exact object")
+    if any(type(key) is not str for key in record):
+        raise ValueError(f"aggregate cell {index} keys must be exact strings")
+    label = f"aggregate cell {index}"
+    base_record = dict(record)
+    diagnostics = base_record.pop("close_diagnostics", None)
+
+    if type(base_record.get("ok")) is not bool:
+        raise ValueError(f"{label} ok must be boolean")
+    if base_record["ok"]:
+        expected_fields = (
+            _DIRECT_SUCCESS_FIELDS
+            if "via" in base_record
+            else _ACTIVATION_SUCCESS_FIELDS
+        )
+        _require_exact_field_set(base_record, expected_fields, label=label)
+        if base_record["contract_ok"] is not True:
+            raise ValueError(f"{label} contract_ok must be exactly true")
+    else:
+        observed_fields = frozenset(base_record)
+        if observed_fields not in _FAILURE_FIELD_SETS:
+            allowed = [sorted(fields) for fields in _FAILURE_FIELD_SETS]
+            raise ValueError(
+                f"{label} failure field set is not exact; observed="
+                f"{sorted(observed_fields)}, allowed={allowed}"
+            )
+
+    slug = _require_identity_string(
+        base_record["slug"], label=f"{label} slug", component=True,
+    )
+    shape_point = _require_identity_string(
+        base_record["shape_point"],
+        label=f"{label} shape_point",
+        component=True,
+    )
+    if slug != expected_slug or shape_point != expected_shape_point:
+        raise ValueError(f"{label} identity disagrees with roster row")
+
+    if "trace_capture_attempt_id" in base_record:
+        _require_identity_string(
+            base_record["trace_capture_attempt_id"],
+            label=f"{label} trace_capture_attempt_id",
+            component=True,
+        )
+    if "typed_reason" in base_record:
+        _require_identity_string(
+            base_record["typed_reason"],
+            label=f"{label} typed_reason",
+            component=True,
+        )
+    if "via" in base_record and base_record["via"] != "direct_injection":
+        raise ValueError(f"{label} via identity is invalid")
+    for field in ("traces_folder", "raw_trace_stage"):
+        if field in base_record:
+            _require_identity_string(
+                base_record[field], label=f"{label} {field}", max_bytes=4096,
+            )
+    for field in ("detail", "stderr_tail"):
+        if field in base_record:
+            _require_bounded_text(
+                base_record[field], label=f"{label} {field}", max_bytes=4096,
+            )
+
+    for field in _HASH_FIELDS & base_record.keys():
+        value = base_record[field]
+        if value is None and field == "allocations_sidecar_sha256":
+            continue
+        _require_hex_identity(value, label=f"{label} {field}", length=64)
+    for field in _RECORD_INTEGER_FIELDS & base_record.keys():
+        value = base_record[field]
+        if value is None and field == "allocations_sidecar_size_bytes":
+            continue
+        _require_exact_nonnegative_integer(value, label=f"{label} {field}")
+    if "returncode" in base_record:
+        _require_exact_signed_integer(
+            base_record["returncode"], label=f"{label} returncode",
+        )
+
+    if "allocations_sidecar_size_bytes" in base_record:
+        allocation_size = base_record["allocations_sidecar_size_bytes"]
+        allocation_hash = base_record["allocations_sidecar_sha256"]
+        if (allocation_size is None) != (allocation_hash is None):
+            raise ValueError(f"{label} allocations sidecar identity is incomplete")
+
+    if "raw_trace_generation" in base_record:
+        raw_generation = _validate_raw_generation(
+            base_record["raw_trace_generation"],
+            label=f"{label} raw_trace_generation",
+        )
+    else:
+        raw_generation = None
+
+    if "capture_seconds" in base_record:
+        _require_finite_nonnegative_float(
+            base_record["capture_seconds"], label=f"{label} capture_seconds",
+        )
+    if "drop_rate" in base_record:
+        drop_rate = _require_finite_nonnegative_float(
+            base_record["drop_rate"],
+            label=f"{label} drop_rate",
+            maximum=1.0,
+        )
+    else:
+        drop_rate = None
+
+    if "records_expected" in base_record:
+        expected = base_record["records_expected"]
+        admitted = base_record["records_admitted"]
+        if admitted > expected:
+            raise ValueError(f"{label} records_admitted exceeds records_expected")
+        dropped = expected - admitted
+        if "drop_count" in base_record and base_record["drop_count"] != dropped:
+            raise ValueError(f"{label} drop_count relationship is invalid")
+        if drop_rate is not None:
+            expected_rate = (dropped / expected) if expected else 0.0
+            if not math.isclose(
+                drop_rate, expected_rate, rel_tol=0.0, abs_tol=1e-15,
+            ):
+                raise ValueError(f"{label} drop_rate relationship is invalid")
+
+    if base_record["ok"]:
+        assert raw_generation is not None
+        if (
+            raw_generation["attempt_id"]
+            != base_record["trace_capture_attempt_id"]
+        ):
+            raise ValueError(
+                f"{label} raw generation attempt identity disagrees"
+            )
+        _validate_raw_generation_location(
+            raw_generation,
+            trace_capture_attempt_id=base_record["trace_capture_attempt_id"],
+            traces_folder=base_record["traces_folder"],
+            label=f"{label} raw generation",
+        )
+        if raw_generation["file_count"] < 1:
+            raise ValueError(f"{label} raw generation file_count must be positive")
+        if raw_generation["directory_count"] < 1:
+            raise ValueError(
+                f"{label} raw generation directory_count must include the root"
+            )
+        required_raw_bytes = (
+            base_record["dynamic_trace_size_bytes"]
+            + base_record["stats_size_bytes"]
+            + base_record["threadblock_payload_size_bytes"]
+            + (base_record["allocations_sidecar_size_bytes"] or 0)
+        )
+        if raw_generation["total_file_bytes"] < required_raw_bytes:
+            raise ValueError(
+                f"{label} raw generation total_file_bytes is incomplete"
+            )
+        trace_bytes = base_record["trace_bytes"]
+        if not (
+            trace_bytes
+            == base_record["trace_pb_bytes"]
+            == base_record["dynamic_trace_size_bytes"]
+        ):
+            raise ValueError(f"{label} trace byte identities disagree")
+
+    launches = base_record.get("launches")
+    if launches is not None:
+        if type(launches) is not list:
+            raise ValueError(f"{label} launches must be an exact array")
+        if len(launches) > _MAX_ROSTER_LAUNCHES_PER_CELL:
+            _raise_roster_resource_error(
+                f"{label} launch vector exceeds "
+                f"{_MAX_ROSTER_LAUNCHES_PER_CELL}"
+            )
+        if base_record["launch_count"] != len(launches):
+            raise ValueError(f"{label} launch_count relationship is invalid")
+        for launch_index, launch in enumerate(launches):
+            validated_launch = _validate_launch_record(
+                launch,
+                expected_index=launch_index,
+                label=f"{label} launch {launch_index}",
+            )
+            launch_bytes = len(json.dumps(
+                validated_launch,
+                indent=1,
+                ensure_ascii=False,
+                allow_nan=False,
+            ).encode("utf-8"))
+            if launch_bytes > _MAX_ROSTER_LAUNCH_MANIFEST_BYTES:
+                _raise_roster_resource_error(
+                    f"{label} launch {launch_index} serialized bytes "
+                    f"{launch_bytes} exceed "
+                    f"{_MAX_ROSTER_LAUNCH_MANIFEST_BYTES}"
+                )
+
+    if diagnostics is not None:
+        _validate_close_diagnostics(
+            diagnostics, label=f"{label} close_diagnostics",
+        )
+
+    fixed_record = dict(record)
+    if "launches" in fixed_record:
+        fixed_record["launches"] = []
+    fixed_bytes = len(json.dumps(
+        fixed_record,
+        indent=1,
+        ensure_ascii=False,
+        allow_nan=False,
+    ).encode("utf-8"))
+    if fixed_bytes > _MAX_ROSTER_CELL_MANIFEST_BYTES:
+        _raise_roster_resource_error(
+            f"{label} fixed serialized bytes {fixed_bytes} exceed "
+            f"{_MAX_ROSTER_CELL_MANIFEST_BYTES}"
+        )
+    return record
+
+
+def _validate_aggregate_manifest(manifest: object, roster: list[dict]) -> dict:
+    if type(manifest) is not dict:
+        raise ValueError("aggregate manifest must be an exact object")
+    _require_exact_field_set(
+        manifest,
+        frozenset({
+            "generated_by", "capture_attempt_id", "host_clock_state", "cells",
+        }),
+        label="aggregate manifest",
+    )
+    if manifest["generated_by"] != "roster_trace_capture":
+        raise ValueError("aggregate generated_by identity is invalid")
+    _require_identity_string(
+        manifest["capture_attempt_id"],
+        label="aggregate capture_attempt_id",
+        component=True,
+    )
+    host_clock_state = manifest["host_clock_state"]
+    if type(host_clock_state) is not dict or len(host_clock_state) > 2:
+        raise ValueError("aggregate host_clock_state must be a bounded exact object")
+    for key, value in host_clock_state.items():
+        _require_identity_string(
+            key, label="aggregate host clock key", component=True,
+        )
+        _require_bounded_text(
+            value, label="aggregate host clock value", max_bytes=4096,
+        )
+    if type(roster) is not list or not roster:
+        raise ValueError("aggregate roster authority must be a nonempty exact array")
+    cells = manifest["cells"]
+    if type(cells) is not list or len(cells) != len(roster):
+        raise ValueError("aggregate cells must exactly match roster length")
+    for index, (record, row) in enumerate(zip(cells, roster, strict=True)):
+        if type(row) is not dict:
+            raise ValueError(f"aggregate roster row {index} must be an exact object")
+        _validate_capture_record(
+            record,
+            expected_slug=row["slug"],
+            expected_shape_point=row["shape_point"],
+            index=index,
+        )
+
+    envelope = dict(manifest)
+    envelope["cells"] = []
+    envelope_bytes = len(json.dumps(
+        envelope,
+        indent=1,
+        ensure_ascii=False,
+        allow_nan=False,
+    ).encode("utf-8"))
+    if envelope_bytes > _MAX_ROSTER_MANIFEST_ENVELOPE_BYTES:
+        _raise_roster_resource_error(
+            f"aggregate envelope bytes {envelope_bytes} exceed "
+            f"{_MAX_ROSTER_MANIFEST_ENVELOPE_BYTES}"
+        )
+    return manifest
+
+
+def _bounded_manifest_payload(manifest: dict, roster: list[dict]) -> bytes:
+    _validate_aggregate_manifest(manifest, roster)
+    payload = (json.dumps(
+        manifest,
+        indent=1,
+        ensure_ascii=False,
+        allow_nan=False,
+    ) + "\n").encode("utf-8")
+    if len(payload) > _MAX_ROSTER_MANIFEST_BYTES:
+        _raise_roster_resource_error(
+            f"aggregate manifest bytes {len(payload)} exceed "
+            f"{_MAX_ROSTER_MANIFEST_BYTES}"
+        )
+    return payload
+
+
+def _run_roster_capture(
+    *,
+    roster: list[dict],
+    plans: list[dict[str, Path | bool]],
+    manifest_path: Path,
+    sku: str,
+    arch_dir: str,
+    output_root: Path,
+) -> int:
+    roster = _validate_roster_entries(roster, require_binary=True)
+    plans = _validate_plan_vector(plans, expected_cells=len(roster))
+    sku = _require_identity_string(sku, label="roster sku", component=True)
+    arch_dir = _require_identity_string(
+        arch_dir, label="roster arch_dir", component=True,
+    )
+    _require_roster_descriptor_budget(len(roster))
+    _require_roster_manifest_budget(len(roster))
+    out = _assert_staging_output(
+        manifest_path, operation="write roster capture manifest"
+    )
+    attempt_id = _require_identity_string(
+        _new_capture_attempt_id(),
+        label="roster capture_attempt_id",
+        component=True,
+    )
+    out.parent.mkdir(parents=True, exist_ok=True)
+    attempt_root = _assert_staging_output(
+        out.parent / "capture_manifest_attempts",
+        operation="write roster capture manifest attempt",
+    )
+    active_payload: bytes | None = None
+    active_locator: RetainedRegular | None = None
+    activation_locators: list[
+        tuple[Path, bytes, MetadataSnapshot]
+    ] = []
+
+    try:
+        with ExitStack() as aggregate_lock_owner:
+            aggregate_lock = aggregate_lock_owner.enter_context(
+                PinnedDirectoryReader(out.parent)
+            )
+            _lock_activation_cell(aggregate_lock)
+            # The prior aggregate cannot remain active while this rerun retires
+            # and replaces its per-cell locators. Preserve it under a hidden name
+            # before the first capture-side mutation.
+            retire_regular_file(out)
+            attempt_root.mkdir(exist_ok=True)
+
+            retained_sources = ExitStack()
+            retained_sources.__enter__()
+            retained_sources_closed = False
+            try:
+                manifest = {
+                    "generated_by": "roster_trace_capture",
+                    "capture_attempt_id": attempt_id,
+                    "host_clock_state": _host_clock_state(),
+                    "cells": [],
+                }
+                failures = 0
+                for index, (cell, plan) in enumerate(
+                    zip(roster, plans, strict=True)
+                ):
+                    slug = cell["slug"]
+                    binary = REPO_ROOT / cell["binary"]
+                    portable = plan["portable"]
+                    print(f"[trace] {slug} ...", flush=True)
+                    cell_locators: list[
+                        tuple[Path, bytes, MetadataSnapshot]
+                    ] = []
+                    try:
+                        if portable:
+                            sidecar = trace_activation_cell(
+                                slug=slug,
+                                shape_point=cell["shape_point"],
+                                arch_dir=arch_dir,
+                                sku=sku,
+                                extra_app_args=tuple(
+                                    item for item in cell.get("app_args", [])
+                                    if item != f"--{cell['shape_point']}"
+                                ),
+                                output_root=output_root,
+                                _precleared_plan={
+                                    key: value for key, value in plan.items()
+                                    if key != "portable"
+                                },
+                                _retention_stack=retained_sources,
+                                _published_locators=cell_locators,
+                            )
+                            record = _activation_capture_record(
+                                slug=slug,
+                                cell_dir=plan["cell_dir"],
+                                sidecar=sidecar,
+                            )
+                        else:
+                            record = _capture_direct(
+                                slug,
+                                binary,
+                                list(cell.get("app_args", [])),
+                                plan["traces_folder"],
+                                plan["workload_output_root"],
+                                retention_stack=retained_sources,
+                            )
+                            if type(record) is not dict:
+                                raise ValueError(
+                                    "direct capture returned a non-object record"
+                                )
+                            record["via"] = "direct_injection"
+                        if type(record) is not dict:
+                            raise ValueError(
+                                "capture returned a non-object aggregate entry"
+                            )
+                        record.setdefault("shape_point", cell["shape_point"])
+                        if (
+                            record.get("ok")
+                            and record.get("contract_ok") is not True
+                        ):
+                            record["ok"] = False
+                            record["typed_reason"] = "trace_admission_missing"
+                        _validate_capture_record(
+                            record,
+                            expected_slug=slug,
+                            expected_shape_point=cell["shape_point"],
+                            index=index,
+                        )
+                    except ImmutableArtifactResourceError as exc:
+                        record = {
+                            "slug": slug,
+                            "shape_point": cell["shape_point"],
+                            "ok": False,
+                            "typed_reason": "trace_snapshot_resource_unavailable",
+                            "detail": _bounded_diagnostic_text(
+                                exc, max_bytes=_CLOSE_DIAGNOSTIC_BYTES,
+                            ),
+                        }
+                    except Exception as exc:
+                        record = {
+                            "slug": slug,
+                            "shape_point": cell["shape_point"],
+                            "ok": False,
+                            "typed_reason": "capture_exception",
+                            "detail": _bounded_diagnostic_text(
+                                exc, max_bytes=_CLOSE_DIAGNOSTIC_BYTES,
+                            ),
+                        }
+                    finally:
+                        activation_locators.extend(cell_locators)
+                    if not (
+                        record.get("ok")
+                        and record.get("contract_ok") is True
+                    ):
+                        failures += 1
+                    manifest["cells"].append(record)
+
+                if failures:
+                    failure = RuntimeError(
+                        "roster capture contains failed or unadmitted cells"
+                    )
+                    retained_sources.__exit__(type(failure), failure, None)
+                    retained_sources_closed = True
+                    # Direct failed-capture guards append bounded close diagnostics
+                    # to their original record during the close above. Serialize
+                    # only after those diagnostics are visible.
+                    payload = _bounded_manifest_payload(manifest, roster)
+                    attempt_path = publish_regular_file(
+                        attempt_root,
+                        f"{attempt_id}.json",
+                        payload,
+                    )
+                else:
+                    payload = _bounded_manifest_payload(manifest, roster)
+                    attempt_path = publish_regular_file(
+                        attempt_root,
+                        f"{attempt_id}.json",
+                        payload,
+                    )
+                    active_locator = publish_retained_regular_file(
+                        out.parent, out.name, payload,
+                    )
+                    active_payload = payload
+                    active_locator.verify_unchanged()
+                    retained_sources.close()
+                    retained_sources_closed = True
+                    # All retained cell closures are now complete. Drain and
+                    # close the exact aggregate capability while its publication
+                    # lock is still held; a monitor-close mutation is followed by
+                    # a descriptor/path/payload reauthentication.
+                    active_locator.verify_unchanged()
+                    # Transfer the aggregate lock reader into the authenticated
+                    # handoff before its final close. If setup fails before the
+                    # callback runs, the detached owner closes against the active
+                    # exception; once invoked, ExitStack has consumed the reader
+                    # callback and no caller-owned reader close remains.
+                    transferred_aggregate_lock = aggregate_lock_owner.pop_all()
+                    aggregate_lock_close_invoked = False
+
+                    def close_transferred_aggregate_lock() -> None:
+                        nonlocal aggregate_lock_close_invoked
+                        aggregate_lock_close_invoked = True
+                        transferred_aggregate_lock.close()
+
+                    try:
+                        close_retained_regular_files_authenticated(
+                            (active_locator,),
+                            lock_reader=aggregate_lock,
+                            closure_callbacks=(
+                                close_transferred_aggregate_lock,
+                            ),
+                        )
+                    finally:
+                        if not aggregate_lock_close_invoked:
+                            transferred_aggregate_lock.__exit__(*sys.exc_info())
+                    active_locator = None
+            finally:
+                if not retained_sources_closed:
+                    retained_sources.__exit__(*sys.exc_info())
+
+        n_ok = sum(
+            1 for record in manifest["cells"]
+            if record.get("ok") and record.get("contract_ok")
+        )
+        print(
+            f"trace manifest attempt: {attempt_path} — "
+            f"{n_ok}/{len(manifest['cells'])} cells "
+            f"captured+contract-valid, {failures} failures"
+        )
+        if failures:
+            return 1
+        print(f"active trace manifest: {out}")
+        return 0
+    except BaseException as exc:
+        for locator, expected_payload, expected_snapshot in activation_locators:
+            try:
+                _retire_matching_locator(
+                    locator, expected_payload, expected_snapshot,
+                )
+            except BaseException as retirement_error:
+                try:
+                    exc.add_note(
+                        f"failed roster cell locator retirement for {locator}: "
+                        f"{retirement_error}"
+                    )
+                except (AttributeError, TypeError):
+                    pass
+        if active_locator is not None and active_payload is not None:
+            try:
+                preserve_retained_regular_file(
+                    active_locator, expected_payload=active_payload,
+                )
+            except BaseException as preservation_error:
+                try:
+                    exc.add_note(
+                        f"failed roster manifest preservation for {out}: "
+                        f"{preservation_error}"
+                    )
+                except (AttributeError, TypeError):
+                    pass
+            try:
+                active_locator.close()
+            except BaseException as close_error:
+                try:
+                    exc.add_note(
+                        f"failed roster manifest capability close for {out}: "
+                        f"{close_error}"
+                    )
+                except (AttributeError, TypeError):
+                    pass
+        if not isinstance(exc, Exception):
+            raise
+        print(
+            f"roster_trace_capture: publication failed: {exc}",
+            file=sys.stderr,
+        )
+        return 2
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -205,8 +1634,13 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = ap.parse_args(argv)
 
-    roster = json.loads(Path(args.roster).read_text())
     try:
+        roster_snapshot = read_regular_snapshot(
+            Path(args.roster), max_bytes=_MAX_ROSTER_INPUT_BYTES,
+        )
+        roster = strict_json_loads(
+            roster_snapshot.payload, label=f"roster {args.roster}",
+        )
         plans, out = _roster_capture_plan(
             roster=roster,
             sku=args.sku,
@@ -214,93 +1648,25 @@ def main(argv: list[str] | None = None) -> int:
             output_root=args.output_root,
             manifest_out=args.manifest_out,
         )
-    except (KeyError, ValueError) as exc:
+    except (ImmutableArtifactError, KeyError, OSError, ValueError) as exc:
         print(f"roster_trace_capture: output refusal: {exc}", file=sys.stderr)
         return 2
 
-    _tracer_env()  # all outputs cleared before dlopen preflight / capture
-    manifest = {
-        "generated_by": "roster_trace_capture",
-        "host_clock_state": _host_clock_state(),
-        "cells": [],
-    }
-    failures = 0
-    for cell, plan in zip(roster, plans, strict=True):
-        slug = cell["slug"]
-        binary = REPO_ROOT / cell["binary"]
-        slug_dir_exists = (
-            REPO_ROOT / "workloads" / "portable_lcd" / slug
-        ).is_dir()
-        print(f"[trace] {slug} ...", flush=True)
-        try:
-            if slug_dir_exists:
-                sidecar = trace_activation_cell(
-                    slug=slug,
-                    shape_point=cell["shape_point"],
-                    arch_dir=args.arch_dir,
-                    sku=args.sku,
-                    extra_app_args=tuple(
-                        a for a in cell.get("app_args", [])
-                        if a != f"--{cell['shape_point']}"
-                    ),
-                    output_root=args.output_root,
-                    _precleared_plan={
-                        key: value for key, value in plan.items()
-                        if key != "portable"
-                    },
-                )
-                traces_folder = Path(plan["traces_folder"])
-                rec = {
-                    "slug": slug, "ok": True,
-                    "traces_folder": str(traces_folder),
-                    "trace_pb_bytes": sidecar.get("trace_bytes"),
-                    "records_expected": sidecar.get("expected_record_count"),
-                    "records_admitted": sidecar.get("admitted_record_count"),
-                    "drop_rate": sidecar.get("actual_drop_rate"),
-                    "binary_sha256": sidecar.get("binary_sha256"),
-                    "via": "trace_activation_cell",
-                }
-            else:
-                traces_folder = Path(plan["traces_folder"])
-                rec = _capture_direct(
-                    slug,
-                    binary,
-                    list(cell.get("app_args", [])),
-                    traces_folder,
-                    Path(plan["workload_output_root"]),
-                )
-                rec["via"] = "direct_injection"
-        except Exception as exc:
-            rec = {"slug": slug, "ok": False,
-                   "typed_reason": "capture_exception", "detail": str(exc)[:400]}
-
-        # FAIL-CLOSED: a cell is OK only if its trace dir exists AND the
-        # contract validation ran and passed — a skipped validation must
-        # never read as success.
-        if rec.get("ok"):
-            tf = rec.get("traces_folder")
-            if not tf or not Path(tf).is_dir():
-                rec["ok"] = False
-                rec["typed_reason"] = "traces_folder_missing"
-                rec["contract_ok"] = False
-            else:
-                v = validate_trace_dir(Path(tf))
-                rec["contract_ok"] = bool(v.ok)
-                if not v.ok:
-                    rec["contract_typed_reason"] = v.typed_reason
-                    rec["contract_detail"] = (v.detail or "")[:300]
-        if not (rec.get("ok") and rec.get("contract_ok") is True):
-            failures += 1
-        manifest["cells"].append(rec)
-
-    out = _assert_staging_output(out, operation="write roster capture manifest")
-    out.parent.mkdir(parents=True, exist_ok=True)
-    out.write_text(json.dumps(manifest, indent=1) + "\n")
-    n_ok = sum(1 for c in manifest["cells"]
-               if c.get("ok") and c.get("contract_ok"))
-    print(f"trace manifest: {out} — {n_ok}/{len(manifest['cells'])} cells "
-          f"captured+contract-valid, {failures} failures")
-    return 1 if failures else 0
+    # Tracer dependency preflight is intentionally per-cell and descriptor-bound
+    # inside the delegated/direct capture paths; never run ldd against the
+    # mutable tracer pathname here.
+    try:
+        return _run_roster_capture(
+            roster=roster,
+            plans=plans,
+            manifest_path=out,
+            sku=args.sku,
+            arch_dir=args.arch_dir,
+            output_root=args.output_root,
+        )
+    except (ImmutableArtifactError, KeyError, OSError, ValueError) as exc:
+        print(f"roster_trace_capture: resource refusal: {exc}", file=sys.stderr)
+        return 2
 
 
 if __name__ == "__main__":

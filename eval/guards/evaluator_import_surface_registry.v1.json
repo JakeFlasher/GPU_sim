@@ -1,0 +1,452 @@
+{
+  "$schema": "https://gpu-simulator.invalid/schemas/evaluator_import_surface_registry.v1.schema.json",
+  "authorities": {
+    "cohort_membership": {
+      "status": "typed_unresolved"
+    },
+    "coverage_thresholds": {
+      "status": "typed_unresolved"
+    },
+    "cycle_aggregation_semantics": {
+      "status": "typed_unresolved"
+    },
+    "hardware_authority": {
+      "status": "typed_unresolved"
+    },
+    "operator_approval": {
+      "status": "typed_unresolved"
+    },
+    "protocol_values": {
+      "status": "typed_unresolved"
+    },
+    "reviewer_approval": {
+      "status": "typed_unresolved"
+    },
+    "trust_anchors": {
+      "status": "typed_unresolved"
+    }
+  },
+  "boundary": {
+    "entrypoint_access": "descriptor_snapshot_only",
+    "label_value_reads": "forbidden",
+    "ordinary_package_import": "forbidden",
+    "score_emission": "none",
+    "status": "blocked_offline"
+  },
+  "classifications": [
+    {
+      "classification": "production_boundary",
+      "import_policy": "allow",
+      "path": "eval/production_evaluator/__init__.py",
+      "review_status": "reviewed",
+      "sha256": "96a7f19d97a7dd49f6a7a9c05bd4fa2de32ed1c3262a0c8efe8db4b422fce5ff"
+    },
+    {
+      "classification": "non_evaluator",
+      "import_policy": "deny",
+      "path": "sim/emit/src/lib.rs",
+      "review_status": "reviewed",
+      "sha256": "913c41524c0235581c959c8ff1db1eeca8089cd833a2546949a7a25ce04d772a"
+    },
+    {
+      "classification": "non_evaluator",
+      "import_policy": "deny",
+      "path": "sim/mem/src/l2.rs",
+      "review_status": "reviewed",
+      "sha256": "9c608db63274a8f0aacec1b8c19f7a261001793756b06f5ae2678768a489b675"
+    },
+    {
+      "classification": "non_evaluator",
+      "import_policy": "deny",
+      "path": "sim/sm/src/issue.rs",
+      "review_status": "reviewed",
+      "sha256": "71e1410f29bba59f2819e769b14ae83bf3316e72bcfd756e2dc1d502cd628fa3"
+    },
+    {
+      "classification": "non_evaluator",
+      "import_policy": "deny",
+      "path": "sim/sm/src/replay.rs",
+      "review_status": "reviewed",
+      "sha256": "eb63013765df8e4c35d2181e121b5abeb1fcaf2b5552953ec866f3ab9ffd32f1"
+    },
+    {
+      "classification": "non_evaluator",
+      "import_policy": "deny",
+      "path": "sim/sm/tests/machine_local_replay.rs",
+      "review_status": "reviewed",
+      "sha256": "01144938008820e95d30df0b8adf65b914d052139d4c2b616ec6214cd5be5864"
+    },
+    {
+      "classification": "unreviewed",
+      "import_policy": "deny",
+      "path": "tools/local_labels/build_duration_predictor_report.py",
+      "review_status": "provisional",
+      "sha256": "0ab3a17094bb1cdbd095904029a651f1073b1714cd95b3cc81118c841cdc2ec2"
+    },
+    {
+      "classification": "unreviewed",
+      "import_policy": "deny",
+      "path": "tools/local_labels/build_sm120_multi_claim_closure_registry.py",
+      "review_status": "provisional",
+      "sha256": "6b997d3208aea8b0a74b605626a7cde4a6f4bb7faa2121c103021f97ec2c64c3"
+    },
+    {
+      "classification": "unreviewed",
+      "import_policy": "deny",
+      "path": "tools/local_labels/build_sm86_timing_cohort_expanded.py",
+      "review_status": "provisional",
+      "sha256": "f65d9529e263bcd2ab9603289ce89c763eb02d23fe81f0d0f35ec0c65d60e1bc"
+    },
+    {
+      "classification": "unreviewed",
+      "import_policy": "deny",
+      "path": "tools/local_labels/capture_long_timing_cohort.py",
+      "review_status": "provisional",
+      "sha256": "75e041dbdd530f284a480d1159d9f6ea2979168180196623a26efa6c89f3e771"
+    },
+    {
+      "classification": "unreviewed",
+      "import_policy": "deny",
+      "path": "tools/local_labels/capture_timing_labels.py",
+      "review_status": "provisional",
+      "sha256": "140281048200582db6ae2f2fcd1ce990155b180c55d48cdfad087fe0c49c64ef"
+    },
+    {
+      "classification": "unreviewed",
+      "import_policy": "deny",
+      "path": "tools/local_labels/capture_toolchain_contract.py",
+      "review_status": "provisional",
+      "sha256": "0156ae458a103847f114fbd8fc0b26c75d1c40f7f05303f4129274d786695c8c"
+    },
+    {
+      "classification": "unreviewed",
+      "import_policy": "deny",
+      "path": "tools/local_labels/duration_predictor_report_validator.py",
+      "review_status": "provisional",
+      "sha256": "9aead042aa439efdbe85c32e9f13a831c1576f464460a023781af054e7946b2f"
+    },
+    {
+      "classification": "unreviewed",
+      "import_policy": "deny",
+      "path": "tools/local_labels/emit_long_timing_feature_artifacts.py",
+      "review_status": "provisional",
+      "sha256": "a3241b316b9886f179d10077b7a34fe4d34abbdcacd5a8362b760a238ae216ce"
+    },
+    {
+      "classification": "unreviewed",
+      "import_policy": "deny",
+      "path": "tools/local_labels/emit_timing_candidate_coverage.py",
+      "review_status": "provisional",
+      "sha256": "37f56252f9edc8e1d7308e1c6af0822e0ee404f57d1c8c78a7de3db58e1affa2"
+    },
+    {
+      "classification": "unreviewed",
+      "import_policy": "deny",
+      "path": "tools/local_labels/emit_timing_prediction_contract.py",
+      "review_status": "provisional",
+      "sha256": "f7d7074e0c15fdce27b85c5e010d019d53d1561e2ee237c1bc20f99f2c5cc661"
+    },
+    {
+      "classification": "unreviewed",
+      "import_policy": "deny",
+      "path": "tools/local_labels/freeze_label_bundle.py",
+      "review_status": "provisional",
+      "sha256": "ed85511820194d5c745a93f32230704c831d489c17f4222dc86f020b3487f82d"
+    },
+    {
+      "classification": "non_evaluator",
+      "import_policy": "deny",
+      "path": "tools/local_labels/label_driver.sh",
+      "review_status": "reviewed",
+      "sha256": "da64bb1f353d0531693d946b04428d8082d4cde9c861f475dfd00710be0f5788"
+    },
+    {
+      "classification": "non_evaluator",
+      "import_policy": "deny",
+      "path": "tools/local_labels/m6_determinism_campaign.py",
+      "review_status": "reviewed",
+      "sha256": "00cf5d63dc49fea8a8d6211e457aab173eafc45bab63f64151b919cc1d597efb"
+    },
+    {
+      "classification": "unreviewed",
+      "import_policy": "deny",
+      "path": "tools/local_labels/metric_comparison_runner.py",
+      "review_status": "provisional",
+      "sha256": "5eb34738d7f5634bd9caacb94ccc28b6495da9fe966191f9c093707896f95abb"
+    },
+    {
+      "classification": "non_evaluator",
+      "import_policy": "deny",
+      "path": "tools/local_labels/metric_registry.json",
+      "review_status": "reviewed",
+      "sha256": "95d90f8c4fffd9376b8d785047a9e02ecafc81ed43da6081985958c2b9dec62d"
+    },
+    {
+      "classification": "unreviewed",
+      "import_policy": "deny",
+      "path": "tools/local_labels/ncu_report_helper.py",
+      "review_status": "provisional",
+      "sha256": "a4501667899c5efb769af52bf360e8c071ae129df63374216c460ae0acae530e"
+    },
+    {
+      "classification": "non_evaluator",
+      "import_policy": "deny",
+      "path": "tools/local_labels/parse_ncu_metrics.py",
+      "review_status": "reviewed",
+      "sha256": "4ba65d78428f3e761fca56c9a78ad9bfcad18bf010f9b1379fc6cfb8ad5b1e94"
+    },
+    {
+      "classification": "unreviewed",
+      "import_policy": "deny",
+      "path": "tools/local_labels/probe_ncu_metric_availability.py",
+      "review_status": "provisional",
+      "sha256": "5715bffa4db656c073d35001e5d9d2cd4377e86d7c50656080532483539bb816"
+    },
+    {
+      "classification": "unreviewed",
+      "import_policy": "deny",
+      "path": "tools/local_labels/read_ncu_report.py",
+      "review_status": "provisional",
+      "sha256": "910f9c6088ad4ef16749971ff7c889f8f11ec2731120f9dc1e1f38fab9c9a535"
+    },
+    {
+      "classification": "non_evaluator",
+      "import_policy": "deny",
+      "path": "tools/local_labels/repeatability_matrix_runner.py",
+      "review_status": "reviewed",
+      "sha256": "af7dbe28b895a44bf4b0d808bc298d2543842afa6360b9369bf50e654bc4e256"
+    },
+    {
+      "classification": "unreviewed",
+      "import_policy": "deny",
+      "path": "tools/local_labels/run_v5_active_path_comparison.py",
+      "review_status": "provisional",
+      "sha256": "e1fe90ee9156f7eb753042c99331d9dccf38d99921db1ec67a616c71c607ae08"
+    },
+    {
+      "classification": "unreviewed",
+      "import_policy": "deny",
+      "path": "tools/local_labels/sm120_loop_claim_guard.py",
+      "review_status": "provisional",
+      "sha256": "8ea1ab8ef6aacc7f824d54afbec5c24a5ab48a5a936545101ed0fe8d603c4f86"
+    },
+    {
+      "classification": "non_evaluator",
+      "import_policy": "deny",
+      "path": "tools/local_labels/sm86_capture_chunk.py",
+      "review_status": "reviewed",
+      "sha256": "06957166a5f47486862f5ae406868c19e3c042484f0ce09929191a633ec140b6"
+    },
+    {
+      "classification": "unreviewed",
+      "import_policy": "deny",
+      "path": "tools/local_labels/test_capture_toolchain_contract.py",
+      "review_status": "provisional",
+      "sha256": "21d9faac66d56e92f72b869d5b4f2dcec29d5233c2dbc3b27f8396d7daebc09f"
+    },
+    {
+      "classification": "unreviewed",
+      "import_policy": "deny",
+      "path": "tools/local_labels/test_committed_comparison_bundles_schema_valid.py",
+      "review_status": "provisional",
+      "sha256": "aaee2717466d863af113e854f2a6a4a4dceff1bf94b5fad51d28a6db36587e4b"
+    },
+    {
+      "classification": "unreviewed",
+      "import_policy": "deny",
+      "path": "tools/local_labels/test_import_label.py",
+      "review_status": "provisional",
+      "sha256": "acb3be94e55aa8b2d8491bcaed620b9bf2535e5b70af0fedecabfc7ffaf86568"
+    },
+    {
+      "classification": "unreviewed",
+      "import_policy": "deny",
+      "path": "tools/local_labels/test_local_label_admitted_schema.py",
+      "review_status": "provisional",
+      "sha256": "72554ef4da5d8b281b49155c4d030b5bdc1448317b096d16e1d881961c3b970c"
+    },
+    {
+      "classification": "non_evaluator",
+      "import_policy": "deny",
+      "path": "tools/local_labels/test_metric_registry.py",
+      "review_status": "reviewed",
+      "sha256": "7533a4c07b4b757fa0dac49e7d14daf5c11d42bd289540c8ddb8b228a9f50b9a"
+    },
+    {
+      "classification": "unreviewed",
+      "import_policy": "deny",
+      "path": "tools/local_labels/test_parse_ncu_launch_identity.py",
+      "review_status": "provisional",
+      "sha256": "bd74eeb50297c7c454a2f6fdb65fd25d7b62e2d307b87e15b86e42358900823b"
+    },
+    {
+      "classification": "unreviewed",
+      "import_policy": "deny",
+      "path": "tools/local_labels/test_schema_authority_gates.py",
+      "review_status": "provisional",
+      "sha256": "baa48f642ea617cd962ff1e28d15bf329bdf738e8138be2c3a9e9891829e94ca"
+    },
+    {
+      "classification": "non_evaluator",
+      "import_policy": "deny",
+      "path": "tools/local_labels/test_schema_v5_lockstep.py",
+      "review_status": "reviewed",
+      "sha256": "6c3a6140e0d0856eb902e277562f782a4eae531ca4171726f55767f449f4212e"
+    },
+    {
+      "classification": "unreviewed",
+      "import_policy": "deny",
+      "path": "tools/local_labels/test_sm86_capture_chunk.py",
+      "review_status": "provisional",
+      "sha256": "658c4ce122caf06540c230d485b3938d7a91c46b2c2d3ef1da2ce22abe18caed"
+    },
+    {
+      "classification": "unreviewed",
+      "import_policy": "deny",
+      "path": "tools/local_labels/test_sol_workload_capture_chunk.py",
+      "review_status": "provisional",
+      "sha256": "9429bd3a671437831502df805b87f6274e795e96345e39cf3c98152e4affda62"
+    },
+    {
+      "classification": "prohibited_evaluator",
+      "import_policy": "deny",
+      "path": "tools/local_labels/timing_prediction_contract.py",
+      "review_status": "reviewed",
+      "sha256": "5e3e2a691b507e801031981969f5fde590ae99e8f7cbbe3f8a92d092ea06edff"
+    },
+    {
+      "classification": "unreviewed",
+      "import_policy": "deny",
+      "path": "tools/local_labels/validate_m1_anchor.py",
+      "review_status": "provisional",
+      "sha256": "21bb921ca159cbae4b1a3207e507b17343de376a675a8ce37095eab884888792"
+    },
+    {
+      "classification": "unreviewed",
+      "import_policy": "deny",
+      "path": "workloads/simbench_bw/comparison_contract_overlay.py",
+      "review_status": "provisional",
+      "sha256": "6c845fca181018f6a88975da984dc607ea298eec80a5c552b9c89573bec6e4db"
+    },
+    {
+      "classification": "prohibited_evaluator",
+      "import_policy": "deny",
+      "path": "workloads/simbench_bw/comparison_runner.py",
+      "review_status": "reviewed",
+      "sha256": "80c1c28a6a951c648de4a4877cd91798e687a368bdfe5b3fc8533562cc25e20e"
+    },
+    {
+      "classification": "prohibited_evaluator",
+      "import_policy": "deny",
+      "path": "workloads/simbench_bw/compute_validation_metric.py",
+      "review_status": "reviewed",
+      "sha256": "25457773763439c7c45e0efb9489784f0bdd83c5d83c56dea2718cd541000bd9"
+    },
+    {
+      "classification": "prohibited_evaluator",
+      "import_policy": "deny",
+      "path": "workloads/simbench_bw/gcom_lite_cycles_evaluator.py",
+      "review_status": "reviewed",
+      "sha256": "13be63ebf5fb20fefef9172133b0f1a5cc65b09bb6d6d21e8b6156a9c3fde285"
+    },
+    {
+      "classification": "prohibited_evaluator",
+      "import_policy": "deny",
+      "path": "workloads/simbench_bw/gcom_lite_slug_disjoint_scoring.py",
+      "review_status": "reviewed",
+      "sha256": "0929c2a2a6df24dd5cf8b9dc191b9b3ca490a776ba12efb9ed63583b8bcc4282"
+    },
+    {
+      "classification": "unreviewed",
+      "import_policy": "deny",
+      "path": "workloads/simbench_bw/nvml_covariate_join.py",
+      "review_status": "provisional",
+      "sha256": "db75f686b474fa2a4a9e1a4f407235aa97996b9a8345965b06735b3c20088bb2"
+    },
+    {
+      "classification": "prohibited_evaluator",
+      "import_policy": "deny",
+      "path": "workloads/simbench_bw/per_metric_evidence_harness.py",
+      "review_status": "reviewed",
+      "sha256": "dcdf4f409dfbd5c7681efd9127afeef5cc4dd765f9878195d155ac161cc3d60c"
+    },
+    {
+      "classification": "non_evaluator",
+      "import_policy": "deny",
+      "path": "workloads/simbench_bw/phase_cycle_ledger_aggregator.py",
+      "review_status": "reviewed",
+      "sha256": "649eb72642a2932da9e60db26f58f04147074af523c2605876460b743e33a9fa"
+    },
+    {
+      "classification": "non_evaluator",
+      "import_policy": "deny",
+      "path": "workloads/simbench_bw/phase_cycle_ledger_consumer.py",
+      "review_status": "reviewed",
+      "sha256": "49635c822a4bca141f52c466977489c09717d16bac88e793d63a513ab6fe9942"
+    },
+    {
+      "classification": "unreviewed",
+      "import_policy": "deny",
+      "path": "workloads/simbench_bw/tests/conftest_cache_predictor_comparison.py",
+      "review_status": "provisional",
+      "sha256": "5593babefe4b50e25638ae1d243e8043e8ef03f6982b9ccf9dfba80a551b128c"
+    },
+    {
+      "classification": "unreviewed",
+      "import_policy": "deny",
+      "path": "workloads/simbench_bw/tests/test_comparison_runner.py",
+      "review_status": "provisional",
+      "sha256": "88c4f4bc42e7187eb2a3796fa2a9e4238ac75899873d24ad198976e2e709e875"
+    },
+    {
+      "classification": "unreviewed",
+      "import_policy": "deny",
+      "path": "workloads/simbench_bw/tests/test_comparison_runner_headline_validity.py",
+      "review_status": "provisional",
+      "sha256": "7a94b041a9f924ccfb7393c2424554748572c2325894190fc4a58d40659d554d"
+    },
+    {
+      "classification": "unreviewed",
+      "import_policy": "deny",
+      "path": "workloads/simbench_bw/tests/test_comparison_runner_v3_selection.py",
+      "review_status": "provisional",
+      "sha256": "592aaf7de09d5703cd83b13a5fd57c7a3d77024fe3a67ec8810a93ed757a7020"
+    },
+    {
+      "classification": "unreviewed",
+      "import_policy": "deny",
+      "path": "workloads/simbench_bw/tests/test_cross_arch_comparison_harness.py",
+      "review_status": "provisional",
+      "sha256": "4562caa3e9067455bd2fed57dbf12ae62565f14bddca26846fd1ccf5dd9a0648"
+    },
+    {
+      "classification": "prohibited_evaluator",
+      "import_policy": "deny",
+      "path": "workloads/simbench_bw/timing_accuracy_runner.py",
+      "review_status": "reviewed",
+      "sha256": "fc0feb640fdc534ab8d852a75b7e6b17d1df45b74961b7681fb0430179d9ba79"
+    },
+    {
+      "classification": "prohibited_evaluator",
+      "import_policy": "deny",
+      "path": "workloads/simbench_bw/timing_closure.py",
+      "review_status": "reviewed",
+      "sha256": "47034d5eb0f2fda130bb2e11064b0cfbbff5da666ada3a988422a066b52afa32"
+    },
+    {
+      "classification": "prohibited_evaluator",
+      "import_policy": "deny",
+      "path": "workloads/simbench_bw/timing_cycle_predictor.py",
+      "review_status": "reviewed",
+      "sha256": "8b97d03087f12d0a51d96641d5432917ab2e50646c3352587f6803920bdbfd1e"
+    }
+  ],
+  "default_repo_local_import_policy": "deny",
+  "hash_algorithm": "sha256",
+  "production_entrypoint": "eval/production_evaluator/__init__.py",
+  "registry_version": "evaluator_import_surface_registry.v1",
+  "schema_binding": {
+    "path": "eval/guards/evaluator_import_surface_registry.v1.schema.json",
+    "sha256": "aded99b64a3e342283447daeb21fe5f58f00654bcce5645b77a681809999ec1b"
+  }
+}

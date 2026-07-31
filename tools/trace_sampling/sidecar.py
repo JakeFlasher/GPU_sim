@@ -13,6 +13,8 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import os
+import stat
 from pathlib import Path
 from typing import Any
 
@@ -23,6 +25,119 @@ from compression import PayloadManifestError, parse_payload_file_manifest
 _SCHEMA_PATH = Path(__file__).resolve().parent / "schema" / "trace_sampling.schema.json"
 _SCHEMA = json.loads(_SCHEMA_PATH.read_text())
 _VALIDATOR = jsonschema.Draft7Validator(_SCHEMA)
+
+
+MetadataSnapshot = tuple[int, int, int, int, int, int, int]
+
+
+def _metadata_snapshot(metadata: os.stat_result) -> MetadataSnapshot:
+    return (
+        metadata.st_dev,
+        metadata.st_ino,
+        metadata.st_mode,
+        metadata.st_nlink,
+        metadata.st_size,
+        metadata.st_mtime_ns,
+        metadata.st_ctime_ns,
+    )
+
+
+class SidecarPublicationState:
+    """Caller-owned retained identity for one exclusive sidecar publication."""
+
+    def __init__(self, expected_payload: bytes) -> None:
+        if type(expected_payload) is not bytes:
+            raise TypeError("sidecar publication payload must be bytes")
+        self.expected_payload = expected_payload
+        self._descriptor = -1
+        self.snapshot: MetadataSnapshot | None = None
+        self.committed = False
+        self.complete = False
+
+    @property
+    def descriptor(self) -> int:
+        if self._descriptor < 0:
+            raise RuntimeError("sidecar publication descriptor is closed")
+        return self._descriptor
+
+    def retain_opened(self, descriptor: int) -> None:
+        if self._descriptor >= 0 or self.committed:
+            raise RuntimeError("sidecar publication state is already bound")
+        if type(descriptor) is not int or descriptor < 0:
+            raise RuntimeError("sidecar publication descriptor is invalid")
+        self._descriptor = os.dup(descriptor)
+        self.committed = True
+
+    def _read_stable_payload(self) -> tuple[bytes, MetadataSnapshot]:
+        descriptor = self.descriptor
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode):
+            raise RuntimeError("retained sidecar publication is not regular")
+        if before.st_size > len(self.expected_payload):
+            raise RuntimeError("retained sidecar publication exceeds expected bytes")
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        remaining = before.st_size
+        blocks: list[bytes] = []
+        while remaining:
+            try:
+                block = os.read(descriptor, remaining)
+            except InterruptedError:
+                continue
+            if not block:
+                raise RuntimeError(
+                    "retained sidecar publication truncated during read"
+                )
+            blocks.append(block)
+            remaining -= len(block)
+        while True:
+            try:
+                extra = os.read(descriptor, 1)
+                break
+            except InterruptedError:
+                continue
+        after = os.fstat(descriptor)
+        before_snapshot = _metadata_snapshot(before)
+        if extra or _metadata_snapshot(after) != before_snapshot:
+            raise RuntimeError(
+                "retained sidecar publication changed during read"
+            )
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        return b"".join(blocks), before_snapshot
+
+    def seal_complete(self) -> None:
+        payload, snapshot = self._read_stable_payload()
+        if payload != self.expected_payload:
+            raise RuntimeError(
+                "retained sidecar publication payload mismatch"
+            )
+        self.snapshot = snapshot
+        self.complete = True
+
+    def verify_retained_payload(self) -> None:
+        if not self.complete or self.snapshot is None:
+            raise RuntimeError("sidecar publication identity is incomplete")
+        payload, current = self._read_stable_payload()
+        expected = self.snapshot
+        # A locator replacement legitimately changes A's link count and ctime,
+        # but the retained descriptor must still name A's exact inode, mode,
+        # size, mtime, and bytes.
+        if (
+            current[0] != expected[0]
+            or current[1] != expected[1]
+            or current[2] != expected[2]
+            or current[4] != expected[4]
+            or current[5] != expected[5]
+            or payload != self.expected_payload
+        ):
+            raise RuntimeError(
+                "retained sidecar publication identity changed"
+            )
+
+    def close(self) -> None:
+        descriptor = self._descriptor
+        self._descriptor = -1
+        if descriptor >= 0:
+            os.close(descriptor)
 
 
 class SidecarSemanticError(ValueError):
@@ -486,9 +601,28 @@ def build_sidecar(*, cell_id: str, kernel_name: str, args_hash: str, stats,
     return sidecar
 
 
-def write_sidecar(sidecar: dict, path: Path) -> None:
+def write_sidecar(
+        sidecar: dict, path: Path, *,
+        publication_state: SidecarPublicationState | None = None) -> None:
     validate_sidecar(sidecar)
+    payload = (json.dumps(sidecar, indent=2) + "\n").encode("utf-8")
+    if publication_state is not None:
+        if type(publication_state) is not SidecarPublicationState:
+            raise TypeError("invalid sidecar publication state")
+        if publication_state.expected_payload != payload:
+            raise RuntimeError(
+                "sidecar publication state payload disagrees with sidecar"
+            )
     # Exclusive creation preserves pre-existing evidence and closes the race
-    # between an orchestration freshness check and the final write.
-    with path.open("x") as stream:
-        stream.write(json.dumps(sidecar, indent=2) + "\n")
+    # between an orchestration freshness check and the final write. When a
+    # publication state is supplied, duplicate the exact opened inode before
+    # writing so even a postcommit exception cannot lose A's identity/evidence.
+    with path.open("x+b") as stream:
+        if publication_state is not None:
+            publication_state.retain_opened(stream.fileno())
+        written = stream.write(payload)
+        if written != len(payload):
+            raise OSError("short sidecar publication write")
+        stream.flush()
+        if publication_state is not None:
+            publication_state.seal_complete()

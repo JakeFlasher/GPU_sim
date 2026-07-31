@@ -202,11 +202,14 @@ the per-context teardown handshake are bounded by:
   teardown spin. The runtime accepts only strictly positive integers;
   empty, non-numeric, negative, and zero values warn and fall back to
   the default so the bounded-spin guarantee always holds against a
-  stalled recv thread. On post-launch exhaustion
-  the tracer resets `skip_callback_flag`, snapshots whatever phase
-  records the recv thread has already drained, emits a typed
-  `WARNING:` line on stderr naming the kernel and `launch_index`,
-  and returns control so subsequent launches continue. On teardown
+  stalled recv thread. On post-launch exhaustion the tracer resets
+  `skip_callback_flag`, snapshots whatever phase records the recv thread has
+  already drained, and exits fatally before any canonical publication. If the
+  snapshot is nonempty, its exact bytes are retained only as
+  `.partial-phase-records_<repeat>_<launch>.bin`; that explicitly noncanonical
+  name cannot match phase-ledger discovery and cannot authorize evidence. A
+  failure while retaining those partial bytes is appended to the timeout
+  diagnostic without replacing timeout as the primary fatal reason. On teardown
   exhaustion the tracer skips `phase_channel_host.destroy(false)`,
   `cudaFree(phase_channel_dev)`, and `delete ctx_state`, instead
   emitting a `WARNING:` line that reports `timed_join_attempted=false`
@@ -223,17 +226,46 @@ atomic (for diagnostics) before pushing the flush sentinel, and waits
 for `phase_completed_flush_launch_index == this_launch_id` after the
 flush. The recv thread always stores the sentinel's `launch_index`
 into `phase_completed_flush_launch_index` on every sentinel it
-processes — a stale sentinel from a previously-timed-out launch that
-writes `completed = N` cannot satisfy a later launch's wait for
-`completed == N+1`, so the handshake is race-free under arbitrary
-recv-thread scheduling. The recv thread also emits a stale-sentinel
-`WARNING:` when the sentinel's `launch_index` does not match the
-current expected value; this is diagnostic only and not load-bearing
-for safety. Late records (records whose `launch_index` is less than
-the current launch being snapshotted) are partitioned out of the
-snapshot and counted with a quarantine `WARNING:` so they cannot
-contaminate a later launch's `phase_records_<repeat>_<launch>.bin`
-file.
+processes. The generation-valued handshake prevents any stale sentinel from
+satisfying a different launch's wait under arbitrary recv-thread scheduling.
+The recv thread also emits a stale-sentinel `WARNING:` when the sentinel's
+`launch_index` does not match the current expected value; this is diagnostic
+only and not load-bearing for safety. Record snapshots are likewise partitioned
+by immutable `launch_index`, and earlier-generation records are quarantined as
+defense in depth. Because a flush timeout is now fatal, no timed-out launch can
+carry partial records forward into a later successful canonical capture.
+
+Those canonical filenames are intentionally not device-qualified, so phase
+injection has a strict one-GPU producer authority per process. It also permits
+only one in-flight phase-enabled launch: `BeginLaunch` claims the immutable
+`(device_id, launch_index)` before the process-global managed launch scalar is
+updated, and a same-device overlap fails closed rather than overwriting that
+identity. Launch exit and publication use the thread-local accepted launch ID,
+never a later read of the mutable managed scalar.
+
+During `nvbit_at_init` the tracer resolves `TRACES_FOLDER` and privately
+duplicates an exact inherited `/proc/self/fd/<n>` directory authority (or opens
+an ordinary path with `O_DIRECTORY|O_NOFOLLOW`), snapshots its device/inode
+identity, and rejects a second producing CUDA device before its independent
+launch counter can collide. `PhaseRecordWriter` is bound to its constructing
+PID; every public operation checks PID ownership before acquiring the mutex, and
+an inherited post-fork destructor also avoids that mutex, preventing child-side
+deadlock or duplicated authority/counter use. Each `CTXstate` stores a device ID
+only after `cudaGetDeviceCount` and `cuCtxGetDevice` succeed and both reported
+bounds are validated. Callback dispatch never queries the current context
+unconditionally: branches whose CUDA API contract requires one (notably memcpy
+and kernel launch) perform a fresh status/bounds check and compare it with the
+stored identity, while explicit-context and post-pop-safe paths use only the
+stored bounds-checked ID. Receiver paths likewise validate stored identity
+before any `kernel_id`, `current_stream_id`, or `stop_report` access.
+
+Every nonempty complete phase snapshot is created relative to a revalidated
+duplicate of the retained directory with `O_CREAT|O_EXCL|O_NOFOLLOW`;
+preexisting regular files, symlinks, hardlinks, FIFOs, and other nodes are never
+overwritten or followed. The publisher requires a single-link regular inode,
+exact bounded writes, file and directory `fsync`, and checked closes. Any
+authority, open, write, identity, or durability failure is process-fatal and
+leaves uncertain partial evidence in place rather than unlinking it.
 
 Two test-only deterministic stall hooks are compiled in but disabled
 unless their env vars are set, used by the synthetic-stall regression
@@ -249,7 +281,12 @@ tests for the post-launch and teardown bounded-spin paths:
   exits its WORKING loop, it `sched_yield()`s `K` times before setting
   `FINISHED`. This exercises the teardown timeout branch.
 
-Both hooks default off and are no-ops in production runs.
+Both hooks default off and are no-ops in production runs. The separate host-only
+`phase_record_writer_test` injects a post-create hardlink, leaf and directory
+`fsync` failures, checked-close failures (including cleanup precedence), a fake
+post-fork PID, same-device launch overlap, and a fatal callback that throws in
+process. It therefore exercises the live publisher and fatal wrapper without
+launching CUDA, NVBit, a GPU, or a subprocess.
 
 ## Using the tracer
 

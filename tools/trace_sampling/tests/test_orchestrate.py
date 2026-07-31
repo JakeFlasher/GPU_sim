@@ -2,12 +2,16 @@
 import copy
 import hashlib
 import json
+import os
 import shutil
 import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+
+from tools.local_labels import immutable_artifact as immutable
+from tools.nvbit_tracer.proto_binding_loader import load_dynamic_trace_bindings
 
 from admissibility_gate import MIN_SEGMENTS
 from counting_pass import BlockStat, CellStats
@@ -81,12 +85,16 @@ def _split_placement_stats(n_blocks=120, **kwargs):
         {0: 1, 1: 1}, **kwargs)
 
 
-def _install_mock_pipeline(monkeypatch, orch, pass1_stats, pass2_stats):
+def _install_mock_pipeline(
+        monkeypatch, orch, pass1_stats, pass2_stats, *, retain_inputs=False,
+        input_exit_hook=None):
     """Install a coherent pass1/pass2 capture pipeline and expose its calls."""
     pass2_stats = list(pass2_stats)
     selected_by_dir = {}
     selected_runs = []
     compression_calls = []
+    retained_pairs = []
+    retained_caps = []
 
     def stats_for(path):
         path = Path(path)
@@ -96,6 +104,10 @@ def _install_mock_pipeline(monkeypatch, orch, pass1_stats, pass2_stats):
         return pass2_stats[min(attempt - 1, len(pass2_stats) - 1)]
 
     def fake_run_pass(_binary, _args, out_dir, mode, **kwargs):
+        retained_pairs.append((
+            kwargs.get("retained_binary"),
+            kwargs.get("retained_tracer"),
+        ))
         out_dir.mkdir(parents=True, exist_ok=True)
         if mode == 2:
             selected = list(kwargs["selected_blocks"])
@@ -134,6 +146,49 @@ def _install_mock_pipeline(monkeypatch, orch, pass1_stats, pass2_stats):
                 + "a" * 64 + "\n"),
         )
 
+    if not retain_inputs:
+        class FakeRetained:
+            def __init__(self, path, descriptor):
+                self.path = Path(path)
+                self._descriptor = descriptor
+
+            @property
+            def descriptor(self):
+                if self._descriptor < 0:
+                    raise immutable.ImmutableArtifactError("retained input closed")
+                return self._descriptor
+
+            @property
+            def proc_path(self):
+                return f"/proc/self/fd/{self.descriptor}"
+
+            def verify_unchanged(self):
+                self.descriptor
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, _type, _value, _traceback):
+                self._descriptor = -1
+                if input_exit_hook is not None:
+                    input_exit_hook(self.path)
+                return False
+
+        def fake_binary_opener(path):
+            retained = FakeRetained(path, 901)
+            retained_caps.append(retained)
+            return retained
+
+        def fake_tracer_opener(path):
+            if Path(path).name == "trace_sampling.json":
+                return immutable.open_retained_regular(Path(path))
+            retained = FakeRetained(path, 902)
+            retained_caps.append(retained)
+            return retained
+
+        monkeypatch.setattr(orch, "open_retained_executable", fake_binary_opener)
+        monkeypatch.setattr(orch, "open_retained_regular", fake_tracer_opener)
+
     monkeypatch.setattr(orch, "run_pass", fake_run_pass)
     monkeypatch.setattr(orch, "cell_stats_from_capture",
                         lambda path, *_a, **_k: stats_for(path))
@@ -142,7 +197,8 @@ def _install_mock_pipeline(monkeypatch, orch, pass1_stats, pass2_stats):
     monkeypatch.setattr(orch, "compress_trace_dir", fake_compress)
     return SimpleNamespace(
         selected_runs=selected_runs, selected_by_dir=selected_by_dir,
-        compression_calls=compression_calls, stats_for=stats_for)
+        compression_calls=compression_calls, stats_for=stats_for,
+        retained_pairs=retained_pairs, retained_caps=retained_caps)
 
 
 def test_select_segments_picks_certainty_and_seeded_sample():
@@ -165,7 +221,7 @@ def test_select_segments_small_grid_refuses_to_floor_clamp():
 # --- pass-2 payload verification ---
 
 def _write_pass2_blocks(root, grid_x, block_ids, records_each=3):
-    import threadblock_pb2  # type: ignore
+    threadblock_pb2 = load_dynamic_trace_bindings().threadblock_pb2
     kd = root / "threadblocks" / "device_0" / "stream_0" / "kernel_1"
     kd.mkdir(parents=True)
     sizes = {}
@@ -240,6 +296,59 @@ def test_run_pass_refuses_a_preexisting_output_directory(tmp_path):
     assert exc_info.value.reason == "capture_output_exists"
 
 
+def _write_retained_sampling_inputs(tmp_path):
+    binary = tmp_path / "bench"
+    binary.write_bytes(b"exact executable generation")
+    binary.chmod(0o755)
+    tracer = tmp_path / "tracer_tool.so"
+    tracer.write_bytes(b"exact tracer generation")
+    tracer.chmod(0o644)
+    return binary, tracer
+
+
+def test_run_pass_executes_exact_retained_descriptors(tmp_path, monkeypatch):
+    import orchestrate as orch
+
+    binary, tracer = _write_retained_sampling_inputs(tmp_path)
+    output = tmp_path / "capture"
+    observed = {}
+
+    def fake_runtime(path, *, pb_lib, retained_descriptor):
+        observed["runtime"] = (path, pb_lib, retained_descriptor)
+        return {}
+
+    def fake_subprocess_run(command, **kwargs):
+        observed["command"] = list(command)
+        observed["kwargs"] = kwargs
+        (output / "dynamic_trace.pb").write_bytes(b"trace")
+        return SimpleNamespace(returncode=0, stdout=b"", stderr=b"")
+
+    monkeypatch.setattr(orch, "tracer_runtime_env", fake_runtime)
+    monkeypatch.setattr(orch.subprocess, "run", fake_subprocess_run)
+
+    orch.run_pass(
+        binary,
+        ["arg"],
+        output,
+        mode=1,
+        tracer_so=tracer,
+        pb_lib=tmp_path / "pb-lib",
+    )
+
+    binary_proc, app_arg = observed["command"]
+    tracer_proc = observed["kwargs"]["env"]["CUDA_INJECTION64_PATH"]
+    binary_fd = int(binary_proc.rsplit("/", 1)[1])
+    tracer_fd = int(tracer_proc.rsplit("/", 1)[1])
+    assert binary_proc == f"/proc/self/fd/{binary_fd}"
+    assert tracer_proc == f"/proc/self/fd/{tracer_fd}"
+    assert app_arg == "arg"
+    assert observed["kwargs"]["pass_fds"] == (binary_fd, tracer_fd)
+    assert observed["runtime"][2] == tracer_fd
+    assert observed["runtime"][0] == tracer.absolute()
+    assert str(binary) not in observed["command"]
+    assert observed["kwargs"]["cwd"] == str(binary.parent)
+
+
 def test_orchestrate_sidecar_matches_the_seeded_population_plan(tmp_path, monkeypatch):
     import orchestrate as orch
 
@@ -268,6 +377,10 @@ def test_orchestrate_sidecar_matches_the_seeded_population_plan(tmp_path, monkey
         block_id for segment in sidecar["segments"]
         for block_id in segment["block_ids"])
     assert mocked.selected_runs == [selected_from_sidecar]
+    assert len(mocked.retained_pairs) == 2
+    assert mocked.retained_pairs[0][0] is mocked.retained_pairs[1][0]
+    assert mocked.retained_pairs[0][1] is mocked.retained_pairs[1][1]
+    assert all(cap._descriptor == -1 for cap in mocked.retained_caps)
     assert sidecar["bytes"]["raw"] == len(selected_from_sidecar) * 10
     assert sidecar["tracer"]["stats_pass_version"] == 2
     assert sidecar["schema_version"] == 2
@@ -278,6 +391,423 @@ def test_orchestrate_sidecar_matches_the_seeded_population_plan(tmp_path, monkey
     hash_input = copy.deepcopy(sidecar)
     hash_input["hashes"].pop("sidecar_sha256")
     assert claimed_hash == sidecar_sha256(hash_input)
+
+
+def _record_real_retained_inputs(monkeypatch, orch):
+    opened = []
+    real_binary_open = orch.open_retained_executable
+    real_tracer_open = orch.open_retained_regular
+
+    def open_binary(path):
+        retained = real_binary_open(path)
+        opened.append(retained)
+        return retained
+
+    def open_tracer(path):
+        retained = real_tracer_open(path)
+        if Path(path).name != "trace_sampling.json":
+            opened.append(retained)
+        return retained
+
+    monkeypatch.setattr(orch, "open_retained_executable", open_binary)
+    monkeypatch.setattr(orch, "open_retained_regular", open_tracer)
+    return opened
+
+
+def _assert_retained_inputs_closed(opened):
+    assert len(opened) == 2
+    for retained in opened:
+        with pytest.raises(immutable.ImmutableArtifactError, match="closed"):
+            retained.descriptor
+
+
+def test_orchestrate_closes_one_real_descriptor_pair_after_both_passes(
+        tmp_path, monkeypatch):
+    import orchestrate as orch
+
+    binary, tracer = _write_retained_sampling_inputs(tmp_path)
+    stats = _stats_with_waves(120, 2)
+    mocked = _install_mock_pipeline(
+        monkeypatch, orch, stats, [stats], retain_inputs=True)
+    opened = _record_real_retained_inputs(monkeypatch, orch)
+
+    sidecar = orch.orchestrate_cell(
+        binary, [], tmp_path / "work", tracer_so=tracer,
+        max_trace_bytes=1000)
+
+    assert sidecar["method"] == "wave_segment_stratified_subset"
+    assert len(mocked.retained_pairs) == 2
+    assert mocked.retained_pairs[0] == mocked.retained_pairs[1]
+    assert mocked.retained_pairs[0] == tuple(opened)
+    _assert_retained_inputs_closed(opened)
+
+
+@pytest.mark.parametrize("mutation", ("same_byte_replacement", "aba"))
+def test_orchestrate_rejects_binary_generation_change_after_pass1(
+        tmp_path, monkeypatch, mutation):
+    import orchestrate as orch
+
+    binary, tracer = _write_retained_sampling_inputs(tmp_path)
+    stats = _stats_with_waves(120, 2)
+    _install_mock_pipeline(
+        monkeypatch, orch, stats, [stats], retain_inputs=True)
+    opened = _record_real_retained_inputs(monkeypatch, orch)
+    mocked_run_pass = orch.run_pass
+    mutated = False
+
+    def mutate_after_pass1(*args, **kwargs):
+        nonlocal mutated
+        mocked_run_pass(*args, **kwargs)
+        mode = kwargs.get("mode", args[3] if len(args) > 3 else None)
+        if mode != 1 or mutated:
+            return
+        mutated = True
+        if mutation == "same_byte_replacement":
+            replacement = binary.with_name(".binary-replacement")
+            replacement.write_bytes(b"exact executable generation")
+            replacement.chmod(0o755)
+            os.replace(replacement, binary)
+        else:
+            parked = binary.with_name(".binary-parked")
+            os.replace(binary, parked)
+            os.replace(parked, binary)
+
+    monkeypatch.setattr(orch, "run_pass", mutate_after_pass1)
+
+    with pytest.raises(SamplingRefusal) as exc_info:
+        orch.orchestrate_cell(
+            binary, [], tmp_path / "work", tracer_so=tracer,
+            max_trace_bytes=1000)
+
+    assert mutated is True
+    assert exc_info.value.reason == "sampling_input_invalid"
+    assert not (tmp_path / "work" / "trace_sampling.json").exists()
+    _assert_retained_inputs_closed(opened)
+
+
+def test_orchestrate_rejects_tracer_replacement_before_final_publication(
+        tmp_path, monkeypatch):
+    import orchestrate as orch
+
+    binary, tracer = _write_retained_sampling_inputs(tmp_path)
+    stats = _stats_with_waves(120, 2)
+    _install_mock_pipeline(
+        monkeypatch, orch, stats, [stats], retain_inputs=True)
+    opened = _record_real_retained_inputs(monkeypatch, orch)
+    original_build = orch.build_sidecar
+    mutated = False
+
+    def build_then_replace_tracer(*args, **kwargs):
+        nonlocal mutated
+        sidecar = original_build(*args, **kwargs)
+        if not mutated:
+            mutated = True
+            replacement = tracer.with_name(".tracer-replacement")
+            replacement.write_bytes(b"exact tracer generation")
+            replacement.chmod(0o644)
+            os.replace(replacement, tracer)
+        return sidecar
+
+    monkeypatch.setattr(orch, "build_sidecar", build_then_replace_tracer)
+
+    with pytest.raises(SamplingRefusal) as exc_info:
+        orch.orchestrate_cell(
+            binary, [], tmp_path / "work", tracer_so=tracer,
+            max_trace_bytes=1000)
+
+    assert mutated is True
+    assert exc_info.value.reason == "sampling_input_invalid"
+    assert not (tmp_path / "work" / "trace_sampling.json").exists()
+    _assert_retained_inputs_closed(opened)
+
+
+def test_orchestrate_rejects_binary_replacement_during_sidecar_publication(
+        tmp_path, monkeypatch):
+    import orchestrate as orch
+
+    binary, tracer = _write_retained_sampling_inputs(tmp_path)
+    stats = _stats_with_waves(120, 2)
+    _install_mock_pipeline(
+        monkeypatch, orch, stats, [stats], retain_inputs=True)
+    opened = _record_real_retained_inputs(monkeypatch, orch)
+    original_write = orch.write_sidecar
+    mutated = False
+
+    def write_then_replace_binary(
+            sidecar, path, *, publication_state=None):
+        nonlocal mutated
+        original_write(
+            sidecar, path, publication_state=publication_state)
+        replacement = binary.with_name(".publication-binary-replacement")
+        replacement.write_bytes(b"exact executable generation")
+        replacement.chmod(0o755)
+        os.replace(replacement, binary)
+        mutated = True
+
+    monkeypatch.setattr(orch, "write_sidecar", write_then_replace_binary)
+
+    with pytest.raises(SamplingRefusal) as exc_info:
+        orch.orchestrate_cell(
+            binary, [], tmp_path / "work", tracer_so=tracer,
+            max_trace_bytes=1000)
+
+    out = tmp_path / "work" / "trace_sampling.json"
+    assert mutated is True
+    assert exc_info.value.reason == "sampling_input_invalid"
+    assert not out.exists()
+    retired = tuple(out.parent.glob(".trace_sampling.json.*.retired"))
+    assert len(retired) == 1
+    validate_sidecar(json.loads(retired[0].read_text(encoding="utf-8")))
+    _assert_retained_inputs_closed(opened)
+
+
+def test_writer_publish_then_raise_retires_exact_sidecar(
+        tmp_path, monkeypatch):
+    import orchestrate as orch
+
+    stats = _stats_with_waves(120, 2)
+    mocked = _install_mock_pipeline(monkeypatch, orch, stats, [stats])
+    original_write = orch.write_sidecar
+
+    def publish_then_raise(
+            sidecar, path, *, publication_state=None):
+        original_write(
+            sidecar, path, publication_state=publication_state)
+        raise RuntimeError("writer failed after publication")
+
+    monkeypatch.setattr(orch, "write_sidecar", publish_then_raise)
+
+    with pytest.raises(SamplingRefusal) as exc_info:
+        orch.orchestrate_cell(
+            tmp_path / "bench", [], tmp_path / "work",
+            max_trace_bytes=1000)
+
+    out = tmp_path / "work" / "trace_sampling.json"
+    assert exc_info.value.reason == "sidecar_publication_failed"
+    assert exc_info.value.evidence_state == "expected_payload_retired"
+    assert "sidecar_evidence_state=expected_payload_retired" in str(
+        exc_info.value)
+    assert not out.exists()
+    retired = tuple(out.parent.glob(".trace_sampling.json.*.retired"))
+    assert len(retired) == 1
+    validate_sidecar(json.loads(retired[0].read_text(encoding="utf-8")))
+    assert all(cap._descriptor == -1 for cap in mocked.retained_caps)
+
+
+def test_writer_publish_replace_then_raise_preserves_replacement(
+        tmp_path, monkeypatch):
+    import orchestrate as orch
+
+    stats = _stats_with_waves(120, 2)
+    mocked = _install_mock_pipeline(monkeypatch, orch, stats, [stats])
+    original_write = orch.write_sidecar
+    replacement_payload = b'{"concurrent":"replacement"}\n'
+
+    def publish_replace_then_raise(
+            sidecar, path, *, publication_state=None):
+        original_write(
+            sidecar, path, publication_state=publication_state)
+        replacement = path.with_name(".concurrent-sidecar")
+        replacement.write_bytes(replacement_payload)
+        os.replace(replacement, path)
+        raise RuntimeError("writer failed after replacement")
+
+    monkeypatch.setattr(
+        orch, "write_sidecar", publish_replace_then_raise)
+
+    with pytest.raises(SamplingRefusal) as exc_info:
+        orch.orchestrate_cell(
+            tmp_path / "bench", [], tmp_path / "work",
+            max_trace_bytes=1000)
+
+    out = tmp_path / "work" / "trace_sampling.json"
+    assert exc_info.value.reason == "sidecar_publication_failed"
+    assert exc_info.value.evidence_state == (
+        "retained_payload_salvaged_active_locator_untouched")
+    assert out.read_bytes() == replacement_payload
+    assert not tuple(out.parent.glob(".trace_sampling.json.*.retired"))
+    evidence = tuple(out.parent.glob(".failed-regular-*"))
+    assert len(evidence) == 1
+    validate_sidecar(json.loads(evidence[0].read_text(encoding="utf-8")))
+    assert all(cap._descriptor == -1 for cap in mocked.retained_caps)
+
+
+def test_writer_same_byte_replace_then_raise_preserves_b_and_a_evidence(
+        tmp_path, monkeypatch):
+    import orchestrate as orch
+
+    stats = _stats_with_waves(120, 2)
+    mocked = _install_mock_pipeline(monkeypatch, orch, stats, [stats])
+    original_write = orch.write_sidecar
+    original_retire = orch.retire_regular_file
+    writer_snapshot = None
+    replacement_identity = None
+    retirement_authority = {}
+
+    def publish_same_byte_replace_then_raise(
+            sidecar, path, *, publication_state=None):
+        nonlocal writer_snapshot, replacement_identity
+        assert publication_state is not None
+        original_write(
+            sidecar, path, publication_state=publication_state)
+        writer_snapshot = publication_state.snapshot
+        assert writer_snapshot is not None
+        payload = path.read_bytes()
+        replacement = path.with_name(".same-byte-writer-replacement")
+        replacement.write_bytes(payload)
+        os.replace(replacement, path)
+        metadata = path.stat()
+        replacement_identity = (metadata.st_dev, metadata.st_ino)
+        assert replacement_identity != writer_snapshot[:2]
+        raise RuntimeError("writer failed after same-byte replacement")
+
+    def record_retirement(
+            path, *, expected_payload=None, expected_snapshot=None):
+        retirement_authority["payload"] = expected_payload
+        retirement_authority["snapshot"] = expected_snapshot
+        return original_retire(
+            path,
+            expected_payload=expected_payload,
+            expected_snapshot=expected_snapshot,
+        )
+
+    monkeypatch.setattr(
+        orch, "write_sidecar", publish_same_byte_replace_then_raise)
+    monkeypatch.setattr(orch, "retire_regular_file", record_retirement)
+
+    with pytest.raises(SamplingRefusal) as exc_info:
+        orch.orchestrate_cell(
+            tmp_path / "bench", [], tmp_path / "work",
+            max_trace_bytes=1000)
+
+    out = tmp_path / "work" / "trace_sampling.json"
+    assert writer_snapshot is not None
+    assert replacement_identity is not None
+    assert exc_info.value.reason == "sidecar_publication_failed"
+    assert isinstance(exc_info.value.__cause__, RuntimeError)
+    assert "same-byte replacement" in str(exc_info.value.__cause__)
+    assert exc_info.value.evidence_state == (
+        "retained_payload_salvaged_active_locator_untouched")
+    assert retirement_authority["snapshot"] == writer_snapshot
+    assert retirement_authority["payload"] == out.read_bytes()
+    assert (out.stat().st_dev, out.stat().st_ino) == replacement_identity
+    assert not tuple(out.parent.glob(".trace_sampling.json.*.retired"))
+    evidence = tuple(out.parent.glob(".failed-regular-*"))
+    assert len(evidence) == 1
+    assert evidence[0].read_bytes() == out.read_bytes()
+    validate_sidecar(json.loads(evidence[0].read_text(encoding="utf-8")))
+    assert all(cap._descriptor == -1 for cap in mocked.retained_caps)
+
+
+def test_same_byte_sidecar_replacement_during_input_close_is_preserved(
+        tmp_path, monkeypatch):
+    import orchestrate as orch
+
+    stats = _stats_with_waves(120, 2)
+    out = tmp_path / "work" / "trace_sampling.json"
+    replacement_identity = None
+
+    def replace_once(_input_path):
+        nonlocal replacement_identity
+        if replacement_identity is not None:
+            return
+        payload = out.read_bytes()
+        replacement = out.with_name(".same-byte-sidecar")
+        replacement.write_bytes(payload)
+        os.replace(replacement, out)
+        metadata = out.stat()
+        replacement_identity = (metadata.st_dev, metadata.st_ino)
+
+    mocked = _install_mock_pipeline(
+        monkeypatch, orch, stats, [stats], input_exit_hook=replace_once)
+
+    with pytest.raises(SamplingRefusal) as exc_info:
+        orch.orchestrate_cell(
+            tmp_path / "bench", [], tmp_path / "work",
+            max_trace_bytes=1000)
+
+    assert replacement_identity is not None
+    assert exc_info.value.reason == "sidecar_publication_changed"
+    assert exc_info.value.evidence_state == (
+        "retained_payload_salvaged_active_locator_untouched")
+    assert (out.stat().st_dev, out.stat().st_ino) == replacement_identity
+    validate_sidecar(json.loads(out.read_text(encoding="utf-8")))
+    assert not tuple(out.parent.glob(".trace_sampling.json.*.retired"))
+    evidence = tuple(out.parent.glob(".failed-regular-*"))
+    assert len(evidence) == 1
+    assert evidence[0].read_bytes() == out.read_bytes()
+    assert all(cap._descriptor == -1 for cap in mocked.retained_caps)
+
+
+def test_sidecar_replacement_during_return_boundary_is_preserved(
+        tmp_path, monkeypatch):
+    import orchestrate as orch
+
+    stats = _stats_with_waves(120, 2)
+    mocked = _install_mock_pipeline(monkeypatch, orch, stats, [stats])
+    out = tmp_path / "work" / "trace_sampling.json"
+    original_opener = orch.open_retained_regular
+    replacement_payload = b'{"return_boundary":"replacement"}\n'
+    replaced = False
+
+    class ReplaceBeforeExit:
+        def __init__(self, retained):
+            self._retained = retained
+
+        def __getattr__(self, name):
+            return getattr(self._retained, name)
+
+        def __enter__(self):
+            self._retained.__enter__()
+            return self
+
+        def __exit__(self, exc_type, exc, traceback):
+            nonlocal replaced
+            if not replaced:
+                replacement = out.with_name(".return-boundary-sidecar")
+                replacement.write_bytes(replacement_payload)
+                os.replace(replacement, out)
+                replaced = True
+            return self._retained.__exit__(exc_type, exc, traceback)
+
+    def retain_with_exit_replacement(path):
+        retained = original_opener(path)
+        if Path(path) == out:
+            return ReplaceBeforeExit(retained)
+        return retained
+
+    monkeypatch.setattr(
+        orch, "open_retained_regular", retain_with_exit_replacement)
+
+    with pytest.raises(SamplingRefusal) as exc_info:
+        orch.orchestrate_cell(
+            tmp_path / "bench", [], tmp_path / "work",
+            max_trace_bytes=1000)
+
+    assert replaced is True
+    assert exc_info.value.reason == "sidecar_publication_changed"
+    assert exc_info.value.evidence_state == (
+        "retained_payload_salvaged_active_locator_untouched")
+    assert out.read_bytes() == replacement_payload
+    assert not tuple(out.parent.glob(".trace_sampling.json.*.retired"))
+    evidence = tuple(out.parent.glob(".failed-regular-*"))
+    assert len(evidence) == 1
+    validate_sidecar(json.loads(evidence[0].read_text(encoding="utf-8")))
+    assert all(cap._descriptor == -1 for cap in mocked.retained_caps)
+
+
+def test_success_returns_exact_active_sidecar_bytes(tmp_path, monkeypatch):
+    import orchestrate as orch
+
+    stats = _stats_with_waves(120, 2)
+    _install_mock_pipeline(monkeypatch, orch, stats, [stats])
+
+    sidecar = orch.orchestrate_cell(
+        tmp_path / "bench", [], tmp_path / "work",
+        max_trace_bytes=1000)
+
+    expected = (json.dumps(sidecar, indent=2) + "\n").encode("utf-8")
+    assert (tmp_path / "work" / "trace_sampling.json").read_bytes() == expected
 
 
 def test_reconciliation_accepts_one_placement_drift_then_fixed_point(
@@ -503,7 +1033,7 @@ def test_counting_two_launch_scoped_via_cell_stats(tmp_path):
 
 @pytest.mark.skipif(not _have_live(), reason="tracer .so / GPU / nvcc absent")
 def test_live_v2_sector_and_mode2_serialized_bytes_match_payload(tmp_path):
-    import threadblock_pb2  # type: ignore
+    threadblock_pb2 = load_dynamic_trace_bindings().threadblock_pb2
     from counting_pass import analyze_trace_dir, cell_stats_from_capture
     from orchestrate import run_pass
     from replay_count_producer import first_launch_dir

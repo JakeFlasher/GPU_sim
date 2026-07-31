@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import stat
 import subprocess
 import sys
 from collections.abc import Mapping
@@ -90,14 +91,42 @@ def tracer_runtime_env(
     *,
     base_env: Mapping[str, str] | None = None,
     pb_lib: Path | None = None,
+    retained_descriptor: int | None = None,
 ) -> dict[str, str]:
     """Return an environment in which ``tracer_so`` has no missing DSOs.
+
+    When ``retained_descriptor`` is supplied, ``ldd`` inspects that exact open
+    inode through ``/proc/self/fd`` and inherits only that descriptor. Callers
+    must use the same descriptor path for ``CUDA_INJECTION64_PATH`` and retain it
+    through the injected child process.
 
     ``ldd`` is a necessary preflight, not proof of successful instrumentation;
     callers must still require a non-empty, contract-valid trace.
     """
 
-    tracer_so = Path(tracer_so).resolve()
+    if retained_descriptor is None:
+        tracer_path = str(Path(tracer_so).resolve())
+        tracer_pass_fds: tuple[int, ...] = ()
+        if not Path(tracer_path).is_file():
+            raise TracerRuntimeError(f"tracer .so is missing: {tracer_path}")
+    else:
+        if type(retained_descriptor) is not int or retained_descriptor < 0:
+            raise TracerRuntimeError(
+                "retained tracer descriptor must be a nonnegative integer"
+            )
+        try:
+            descriptor_stat = os.fstat(retained_descriptor)
+        except OSError as exc:
+            raise TracerRuntimeError(
+                f"retained tracer descriptor is unavailable: {exc}"
+            ) from exc
+        if not stat.S_ISREG(descriptor_stat.st_mode):
+            raise TracerRuntimeError(
+                "retained tracer descriptor must identify a regular file"
+            )
+        tracer_path = f"/proc/self/fd/{retained_descriptor}"
+        tracer_pass_fds = (retained_descriptor,)
+
     selected_pb_lib = _configured_pb_lib(pb_lib)
     cursor = selected_pb_lib
     symlinked = None
@@ -112,8 +141,6 @@ def tracer_runtime_env(
             f"{symlinked}"
         )
     pb_lib = selected_pb_lib.resolve()
-    if not tracer_so.is_file():
-        raise TracerRuntimeError(f"tracer .so is missing: {tracer_so}")
     if not pb_lib.is_dir():
         raise TracerRuntimeError(
             f"pinned protobuf runtime directory is missing: {pb_lib}"
@@ -125,11 +152,12 @@ def tracer_runtime_env(
     )
     try:
         proc = subprocess.run(
-            ["ldd", str(tracer_so)],
+            ["ldd", tracer_path],
             capture_output=True,
             text=True,
             env=env,
             check=False,
+            pass_fds=tracer_pass_fds,
         )
     except OSError as exc:
         raise TracerRuntimeError(f"could not execute ldd: {exc}") from exc

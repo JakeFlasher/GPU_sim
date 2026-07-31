@@ -508,7 +508,8 @@ def test_ncu_probe_rejects_executable_mutation_during_version_observation(
     assert result["status"] == cp.STATUS_FAILED
     assert result["resolved_path"] is None
     assert result["executable_sha256"] is None
-    assert "metadata changed" in result["detail"]
+    assert result["detail"].startswith("NCU executable identity is invalid:")
+    assert "generation changed" in result["detail"]
 
 
 def test_ncu_probe_rejects_launcher_mutation_during_inner_version_observation(
@@ -530,7 +531,8 @@ def test_ncu_probe_rejects_launcher_mutation_during_inner_version_observation(
     assert result["status"] == cp.STATUS_FAILED
     assert result["resolved_path"] is None
     assert result["launcher_resolved_path"] is None
-    assert "metadata changed" in result["detail"]
+    assert result["detail"].startswith("NCU executable identity is invalid:")
+    assert "generation changed" in result["detail"]
 
 
 def test_ncu_probe_converts_version_timeout_to_failed_null_identity(tmp_path):

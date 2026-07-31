@@ -117,6 +117,59 @@ directory, not the `.pb`). The per-instruction wire contract (every memory
 instruction carries a non-`UNSPECIFIED` `memory_op_class` and a `data_width>0`)
 is validated offline by `import_trace_contract.py`.
 
+The local activation and roster publishers retain exact sidecar/manifest inode
+capabilities through raw/source closure and drain their mutation monitors as an
+authenticated set under the publication lock. The activation generation-root
+reader stack and roster aggregate-lock reader are ownership-transferred into
+that authenticated close; their sole reader-close callbacks run before the
+final locator observation, and no caller-owned reader close remains afterward.
+Activation and direct-cell arguments are bounded to 64 entries and 64 KiB before
+subprocess launch; the roster-wide argument total is also 64 KiB. Roster
+transactions are deliberately bounded to 32 cells (the canonical roster has
+17), 1024 admitted launches per direct cell, a 1 MiB roster input, and a 192 MiB
+aggregate manifest. The compositional preflight reserves a 1 MiB envelope,
+64 KiB fixed record material per cell, and 5 KiB per launch, so every admitted
+worst-case vector fits before capture starts. Aggregate objects, nested
+generations, launches, integers, floats, device IDs, and trace-byte/count
+relationships are then validated without coercion before attempt or active
+publication. Successful raw generations must share the capture attempt ID;
+their producer-relative path is exactly
+`<generation-root-name>/<attempt-id>` and must equal the suffix of
+`traces_folder`. They must also contain at least one file and the root directory,
+and cover the summed dynamic-trace, stats, threadblock, and optional
+allocation-sidecar bytes. Subprocess return codes are bounded exact signed
+integers, so signal statuses such as `-9` remain `capture_failed` evidence.
+Transactions also preflight 128 base descriptors plus 128 per retained cell;
+late `EMFILE`/`ENFILE` at Git HEAD/status/show pipe creation, activation lock
+duplication, activation capture-pipe allocation, or direct subprocess execution
+is mapped to `VERIFY_RESOURCE_BOUND` and
+`trace_snapshot_resource_unavailable` rather than `capture_exception`.
+
+The optional phase-injection A/B transaction has a separate finite work domain:
+at most 64 repeats, 1024 admitted contiguous launches, and 2048 total
+repeat-by-launch cells. Its target arguments are an exact list of at most 64
+UTF-8 strings and 64 KiB including separators; the child environment is capped
+at 4096 entries and 4 MiB. Supervised children retain at most 1 MiB combined
+stdout/stderr and diagnostics retain at most 64 KiB with replacement decoding.
+The default per-run timeout is 600 seconds; explicit values are exact integers
+from 1 through 3600 seconds, while `None` is reserved for an operator's explicit
+debug opt-out. Admission thresholds are exact integers or floats, finite, and in
+[0, 1000] percent. Each canonical phase-record file admits at most 262144
+complete 56-byte records (14680064 bytes). Repeat and launch bounds are checked
+before subprocess execution or matrix construction.
+
+Every A/B child executes a duplicate of the still-open admitted
+`RetainedExecutable` descriptor, and the caller-owned executable authority is
+reauthenticated before and after each invocation. Phase sources must cover the
+exact contiguous launch vector from admitted trace authority for every repeat;
+empty, malformed, partial, linked, special, trailing-byte, missing, and extra
+authorities fail closed. Serialized ledgers are admitted in memory, published
+into a monitored hidden stage, rebound to exact SHA-256/size identities, and
+passed to the immutable directory commit as an expected-file seal. A changed
+hidden tree is rejected before the no-replace rename. Once rename succeeds, any
+later source, monitor, reader, or stage authentication/cleanup failure carries
+the exact immutable generation identity and remains non-active.
+
 ### Variant B — `metric_extractor` (counter-free histograms)
 
 Purpose-built for the dissolved SOL-ExecBench framework as **historical Surface 1**
@@ -240,6 +293,15 @@ authorities. Restore missing bytes with `git restore --source=HEAD --worktree
 -- workloads/simbench_bw/_pb_generated`; do not generate replacements in the
 canonical checkout. A missing Python protobuf runtime is a separate
 prerequisite failure resolved from `requirements.txt`.
+
+Production Python consumers route through
+`tools/nvbit_tracer/proto_binding_loader.py`. It authenticates and compiles all
+nine retained source snapshots before generated code executes and never consults
+normal binding imports, `sys.path`, `sys.meta_path`, native extensions, or Python
+bytecode caches. An existing ignored `_pb_generated/__pycache__/` subtree is
+therefore left untouched and is not itself a prerequisite failure; its contents
+are never traversed or executed. Top-level same-stem sourceless/native import
+candidates remain repository contamination and fail before binding execution.
 
 ```bash
 # Variant A (profiler path is run_suite.py --mode trace; manual form:)

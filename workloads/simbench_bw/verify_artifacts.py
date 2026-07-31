@@ -39,10 +39,12 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import os
 import re
 import sys
 import tomllib
-from pathlib import Path
+from contextlib import ExitStack
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 import jsonschema
@@ -53,9 +55,34 @@ SCHEMAS_DIR = SUITE_ROOT / "schemas"
 _REPO_ROOT = SUITE_ROOT.parent.parent
 
 _TOOLS_CLOUD_DIR = SUITE_ROOT.parent.parent / "tools" / "cloud"
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 if str(_TOOLS_CLOUD_DIR) not in sys.path:
     sys.path.insert(0, str(_TOOLS_CLOUD_DIR))
 import trace_budgets as _trace_budgets  # type: ignore[import-not-found]  # noqa: E402
+from tools.local_labels.immutable_artifact import (  # noqa: E402
+    ImmutableArtifactError,
+    ImmutableArtifactLimitError,
+    ImmutableArtifactResourceError,
+    PinnedDirectoryReader,
+    PinnedPathSetMonitor,
+    PinnedTreeSnapshot,
+    inspect_immutable_directory_generation,
+    open_retained_regular,
+)
+from tools.nvbit_tracer.trace_admission import (  # noqa: E402
+    DEFAULT_TRACE_ADMISSION_LIMITS,
+    TraceAdmission,
+    TraceAdmissionError,
+    require_trace_admission,
+)
+from workloads.simbench_bw.nvbit_trace_summary_adapter import (  # noqa: E402
+    compute_kernel_signature_sha256,
+)
+from workloads.simbench_bw.phase_cycle_ledger_aggregator import (  # noqa: E402
+    PhaseLedgerSchemaInvalid,
+    serialize_phase_cycle_ledger,
+)
 
 
 # Numeric tolerance for cached-ratio consistency checks. The cached
@@ -65,6 +92,24 @@ import trace_budgets as _trace_budgets  # type: ignore[import-not-found]  # noqa
 # discrepancy is BudgetViolationUntracked-equivalent because the
 # cached field cannot have been derived from the raw evidence.
 _RATIO_CONSISTENCY_TOL: float = 1e-6
+_RAW_TRACE_GENERATION_NAMESPACE = "raw_trace_generations"
+_SUMMARY_GENERATION_NAMESPACE = "nvbit_trace_summary_generations"
+_PHASE_LEDGER_GENERATION_NAMESPACE = "phase_cycle_ledger_generations"
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+_SUMMARY_FILENAME_RE = re.compile(
+    r"^nvbit_trace_summary_([0-9]+)_([0-9]+)\.json$"
+)
+_PHASE_LEDGER_FILENAME_RE = re.compile(
+    r"^phase_cycle_ledger_([0-9]+)_([0-9]+)\.json$"
+)
+_CANONICAL_DISCOVERY_MAX_FILES = 250_000
+_CANONICAL_DISCOVERY_MAX_DIRECTORIES = 100_000
+_CANONICAL_DISCOVERY_MAX_TOTAL_FILE_BYTES = 4 * 1024**4
+_CANONICAL_DISCOVERY_MAX_RELATIVE_PATH_BYTES = 64 * 1024 * 1024
+_CANONICAL_AUTHORITY_JSON_MAX_BYTES = 16 * 1024 * 1024
+_KNOWN_NONAUTHORITY_TRACE_FILENAMES = frozenset({
+    "trace_volume_exceeded.json",
+})
 
 
 # Cache-predictor verifier defect-token frozenset. Every typed
@@ -199,139 +244,1250 @@ def verify_trace_dir(
     return errors
 
 
-def _verify_canonical_trace_pb_admission(trace_dir: Path) -> list[str]:
-    """Flag canonical-shape `dynamic_trace.pb` raw-only trees.
+def _inspect_recorded_attempt_generation(
+    *,
+    trace_record_path: Path,
+    trace_record: dict[str, Any],
+    descriptor: object,
+    namespace: str,
+    label: str,
+    require_nonempty: bool,
+    max_files: int,
+    max_directories: int,
+    max_total_file_bytes: int,
+    max_total_relative_path_bytes: int,
+) -> tuple[Any | None, str | None]:
+    """Inspect one exact attempt-scoped generation named by an active record."""
+    if type(descriptor) is not dict:
+        return None, f"{label} descriptor is absent or not an object"
+    shape_point = trace_record.get("shape_point")
+    attempt_id = trace_record.get("trace_capture_attempt_id")
+    relative_value = descriptor.get("path")
+    if type(relative_value) is not str:
+        return None, f"{label} path must be a string"
+    relative = PurePosixPath(relative_value)
+    if (
+        relative.is_absolute()
+        or relative.as_posix() != relative_value
+        or any(part in {"", ".", ".."} for part in relative.parts)
+        or len(relative.parts) != 3
+        or relative.parts[0] != namespace
+        or relative.parts[1] != shape_point
+        or relative.parts[2] != attempt_id
+        or descriptor.get("attempt_id") != attempt_id
+    ):
+        return None, f"{label} path is not the exact active attempt path"
+    for field in ("content_manifest_sha256", "filesystem_generation_sha256"):
+        value = descriptor.get(field)
+        if type(value) is not str or _SHA256_RE.fullmatch(value) is None:
+            return None, f"{label} {field} must be lowercase 64-hex"
+    bounds = {
+        "file_count": max_files,
+        "directory_count": max_directories,
+        "total_file_bytes": max_total_file_bytes,
+    }
+    for field, maximum in bounds.items():
+        value = descriptor.get(field)
+        minimum = 1 if field != "total_file_bytes" else 0
+        if type(value) is not int or not minimum <= value <= maximum:
+            return None, f"{label} {field} is invalid or exceeds its hard bound"
+    generation_path = trace_record_path.parent.joinpath(*relative.parts)
+    try:
+        observed = inspect_immutable_directory_generation(
+            generation_path,
+            require_nonempty=require_nonempty,
+            max_files=descriptor["file_count"],
+            max_directories=descriptor["directory_count"],
+            max_total_file_bytes=descriptor["total_file_bytes"],
+            max_total_relative_path_bytes=max_total_relative_path_bytes,
+        )
+    except ImmutableArtifactResourceError as exc:
+        return None, (
+            f"{label} resource unavailable: {type(exc).__name__}: {exc}"
+        )
+    except (ImmutableArtifactError, OSError) as exc:
+        return None, f"{label} is absent or invalid: {type(exc).__name__}: {exc}"
+    if (
+        observed.content_manifest_sha256
+        != descriptor["content_manifest_sha256"]
+        or observed.filesystem_generation_sha256
+        != descriptor["filesystem_generation_sha256"]
+        or observed.file_count != descriptor["file_count"]
+        or observed.directory_count != descriptor["directory_count"]
+        or observed.total_file_bytes != descriptor["total_file_bytes"]
+    ):
+        return None, f"{label} content or filesystem-generation seal is stale"
+    return observed, None
 
-    The canonical `run_suite.py --mode trace` layout writes per-shape
-    artifacts under
 
-        <artifact_dir>/trace_<shape>/dynamic_trace.pb       (raw NVBit)
-        <artifact_dir>/trace_<shape>.json                   (run summary)
-        <artifact_dir>/measurement_manifest.json            (per-shape)
+def _admitted_launch_indices(
+    admission: TraceAdmission,
+) -> tuple[int, ...] | None:
+    """Return the exact contiguous launch authority admitted from raw bytes."""
+    if type(admission.launch_count) is not int or admission.launch_count <= 0:
+        return None
+    indices = tuple(launch.launch_index for launch in admission.launches)
+    if any(type(index) is not int for index in indices):
+        return None
+    if indices != tuple(range(admission.launch_count)):
+        return None
+    return indices
 
-    The pre-R51 verifier scanned only `*.trace*` (i.e., the per-kernel
-    `kernel-N.trace` files) and the typed sidecar files; a tree with
-    `dynamic_trace.pb` but NO `trace_<shape>.json` binder slipped
-    through silently because the per-kernel `.trace` glob never
-    matched the protobuf and the run-summary verifier (which globs
-    `trace_*.json`) returned a vacuous pass when no summary existed.
 
-    R51 closes the false-positive admission shape: every
-    `dynamic_trace.pb` must have a matching `trace_<shape>.json` one
-    level up, the summary must be parseable JSON, and a
-    `measurement_manifest.json` must sit alongside the summary
-    (proving the orchestrator's `_emit_manifest` ran). Missing any
-    of those is a hard fail.
-    """
+def _expected_summary_body(
+    trace_record: dict[str, Any],
+    trace_admission: TraceAdmission,
+    *,
+    repeat_index: int,
+    launch_index: int,
+) -> dict[str, Any]:
+    """Build the exact schema-v2 body authorized by raw launch bytes."""
+    launch = trace_admission.launches[launch_index]
+    return {
+        "schema_version": 2,
+        "slug": trace_record.get("slug"),
+        "shape_point": trace_record.get("shape_point"),
+        "repeat_index": repeat_index,
+        "launch_index": launch_index,
+        "kernel_name": launch.kernel_name,
+        "kernel_signature_sha256": compute_kernel_signature_sha256(
+            launch.kernel_signature_inputs()
+        ),
+        "inst_count": launch.inst_count,
+        "binary_sha256": trace_record.get("binary_sha256"),
+        "nvbit_trace_pb_path": trace_admission.dynamic_trace_path,
+        "nvbit_trace_pb_sha256": trace_admission.dynamic_trace_sha256,
+        "nvbit_tracer_build_hash": trace_record.get(
+            "nvbit_tracer_build_hash"
+        ),
+        "nvbit_threadblock_payload_size_bytes": (
+            trace_admission.threadblock_payload_size_bytes
+        ),
+        "nvbit_threadblock_payload_manifest_sha256": (
+            trace_admission.threadblock_payload_manifest_sha256
+        ),
+        "trace_admission_sha256": trace_admission.trace_admission_sha256,
+    }
+
+
+def _verify_active_summary_generation(
+    trace_record_path: Path,
+    trace_record: dict[str, Any],
+    *,
+    trace_admission: TraceAdmission,
+) -> list[str]:
     errors: list[str] = []
-    for trace_pb in trace_dir.rglob("dynamic_trace.pb"):
-        # Canonical layout: trace_pb.parent is a `trace_<shape>` dir.
-        # The matching summary lives one level up at
-        # `<artifact_dir>/<parent_name>.json`.
-        shape_dir = trace_pb.parent
-        # Scope: only enforce on canonical `trace_<shape>/` dirs.
-        # Legacy `traces/` layouts (pre-R51 captures) intentionally
-        # bypass this check; their admission is governed by the
-        # other verifier helpers. Without this guard the check
-        # would flood the report with false positives on every
-        # existing repo tree under `workloads/simbench_bw/l1/<slug>/traces/`.
-        if not shape_dir.name.startswith("trace_"):
+    admitted_launch_indices = _admitted_launch_indices(trace_admission)
+    if admitted_launch_indices is None:
+        return ["admitted raw launch authority is malformed"]
+    descriptor = trace_record.get("nvbit_trace_summary_generation")
+    if type(descriptor) is not dict:
+        return ["summary generation descriptor is absent or not an object"]
+    shape_point = trace_record.get("shape_point")
+    admission_sha256 = trace_record.get("trace_admission_sha256")
+    filesystem_sha256 = trace_record.get(
+        "trace_filesystem_generation_sha256"
+    )
+    relative_value = descriptor.get("path")
+    expected = PurePosixPath(
+        _SUMMARY_GENERATION_NAMESPACE,
+        str(shape_point),
+        str(admission_sha256),
+        str(filesystem_sha256),
+    )
+    if (
+        type(relative_value) is not str
+        or PurePosixPath(relative_value) != expected
+        or expected.as_posix() != relative_value
+    ):
+        return ["summary generation path is not the exact admitted generation"]
+    for field in ("content_manifest_sha256", "filesystem_generation_sha256"):
+        value = descriptor.get(field)
+        if type(value) is not str or _SHA256_RE.fullmatch(value) is None:
+            errors.append(f"summary generation {field} is absent or invalid")
+    file_count = descriptor.get("file_count")
+    directory_count = descriptor.get("directory_count")
+    total_file_bytes = descriptor.get("total_file_bytes")
+    if type(file_count) is not int or not 1 <= file_count <= 4096:
+        errors.append("summary generation file_count is invalid")
+    if type(directory_count) is not int or directory_count != 1:
+        errors.append("summary generation directory_count must equal one")
+    if (
+        type(total_file_bytes) is not int
+        or not 0 <= total_file_bytes <= 256 * 1024 * 1024
+    ):
+        errors.append("summary generation total_file_bytes is invalid")
+    if errors:
+        return errors
+
+    generation_path = trace_record_path.parent.joinpath(*expected.parts)
+    try:
+        observed = inspect_immutable_directory_generation(
+            generation_path,
+            require_nonempty=True,
+            max_files=file_count,
+            max_directories=directory_count,
+            max_total_file_bytes=total_file_bytes,
+            max_total_relative_path_bytes=4 * 1024 * 1024,
+        )
+    except ImmutableArtifactResourceError as exc:
+        return [
+            "summary generation resource unavailable: "
+            f"{type(exc).__name__}: {exc}"
+        ]
+    except (ImmutableArtifactError, OSError) as exc:
+        return [
+            "summary generation is absent or invalid: "
+            f"{type(exc).__name__}: {exc}"
+        ]
+    if (
+        observed.content_manifest_sha256
+        != descriptor["content_manifest_sha256"]
+        or observed.filesystem_generation_sha256
+        != descriptor["filesystem_generation_sha256"]
+        or observed.file_count != file_count
+        or observed.directory_count != directory_count
+        or observed.total_file_bytes != total_file_bytes
+    ):
+        return ["summary generation content or filesystem seal is stale"]
+
+    observed_pairs: set[tuple[int, int]] = set()
+    for identity in observed.files:
+        match = _SUMMARY_FILENAME_RE.fullmatch(identity.relative_path)
+        if match is None:
+            errors.append(
+                "summary generation contains noncanonical file "
+                f"{identity.relative_path}"
+            )
             continue
-        artifact_dir = shape_dir.parent
-        summary_name = f"{shape_dir.name}.json"
-        summary_path = artifact_dir / summary_name
-        if not summary_path.exists():
+        repeat_text, launch_text = match.groups()
+        repeat_index = int(repeat_text)
+        launch_index = int(launch_text)
+        if (
+            str(repeat_index) != repeat_text
+            or str(launch_index) != launch_text
+        ):
+            errors.append(
+                "summary generation contains noncanonical numeric filename "
+                f"{identity.relative_path}"
+            )
+            continue
+        observed_pairs.add((repeat_index, launch_index))
+    expected_pairs = {
+        (0, launch_index) for launch_index in admitted_launch_indices
+    }
+    if observed_pairs != expected_pairs or observed.file_count != len(
+        expected_pairs
+    ):
+        errors.append(
+            "summary generation does not equal the admitted raw launch authority"
+        )
+
+    expected_identities = [
+        {
+            "path": (expected / identity.relative_path).as_posix(),
+            "sha256": identity.sha256,
+            "size_bytes": identity.size_bytes,
+        }
+        for identity in observed.files
+    ]
+    if descriptor.get("files") != expected_identities:
+        errors.append("summary generation file identities are stale or incomplete")
+    manifest_sha256 = hashlib.sha256(
+        json.dumps(
+            expected_identities,
+            allow_nan=False,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()
+    if descriptor.get("manifest_sha256") != manifest_sha256:
+        errors.append("summary generation manifest_sha256 is stale")
+    references = trace_record.get("nvbit_trace_summary_paths")
+    if references != [identity["path"] for identity in expected_identities]:
+        errors.append("active summary path list is stale or incomplete")
+
+    identities = {identity.relative_path: identity for identity in observed.files}
+    summary_validator = _load_schema_validator(
+        "nvbit_trace_summary.schema.json"
+    )
+    try:
+        with PinnedDirectoryReader(generation_path) as reader:
+            snapshot = reader.snapshot_tree(
+                require_readonly_files=True,
+                require_readonly_directories=True,
+                max_files=file_count,
+                max_directories=directory_count,
+                max_total_file_bytes=total_file_bytes,
+                max_total_relative_path_bytes=4 * 1024 * 1024,
+            )
+            for relative_path, metadata in sorted(dict(snapshot.files).items()):
+                match = _SUMMARY_FILENAME_RE.fullmatch(relative_path)
+                if match is None:
+                    errors.append(
+                        "summary generation contains noncanonical file "
+                        f"{relative_path}"
+                    )
+                    continue
+                payload = reader.read_snapshot(
+                    relative_path, expected_metadata=metadata
+                ).payload
+                identity = identities.get(relative_path)
+                if identity is None or (
+                    len(payload) != identity.size_bytes
+                    or hashlib.sha256(payload).hexdigest() != identity.sha256
+                ):
+                    errors.append(
+                        "summary generation file "
+                        f"{relative_path} disagrees with its immutable seal"
+                    )
+                    continue
+                try:
+                    summary = json.loads(payload)
+                except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                    errors.append(
+                        "summary generation file "
+                        f"{relative_path} is invalid JSON: {exc}"
+                    )
+                    continue
+                schema_errors = list(summary_validator.iter_errors(summary))
+                if schema_errors:
+                    first = schema_errors[0]
+                    errors.append(
+                        "summary generation file "
+                        f"{relative_path} fails schema validation at "
+                        f"{list(first.absolute_path)}: {first.message}"
+                    )
+                    continue
+                repeat_index = int(match.group(1))
+                launch_index = int(match.group(2))
+                if launch_index not in admitted_launch_indices:
+                    errors.append(
+                        f"summary generation file {relative_path} "
+                        "names an unadmitted launch"
+                    )
+                    continue
+                expected_summary = _expected_summary_body(
+                    trace_record,
+                    trace_admission,
+                    repeat_index=repeat_index,
+                    launch_index=launch_index,
+                )
+                if type(summary) is not dict or summary != expected_summary:
+                    errors.append(
+                        f"summary generation file {relative_path} "
+                        "disagrees with admitted raw launch and execution authority"
+                    )
+            reader.verify_path()
+    except ImmutableArtifactResourceError as exc:
+        errors.append(
+            "summary generation resource unavailable during descriptor read: "
+            f"{type(exc).__name__}: {exc}"
+        )
+    except (ImmutableArtifactError, OSError) as exc:
+        errors.append(
+            "summary generation changed or became invalid during descriptor read: "
+            f"{type(exc).__name__}: {exc}"
+        )
+    return errors
+
+
+def _verify_active_phase_generation(
+    trace_record_path: Path,
+    trace_record: dict[str, Any],
+    *,
+    trace_admission: TraceAdmission,
+) -> list[str]:
+    errors: list[str] = []
+    phase = trace_record.get("phase_inject_ab")
+    if phase is None:
+        phase_namespace = (
+            trace_record_path.parent / _PHASE_LEDGER_GENERATION_NAMESPACE
+        )
+        try:
+            phase_namespace.lstat()
+        except FileNotFoundError:
+            return errors
+        except OSError as exc:
+            return [
+                "phase generation namespace cannot be authenticated: "
+                f"{type(exc).__name__}: {exc}"
+            ]
+        return [
+            "phase generation authority exists but phase_inject_ab "
+            "authority is absent"
+        ]
+
+    if type(phase) is not dict or type(phase.get("requested")) is not bool:
+        return ["phase_inject_ab authority is malformed"]
+    repeat_count = phase.get("repeat_count")
+    descriptor = phase.get("generation")
+    evidence = phase.get("evidence")
+    if not phase["requested"]:
+        if repeat_count is not None and (
+            type(repeat_count) is not int or repeat_count != 0
+        ):
+            errors.append("unrequested phase evidence has an invalid repeat_count")
+        if descriptor is not None:
+            errors.append("unrequested phase evidence carries active authority")
+        if evidence is not None and (
+            type(evidence) is not list or evidence
+        ):
+            errors.append("unrequested phase evidence carries active authority")
+        return errors
+
+    if type(repeat_count) is not int or repeat_count <= 0:
+        return ["requested phase evidence has no positive repeat_count"]
+    admitted_launch_indices = _admitted_launch_indices(trace_admission)
+    if admitted_launch_indices is None:
+        return ["admitted raw launch authority is malformed"]
+    expected_file_count = repeat_count * len(admitted_launch_indices)
+    if expected_file_count > 4096:
+        return [
+            "requested phase repeat-by-launch authority exceeds the hard "
+            "phase generation file bound"
+        ]
+    phase_observed, phase_error = _inspect_recorded_attempt_generation(
+        trace_record_path=trace_record_path,
+        trace_record=trace_record,
+        descriptor=descriptor,
+        namespace=_PHASE_LEDGER_GENERATION_NAMESPACE,
+        label="phase ledger generation",
+        require_nonempty=True,
+        max_files=4096,
+        max_directories=1,
+        max_total_file_bytes=256 * 1024 * 1024,
+        max_total_relative_path_bytes=4 * 1024 * 1024,
+    )
+    if phase_error is not None:
+        return [phase_error]
+    assert phase_observed is not None and type(descriptor) is dict
+
+    if phase_observed.file_count != expected_file_count:
+        errors.append(
+            "phase ledger generation file count does not equal the admitted "
+            "repeat-by-launch authority"
+        )
+    expected_phase = [
+        {
+            "path": (
+                PurePosixPath(descriptor["path"]) / identity.relative_path
+            ).as_posix(),
+            "sha256": identity.sha256,
+            "size_bytes": identity.size_bytes,
+        }
+        for identity in phase_observed.files
+    ]
+    if evidence != expected_phase:
+        errors.append("phase ledger evidence list is stale or incomplete")
+
+    generation_path = trace_record_path.parent.joinpath(
+        *PurePosixPath(descriptor["path"]).parts
+    )
+    identities = {
+        identity.relative_path: identity for identity in phase_observed.files
+    }
+    observed_pairs: set[tuple[int, int]] = set()
+    try:
+        with PinnedDirectoryReader(generation_path) as reader:
+            snapshot = reader.snapshot_tree(
+                require_readonly_files=True,
+                require_readonly_directories=True,
+                max_files=descriptor["file_count"],
+                max_directories=descriptor["directory_count"],
+                max_total_file_bytes=descriptor["total_file_bytes"],
+                max_total_relative_path_bytes=4 * 1024 * 1024,
+            )
+            files = dict(snapshot.files)
+            directories = dict(snapshot.directories)
+            if set(files) != set(identities) or set(directories) != {"."}:
+                errors.append(
+                    "phase ledger generation inventory changed before read"
+                )
+            else:
+                for relative_path, identity in sorted(identities.items()):
+                    match = _PHASE_LEDGER_FILENAME_RE.fullmatch(relative_path)
+                    if match is None:
+                        errors.append(
+                            "phase ledger generation contains noncanonical file "
+                            f"{relative_path}"
+                        )
+                        continue
+                    repeat_text, launch_text = match.groups()
+                    repeat_index = int(repeat_text)
+                    launch_index = int(launch_text)
+                    if (
+                        str(repeat_index) != repeat_text
+                        or str(launch_index) != launch_text
+                    ):
+                        errors.append(
+                            "phase ledger generation contains noncanonical numeric "
+                            f"filename {relative_path}"
+                        )
+                        continue
+                    payload = reader.read_snapshot(
+                        relative_path,
+                        expected_metadata=files[relative_path],
+                    ).payload
+                    if (
+                        len(payload) != identity.size_bytes
+                        or hashlib.sha256(payload).hexdigest() != identity.sha256
+                    ):
+                        errors.append(
+                            "phase ledger generation file "
+                            f"{relative_path} disagrees with its immutable seal"
+                        )
+                        continue
+                    try:
+                        ledger = json.loads(payload)
+                    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                        errors.append(
+                            "phase ledger generation file "
+                            f"{relative_path} is invalid JSON: {exc}"
+                        )
+                        continue
+                    if type(ledger) is not dict:
+                        errors.append(
+                            f"phase ledger generation file {relative_path} "
+                            "is not an object"
+                        )
+                        continue
+                    try:
+                        serialize_phase_cycle_ledger(ledger)
+                    except (PhaseLedgerSchemaInvalid, TypeError, ValueError) as exc:
+                        errors.append(
+                            "phase ledger generation file "
+                            f"{relative_path} fails schema validation: {exc}"
+                        )
+                        continue
+                    if launch_index not in admitted_launch_indices:
+                        errors.append(
+                            "phase ledger generation file "
+                            f"{relative_path} names an unadmitted launch"
+                        )
+                        continue
+                    if (
+                        ledger.get("slug") != trace_record.get("slug")
+                        or ledger.get("shape_point")
+                        != trace_record.get("shape_point")
+                        or type(ledger.get("repeat_index")) is not int
+                        or ledger.get("repeat_index") != repeat_index
+                        or type(ledger.get("launch_index")) is not int
+                        or ledger.get("launch_index") != launch_index
+                        or ledger.get("kernel_signature_sha256")
+                        != trace_record.get("kernel_signature_sha256")
+                        or ledger.get("binary_sha256")
+                        != trace_record.get("binary_sha256")
+                        or ledger.get("nvbit_tracer_build_hash")
+                        != trace_record.get("nvbit_tracer_build_hash")
+                    ):
+                        errors.append(
+                            "phase ledger generation file "
+                            f"{relative_path} disagrees with admitted raw launch "
+                            "and execution authority"
+                        )
+                        continue
+                    observed_pairs.add((repeat_index, launch_index))
+            reader.verify_path()
+    except ImmutableArtifactResourceError as exc:
+        errors.append(
+            "phase ledger generation resource unavailable during authenticated "
+            f"read: {type(exc).__name__}: {exc}"
+        )
+    except (ImmutableArtifactError, OSError) as exc:
+        errors.append(
+            "phase ledger generation changed or became invalid during "
+            f"authenticated read: {type(exc).__name__}: {exc}"
+        )
+
+    expected_pairs = {
+        (repeat_index, launch_index)
+        for repeat_index in range(repeat_count)
+        for launch_index in admitted_launch_indices
+    }
+    if observed_pairs != expected_pairs:
+        errors.append(
+            "phase ledger generation does not equal the admitted "
+            "repeat-by-launch authority"
+        )
+    return errors
+
+
+def _verify_active_generation_record(
+    trace_record_path: Path,
+    trace_record: dict[str, Any],
+) -> list[str]:
+    """Freshly authenticate one active raw, summary, manifest, and phase set."""
+    errors: list[str] = []
+    shape_point = trace_record.get("shape_point")
+    attempt_id = trace_record.get("trace_capture_attempt_id")
+    if (
+        type(shape_point) is not str
+        or not shape_point
+        or type(attempt_id) is not str
+        or not attempt_id
+        or trace_record.get("activation_state") != "active"
+    ):
+        return ["canonical trace record lacks active shape/attempt authority"]
+
+    limits = DEFAULT_TRACE_ADMISSION_LIMITS
+    raw_max_bytes = (
+        limits.trace_root_bytes
+        + limits.allocations_sidecar_bytes
+        + limits.stats_bytes
+        + limits.total_threadblock_bytes
+    )
+    raw_descriptor = trace_record.get("raw_trace_generation")
+    raw_observed, raw_error = _inspect_recorded_attempt_generation(
+        trace_record_path=trace_record_path,
+        trace_record=trace_record,
+        descriptor=raw_descriptor,
+        namespace=_RAW_TRACE_GENERATION_NAMESPACE,
+        label="raw trace generation",
+        require_nonempty=True,
+        max_files=limits.tree_files,
+        max_directories=limits.tree_directories,
+        max_total_file_bytes=raw_max_bytes,
+        max_total_relative_path_bytes=limits.tree_relative_path_bytes,
+    )
+    if raw_error is not None:
+        errors.append(raw_error)
+        return errors
+    assert type(raw_descriptor) is dict and raw_observed is not None
+    for field in (
+        "trace_admission_sha256",
+        "trace_filesystem_generation_sha256",
+        "dynamic_trace_sha256",
+    ):
+        value = raw_descriptor.get(field)
+        if type(value) is not str or _SHA256_RE.fullmatch(value) is None:
+            errors.append(f"raw trace generation {field} is absent or invalid")
+        if trace_record.get(field) != value:
+            errors.append(f"top-level {field} disagrees with raw generation")
+    expected_trace_pb = (
+        PurePosixPath(str(raw_descriptor["path"])) / "dynamic_trace.pb"
+    ).as_posix()
+    if trace_record.get("trace_pb_path") != expected_trace_pb:
+        errors.append("trace_pb_path does not name the exact raw generation")
+    raw_path = trace_record_path.parent.joinpath(
+        *PurePosixPath(str(raw_descriptor["path"])).parts
+    )
+    admitted: TraceAdmission | None = None
+    try:
+        admitted = require_trace_admission(raw_path)
+    except TraceAdmissionError as exc:
+        errors.append(
+            "raw trace generation fresh admission failed: "
+            f"{exc.typed_reason}: {exc.detail}"
+        )
+    except ImmutableArtifactResourceError as exc:
+        errors.append(
+            "raw trace generation admission resource unavailable: "
+            f"{type(exc).__name__}: {exc}"
+        )
+    except (ImmutableArtifactError, OSError) as exc:
+        errors.append(
+            "raw trace generation fresh admission failed: "
+            f"{type(exc).__name__}: {exc}"
+        )
+    else:
+        if (
+            admitted.trace_admission_sha256
+            != raw_descriptor.get("trace_admission_sha256")
+            or admitted.trace_filesystem_generation_sha256
+            != raw_descriptor.get("trace_filesystem_generation_sha256")
+            or admitted.dynamic_trace_sha256
+            != raw_descriptor.get("dynamic_trace_sha256")
+        ):
+            errors.append("raw trace admission or filesystem seals are stale")
+    if errors or admitted is None:
+        return errors
+
+    errors.extend(
+        _verify_active_summary_generation(
+            trace_record_path,
+            trace_record,
+            trace_admission=admitted,
+        )
+    )
+
+    manifest = trace_record.get("measurement_manifest")
+    if type(manifest) is not dict:
+        errors.append("measurement manifest descriptor is absent")
+    else:
+        manifest_value = manifest.get("path")
+        if type(manifest_value) is not str:
+            errors.append("measurement manifest path is invalid")
+        else:
+            relative = PurePosixPath(manifest_value)
+            if (
+                relative.is_absolute()
+                or relative.as_posix() != manifest_value
+                or any(part in {"", ".", ".."} for part in relative.parts)
+            ):
+                errors.append("measurement manifest path escapes authority")
+            else:
+                try:
+                    with open_retained_regular(
+                        trace_record_path.parent.joinpath(*relative.parts)
+                    ) as retained:
+                        payload = retained.read_bytes()
+                        if (
+                            retained.sha256 != manifest.get("sha256")
+                            or retained.size_bytes != manifest.get("size_bytes")
+                        ):
+                            errors.append("measurement manifest descriptor is stale")
+                        else:
+                            body = json.loads(payload)
+                            if (
+                                type(body) is not dict
+                                or body.get("shape_point") != shape_point
+                            ):
+                                errors.append(
+                                    "measurement manifest shape identity is stale"
+                                )
+                except ImmutableArtifactResourceError as exc:
+                    errors.append(
+                        "measurement manifest resource unavailable: "
+                        f"{type(exc).__name__}: {exc}"
+                    )
+                except (
+                    ImmutableArtifactError,
+                    OSError,
+                    UnicodeDecodeError,
+                    json.JSONDecodeError,
+                ) as exc:
+                    errors.append(
+                        "measurement manifest is absent or invalid: "
+                        f"{type(exc).__name__}: {exc}"
+                    )
+
+    errors.extend(
+        _verify_active_phase_generation(
+            trace_record_path,
+            trace_record,
+            trace_admission=admitted,
+        )
+    )
+    return errors
+
+
+def _snapshot_relative_path(root: Path, relative_path: str) -> Path:
+    """Render one descriptor-inventoried path without resolving symlinks."""
+    relative = PurePosixPath(relative_path)
+    return root.joinpath(*relative.parts)
+
+
+def _snapshot_join_relative(parent: str, *parts: str) -> str:
+    base = PurePosixPath(parent)
+    return (base.joinpath(*parts)).as_posix()
+
+
+def _snapshot_direct_child_names(
+    snapshot: PinnedTreeSnapshot,
+    parent: str,
+) -> set[str]:
+    """Return direct children of one inventoried directory."""
+    names: set[str] = set()
+    for relative_path, _metadata in (*snapshot.files, *snapshot.directories):
+        if relative_path == ".":
+            continue
+        relative = PurePosixPath(relative_path)
+        if relative.parent.as_posix() == parent:
+            names.add(relative.name)
+    return names
+
+
+def _read_snapshot_json(
+    reader: PinnedDirectoryReader,
+    file_inventory: dict[str, tuple[int, int, int, int, int, int, int]],
+    relative_path: str,
+) -> Any:
+    """Parse one bounded JSON leaf from the retained discovery inventory."""
+    metadata = file_inventory[relative_path]
+    payload = reader.read_snapshot(
+        relative_path,
+        max_bytes=_CANONICAL_AUTHORITY_JSON_MAX_BYTES,
+        expected_metadata=metadata,
+    ).payload
+    return json.loads(payload)
+
+
+def _canonical_discovery_failure(trace_dir: Path, exc: BaseException) -> str:
+    if isinstance(exc, ImmutableArtifactResourceError):
+        return (
+            "CanonicalGenerationAuthorityResourceUnavailable: "
+            f"{trace_dir} bounded retained authority traversal failed: "
+            f"{type(exc).__name__}: {exc}"
+        )
+    if isinstance(exc, ImmutableArtifactLimitError):
+        return (
+            "CanonicalGenerationAuthorityInvalid: "
+            f"{trace_dir} bounded authority discovery limit exceeded: "
+            f"{type(exc).__name__}: {exc}"
+        )
+    return (
+        "CanonicalGenerationAuthorityInvalid: "
+        f"{trace_dir} trace authority changed or cannot be inventoried without "
+        "symlink indirection through bounded traversal: "
+        f"{type(exc).__name__}: {exc}"
+    )
+
+
+def _verify_canonical_trace_pb_admission(trace_dir: Path) -> list[str]:
+    """Verify nested generation authority from one retained bounded inventory."""
+    errors: list[str] = []
+    root = Path(trace_dir).absolute()
+    namespaces = (
+        _RAW_TRACE_GENERATION_NAMESPACE,
+        _SUMMARY_GENERATION_NAMESPACE,
+        _PHASE_LEDGER_GENERATION_NAMESPACE,
+    )
+    namespace_set = frozenset(namespaces)
+
+    try:
+        with ExitStack() as retained_tree:
+            reader = retained_tree.enter_context(PinnedDirectoryReader(root))
+            monitor = retained_tree.enter_context(
+                PinnedPathSetMonitor.from_reader(
+                    reader,
+                    regular_paths=(),
+                    recursive_directories=(".",),
+                    max_files=_CANONICAL_DISCOVERY_MAX_FILES,
+                    max_directories=_CANONICAL_DISCOVERY_MAX_DIRECTORIES,
+                    max_total_file_bytes=(
+                        _CANONICAL_DISCOVERY_MAX_TOTAL_FILE_BYTES
+                    ),
+                    max_total_relative_path_bytes=(
+                        _CANONICAL_DISCOVERY_MAX_RELATIVE_PATH_BYTES
+                    ),
+                )
+            )
+            snapshot = reader.snapshot_tree(
+                max_files=_CANONICAL_DISCOVERY_MAX_FILES,
+                max_directories=_CANONICAL_DISCOVERY_MAX_DIRECTORIES,
+                max_total_file_bytes=(
+                    _CANONICAL_DISCOVERY_MAX_TOTAL_FILE_BYTES
+                ),
+                max_total_relative_path_bytes=(
+                    _CANONICAL_DISCOVERY_MAX_RELATIVE_PATH_BYTES
+                ),
+            )
+            monitor.verify_unchanged()
+            file_inventory = dict(snapshot.files)
+            directory_inventory = dict(snapshot.directories)
+
+            authority_dirs: set[Path] = set()
+            invalid_namespace_entries: dict[Path, list[Path]] = {}
+            invalid_record_entries: dict[Path, list[Path]] = {}
+            record_candidates: dict[Path, list[str]] = {}
+
+            def is_trace_record_candidate(relative: PurePosixPath) -> bool:
+                return (
+                    relative.name.startswith("trace_")
+                    and relative.name.endswith(".json")
+                    and relative.name
+                    not in _KNOWN_NONAUTHORITY_TRACE_FILENAMES
+                    and not any(
+                        part.startswith(".") or part in namespace_set
+                        for part in relative.parts[:-1]
+                    )
+                )
+            for relative_path in directory_inventory:
+                if relative_path == ".":
+                    continue
+                relative = PurePosixPath(relative_path)
+                artifact_dir = _snapshot_relative_path(
+                    root, relative.parent.as_posix()
+                )
+                if relative.name in namespace_set:
+                    authority_dirs.add(artifact_dir)
+                if is_trace_record_candidate(relative):
+                    authority_dirs.add(artifact_dir)
+                    invalid_record_entries.setdefault(
+                        artifact_dir, []
+                    ).append(_snapshot_relative_path(root, relative_path))
+            for relative_path in file_inventory:
+                relative = PurePosixPath(relative_path)
+                if relative.name in namespace_set:
+                    artifact_dir = _snapshot_relative_path(
+                        root, relative.parent.as_posix()
+                    )
+                    authority_dirs.add(artifact_dir)
+                    invalid_namespace_entries.setdefault(
+                        artifact_dir, []
+                    ).append(_snapshot_relative_path(root, relative_path))
+
+            # Every canonical-looking trace leaf establishes authority in its own
+            # artifact directory, including malformed and explicitly non-active
+            # tombstones. Hidden stages and generation interiors are not locator
+            # surfaces, but they remain covered by the retained tree monitor.
+            for relative_path in file_inventory:
+                relative = PurePosixPath(relative_path)
+                if not is_trace_record_candidate(relative):
+                    continue
+                artifact_dir = _snapshot_relative_path(
+                    root, relative.parent.as_posix()
+                )
+                authority_dirs.add(artifact_dir)
+                record_candidates.setdefault(artifact_dir, []).append(
+                    relative_path
+                )
+
+            for artifact_dir in sorted(authority_dirs):
+                try:
+                    artifact_relative = artifact_dir.relative_to(root).as_posix()
+                except ValueError as exc:
+                    raise ImmutableArtifactError(
+                        "inventoried authority directory escaped retained root"
+                    ) from exc
+                if artifact_relative == "":
+                    artifact_relative = "."
+
+                for invalid_namespace in sorted(
+                    invalid_namespace_entries.get(artifact_dir, ())
+                ):
+                    errors.append(
+                        "CanonicalGenerationAuthorityInvalid: "
+                        f"{invalid_namespace} generation namespace is not a "
+                        "no-follow directory"
+                    )
+
+                for invalid_record in sorted(
+                    invalid_record_entries.get(artifact_dir, ())
+                ):
+                    errors.append(
+                        "CanonicalGenerationAuthorityInvalid: "
+                        f"{invalid_record} canonical trace-record candidate is "
+                        "not a single-link regular file"
+                    )
+
+                active_records: list[tuple[Path, dict[str, Any]]] = []
+                for relative_path in sorted(
+                    record_candidates.get(artifact_dir, ())
+                ):
+                    candidate = _snapshot_relative_path(root, relative_path)
+                    try:
+                        record = _read_snapshot_json(
+                            reader,
+                            file_inventory,
+                            relative_path,
+                        )
+                    except ImmutableArtifactResourceError as exc:
+                        errors.append(
+                            "CanonicalGenerationAuthorityResourceUnavailable: "
+                            f"{candidate} cannot be retained: "
+                            f"{type(exc).__name__}: {exc}"
+                        )
+                        continue
+                    except ImmutableArtifactLimitError as exc:
+                        errors.append(
+                            "CanonicalGenerationAuthorityInvalid: "
+                            f"{candidate} exceeds the bounded authority JSON "
+                            f"limit: {type(exc).__name__}: {exc}"
+                        )
+                        continue
+                    except (
+                        ImmutableArtifactError,
+                        OSError,
+                        UnicodeDecodeError,
+                        json.JSONDecodeError,
+                    ) as exc:
+                        errors.append(
+                            "CanonicalGenerationAuthorityInvalid: "
+                            f"{candidate} is unreadable: "
+                            f"{type(exc).__name__}: {exc}"
+                        )
+                        continue
+                    if type(record) is not dict:
+                        continue
+                    has_generation_reference = (
+                        record.get("raw_trace_generation") is not None
+                        or record.get("nvbit_trace_summary_generation") is not None
+                    )
+                    if record.get("activation_state") == "active":
+                        shape_point = record.get("shape_point")
+                        if (
+                            type(shape_point) is not str
+                            or not shape_point
+                            or candidate.name != f"trace_{shape_point}.json"
+                        ):
+                            errors.append(
+                                "CanonicalGenerationAuthorityInvalid: "
+                                f"{candidate} has malformed active shape authority"
+                            )
+                            continue
+                        active_records.append((candidate, record))
+                    elif has_generation_reference:
+                        errors.append(
+                            "CanonicalGenerationAuthorityInvalid: "
+                            f"{candidate} carries generation references but is "
+                            "not active"
+                        )
+
+                if not active_records:
+                    errors.append(
+                        "CanonicalGenerationAuthorityMissing: "
+                        f"{artifact_dir} contains generation authority without an "
+                        "active canonical trace record"
+                    )
+                    continue
+
+                active_shapes = {
+                    record["shape_point"] for _path, record in active_records
+                }
+                for namespace in namespaces:
+                    namespace_relative = _snapshot_join_relative(
+                        artifact_relative,
+                        namespace,
+                    )
+                    if namespace_relative not in directory_inventory:
+                        continue
+                    namespace_path = _snapshot_relative_path(
+                        root, namespace_relative
+                    )
+                    for child_name in sorted(
+                        _snapshot_direct_child_names(
+                            snapshot,
+                            namespace_relative,
+                        )
+                    ):
+                        if child_name.startswith("."):
+                            continue
+                        if child_name not in active_shapes:
+                            errors.append(
+                                "CanonicalGenerationAuthorityUnbound: "
+                                f"{namespace_path / child_name} has no active "
+                                "trace record for its shape"
+                            )
+                for record_path, record in active_records:
+                    for detail in _verify_active_generation_record(
+                        record_path, record
+                    ):
+                        token = (
+                            "CanonicalGenerationAuthorityResourceUnavailable"
+                            if "resource unavailable" in detail
+                            else "CanonicalGenerationAuthorityInvalid"
+                        )
+                        errors.append(f"{token}: {record_path}: {detail}")
+
+            monitor.verify_unchanged()
+            reader.verify_path()
+            errors.extend(
+                _verify_legacy_canonical_trace_pb_admission(
+                    root,
+                    generation_authority_dirs=authority_dirs,
+                    reader=reader,
+                    tree_snapshot=snapshot,
+                )
+            )
+            monitor.verify_unchanged()
+            reader.verify_path()
+    except (
+        ImmutableArtifactLimitError,
+        ImmutableArtifactResourceError,
+        ImmutableArtifactError,
+        OSError,
+    ) as exc:
+        errors.append(_canonical_discovery_failure(root, exc))
+    return errors
+
+
+def _verify_legacy_canonical_trace_pb_admission(
+    trace_dir: Path,
+    *,
+    generation_authority_dirs: set[Path],
+    reader: PinnedDirectoryReader | None = None,
+    tree_snapshot: PinnedTreeSnapshot | None = None,
+) -> list[str]:
+    """Verify legacy raw trees from the same bounded retained inventory.
+
+    Fallback remains local to each artifact directory: authority in one sibling
+    cannot disable legacy checks in another. Discovery or retention failure is a
+    hard canonical-authority error and never falls through to lexical probing.
+    """
+    root = Path(trace_dir).absolute()
+    if (reader is None) != (tree_snapshot is None):
+        raise TypeError("reader and tree_snapshot must be supplied together")
+    if reader is None:
+        try:
+            with ExitStack() as retained_tree:
+                owned_reader = retained_tree.enter_context(
+                    PinnedDirectoryReader(root)
+                )
+                monitor = retained_tree.enter_context(
+                    PinnedPathSetMonitor.from_reader(
+                        owned_reader,
+                        regular_paths=(),
+                        recursive_directories=(".",),
+                        max_files=_CANONICAL_DISCOVERY_MAX_FILES,
+                        max_directories=_CANONICAL_DISCOVERY_MAX_DIRECTORIES,
+                        max_total_file_bytes=(
+                            _CANONICAL_DISCOVERY_MAX_TOTAL_FILE_BYTES
+                        ),
+                        max_total_relative_path_bytes=(
+                            _CANONICAL_DISCOVERY_MAX_RELATIVE_PATH_BYTES
+                        ),
+                    )
+                )
+                owned_snapshot = owned_reader.snapshot_tree(
+                    max_files=_CANONICAL_DISCOVERY_MAX_FILES,
+                    max_directories=_CANONICAL_DISCOVERY_MAX_DIRECTORIES,
+                    max_total_file_bytes=(
+                        _CANONICAL_DISCOVERY_MAX_TOTAL_FILE_BYTES
+                    ),
+                    max_total_relative_path_bytes=(
+                        _CANONICAL_DISCOVERY_MAX_RELATIVE_PATH_BYTES
+                    ),
+                )
+                monitor.verify_unchanged()
+                result = _verify_legacy_canonical_trace_pb_admission(
+                    root,
+                    generation_authority_dirs=generation_authority_dirs,
+                    reader=owned_reader,
+                    tree_snapshot=owned_snapshot,
+                )
+                monitor.verify_unchanged()
+                owned_reader.verify_path()
+                return result
+        except (
+            ImmutableArtifactLimitError,
+            ImmutableArtifactResourceError,
+            ImmutableArtifactError,
+            OSError,
+        ) as exc:
+            return [_canonical_discovery_failure(root, exc)]
+
+    assert tree_snapshot is not None
+    errors: list[str] = []
+    file_inventory = dict(tree_snapshot.files)
+    directory_inventory = dict(tree_snapshot.directories)
+    authority_dirs = {Path(path).absolute() for path in generation_authority_dirs}
+
+    for trace_relative in sorted(file_inventory):
+        relative = PurePosixPath(trace_relative)
+        if relative.name != "dynamic_trace.pb":
+            continue
+        shape_relative = relative.parent
+        if not shape_relative.name.startswith("trace_"):
+            continue
+        artifact_relative = shape_relative.parent.as_posix()
+        artifact_dir = _snapshot_relative_path(root, artifact_relative)
+        trace_pb = _snapshot_relative_path(root, trace_relative)
+        if artifact_dir.absolute() in authority_dirs:
+            errors.append(
+                "LegacyTraceWithGenerationAuthority: "
+                f"{trace_pb} uses the legacy trace_<shape> layout beside "
+                "active or generation authority; legacy fallback is disabled"
+            )
+            continue
+
+        summary_relative = _snapshot_join_relative(
+            artifact_relative,
+            f"{shape_relative.name}.json",
+        )
+        summary_path = _snapshot_relative_path(root, summary_relative)
+        if summary_relative not in file_inventory:
             errors.append(
                 f"RawOnlyTraceTree: {trace_pb} has no binding "
                 f"run summary at {summary_path}; the canonical "
-                f"`run_suite.py --mode trace` path emits a "
-                f"per-shape `trace_<shape>.json` alongside the raw "
-                f"`dynamic_trace.pb` — its absence indicates a "
-                f"bypass-orchestrator capture (e.g., direct "
-                f"CUDA_INJECTION64_PATH invocation) that did not "
-                f"go through `handle_trace`. Re-capture via "
-                f"`run_suite.py --mode trace` so the per-shape "
-                f"summary, manifest, and feature sidecars are "
-                f"emitted."
+                "`run_suite.py --mode trace` path emits a "
+                "per-shape `trace_<shape>.json` alongside the raw "
+                "`dynamic_trace.pb` — its absence indicates a "
+                "bypass-orchestrator capture (e.g., direct "
+                "CUDA_INJECTION64_PATH invocation) that did not "
+                "go through `handle_trace`. Re-capture via "
+                "`run_suite.py --mode trace` so the per-shape "
+                "summary, manifest, and feature sidecars are emitted."
             )
             continue
         try:
-            with open(summary_path) as f:
-                json.load(f)
-        except Exception as e:
+            summary = _read_snapshot_json(
+                reader,
+                file_inventory,
+                summary_relative,
+            )
+        except (
+            ImmutableArtifactLimitError,
+            ImmutableArtifactResourceError,
+            ImmutableArtifactError,
+            OSError,
+            UnicodeDecodeError,
+            json.JSONDecodeError,
+        ) as exc:
             errors.append(
                 f"RawOnlyTraceTree: {summary_path} is unparseable "
-                f"({e}); the orchestrator-emitted run summary must "
-                f"be valid JSON."
+                f"({type(exc).__name__}: {exc}); the orchestrator-emitted run "
+                "summary must be valid JSON."
             )
             continue
-        # Per-shape manifest (activation orchestrator path) at
-        # `cell_dir/measurement_manifest_<shape_point>.json` is
-        # checked first; cell-level manifest
-        # `cell_dir/measurement_manifest.json` (microbench path
-        # via run_suite._emit_manifest) is the backwards-compat
-        # fallback. Multi-shape slugs (e.g., silu_fwd_bf16_sm80
-        # traced for both correctness_shape AND timing_shape)
-        # MUST use the per-shape filename so the second shape's
-        # capture cannot overwrite the first shape's manifest;
-        # single-shape slugs (every microbench cell) can use
-        # either.
-        shape_point = shape_dir.name[len("trace_"):]
-        per_shape_manifest_path = (
-            artifact_dir / f"measurement_manifest_{shape_point}.json"
+
+        shape_point = shape_relative.name[len("trace_") :]
+        per_shape_manifest_relative = _snapshot_join_relative(
+            artifact_relative,
+            f"measurement_manifest_{shape_point}.json",
         )
-        cell_level_manifest_path = (
-            artifact_dir / "measurement_manifest.json"
+        cell_level_manifest_relative = _snapshot_join_relative(
+            artifact_relative,
+            "measurement_manifest.json",
         )
-        # Detect multi-shape cell: when artifact_dir has > 1
-        # `trace_<shape>/` child, falling back to the cell-level
-        # `measurement_manifest.json` is dangerous because that
-        # file only carries one shape's metadata. A second
-        # shape's capture overwrites the first shape's
-        # cell-level manifest in place, so a stale manifest can
-        # silently satisfy verification for every shape in the
-        # cell. The activation orchestrator emits
-        # `measurement_manifest_<shape_point>.json` per shape
-        # precisely to avoid this. Gate the cell-level fallback
-        # to single-shape directories; for multi-shape directories
-        # require the per-shape manifest OR verify the cell-level
-        # manifest's `shape_point` field matches the current shape.
+        per_shape_manifest_path = _snapshot_relative_path(
+            root, per_shape_manifest_relative
+        )
         sibling_shape_dirs = [
-            d for d in artifact_dir.iterdir()
-            if d.is_dir() and d.name.startswith("trace_")
+            PurePosixPath(path)
+            for path in directory_inventory
+            if path != "."
+            and PurePosixPath(path).parent.as_posix() == artifact_relative
+            and PurePosixPath(path).name.startswith("trace_")
         ]
         is_multi_shape = len(sibling_shape_dirs) > 1
-        if per_shape_manifest_path.exists():
-            manifest_path = per_shape_manifest_path
-        elif cell_level_manifest_path.exists() and not is_multi_shape:
-            manifest_path = cell_level_manifest_path
-        elif cell_level_manifest_path.exists() and is_multi_shape:
-            # Multi-shape directory: cell-level fallback only
-            # admits when the manifest's `shape_point` matches
-            # the current shape (preventing a stale overwrite
-            # from silently passing).
+        if per_shape_manifest_relative in file_inventory:
+            pass
+        elif (
+            cell_level_manifest_relative in file_inventory
+            and not is_multi_shape
+        ):
+            pass
+        elif (
+            cell_level_manifest_relative in file_inventory
+            and is_multi_shape
+        ):
             try:
-                with open(cell_level_manifest_path) as fh:
-                    _cell_manifest = json.load(fh)
-                manifest_shape = _cell_manifest.get("shape_point")
-            except Exception:
+                cell_manifest = _read_snapshot_json(
+                    reader,
+                    file_inventory,
+                    cell_level_manifest_relative,
+                )
+                manifest_shape = (
+                    cell_manifest.get("shape_point")
+                    if type(cell_manifest) is dict
+                    else None
+                )
+            except (
+                ImmutableArtifactLimitError,
+                ImmutableArtifactResourceError,
+                ImmutableArtifactError,
+                OSError,
+                UnicodeDecodeError,
+                json.JSONDecodeError,
+            ):
                 manifest_shape = None
-            if manifest_shape == shape_point:
-                manifest_path = cell_level_manifest_path
-            else:
+            if manifest_shape != shape_point:
                 errors.append(
                     f"RawOnlyTraceTree: {trace_pb} is in a "
                     f"multi-shape cell ({len(sibling_shape_dirs)} "
-                    f"`trace_<shape>/` children at "
+                    "`trace_<shape>/` children at "
                     f"{artifact_dir}); the per-shape manifest "
                     f"`{per_shape_manifest_path.name}` is missing AND "
-                    f"the cell-level `measurement_manifest.json` "
+                    "the cell-level `measurement_manifest.json` "
                     f"records shape_point={manifest_shape!r} != "
                     f"current shape {shape_point!r}. The cell-level "
-                    f"manifest is stale (overwritten by another "
-                    f"shape's capture); the activation orchestrator "
-                    f"must emit the per-shape manifest to avoid "
-                    f"cross-shape overwrites."
+                    "manifest is stale (overwritten by another "
+                    "shape's capture); the activation orchestrator "
+                    "must emit the per-shape manifest to avoid "
+                    "cross-shape overwrites."
                 )
                 continue
         else:
@@ -339,105 +1495,76 @@ def _verify_canonical_trace_pb_admission(trace_dir: Path) -> list[str]:
                 f"RawOnlyTraceTree: {trace_pb} has summary "
                 f"{summary_path} but neither "
                 f"`{per_shape_manifest_path.name}` nor "
-                f"`measurement_manifest.json` exists at "
+                "`measurement_manifest.json` exists at "
                 f"{artifact_dir}; the canonical capture path "
-                f"emits the manifest via `_emit_manifest` (or its "
-                f"per-shape variant for multi-shape activation "
-                f"slugs) — its absence indicates a partial / "
-                f"interrupted capture."
+                "emits the manifest via `_emit_manifest` (or its "
+                "per-shape variant for multi-shape activation "
+                "slugs) — its absence indicates a partial / "
+                "interrupted capture."
             )
             continue
-        # R53 / Codex's R52 review blocking issue: a canonical
-        # `trace_<shape>/dynamic_trace.pb` whose run summary
-        # admits MUST also emit the per-shape feature
-        # sidecars. The canonical pipeline emits 5: sector_stream,
-        # hrd_profile, divergence_proxies, sharing_locality,
-        # order_projections. Each sidecar's absence is a hard
-        # fail; presence + a typed-unavailable arm in the run
-        # summary is admissible (the producer fired and recorded
-        # a typed skip reason rather than silently omitting).
-        # The per-sidecar typed-unavailable arms are the
-        # `*_skip_reason` fields populated by run_suite.py's
-        # `_emit_*_for_run_summary` helpers; if a skip reason is
-        # present we accept the sidecar absence as a typed
-        # outcome.
-        try:
-            with open(summary_path) as f:
-                summary = json.load(f)
-        except Exception:
-            # Unparseable summary already flagged above; skip
-            # the per-sidecar checks since we cannot read the
-            # skip-reason fields.
-            continue
-        # Budget-exceedance carve-out: when the trace exceeded
-        # `trace_budget_mib` (sidecar `trace_volume_exceeded.json`
-        # adjacent to the .pb), the slowdown budget (sidecar
-        # `nvbit_slowdown_budget_exceeded.json` adjacent to the
-        # trace shape), or the drop-rate budget (sidecar
-        # `nvbit_drop_rate_exceeded.json` under the same trace
-        # shape), `handle_trace` returns `EXIT_SAMPLING_REQUIRED`
-        # before any per-shape feature-sidecar emitter runs. The
-        # resulting canonical tree legitimately has no per-shape
-        # feature sidecars; admit it as a typed budget-exceedance
-        # outcome rather than demanding a sidecar the orchestrator
-        # never tried to emit.
-        budget_exceeded = any((
-            (shape_dir / "trace_volume_exceeded.json").exists(),
-            (shape_dir / "nvbit_slowdown_budget_exceeded.json").exists(),
-            (shape_dir / "nvbit_drop_rate_exceeded.json").exists(),
-        ))
+
+        budget_exceeded = any(
+            _snapshot_join_relative(shape_relative.as_posix(), filename)
+            in file_inventory
+            for filename in (
+                "trace_volume_exceeded.json",
+                "nvbit_slowdown_budget_exceeded.json",
+                "nvbit_drop_rate_exceeded.json",
+            )
+        )
         if budget_exceeded:
             continue
-        # Upstream-skip carve-out: when HRD's
-        # `_ensure_sector_stream_jsonl` fails (e.g., the wire
-        # contract rejects a small synthetic trace), the run
-        # summary records `hrd_skip_reason` and downstream
-        # producers (divergence_proxies, sharing_locality,
-        # order_projections) all transitively skip because they
-        # consume the same sector_stream.jsonl. Treat
-        # `hrd_skip_reason` as an implicit typed-skip for
-        # `sector_stream` too (no separate field is set since
-        # the materialization is HRD's responsibility).
+        if type(summary) is not dict:
+            # Valid JSON of the wrong shape cannot carry typed sidecar skips.
+            summary = {}
         upstream_skip = bool(summary.get("hrd_skip_reason"))
         for sidecar_dir, sidecar_file, skip_field in (
-            ("sector_stream", "sector_stream.jsonl",
-             "sector_stream_skip_reason"),
-            ("hrd_profile", "hrd_profile.json",
-             "hrd_skip_reason"),
-            ("divergence_proxies", "divergence_proxies.json",
-             "divergence_proxies_skip_reason"),
-            ("sharing_locality", "sharing_locality.json",
-             "sharing_locality_skip_reason"),
-            ("order_projections", "order_projections.json",
-             "order_projections_skip_reason"),
+            (
+                "sector_stream",
+                "sector_stream.jsonl",
+                "sector_stream_skip_reason",
+            ),
+            ("hrd_profile", "hrd_profile.json", "hrd_skip_reason"),
+            (
+                "divergence_proxies",
+                "divergence_proxies.json",
+                "divergence_proxies_skip_reason",
+            ),
+            (
+                "sharing_locality",
+                "sharing_locality.json",
+                "sharing_locality_skip_reason",
+            ),
+            (
+                "order_projections",
+                "order_projections.json",
+                "order_projections_skip_reason",
+            ),
         ):
-            sidecar_path = shape_dir / sidecar_dir / sidecar_file
+            sidecar_relative = _snapshot_join_relative(
+                shape_relative.as_posix(),
+                sidecar_dir,
+                sidecar_file,
+            )
             skip_reason = summary.get(skip_field)
-            if sidecar_path.exists():
-                # Sidecar present: admissible whether or not a
-                # skip reason is recorded (the producer wrote
-                # the artifact; the skip-reason field then
-                # describes typed-unavailable internal records,
-                # which the per-sidecar verifier helpers
-                # handle).
+            if sidecar_relative in file_inventory:
                 continue
             if skip_reason or upstream_skip:
-                # Sidecar absent BUT typed skip reason recorded
-                # (per-sidecar OR transitive via HRD upstream):
-                # accept as a typed outcome.
                 continue
             errors.append(
                 f"CanonicalSidecarMissing: {trace_pb} run summary "
                 f"{summary_path} admits but the canonical sidecar "
                 f"`{sidecar_dir}/{sidecar_file}` is absent and no "
                 f"`{skip_field}` is recorded. The canonical "
-                f"capture path emits all 5 per-shape feature sidecars feature "
-                f"sidecars (sector_stream, hrd_profile, "
-                f"divergence_proxies, sharing_locality, "
-                f"order_projections); a missing file with no "
-                f"typed-unavailable arm indicates a partial "
-                f"emission and is not admissible."
+                "capture path emits all 5 per-shape feature sidecars feature "
+                "sidecars (sector_stream, hrd_profile, "
+                "divergence_proxies, sharing_locality, "
+                "order_projections); a missing file with no "
+                "typed-unavailable arm indicates a partial "
+                "emission and is not admissible."
             )
+    reader.verify_path()
     return errors
 
 

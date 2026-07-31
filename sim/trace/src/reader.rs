@@ -165,6 +165,10 @@ pub enum TraceError {
     },
     #[error("{record}: memory_op_access_kind is present but UNSPECIFIED on a memory instruction")]
     MemoryOpAccessKindUnspecified { record: String },
+    #[error("{record}: instruction_cache_op is present but UNSPECIFIED")]
+    InstructionCacheOpUnspecified { record: String },
+    #[error("{record}: non-memory instruction carries additive memory metadata in {field}")]
+    MemoryMetadataOnNonMemoryInstruction { record: String, field: &'static str },
     #[error(
         "{record}: address operand {operand} explicitly carries MEMORY_SPACE_UNSPECIFIED (canonical: memory_space_unspecified)"
     )]
@@ -364,6 +368,10 @@ impl TraceError {
             Self::MemoryPayloadClassUndeclared { .. } => Some("memory_payload_class_undeclared"),
             Self::MemoryPayloadShapeInvalid { .. } => Some("memory_payload_shape_invalid"),
             Self::MemoryOpAccessKindUnspecified { .. } => Some("memory_op_access_kind_unspecified"),
+            Self::InstructionCacheOpUnspecified { .. } => Some("instruction_cache_op_unspecified"),
+            Self::MemoryMetadataOnNonMemoryInstruction { .. } => {
+                Some("memory_metadata_on_non_memory_instruction")
+            }
             Self::MemorySpaceUnspecified { .. } => Some("memory_space_unspecified"),
             Self::MemoryOpClassAddressSpaceConflict { .. } => {
                 Some("memory_op_class_address_space_conflict")
@@ -4017,8 +4025,9 @@ fn decode_address_access(
 /// preflight.
 ///
 /// "Memory instruction" uses the canonical Python predicate: address records OR
-/// a present `memory_op_class`. Data-width/access-kind/cache-op fields alone do not
-/// reclassify a non-memory record. Every instruction must carry `warpid_tb`, a
+/// a present `memory_op_class`. Data-width alone does not reclassify a non-memory
+/// record; access-kind or cache-op metadata on such a record is rejected as a
+/// producer contradiction. Every instruction must carry `warpid_tb`, a
 /// positive function id, both masks, and a low-32-consistent `vpc`. Memory records
 /// additionally require a specified class and positive instruction width; unknown
 /// enum values are typed schema skew, explicit memory-space UNSPECIFIED is rejected,
@@ -4030,7 +4039,9 @@ pub fn preflight_memory_access<'a>(
 ) -> Result<Option<PreflightedMemoryAccess<'a>>, TraceError> {
     let n_addresses = inst.addresses.len();
     // Canonical Python predicate: data_width and additive provenance fields do
-    // not by themselves turn an otherwise non-memory instruction into memory.
+    // not by themselves reclassify an otherwise non-memory instruction. The
+    // additive fields are nevertheless contradictory on that record and are
+    // rejected after their enum values receive complete wire validation.
     let looks_like_memory = n_addresses > 0 || inst.memory_op_class.is_some();
 
     // Keep the Python validator's fail-fast precedence: memory width first,
@@ -4078,6 +4089,39 @@ pub fn preflight_memory_access<'a>(
     }
 
     if !looks_like_memory {
+        let access_kind = match inst.memory_op_access_kind {
+            None => None,
+            Some(raw) => {
+                let kind: pb::MemoryOpAccessKind =
+                    known_enum(raw, "memory_op_access_kind", &record)?;
+                if kind == pb::MemoryOpAccessKind::Unspecified {
+                    return Err(TraceError::MemoryOpAccessKindUnspecified { record: record() });
+                }
+                Some(kind)
+            }
+        };
+        let cache_op = match inst.instruction_cache_op {
+            None => None,
+            Some(raw) => {
+                let op: pb::InstructionCacheOp = known_enum(raw, "instruction_cache_op", &record)?;
+                if op == pb::InstructionCacheOp::Unspecified {
+                    return Err(TraceError::InstructionCacheOpUnspecified { record: record() });
+                }
+                Some(op)
+            }
+        };
+        if access_kind.is_some() {
+            return Err(TraceError::MemoryMetadataOnNonMemoryInstruction {
+                record: record(),
+                field: "memory_op_access_kind",
+            });
+        }
+        if cache_op.is_some() {
+            return Err(TraceError::MemoryMetadataOnNonMemoryInstruction {
+                record: record(),
+                field: "instruction_cache_op",
+            });
+        }
         return Ok(None);
     }
 
@@ -4134,11 +4178,13 @@ pub fn preflight_memory_access<'a>(
     };
     let cache_op = match inst.instruction_cache_op {
         None => None,
-        Some(raw) => Some(known_enum::<pb::InstructionCacheOp>(
-            raw,
-            "instruction_cache_op",
-            &record,
-        )?),
+        Some(raw) => {
+            let op: pb::InstructionCacheOp = known_enum(raw, "instruction_cache_op", &record)?;
+            if op == pb::InstructionCacheOp::Unspecified {
+                return Err(TraceError::InstructionCacheOpUnspecified { record: record() });
+            }
+            Some(op)
+        }
     };
 
     Ok(Some(PreflightedMemoryAccess {
@@ -5136,6 +5182,16 @@ mod tests {
     }
 
     #[test]
+    fn unspecified_cache_op_rejected() {
+        let mut inst = mem_inst(0);
+        inst.instruction_cache_op = Some(pb::InstructionCacheOp::Unspecified as i32);
+        assert!(matches!(
+            memory_access(&inst, || "t".into()),
+            Err(TraceError::InstructionCacheOpUnspecified { .. })
+        ));
+    }
+
+    #[test]
     fn masks_required_on_every_instruction() {
         let mut inst = mem_inst(0);
         inst.active_mask = None;
@@ -5169,7 +5225,7 @@ mod tests {
     }
 
     #[test]
-    fn memory_only_metadata_does_not_reclassify_nonmemory() {
+    fn additive_memory_metadata_rejected_on_nonmemory() {
         let universal = pb::Instruction {
             pc: 0,
             active_mask: Some(0),
@@ -5190,20 +5246,24 @@ mod tests {
         let mut kind_only = universal.clone();
         kind_only.data_width = Some(4);
         kind_only.memory_op_access_kind = Some(pb::MemoryOpAccessKind::Load as i32);
-        assert!(
-            memory_access(&kind_only, || "kind-only".into())
-                .unwrap()
-                .is_none()
-        );
+        assert!(matches!(
+            memory_access(&kind_only, || "kind-only".into()),
+            Err(TraceError::MemoryMetadataOnNonMemoryInstruction {
+                field: "memory_op_access_kind",
+                ..
+            })
+        ));
 
         let mut cache_op_only = universal;
         cache_op_only.data_width = Some(4);
         cache_op_only.instruction_cache_op = Some(pb::InstructionCacheOp::LdgECa as i32);
-        assert!(
-            memory_access(&cache_op_only, || "cache-op-only".into())
-                .unwrap()
-                .is_none()
-        );
+        assert!(matches!(
+            memory_access(&cache_op_only, || "cache-op-only".into()),
+            Err(TraceError::MemoryMetadataOnNonMemoryInstruction {
+                field: "instruction_cache_op",
+                ..
+            })
+        ));
     }
 
     #[test]

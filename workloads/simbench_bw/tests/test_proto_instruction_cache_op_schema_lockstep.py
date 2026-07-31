@@ -28,13 +28,13 @@ before comparing.
 from __future__ import annotations
 
 import json
-import sys
 import unittest
 from pathlib import Path
 
+from tools.nvbit_tracer.proto_binding_loader import load_dynamic_trace_bindings
+
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent.parent
-_PB_GENERATED = _REPO_ROOT / "workloads" / "simbench_bw" / "_pb_generated"
 _SCHEMA_PATH = (
     _REPO_ROOT / "tools" / "cache_predictor" / "cache_op_map.schema.json"
 )
@@ -55,28 +55,9 @@ def _load_schema_enum() -> list[str]:
 def _load_proto_enum(
     case: unittest.TestCase,
 ) -> dict[int, str]:
-    """Return the enum from the tracked binding authority.
-
-    Missing tracked bytes are repository corruption; a missing runtime is a
-    test prerequisite failure. Neither condition skips lockstep enforcement.
-    """
-    pb_path = _PB_GENERATED / "instruction_pb2.py"
-    if not pb_path.is_file() or pb_path.is_symlink():
-        case.fail(
-            "tracked protobuf authority is missing; restore byte-exact "
-            "committed content with `git restore --source=HEAD --worktree -- "
-            "workloads/simbench_bw/_pb_generated/instruction_pb2.py`"
-        )
-    try:
-        import google.protobuf  # noqa: F401
-    except ImportError as exc:
-        case.fail(
-            "protobuf runtime prerequisite is missing; install the exact "
-            f"requirements.txt pin: {exc}"
-        )
-    if str(_PB_GENERATED) not in sys.path:
-        sys.path.insert(0, str(_PB_GENERATED))
-    import instruction_pb2 as ipb  # type: ignore[import-untyped]
+    """Return the enum from the authenticated tracked authority."""
+    del case
+    ipb = load_dynamic_trace_bindings().instruction_pb2
     enum_desc = ipb.InstructionCacheOp.DESCRIPTOR
     return {v.number: v.name for v in enum_desc.values}
 
@@ -114,7 +95,7 @@ class ProtoVsSchemaEnumLockstepTest(unittest.TestCase):
         self,
     ) -> None:
         _load_proto_enum(self)
-        import instruction_pb2 as ipb  # type: ignore[import-untyped]
+        ipb = load_dynamic_trace_bindings().instruction_pb2
         inst = ipb.instruction()
         field_descriptor = inst.DESCRIPTOR.fields_by_name.get(
             "instruction_cache_op"
@@ -133,7 +114,7 @@ class ProtoVsSchemaEnumLockstepTest(unittest.TestCase):
         self,
     ) -> None:
         _load_proto_enum(self)
-        import instruction_pb2 as ipb  # type: ignore[import-untyped]
+        ipb = load_dynamic_trace_bindings().instruction_pb2
         inst = ipb.instruction()
         inst.instruction_cache_op = (
             ipb.INSTRUCTION_CACHE_OP_LDG_E_CA
@@ -157,7 +138,7 @@ class ProtoVsSchemaEnumLockstepTest(unittest.TestCase):
         # HasField returns false; the field's value is
         # UNSPECIFIED on the consumer side.
         _load_proto_enum(self)
-        import instruction_pb2 as ipb  # type: ignore[import-untyped]
+        ipb = load_dynamic_trace_bindings().instruction_pb2
         legacy = ipb.instruction()
         legacy.pc = 0x10
         wire = legacy.SerializeToString()

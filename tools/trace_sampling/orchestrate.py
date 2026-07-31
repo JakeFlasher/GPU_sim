@@ -18,6 +18,7 @@ import hashlib
 import json
 import subprocess
 import sys
+from contextlib import ExitStack, contextmanager
 from pathlib import Path
 
 _PKG = Path(__file__).resolve().parent
@@ -28,12 +29,25 @@ from admissibility_gate import MIN_SEGMENTS, M_SUBSET, classify
 from compression import compress_trace_dir
 from counting_pass import cell_stats_from_capture
 from selection import SelectionPlanError, build_segment_population, plan_from_stats
-from sidecar import build_sidecar, write_sidecar
+from sidecar import SidecarPublicationState, build_sidecar, write_sidecar
 
 _REPO = Path(__file__).resolve().parents[2]
 if str(_REPO) not in sys.path:
     sys.path.insert(0, str(_REPO))
 
+from tools.local_labels.immutable_artifact import (  # noqa: E402
+    ImmutableArtifactError,
+    ImmutableArtifactResourceError,
+    RetainedExecutable,
+    RetainedRegular,
+    open_retained_executable,
+    open_retained_regular,
+    retire_regular_file,
+    salvage_retained_regular_descriptor,
+)
+from tools.nvbit_tracer.proto_binding_loader import (  # noqa: E402
+    load_dynamic_trace_bindings,
+)
 from tools.nvbit_tracer.runtime_env import (  # noqa: E402
     TracerRuntimeError,
     tracer_runtime_env,
@@ -50,6 +64,7 @@ class SamplingRefusal(RuntimeError):
     def __init__(self, reason: str, detail: str | None = None):
         self.reason = reason
         self.detail = detail
+        self.evidence_state: str | None = None
         super().__init__(f"{reason}: {detail}" if detail else reason)
 
 
@@ -68,25 +83,128 @@ def _refuse_existing_output(path: Path, reason: str) -> None:
         raise SamplingRefusal(reason, f"output path already exists: {path}")
 
 
-def run_pass(binary: Path, app_args: list[str], out_dir: Path, mode: int, *,
-             selected_blocks: list[int] | None = None,
-             tracer_so: Path = DEFAULT_TRACER_SO,
-             pb_lib: Path = DEFAULT_PB_LIB) -> None:
-    """Run one instrumented pass in the given trace-sampling mode. Fail-closed if
-    no `dynamic_trace.pb` is produced (silent NVBit injection failure)."""
-    _create_fresh_directory(out_dir, "capture_output_exists")
+def _require_sampling_inputs_unchanged(
+    retained_binary: RetainedExecutable,
+    retained_tracer: RetainedRegular,
+) -> None:
+    """Revalidate both execution capabilities with stable typed refusal."""
     try:
-        env = tracer_runtime_env(tracer_so, pb_lib=pb_lib)
+        retained_binary.verify_unchanged()
+        retained_tracer.verify_unchanged()
+    except ImmutableArtifactResourceError as exc:
+        raise SamplingRefusal(
+            "sampling_input_resource_unavailable",
+            f"{type(exc).__name__}: {exc}",
+        ) from exc
+    except (ImmutableArtifactError, OSError) as exc:
+        raise SamplingRefusal(
+            "sampling_input_invalid",
+            f"{type(exc).__name__}: {exc}",
+        ) from exc
+
+
+def _require_sampling_sidecar_unchanged(
+    retained_sidecar: RetainedRegular,
+    expected_payload: bytes,
+) -> None:
+    """Bind the active locator to the exact returned sidecar bytes."""
+    try:
+        payload = retained_sidecar.read_bytes()
+        retained_sidecar.verify_unchanged()
+    except ImmutableArtifactResourceError as exc:
+        raise SamplingRefusal(
+            "sidecar_publication_resource_unavailable",
+            f"{type(exc).__name__}: {exc}",
+        ) from exc
+    except (ImmutableArtifactError, OSError) as exc:
+        raise SamplingRefusal(
+            "sidecar_publication_changed",
+            f"{type(exc).__name__}: {exc}",
+        ) from exc
+    if payload != expected_payload:
+        raise SamplingRefusal(
+            "sidecar_publication_payload_mismatch",
+            "published trace_sampling.json bytes disagree with returned sidecar",
+        )
+
+
+def _bind_sidecar_evidence_state(
+    refusal: SamplingRefusal,
+    state: str,
+) -> None:
+    refusal.evidence_state = state
+    suffix = f"sidecar_evidence_state={state}"
+    refusal.detail = (
+        f"{refusal.detail}; {suffix}" if refusal.detail else suffix
+    )
+    refusal.args = (f"{refusal.reason}: {refusal.detail}",)
+
+
+@contextmanager
+def _retained_sidecar_return_boundary(
+    retained_sidecar: RetainedRegular,
+    publication_state: SidecarPublicationState,
+):
+    """Revalidate on return without letting cleanup replace a primary failure."""
+    entered = retained_sidecar.__enter__()
+    try:
+        yield entered
+    except BaseException as primary:
+        try:
+            retained_sidecar.__exit__(
+                type(primary), primary, primary.__traceback__
+            )
+        except BaseException as cleanup:
+            try:
+                primary.add_note(
+                    "retained sidecar cleanup also failed: "
+                    f"{type(cleanup).__name__}: {cleanup}"
+                )
+            except (AttributeError, TypeError):
+                pass
+        raise
+    else:
+        retained_sidecar.__exit__(None, None, None)
+        publication_state.close()
+
+
+def _run_retained_pass(
+    retained_binary: RetainedExecutable,
+    app_args: list[str],
+    out_dir: Path,
+    mode: int,
+    *,
+    selected_blocks: list[int] | None,
+    retained_tracer: RetainedRegular,
+    pb_lib: Path,
+) -> None:
+    """Execute one pass only through the already-retained descriptors."""
+    _require_sampling_inputs_unchanged(retained_binary, retained_tracer)
+    try:
+        env = tracer_runtime_env(
+            retained_tracer.path,
+            pb_lib=pb_lib,
+            retained_descriptor=retained_tracer.descriptor,
+        )
     except TracerRuntimeError as exc:
         raise SamplingRefusal("tracer_runtime_unavailable", str(exc)) from exc
-    env["CUDA_INJECTION64_PATH"] = str(tracer_so)
+    _require_sampling_inputs_unchanged(retained_binary, retained_tracer)
+    env["CUDA_INJECTION64_PATH"] = retained_tracer.proc_path
     env["USER_DEFINED_FOLDERS"] = "1"
     env["TRACES_FOLDER"] = str(out_dir)
     env["TRACE_SAMPLING_MODE"] = str(mode)
     if mode == 2:
-        env["TRACE_SAMPLING_SELECTED_BLOCKS"] = ",".join(str(b) for b in (selected_blocks or []))
-    result = subprocess.run([str(binary), *app_args], env=env, cwd=str(binary.parent),
-                            capture_output=True)
+        env["TRACE_SAMPLING_SELECTED_BLOCKS"] = ",".join(
+            str(block_id) for block_id in (selected_blocks or [])
+        )
+    result = subprocess.run(
+        [retained_binary.proc_path, *app_args],
+        env=env,
+        cwd=str(retained_binary.path.parent),
+        capture_output=True,
+        pass_fds=(retained_binary.descriptor, retained_tracer.descriptor),
+    )
+    _require_sampling_inputs_unchanged(retained_binary, retained_tracer)
     # Fail closed on a nonzero target exit: a benchmark that fails a correctness
     # check while still writing a partial trace must NOT be routed as valid input.
     if result.returncode != 0:
@@ -94,11 +212,77 @@ def run_pass(binary: Path, app_args: list[str], out_dir: Path, mode: int, *,
             "target_process_failed",
             f"pass mode={mode}: target exited {result.returncode}\n"
             f"stdout: {result.stdout.decode(errors='replace')[-2000:]}\n"
-            f"stderr: {result.stderr.decode(errors='replace')[-2000:]}")
+            f"stderr: {result.stderr.decode(errors='replace')[-2000:]}",
+        )
     if not (out_dir / "dynamic_trace.pb").is_file():
         raise SamplingRefusal(
             "capture_trace_missing",
-            f"pass mode={mode}: no dynamic_trace.pb (injection failed?)")
+            f"pass mode={mode}: no dynamic_trace.pb (injection failed?)",
+        )
+    _require_sampling_inputs_unchanged(retained_binary, retained_tracer)
+
+
+def run_pass(
+    binary: Path,
+    app_args: list[str],
+    out_dir: Path,
+    mode: int,
+    *,
+    selected_blocks: list[int] | None = None,
+    tracer_so: Path = DEFAULT_TRACER_SO,
+    pb_lib: Path = DEFAULT_PB_LIB,
+    retained_binary: RetainedExecutable | None = None,
+    retained_tracer: RetainedRegular | None = None,
+) -> None:
+    """Run one instrumented pass from exact retained binary/tracer inodes.
+
+    Standalone callers retain both inputs for this pass. ``orchestrate_cell``
+    supplies one pair that remains open across pass 1, every pass-2 attempt, and
+    the final sidecar decision.
+    """
+    _create_fresh_directory(out_dir, "capture_output_exists")
+    if (retained_binary is None) != (retained_tracer is None):
+        raise SamplingRefusal(
+            "sampling_input_invalid",
+            "retained binary and tracer must be supplied together",
+        )
+    if retained_binary is not None and retained_tracer is not None:
+        _run_retained_pass(
+            retained_binary,
+            app_args,
+            out_dir,
+            mode,
+            selected_blocks=selected_blocks,
+            retained_tracer=retained_tracer,
+            pb_lib=pb_lib,
+        )
+        return
+    try:
+        with (
+            open_retained_executable(binary) as owned_binary,
+            open_retained_regular(tracer_so) as owned_tracer,
+        ):
+            _run_retained_pass(
+                owned_binary,
+                app_args,
+                out_dir,
+                mode,
+                selected_blocks=selected_blocks,
+                retained_tracer=owned_tracer,
+                pb_lib=pb_lib,
+            )
+    except SamplingRefusal:
+        raise
+    except ImmutableArtifactResourceError as exc:
+        raise SamplingRefusal(
+            "sampling_input_resource_unavailable",
+            f"{type(exc).__name__}: {exc}",
+        ) from exc
+    except (ImmutableArtifactError, OSError) as exc:
+        raise SamplingRefusal(
+            "sampling_input_invalid",
+            f"{type(exc).__name__}: {exc}",
+        ) from exc
 
 
 def segments_from_stats(stats) -> dict[int, list[int]]:
@@ -124,7 +308,7 @@ def verify_pass2_payload(
     binds the producer's mode-2 ``serialized_bytes`` evidence to the actual raw
     payload, so certainty bytes cannot be redistributed between selected blocks.
     """
-    import threadblock_pb2  # type: ignore
+    threadblock_pb2 = load_dynamic_trace_bindings().threadblock_pb2
     from replay_count_producer import first_launch_dir  # type: ignore
 
     if (not isinstance(expected_serialized_bytes, dict)
@@ -266,23 +450,43 @@ def _selection_auxiliary(stats, selected_blocks: list[int]) -> dict:
     }
 
 
-def orchestrate_cell(binary: Path, app_args: list[str], work_dir: Path, *,
-                     args_hash: str = "0" * 8, cooperative: bool = False,
-                     seed: int = 0, sample_size: int = MIN_SEGMENTS,
-                     max_trace_bytes: int | None = None,
-                     max_reconcile_attempts: int = 3,
-                     tracer_so: Path = DEFAULT_TRACER_SO,
-                     pb_lib: Path = DEFAULT_PB_LIB) -> dict:
-    """Run pass1 -> gate -> (subset pass2 | typed unavailable) -> sidecar. Returns
-    the validated `trace_sampling.json` dict (also written under work_dir)."""
+def _orchestrate_cell_retained(
+    binary: Path,
+    app_args: list[str],
+    work_dir: Path,
+    *,
+    retained_binary: RetainedExecutable,
+    retained_tracer: RetainedRegular,
+    args_hash: str = "0" * 8,
+    cooperative: bool = False,
+    seed: int = 0,
+    sample_size: int = MIN_SEGMENTS,
+    max_trace_bytes: int | None = None,
+    max_reconcile_attempts: int = 3,
+    tracer_so: Path = DEFAULT_TRACER_SO,
+    pb_lib: Path = DEFAULT_PB_LIB,
+) -> dict:
+    """Compute one sampled sidecar while retained inputs remain live."""
     cell_id = binary.stem
     out = work_dir / "trace_sampling.json"
     compressed_out = work_dir / "pass2_zst"
     _refuse_existing_output(out, "sidecar_output_exists")
     _refuse_existing_output(compressed_out, "compression_output_exists")
+    _require_sampling_inputs_unchanged(retained_binary, retained_tracer)
     pass1 = work_dir / "pass1"
-    run_pass(binary, app_args, pass1, mode=1, tracer_so=tracer_so, pb_lib=pb_lib)
+    run_pass(
+        binary,
+        app_args,
+        pass1,
+        mode=1,
+        tracer_so=tracer_so,
+        pb_lib=pb_lib,
+        retained_binary=retained_binary,
+        retained_tracer=retained_tracer,
+    )
+    _require_sampling_inputs_unchanged(retained_binary, retained_tracer)
     stats = cell_stats_from_capture(pass1, cell_id, cooperative=cooperative)
+    _require_sampling_inputs_unchanged(retained_binary, retained_tracer)
     gate = classify(stats, sample_size=sample_size)
 
     if gate.method == M_SUBSET:
@@ -305,10 +509,25 @@ def orchestrate_cell(binary: Path, app_args: list[str], work_dir: Path, *,
         accepted = None
         for attempt in range(1, max_reconcile_attempts + 1):
             pass2 = work_dir / f"pass2_attempt_{attempt}"
-            run_pass(binary, app_args, pass2, mode=2, selected_blocks=candidate,
-                     tracer_so=tracer_so, pb_lib=pb_lib)
+            run_pass(
+                binary,
+                app_args,
+                pass2,
+                mode=2,
+                selected_blocks=candidate,
+                tracer_so=tracer_so,
+                pb_lib=pb_lib,
+                retained_binary=retained_binary,
+                retained_tracer=retained_tracer,
+            )
+            _require_sampling_inputs_unchanged(
+                retained_binary, retained_tracer
+            )
             pass2_stats = cell_stats_from_capture(
                 pass2, cell_id, cooperative=cooperative)
+            _require_sampling_inputs_unchanged(
+                retained_binary, retained_tracer
+            )
             _same_launch_identity(stats, pass2_stats)
             capture_stats_sha256 = verify_capture_selection(pass2, candidate)
             candidate_set = set(candidate)
@@ -318,8 +537,14 @@ def orchestrate_cell(binary: Path, app_args: list[str], work_dir: Path, *,
                 if block.block_id in candidate_set
             }
             actual_records, actual_raw_bytes = verify_pass2_payload(
-                pass2, pass2_stats.grid, candidate,
-                candidate_serialized_bytes)
+                pass2,
+                pass2_stats.grid,
+                candidate,
+                candidate_serialized_bytes,
+            )
+            _require_sampling_inputs_unchanged(
+                retained_binary, retained_tracer
+            )
 
             provisional_gate = classify(
                 pass2_stats, sample_size=sample_size,
@@ -350,12 +575,21 @@ def orchestrate_cell(binary: Path, app_args: list[str], work_dir: Path, *,
                 # reduced-shape label does not exist here, so emit no sampled
                 # point and return the established typed unavailable method.
                 sidecar = build_sidecar(
-                    cell_id=cell_id, kernel_name=pass2_stats.kernel_name,
-                    args_hash=args_hash, stats=pass2_stats, gate=final_gate,
-                    compression=None, records_captured=0, tracer_version=5,
+                    cell_id=cell_id,
+                    kernel_name=pass2_stats.kernel_name,
+                    args_hash=args_hash,
+                    stats=pass2_stats,
+                    gate=final_gate,
+                    compression=None,
+                    records_captured=0,
+                    tracer_version=5,
                     stats_pass_version=pass2_stats.stats_pass_version,
-                    method="unavailable", reason="gate_forced")
-                write_sidecar(sidecar, out)
+                    method="unavailable",
+                    reason="gate_forced",
+                )
+                _require_sampling_inputs_unchanged(
+                    retained_binary, retained_tracer
+                )
                 return sidecar
             if desired != candidate:
                 candidate = desired
@@ -381,8 +615,10 @@ def orchestrate_cell(binary: Path, app_args: list[str], work_dir: Path, *,
             raise SamplingRefusal(
                 "selected_payload_over_budget",
                 f"raw={selected_payload_bytes}, max={max_trace_bytes}")
+        _require_sampling_inputs_unchanged(retained_binary, retained_tracer)
         _create_fresh_directory(compressed_out, "compression_output_exists")
         comp = compress_trace_dir(pass2, compressed_out)
+        _require_sampling_inputs_unchanged(retained_binary, retained_tracer)
         selected_serialized_bytes = sum(
             block.serialized_bytes for block in final_stats.blocks
             if block.block_id in selected_set)
@@ -402,19 +638,33 @@ def orchestrate_cell(binary: Path, app_args: list[str], work_dir: Path, *,
             "convergence": {"status": "budget_limited_wide_ci"},
         }
         sidecar = build_sidecar(
-            cell_id=cell_id, kernel_name=final_stats.kernel_name, args_hash=args_hash,
-            stats=final_stats, gate=gate, compression=comp, records_captured=captured,
+            cell_id=cell_id,
+            kernel_name=final_stats.kernel_name,
+            args_hash=args_hash,
+            stats=final_stats,
+            gate=gate,
+            compression=comp,
+            records_captured=captured,
             tracer_version=5,
             stats_pass_version=final_stats.stats_pass_version,
             method=M_SUBSET,
-            reason="byte_budget", segments=segments, strata=strata,
-            estimator=estimator, decompressed_payload_sha256=comp.decompressed_sha256,
-            seed=seed, rng_algo="pcg64",
-            selected_segment_ids=[segment.id for segment in plan.selected_segments],
-            certainty_segments=[segment.id for segment in plan.certainty_segments],
+            reason="byte_budget",
+            segments=segments,
+            strata=strata,
+            estimator=estimator,
+            decompressed_payload_sha256=comp.decompressed_sha256,
+            seed=seed,
+            rng_algo="pcg64",
+            selected_segment_ids=[
+                segment.id for segment in plan.selected_segments
+            ],
+            certainty_segments=[
+                segment.id for segment in plan.certainty_segments
+            ],
             force_include_blocks=list(plan.population.force_include_block_ids),
             selection_reconciliation={
-                "status": "fixed_point", "attempts": attempts,
+                "status": "fixed_point",
+                "attempts": attempts,
                 "max_attempts": max_reconcile_attempts,
                 "capture_stats_sha256": capture_stats_sha256,
             },
@@ -425,17 +675,345 @@ def orchestrate_cell(binary: Path, app_args: list[str], work_dir: Path, *,
                 "certainty_fraction_denominator": 5,
                 "certainty_bytes": certainty_bytes,
             },
-            selection_auxiliary=_selection_auxiliary(final_stats, selected))
+            selection_auxiliary=_selection_auxiliary(final_stats, selected),
+        )
     else:
         # Gate-forbidden -> typed unavailable (a reduced shape needs a separate
         # shape-adjust wrapper; never silently subset a forbidden cell).
         sidecar = build_sidecar(
-            cell_id=cell_id, kernel_name=stats.kernel_name, args_hash=args_hash,
-            stats=stats, gate=gate, compression=None, records_captured=0,
+            cell_id=cell_id,
+            kernel_name=stats.kernel_name,
+            args_hash=args_hash,
+            stats=stats,
+            gate=gate,
+            compression=None,
+            records_captured=0,
             tracer_version=5,
             stats_pass_version=stats.stats_pass_version,
             method="unavailable",
-            reason="gate_forced")
+            reason="gate_forced",
+        )
 
-    write_sidecar(sidecar, out)
+    _require_sampling_inputs_unchanged(retained_binary, retained_tracer)
     return sidecar
+
+
+def orchestrate_cell(
+    binary: Path,
+    app_args: list[str],
+    work_dir: Path,
+    *,
+    args_hash: str = "0" * 8,
+    cooperative: bool = False,
+    seed: int = 0,
+    sample_size: int = MIN_SEGMENTS,
+    max_trace_bytes: int | None = None,
+    max_reconcile_attempts: int = 3,
+    tracer_so: Path = DEFAULT_TRACER_SO,
+    pb_lib: Path = DEFAULT_PB_LIB,
+) -> dict:
+    """Run both passes under one exact retained binary/tracer generation.
+
+    Publication occurs while both input capabilities remain live. The exact
+    published sidecar generation is then retained while those inputs close and
+    is revalidated as part of the return boundary. Any post-dispatch failure
+    retires only the exact payload and, once known, exact generation owned by
+    this attempt.
+    """
+    out = work_dir / "trace_sampling.json"
+    compressed_out = work_dir / "pass2_zst"
+    _refuse_existing_output(out, "sidecar_output_exists")
+    _refuse_existing_output(compressed_out, "compression_output_exists")
+
+    expected_payload: bytes | None = None
+    published_snapshot = None
+    publication_state: SidecarPublicationState | None = None
+    publication_attempted = False
+    input_stack = ExitStack()
+
+    def close_inputs_preserving(primary: BaseException) -> None:
+        try:
+            input_stack.__exit__(
+                type(primary), primary, primary.__traceback__
+            )
+        except BaseException as cleanup:
+            try:
+                primary.add_note(
+                    "trace-sampling input cleanup also failed: "
+                    f"{type(cleanup).__name__}: {cleanup}"
+                )
+            except (AttributeError, TypeError):
+                pass
+
+    def bind_evidence_state(primary: BaseException, state: str) -> None:
+        if isinstance(primary, SamplingRefusal):
+            _bind_sidecar_evidence_state(primary, state)
+            return
+        try:
+            primary.add_note(f"sidecar_evidence_state={state}")
+        except (AttributeError, TypeError):
+            pass
+
+    def close_publication_state_preserving(
+        primary: BaseException,
+    ) -> None:
+        if publication_state is None:
+            return
+        try:
+            publication_state.close()
+        except BaseException as cleanup:
+            try:
+                primary.add_note(
+                    "retained sidecar publication close also failed: "
+                    f"{type(cleanup).__name__}: {cleanup}"
+                )
+            except (AttributeError, TypeError):
+                pass
+
+    def retire_failed_publication(primary: BaseException) -> None:
+        if not publication_attempted or expected_payload is None:
+            close_publication_state_preserving(primary)
+            return
+
+        snapshot = (
+            publication_state.snapshot
+            if publication_state is not None
+            and publication_state.complete
+            else published_snapshot
+        )
+        if snapshot is None:
+            bind_evidence_state(
+                primary,
+                "publication_identity_incomplete_active_locator_untouched",
+            )
+            close_publication_state_preserving(primary)
+            return
+
+        retired = None
+        retirement_error: BaseException | None = None
+        try:
+            retired = retire_regular_file(
+                out,
+                expected_payload=expected_payload,
+                expected_snapshot=snapshot,
+            )
+        except BaseException as cleanup:
+            retirement_error = cleanup
+            try:
+                primary.add_note(
+                    "trace-sampling sidecar retirement also failed: "
+                    f"{type(cleanup).__name__}: {cleanup}"
+                )
+            except (AttributeError, TypeError):
+                pass
+
+        if retired is not None:
+            bind_evidence_state(primary, "expected_payload_retired")
+            close_publication_state_preserving(primary)
+            return
+
+        salvaged = None
+        salvage_error: BaseException | None = None
+        if publication_state is not None and publication_state.complete:
+            try:
+                publication_state.verify_retained_payload()
+                salvaged = salvage_retained_regular_descriptor(
+                    out,
+                    publication_state.descriptor,
+                    expected_payload=expected_payload,
+                    expected_snapshot=snapshot,
+                )
+            except BaseException as cleanup:
+                salvage_error = cleanup
+                try:
+                    primary.add_note(
+                        "retained sidecar publication salvage also failed: "
+                        f"{type(cleanup).__name__}: {cleanup}"
+                    )
+                except (AttributeError, TypeError):
+                    pass
+
+        if salvaged is not None:
+            bind_evidence_state(
+                primary,
+                "retained_payload_salvaged_active_locator_untouched",
+            )
+            try:
+                primary.add_note(
+                    "retained sidecar publication evidence preserved as "
+                    f"{salvaged}"
+                )
+            except (AttributeError, TypeError):
+                pass
+        elif retirement_error is None and salvage_error is None:
+            bind_evidence_state(primary, "active_locator_absent")
+        else:
+            bind_evidence_state(primary, "active_locator_not_retired")
+        close_publication_state_preserving(primary)
+
+    try:
+        retained_binary = input_stack.enter_context(
+            open_retained_executable(binary)
+        )
+        retained_tracer = input_stack.enter_context(
+            open_retained_regular(tracer_so)
+        )
+        sidecar = _orchestrate_cell_retained(
+            binary,
+            app_args,
+            work_dir,
+            retained_binary=retained_binary,
+            retained_tracer=retained_tracer,
+            args_hash=args_hash,
+            cooperative=cooperative,
+            seed=seed,
+            sample_size=sample_size,
+            max_trace_bytes=max_trace_bytes,
+            max_reconcile_attempts=max_reconcile_attempts,
+            tracer_so=tracer_so,
+            pb_lib=pb_lib,
+        )
+        _require_sampling_inputs_unchanged(
+            retained_binary, retained_tracer
+        )
+        expected_payload = (
+            json.dumps(sidecar, indent=2) + "\n"
+        ).encode("utf-8")
+        publication_state = SidecarPublicationState(expected_payload)
+        publication_attempted = True
+        try:
+            write_sidecar(
+                sidecar,
+                out,
+                publication_state=publication_state,
+            )
+        except SamplingRefusal:
+            raise
+        except Exception as exc:
+            raise SamplingRefusal(
+                "sidecar_publication_failed",
+                f"{type(exc).__name__}: {exc}",
+            ) from exc
+
+        try:
+            if (
+                not publication_state.complete
+                or publication_state.snapshot is None
+            ):
+                raise RuntimeError(
+                    "sidecar writer returned without sealed publication identity"
+                )
+            publication_state.verify_retained_payload()
+        except Exception as exc:
+            raise SamplingRefusal(
+                "sidecar_publication_changed",
+                f"{type(exc).__name__}: {exc}",
+            ) from exc
+        published_snapshot = publication_state.snapshot
+
+        try:
+            retained_sidecar = open_retained_regular(out)
+        except ImmutableArtifactResourceError as exc:
+            raise SamplingRefusal(
+                "sidecar_publication_resource_unavailable",
+                f"{type(exc).__name__}: {exc}",
+            ) from exc
+        except (ImmutableArtifactError, OSError) as exc:
+            raise SamplingRefusal(
+                "sidecar_publication_changed",
+                f"{type(exc).__name__}: {exc}",
+            ) from exc
+        if retained_sidecar.snapshot != published_snapshot:
+            refusal = SamplingRefusal(
+                "sidecar_publication_changed",
+                "active sidecar locator differs from writer publication identity",
+            )
+            try:
+                retained_sidecar.close()
+            except BaseException as cleanup:
+                try:
+                    refusal.add_note(
+                        "mismatched retained sidecar close also failed: "
+                        f"{type(cleanup).__name__}: {cleanup}"
+                    )
+                except (AttributeError, TypeError):
+                    pass
+            raise refusal
+
+        try:
+            with _retained_sidecar_return_boundary(
+                retained_sidecar,
+                publication_state,
+            ) as retained_publication:
+                _require_sampling_sidecar_unchanged(
+                    retained_publication, expected_payload
+                )
+                _require_sampling_inputs_unchanged(
+                    retained_binary, retained_tracer
+                )
+                try:
+                    input_stack.close()
+                except ImmutableArtifactResourceError as exc:
+                    raise SamplingRefusal(
+                        "sampling_input_resource_unavailable",
+                        f"{type(exc).__name__}: {exc}",
+                    ) from exc
+                except (ImmutableArtifactError, OSError) as exc:
+                    raise SamplingRefusal(
+                        "sampling_input_invalid",
+                        f"{type(exc).__name__}: {exc}",
+                    ) from exc
+                _require_sampling_sidecar_unchanged(
+                    retained_publication, expected_payload
+                )
+                try:
+                    returned_payload = (
+                        json.dumps(sidecar, indent=2) + "\n"
+                    ).encode("utf-8")
+                except Exception as exc:
+                    raise SamplingRefusal(
+                        "sidecar_return_payload_changed",
+                        f"{type(exc).__name__}: {exc}",
+                    ) from exc
+                if returned_payload != expected_payload:
+                    raise SamplingRefusal(
+                        "sidecar_return_payload_changed",
+                        "returned sidecar serialization changed after publication",
+                    )
+                return sidecar
+        except SamplingRefusal:
+            raise
+        except ImmutableArtifactResourceError as exc:
+            raise SamplingRefusal(
+                "sidecar_publication_resource_unavailable",
+                f"{type(exc).__name__}: {exc}",
+            ) from exc
+        except (ImmutableArtifactError, OSError) as exc:
+            raise SamplingRefusal(
+                "sidecar_publication_changed",
+                f"{type(exc).__name__}: {exc}",
+            ) from exc
+    except SamplingRefusal as primary:
+        close_inputs_preserving(primary)
+        retire_failed_publication(primary)
+        raise
+    except ImmutableArtifactResourceError as exc:
+        refusal = SamplingRefusal(
+            "sampling_input_resource_unavailable",
+            f"{type(exc).__name__}: {exc}",
+        )
+        close_inputs_preserving(refusal)
+        retire_failed_publication(refusal)
+        raise refusal from exc
+    except (ImmutableArtifactError, OSError) as exc:
+        refusal = SamplingRefusal(
+            "sampling_input_invalid",
+            f"{type(exc).__name__}: {exc}",
+        )
+        close_inputs_preserving(refusal)
+        retire_failed_publication(refusal)
+        raise refusal from exc
+    except BaseException as primary:
+        close_inputs_preserving(primary)
+        retire_failed_publication(primary)
+        raise

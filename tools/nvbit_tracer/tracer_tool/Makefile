@@ -90,7 +90,9 @@ OBJECTS=$(SOURCES:.cu=.o)
 #     that recv_thread_fun increments on the 6 excluded memory-op
 #     classes, serialized to traces/extra_info/*.json at trace
 #     finalization (task11b producer side).
-HOST_OBJECTS=allocation_registry.o exclusion_aggregator.o
+#   phase_record_writer.cc — descriptor-relative, single-device,
+#     exclusive and durable publisher for canonical phase-record leaves.
+HOST_OBJECTS=allocation_registry.o exclusion_aggregator.o phase_record_writer.o
 ARCH?=all
 
 ARCH_VER_REQ=11.7 # NVCC < 11.7 doesn't support -arch=all flag
@@ -137,6 +139,11 @@ allocation_registry.o: allocation_registry.cc allocation_registry.h
 exclusion_aggregator.o: exclusion_aggregator.cc exclusion_aggregator.h
 	$(CXX) -std=c++20 -Wall -Wextra -fPIC $(OPTFLAGS) -c $< -o $@
 
+# Descriptor-relative phase-record publication helper. This host-only object
+# owns the retained TRACES_FOLDER descriptor and is linked into tracer_tool.so.
+phase_record_writer.o: phase_record_writer.cc phase_record_writer.h phase_record_path.h
+	$(CXX) -std=c++20 -Wall -Wextra -fPIC $(OPTFLAGS) -c $< -o $@
+
 # Generated protobuf headers the tracer .cu files consume via
 # `#include "../traces_enhanced/pb_trace/include/instruction.pb.h"` (and
 # trace.pb.h, address.pb.h). The headers live in the traces_enhanced
@@ -174,7 +181,7 @@ TRACES_ENHANCED_PB_HEADERS = \
 %.o: %.cu common.h $(TRACES_ENHANCED_PB_HEADERS) | traces_enhanced
 	$(NVCC) -dc -c -std=c++20 $(TRACER_INCLUDES) -Xptxas -cloning=no -Xcompiler -Wall -arch=$(ARCH) $(OPTFLAGS) -Xcompiler -fPIC $< -o $@
 
-tracer_tool.o: active_launch_gate.h module_origin_resolver.h ../metric_extractor/tier2_sha256.h
+tracer_tool.o: active_launch_gate.h module_origin_resolver.h phase_record_writer.h phase_record_path.h ../metric_extractor/tier2_sha256.h
 
 inject_funcs.o: inject_funcs.cu common.h $(TRACES_ENHANCED_PB_HEADERS) | traces_enhanced
 	$(NVCC) $(TRACER_INCLUDES) $(MAXRREGCOUNT_FLAG) -Xptxas -astoolspatch --keep-device-functions -arch=$(ARCH) -Xcompiler -Wall -Xcompiler -fPIC -c $< -o $@
@@ -266,7 +273,18 @@ ACTIVE_RANGE_SOURCE_TEST=$(TESTS_DIR)/active_range_source_test.py
 $(MODULE_ORIGIN_RESOLVER_TEST_BIN): $(MODULE_ORIGIN_RESOLVER_TEST_SRC) module_origin_resolver.h ../metric_extractor/tier2_sha256.h
 	$(CXX) -std=c++20 -Wall -Wextra -O2 -o $@ $(MODULE_ORIGIN_RESOLVER_TEST_SRC)
 
-unit-tests: $(PHASE_CLASSIFIER_TEST_BIN) $(MEMORY_OP_CLASS_TEST_BIN) $(MEMORY_OP_ACCESS_KIND_TEST_BIN) $(ALLOCATION_REGISTRY_TEST_BIN) $(EXCLUSION_AGGREGATOR_TEST_BIN) $(PATH_RESOLVER_TEST_BIN) $(ACTIVE_LAUNCH_GATE_TEST_BIN) $(MODULE_ORIGIN_RESOLVER_TEST_BIN)
+# phase_record_writer_test: standalone hostile-filesystem regression for the
+# exact helper linked into the live tracer. Test-only hooks bind post-create
+# link-count races, write/fsync/close failures, PID ownership, cleanup-error
+# precedence, and fatal integration; no CUDA, NVBit, protobuf, or nvcc
+# dependency is present.
+PHASE_RECORD_WRITER_TEST_BIN=$(TESTS_DIR)/phase_record_writer_test
+PHASE_RECORD_WRITER_TEST_SRC=$(TESTS_DIR)/phase_record_writer_test.cc
+
+$(PHASE_RECORD_WRITER_TEST_BIN): $(PHASE_RECORD_WRITER_TEST_SRC) phase_record_writer.cc phase_record_writer.h phase_record_path.h
+	$(CXX) -std=c++20 -Wall -Wextra -O2 -DSIMBENCH_PHASE_RECORD_WRITER_TESTING -o $@ $(PHASE_RECORD_WRITER_TEST_SRC) phase_record_writer.cc
+
+unit-tests: $(PHASE_CLASSIFIER_TEST_BIN) $(MEMORY_OP_CLASS_TEST_BIN) $(MEMORY_OP_ACCESS_KIND_TEST_BIN) $(ALLOCATION_REGISTRY_TEST_BIN) $(EXCLUSION_AGGREGATOR_TEST_BIN) $(PATH_RESOLVER_TEST_BIN) $(ACTIVE_LAUNCH_GATE_TEST_BIN) $(MODULE_ORIGIN_RESOLVER_TEST_BIN) $(PHASE_RECORD_WRITER_TEST_BIN)
 	./$(PHASE_CLASSIFIER_TEST_BIN)
 	./$(MEMORY_OP_CLASS_TEST_BIN)
 	./$(MEMORY_OP_ACCESS_KIND_TEST_BIN)
@@ -275,10 +293,11 @@ unit-tests: $(PHASE_CLASSIFIER_TEST_BIN) $(MEMORY_OP_CLASS_TEST_BIN) $(MEMORY_OP
 	./$(PATH_RESOLVER_TEST_BIN)
 	./$(ACTIVE_LAUNCH_GATE_TEST_BIN)
 	./$(MODULE_ORIGIN_RESOLVER_TEST_BIN)
+	./$(PHASE_RECORD_WRITER_TEST_BIN)
 	python3 $(ACTIVE_RANGE_SOURCE_TEST)
 
 clean:
-	rm -f *.so *.o trace_printer $(PHASE_CLASSIFIER_TEST_BIN) $(MEMORY_OP_CLASS_TEST_BIN) $(MEMORY_OP_ACCESS_KIND_TEST_BIN) $(ALLOCATION_REGISTRY_TEST_BIN) $(EXCLUSION_AGGREGATOR_TEST_BIN) $(PATH_RESOLVER_TEST_BIN) $(ACTIVE_LAUNCH_GATE_TEST_BIN) $(MODULE_ORIGIN_RESOLVER_TEST_BIN)
+	rm -f *.so *.o trace_printer $(PHASE_CLASSIFIER_TEST_BIN) $(MEMORY_OP_CLASS_TEST_BIN) $(MEMORY_OP_ACCESS_KIND_TEST_BIN) $(ALLOCATION_REGISTRY_TEST_BIN) $(EXCLUSION_AGGREGATOR_TEST_BIN) $(PATH_RESOLVER_TEST_BIN) $(ACTIVE_LAUNCH_GATE_TEST_BIN) $(MODULE_ORIGIN_RESOLVER_TEST_BIN) $(PHASE_RECORD_WRITER_TEST_BIN)
 	$(MAKE) clean -C $(TRACES_ENHANCED_DIR)
 
 .PHONY: all traces_enhanced unit-tests clean

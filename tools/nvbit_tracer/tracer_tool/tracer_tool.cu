@@ -67,6 +67,7 @@
 #include "../traces_enhanced/src/string_utilities.h"
 #include "../isa_def/trace_opcode.h"
 #include "path_resolver.h"
+#include "phase_record_writer.h"
 #include "active_launch_gate.h"
 #include "module_origin_resolver.h"
 // MOD. End. Enhanced Tracer
@@ -200,6 +201,10 @@ static_assert(
 
 int num_devices = 0;
 
+// Fixed upper bound for all per-device process state. Every device identity is
+// status-checked and range-checked before it can index these arrays.
+static constexpr int TRACER_MAX_DEVICES = 32;
+
 enum class RecvThreadState {
   WORKING,
   STOP,
@@ -209,6 +214,11 @@ enum class RecvThreadState {
 struct CTXstate {
   /* context id */
   int id;
+
+  /* Checked CUDA device ordinal that owns this context. Set exactly once in
+   * init_context_state after cudaGetDeviceCount and cuCtxGetDevice both succeed;
+   * every per-device array access derives from this immutable identity. */
+  int device_id = -1;
 
   /* Channel used to communicate from GPU to CPU receiving thread */
   ChannelDev* channel_dev;
@@ -280,8 +290,8 @@ struct CTXstate {
   /* Generation counter for diagnostics. Main thread stores
    * `this_launch_id` here BEFORE pushing the launch-indexed flush
    * sentinel; the recv thread compares each sentinel's launch_index
-   * against this value to emit a stale-sentinel WARNING when a
-   * sentinel from a prior timed-out launch arrives. The actual
+   * against this value to diagnose any unexpected earlier-generation
+   * sentinel. The actual
    * post-launch handshake uses `phase_completed_flush_launch_index`
    * below — making the *waited-on* state itself generation-valued
    * means a stale sentinel writing `completed = N` cannot satisfy
@@ -311,12 +321,63 @@ struct CTXstate {
    * thread snapshots and clears at each per-launch flush boundary
    * to write `phase_records_<repeat>_<launch>.bin` files into the
    * traces folder. Records are filtered by `launch_index` at
-   * snapshot time so a slow/late record from a prior launch cannot
-   * contaminate a later launch's snapshot file.
+   * snapshot time so an unexpected earlier-generation record cannot
+   * contaminate the current launch's evidence.
    */
   std::vector<char> phase_records_buffer;
   std::mutex phase_records_buffer_mutex;
 };
+
+[[noreturn]] static void fail_device_identity(const char *stage,
+                                              const std::string &detail) {
+  fprintf(stderr,
+          "FATAL: checked CUDA device identity failed at %s: %s; refusing "
+          "unchecked per-device state access.\n",
+          stage, detail.c_str());
+  fflush(stderr);
+  _exit(EXIT_FAILURE);
+}
+
+static int checked_device_id_value(int device_id, const char *stage) {
+  if (num_devices <= 0 || num_devices > TRACER_MAX_DEVICES || device_id < 0 ||
+      device_id >= num_devices || device_id >= TRACER_MAX_DEVICES) {
+    std::ostringstream detail;
+    detail << "device_id=" << device_id << " num_devices=" << num_devices
+           << " TRACER_MAX_DEVICES=" << TRACER_MAX_DEVICES;
+    fail_device_identity(stage, detail.str());
+  }
+  return device_id;
+}
+
+static int checked_current_context_device_id(const CTXstate *ctx_state,
+                                             const char *stage) {
+  CUdevice observed_device = -1;
+  const CUresult status = cuCtxGetDevice(&observed_device);
+  if (status != CUDA_SUCCESS) {
+    std::ostringstream detail;
+    detail << "cuCtxGetDevice returned CUresult=" << static_cast<int>(status);
+    fail_device_identity(stage, detail.str());
+  }
+  const int device_id =
+      checked_device_id_value(static_cast<int>(observed_device), stage);
+  if (ctx_state != nullptr && ctx_state->device_id >= 0 &&
+      ctx_state->device_id != device_id) {
+    std::ostringstream detail;
+    detail << "current device_id=" << device_id
+           << " differs from stored CTXstate::device_id="
+           << ctx_state->device_id;
+    fail_device_identity(stage, detail.str());
+  }
+  return device_id;
+}
+
+static int checked_stored_context_device_id(const CTXstate *ctx_state,
+                                            const char *stage) {
+  if (ctx_state == nullptr) {
+    fail_device_identity(stage, "CTXstate is null");
+  }
+  return checked_device_id_value(ctx_state->device_id, stage);
+}
 
 /* Host-managed launch_index counter that the injected
  * `record_phase_clock` function reads at call time. Updated by the
@@ -598,6 +659,17 @@ static void write_allocation_sidecar(
  * wiring alone.
  */
 bool phase_injection_enabled = false;
+/* Zero-based A/B repeat identity supplied by the retained Python orchestrator.
+ * Each injected subprocess is a fresh process, so this immutable process-local
+ * value prevents later repeats from overwriting phase_records_0_<launch>.bin. */
+uint32_t phase_repeat_index = 0;
+
+/* Descriptor-relative authority for phase-record leaves. Opened once from the
+ * resolved TRACES_FOLDER before the first launch can be admitted. The helper
+ * owns and revalidates the retained directory inode, enforces a single GPU
+ * device for the unqualified canonical filename namespace, and performs the
+ * host-only exclusive/durable publication contract. */
+simbench_nvbit::PhaseRecordWriter phase_record_writer;
 
 /* Iteration cap for the per-launch phase-channel sentinel spin and the
  * per-context phase teardown spin. Configurable via env-var
@@ -918,38 +990,39 @@ int binary_version;
 // FATAL message to stderr and calls `_exit(EXIT_FAILURE)`. The caller
 // should treat this as a terminal failure rather than retrying.
 static int resolve_binary_version_for_current_device() {
-  // Prefer the CUDA runtime device properties because this helper runs
-  // during context init before a per-function CUfunction handle exists.
-  int dev = 0;
-  cudaError_t dev_rc = cudaGetDevice(&dev);
-  cudaDeviceProp prop;
-  cudaError_t prop_rc = cudaGetDeviceProperties(&prop, dev);
-  if (dev_rc == cudaSuccess && prop_rc == cudaSuccess &&
-      (prop.major * 10 + prop.minor) > 0) {
+  // Establish a checked driver identity first. The runtime path is used only
+  // when it independently reports that same in-range device ordinal.
+  const int checked_device = checked_current_context_device_id(
+      nullptr, "resolve_binary_version_for_current_device");
+  int runtime_device = -1;
+  const cudaError_t dev_rc = cudaGetDevice(&runtime_device);
+  cudaDeviceProp prop{};
+  cudaError_t prop_rc = cudaErrorInvalidDevice;
+  if (dev_rc == cudaSuccess && runtime_device == checked_device) {
+    prop_rc = cudaGetDeviceProperties(&prop, runtime_device);
+  }
+  if (dev_rc == cudaSuccess && runtime_device == checked_device &&
+      prop_rc == cudaSuccess && (prop.major * 10 + prop.minor) > 0) {
     return prop.major * 10 + prop.minor;
   }
-  // Driver-API fallback (mirrors the per-kernel-hook logic at line 1175
-  // block so behavior matches when that path is exercised).
-  CUdevice cdev;
+  // Driver-API fallback uses the already status/range-checked context device.
+  const CUdevice cdev = static_cast<CUdevice>(checked_device);
   int major = 0, minor = 0;
-  CUresult dev_res = cuCtxGetDevice(&cdev);
-  CUresult maj_res = CUDA_ERROR_UNKNOWN, min_res = CUDA_ERROR_UNKNOWN;
-  if (dev_res == CUDA_SUCCESS) {
-    maj_res = cuDeviceGetAttribute(
-        &major, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, cdev);
-    min_res = cuDeviceGetAttribute(
-        &minor, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, cdev);
-  }
-  if (dev_res == CUDA_SUCCESS && maj_res == CUDA_SUCCESS &&
-      min_res == CUDA_SUCCESS && (major * 10 + minor) > 0) {
+  const CUresult maj_res = cuDeviceGetAttribute(
+      &major, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, cdev);
+  const CUresult min_res = cuDeviceGetAttribute(
+      &minor, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, cdev);
+  if (maj_res == CUDA_SUCCESS && min_res == CUDA_SUCCESS &&
+      (major * 10 + minor) > 0) {
     return major * 10 + minor;
   }
   fprintf(stderr,
           "FATAL: resolve_binary_version_for_current_device cannot "
-          "determine binary_version. dev_rc=%d prop_rc=%d dev_res=%d "
-          "maj_res=%d min_res=%d major=%d minor=%d. Aborting.\n",
-          (int)dev_rc, (int)prop_rc, (int)dev_res, (int)maj_res,
-          (int)min_res, major, minor);
+          "determine binary_version. dev_rc=%d runtime_device=%d "
+          "checked_device=%d prop_rc=%d maj_res=%d min_res=%d major=%d "
+          "minor=%d. Aborting.\n",
+          (int)dev_rc, runtime_device, checked_device, (int)prop_rc,
+          (int)maj_res, (int)min_res, major, minor);
   fflush(stderr);
   _exit(EXIT_FAILURE);
 }
@@ -970,11 +1043,8 @@ static int resolve_binary_version_for_current_device() {
 // (e.g. line :1389-1390 right after channel->recv returns), the explicit
 // acquire-load on kernel_id itself provides the direct synchronization.
 //
-// TRACER_MAX_DEVICES is comfortably above anything real NVBit sessions
-// encounter on a workstation or laptop; if you add more than 32 GPUs,
-// the assertion in init_context_state will abort early rather than
-// silently corrupt memory.
-static constexpr int TRACER_MAX_DEVICES = 32;
+// Device identities are checked against both the runtime-reported device count
+// and TRACER_MAX_DEVICES before any access reaches these arrays.
 std::atomic<int> kernel_id[TRACER_MAX_DEVICES]{};
 std::atomic<int> current_stream_id[TRACER_MAX_DEVICES]{};
 
@@ -1829,6 +1899,35 @@ static AcceptedModuleMapping resolve_accepted_module_mapping(
   return mapping;
 }
 
+/* Resolve every output global from TRACES_FOLDER during nvbit_at_init, before
+ * any CUDA callback can trigger a launch or an application thread can close an
+ * inherited /proc/self/fd directory authority. The first-event path still
+ * creates the ordinary trace tree, but it no longer establishes phase
+ * authority from a mutable lexical path. */
+static void configure_trace_output_paths_from_environment() {
+  if (user_defined_folders != 1) return;
+
+  const char *usr_folder_c = std::getenv("TRACES_FOLDER");
+  if (usr_folder_c == nullptr || usr_folder_c[0] == '\0') return;
+
+  std::string usr_folder = usr_folder_c;
+  while (!usr_folder.empty() && usr_folder.back() == '/') {
+    usr_folder.pop_back();
+  }
+  traces_path = usr_folder;
+  extrainfo_path = traces_path + "/extra_info";
+  cubin_path = extrainfo_path + "/cubin";
+  sass_path = extrainfo_path + "/sass";
+  register_usage_path = extrainfo_path + "/register_usage";
+  threadblock_trace_path = traces_path + "/threadblocks";
+  threadblock_register_values_path =
+      traces_path + "/threadblocks/register_values";
+  traces_location = traces_path + "/";
+  stats_location = traces_path + "/stats.csv";
+  printf("\n Traces location is %s \n", traces_location.c_str());
+  printf("Stats location is %s \n", stats_location.c_str());
+}
+
 void nvbit_at_init() {
   setenv("CUDA_MANAGED_FORCE_DEVICE_ALLOC", "1", 1);
   GET_VAR_INT(
@@ -1875,6 +1974,7 @@ void nvbit_at_init() {
               "Stop the process once the current kernel > DYNAMIC_KERNEL_LIMIT_END");
   GET_VAR_INT(user_defined_folders, "USER_DEFINED_FOLDERS", 0, "Uses the user defined "
               "folder TRACES_FOLDER path environment");
+  configure_trace_output_paths_from_environment();
   GET_VAR_INT(trace_sampling_mode, "TRACE_SAMPLING_MODE", 0,
               "Trace-sampling capture mode: 0=off, 1=counting-only (per-block "
               "stats, no address payload), 2=selective-dump (write only the "
@@ -1924,8 +2024,29 @@ void nvbit_at_init() {
   phase_injection_enabled = (phase_inject_env != nullptr &&
                              phase_inject_env[0] == '1');
   if (phase_injection_enabled) {
+    const char *repeat_env =
+        std::getenv("SIMBENCH_NVBIT_PHASE_REPEAT_INDEX");
+    if (repeat_env != nullptr) {
+      bool decimal = repeat_env[0] != '\0';
+      for (const char *p = repeat_env; decimal && *p != '\0'; ++p) {
+        decimal = *p >= '0' && *p <= '9';
+      }
+      errno = 0;
+      char *endp = nullptr;
+      const unsigned long long parsed = std::strtoull(repeat_env, &endp, 10);
+      if (!decimal || errno != 0 || endp == repeat_env || *endp != '\0' ||
+          parsed > UINT32_MAX) {
+        fprintf(stderr,
+                "ERROR: SIMBENCH_NVBIT_PHASE_REPEAT_INDEX=%s is not a "
+                "uint32 decimal repeat index.\n",
+                repeat_env);
+        std::exit(EXIT_FAILURE);
+      }
+      phase_repeat_index = static_cast<uint32_t>(parsed);
+    }
     fprintf(stderr,
             "[tracer_tool] phase_injection_enabled=1 "
+            "repeat_index=%" PRIu32 " "
             "(SIMBENCH_NVBIT_PHASE_INJECT=1); phase-injection "
             "foundation wired (phase_clock_record_t struct + "
             "record_phase_clock injected function defined). "
@@ -1933,7 +2054,16 @@ void nvbit_at_init() {
             "function-exit / basic-block-entry / bar.sync "
             "boundaries is sequenced for a subsequent round; no "
             "per-launch phase_cycle_ledger sidecars are emitted "
-            "yet.\n");
+            "yet.\n",
+            phase_repeat_index);
+
+    create_folder(traces_path.c_str());
+    std::string phase_authority_error;
+    if (!phase_record_writer.OpenDirectory(traces_path,
+                                           &phase_authority_error)) {
+      simbench_nvbit::FailPhaseRecordAuthority("early TRACES_FOLDER open/snapshot",
+                                  phase_authority_error);
+    }
   }
 
   std::string pad(100, '-');
@@ -1962,6 +2092,15 @@ std::unordered_set<CUfunction> already_instrumented;
 void instrument_function_if_needed(CUcontext ctx, CUfunction func, int device_id) {
   assert(ctx_state_map.find(ctx) != ctx_state_map.end());
   CTXstate* ctx_state = ctx_state_map[ctx];
+  device_id = checked_device_id_value(
+      device_id, "instrument_function_if_needed/stop_report");
+  if (device_id != ctx_state->device_id) {
+    std::ostringstream detail;
+    detail << "instrumentation device_id=" << device_id
+           << " differs from CTXstate::device_id=" << ctx_state->device_id;
+    fail_device_identity("instrument_function_if_needed/stop_report",
+                         detail.str());
+  }
 
   std::vector<CUfunction> related_functions =
       nvbit_get_related_functions(ctx, func);
@@ -2500,10 +2639,9 @@ __global__ void flush_channel(ChannelDev* ch_dev) {
  * `this_launch_id` of the kernel that just finished. The recv
  * thread always stores `launch_index` into the per-context
  * `phase_completed_flush_launch_index` atomic; the host post-launch
- * path waits for `completed == this_launch_id`. A stale sentinel
- * from a previously-timed-out launch publishes its own (smaller)
- * `launch_index` and cannot spuriously satisfy a later launch's
- * wait. The recv thread also compares `launch_index` against
+ * path waits for `completed == this_launch_id`. An unexpected stale sentinel
+ * publishes its own generation and cannot spuriously satisfy a different
+ * launch's wait. The recv thread also compares `launch_index` against
  * `phase_expected_flush_launch_index` and emits a stale-sentinel
  * `WARNING:` when the values disagree; that diagnostic is not
  * load-bearing for safety.
@@ -2539,9 +2677,8 @@ __global__ void flush_phase_channel(ChannelDev* ch_dev,
  * `SIMBENCH_PHASE_TEST_STALL_LAUNCH=N` to pick the target launch and
  * `SIMBENCH_PHASE_TEST_STALL_ITERS=K` (default 1e8) to choose the
  * stall length. With a small `SIMBENCH_PHASE_FLUSH_TIMEOUT_ITERS`
- * cap, this lets the smoke pytest force the post-launch timeout
- * branch to fire deterministically and prove the next launch still
- * drains correctly under the launch-indexed handshake.
+ * cap, this forces the post-launch timeout branch deterministically so a live
+ * smoke run can verify fatal rejection and noncanonical partial retention.
  *
  * Disabled (no-op) unless the env var is set. Reads cached on first
  * call. A negative or zero target launch disables the hook entirely.
@@ -2604,10 +2741,8 @@ void *phase_recv_thread_fun(void *args) {
   pthread_mutex_lock(&mutex);
   assert(ctx_state_map.find(ctx) != ctx_state_map.end());
   CTXstate* ctx_state = ctx_state_map[ctx];
-  CUcontext current_ctx;
-  cuCtxGetCurrent(&current_ctx);
-  cuCtxSetCurrent(ctx);
-  cuCtxSetCurrent(current_ctx);
+  checked_stored_context_device_id(ctx_state,
+                                   "phase_recv_thread_fun/context device");
   ChannelHost* ch_host = &ctx_state->phase_channel_host;
   pthread_mutex_unlock(&mutex);
 
@@ -2624,10 +2759,9 @@ void *phase_recv_thread_fun(void *args) {
           /* Per-launch flush sentinel. Always publish the
            * sentinel's launch_index into the per-context completed
            * counter; the host post-launch path waits for
-           * `completed == this_launch_id` and so a stale sentinel
-           * from a prior timed-out launch (writing `completed = N`)
-           * cannot satisfy a wait for `completed == N+1`. The
-           * generation-valued counter is what makes the handshake
+           * `completed == this_launch_id`; an unexpected stale sentinel
+           * stores only its own generation and cannot acknowledge a different
+           * launch. The generation-valued counter makes the handshake
            * race-free under arbitrary recv-thread scheduling.
            */
           uint32_t sentinel_launch = pcr->launch_index;
@@ -2654,12 +2788,11 @@ void *phase_recv_thread_fun(void *args) {
                 1, std::memory_order_relaxed);
             fprintf(stderr,
                     "WARNING: stale phase flush sentinel "
-                    "launch_index=%u (expected=%u); a prior launch "
-                    "likely exhausted SIMBENCH_PHASE_FLUSH_TIMEOUT_ITERS "
-                    "before its sentinel was drained. The host "
-                    "completed-counter handshake makes this safe: "
-                    "the stale store cannot satisfy a wait for a "
-                    "later launch_index.\n",
+                    "launch_index=%u (expected=%u); the generation-valued "
+                    "completed counter cannot acknowledge the wrong launch. "
+                    "If the expected sentinel does not arrive within the "
+                    "configured bound, capture exits fatally before canonical "
+                    "phase publication.\n",
                     (unsigned)sentinel_launch, (unsigned)expected_launch);
           }
           ctx_state->phase_completed_flush_launch_index.store(
@@ -2720,43 +2853,8 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
 
     first_call = false;
 
-    // R51 (NVIDIA_Sims_Predict_NCU repo): when USER_DEFINED_FOLDERS=1
-    // and TRACES_FOLDER is set, redirect EVERY trace output path to
-    // the caller-provided folder BEFORE create_folder runs. The
-    // pre-R51 behavior only redirected `traces_location` and
-    // `stats_location` and only after `create_folder(traces_path)`
-    // had already created the default `./traces/` directory; that
-    // left `dynamic_trace.pb`, the per-kernel `.trace` files, the
-    // extra_info subtree, and the threadblock subtree at the
-    // hardcoded `traces/` path. The simbench-bw orchestrator's
-    // `handle_trace` builds a per-shape `traces_folder = artifact_dir
-    // / trace_<shape>` and expects every trace artifact under that
-    // path; redirecting all globals here lets the orchestrator drive
-    // canonical capture without bypassing this tool.
-    if (user_defined_folders == 1)
-    {
-      const char *usr_folder_c = std::getenv("TRACES_FOLDER");
-      if (usr_folder_c != NULL && usr_folder_c[0] != '\0') {
-        std::string usr_folder = usr_folder_c;
-        // Strip any trailing slash so the appended subdirectory
-        // names produce single-slash paths.
-        while (!usr_folder.empty() && usr_folder.back() == '/') {
-          usr_folder.pop_back();
-        }
-        traces_path = usr_folder;
-        extrainfo_path = traces_path + "/extra_info";
-        cubin_path = extrainfo_path + "/cubin";
-        sass_path = extrainfo_path + "/sass";
-        register_usage_path = extrainfo_path + "/register_usage";
-        threadblock_trace_path = traces_path + "/threadblocks";
-        threadblock_register_values_path = traces_path + "/threadblocks/register_values";
-        traces_location = traces_path + "/";
-        stats_location = traces_path + "/stats.csv";
-        printf("\n Traces location is %s \n", traces_location.c_str());
-        printf("Stats location is %s \n", stats_location.c_str());
-      }
-    }
-
+    // Output globals were resolved in nvbit_at_init. In phase mode that hook
+    // also opened and snapshotted TRACES_FOLDER before any CUDA callback.
     create_folder(traces_path.c_str());
 
     if (active_from_start &&
@@ -2783,8 +2881,8 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
       cuMemcpyHtoD_v2_params *p = (cuMemcpyHtoD_v2_params *)params;
       uint64_t stream_key = 0;// Memcpy unless they are asynchronous, they are always in stream 0.
       char buffer[1024];
-      int device_id;
-      cuCtxGetDevice(&device_id);
+      const int device_id = checked_current_context_device_id(
+          ctx_state, "nvbit_at_cuda_event/cuMemcpyHtoD_v2");
       sprintf(buffer, "MemcpyHtoD,0x%016llx,%lu", p->dstDevice, p->ByteCount);
       // Serialize dyn_trace mutation against any concurrent recv-thread
       // writes on other contexts.
@@ -2866,9 +2964,13 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
       // cluster_dim_* already initialized to (1,1,1) — plain
       // cuLaunchKernel has no cluster support.
     }
+    // cuLaunchKernel/cuLaunchKernelEx require a current context. Query it only
+    // after CBID dispatch, then status/bounds-check and compare it with the
+    // immutable CTXstate identity before any per-device array access.
+    const int launch_device_id = checked_current_context_device_id(
+        ctx_state, "nvbit_at_cuda_event/kernel launch");
     if (!is_exit) {
-      int device_id;
-      cuCtxGetDevice(&device_id);
+      const int device_id = launch_device_id;
       pending_accepted_launch = PendingAcceptedLaunch{};
       if (active_from_start && dynamic_kernel_limit_start &&
           kernel_id[device_id].load(std::memory_order_acquire) ==
@@ -2916,6 +3018,21 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
         return;
       }
 
+      /* Canonical phase leaves intentionally retain the admitted
+       * phase_records_<repeat>_<launch>.bin spelling. Because kernel_id is a
+       * per-device counter, two producing devices would otherwise both claim
+       * the same launch numbers. Admit exactly one GPU device before phase
+       * instrumentation is enabled; the host-only writer also rechecks this at
+       * publication. */
+      if (phase_injection_enabled) {
+        std::string phase_device_error;
+        if (!phase_record_writer.AdmitDevice(device_id,
+                                             &phase_device_error)) {
+          simbench_nvbit::FailPhaseRecordAuthority("single-device admission",
+                                      phase_device_error);
+        }
+      }
+
       pending_accepted_launch.accepted = true;
       pending_accepted_launch.device_id = device_id;
       pending_accepted_launch.trace_launch_id = static_cast<uint32_t>(
@@ -2924,6 +3041,19 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
           total_dynamic_instr_counter;
       pending_accepted_launch.reported_insts_at_entry =
           reported_dynamic_instr_counter;
+
+      // Claim the single process-global managed launch identity before any
+      // instrumentation can publish a new value. Same-device overlap is fatal:
+      // an unqualified managed scalar cannot represent two in-flight launches.
+      if (phase_injection_enabled) {
+        std::string phase_launch_error;
+        if (!phase_record_writer.BeginLaunch(
+                device_id, pending_accepted_launch.trace_launch_id,
+                &phase_launch_error)) {
+          simbench_nvbit::FailPhaseRecordAuthority(
+              "exclusive phase-launch admission", phase_launch_error);
+        }
+      }
 
       // Sampling scope dimensions belong to the accepted profiler-bounded
       // launch.  Warm-up / reference launches outside the active range cannot
@@ -2975,18 +3105,14 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
           binary_version = attr_bv;
           ctx_state->binary_version = attr_bv;
         } else {
-          CUdevice dev;
-          CUresult dev_res = cuCtxGetDevice(&dev);
+          const CUdevice dev = static_cast<CUdevice>(device_id);
           int major = 0, minor = 0;
-          CUresult maj_res = CUDA_ERROR_UNKNOWN, min_res = CUDA_ERROR_UNKNOWN;
-          if (dev_res == CUDA_SUCCESS) {
-            maj_res = cuDeviceGetAttribute(
-                &major, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, dev);
-            min_res = cuDeviceGetAttribute(
-                &minor, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, dev);
-          }
-          if (dev_res == CUDA_SUCCESS && maj_res == CUDA_SUCCESS &&
-              min_res == CUDA_SUCCESS && (major * 10 + minor) > 0) {
+          const CUresult maj_res = cuDeviceGetAttribute(
+              &major, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MAJOR, dev);
+          const CUresult min_res = cuDeviceGetAttribute(
+              &minor, CU_DEVICE_ATTRIBUTE_COMPUTE_CAPABILITY_MINOR, dev);
+          if (maj_res == CUDA_SUCCESS && min_res == CUDA_SUCCESS &&
+              (major * 10 + minor) > 0) {
             binary_version = major * 10 + minor;
             ctx_state->binary_version = binary_version;
             fprintf(stderr,
@@ -2998,9 +3124,10 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
             fprintf(stderr,
                     "FATAL: Cannot determine binary_version. "
                     "cuFuncGetAttribute returned attr_bv=%d (CUresult=%d), "
-                    "device fallback failed (dev_res=%d, maj_res=%d, "
-                    "min_res=%d, major=%d, minor=%d). Aborting.\n",
-                    attr_bv, (int)bv_res, (int)dev_res, (int)maj_res,
+                    "checked device fallback failed (device_id=%d, "
+                    "maj_res=%d, min_res=%d, major=%d, minor=%d). "
+                    "Aborting.\n",
+                    attr_bv, (int)bv_res, device_id, (int)maj_res,
                     (int)min_res, major, minor);
             fflush(stderr);
             _exit(EXIT_FAILURE);
@@ -3097,8 +3224,8 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
 
       fclose(statsFile);
 
-      uint32_t this_launch_id =
-          (uint32_t)kernel_id[device_id].load(std::memory_order_acquire);
+      const uint32_t this_launch_id =
+          pending_accepted_launch.trace_launch_id;
       kernel_id[device_id].fetch_add(1, std::memory_order_acq_rel);
       // Release-store publishes both the kernel_id increment above and every
       // other main-thread mutation (pc_to_opcode, threadblocks, etc.) to the
@@ -3131,8 +3258,7 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
         pthread_mutex_unlock(&mutex);
         return;
       }
-      int device_id;
-      cuCtxGetDevice(&device_id);
+      const int device_id = launch_device_id;
       if (device_id != pending_accepted_launch.device_id) {
         fprintf(stderr,
                 "FATAL: accepted launch exit changed devices (entry=%d, "
@@ -3177,13 +3303,14 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
        * which forces every runtime value to be strictly positive). A
        * stalled receive thread (e.g., backpressured device-side push()
        * that never completes) would otherwise wedge the host
-       * indefinitely. On exhaustion we fall through, emit a typed
-       * WARNING after the per-launch snapshot path, and let subsequent
-       * launches continue.
+       * indefinitely. On exhaustion the host snapshots any bytes already
+       * received, optionally retains them under the explicitly noncanonical
+       * partial-evidence filename, and then exits fatally before canonical
+       * publication. A timed-out flush can never authorize a capture.
        */
       bool phase_flush_timed_out = false;
-      uint32_t phase_this_launch_id =
-          (uint32_t)simbench_phase_launch_index_for_inject;
+      const uint32_t phase_this_launch_id =
+          pending_accepted_launch.trace_launch_id;
       if (phase_injection_enabled &&
           ctx_state->phase_channel_dev != nullptr) {
         flush_phase_channel<<<1, 1>>>(ctx_state->phase_channel_dev,
@@ -3192,10 +3319,9 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
         assert(cudaGetLastError() == cudaSuccess);
         /* Wait for the recv thread to publish
          * `phase_completed_flush_launch_index == phase_this_launch_id`.
-         * The generation-valued counter makes the wait race-free:
-         * a stale sentinel from a previously-timed-out launch
-         * publishes its own (smaller) launch_index and cannot
-         * spuriously satisfy this wait. Bounded by
+         * The generation-valued counter makes the wait race-free: an
+         * unexpected stale sentinel publishes only its own launch_index and
+         * cannot spuriously satisfy this launch's wait. Bounded by
          * SIMBENCH_PHASE_FLUSH_TIMEOUT_ITERS.
          */
         long long iters_cap = phase_flush_timeout_iters();
@@ -3228,12 +3354,11 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
        * fetch_add, mirroring the kernel-trace filename convention.
        *
        * Records are filtered by `launch_index`: only records whose
-       * `launch_index` equals `phase_this_launch_id` go into this
-       * launch's snapshot file. Late records from a previously-
-       * timed-out launch (smaller launch_index) are quarantined and
-       * counted; future-launch records (should not occur today since
-       * the next launch hasn't been published yet) are retained in
-       * the buffer for that launch's own snapshot.
+       * `launch_index` equals `phase_this_launch_id` enter this launch's
+       * evidence. Earlier-generation records are quarantined as defense in
+       * depth; the timeout path now exits fatally, so they cannot be carried
+       * into a successfully continuing capture. Future-generation records are
+       * retained for their own snapshot.
        */
       uint64_t phase_quarantined_this_launch = 0;
       if (phase_injection_enabled &&
@@ -3270,44 +3395,60 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
           ctx_state->phase_quarantined_record_count.fetch_add(
               phase_quarantined_this_launch, std::memory_order_relaxed);
           fprintf(stderr,
-                  "WARNING: quarantined %llu late phase record(s) "
-                  "from a prior timed-out launch while snapshotting "
-                  "kernel='%s' launch_index=%u; the late records are "
-                  "discarded so they do not contaminate this "
-                  "launch's phase ledger.\n",
+                  "WARNING: quarantined %llu earlier-generation phase "
+                  "record(s) while snapshotting kernel='%s' "
+                  "launch_index=%u; they cannot contaminate this launch's "
+                  "phase evidence.\n",
                   (unsigned long long)phase_quarantined_this_launch,
                   nvbit_get_func_name(ctx, kernel_func, true),
                   (unsigned)phase_this_launch_id);
         }
-        if (!snapshot_for_launch.empty()) {
-          create_folder(traces_path.c_str());
-          char buf_path[1024];
-          snprintf(buf_path, sizeof(buf_path),
-                   "%s/phase_records_0_%u.bin",
-                   traces_path.c_str(), (unsigned)phase_this_launch_id);
-          std::ofstream ofs(buf_path, std::ios::out | std::ios::binary);
-          if (ofs) {
-            ofs.write(snapshot_for_launch.data(),
-                      (std::streamsize)snapshot_for_launch.size());
-            ofs.close();
+        if (phase_flush_timed_out) {
+          std::ostringstream timeout_detail;
+          timeout_detail
+              << "SIMBENCH_PHASE_FLUSH_TIMEOUT_ITERS="
+              << phase_flush_timeout_iters()
+              << " exhausted draining the phase channel for kernel='"
+              << nvbit_get_func_name(ctx, kernel_func, true)
+              << "' launch_index=" << phase_this_launch_id
+              << "; canonical phase publication is forbidden";
+          if (!snapshot_for_launch.empty()) {
+            std::string partial_publication_error;
+            if (!phase_record_writer.WritePartialRecord(
+                    device_id, phase_repeat_index, phase_this_launch_id,
+                    snapshot_for_launch.data(), snapshot_for_launch.size(),
+                    &partial_publication_error)) {
+              timeout_detail
+                  << "; additionally, noncanonical partial-evidence "
+                     "publication failed: "
+                  << partial_publication_error;
+            } else {
+              timeout_detail
+                  << "; retained " << snapshot_for_launch.size()
+                  << " partial byte(s) only as "
+                     ".partial-phase-records_<repeat>_<launch>.bin";
+            }
           } else {
-            fprintf(stderr,
-                    "[tracer_tool] failed to write phase records "
-                    "binary at %s; %zu bytes lost.\n",
-                    buf_path, snapshot_for_launch.size());
+            timeout_detail << "; no partial record bytes were available";
           }
+          simbench_nvbit::FailPhaseRecordAuthority(
+              "phase-channel flush timeout", timeout_detail.str());
+        }
+        if (!snapshot_for_launch.empty()) {
+          simbench_nvbit::PublishCanonicalRecordOrFail(
+              phase_record_writer, device_id, phase_repeat_index,
+              phase_this_launch_id, snapshot_for_launch.data(),
+              snapshot_for_launch.size(), "exclusive durable publication");
         }
       }
 
-      if (phase_flush_timed_out) {
-        fprintf(stderr,
-                "WARNING: SIMBENCH_PHASE_FLUSH_TIMEOUT_ITERS=%lld "
-                "exhausted draining the phase channel for "
-                "kernel='%s' launch_index=%u; snapshot uses partial "
-                "phase records; subsequent launches continue.\n",
-                (long long)phase_flush_timeout_iters(),
-                nvbit_get_func_name(ctx, kernel_func, true),
-                (unsigned)phase_this_launch_id);
+      if (phase_injection_enabled) {
+        std::string phase_launch_error;
+        if (!phase_record_writer.EndLaunch(device_id, phase_this_launch_id,
+                                           &phase_launch_error)) {
+          simbench_nvbit::FailPhaseRecordAuthority(
+              "exclusive phase-launch completion", phase_launch_error);
+        }
       }
 
       const uint64_t total_insts_per_kernel = total_dynamic_instr_counter -
@@ -3418,8 +3559,8 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
         uint64_t base = static_cast<uint64_t>(*p->dptr);
         uint64_t size = static_cast<uint64_t>(p->bytesize);
         if (base != 0 && size > 0) {
-          int device_id = -1;
-          cuCtxGetDevice(&device_id);
+          const int device_id = checked_stored_context_device_id(
+              ctx_state, "nvbit_at_cuda_event/allocation registry");
           nvbit_tracer::register_allocation(
               ctx, base, size, device_id);
         }
@@ -3456,8 +3597,8 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
         uint64_t base = static_cast<uint64_t>(*p->dptr);
         uint64_t size = static_cast<uint64_t>(p->bytesize);
         if (base != 0 && size > 0) {
-          int device_id = -1;
-          cuCtxGetDevice(&device_id);
+          const int device_id = checked_stored_context_device_id(
+              ctx_state, "nvbit_at_cuda_event/allocation registry");
           nvbit_tracer::register_allocation(
               ctx, base, size, device_id);
         }
@@ -3492,8 +3633,8 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
             static_cast<uint64_t>(*p->pPitch) *
             static_cast<uint64_t>(p->Height);
         if (base != 0 && size > 0) {
-          int device_id = -1;
-          cuCtxGetDevice(&device_id);
+          const int device_id = checked_stored_context_device_id(
+              ctx_state, "nvbit_at_cuda_event/allocation registry");
           nvbit_tracer::register_allocation(
               ctx, base, size, device_id);
         }
@@ -3513,8 +3654,8 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
             static_cast<uint64_t>(*p->pPitch) *
             static_cast<uint64_t>(p->Height);
         if (base != 0 && size > 0) {
-          int device_id = -1;
-          cuCtxGetDevice(&device_id);
+          const int device_id = checked_stored_context_device_id(
+              ctx_state, "nvbit_at_cuda_event/allocation registry");
           nvbit_tracer::register_allocation(
               ctx, base, size, device_id);
         }
@@ -3534,8 +3675,8 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
         uint64_t base = static_cast<uint64_t>(*p->dptr);
         uint64_t size = static_cast<uint64_t>(p->bytesize);
         if (base != 0 && size > 0) {
-          int device_id = -1;
-          cuCtxGetDevice(&device_id);
+          const int device_id = checked_stored_context_device_id(
+              ctx_state, "nvbit_at_cuda_event/allocation registry");
           nvbit_tracer::register_allocation(
               ctx, base, size, device_id);
         }
@@ -3561,8 +3702,8 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
         uint64_t base = static_cast<uint64_t>(*p->dptr);
         uint64_t size = static_cast<uint64_t>(p->bytesize);
         if (base != 0 && size > 0) {
-          int device_id = -1;
-          cuCtxGetDevice(&device_id);
+          const int device_id = checked_stored_context_device_id(
+              ctx_state, "nvbit_at_cuda_event/allocation registry");
           nvbit_tracer::register_allocation(
               ctx, base, size, device_id);
         }
@@ -3584,8 +3725,8 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
         uint64_t base = static_cast<uint64_t>(*p->dptr);
         uint64_t size = static_cast<uint64_t>(p->bytesize);
         if (base != 0 && size > 0) {
-          int device_id = -1;
-          cuCtxGetDevice(&device_id);
+          const int device_id = checked_stored_context_device_id(
+              ctx_state, "nvbit_at_cuda_event/allocation registry");
           nvbit_tracer::register_allocation(
               ctx, base, size, device_id);
         }
@@ -3722,8 +3863,8 @@ void nvbit_at_cuda_event(CUcontext ctx, int is_exit, nvbit_api_cuda_t cbid,
       uint64_t base = static_cast<uint64_t>(p->ptr);
       uint64_t size = static_cast<uint64_t>(p->size);
       if (base != 0 && size > 0) {
-        int device_id = -1;
-        cuCtxGetDevice(&device_id);
+        const int device_id = checked_stored_context_device_id(
+            ctx_state, "nvbit_at_cuda_event/cuMemMap registry");
         nvbit_tracer::register_allocation(ctx, base, size, device_id);
       }
     }
@@ -3877,12 +4018,8 @@ void *recv_thread_fun(void *args) {
   /* get context state from map */
   assert(ctx_state_map.find(ctx) != ctx_state_map.end());
   CTXstate* ctx_state = ctx_state_map[ctx];
-  CUcontext current_ctx;
-  int device_id;
-  cuCtxGetCurrent(&current_ctx);
-  cuCtxSetCurrent(ctx);
-  cuCtxGetDevice(&device_id);
-  cuCtxSetCurrent(current_ctx);
+  const int device_id = checked_stored_context_device_id(
+      ctx_state, "recv_thread_fun/per-device counters");
   ChannelHost* ch_host = &ctx_state->channel_host;
   pthread_mutex_unlock(&mutex);
 
@@ -4717,13 +4854,25 @@ void nvbit_at_ctx_init(CUcontext ctx) {
 void init_context_state(CUcontext ctx) {
   if(is_first_init_context_call) {
     is_first_init_context_call = false;
-    cudaGetDeviceCount(&num_devices);
-    // If a future system has more than TRACER_MAX_DEVICES GPUs, abort loudly
-    // at init rather than silently writing past the end of the atomic arrays.
-    assert(num_devices <= TRACER_MAX_DEVICES &&
-           "tracer_tool: num_devices exceeds TRACER_MAX_DEVICES; "
-           "bump TRACER_MAX_DEVICES in tracer_tool.cu");
-    cudaMallocManaged(&stop_report, num_devices * sizeof(bool));
+    const cudaError_t count_status = cudaGetDeviceCount(&num_devices);
+    if (count_status != cudaSuccess || num_devices <= 0 ||
+        num_devices > TRACER_MAX_DEVICES) {
+      std::ostringstream detail;
+      detail << "cudaGetDeviceCount status=" << static_cast<int>(count_status)
+             << " num_devices=" << num_devices
+             << " TRACER_MAX_DEVICES=" << TRACER_MAX_DEVICES;
+      fail_device_identity("init_context_state/device count", detail.str());
+    }
+    const cudaError_t stop_report_status =
+        cudaMallocManaged(&stop_report, num_devices * sizeof(bool));
+    if (stop_report_status != cudaSuccess || stop_report == nullptr) {
+      std::ostringstream detail;
+      detail << "cudaMallocManaged(stop_report) status="
+             << static_cast<int>(stop_report_status)
+             << " num_devices=" << num_devices;
+      fail_device_identity("init_context_state/stop_report allocation",
+                           detail.str());
+    }
     for(int i = 0; i < num_devices; ++i) {
       stop_report[i] = false;
       // Relaxed is sufficient here: init_context_state runs under the global
@@ -4734,6 +4883,8 @@ void init_context_state(CUcontext ctx) {
     }
   }
   CTXstate* ctx_state = ctx_state_map[ctx];
+  ctx_state->device_id = checked_current_context_device_id(
+      nullptr, "init_context_state/context device");
   // Release-store: the recv thread's acquire-load at :1385 must observe
   // WORKING on its very first iteration, which happens strictly after
   // channel_host.init() spawns it below.

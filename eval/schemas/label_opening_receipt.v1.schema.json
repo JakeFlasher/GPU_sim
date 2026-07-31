@@ -1,0 +1,510 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gpu-simulator.invalid/eval/schemas/label_opening_receipt.v1.schema.json",
+  "title": "Blocked fixture label-opening receipt v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "artifact_kind",
+    "schema_sha256",
+    "contract_mode",
+    "production_eligibility",
+    "evaluation_boundary",
+    "phase_chain",
+    "unadmitted_label_bundle_fixture",
+    "blocked_transition",
+    "model_seal_sha256"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "artifact_kind": {
+      "const": "EVALUATOR_LABEL_OPENING_BLOCKED_FIXTURE"
+    },
+    "schema_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "contract_mode": {
+      "const": "FIXTURE_ONLY"
+    },
+    "production_eligibility": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "reason_codes"
+      ],
+      "properties": {
+        "status": {
+          "const": "UNAVAILABLE"
+        },
+        "reason_codes": {
+          "const": [
+            "LABEL_ADMISSION_AUTHORITY_UNAVAILABLE",
+            "REVIEW_OPERATOR_TRUST_AUTHORITY_UNAVAILABLE"
+          ]
+        }
+      }
+    },
+    "evaluation_boundary": {
+      "$ref": "#/$defs/evaluation_boundary"
+    },
+    "phase_chain": {
+      "$ref": "#/$defs/label_opening_phase"
+    },
+    "unadmitted_label_bundle_fixture": {
+      "$ref": "#/$defs/opaque_bundle_identity"
+    },
+    "blocked_transition": {
+      "$ref": "#/$defs/embargo_transition"
+    },
+    "model_seal_sha256": {
+      "$ref": "#/$defs/sha256"
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "minLength": 64,
+      "maxLength": 64,
+      "pattern": "^[0-9a-f]{64}(?![\\s\\S])"
+    },
+    "safe_positive_integer": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "ascii_token": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9]+(?:[._-][A-Za-z0-9]+)*(?![\\s\\S])"
+    },
+    "prediction_reference": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "identity_schema_version",
+        "schema_version",
+        "artifact_kind",
+        "schema_sha256",
+        "canonical_model_sha256",
+        "model_seal_sha256"
+      ],
+      "properties": {
+        "identity_schema_version": {
+          "const": 1
+        },
+        "schema_version": {
+          "const": 1
+        },
+        "artifact_kind": {
+          "const": "EVALUATOR_PREDICTION_SEAL_FIXTURE"
+        },
+        "schema_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "canonical_model_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "model_seal_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "label_opening_phase": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "chain_schema_version",
+        "chain_mode",
+        "chain_id_sha256",
+        "phase",
+        "phase_ordinal",
+        "ordering_basis",
+        "predecessor_receipt",
+        "state_lifetime"
+      ],
+      "properties": {
+        "chain_schema_version": {
+          "const": 1
+        },
+        "chain_mode": {
+          "const": "FIXTURE_ONLY"
+        },
+        "chain_id_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "phase": {
+          "const": "LABEL_OPENING_BLOCKED_FIXTURE"
+        },
+        "phase_ordinal": {
+          "const": 2
+        },
+        "ordering_basis": {
+          "const": "PHASE_ORDINAL_AND_EXACT_PREDECESSOR_HASH"
+        },
+        "predecessor_receipt": {
+          "$ref": "#/$defs/prediction_reference"
+        },
+        "state_lifetime": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "preregistration_bindings",
+            "prediction_bindings",
+            "label_bundle_binding",
+            "label_payload",
+            "scoring"
+          ],
+          "properties": {
+            "preregistration_bindings": {
+              "const": "FIXTURE_SEALED_NONAUTHORITATIVE"
+            },
+            "prediction_bindings": {
+              "const": "FIXTURE_SEALED_NONAUTHORITATIVE"
+            },
+            "label_bundle_binding": {
+              "const": "FIXTURE_OPAQUE_DIGEST_UNADMITTED"
+            },
+            "label_payload": {
+              "const": "ABSENT"
+            },
+            "scoring": {
+              "const": "DISABLED"
+            }
+          }
+        }
+      }
+    },
+    "opaque_bundle_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "binding_schema_version",
+        "binding_kind",
+        "bundle_schema_version",
+        "bundle_id",
+        "bundle_sha256",
+        "candidate_inventory_sha256",
+        "expected_row_inventory_sha256",
+        "payload_visibility",
+        "admission_status",
+        "label_authority_pins",
+        "fixture_binding_sha256"
+      ],
+      "properties": {
+        "binding_schema_version": {
+          "const": 1
+        },
+        "binding_kind": {
+          "const": "FIXTURE_OPAQUE_UNADMITTED_LABEL_BUNDLE_DIGEST"
+        },
+        "bundle_schema_version": {
+          "const": 5
+        },
+        "bundle_id": {
+          "$ref": "#/$defs/ascii_token"
+        },
+        "bundle_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "candidate_inventory_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "expected_row_inventory_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "payload_visibility": {
+          "const": "OPAQUE_FIXTURE_DIGEST_ONLY"
+        },
+        "admission_status": {
+          "const": "UNAVAILABLE"
+        },
+        "label_authority_pins": {
+          "$ref": "#/$defs/label_authority_pins"
+        },
+        "fixture_binding_sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      }
+    },
+    "embargo_transition": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "transition",
+        "ordering_basis",
+        "timestamp_basis",
+        "label_payload_state",
+        "label_admission",
+        "scoring"
+      ],
+      "properties": {
+        "transition": {
+          "const": "BLOCKED_NO_PRODUCTION_LABEL_OPENING"
+        },
+        "ordering_basis": {
+          "const": "FIXTURE_PREDECESSOR_HASH_AND_PHASE_ORDINAL"
+        },
+        "timestamp_basis": {
+          "const": "NOT_USED"
+        },
+        "label_payload_state": {
+          "const": "ABSENT"
+        },
+        "label_admission": {
+          "const": "UNAVAILABLE"
+        },
+        "scoring": {
+          "const": "DISABLED"
+        }
+      }
+    },
+    "unresolved_input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "status"
+      ],
+      "properties": {
+        "name": {
+          "enum": [
+            "CYCLE_MAPPING",
+            "CYCLE_COMPOSITION",
+            "COHORT",
+            "PROTOCOL_NUMERIC_SETTINGS",
+            "COVERAGE",
+            "TRUST",
+            "OPERATOR_APPROVAL"
+          ]
+        },
+        "status": {
+          "const": "UNRESOLVED"
+        }
+      }
+    },
+    "evaluation_boundary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "m5",
+        "scientific_inputs",
+        "cycles"
+      ],
+      "properties": {
+        "mode": {
+          "const": "TARGET_FREE_OFFLINE_ONLY"
+        },
+        "m5": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "collection_status"
+          ],
+          "properties": {
+            "status": {
+              "const": "M5_NOT_STARTED"
+            },
+            "collection_status": {
+              "const": "M5_COLLECT_DISABLED"
+            }
+          }
+        },
+        "scientific_inputs": {
+          "type": "array",
+          "minItems": 7,
+          "maxItems": 7,
+          "prefixItems": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "name",
+                "status"
+              ],
+              "properties": {
+                "name": {
+                  "const": "CYCLE_MAPPING"
+                },
+                "status": {
+                  "const": "UNRESOLVED"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "name",
+                "status"
+              ],
+              "properties": {
+                "name": {
+                  "const": "CYCLE_COMPOSITION"
+                },
+                "status": {
+                  "const": "UNRESOLVED"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "name",
+                "status"
+              ],
+              "properties": {
+                "name": {
+                  "const": "COHORT"
+                },
+                "status": {
+                  "const": "UNRESOLVED"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "name",
+                "status"
+              ],
+              "properties": {
+                "name": {
+                  "const": "PROTOCOL_NUMERIC_SETTINGS"
+                },
+                "status": {
+                  "const": "UNRESOLVED"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "name",
+                "status"
+              ],
+              "properties": {
+                "name": {
+                  "const": "COVERAGE"
+                },
+                "status": {
+                  "const": "UNRESOLVED"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "name",
+                "status"
+              ],
+              "properties": {
+                "name": {
+                  "const": "TRUST"
+                },
+                "status": {
+                  "const": "UNRESOLVED"
+                }
+              }
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "name",
+                "status"
+              ],
+              "properties": {
+                "name": {
+                  "const": "OPERATOR_APPROVAL"
+                },
+                "status": {
+                  "const": "UNRESOLVED"
+                }
+              }
+            }
+          ],
+          "items": false
+        },
+        "cycles": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "metric_id",
+            "implementation_status",
+            "evaluation_state",
+            "outcome",
+            "score_status"
+          ],
+          "properties": {
+            "metric_id": {
+              "const": "gpc__cycles_elapsed.max"
+            },
+            "implementation_status": {
+              "const": "required_unimplemented"
+            },
+            "evaluation_state": {
+              "const": "pending"
+            },
+            "outcome": {
+              "const": "unavailable"
+            },
+            "score_status": {
+              "const": "unscored"
+            }
+          }
+        }
+      }
+    },
+    "label_authority_pins": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sidecar_schema_version",
+        "sidecar_schema_id",
+        "sidecar_schema_sha256",
+        "admitted_schema_version",
+        "admitted_schema_id",
+        "admitted_schema_sha256",
+        "metric_registry_version",
+        "metric_registry_sha256"
+      ],
+      "properties": {
+        "sidecar_schema_version": {
+          "const": 5
+        },
+        "sidecar_schema_id": {
+          "const": "simbench_bw/schemas/local_label_sidecar.schema.json"
+        },
+        "sidecar_schema_sha256": {
+          "const": "15c7111f9ccbff9572c02655e535a9e36305d9681f65a18d072bcdbd4beb3c2e"
+        },
+        "admitted_schema_version": {
+          "const": 5
+        },
+        "admitted_schema_id": {
+          "const": "simbench_bw/schemas/local_label_admitted.schema.json"
+        },
+        "admitted_schema_sha256": {
+          "const": "db0bc46f9361344b11f27b6157f3f873bfff7b14c8a049d343b7ed0c0eb13de1"
+        },
+        "metric_registry_version": {
+          "const": 2
+        },
+        "metric_registry_sha256": {
+          "const": "95d90f8c4fffd9376b8d785047a9e02ecafc81ed43da6081985958c2b9dec62d"
+        }
+      }
+    }
+  }
+}

@@ -475,6 +475,12 @@ fn write_case(root: &Path, mutation: &str) {
             );
             instruction.memory_op_access_kind = Some(99);
         }
+        "unspecified_cache_op" => {
+            let instruction = instruction_mut(&mut threadblock);
+            instruction.memory_op_class = Some(pb::MemoryOpClass::Global as i32);
+            instruction.data_width = Some(4);
+            instruction.instruction_cache_op = Some(pb::InstructionCacheOp::Unspecified as i32);
+        }
         "unknown_cache_op" => {
             let instruction = instruction_mut(&mut threadblock);
             instruction.memory_op_class = Some(pb::MemoryOpClass::Global as i32);
@@ -498,7 +504,7 @@ fn write_case(root: &Path, mutation: &str) {
             let instruction = instruction_mut(&mut threadblock);
             instruction.data_width = Some(4);
             instruction.memory_op_access_kind = Some(pb::MemoryOpAccessKind::Load as i32);
-            instruction.instruction_cache_op = Some(0);
+            instruction.instruction_cache_op = Some(pb::InstructionCacheOp::LdgECa as i32);
         }
         "allocation_id_missing" => {
             make_memory(

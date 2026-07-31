@@ -16,7 +16,7 @@ The receive-thread phase-record path in `tracer_tool.cu`'s
 `PhaseClockRecord`; this aggregator's contract is locked in here so
 the producer-side test fixtures match the real receive-thread output.
 
-Seven typed diagnostics required by the non-root measurement
+Nine typed diagnostics required by the non-root measurement
 NVBit phase-injection contract:
 
   * `PhaseRecordPairingFailed` — a phase_open record without a
@@ -25,6 +25,10 @@ NVBit phase-injection contract:
     (clock counter went backward).
   * `PhaseLedgerSchemaInvalid` — the assembled ledger fails
     `phase_cycle_ledger.schema.json` validation.
+  * `PhaseLedgerCanonicalSerializationInvalid` — input contains a non-finite
+    number that canonical JSON cannot represent.
+  * `PhaseLedgerSerializationLimitExceeded` — canonical ledger bytes would
+    exceed the producer transaction's single bounded byte authority.
   * `PhaseRecordDuplicateOpen` — two phase_open records share the
     same per-warp-phase pairing key. The receive thread saw
     duplicate opens; the aggregator refuses to silently use only
@@ -47,6 +51,8 @@ from __future__ import annotations
 
 import enum
 import json
+import math
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
@@ -54,7 +60,19 @@ from typing import Any
 import validate as _validate  # type: ignore[import-not-found]
 
 
+_REPO_ROOT = Path(__file__).resolve().parents[2]
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+from tools.local_labels.immutable_artifact import (  # noqa: E402
+    publish_regular_file,
+)
+
+
 _SCHEMAS_DIR = Path(__file__).resolve().parent / "schemas"
+# One authority governs both canonical per-ledger serialization and the complete
+# attempt-scoped producer transaction. Consumers may lower it in hostile tests,
+# but production callers must not duplicate this value.
+PHASE_LEDGER_MAX_BYTES = 256 * 1024 * 1024
 
 
 # --- phase enums (mirror the non-root measurement-named field encodings) ------------
@@ -188,6 +206,69 @@ class PhaseLedgerSchemaInvalid(Exception):
             "diagnostic": self.TOKEN,
             "schema_path": self.schema_path,
             "validation_error": self.validation_error,
+        }
+
+
+class PhaseLedgerCanonicalSerializationInvalid(PhaseLedgerSchemaInvalid):
+    """A schema-valid Python number has no canonical JSON representation."""
+
+    TOKEN = "phase_ledger_canonical_serialization_invalid"
+
+    def __init__(self, json_path: str):
+        Exception.__init__(
+            self,
+            f"{self.TOKEN}: non-finite numeric value at {json_path}; "
+            "canonical phase-ledger JSON permits only finite numbers.",
+        )
+        self.json_path = json_path
+        self.schema_path = str(
+            _SCHEMAS_DIR / "phase_cycle_ledger.schema.json"
+        )
+        self.validation_error = (
+            f"non-finite numeric value at {json_path} is not canonical JSON"
+        )
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "diagnostic": self.TOKEN,
+            "json_path": self.json_path,
+        }
+
+
+class PhaseLedgerSerializationLimitExceeded(PhaseLedgerSchemaInvalid):
+    """Canonical ledger bytes would exceed the producer transaction cap."""
+
+    TOKEN = "phase_ledger_serialization_limit_exceeded"
+
+    def __init__(
+        self,
+        *,
+        max_bytes: int,
+        attempted_size_bytes_at_least: int,
+    ) -> None:
+        Exception.__init__(
+            self,
+            f"{self.TOKEN}: canonical ledger requires at least "
+            f"{attempted_size_bytes_at_least} bytes, exceeding the "
+            f"{max_bytes}-byte phase-ledger transaction limit.",
+        )
+        self.max_bytes = max_bytes
+        self.attempted_size_bytes_at_least = attempted_size_bytes_at_least
+        self.schema_path = str(
+            _SCHEMAS_DIR / "phase_cycle_ledger.schema.json"
+        )
+        self.validation_error = (
+            "canonical ledger serialization exceeds the producer transaction "
+            "byte limit"
+        )
+
+    def to_json(self) -> dict[str, Any]:
+        return {
+            "diagnostic": self.TOKEN,
+            "max_bytes": self.max_bytes,
+            "attempted_size_bytes_at_least": (
+                self.attempted_size_bytes_at_least
+            ),
         }
 
 
@@ -530,22 +611,164 @@ def _schema_check_ledger(ledger: dict[str, Any]) -> None:
         ) from e
 
 
+def _ordered_mapping_keys(value: dict[Any, Any]) -> list[Any]:
+    keys = list(value)
+    if all(isinstance(key, str) for key in keys):
+        keys.sort()
+    return keys
+
+
+def _format_json_path(parts: list[Any]) -> str:
+    return "$" + "".join(
+        f"[{part}]" if isinstance(part, int) else f".{part}"
+        for part in parts
+    )
+
+
+def _raise_for_non_finite_number(
+    value: Any,
+    *,
+    _path: list[Any] | None = None,
+) -> None:
+    """Reject every nested NaN or infinity before JSON encoding begins."""
+    path = [] if _path is None else _path
+    if isinstance(value, float) and not math.isfinite(value):
+        raise PhaseLedgerCanonicalSerializationInvalid(
+            _format_json_path(path)
+        )
+    if isinstance(value, dict):
+        for key in _ordered_mapping_keys(value):
+            path.append(key)
+            _raise_for_non_finite_number(value[key], _path=path)
+            path.pop()
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            path.append(index)
+            _raise_for_non_finite_number(item, _path=path)
+            path.pop()
+
+
+def _ascii_json_string_size(value: str) -> int:
+    """Return the exact byte size of ``json.dumps(value)``.
+
+    Canonical phase-ledger JSON deliberately retains ``ensure_ascii=True``, so
+    every output code unit is one byte and the size can be counted without
+    first allocating an escaped copy of a hostile string.
+    """
+    size = 2  # opening and closing quotes
+    for character in value:
+        codepoint = ord(character)
+        if character in {'"', "\\", "\b", "\f", "\n", "\r", "\t"}:
+            size += 2
+        elif codepoint < 0x20:
+            size += 6
+        elif codepoint <= 0x7E:
+            size += 1
+        elif codepoint <= 0xFFFF:
+            size += 6
+        else:
+            size += 12
+    return size
+
+
+def _raise_for_oversized_json_string(
+    value: Any,
+    *,
+    max_bytes: int,
+    _size_cache: dict[str, int] | None = None,
+) -> None:
+    """Reject a single over-cap escaped string before the encoder copies it."""
+    size_cache = {} if _size_cache is None else _size_cache
+    if isinstance(value, str):
+        encoded_size = size_cache.get(value) if len(value) <= 64 else None
+        if encoded_size is None:
+            encoded_size = _ascii_json_string_size(value)
+            if len(value) <= 64 and len(size_cache) < 256:
+                size_cache[value] = encoded_size
+        attempted_size = encoded_size + 1  # final newline
+        if attempted_size > max_bytes:
+            raise PhaseLedgerSerializationLimitExceeded(
+                max_bytes=max_bytes,
+                attempted_size_bytes_at_least=attempted_size,
+            )
+        return
+    if isinstance(value, dict):
+        for key in _ordered_mapping_keys(value):
+            _raise_for_oversized_json_string(
+                key,
+                max_bytes=max_bytes,
+                _size_cache=size_cache,
+            )
+            _raise_for_oversized_json_string(
+                value[key],
+                max_bytes=max_bytes,
+                _size_cache=size_cache,
+            )
+    elif isinstance(value, list):
+        for item in value:
+            _raise_for_oversized_json_string(
+                item,
+                max_bytes=max_bytes,
+                _size_cache=size_cache,
+            )
+
+
+def serialize_phase_cycle_ledger(ledger: dict[str, Any]) -> bytes:
+    """Validate and bounded-stream one ledger into canonical JSON bytes.
+
+    The public return type and valid-ledger bytes remain unchanged. Encoding is
+    incremental, reserves the canonical trailing newline, rejects non-finite
+    values with a typed diagnostic, and never grows the accumulator beyond the
+    producer transaction's single byte authority.
+    """
+    max_bytes = PHASE_LEDGER_MAX_BYTES
+    _raise_for_non_finite_number(ledger)
+    _schema_check_ledger(ledger)
+    _raise_for_oversized_json_string(ledger, max_bytes=max_bytes)
+    encoder = json.JSONEncoder(
+        allow_nan=False,
+        ensure_ascii=True,
+        indent=2,
+        sort_keys=True,
+    )
+    payload = bytearray()
+    try:
+        for chunk in encoder.iterencode(ledger):
+            # With ensure_ascii=True, character count equals UTF-8 byte count.
+            # Reserve one byte for the canonical final newline before encoding
+            # the chunk, so an over-cap chunk never creates a bytes allocation.
+            attempted_size = len(payload) + len(chunk) + 1
+            if attempted_size > max_bytes:
+                raise PhaseLedgerSerializationLimitExceeded(
+                    max_bytes=max_bytes,
+                    attempted_size_bytes_at_least=attempted_size,
+                )
+            payload.extend(chunk.encode("utf-8"))
+    except ValueError as exc:
+        # ``allow_nan=False`` is the encoder backstop for any numeric object
+        # whose behavior evaded the explicit finite-number walk.
+        raise PhaseLedgerCanonicalSerializationInvalid("$") from exc
+    payload.append(0x0A)
+    return bytes(payload)
+
+
 def emit_phase_cycle_ledger(
     ledger: dict[str, Any],
     output_path: Path,
 ) -> None:
-    """Schema-validate `ledger` against
-    `phase_cycle_ledger.schema.json` and atomically write it to
-    `output_path` via tmp+rename. Raises `PhaseLedgerSchemaInvalid`
-    on schema failure; no `<output>.tmp` lands on disk in that
-    case."""
-    _schema_check_ledger(ledger)
-    tmp_path = output_path.with_suffix(output_path.suffix + ".tmp")
-    tmp_path.write_text(
-        json.dumps(ledger, sort_keys=True, indent=2) + "\n",
-        encoding="utf-8",
+    """Schema-validate and exclusively publish one no-follow ledger leaf.
+
+    Canonical multi-ledger capture uses the attempt-scoped directory transaction
+    in ``phase_inject_orchestrator``. This compatibility leaf emitter uses the
+    same immutable no-replace contract: every preexisting destination class is
+    preserved and fails closed rather than losing possibly unique evidence.
+    """
+    payload = serialize_phase_cycle_ledger(ledger)
+    publish_regular_file(
+        output_path.parent,
+        output_path.name,
+        payload,
     )
-    tmp_path.replace(output_path)
 
 
 # --- Receive-thread phase-record decoding ----------------------------------

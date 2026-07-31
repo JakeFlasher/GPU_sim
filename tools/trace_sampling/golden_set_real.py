@@ -34,11 +34,14 @@ import numpy as np
 
 _PKG = Path(__file__).resolve().parent
 _REPO = _PKG.parents[1]
-for _p in (str(_PKG), str(_REPO / "tools" / "cache_replay"),
-           str(_REPO / "tools" / "local_labels"),
-           str(_REPO / "workloads" / "simbench_bw" / "_pb_generated")):
+for _p in (str(_PKG), str(_REPO), str(_REPO / "tools" / "cache_replay"),
+           str(_REPO / "tools" / "local_labels")):
     if _p not in sys.path:
         sys.path.insert(0, _p)
+
+from tools.nvbit_tracer.proto_binding_loader import (  # noqa: E402
+    load_dynamic_trace_bindings,
+)
 
 from admissibility_gate import M_SUBSET, MIN_SEGMENTS, classify
 from counting_pass import analyze_trace_dir
@@ -93,7 +96,7 @@ def _pb_files(trace_dir: Path) -> list[Path]:
 
 
 def _flat_idx(pb_path: Path, gx: int, gy: int) -> int:
-    import threadblock_pb2  # type: ignore
+    threadblock_pb2 = load_dynamic_trace_bindings().threadblock_pb2
     tb = threadblock_pb2.threadblock()
     tb.ParseFromString(pb_path.read_bytes())
     return int(tb.block_id.x) + int(tb.block_id.y) * gx + int(tb.block_id.z) * gx * gy

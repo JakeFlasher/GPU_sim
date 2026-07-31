@@ -49,6 +49,30 @@ from tools.local_labels.sm120_template_safety import (  # noqa: E402
     is_sm120_template_arch,
     unavailable_result,
 )
+from tools.local_labels.immutable_artifact import (  # noqa: E402
+    ImmutableArtifactError,
+    ImmutableArtifactLimitError,
+    ImmutableArtifactResourceError,
+    ensure_directory,
+    replace_regular_bytes,
+)
+from tools.nvbit_tracer.trace_admission import (  # noqa: E402
+    AdmittedTraceSources,
+    TraceAdmissionError,
+    open_admitted_trace_sources,
+    require_trace_admission,
+)
+from tools.sector_stream.consume_trace import (  # noqa: E402
+    AdmittedSectorStream,
+    consume_admitted_trace_sources,
+)
+
+_HARD_TRACE_SOURCE_ERRORS = (
+    TraceAdmissionError,
+    ImmutableArtifactLimitError,
+    ImmutableArtifactResourceError,
+    ImmutableArtifactError,
+)
 
 # RTX 5060 Laptop GPU device-name string. Mirrors the value
 # emitted by `run_suite.py --mode trace` for the dram_stream
@@ -206,26 +230,30 @@ def _load_admitted_sm120(
     return out
 
 
-def _generate_sector_stream(*, trace_dir: Path, output_path: Path) -> Path:
-    """Decode a protected trace read-only and serialize into staging."""
-
+def _generate_sector_stream(
+    *,
+    sources: AdmittedTraceSources,
+    output_path: Path,
+) -> tuple[AdmittedSectorStream, Path]:
+    """Generate admission-bound sectors and serialize those exact bytes."""
     output_path = _assert_staging_output(
         output_path, operation="write derived sector stream",
     )
-    from tools.sector_stream.consume_trace import consume_trace_dir
-
-    result = consume_trace_dir(trace_dir, write_jsonl=False)
-    if not result.get("contract_ok") or not result.get("schema_admits_all"):
-        raise RuntimeError(
-            f"sector_stream consume_trace failed for {trace_dir}: "
-            f"contract={result.get('contract_typed_reason')} "
-            f"schema={result.get('schema_first_failure')}"
+    result = consume_admitted_trace_sources(
+        sources=sources,
+        output_root=None,
+        write_jsonl=False,
+    )
+    if not result.schema_admits_all:
+        raise TraceAdmissionError(
+            "sector_stream_schema_invalid",
+            "sm120 helper sector-stream producer generated a schema-invalid "
+            f"record: {result.schema_first_failure}",
         )
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    with output_path.open("w", encoding="utf-8") as fh:
-        for record in result.get("records", []):
-            fh.write(json.dumps(record, sort_keys=True) + "\n")
-    return output_path
+    result.verify_for(sources)
+    ensure_directory(output_path.parent)
+    replace_regular_bytes(output_path, result.jsonl_bytes())
+    return result, output_path
 
 
 def _resolve_binary_path(slug: str, shape_point: str) -> Path:
@@ -304,25 +332,10 @@ def _emit_bundle_for_cell(
         sku="rtx_5060_laptop", arch_dir="sm_120",
     )
     trace_dir = cell_root / f"trace_{shape_point}"
-    pb_path = trace_dir / "dynamic_trace.pb"
-    if not pb_path.is_file():
-        raise FileNotFoundError(
-            f"existing trace artifact missing for {slug}/{shape_point}: "
-            f"{pb_path}. The producer expects the per-shape trace to "
-            f"already exist (captured by Rounds 4-10 via "
-            f"activation_trace_orchestrator.py / run_suite.py); "
-            f"re-capture via the appropriate producer if missing."
-        )
-    sector_stream_path = trace_dir / "sector_stream" / "sector_stream.jsonl"
-    if not sector_stream_path.is_file():
-        if derived_sector_stream is None:
-            raise RuntimeError(
-                "missing sector stream requires an explicitly cleared "
-                "staging destination"
-            )
-        sector_stream_path = _generate_sector_stream(
-            trace_dir=trace_dir,
-            output_path=derived_sector_stream,
+    if derived_sector_stream is None:
+        raise RuntimeError(
+            "sm120 helper requires an explicitly cleared staging destination "
+            "for regenerated sector-stream bytes"
         )
 
     import cache_predictor as cp  # type: ignore[import-not-found]
@@ -338,25 +351,29 @@ def _emit_bundle_for_cell(
         "arch": "sm_120",
     }
 
-    # Producer-side canonical pre-calibration block emission per the
-    # goal tracker's canonical-feature wire-surface row: pass the two
-    # sibling sidecar paths so predict_cache_hit_rate auto-derives
-    # unique_sector_count from the hrd_profile (cold-sentinel sum)
-    # and attaches the 6-feature canonical block to the bundle. If
-    # either sidecar is missing on disk, the bundle's
-    # evidence.canonical_pre_calibration_features_unavailable_reason
-    # records the typed reason (schema-valid fail-closed).
-    bundle = cp.predict_cache_hit_rate(
-        trace_dir=trace_dir,
-        sector_stream_path=sector_stream_path,
-        cache_model_capacity_bytes=l2_cache_size_bytes,
-        manifest_pairing_index=manifest_pairing_index,
-        device=_SM120_LAPTOP_DEVICE_NAME,
-        sharing_locality_path=(
-            trace_dir / "sharing_locality" / "sharing_locality.json"
-        ),
-        hrd_profile_path=trace_dir / "hrd_profile" / "hrd_profile.json",
-    )
+    admission = require_trace_admission(trace_dir)
+    with open_admitted_trace_sources(
+        trace_dir, expected_admission=admission
+    ) as sources:
+        sector_stream, sector_stream_path = _generate_sector_stream(
+            sources=sources,
+            output_path=derived_sector_stream,
+        )
+        bundle = cp.predict_cache_hit_rate_from_admitted_sources(
+            sources=sources,
+            sector_stream=sector_stream,
+            trace_dir=trace_dir,
+            sector_stream_path=sector_stream_path,
+            cache_model_capacity_bytes=l2_cache_size_bytes,
+            manifest_pairing_index=manifest_pairing_index,
+            device=_SM120_LAPTOP_DEVICE_NAME,
+            sharing_locality_path=(
+                trace_dir / "sharing_locality" / "sharing_locality.json"
+            ),
+            hrd_profile_path=(
+                trace_dir / "hrd_profile" / "hrd_profile.json"
+            ),
+        )
 
     # `predict_cache_hit_rate` does not write the bundle; serialize
     # it here under the sm_120 cohort-bundles dir's
@@ -483,6 +500,8 @@ def main(argv: list[str] | None = None) -> int:
                 bundle_path=cell_plan["bundle_path"],
                 derived_sector_stream=cell_plan["derived_sector_stream"],
             )
+        except _HARD_TRACE_SOURCE_ERRORS:
+            raise
         except (FileNotFoundError, RuntimeError) as exc:
             failures.append(f"{slug}/{shape}: {type(exc).__name__}: {exc}")
             sys.stderr.write(

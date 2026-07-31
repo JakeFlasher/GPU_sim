@@ -38,10 +38,14 @@ import argparse
 import ctypes
 import datetime as _dt
 import csv
+from contextlib import ExitStack, contextmanager, nullcontext
 import hashlib
 import json
 import os
+import re
+import stat
 import sys
+import tempfile
 import tomllib
 from ctypes import c_char, c_int, c_size_t, POINTER, byref, c_uint
 from pathlib import Path
@@ -60,14 +64,43 @@ if str(SUITE_ROOT) not in sys.path:
 if str(REPO_ROOT) not in sys.path:
     sys.path.insert(0, str(REPO_ROOT))
 
+from tools.local_labels.immutable_artifact import (  # noqa: E402
+    ExclusiveDirectoryStage,
+    ImmutableArtifactError,
+    ImmutableArtifactLimitError,
+    ImmutableArtifactResourceError,
+    ImmutableDirectoryGeneration,
+    ImmutableFile,
+    PinnedDirectoryReader,
+    PinnedTreeSnapshot,
+    RetainedExecutable,
+    RetainedRegular,
+    create_exclusive_directory_stage,
+    ensure_directory,
+    inspect_immutable_directory_generation,
+    open_retained_executable,
+    open_retained_regular,
+    publish_directory,
+    publish_regular_file,
+    read_regular,
+    replace_regular_bytes,
+    retire_regular_file,
+    sha256_file as anchored_sha256_file,
+)
 from tools.nvbit_tracer.runtime_env import (  # noqa: E402
     TracerRuntimeError,
     tracer_runtime_env,
 )
 from tools.nvbit_tracer.trace_admission import (  # noqa: E402
+    DEFAULT_TRACE_ADMISSION_LIMITS,
+    AdmittedTraceSources,
+    TraceAdmission,
     TraceAdmissionError,
+    open_admitted_trace_sources,
     require_trace_admission,
 )
+
+from tools.sector_stream.consume_trace import AdmittedSectorStream  # noqa: E402
 
 # C-AC-H budget constants come from `tools/cloud/trace_budgets.py`
 # (Loop 2 R11). Add the cloud directory to sys.path so the import
@@ -299,7 +332,17 @@ def build_measurement_manifest(
     binary_path: Path | None,
     compiler_flags: list[str],
     shape_point: str | None = None,
+    binary_sha256: str | None = None,
 ) -> dict[str, Any]:
+    if binary_sha256 is not None:
+        if (
+            len(binary_sha256) != 64
+            or any(character not in "0123456789abcdef" for character in binary_sha256)
+        ):
+            raise ValueError("binary_sha256 override must be lowercase 64-hex")
+        binary_digest = binary_sha256
+    else:
+        binary_digest = _binary_sha256(binary_path) if binary_path else ""
     manifest: dict[str, Any] = {
         "schema_version": 2,
         "slug": slug,
@@ -316,7 +359,7 @@ def build_measurement_manifest(
         "device_name": props.device_name,
         "compute_capability_major": props.compute_capability_major,
         "compute_capability_minor": props.compute_capability_minor,
-        "binary_sha256": _binary_sha256(binary_path) if binary_path else "",
+        "binary_sha256": binary_digest,
         "compiler_flags": list(compiler_flags),
         "kb_capability_card": KB_CAPABILITY_CARD,
         "timestamp_utc": _dt.datetime.now(_dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
@@ -449,11 +492,41 @@ def synthetic_dry_run_props() -> DeviceProps:
 # --- per-mode handlers --------------------------------------------------------
 
 
-def _emit_manifest(manifest: dict[str, Any], out_dir: Path) -> Path:
-    out_dir.mkdir(parents=True, exist_ok=True)
-    dest = out_dir / "measurement_manifest.json"
-    with open(dest, "w") as f:
-        json.dump(manifest, f, indent=2, sort_keys=False)
+def _emit_manifest(
+    manifest: dict[str, Any],
+    out_dir: Path,
+    *,
+    filename: str = "measurement_manifest.json",
+    preserve_previous: bool = False,
+) -> Path:
+    """Publish one manifest without following destination path components.
+
+    Ordinary timing/correctness callers retain the historical replace-in-place
+    behavior.  Trace activation uses a shape-specific filename with
+    ``preserve_previous=True``: the prior regular file is atomically retired as
+    byte-exact evidence, then the new file is committed with no-replace
+    semantics so a concurrent destination cannot be overwritten.
+    """
+    if (
+        type(filename) is not str
+        or not filename
+        or filename in {".", ".."}
+        or "/" in filename
+        or "\\" in filename
+    ):
+        raise ImmutableArtifactError(
+            "manifest filename must be one portable path component"
+        )
+    ensure_directory(out_dir)
+    dest = out_dir / filename
+    payload = (json.dumps(manifest, indent=2, sort_keys=False) + "\n").encode(
+        "utf-8"
+    )
+    if preserve_previous:
+        retire_regular_file(dest)
+        publish_regular_file(out_dir, filename, payload)
+    else:
+        replace_regular_bytes(dest, payload)
     return dest
 
 
@@ -772,49 +845,68 @@ def _emit_byproduct_manifest_pairing_index(
         if not target_dir.is_dir():
             continue
         target = target_dir / "manifest_pairing_index.json"
-        with target.open("w", encoding="utf-8") as fh:
-            json.dump(manifest_pairing_index, fh, indent=2, sort_keys=True)
-            fh.write("\n")
+        publish_regular_file(
+            target_dir,
+            target.name,
+            (
+                json.dumps(
+                    manifest_pairing_index, indent=2, sort_keys=True
+                )
+                + "\n"
+            ).encode("utf-8"),
+        )
         written.append(target)
     return written
 
 
 def _ensure_sector_stream_jsonl(
     traces_folder: Path,
-) -> tuple[bool, str | None]:
-    """Generate the sector-stream JSONL from the threadblock proto
-    if it is missing. Returns ``(ok, typed_skip_reason)``: when
-    ``ok`` is True, the JSONL exists and the wire contract +
-    schema were re-validated; when False, the second element is
-    the typed-skip-reason string the controller persists into the
-    run summary's ``hrd_skip_reason`` field."""
-    sector_stream_jsonl = (
-        traces_folder / "sector_stream" / "sector_stream.jsonl"
-    )
-    if sector_stream_jsonl.is_file():
-        return True, None
-    sector_stream_dir = SUITE_ROOT.parent.parent / "tools" / "sector_stream"
-    if str(sector_stream_dir) not in sys.path:
-        sys.path.insert(0, str(sector_stream_dir))
+    *,
+    trace_sources: AdmittedTraceSources,
+) -> tuple[bool, str | None, AdmittedSectorStream | None]:
+    """Generate one admission-bound sector result for the feature batch."""
     try:
-        from consume_trace import (  # type: ignore[import-not-found]
-            consume_trace_dir as _consume_trace_dir,
+        from tools.sector_stream.consume_trace import (
+            consume_admitted_trace_sources as _consume_trace_sources,
         )
+    except (
+        TraceAdmissionError,
+        ImmutableArtifactLimitError,
+        ImmutableArtifactResourceError,
+        ImmutableArtifactError,
+    ):
+        raise
     except Exception as exc:
-        return False, f"sector_stream_consumer_import_failed:{exc}"
+        return False, f"sector_stream_consumer_import_failed:{exc}", None
     try:
-        result = _consume_trace_dir(traces_folder, write_jsonl=True)
+        result = _consume_trace_sources(
+            sources=trace_sources,
+            output_root=traces_folder,
+            write_jsonl=True,
+        )
+    except (
+        TraceAdmissionError,
+        ImmutableArtifactLimitError,
+        ImmutableArtifactResourceError,
+        ImmutableArtifactError,
+    ):
+        raise
     except Exception as exc:
-        return False, f"sector_stream_consumer_failed:{exc}"
-    if not result["contract_ok"]:
+        return False, f"sector_stream_consumer_failed:{exc}", None
+    if not isinstance(result, AdmittedSectorStream):
+        return False, "sector_stream_result_invalid", None
+    if not result.contract_ok:
         return False, (
-            f"trace_contract:{result['contract_typed_reason']}"
-        )
-    if not result["schema_admits_all"]:
+            f"trace_contract:{result.contract_typed_reason}"
+        ), None
+    if not result.schema_admits_all:
         return False, (
-            f"sector_stream_schema_invalid:{result['schema_first_failure']}"
-        )
-    return True, None
+            "sector_stream_schema_invalid:"
+            f"{result.schema_first_failure}"
+        ), None
+    result.verify_for(trace_sources)
+    trace_sources.verify_unchanged()
+    return True, None, result
 
 
 def _bundle_capacity_typed_reason(
@@ -873,35 +965,21 @@ def _emit_hrd_bundle_for_run_summary(
     traces_folder: Path,
     slug: str,
     shape_point: dict[str, Any],
-    executable: Path,
+    binary_sha256: str,
+    kernel_signature_sha256: str,
     props: "DeviceProps",
+    trace_sources: AdmittedTraceSources,
+    sector_stream: AdmittedSectorStream,
 ) -> None:
-    """task11 / the HRD-profiler clause: emit the HRD bundle and
-    persist the R16 task10 §10 evidence fields into the run
-    summary.
-
-    R19 closure (Codex's R18 review directive #5): the helper
-    generates the sector-stream JSONL from the fresh
-    `dynamic_trace.pb` via
-    `tools/sector_stream/consume_trace.consume_trace_dir` when
-    the JSONL is missing, requires `contract_ok` and
-    `schema_admits_all`, and surfaces typed
-    `hrd_skip_reason` strings on contract / schema failures so a
-    fresh-trace `handle_trace` capture cannot silently skip HRD.
-    The HRD bundle producer
-    (`tools/hrd_profiler.bundle_from_trace.emit_hrd_bundle`)
-    walks the same threadblock proto records via
-    `import_trace_contract._reconstruct_lane_vector` (Codex's R18
-    review directive #1) and emits per-touched-sector
-    observations with byte-address-derived identities.
-    """
-    ok, skip_reason = _ensure_sector_stream_jsonl(traces_folder)
-    if not ok:
-        assert skip_reason is not None
-        _hrd_skip_run_summary(
-            artifact_record, skip_reason=skip_reason,
+    """Emit the single-launch HRD bundle and run-summary identity."""
+    admission = trace_sources.admission
+    if admission.launch_count != 1:
+        raise TraceAdmissionError(
+            "trace_launch_count_unsupported",
+            "run-summary HRD identity requires exactly one admitted launch; "
+            f"observed launch_count={admission.launch_count}",
         )
-        return
+    sector_stream.verify_for(trace_sources)
     # BL-20260505 (tools-subdir-module-name-collision): both
     # `tools/hrd_profiler/bundle_from_trace.py` and
     # `tools/divergence_proxies/bundle_from_trace.py` exist with
@@ -928,7 +1006,10 @@ def _emit_hrd_bundle_for_run_summary(
     # bare basename `bundle_from_trace`, so divergence loading
     # does not populate `sys.modules["bundle_from_trace"]`.
     if "bundle_from_trace" in sys.modules:
-        emit_hrd_bundle = sys.modules["bundle_from_trace"].emit_hrd_bundle
+        emit_hrd_bundle_from_sources = getattr(
+            sys.modules["bundle_from_trace"],
+            "emit_hrd_bundle_from_admitted_sources",
+        )
     else:
         hrd_module_path = (
             SUITE_ROOT.parent.parent
@@ -948,14 +1029,16 @@ def _emit_hrd_bundle_for_run_summary(
             )
         _hrd_module = _importlib_util.module_from_spec(_spec)
         _spec.loader.exec_module(_hrd_module)
-        emit_hrd_bundle = _hrd_module.emit_hrd_bundle
+        emit_hrd_bundle_from_sources = (
+            _hrd_module.emit_hrd_bundle_from_admitted_sources
+        )
 
     manifest_pairing_index = {
         "slug": slug,
         "shape_point": shape_point["name"],
-        "binary_sha256": _sha256_of_file(executable),
+        "binary_sha256": binary_sha256,
         "source_commit": _resolve_source_commit(),
-        "kernel_signature_sha256": _kernel_signature_sha256(executable, slug),
+        "kernel_signature_sha256": kernel_signature_sha256,
     }
     device_block = {
         "device_name": props.device_name,
@@ -973,8 +1056,10 @@ def _emit_hrd_bundle_for_run_summary(
         props.num_l2_slices if props.num_l2_slices > 0 else None
     )
     try:
-        result = emit_hrd_bundle(
-            trace_dir=traces_folder,
+        result = emit_hrd_bundle_from_sources(
+            sources=trace_sources,
+            sector_stream=sector_stream,
+            output_root=traces_folder,
             manifest_pairing_index=manifest_pairing_index,
             device=device_block,
             cuda_l2_cache_size_bytes=(
@@ -985,6 +1070,13 @@ def _emit_hrd_bundle_for_run_summary(
             cuda_num_l2_slices=cuda_num_l2_slices,
             static_card_num_l2_slices=static_num_l2_slices,
         )
+    except (
+        TraceAdmissionError,
+        ImmutableArtifactLimitError,
+        ImmutableArtifactResourceError,
+        ImmutableArtifactError,
+    ):
+        raise
     except Exception as exc:
         _hrd_skip_run_summary(
             artifact_record, skip_reason=f"emit_failed:{exc}",
@@ -1039,9 +1131,9 @@ def _emit_hrd_bundle_for_run_summary(
         "kernel_signature_sha256": (
             manifest_pairing_index["kernel_signature_sha256"]
         ),
-        # launch / kernel identity
-        "launch_index": 0,
-        "kernel_name": _stats_csv_kernel_name(traces_folder),
+        # launch / kernel identity (single-launch gate above)
+        "launch_index": admission.launches[0].launch_index,
+        "kernel_name": admission.launches[0].kernel_name,
         # device block
         "device_name": props.device_name,
         "compute_capability_major": props.compute_capability_major,
@@ -1125,13 +1217,6 @@ def _emit_hrd_bundle_for_run_summary(
         ),
     }
     artifact_record.update(section10)
-
-
-def _sha256_of_file(path: Path) -> str:
-    try:
-        return hashlib.sha256(path.read_bytes()).hexdigest()
-    except OSError:
-        return "0" * 64
 
 
 def _resolve_source_commit() -> str:
@@ -1279,8 +1364,10 @@ def _emit_order_projections_for_run_summary(
     traces_folder: Path,
     slug: str,
     shape_point: dict[str, Any],
-    executable: Path,
+    binary_sha256: str,
+    kernel_signature_sha256: str,
     props: "DeviceProps",
+    trace_sources: AdmittedTraceSources,
 ) -> None:
     """task13 / the order-projections clause: emit the
     six-projections bundle alongside the HRD bundle and persist
@@ -1307,8 +1394,15 @@ def _emit_order_projections_for_run_summary(
         sys.path.insert(0, str(projector_dir))
     try:
         from projector import (  # type: ignore[import-not-found]
-            compute_order_projections,
+            compute_order_projections_from_admitted_sources,
         )
+    except (
+        TraceAdmissionError,
+        ImmutableArtifactLimitError,
+        ImmutableArtifactResourceError,
+        ImmutableArtifactError,
+    ):
+        raise
     except Exception as exc:
         _order_projections_skip_run_summary(
             artifact_record,
@@ -1319,9 +1413,9 @@ def _emit_order_projections_for_run_summary(
     manifest_pairing_index = {
         "slug": slug,
         "shape_point": shape_point["name"],
-        "binary_sha256": _sha256_of_file(executable),
+        "binary_sha256": binary_sha256,
         "source_commit": _resolve_source_commit(),
-        "kernel_signature_sha256": _kernel_signature_sha256(executable, slug),
+        "kernel_signature_sha256": kernel_signature_sha256,
     }
     static_l2 = _static_card_l2_bytes_for_props(props)
     cuda_l2 = (
@@ -1346,12 +1440,19 @@ def _emit_order_projections_for_run_summary(
         "l2_cache_size_bytes": capacity_bytes,
     }
     try:
-        bundle = compute_order_projections(
-            trace_dir=traces_folder,
+        bundle = compute_order_projections_from_admitted_sources(
+            sources=trace_sources,
             manifest_pairing_index=manifest_pairing_index,
             device=device_block,
             capacity_bytes=capacity_bytes,
         )
+    except (
+        TraceAdmissionError,
+        ImmutableArtifactLimitError,
+        ImmutableArtifactResourceError,
+        ImmutableArtifactError,
+    ):
+        raise
     except Exception as exc:
         _order_projections_skip_run_summary(
             artifact_record,
@@ -1359,9 +1460,11 @@ def _emit_order_projections_for_run_summary(
         )
         return
 
-    op_dir.mkdir(parents=True, exist_ok=True)
-    op_path.write_text(
-        json.dumps(bundle, indent=2) + "\n", encoding="utf-8"
+    ensure_directory(op_dir)
+    publish_regular_file(
+        op_dir,
+        op_path.name,
+        (json.dumps(bundle, indent=2) + "\n").encode("utf-8"),
     )
     rel_path = (
         op_path.relative_to(artifact_dir)
@@ -1456,46 +1559,21 @@ def _emit_divergence_proxies_for_run_summary(
     traces_folder: Path,
     slug: str,
     shape_point: dict[str, Any],
-    executable: Path,
+    binary_sha256: str,
+    kernel_signature_sha256: str,
     props: "DeviceProps",
+    trace_sources: AdmittedTraceSources,
+    sector_stream: AdmittedSectorStream,
 ) -> None:
-    """Canonical emission of the per-shape `divergence_proxies/`
-    sidecar.
-
-    Derives the producer-side device token from the live
-    `DeviceProps` via
-    `_divergence_proxies_device_token_for_props(props)` (CC 8.6 →
-    `sm_86`; CC 12.0 → `sm_120-laptop`; other CCs raise a typed
-    `ValueError` that the outer `except` translates into a
-    `divergence_proxies_skip_reason`). The
-    producer-side argparse choices at
-    `tools/divergence_proxies/bundle_from_trace.py` are the
-    lockstep partner; both surfaces MUST move together when a third
-    local arch is added (BL-20260507-arch-token-multi-surface-lockstep).
-
-    Builds the canonical 5-field `manifest_pairing_index`
-    (slug, shape_point, binary_sha256, source_commit,
-    kernel_signature_sha256) and passes it through to the producer
-    so the on-disk bundle carries the same provenance shape sibling
-    sidecars (HRD, sharing locality, order projections, perturbation
-    ledger) emit. The verifier's
-    `_verify_divergence_proxies_run_summaries` binds the bundle's
-    `manifest_pairing_index.{slug, shape_point, source_commit}` to
-    the run-summary's cached fields and fails-closed on mismatch.
-
-    Calls `tools.divergence_proxies.bundle_from_trace.consume_trace_dir`
-    with the derived `device` token and the manifest_pairing_index.
-    The producer reads the per-shape
-    `sector_stream/sector_stream.jsonl` and `stats.csv` (already
-    materialized by HRD's upstream `_ensure_sector_stream_jsonl`
-    call), computes the 8 named proxies, writes
-    `trace_<shape>/divergence_proxies/divergence_proxies.json`, and
-    re-validates the on-disk bundle against
-    `workloads/simbench_bw/schemas/divergence_proxies.schema.json`.
-    Schema-rejected output → typed
-    `divergence_proxies_skip_reason`; success → run-summary cache
-    fields below.
-    """
+    """Emit single-launch divergence proxies from admission-bound sectors."""
+    if trace_sources.admission.launch_count != 1:
+        raise TraceAdmissionError(
+            "trace_launch_count_unsupported",
+            "run-summary divergence identity requires exactly one admitted "
+            f"launch; observed launch_count="
+            f"{trace_sources.admission.launch_count}",
+        )
+    sector_stream.verify_for(trace_sources)
     # BL-20260505 (tools-subdir-module-name-collision): both
     # `tools/hrd_profiler/bundle_from_trace.py` and
     # `tools/divergence_proxies/bundle_from_trace.py` exist with
@@ -1525,7 +1603,16 @@ def _emit_divergence_proxies_for_run_summary(
             )
         _div_module = _importlib_util.module_from_spec(_spec)
         _spec.loader.exec_module(_div_module)
-        _div_consume_trace_dir = _div_module.consume_trace_dir
+        _div_consume_trace_sources = (
+            _div_module.consume_admitted_trace_sources
+        )
+    except (
+        TraceAdmissionError,
+        ImmutableArtifactLimitError,
+        ImmutableArtifactResourceError,
+        ImmutableArtifactError,
+    ):
+        raise
     except Exception as exc:
         _divergence_proxies_skip_run_summary(
             artifact_record,
@@ -1545,18 +1632,26 @@ def _emit_divergence_proxies_for_run_summary(
     manifest_pairing_index = {
         "slug": slug,
         "shape_point": shape_point["name"],
-        "binary_sha256": _sha256_of_file(executable),
+        "binary_sha256": binary_sha256,
         "source_commit": _resolve_source_commit(),
-        "kernel_signature_sha256": _kernel_signature_sha256(
-            executable, slug
-        ),
+        "kernel_signature_sha256": kernel_signature_sha256,
     }
 
     try:
-        result = _div_consume_trace_dir(
-            traces_folder, device_token,
+        result = _div_consume_trace_sources(
+            sources=trace_sources,
+            sector_stream=sector_stream,
+            output_root=traces_folder,
+            device=device_token,
             manifest_pairing_index=manifest_pairing_index,
         )
+    except (
+        TraceAdmissionError,
+        ImmutableArtifactLimitError,
+        ImmutableArtifactResourceError,
+        ImmutableArtifactError,
+    ):
+        raise
     except Exception as exc:
         _divergence_proxies_skip_run_summary(
             artifact_record,
@@ -1663,8 +1758,10 @@ def _emit_sharing_locality_for_run_summary(
     traces_folder: Path,
     slug: str,
     shape_point: dict[str, Any],
-    executable: Path,
+    binary_sha256: str,
+    kernel_signature_sha256: str,
     props: "DeviceProps",
+    trace_sources: AdmittedTraceSources,
 ) -> None:
     """R53 canonical emission of the per-shape feature sidecars
     `sharing_locality/` sidecar.
@@ -1684,8 +1781,15 @@ def _emit_sharing_locality_for_run_summary(
         sys.path.insert(0, str(sl_dir))
     try:
         from classifier import (  # type: ignore[import-not-found]
-            compute_sharing_locality as _compute_sharing_locality,
+            compute_sharing_locality_from_admitted_sources as _compute_sharing_locality_from_sources,
         )
+    except (
+        TraceAdmissionError,
+        ImmutableArtifactLimitError,
+        ImmutableArtifactResourceError,
+        ImmutableArtifactError,
+    ):
+        raise
     except Exception as exc:
         _sharing_locality_skip_run_summary(
             artifact_record,
@@ -1696,9 +1800,9 @@ def _emit_sharing_locality_for_run_summary(
     manifest_pairing_index = {
         "slug": slug,
         "shape_point": shape_point["name"],
-        "binary_sha256": _sha256_of_file(executable),
+        "binary_sha256": binary_sha256,
         "source_commit": _resolve_source_commit(),
-        "kernel_signature_sha256": _kernel_signature_sha256(executable, slug),
+        "kernel_signature_sha256": kernel_signature_sha256,
     }
     # The sharing_locality schema's `device` block uses
     # `additionalProperties: false` with exactly four fields
@@ -1714,11 +1818,18 @@ def _emit_sharing_locality_for_run_summary(
         "sm_count": props.sm_count,
     }
     try:
-        bundle = _compute_sharing_locality(
-            trace_dir=traces_folder,
+        bundle = _compute_sharing_locality_from_sources(
+            sources=trace_sources,
             manifest_pairing_index=manifest_pairing_index,
             device=device_block,
         )
+    except (
+        TraceAdmissionError,
+        ImmutableArtifactLimitError,
+        ImmutableArtifactResourceError,
+        ImmutableArtifactError,
+    ):
+        raise
     except Exception as exc:
         _sharing_locality_skip_run_summary(
             artifact_record,
@@ -1727,10 +1838,12 @@ def _emit_sharing_locality_for_run_summary(
         return
 
     sl_subdir = traces_folder / "sharing_locality"
-    sl_subdir.mkdir(parents=True, exist_ok=True)
+    ensure_directory(sl_subdir)
     sl_path = sl_subdir / "sharing_locality.json"
-    sl_path.write_text(
-        json.dumps(bundle, indent=2) + "\n", encoding="utf-8"
+    publish_regular_file(
+        sl_subdir,
+        sl_path.name,
+        (json.dumps(bundle, indent=2) + "\n").encode("utf-8"),
     )
 
     # R7-style discipline (validate the bytes the producer wrote,
@@ -1742,10 +1855,17 @@ def _emit_sharing_locality_for_run_summary(
     )
     try:
         import jsonschema as _jsonschema  # type: ignore[import-not-found]
-        schema = json.loads(schema_path.read_text(encoding="utf-8"))
+        schema = json.loads(read_regular(schema_path))
         validator = _jsonschema.Draft202012Validator(schema)
-        on_disk = json.loads(sl_path.read_text(encoding="utf-8"))
+        on_disk = json.loads(read_regular(sl_path))
         errors = list(validator.iter_errors(on_disk))
+    except (
+        TraceAdmissionError,
+        ImmutableArtifactLimitError,
+        ImmutableArtifactResourceError,
+        ImmutableArtifactError,
+    ):
+        raise
     except Exception as exc:
         _sharing_locality_skip_run_summary(
             artifact_record,
@@ -1916,7 +2036,8 @@ def _emit_perturbation_run_ledger_for_run_summary(
     traces_folder: Path,
     slug: str,
     shape_point: dict[str, Any],
-    executable: Path,
+    binary_sha256: str,
+    kernel_signature_sha256: str,
     props: "DeviceProps",
 ) -> None:
     """task15 / the perturbation-harness clause: build the
@@ -1954,9 +2075,9 @@ def _emit_perturbation_run_ledger_for_run_summary(
     manifest_pairing_index = {
         "slug": slug,
         "shape_point": shape_point["name"],
-        "binary_sha256": _sha256_of_file(executable),
+        "binary_sha256": binary_sha256,
         "source_commit": _resolve_source_commit(),
-        "kernel_signature_sha256": _kernel_signature_sha256(executable, slug),
+        "kernel_signature_sha256": kernel_signature_sha256,
     }
     static_l2 = _static_card_l2_bytes_for_props(props)
     cuda_l2 = (
@@ -2003,9 +2124,11 @@ def _emit_perturbation_run_ledger_for_run_summary(
         )
         return
 
-    ledger_dir.mkdir(parents=True, exist_ok=True)
-    ledger_path.write_text(
-        json.dumps(bundle, indent=2) + "\n", encoding="utf-8"
+    ensure_directory(ledger_dir)
+    publish_regular_file(
+        ledger_dir,
+        ledger_path.name,
+        (json.dumps(bundle, indent=2) + "\n").encode("utf-8"),
     )
     rel_path = (
         ledger_path.relative_to(artifact_dir)
@@ -2089,6 +2212,7 @@ def _emit_trace_convergence_confidence_for_run_summary(
     slug: str,
     shape_point: dict[str, Any],
     props: "DeviceProps",
+    trace_admission: TraceAdmission | None = None,
     trace_convergence_enabled: bool = True,
 ) -> None:
     """task17 / the adaptive-sampler clause: build the
@@ -2249,15 +2373,17 @@ def _emit_trace_convergence_confidence_for_run_summary(
     sector_bins = usable_admitted_bins(raw_bins, layer="sector")
     line_bins = usable_admitted_bins(raw_bins, layer="line")
 
-    # Estimate the actual trace bytes from `dynamic_trace.pb` size if
-    # present (the canonical raw-trace volume measure). Fall back to
-    # 0 when the file is absent — the producer treats 0 as
-    # "below-window" and emits the window-count-underconfigured arm.
-    dynamic_trace_path = traces_folder / "dynamic_trace.pb"
-    actual_trace_bytes = (
-        dynamic_trace_path.stat().st_size
-        if dynamic_trace_path.is_file() else 0
-    )
+    # Canonical callers pass the admitted size and never reopen/stat the raw
+    # trace path.  The path-compatible fallback remains for standalone tests and
+    # older call sites that do not yet own a Task235 capability.
+    if trace_admission is not None:
+        actual_trace_bytes = trace_admission.dynamic_trace_size_bytes
+    else:
+        dynamic_trace_path = traces_folder / "dynamic_trace.pb"
+        actual_trace_bytes = (
+            dynamic_trace_path.stat().st_size
+            if dynamic_trace_path.is_file() else 0
+        )
     required_trace_bytes = (
         (K_CONSECUTIVE_WINDOWS + 1) * TRACE_WINDOW_SIZE_BYTES
     )
@@ -2373,9 +2499,11 @@ def _emit_trace_convergence_confidence_for_run_summary(
         )
         return
 
-    bundle_dir.mkdir(parents=True, exist_ok=True)
-    bundle_path.write_text(
-        json.dumps(bundle, indent=2) + "\n", encoding="utf-8",
+    ensure_directory(bundle_dir)
+    publish_regular_file(
+        bundle_dir,
+        bundle_path.name,
+        (json.dumps(bundle, indent=2) + "\n").encode("utf-8"),
     )
     rel_bundle = (
         bundle_path.relative_to(artifact_dir)
@@ -3186,14 +3314,461 @@ def handle_timing(row: dict[str, Any], props: DeviceProps, out_dir: Path,
 NVBIT_TRACER_SO = SUITE_ROOT.parent.parent / "tools" / "nvbit_tracer" / "tracer_tool" / "tracer_tool.so"
 
 
-def _emit_nvbit_trace_summaries_for_trace_artifact(
+def _write_trace_volume_exceeded(
     *,
-    traces_folder: Path,
-    trace_pb: Path,
+    sidecar: Path,
     slug: str,
     shape_point: str,
-    executable: Path,
-    tracer_so_path: Path,
+    budget_bytes: int,
+    actual_trace_bytes: int,
+    actual_wall_time_s: float,
+) -> None:
+    trace_budgets_sha256, _size = anchored_sha256_file(
+        SUITE_ROOT / "trace_budgets.toml"
+    )
+    record = {
+        "schema_version": 1,
+        "slug": slug,
+        "shape_point": shape_point,
+        "sampling_policy": "off",
+        "max_trace_bytes": budget_bytes,
+        "actual_trace_bytes": actual_trace_bytes,
+        "max_wall_time_s": 3600,
+        "actual_wall_time_s": actual_wall_time_s,
+        "exceeded_trace_bytes": True,
+        "exceeded_wall_time": False,
+        "trace_budgets_sha256": trace_budgets_sha256,
+    }
+    ensure_directory(sidecar.parent)
+    retire_regular_file(sidecar)
+    publish_regular_file(
+        sidecar.parent,
+        sidecar.name,
+        (json.dumps(record, indent=2) + "\n").encode("utf-8"),
+    )
+
+
+def _trace_artifact_record_payload(record: dict[str, Any]) -> bytes:
+    """Serialize the exact canonical locator bytes used for publication."""
+    return (json.dumps(record, indent=2) + "\n").encode("utf-8")
+
+
+def _publish_trace_artifact_record(path: Path, record: dict[str, Any]) -> None:
+    """Commit the sole trace-activation leaf with no-replace semantics.
+
+    The caller must retire any prior active record before beginning the rerun.
+    Publication therefore refuses every destination race rather than replacing
+    a concurrently created regular file.  The committed leaf is read-only and
+    can be retired byte-exact by the next attempt.
+    """
+    publish_regular_file(
+        path.parent,
+        path.name,
+        _trace_artifact_record_payload(record),
+    )
+
+
+def _admitted_trace_exceeds_budget(
+    *,
+    trace_admission: TraceAdmission,
+    budget_bytes: int,
+    sidecar: Path,
+    slug: str,
+    shape_point: str,
+    actual_wall_time_s: float,
+) -> bool:
+    actual_trace_bytes = trace_admission.dynamic_trace_size_bytes
+    if actual_trace_bytes <= budget_bytes:
+        retire_regular_file(sidecar)
+        return False
+    _write_trace_volume_exceeded(
+        sidecar=sidecar,
+        slug=slug,
+        shape_point=shape_point,
+        budget_bytes=budget_bytes,
+        actual_trace_bytes=actual_trace_bytes,
+        actual_wall_time_s=actual_wall_time_s,
+    )
+    return True
+
+
+def _emit_nvbit_budget_sidecars(
+    *,
+    output_root: Path,
+    artifact_dir: Path,
+    slug: str,
+    shape_point: str,
+    actual_slowdown_ratio: float | None,
+    baseline_wall_time_s: float | None,
+    actual_wall_time_s: float,
+    actual_drop_rate: float | None,
+    expected_record_count: int | None,
+    admitted_record_count: int | None,
+) -> dict[str, Path | None]:
+    """Publish attempt-scoped slowdown/drop evidence without stale reuse."""
+    for legacy_name in (
+        "nvbit_slowdown_budget_exceeded.json",
+        "nvbit_drop_rate_exceeded.json",
+    ):
+        retire_regular_file(artifact_dir / legacy_name)
+    trace_budgets_sha256, _size = anchored_sha256_file(
+        SUITE_ROOT / "trace_budgets.toml"
+    )
+    result: dict[str, Path | None] = {
+        "slowdown": None,
+        "drop_rate": None,
+    }
+    if (
+        actual_slowdown_ratio is not None
+        and baseline_wall_time_s is not None
+        and float(baseline_wall_time_s)
+        >= _trace_budgets.NVBIT_SLOWDOWN_BUDGET_MIN_BASELINE_TIME_S
+        and actual_slowdown_ratio
+        > _trace_budgets.NVBIT_SLOWDOWN_BUDGET_MAX_RATIO
+    ):
+        payload = (
+            json.dumps({
+                "schema_version": 1,
+                "slug": slug,
+                "shape_point": shape_point,
+                "max_slowdown_ratio": (
+                    _trace_budgets.NVBIT_SLOWDOWN_BUDGET_MAX_RATIO
+                ),
+                "actual_slowdown_ratio": actual_slowdown_ratio,
+                "baseline_wall_time_s": float(baseline_wall_time_s),
+                "actual_wall_time_s": actual_wall_time_s,
+                "trace_budgets_sha256": trace_budgets_sha256,
+            }, indent=2)
+            + "\n"
+        ).encode("utf-8")
+        result["slowdown"] = publish_regular_file(
+            output_root,
+            "nvbit_slowdown_budget_exceeded.json",
+            payload,
+        )
+        print(
+            f"nvbit_slowdown_budget_exceeded: actual_ratio="
+            f"{actual_slowdown_ratio:.3f} > max_ratio="
+            f"{_trace_budgets.NVBIT_SLOWDOWN_BUDGET_MAX_RATIO}",
+            file=sys.stderr,
+        )
+        print(
+            "nvbit_slowdown_budget_exceeded: sidecar at "
+            f"{result['slowdown']}",
+            file=sys.stderr,
+        )
+
+    if (
+        actual_drop_rate is not None
+        and expected_record_count is not None
+        and actual_drop_rate > _trace_budgets.NVBIT_DROP_RATE_BUDGET_MAX
+    ):
+        admitted_int = int(admitted_record_count or 0)
+        residual = int(expected_record_count) - admitted_int
+        payload = (
+            json.dumps({
+                "schema_version": 1,
+                "slug": slug,
+                "shape_point": shape_point,
+                "max_drop_rate": _trace_budgets.NVBIT_DROP_RATE_BUDGET_MAX,
+                "actual_drop_rate": actual_drop_rate,
+                "expected_record_count": int(expected_record_count),
+                "admitted_record_count": admitted_int,
+                "channel_overflow_dropped": 0,
+                "ring_buffer_loss_dropped": 0,
+                "decoder_gap_dropped": 0,
+                "expected_record_mismatch_dropped": residual,
+                "trace_budgets_sha256": trace_budgets_sha256,
+            }, indent=2)
+            + "\n"
+        ).encode("utf-8")
+        result["drop_rate"] = publish_regular_file(
+            output_root,
+            "nvbit_drop_rate_exceeded.json",
+            payload,
+        )
+        print(
+            f"nvbit_drop_rate_exceeded: actual_rate="
+            f"{actual_drop_rate:.3f} > max_rate="
+            f"{_trace_budgets.NVBIT_DROP_RATE_BUDGET_MAX}",
+            file=sys.stderr,
+        )
+        print(
+            "nvbit_drop_rate_exceeded: sidecar at "
+            f"{result['drop_rate']}",
+            file=sys.stderr,
+        )
+    return result
+
+
+RAW_TRACE_GENERATION_NAMESPACE = "raw_trace_generations"
+TRACE_DERIVED_GENERATION_NAMESPACE = "trace_derived_generations"
+PHASE_LEDGER_GENERATION_NAMESPACE = "phase_cycle_ledger_generations"
+TRACE_CAPTURE_ATTEMPT_NAMESPACE = "trace_capture_attempts"
+
+
+def _trace_generation_root(
+    *, artifact_dir: Path, namespace: str, shape_point: str,
+) -> Path:
+    if namespace not in {
+        RAW_TRACE_GENERATION_NAMESPACE,
+        TRACE_DERIVED_GENERATION_NAMESPACE,
+        PHASE_LEDGER_GENERATION_NAMESPACE,
+    }:
+        raise ImmutableArtifactError("unknown trace generation namespace")
+    if (
+        type(shape_point) is not str
+        or not shape_point
+        or shape_point in {".", ".."}
+        or "/" in shape_point
+        or "\\" in shape_point
+        or len(os.fsencode(shape_point)) > 255
+    ):
+        raise ImmutableArtifactError(
+            "shape_point must be one nonempty portable path component"
+        )
+    return artifact_dir / namespace / shape_point
+
+
+def _new_trace_attempt_id() -> str:
+    """Return a no-reuse generation name independent of trace content."""
+    return f"attempt-{os.urandom(16).hex()}"
+
+
+def _trace_generation_commit_limits() -> dict[str, int]:
+    limits = DEFAULT_TRACE_ADMISSION_LIMITS
+    return {
+        "max_files": limits.tree_files,
+        "max_directories": limits.tree_directories,
+        "max_total_file_bytes": (
+            limits.trace_root_bytes
+            + limits.allocations_sidecar_bytes
+            + limits.stats_bytes
+            + limits.total_threadblock_bytes
+        ),
+        "max_total_relative_path_bytes": limits.tree_relative_path_bytes,
+    }
+
+
+def _directory_generation_record(
+    *,
+    generation: ImmutableDirectoryGeneration,
+    artifact_dir: Path,
+    attempt_id: str,
+) -> dict[str, Any]:
+    artifact_root = Path(os.path.abspath(os.fspath(artifact_dir)))
+    generation_path = Path(os.path.abspath(os.fspath(generation.path)))
+    try:
+        relative = generation_path.relative_to(artifact_root).as_posix()
+    except ValueError as exc:
+        raise ImmutableArtifactError(
+            f"trace generation escapes artifact directory: {generation_path}"
+        ) from exc
+    return {
+        "schema_version": 1,
+        "attempt_id": attempt_id,
+        "path": relative,
+        "content_manifest_sha256": generation.content_manifest_sha256,
+        "filesystem_generation_sha256": (
+            generation.filesystem_generation_sha256
+        ),
+        "file_count": generation.file_count,
+        "directory_count": generation.directory_count,
+        "total_file_bytes": generation.total_file_bytes,
+    }
+
+
+def _publish_trace_attempt_event(
+    *,
+    artifact_dir: Path,
+    slug: str,
+    shape_point: str,
+    attempt_id: str,
+    event_name: str,
+    status: str,
+    typed_reason: str | None,
+    raw_trace_generation: dict[str, Any] | None = None,
+    raw_staging_path: Path | None = None,
+    raw_unresolved_committed_path: Path | None = None,
+    derived_generation: dict[str, Any] | None = None,
+    derived_staging_path: Path | None = None,
+    phase_ledger_generation: dict[str, Any] | None = None,
+    phase_ledger_staging_path: Path | None = None,
+    summary_generation: dict[str, Any] | None = None,
+    measurement_manifest: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Publish one immutable, non-active event for an attempt.
+
+    Events never act as canonical authority.  They make handled failures typed
+    and preserve exact staging/final references without replacing earlier event
+    bytes.  A successful activation references its ``activation_ready`` event
+    and is still the last publication.
+    """
+    if event_name not in {
+        "stage_creation_failed",
+        "capture_failed",
+        "typed_unavailable",
+        "raw_commit_failed",
+        "admission_failed",
+        "budget_rejected",
+        "preactivation_failed",
+        "activation_ready",
+        "activation_failed",
+    }:
+        raise ImmutableArtifactError("unknown trace attempt event name")
+    attempt_dir = (
+        artifact_dir
+        / TRACE_CAPTURE_ATTEMPT_NAMESPACE
+        / shape_point
+        / attempt_id
+    )
+    ensure_directory(attempt_dir)
+
+    def relative_staging(path: Path | None) -> str | None:
+        if path is None:
+            return None
+        artifact_root = Path(os.path.abspath(os.fspath(artifact_dir)))
+        absolute = Path(os.path.abspath(os.fspath(path)))
+        try:
+            return absolute.relative_to(artifact_root).as_posix()
+        except ValueError as exc:
+            raise ImmutableArtifactError(
+                f"trace attempt staging path escapes artifact directory: {absolute}"
+            ) from exc
+
+    event = {
+        "schema_version": 1,
+        "slug": slug,
+        "shape_point": shape_point,
+        "attempt_id": attempt_id,
+        "status": status,
+        "typed_reason": typed_reason,
+        "activation_state": "non_active",
+        "raw_trace_generation": raw_trace_generation,
+        "raw_staging_path": relative_staging(raw_staging_path),
+        "raw_unresolved_committed_path": relative_staging(
+            raw_unresolved_committed_path
+        ),
+        "trace_derived_generation": derived_generation,
+        "derived_staging_path": relative_staging(derived_staging_path),
+        "phase_cycle_ledger_generation": phase_ledger_generation,
+        "phase_ledger_staging_path": relative_staging(
+            phase_ledger_staging_path
+        ),
+        "nvbit_trace_summary_generation": summary_generation,
+        "measurement_manifest": measurement_manifest,
+    }
+    event_path = publish_regular_file(
+        attempt_dir,
+        f"{event_name}.json",
+        (json.dumps(event, indent=2) + "\n").encode("utf-8"),
+    )
+    return _retained_artifact_identity(
+        path=event_path, artifact_dir=artifact_dir
+    )
+
+
+def _rebase_trace_feature_paths(
+    *,
+    artifact_record: dict[str, Any],
+    artifact_dir: Path,
+    staged_root: Path,
+    committed_root: Path,
+) -> None:
+    """Move explicit feature references from the hidden stage to its final name."""
+    artifact_root = Path(os.path.abspath(os.fspath(artifact_dir)))
+    staged = Path(os.path.abspath(os.fspath(staged_root)))
+    committed = Path(os.path.abspath(os.fspath(committed_root)))
+    try:
+        staged_relative = staged.relative_to(artifact_root)
+        committed_relative = committed.relative_to(artifact_root)
+    except ValueError as exc:
+        raise ImmutableArtifactError(
+            "trace feature generation escapes artifact directory"
+        ) from exc
+    for field in (
+        "sector_stream_path",
+        "hrd_profile_path",
+        "divergence_proxies_path",
+        "sharing_locality_path",
+        "order_projections_path",
+        "perturbation_run_ledger_path",
+        "trace_convergence_confidence_path",
+        "nvbit_slowdown_budget_sidecar_path",
+        "nvbit_drop_rate_sidecar_path",
+    ):
+        value = artifact_record.get(field)
+        if value is None:
+            continue
+        if type(value) is not str or not value:
+            raise ImmutableArtifactError(
+                f"trace feature path field is invalid: {field}"
+            )
+        path = Path(value)
+        try:
+            suffix = path.relative_to(staged_relative)
+        except ValueError as exc:
+            raise ImmutableArtifactError(
+                f"trace feature path does not reference its staging generation: {field}"
+            ) from exc
+        artifact_record[field] = (committed_relative / suffix).as_posix()
+
+
+NVBIT_TRACE_SUMMARY_GENERATION_NAMESPACE = (
+    "nvbit_trace_summary_generations"
+)
+
+
+def _nvbit_trace_summary_generation_root(
+    *,
+    artifact_dir: Path,
+    shape_point: str,
+    trace_admission_sha256: str,
+) -> Path:
+    """Return the parent whose final child is one filesystem generation.
+
+    The artifact directory already scopes ``slug``.  The remaining directory
+    components scope the batch by shape and portable content admission; the
+    final no-replace directory name is the local filesystem-generation seal.
+    Shape names are committed roster inputs, but still fail closed unless they
+    are one portable path component so they cannot escape the namespace.
+    """
+    if (
+        type(shape_point) is not str
+        or not shape_point
+        or shape_point in {".", ".."}
+        or "/" in shape_point
+        or "\\" in shape_point
+        or len(os.fsencode(shape_point)) > 255
+    ):
+        raise ImmutableArtifactError(
+            "shape_point must be one nonempty portable path component"
+        )
+    if (
+        len(trace_admission_sha256) != 64
+        or any(
+            character not in "0123456789abcdef"
+            for character in trace_admission_sha256
+        )
+    ):
+        raise ImmutableArtifactError(
+            "trace_admission_sha256 must be lowercase 64-hex"
+        )
+    return (
+        artifact_dir
+        / NVBIT_TRACE_SUMMARY_GENERATION_NAMESPACE
+        / shape_point
+        / trace_admission_sha256
+    )
+
+
+def _emit_nvbit_trace_summaries_for_trace_artifact(
+    *,
+    trace_admission: TraceAdmission,
+    slug: str,
+    shape_point: str,
+    binary_sha256: str,
+    tracer_build_sha256: str,
     artifact_dir: Path,
 ) -> dict[str, Any]:
     """Per-launch NVBit trace summary emission, factored out of
@@ -3204,9 +3779,9 @@ def _emit_nvbit_trace_summaries_for_trace_artifact(
     Returns a dict with:
       - `status`: one of `ok`, `adapter_import_failed`,
         `tracked_protobuf_corrupt`, `protobuf_runtime_prerequisite_missing`,
-        `adapter_error`.
-      - `paths`: list of repo-relative summary paths (relative to
-        `artifact_dir`); empty when status is non-ok.
+        `resource_unavailable`, `adapter_error`.
+      - `paths`: exact paths relative to `artifact_dir` inside the committed
+        immutable generation; empty when status is non-ok.
       - `failure_reason`: human-readable diagnostic when status is
         non-ok; None on success.
       - `failed_hard`: True for every non-ok dependency or adapter result.
@@ -3214,6 +3789,12 @@ def _emit_nvbit_trace_summaries_for_trace_artifact(
     The adapter and all nine `_pb2.py` files are tracked authorities. Missing
     source/binding bytes are repository corruption; a missing protobuf runtime
     is a prerequisite failure. Neither condition is a graceful trace result.
+    Launch metadata, counts, and all trace identities come only from
+    `trace_admission`. Executable and tracer digests must come from the retained
+    descriptors used for execution and injection. This producer reopens none of
+    those source paths.  Every launch is rendered outside the artifact namespace,
+    converted to an in-memory ``ImmutableFile``, and committed together by the
+    final generation-directory rename.  Prior generations are never removed.
     """
     result: dict[str, Any] = {
         "status": "not_attempted",
@@ -3221,90 +3802,1197 @@ def _emit_nvbit_trace_summaries_for_trace_artifact(
         "failure_reason": None,
         "failed_hard": False,
     }
+
+    def fail(status: str, reason: str) -> dict[str, Any]:
+        result["status"] = status
+        result["failure_reason"] = reason
+        result["paths"] = []
+        result["failed_hard"] = True
+        return result
+
     try:
         import nvbit_trace_summary_adapter as _nvbit_adapter  # pyright: ignore[reportMissingImports]
     except ImportError as exc:
-        result["status"] = "adapter_import_failed"
-        result["failure_reason"] = (
+        return fail(
+            "adapter_import_failed",
             "tracked adapter source is unavailable; restore "
             "workloads/simbench_bw/nvbit_trace_summary_adapter.py from "
-            f"the committed tree: {exc}"
+            f"the committed tree: {exc}",
         )
-        result["failed_hard"] = True
-        return result
-    try:
-        launch_count = _nvbit_adapter.enumerate_launches(trace_pb)
-    except _nvbit_adapter.NvbitTrackedProtobufCorruption as exc:
-        result["status"] = "tracked_protobuf_corrupt"
-        result["failure_reason"] = str(exc)
-        result["failed_hard"] = True
-        return result
-    except _nvbit_adapter.NvbitProtobufRuntimePrerequisiteMissing as exc:
-        result["status"] = "protobuf_runtime_prerequisite_missing"
-        result["failure_reason"] = str(exc)
-        result["failed_hard"] = True
-        return result
-    except Exception as exc:  # noqa: BLE001
-        result["status"] = "adapter_error"
-        result["failure_reason"] = (
-            f"enumerate_launches: {type(exc).__name__}: {exc}"
+    launch_count = trace_admission.launch_count
+    if launch_count != len(trace_admission.launches):
+        return fail(
+            "adapter_error",
+            "admitted launch count disagrees with retained summary inputs",
         )
-        result["failed_hard"] = True
-        return result
 
-    paths: list[str] = []
-    for launch_index in range(launch_count):
-        summary_out_path = (
-            artifact_dir / f"nvbit_trace_summary_0_{launch_index}.json"
+    material: list[ImmutableFile] = []
+    try:
+        filesystem_generation = (
+            trace_admission.trace_filesystem_generation_sha256
         )
-        try:
-            _nvbit_adapter.emit_nvbit_trace_summary(
-                traces_dir=traces_folder,
-                slug=slug,
-                shape_point=shape_point,
-                repeat_index=0,
-                launch_index=launch_index,
-                executable_path=executable,
-                tracer_so_path=tracer_so_path,
-                output_path=summary_out_path,
+        if (
+            len(filesystem_generation) != 64
+            or any(
+                character not in "0123456789abcdef"
+                for character in filesystem_generation
             )
-            paths.append(str(summary_out_path.relative_to(artifact_dir)))
-        except _nvbit_adapter.NvbitTrackedProtobufCorruption as exc:
-            result["status"] = "tracked_protobuf_corrupt"
-            result["failure_reason"] = str(exc)
-            result["paths"] = []
-            result["failed_hard"] = True
-            return result
-        except _nvbit_adapter.NvbitProtobufRuntimePrerequisiteMissing as exc:
-            result["status"] = "protobuf_runtime_prerequisite_missing"
-            result["failure_reason"] = str(exc)
-            result["paths"] = []
-            result["failed_hard"] = True
-            return result
-        except Exception as exc:  # noqa: BLE001
-            result["status"] = "adapter_error"
-            result["failure_reason"] = (
-                f"emit_nvbit_trace_summary launch_index={launch_index}: "
-                f"{type(exc).__name__}: {exc}"
+        ):
+            raise ImmutableArtifactError(
+                "trace_filesystem_generation_sha256 must be lowercase 64-hex"
             )
-            result["failed_hard"] = True
-            result["paths"] = []
-            return result
+        generation_root = _nvbit_trace_summary_generation_root(
+            artifact_dir=artifact_dir,
+            shape_point=shape_point,
+            trace_admission_sha256=(
+                trace_admission.trace_admission_sha256
+            ),
+        )
+        with tempfile.TemporaryDirectory(
+            prefix="nvbit-trace-summary-batch-"
+        ) as temporary_directory:
+            temporary_root = Path(temporary_directory)
+            for launch_index in range(launch_count):
+                filename = f"nvbit_trace_summary_0_{launch_index}.json"
+                staged_path = temporary_root / filename
+                _nvbit_adapter.emit_admitted_nvbit_trace_summary(
+                    admission=trace_admission,
+                    slug=slug,
+                    shape_point=shape_point,
+                    repeat_index=0,
+                    launch_index=launch_index,
+                    binary_sha256=binary_sha256,
+                    tracer_build_sha256=tracer_build_sha256,
+                    output_path=staged_path,
+                )
+                with open_retained_regular(staged_path) as staged:
+                    payload = staged.read_bytes()
+                material.append(ImmutableFile.from_bytes(filename, payload))
+
+            published_directory = publish_directory(
+                generation_root,
+                filesystem_generation,
+                material,
+                accept_existing=False,
+            )
+
+        artifact_root = Path(os.path.abspath(os.fspath(artifact_dir)))
+        generation_relative = published_directory.relative_to(
+            artifact_root
+        )
+    except ImmutableArtifactResourceError as exc:
+        return fail(
+            "resource_unavailable",
+            "trace_summary_resource_unavailable: transactional NVBit summary "
+            f"emission failed: {type(exc).__name__}: {exc}",
+        )
+    except _nvbit_adapter.NvbitTrackedProtobufCorruption as exc:
+        return fail(
+            "tracked_protobuf_corrupt",
+            str(exc),
+        )
+    except _nvbit_adapter.NvbitProtobufRuntimePrerequisiteMissing as exc:
+        return fail(
+            "protobuf_runtime_prerequisite_missing",
+            str(exc),
+        )
+    except Exception as exc:  # noqa: BLE001
+        return fail(
+            "adapter_error",
+            "transactional NVBit summary emission failed: "
+            f"{type(exc).__name__}: {exc}",
+        )
 
     result["status"] = "ok"
-    result["paths"] = paths
+    result["paths"] = [
+        (generation_relative / file.relative_path).as_posix()
+        for file in material
+    ]
     return result
+
+
+def _expected_admitted_nvbit_summary_record(
+    *,
+    trace_admission: TraceAdmission,
+    slug: str,
+    shape_point: str,
+    launch_index: int,
+    binary_sha256: str,
+    tracer_build_sha256: str,
+) -> dict[str, Any]:
+    """Rebuild the exact V2 body allowed to become active."""
+    import nvbit_trace_summary_adapter as adapter  # pyright: ignore[reportMissingImports]
+
+    launch = trace_admission.launches[launch_index]
+    return {
+        "schema_version": 2,
+        "slug": slug,
+        "shape_point": shape_point,
+        "repeat_index": 0,
+        "launch_index": launch_index,
+        "kernel_name": launch.kernel_name,
+        "kernel_signature_sha256": adapter.compute_kernel_signature_sha256(
+            launch.kernel_signature_inputs()
+        ),
+        "inst_count": launch.inst_count,
+        "binary_sha256": binary_sha256,
+        "nvbit_trace_pb_path": trace_admission.dynamic_trace_path,
+        "nvbit_trace_pb_sha256": trace_admission.dynamic_trace_sha256,
+        "nvbit_tracer_build_hash": tracer_build_sha256,
+        "nvbit_threadblock_payload_size_bytes": (
+            trace_admission.threadblock_payload_size_bytes
+        ),
+        "nvbit_threadblock_payload_manifest_sha256": (
+            trace_admission.threadblock_payload_manifest_sha256
+        ),
+        "trace_admission_sha256": trace_admission.trace_admission_sha256,
+    }
+
+
+def _require_one_committed_nvbit_summary_generation(
+    *,
+    emit_result: dict[str, Any],
+    trace_admission: TraceAdmission,
+    slug: str,
+    shape_point: str,
+    binary_sha256: str,
+    tracer_build_sha256: str,
+    artifact_dir: Path,
+) -> dict[str, Any]:
+    """Close the exact immutable summary generation before activation.
+
+    The active record is allowed to name exactly one complete, read-only
+    generation.  This gate inventories that generation through a pinned
+    no-follow reader, rejects extra/missing launches and hard links, binds every
+    summary body to the admitted trace, and returns the file identities recorded
+    by the activation leaf.
+    """
+    if emit_result.get("status") != "ok" or emit_result.get("failed_hard"):
+        raise ImmutableArtifactError(
+            "NVBit summary generation is not eligible for activation"
+        )
+    paths = emit_result.get("paths")
+    if type(paths) is not list or not paths:
+        raise ImmutableArtifactError(
+            "NVBit summary generation has no committed launch references"
+        )
+
+    generation_relative = (
+        Path(NVBIT_TRACE_SUMMARY_GENERATION_NAMESPACE)
+        / shape_point
+        / trace_admission.trace_admission_sha256
+        / trace_admission.trace_filesystem_generation_sha256
+    )
+    expected_paths = [
+        (
+            generation_relative
+            / f"nvbit_trace_summary_0_{launch_index}.json"
+        ).as_posix()
+        for launch_index in range(trace_admission.launch_count)
+    ]
+    if paths != expected_paths:
+        raise ImmutableArtifactError(
+            "NVBit summary references do not name exactly one admitted generation"
+        )
+
+    artifact_root = Path(os.path.abspath(os.fspath(artifact_dir)))
+    generation_dir = artifact_root.joinpath(*generation_relative.parts)
+    expected_names = {Path(path).name for path in expected_paths}
+    identities: list[dict[str, Any]] = []
+    with PinnedDirectoryReader(generation_dir) as reader:
+        snapshot = reader.snapshot_tree(
+            require_readonly_files=True,
+            require_readonly_directories=True,
+            max_files=max(1, trace_admission.launch_count),
+            max_directories=1,
+            max_total_file_bytes=max(1, trace_admission.launch_count)
+            * 16
+            * 1024
+            * 1024,
+            max_total_relative_path_bytes=max(
+                4096, trace_admission.launch_count * 4096
+            ),
+        )
+        files = dict(snapshot.files)
+        directories = dict(snapshot.directories)
+        if set(files) != expected_names or set(directories) != {"."}:
+            raise ImmutableArtifactError(
+                "committed NVBit summary generation inventory mismatch"
+            )
+        if stat.S_IMODE(directories["."][2]) != 0o555:
+            raise ImmutableArtifactError(
+                "committed NVBit summary generation is not read-only"
+            )
+
+        for launch_index, relative_path in enumerate(expected_paths):
+            filename = Path(relative_path).name
+            metadata = files[filename]
+            if stat.S_IMODE(metadata[2]) != 0o444 or metadata[3] != 1:
+                raise ImmutableArtifactError(
+                    "committed NVBit summary is not a single-link read-only file: "
+                    f"{filename}"
+                )
+            payload = reader.read_snapshot(
+                filename, expected_metadata=metadata
+            ).payload
+            try:
+                summary = json.loads(payload)
+            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise ImmutableArtifactError(
+                    f"committed NVBit summary is invalid JSON: {filename}: {exc}"
+                ) from exc
+            expected_summary = _expected_admitted_nvbit_summary_record(
+                trace_admission=trace_admission,
+                slug=slug,
+                shape_point=shape_point,
+                launch_index=launch_index,
+                binary_sha256=binary_sha256,
+                tracer_build_sha256=tracer_build_sha256,
+            )
+            if type(summary) is not dict or summary != expected_summary:
+                raise ImmutableArtifactError(
+                    "committed NVBit summary body disagrees with exact admitted "
+                    f"launch and execution identity: {filename}"
+                )
+            identities.append({
+                "path": relative_path,
+                "sha256": hashlib.sha256(payload).hexdigest(),
+                "size_bytes": len(payload),
+            })
+        reader.verify_path()
+
+    sealed_generation = inspect_immutable_directory_generation(
+        generation_dir,
+        require_nonempty=True,
+        max_files=len(identities),
+        max_directories=1,
+        max_total_file_bytes=sum(
+            identity["size_bytes"] for identity in identities
+        ),
+        max_total_relative_path_bytes=max(
+            4096, trace_admission.launch_count * 4096
+        ),
+    )
+    sealed_files = [
+        {
+            "path": (
+                generation_relative / identity.relative_path
+            ).as_posix(),
+            "sha256": identity.sha256,
+            "size_bytes": identity.size_bytes,
+        }
+        for identity in sealed_generation.files
+    ]
+    if sealed_files != identities:
+        raise ImmutableArtifactError(
+            "committed NVBit summary generation seal disagrees with file identities"
+        )
+
+    generation_manifest_sha256 = hashlib.sha256(
+        json.dumps(
+            identities,
+            allow_nan=False,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()
+    return {
+        "schema_version": 1,
+        "path": generation_relative.as_posix(),
+        "content_manifest_sha256": (
+            sealed_generation.content_manifest_sha256
+        ),
+        "filesystem_generation_sha256": (
+            sealed_generation.filesystem_generation_sha256
+        ),
+        "file_count": len(identities),
+        "directory_count": sealed_generation.directory_count,
+        "total_file_bytes": sealed_generation.total_file_bytes,
+        "files": identities,
+        "manifest_sha256": generation_manifest_sha256,
+    }
+
+
+def _retained_artifact_identity(
+    *, path: Path, artifact_dir: Path,
+) -> dict[str, Any]:
+    """Return a no-follow identity for one already-published evidence file."""
+    artifact_root = Path(os.path.abspath(os.fspath(artifact_dir)))
+    absolute = Path(os.path.abspath(os.fspath(path)))
+    try:
+        relative = absolute.relative_to(artifact_root).as_posix()
+    except ValueError as exc:
+        raise ImmutableArtifactError(
+            f"evidence path escapes artifact directory: {absolute}"
+        ) from exc
+    with open_retained_regular(absolute) as retained:
+        retained.read_bytes()
+        return {
+            "path": relative,
+            "sha256": retained.sha256,
+            "size_bytes": retained.size_bytes,
+        }
+
+
+def _collect_trace_feature_evidence_identities(
+    *, artifact_record: dict[str, Any], artifact_dir: Path,
+) -> list[dict[str, Any]]:
+    """Bind every successfully published feature path carried by the record."""
+    path_fields = (
+        "sector_stream_path",
+        "hrd_profile_path",
+        "divergence_proxies_path",
+        "sharing_locality_path",
+        "order_projections_path",
+        "perturbation_run_ledger_path",
+        "trace_convergence_confidence_path",
+        "nvbit_slowdown_budget_sidecar_path",
+        "nvbit_drop_rate_sidecar_path",
+    )
+    identities: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for field in path_fields:
+        relative_path = artifact_record.get(field)
+        if relative_path is None:
+            continue
+        if type(relative_path) is not str or not relative_path:
+            raise ImmutableArtifactError(
+                f"trace feature path field is invalid: {field}"
+            )
+        if relative_path in seen:
+            raise ImmutableArtifactError(
+                f"duplicate trace feature evidence path: {relative_path}"
+            )
+        seen.add(relative_path)
+        identity = _retained_artifact_identity(
+            path=artifact_dir / relative_path,
+            artifact_dir=artifact_dir,
+        )
+        identity["kind"] = field.removesuffix("_path")
+        identities.append(identity)
+    return sorted(identities, key=lambda identity: identity["path"])
+
+
+def _require_same_trace_admission(
+    expected: TraceAdmission,
+    observed: TraceAdmission,
+    *,
+    stage: str,
+) -> None:
+    if observed != expected:
+        raise TraceAdmissionError(
+            "trace_snapshot_changed",
+            f"{stage} trace admission disagrees with the captured generation",
+        )
+
+
+def _emit_admitted_trace_features(
+    *,
+    artifact_record: dict[str, Any],
+    artifact_dir: Path,
+    traces_folder: Path,
+    trace_admission: TraceAdmission,
+    slug: str,
+    shape_point: dict[str, Any],
+    binary_sha256: str,
+    kernel_signature_sha256: str,
+    props: DeviceProps,
+    trace_sources: AdmittedTraceSources,
+) -> None:
+    """Emit every feature under one admitted-source capability boundary.
+
+    Task235's capability is the integration point for downstream producers.
+    Until every producer accepts it directly, path-compatible producer calls are
+    permitted only inside this continuously monitored capability and cannot be
+    activated unless the final capability gate also closes successfully.
+    """
+    if trace_sources.admission != trace_admission:
+        raise TraceAdmissionError(
+            "trace_snapshot_changed",
+            "feature capability admission disagrees with captured generation",
+        )
+    trace_sources.verify_unchanged()
+    if trace_admission.launch_count != 1:
+        raise TraceAdmissionError(
+            "trace_launch_count_unsupported",
+            "coherent run-suite feature batch requires exactly one admitted "
+            f"launch; observed launch_count={trace_admission.launch_count}",
+        )
+    sector_ok, sector_skip_reason, sector_stream = (
+        _ensure_sector_stream_jsonl(
+            traces_folder,
+            trace_sources=trace_sources,
+        )
+    )
+    if not sector_ok:
+        reason = sector_skip_reason or "sector_stream_generation_failed"
+        artifact_record["sector_stream_path"] = None
+        artifact_record["sector_stream_skip_reason"] = reason
+        _hrd_skip_run_summary(artifact_record, skip_reason=reason)
+        _divergence_proxies_skip_run_summary(
+            artifact_record, skip_reason=reason,
+        )
+        _sharing_locality_skip_run_summary(
+            artifact_record, skip_reason=reason,
+        )
+        _order_projections_skip_run_summary(
+            artifact_record, skip_reason=reason,
+        )
+        trace_sources.verify_unchanged()
+        return
+    if sector_stream is None:
+        raise TraceAdmissionError(
+            "sector_stream_result_missing",
+            "sector-stream producer reported success without a typed result",
+        )
+    sector_stream.verify_for(trace_sources)
+    artifact_record["sector_stream_path"] = (
+        traces_folder / "sector_stream" / "sector_stream.jsonl"
+    ).relative_to(artifact_dir).as_posix()
+    _emit_hrd_bundle_for_run_summary(
+        artifact_record=artifact_record,
+        artifact_dir=artifact_dir,
+        traces_folder=traces_folder,
+        slug=slug,
+        shape_point=shape_point,
+        binary_sha256=binary_sha256,
+        kernel_signature_sha256=kernel_signature_sha256,
+        props=props,
+        trace_sources=trace_sources,
+        sector_stream=sector_stream,
+    )
+    _emit_divergence_proxies_for_run_summary(
+        artifact_record=artifact_record,
+        artifact_dir=artifact_dir,
+        traces_folder=traces_folder,
+        slug=slug,
+        shape_point=shape_point,
+        binary_sha256=binary_sha256,
+        kernel_signature_sha256=kernel_signature_sha256,
+        props=props,
+        trace_sources=trace_sources,
+        sector_stream=sector_stream,
+    )
+    _emit_sharing_locality_for_run_summary(
+        artifact_record=artifact_record,
+        artifact_dir=artifact_dir,
+        traces_folder=traces_folder,
+        slug=slug,
+        shape_point=shape_point,
+        binary_sha256=binary_sha256,
+        kernel_signature_sha256=kernel_signature_sha256,
+        props=props,
+        trace_sources=trace_sources,
+    )
+    _emit_order_projections_for_run_summary(
+        artifact_record=artifact_record,
+        artifact_dir=artifact_dir,
+        traces_folder=traces_folder,
+        slug=slug,
+        shape_point=shape_point,
+        binary_sha256=binary_sha256,
+        kernel_signature_sha256=kernel_signature_sha256,
+        props=props,
+        trace_sources=trace_sources,
+    )
+    _emit_perturbation_run_ledger_for_run_summary(
+        artifact_record=artifact_record,
+        artifact_dir=artifact_dir,
+        traces_folder=traces_folder,
+        slug=slug,
+        shape_point=shape_point,
+        binary_sha256=binary_sha256,
+        kernel_signature_sha256=kernel_signature_sha256,
+        props=props,
+    )
+    _emit_trace_convergence_confidence_for_run_summary(
+        artifact_record=artifact_record,
+        artifact_dir=artifact_dir,
+        traces_folder=traces_folder,
+        slug=slug,
+        shape_point=shape_point,
+        props=props,
+        trace_admission=trace_admission,
+    )
+    trace_sources.verify_unchanged()
+
+
+def _run_retained_nvbit_capture(
+    *,
+    retained_executable: RetainedExecutable,
+    retained_tracer: RetainedRegular,
+    args: list[str],
+    traces_folder: Path,
+    traces_descriptor: int | None = None,
+) -> dict[str, Any]:
+    """Run baseline and NVBit capture through retained source capabilities.
+
+    Canonical callers provide the exclusive staging-directory descriptor.  The
+    subprocess then receives ``/proc/self/fd/<n>`` rather than a mutable lexical
+    pathname, and the descriptor remains inherited for the complete capture.
+    """
+    import subprocess as _sp
+    import time as _time
+
+    if traces_descriptor is not None:
+        if type(traces_descriptor) is not int or traces_descriptor < 0:
+            raise ImmutableArtifactError(
+                "capture staging descriptor must be a nonnegative integer"
+            )
+        stage_metadata = os.fstat(traces_descriptor)
+        if not stat.S_ISDIR(stage_metadata.st_mode):
+            raise ImmutableArtifactError(
+                "capture staging descriptor is not a directory"
+            )
+        capture_folder = f"/proc/self/fd/{traces_descriptor}"
+        capture_fds = (traces_descriptor,)
+    else:
+        capture_folder = str(traces_folder)
+        capture_fds = ()
+
+    retained_executable.verify_unchanged()
+    retained_tracer.verify_unchanged()
+    with nullcontext(retained_executable):
+        with nullcontext(retained_tracer):
+            executable_proc_path = (
+                f"/proc/self/fd/{retained_executable.descriptor}"
+            )
+            baseline_env = {
+                key: value
+                for key, value in os.environ.items()
+                if key != "CUDA_INJECTION64_PATH"
+            }
+            baseline_env["TRACES_FOLDER"] = capture_folder
+            baseline_t0 = _time.perf_counter()
+            baseline_proc = _sp.run(
+                [executable_proc_path, *args],
+                capture_output=True,
+                text=True,
+                env=baseline_env,
+                pass_fds=(retained_executable.descriptor, *capture_fds),
+            )
+            baseline_elapsed_s = _time.perf_counter() - baseline_t0
+            if baseline_proc.returncode == 0:
+                try:
+                    baseline_result = json.loads(baseline_proc.stdout)
+                except json.JSONDecodeError:
+                    baseline_result = None
+            else:
+                baseline_result = None
+
+            trace_proc = None
+            trace_elapsed_s = None
+            if not (
+                isinstance(baseline_result, dict)
+                and baseline_result.get("result_kind") == "typed_unavailable"
+            ):
+                env = tracer_runtime_env(
+                    retained_tracer.path,
+                    retained_descriptor=retained_tracer.descriptor,
+                )
+                env["CUDA_INJECTION64_PATH"] = retained_tracer.proc_path
+                env["USER_DEFINED_FOLDERS"] = "1"
+                env["TRACES_FOLDER"] = capture_folder
+                trace_t0 = _time.perf_counter()
+                trace_proc = _sp.run(
+                    [executable_proc_path, *args],
+                    capture_output=True,
+                    text=True,
+                    env=env,
+                    pass_fds=(
+                        retained_executable.descriptor,
+                        retained_tracer.descriptor,
+                        *capture_fds,
+                    ),
+                )
+                trace_elapsed_s = _time.perf_counter() - trace_t0
+
+            result = {
+                "baseline_proc": baseline_proc,
+                "baseline_elapsed_s": baseline_elapsed_s,
+                "baseline_result": baseline_result,
+                "trace_proc": trace_proc,
+                "trace_elapsed_s": trace_elapsed_s,
+                "binary_sha256": retained_executable.sha256,
+                "tracer_build_sha256": retained_tracer.sha256,
+            }
+            retained_executable.verify_unchanged()
+            retained_tracer.verify_unchanged()
+    return result
+
+
+def _capture_raw_trace_generation(
+    *,
+    artifact_dir: Path,
+    shape_point: str,
+    attempt_id: str,
+    retained_executable: RetainedExecutable,
+    retained_tracer: RetainedRegular,
+    args: list[str],
+) -> dict[str, Any]:
+    """Capture one attempt and commit its raw tree before any admission.
+
+    The returned status is always typed.  Hidden stages and committed trees are
+    never removed on failure; callers publish a non-active attempt event before
+    returning or advancing to activation.
+    """
+    generation_root = _trace_generation_root(
+        artifact_dir=artifact_dir,
+        namespace=RAW_TRACE_GENERATION_NAMESPACE,
+        shape_point=shape_point,
+    )
+    staging_path = generation_root / f".{attempt_id}.staging"
+    try:
+        stage = create_exclusive_directory_stage(
+            generation_root, attempt_id
+        )
+    except ImmutableArtifactLimitError as exc:
+        return {
+            "status": "stage_creation_failed",
+            "typed_reason": "trace_inventory_limit_exceeded",
+            "detail": f"{type(exc).__name__}: {exc}",
+            "execution": None,
+            "generation": None,
+            "staging_path": staging_path,
+        }
+    except ImmutableArtifactResourceError as exc:
+        return {
+            "status": "stage_creation_failed",
+            "typed_reason": "trace_snapshot_resource_unavailable",
+            "detail": f"{type(exc).__name__}: {exc}",
+            "execution": None,
+            "generation": None,
+            "staging_path": staging_path,
+        }
+    except (ImmutableArtifactError, OSError) as exc:
+        return {
+            "status": "stage_creation_failed",
+            "typed_reason": "trace_filesystem_invalid",
+            "detail": f"{type(exc).__name__}: {exc}",
+            "execution": None,
+            "generation": None,
+            "staging_path": staging_path,
+        }
+
+    selected_result: dict[str, Any] | None = None
+
+    def select(result: dict[str, Any]) -> dict[str, Any]:
+        nonlocal selected_result
+        selected_result = result
+        return result
+
+    @contextmanager
+    def preserve_selected_stage_result():
+        entered = stage.__enter__()
+        try:
+            yield entered
+        except BaseException as primary:
+            try:
+                stage.__exit__(
+                    type(primary), primary, primary.__traceback__
+                )
+            except BaseException as cleanup:
+                try:
+                    primary.add_note(
+                        "raw trace stage cleanup also failed: "
+                        f"{type(cleanup).__name__}: {cleanup}"
+                    )
+                except (AttributeError, TypeError):
+                    pass
+            raise
+        else:
+            try:
+                stage.__exit__(None, None, None)
+            except BaseException as cleanup:
+                if selected_result is None:
+                    raise
+                cleanup_detail = (
+                    "raw trace stage cleanup failed: "
+                    f"{type(cleanup).__name__}: {cleanup}"
+                )
+                if selected_result.get("status") == "raw_committed":
+                    selected_result["status"] = "raw_stage_closure_failed"
+                    selected_result["typed_reason"] = (
+                        "trace_snapshot_resource_unavailable"
+                        if isinstance(
+                            cleanup, ImmutableArtifactResourceError
+                        )
+                        else "trace_filesystem_invalid"
+                    )
+                    selected_result["detail"] = cleanup_detail
+                else:
+                    prior_detail = selected_result.get("detail")
+                    selected_result["detail"] = (
+                        f"{prior_detail}; {cleanup_detail}"
+                        if prior_detail
+                        else cleanup_detail
+                    )
+
+    with preserve_selected_stage_result():
+        try:
+            execution = _run_retained_nvbit_capture(
+                retained_executable=retained_executable,
+                retained_tracer=retained_tracer,
+                args=args,
+                traces_folder=stage.staging_path,
+                traces_descriptor=stage.descriptor,
+            )
+        except TracerRuntimeError as exc:
+            return select({
+                "status": "capture_failed",
+                "typed_reason": "tracer_so_deps_unresolved",
+                "detail": str(exc),
+                "execution": None,
+                "generation": None,
+                "staging_path": stage.staging_path,
+            })
+        except ImmutableArtifactLimitError as exc:
+            return select({
+                "status": "capture_failed",
+                "typed_reason": "trace_inventory_limit_exceeded",
+                "detail": f"{type(exc).__name__}: {exc}",
+                "execution": None,
+                "generation": None,
+                "staging_path": stage.staging_path,
+            })
+        except ImmutableArtifactResourceError as exc:
+            return select({
+                "status": "capture_failed",
+                "typed_reason": "trace_snapshot_resource_unavailable",
+                "detail": f"{type(exc).__name__}: {exc}",
+                "execution": None,
+                "generation": None,
+                "staging_path": stage.staging_path,
+            })
+        except (ImmutableArtifactError, OSError) as exc:
+            return select({
+                "status": "capture_failed",
+                "typed_reason": "trace_input_identity_invalid",
+                "detail": f"{type(exc).__name__}: {exc}",
+                "execution": None,
+                "generation": None,
+                "staging_path": stage.staging_path,
+            })
+
+        baseline_result = execution["baseline_result"]
+        if (
+            isinstance(baseline_result, dict)
+            and baseline_result.get("result_kind") == "typed_unavailable"
+        ):
+            return select({
+                "status": "typed_unavailable",
+                "typed_reason": str(
+                    baseline_result.get("typed_reason")
+                    or "typed_unavailable_without_reason"
+                ),
+                "detail": "baseline workload refused the trace launch",
+                "execution": execution,
+                "generation": None,
+                "staging_path": stage.staging_path,
+            })
+
+        trace_process = execution["trace_proc"]
+        if trace_process is None:
+            return select({
+                "status": "capture_failed",
+                "typed_reason": "trace_execution_missing",
+                "detail": "retained NVBit run did not execute",
+                "execution": execution,
+                "generation": None,
+                "staging_path": stage.staging_path,
+            })
+        if trace_process.returncode != 0:
+            return select({
+                "status": "capture_failed",
+                "typed_reason": "trace_process_failed",
+                "detail": (
+                    f"{retained_executable.path} under tracer "
+                    f"rc={trace_process.returncode}: "
+                    f"{trace_process.stderr.strip()}"
+                ),
+                "execution": execution,
+                "generation": None,
+                "staging_path": stage.staging_path,
+            })
+
+        generation: ImmutableDirectoryGeneration | None = None
+
+        def raw_commit_failure(
+            *,
+            typed_reason: str,
+            exc: BaseException,
+        ) -> dict[str, Any]:
+            nonlocal generation
+            recovery_detail: str | None = None
+            if generation is None and stage.committed:
+                try:
+                    generation = inspect_immutable_directory_generation(
+                        stage.final_path,
+                        require_nonempty=True,
+                        **_trace_generation_commit_limits(),
+                    )
+                except (ImmutableArtifactError, OSError) as recovery_exc:
+                    recovery_detail = (
+                        f"; committed generation recovery failed: "
+                        f"{type(recovery_exc).__name__}: {recovery_exc}"
+                    )
+            return {
+                "status": "raw_commit_failed",
+                "typed_reason": typed_reason,
+                "detail": (
+                    f"{type(exc).__name__}: {exc}{recovery_detail or ''}"
+                ),
+                "execution": execution,
+                "generation": generation,
+                "staging_path": (
+                    None if stage.committed else stage.staging_path
+                ),
+                "unresolved_committed_path": (
+                    stage.final_path
+                    if stage.committed and generation is None
+                    else None
+                ),
+            }
+
+        try:
+            retained_executable.verify_unchanged()
+            retained_tracer.verify_unchanged()
+            generation = stage.commit(
+                require_nonempty=True,
+                **_trace_generation_commit_limits(),
+            )
+            retained_executable.verify_unchanged()
+            retained_tracer.verify_unchanged()
+        except ImmutableArtifactLimitError as exc:
+            return select(raw_commit_failure(
+                typed_reason="trace_inventory_limit_exceeded",
+                exc=exc,
+            ))
+        except ImmutableArtifactResourceError as exc:
+            return select(raw_commit_failure(
+                typed_reason="trace_snapshot_resource_unavailable",
+                exc=exc,
+            ))
+        except (ImmutableArtifactError, OSError) as exc:
+            return select(raw_commit_failure(
+                typed_reason="trace_filesystem_invalid",
+                exc=exc,
+            ))
+
+        return select({
+            "status": "raw_committed",
+            "typed_reason": None,
+            "detail": None,
+            "execution": execution,
+            "generation": generation,
+            "staging_path": None,
+        })
+
+
+def _phase_evidence_identities(
+    *,
+    artifact_dir: Path,
+    shape_point_name: str,
+    expected_repeat_count: int,
+    expected_launch_indices: tuple[int, ...],
+    phase_requested: bool,
+    generation: ImmutableDirectoryGeneration,
+) -> list[dict[str, Any]]:
+    """Validate and identify one exact committed phase-ledger generation."""
+    if phase_requested is not True:
+        raise ImmutableArtifactError(
+            "optional phase evidence cannot acquire credit when requested is "
+            "not exact true"
+        )
+    import phase_inject_orchestrator as _pinj  # type: ignore[import-not-found]
+
+    try:
+        _pinj._validated_repeat_and_launch_domain(
+            expected_repeat_count,
+            expected_launch_indices,
+        )
+    except (
+        _pinj.PhaseInjectAbRepeatCountInvalid,
+        _pinj.PhaseInjectLaunchAuthorityInvalid,
+        _pinj.PhaseInjectResourceLimitExceeded,
+    ) as exc:
+        raise ImmutableArtifactError(
+            f"optional phase expected repeat/launch authority is invalid: {exc}"
+        ) from exc
+    observed = inspect_immutable_directory_generation(
+        generation.path,
+        require_nonempty=True,
+        max_files=generation.file_count,
+        max_directories=generation.directory_count,
+        max_total_file_bytes=generation.total_file_bytes,
+        max_total_relative_path_bytes=4 * 1024 * 1024,
+    )
+    if observed != generation:
+        raise ImmutableArtifactError(
+            "optional phase ledger generation changed before activation"
+        )
+    artifact_root = Path(os.path.abspath(os.fspath(artifact_dir)))
+    try:
+        generation_relative = generation.path.relative_to(artifact_root)
+    except ValueError as exc:
+        raise ImmutableArtifactError(
+            "optional phase ledger generation escapes artifact directory"
+        ) from exc
+
+    expected = {
+        identity.relative_path: identity
+        for identity in generation.files
+    }
+    identities: list[dict[str, Any]] = []
+    observed_launches: dict[int, set[int]] = {}
+    observed_keys: set[tuple[int, int]] = set()
+    with PinnedDirectoryReader(generation.path) as reader:
+        snapshot = reader.snapshot_tree(
+            require_readonly_files=True,
+            require_readonly_directories=True,
+            max_files=generation.file_count,
+            max_directories=generation.directory_count,
+            max_total_file_bytes=generation.total_file_bytes,
+            max_total_relative_path_bytes=4 * 1024 * 1024,
+        )
+        files = dict(snapshot.files)
+        directories = dict(snapshot.directories)
+        if set(directories) != {"."} or set(files) != set(expected):
+            raise ImmutableArtifactError(
+                "optional phase ledger generation inventory mismatch"
+            )
+        for filename, metadata in sorted(files.items()):
+            match = re.fullmatch(
+                r"phase_cycle_ledger_([0-9]+)_([0-9]+)\.json",
+                filename,
+            )
+            if match is None:
+                raise ImmutableArtifactError(
+                    f"unexpected optional phase evidence file: {filename}"
+                )
+            repeat_text, launch_text = match.groups()
+            try:
+                repeat_index = int(repeat_text)
+                launch_index = int(launch_text)
+            except ValueError as exc:
+                raise ImmutableArtifactError(
+                    "optional phase evidence filename index is invalid: "
+                    f"{filename}"
+                ) from exc
+            if (
+                str(repeat_index) != repeat_text
+                or str(launch_index) != launch_text
+            ):
+                raise ImmutableArtifactError(
+                    "optional phase evidence filename indices are not canonical: "
+                    f"{filename}"
+                )
+            identity_key = (repeat_index, launch_index)
+            if identity_key in observed_keys:
+                raise ImmutableArtifactError(
+                    "duplicate normalized optional phase evidence identity: "
+                    f"repeat={repeat_index} launch={launch_index}"
+                )
+            observed_keys.add(identity_key)
+            if not stat.S_ISREG(metadata[2]) or metadata[3] != 1:
+                raise ImmutableArtifactError(
+                    "optional phase evidence is not a single-link regular file: "
+                    f"{filename}"
+                )
+            payload = reader.read_snapshot(
+                filename, expected_metadata=metadata
+            ).payload
+            identity = expected[filename]
+            if (
+                hashlib.sha256(payload).hexdigest() != identity.sha256
+                or len(payload) != identity.size_bytes
+            ):
+                raise ImmutableArtifactError(
+                    f"optional phase evidence seal mismatch: {filename}"
+                )
+            try:
+                record = json.loads(payload)
+            except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                raise ImmutableArtifactError(
+                    f"optional phase evidence is invalid JSON: {filename}: {exc}"
+                ) from exc
+            if (
+                type(record) is not dict
+                or record.get("shape_point") != shape_point_name
+                or type(record.get("repeat_index")) is not int
+                or record.get("repeat_index") != repeat_index
+                or type(record.get("launch_index")) is not int
+                or record.get("launch_index") != launch_index
+            ):
+                raise ImmutableArtifactError(
+                    "optional phase evidence identity disagrees with its trace "
+                    f"or filename: {filename}"
+                )
+            observed_launches.setdefault(repeat_index, set()).add(launch_index)
+            identities.append({
+                "path": (generation_relative / filename).as_posix(),
+                "sha256": identity.sha256,
+                "size_bytes": identity.size_bytes,
+            })
+        reader.verify_path()
+    expected_repeats = set(range(expected_repeat_count))
+    expected_launches = set(expected_launch_indices)
+    if (
+        set(observed_launches) != expected_repeats
+        or any(
+            launches != expected_launches
+            for launches in observed_launches.values()
+        )
+    ):
+        observed_coverage = {
+            repeat_index: sorted(launches)
+            for repeat_index, launches in sorted(observed_launches.items())
+        }
+        raise ImmutableArtifactError(
+            "optional phase evidence coverage does not equal the admitted "
+            "repeat-by-launch authority: "
+            f"expected_repeats={sorted(expected_repeats)} "
+            f"expected_launches={sorted(expected_launches)} "
+            f"observed={observed_coverage}"
+        )
+    return identities
 
 
 def handle_trace(row: dict[str, Any], props: DeviceProps, out_dir: Path,
                  shape_point_name: str | None = None,
                  phase_inject_ab: bool = False,
                  ab_repeat_count: int = 3) -> int:
+    if type(phase_inject_ab) is not bool:
+        print(
+            "phase_inject_request_invalid: phase_inject_ab must be an exact "
+            f"boolean; got {phase_inject_ab!r}",
+            file=sys.stderr,
+        )
+        return EXIT_USAGE
+    if phase_inject_ab:
+        import phase_inject_orchestrator as _pinj  # type: ignore[import-not-found]
+
+        if (
+            type(ab_repeat_count) is not int
+            or ab_repeat_count <= 0
+            or ab_repeat_count > _pinj.PHASE_AB_MAX_REPEAT_COUNT
+        ):
+            print(
+                "phase_inject_ab_repeat_count_invalid: "
+                "ab_repeat_count must be an exact strictly positive integer "
+                f"no greater than {_pinj.PHASE_AB_MAX_REPEAT_COUNT}; "
+                f"got {ab_repeat_count!r}",
+                file=sys.stderr,
+            )
+            return EXIT_USAGE
+    source_stack = ExitStack()
+    try:
+        result = _handle_trace_with_sources(
+            row,
+            props,
+            out_dir,
+            shape_point_name=shape_point_name,
+            phase_inject_ab=phase_inject_ab,
+            ab_repeat_count=ab_repeat_count,
+            source_stack=source_stack,
+        )
+    except BaseException as primary:
+        try:
+            source_stack.__exit__(
+                type(primary), primary, primary.__traceback__
+            )
+        except BaseException as cleanup:
+            try:
+                primary.add_note(
+                    "trace source cleanup also failed: "
+                    f"{type(cleanup).__name__}: {cleanup}"
+                )
+            except (AttributeError, TypeError):
+                pass
+        raise
+    if result != EXIT_OK:
+        # The typed failure has already won.  Retained capabilities still close
+        # and attempt revalidation, but a cleanup-side inotify/resource error must
+        # not replace the selected EXIT_* boundary result.
+        failure = RuntimeError("trace source transaction already failed")
+        try:
+            source_stack.__exit__(type(failure), failure, None)
+        except BaseException as cleanup_exc:
+            print(
+                "trace_source_cleanup_failed_after_typed_result: "
+                f"{type(cleanup_exc).__name__}: {cleanup_exc}",
+                file=sys.stderr,
+            )
+        return result
+    source_stack.close()
+    return result
+
+
+def _handle_trace_with_sources(
+    row: dict[str, Any],
+    props: DeviceProps,
+    out_dir: Path,
+    *,
+    shape_point_name: str | None,
+    phase_inject_ab: bool,
+    ab_repeat_count: int,
+    source_stack: ExitStack,
+) -> int:
     slug = row["slug"]
     shape_path = SUITE_ROOT / "shapes" / f"{slug}.toml"
     if not shape_path.exists():
         print(f"run_suite: trace for {slug} requires shapes/{slug}.toml (missing)", file=sys.stderr)
         return EXIT_UNSUPPORTED
+    with open(shape_path, "rb") as f:
+        shape = tomllib.load(f)
+    trace_shapes = shape.get("trace_shapes", [])
+    if not trace_shapes:
+        print(f"trace_shapes_missing: shapes/{slug}.toml has no trace_shapes", file=sys.stderr)
+        return EXIT_UNSUPPORTED
+    if shape_point_name is not None:
+        named_matches = [s for s in trace_shapes if s.get("name") == shape_point_name]
+        if not named_matches:
+            print(
+                f"shape_point_not_found_in_trace_shapes: {shape_point_name!r} not in "
+                f"{[s.get('name') for s in trace_shapes]} (shapes/{slug}.toml)",
+                file=sys.stderr,
+            )
+            return EXIT_USAGE
+        shape_point = named_matches[0]
+    else:
+        shape_point = trace_shapes[0]
+
+    artifact_dir = _artifact_dir_for_row(row, props)
+    artifact_path = artifact_dir / f"trace_{shape_point['name']}.json"
+    # Task238 activation invariant: once a concrete per-shape rerun is selected,
+    # retire its previous activation leaf before any preflight sidecar, capture
+    # directory, subprocess, or feature output can mutate.  The no-follow
+    # primitive preserves the exact old inode under a hidden history name.  A
+    # crash after this point therefore leaves either no canonical activation or
+    # a later, fully committed replacement; stale success can never survive.
+    try:
+        ensure_directory(artifact_dir)
+        # Establish a persistent authority surface before retiring any legacy
+        # activation. If this attempt exits before a replacement leaf is ready,
+        # replay must refuse flat-summary fallback rather than reactivate stale V1.
+        ensure_directory(artifact_dir / TRACE_CAPTURE_ATTEMPT_NAMESPACE)
+        retire_regular_file(artifact_path)
+    except ImmutableArtifactResourceError as exc:
+        print(
+            "trace_activation_retirement_resource_unavailable: "
+            f"{type(exc).__name__}: {exc}",
+            file=sys.stderr,
+        )
+        return EXIT_BUILD_FAILED
+    except (ImmutableArtifactError, OSError) as exc:
+        print(
+            "trace_activation_retirement_invalid: "
+            f"{type(exc).__name__}: {exc}",
+            file=sys.stderr,
+        )
+        return EXIT_BUILD_FAILED
+
     # Delegate to the trace_size_estimator for per-point validation. This
     # recomputes the static predictor and flags trace_prediction_stale when
     # the committed predicted_bytes has drifted, AND catches trace_shape_overbudget
@@ -3316,8 +5004,6 @@ def handle_trace(row: dict[str, Any], props: DeviceProps, out_dir: Path,
     est = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(est)
     estimator_errors = est.validate_slug(slug)
-    with open(shape_path, "rb") as f:
-        shape = tomllib.load(f)
     budget_bytes = row["trace_budget_mib"] * 1024 * 1024
     stale = [e for e in estimator_errors if "trace_prediction_stale" in e]
     overbudget = [e for e in estimator_errors if "trace_shape_overbudget" in e]
@@ -3326,8 +5012,6 @@ def handle_trace(row: dict[str, Any], props: DeviceProps, out_dir: Path,
             print(e, file=sys.stderr)
         return EXIT_UNSUPPORTED
     if overbudget:
-        import hashlib
-        out_dir.mkdir(parents=True, exist_ok=True)
         sidecar = out_dir / "trace_volume_exceeded.json"
         # Pick the worst offender for the sidecar
         worst_point = None
@@ -3337,20 +5021,14 @@ def handle_trace(row: dict[str, Any], props: DeviceProps, out_dir: Path,
             if pred > worst_bytes:
                 worst_bytes = pred
                 worst_point = point.get("name", "<?>")
-        tb_hash = hashlib.sha256((SUITE_ROOT / "trace_budgets.toml").read_bytes()).hexdigest()
-        sidecar.write_text(json.dumps({
-            "schema_version": 1,
-            "slug": slug,
-            "shape_point": worst_point or "<?>",
-            "sampling_policy": "off",
-            "max_trace_bytes": budget_bytes,
-            "actual_trace_bytes": worst_bytes,
-            "max_wall_time_s": 3600,
-            "actual_wall_time_s": 0.0,
-            "exceeded_trace_bytes": True,
-            "exceeded_wall_time": False,
-            "trace_budgets_sha256": tb_hash,
-        }, indent=2))
+        _write_trace_volume_exceeded(
+            sidecar=sidecar,
+            slug=slug,
+            shape_point=worst_point or "<?>",
+            budget_bytes=budget_bytes,
+            actual_trace_bytes=worst_bytes,
+            actual_wall_time_s=0.0,
+        )
         for e in overbudget:
             print(e, file=sys.stderr)
         print(f"trace_shape_overbudget: sidecar at {sidecar}", file=sys.stderr)
@@ -3372,77 +5050,112 @@ def handle_trace(row: dict[str, Any], props: DeviceProps, out_dir: Path,
     if executable is None:
         print(f"executable_missing: {slug} has no {slug}_run executable (build the kernel first)", file=sys.stderr)
         return EXIT_UNSUPPORTED
-    trace_shapes = shape.get("trace_shapes", [])
-    if not trace_shapes:
-        print(f"trace_shapes_missing: shapes/{slug}.toml has no trace_shapes", file=sys.stderr)
-        return EXIT_UNSUPPORTED
-    if shape_point_name is not None:
-        named_matches = [s for s in trace_shapes if s.get("name") == shape_point_name]
-        if not named_matches:
+
+    try:
+        retained_executable = source_stack.enter_context(
+            open_retained_executable(executable)
+        )
+        retained_tracer = source_stack.enter_context(
+            open_retained_regular(tracer_so)
+        )
+    except ImmutableArtifactResourceError as exc:
+        print(
+            "trace_input_identity_resource_unavailable: "
+            f"{type(exc).__name__}: {exc}",
+            file=sys.stderr,
+        )
+        return EXIT_BUILD_FAILED
+    except (ImmutableArtifactError, OSError) as exc:
+        print(
+            "trace_input_identity_invalid: "
+            f"{type(exc).__name__}: {exc}",
+            file=sys.stderr,
+        )
+        return EXIT_BUILD_FAILED
+
+    attempt_id = _new_trace_attempt_id()
+    args = _kernel_args_from_shape(shape_point, row)
+    kernel_signature_sha256 = _kernel_signature_sha256(
+        retained_executable.path, slug
+    )
+    capture_result = _capture_raw_trace_generation(
+        artifact_dir=artifact_dir,
+        shape_point=shape_point["name"],
+        attempt_id=attempt_id,
+        retained_executable=retained_executable,
+        retained_tracer=retained_tracer,
+        args=args,
+    )
+    capture_status = capture_result["status"]
+    execution = capture_result["execution"]
+    raw_generation = capture_result["generation"]
+    raw_staging_path = capture_result["staging_path"]
+    raw_unresolved_committed_path = capture_result.get(
+        "unresolved_committed_path"
+    )
+
+    if capture_status not in {"raw_committed", "typed_unavailable"}:
+        failed_raw_generation_record = None
+        if isinstance(raw_generation, ImmutableDirectoryGeneration):
+            failed_raw_generation_record = _directory_generation_record(
+                generation=raw_generation,
+                artifact_dir=artifact_dir,
+                attempt_id=attempt_id,
+            )
+        try:
+            _publish_trace_attempt_event(
+                artifact_dir=artifact_dir,
+                slug=slug,
+                shape_point=shape_point["name"],
+                attempt_id=attempt_id,
+                event_name=(
+                    "stage_creation_failed"
+                    if capture_status == "stage_creation_failed"
+                    else (
+                        "raw_commit_failed"
+                        if capture_status in {
+                            "raw_commit_failed",
+                            "raw_stage_closure_failed",
+                        }
+                        else "capture_failed"
+                    )
+                ),
+                status=capture_status,
+                typed_reason=capture_result["typed_reason"],
+                raw_trace_generation=failed_raw_generation_record,
+                raw_staging_path=(
+                    None
+                    if failed_raw_generation_record is not None
+                    else raw_staging_path
+                ),
+                raw_unresolved_committed_path=(
+                    None
+                    if failed_raw_generation_record is not None
+                    else raw_unresolved_committed_path
+                ),
+            )
+        except (ImmutableArtifactError, OSError) as event_exc:
             print(
-                f"shape_point_not_found_in_trace_shapes: {shape_point_name!r} not in "
-                f"{[s.get('name') for s in trace_shapes]} (shapes/{slug}.toml)",
+                "trace_attempt_event_publication_failed: "
+                f"{type(event_exc).__name__}: {event_exc}",
                 file=sys.stderr,
             )
-            return EXIT_USAGE
-        shape_point = named_matches[0]
-    else:
-        shape_point = trace_shapes[0]
+        print(
+            f"{capture_result['typed_reason']}: {capture_result['detail']}",
+            file=sys.stderr,
+        )
+        return EXIT_BUILD_FAILED
 
-    artifact_dir = _artifact_dir_for_row(row, props)
-    traces_folder = artifact_dir / f"trace_{shape_point['name']}"
-    # R51: pre-clean any prior per-shape trace folder so a fresh capture
-    # cannot inherit a stale `dynamic_trace.pb`, stale `stats.csv`, or
-    # stale per-kernel `.trace` files from a previous run on the same
-    # shape point. Without the cleanup the post-capture
-    # `trace_missing` check (which only re-checks file existence) and
-    # `require_trace_admission` would otherwise inspect a mixed tree from two
-    # captures and admit a tree whose `dynamic_trace.pb` was produced
-    # by a different binary, different injected library, or different
-    # kernel arguments — exactly the false-positive admission shape
-    # that R50's bypass-orchestrator capture hid.
-    if traces_folder.exists():
-        import shutil as _shutil
-        _shutil.rmtree(traces_folder)
-    traces_folder.mkdir(parents=True, exist_ok=True)
-    args = _kernel_args_from_shape(shape_point, row)
+    assert execution is not None
 
-    import subprocess as _sp
-    import time as _time
-    # C-AC-H baseline timing (Loop 2 R11). Measure a non-instrumented
-    # baseline run of the same executable + shape args immediately
-    # before the NVBit run. The baseline sets the denominator for the
-    # slowdown-ratio admissibility check; without it the verifier
-    # cannot independently decide that a run is within budget. The
-    # baseline run uses a fresh env that scrubs CUDA_INJECTION64_PATH
-    # so the host executable runs without NVBit injection. A baseline
-    # failure does not block the NVBit run; it leaves
-    # `baseline_wall_time_s = None` in the run summary, and the
-    # verifier treats absent baseline as the typed-unavailable arm
-    # (no enforcement on that run).
-    baseline_env = {
-        k: v for k, v in os.environ.items()
-        if k != "CUDA_INJECTION64_PATH"
-    }
-    baseline_env["TRACES_FOLDER"] = str(traces_folder)
-    baseline_t0 = _time.perf_counter()
-    baseline_proc = _sp.run(
-        [str(executable), *args],
-        capture_output=True, text=True, env=baseline_env,
-    )
-    baseline_t1 = _time.perf_counter()
-    # C-AC-H R13: prefer the workload's self-reported `wall_time_ms`
-    # (matching the existing `handle_timing` stdout-preferred pattern)
-    # over the host `perf_counter` measurement. The self-reported
-    # device-side timing excludes process-launch overhead and host
-    # scheduling jitter, which is what the admissibility-budget
-    # enforcement should measure. When stdout lacks the field, fall
-    # back to the host timer.
+    baseline_proc = execution["baseline_proc"]
+    baseline_result = execution["baseline_result"]
     if baseline_proc.returncode == 0:
         reported = _stdout_wall_time_s(baseline_proc.stdout)
         baseline_wall_time_s: float | None = (
-            reported if reported is not None
-            else baseline_t1 - baseline_t0
+            reported
+            if reported is not None
+            else execution["baseline_elapsed_s"]
         )
     else:
         baseline_wall_time_s = None
@@ -3457,52 +5170,183 @@ def handle_trace(row: dict[str, Any], props: DeviceProps, out_dir: Path,
     # `trace_missing`. We persist a typed-unavailable trace
     # artifact + manifest so the unsupported-device run is
     # observable as a typed outcome rather than dropped.
-    if baseline_proc.returncode == 0:
+    if capture_status == "typed_unavailable":
+        assert isinstance(baseline_result, dict)
+        typed_reason = capture_result["typed_reason"]
+        tombstone_committed = False
+        tombstone_payload: bytes | None = None
+
+        def retire_failed_tombstone() -> None:
+            nonlocal tombstone_committed
+            if not tombstone_committed:
+                return
+            if tombstone_payload is None:
+                raise ImmutableArtifactError(
+                    "committed trace tombstone has no retained locator payload"
+                )
+            try:
+                retire_regular_file(
+                    artifact_path,
+                    expected_payload=tombstone_payload,
+                )
+            except (ImmutableArtifactError, OSError) as retirement_error:
+                print(
+                    "trace_failed_tombstone_retirement_failed: "
+                    f"{type(retirement_error).__name__}: {retirement_error}",
+                    file=sys.stderr,
+                )
+            else:
+                tombstone_committed = False
+
+        manifest = build_measurement_manifest(
+            slug=slug, mode="trace",
+            warm_up_iters=0, repeat_iters=1, cv_pct=0.0,
+            props=props, binary_path=retained_executable.path,
+            compiler_flags=_gencode_flags_for_arch_gate(row.get("arch_gate", [])),
+            shape_point=shape_point["name"],
+            binary_sha256=execution["binary_sha256"],
+        )
         try:
-            baseline_result = json.loads(baseline_proc.stdout)
-        except json.JSONDecodeError:
-            baseline_result = None
-        if (isinstance(baseline_result, dict)
-                and baseline_result.get("result_kind") == "typed_unavailable"):
-            typed_reason = baseline_result.get("typed_reason")
-            trace_artifact = artifact_dir / f"trace_{shape_point['name']}.json"
-            with open(trace_artifact, "w") as f:
-                json.dump(baseline_result, f, indent=2)
-            manifest = build_measurement_manifest(
-                slug=slug, mode="trace",
-                warm_up_iters=0, repeat_iters=1, cv_pct=0.0,
-                props=props, binary_path=executable,
-                compiler_flags=_gencode_flags_for_arch_gate(row.get("arch_gate", [])),
+            manifest_path = _emit_manifest(
+                manifest,
+                artifact_dir,
+                filename=f"measurement_manifest_{shape_point['name']}.json",
+                preserve_previous=True,
+            )
+            manifest_identity = _retained_artifact_identity(
+                path=manifest_path, artifact_dir=artifact_dir
+            )
+            attempt_event = _publish_trace_attempt_event(
+                artifact_dir=artifact_dir,
+                slug=slug,
                 shape_point=shape_point["name"],
+                attempt_id=attempt_id,
+                event_name="typed_unavailable",
+                status="typed_unavailable",
+                typed_reason=str(typed_reason),
+                raw_staging_path=raw_staging_path,
+                measurement_manifest=manifest_identity,
             )
-            _emit_manifest(manifest, artifact_dir)
+            typed_trace_record = dict(baseline_result)
+            typed_trace_record.update({
+                "slug": slug,
+                "shape_set": "trace_shapes",
+                "shape_point": shape_point["name"],
+                "activation_state": "non_active",
+                "typed_tombstone": True,
+                "trace_capture_attempt_id": attempt_id,
+                "trace_capture_attempt_event": attempt_event,
+                "raw_trace_staging_path": (
+                    Path(os.path.abspath(os.fspath(raw_staging_path)))
+                    .relative_to(
+                        Path(os.path.abspath(os.fspath(artifact_dir)))
+                    )
+                    .as_posix()
+                    if raw_staging_path is not None else None
+                ),
+                "binary_sha256": execution["binary_sha256"],
+                "nvbit_tracer_build_hash": execution["tracer_build_sha256"],
+                "kernel_signature_sha256": kernel_signature_sha256,
+                "source_commit": _resolve_source_commit(),
+                "measurement_manifest": manifest_identity,
+                "nvbit_trace_summary_emit_status": "typed_unavailable",
+                "nvbit_trace_summary_paths": [],
+                "nvbit_trace_summary_failure_reason": str(typed_reason),
+            })
+            retained_executable.verify_unchanged()
+            retained_tracer.verify_unchanged()
+            tombstone_payload = _trace_artifact_record_payload(
+                typed_trace_record
+            )
+            _publish_trace_artifact_record(artifact_path, typed_trace_record)
+            tombstone_committed = True
+            retained_executable.verify_unchanged()
+            retained_tracer.verify_unchanged()
+            source_stack.pop_all().close()
+        except ImmutableArtifactResourceError as exc:
+            retire_failed_tombstone()
             print(
-                f"run_suite: trace for {slug}: typed_unavailable "
-                f"({typed_reason}); artifact at {trace_artifact}"
+                "trace_tombstone_resource_unavailable: "
+                f"{type(exc).__name__}: {exc}",
+                file=sys.stderr,
             )
-            return EXIT_OK
-    try:
-        env = tracer_runtime_env(tracer_so)
-    except TracerRuntimeError as exc:
-        print(f"tracer_so_deps_unresolved: {exc}", file=sys.stderr)
+            return EXIT_BUILD_FAILED
+        except (ImmutableArtifactError, OSError) as exc:
+            retire_failed_tombstone()
+            print(
+                "trace_tombstone_publication_failed: "
+                f"{type(exc).__name__}: {exc}",
+                file=sys.stderr,
+            )
+            return EXIT_BUILD_FAILED
+        print(
+            f"run_suite: trace for {slug}: typed_unavailable "
+            f"({typed_reason}); non-active tombstone at {artifact_path}"
+        )
+        return EXIT_OK
+
+    assert isinstance(raw_generation, ImmutableDirectoryGeneration)
+    raw_generation_record = _directory_generation_record(
+        generation=raw_generation,
+        artifact_dir=artifact_dir,
+        attempt_id=attempt_id,
+    )
+
+    def publish_committed_failure_event(
+        *,
+        event_name: str,
+        status: str,
+        typed_reason: str,
+        derived_generation: dict[str, Any] | None = None,
+        derived_staging_path: Path | None = None,
+        phase_ledger_generation: dict[str, Any] | None = None,
+        phase_ledger_staging_path: Path | None = None,
+        summary_generation: dict[str, Any] | None = None,
+        measurement_manifest: dict[str, Any] | None = None,
+    ) -> None:
+        if typed_reason == "trace_snapshot_resource_unavailable":
+            # The publication primitive depends on the same bounded no-follow
+            # verifier resource that just failed.  Do not loop or misreport a
+            # second event as durable; the committed raw tree / hidden derived
+            # stage and the typed stderr result remain preserved.
+            print(
+                "trace_attempt_event_deferred: "
+                "trace_snapshot_resource_unavailable",
+                file=sys.stderr,
+            )
+            return
+        try:
+            _publish_trace_attempt_event(
+                artifact_dir=artifact_dir,
+                slug=slug,
+                shape_point=shape_point["name"],
+                attempt_id=attempt_id,
+                event_name=event_name,
+                status=status,
+                typed_reason=typed_reason,
+                raw_trace_generation=raw_generation_record,
+                derived_generation=derived_generation,
+                derived_staging_path=derived_staging_path,
+                phase_ledger_generation=phase_ledger_generation,
+                phase_ledger_staging_path=phase_ledger_staging_path,
+                summary_generation=summary_generation,
+                measurement_manifest=measurement_manifest,
+            )
+        except (ImmutableArtifactError, OSError) as event_exc:
+            print(
+                "trace_attempt_event_publication_failed: "
+                f"{type(event_exc).__name__}: {event_exc}",
+                file=sys.stderr,
+            )
+
+    traces_folder = raw_generation.path
+    proc = execution["trace_proc"]
+    if proc is None:
+        print(
+            "trace_execution_missing: retained NVBit run did not execute",
+            file=sys.stderr,
+        )
         return EXIT_BUILD_FAILED
-    env["CUDA_INJECTION64_PATH"] = str(tracer_so)
-    # R51: USER_DEFINED_FOLDERS=1 is the gate that unlocks the tracer's
-    # TRACES_FOLDER lookup; without it the tracer ignores TRACES_FOLDER
-    # and writes EVERY artifact (`dynamic_trace.pb`, `stats.csv`, the
-    # per-kernel `.trace` files, `extra_info/`, `threadblocks/`) to
-    # `<cwd>/traces/`. The post-capture admission below — and every
-    # downstream feature-sidecar producer (sector_stream, hrd_profile,
-    # divergence_proxies, sharing_locality, order_projections,
-    # perturbation_run_ledger, convergence_confidence) — looks for
-    # those artifacts under `traces_folder = artifact_dir /
-    # f"trace_{shape}"`, so missing this gate is what produced R50's
-    # raw-only trees with no per-run sidecars.
-    env["USER_DEFINED_FOLDERS"] = "1"
-    env["TRACES_FOLDER"] = str(traces_folder)
-    t0 = _time.perf_counter()
-    proc = _sp.run([str(executable), *args], capture_output=True, text=True, env=env)
-    t1 = _time.perf_counter()
     if proc.returncode != 0:
         print(f"build_failed: {executable} under tracer rc={proc.returncode}: {proc.stderr.strip()}", file=sys.stderr)
         return EXIT_BUILD_FAILED
@@ -3515,60 +5359,135 @@ def handle_trace(row: dict[str, Any], props: DeviceProps, out_dir: Path,
     # selected value.
     nvbit_reported = _stdout_wall_time_s(proc.stdout)
     actual_wall_time_s = (
-        nvbit_reported if nvbit_reported is not None
-        else t1 - t0
+        nvbit_reported
+        if nvbit_reported is not None
+        else execution["trace_elapsed_s"]
     )
     trace_pb = traces_folder / "dynamic_trace.pb"
-    if not trace_pb.exists():
-        # NVBit dispatch appeared to succeed but produced no trace artifact.
-        # Treat this as a hard failure rather than silently recording success.
-        print(f"trace_missing: tracer ran but {trace_pb} was not written (CUDA_INJECTION64_PATH=LD path wrong, or binary does not launch any CUDA kernels)", file=sys.stderr)
-        return EXIT_BUILD_FAILED
-
-    # Post-capture artifact-integrity enforcement (R24 / R23-review
-    # blocking fix). The pre-admission check uses the committed
-    # `predicted_bytes`, but the actual trace emitted by NVBit can still
-    # exceed the row budget for kernels where the static predictor under-
-    # estimates (dynamic control flow, cache-dependent access patterns, etc.).
-    # AC7 wants the orchestrator to refuse such traces — not record them —
-    # so write the sidecar, delete the oversize .pb, and return
-    # EXIT_SAMPLING_REQUIRED. This closes the `BudgetViolationUntracked`
-    # class Codex reproduced on the R23 dispatch.
-    trace_bytes = trace_pb.stat().st_size
-    budget_bytes = row["trace_budget_mib"] * 1024 * 1024
-    if trace_bytes > budget_bytes:
-        import hashlib
-        sidecar = artifact_dir / "trace_volume_exceeded.json"
-        tb_hash = hashlib.sha256((SUITE_ROOT / "trace_budgets.toml").read_bytes()).hexdigest()
-        sidecar.write_text(json.dumps({
-            "schema_version": 1,
-            "slug": slug,
-            "shape_point": shape_point["name"],
-            "sampling_policy": "off",
-            "max_trace_bytes": budget_bytes,
-            "actual_trace_bytes": trace_bytes,
-            "max_wall_time_s": 3600,
-            "actual_wall_time_s": actual_wall_time_s,
-            "exceeded_trace_bytes": True,
-            "exceeded_wall_time": False,
-            "trace_budgets_sha256": tb_hash,
-        }, indent=2))
-        # Remove the oversize trace so the `results/` tree never contains an
-        # untracked BudgetViolation artifact. Use missing_ok=True so a racy
-        # concurrent removal does not re-fail the handler.
-        trace_pb.unlink(missing_ok=True)
-        print(f"trace_shape_overbudget: post-capture trace_bytes={trace_bytes} > budget_bytes={budget_bytes}", file=sys.stderr)
-        print(f"trace_shape_overbudget: sidecar at {sidecar}", file=sys.stderr)
-        return EXIT_SAMPLING_REQUIRED
 
     try:
         trace_admission = require_trace_admission(traces_folder)
     except TraceAdmissionError as exc:
+        publish_committed_failure_event(
+            event_name="admission_failed",
+            status="admission_failed",
+            typed_reason=exc.typed_reason,
+        )
         print(
             f"trace_capture_not_admitted: {exc.typed_reason}: {exc.detail}",
             file=sys.stderr,
         )
         return EXIT_BUILD_FAILED
+    except ImmutableArtifactResourceError as exc:
+        publish_committed_failure_event(
+            event_name="admission_failed",
+            status="admission_failed",
+            typed_reason="trace_snapshot_resource_unavailable",
+        )
+        print(
+            "trace_capture_not_admitted: trace_snapshot_resource_unavailable: "
+            f"{type(exc).__name__}: {exc}",
+            file=sys.stderr,
+        )
+        return EXIT_BUILD_FAILED
+    except (ImmutableArtifactError, OSError) as exc:
+        publish_committed_failure_event(
+            event_name="admission_failed",
+            status="admission_failed",
+            typed_reason="trace_filesystem_invalid",
+        )
+        print(
+            "trace_capture_not_admitted: trace_filesystem_invalid: "
+            f"{type(exc).__name__}: {exc}",
+            file=sys.stderr,
+        )
+        return EXIT_BUILD_FAILED
+    raw_generation_record.update({
+        "trace_admission_sha256": trace_admission.trace_admission_sha256,
+        "trace_filesystem_generation_sha256": (
+            trace_admission.trace_filesystem_generation_sha256
+        ),
+        "dynamic_trace_sha256": trace_admission.dynamic_trace_sha256,
+    })
+    trace_bytes = trace_admission.dynamic_trace_size_bytes
+    sidecar = artifact_dir / "trace_volume_exceeded.json"
+    if _admitted_trace_exceeds_budget(
+        trace_admission=trace_admission,
+        budget_bytes=budget_bytes,
+        sidecar=sidecar,
+        slug=slug,
+        shape_point=shape_point["name"],
+        actual_wall_time_s=actual_wall_time_s,
+    ):
+        print(
+            "trace_shape_overbudget: admitted snapshot "
+            f"trace_bytes={trace_bytes} > budget_bytes={budget_bytes}",
+            file=sys.stderr,
+        )
+        print(f"trace_shape_overbudget: sidecar at {sidecar}", file=sys.stderr)
+        publish_committed_failure_event(
+            event_name="budget_rejected",
+            status="budget_rejected",
+            typed_reason="trace_shape_overbudget",
+        )
+        return EXIT_SAMPLING_REQUIRED
+
+    derived_generation_root = _trace_generation_root(
+        artifact_dir=artifact_dir,
+        namespace=TRACE_DERIVED_GENERATION_NAMESPACE,
+        shape_point=shape_point["name"],
+    )
+    try:
+        derived_stage = create_exclusive_directory_stage(
+            derived_generation_root, attempt_id
+        )
+    except ImmutableArtifactLimitError as exc:
+        publish_committed_failure_event(
+            event_name="preactivation_failed",
+            status="derived_stage_creation_failed",
+            typed_reason="trace_inventory_limit_exceeded",
+        )
+        print(
+            "trace_derived_stage_limit_exceeded: "
+            f"{type(exc).__name__}: {exc}",
+            file=sys.stderr,
+        )
+        return EXIT_BUILD_FAILED
+    except ImmutableArtifactResourceError as exc:
+        publish_committed_failure_event(
+            event_name="preactivation_failed",
+            status="derived_stage_creation_failed",
+            typed_reason="trace_snapshot_resource_unavailable",
+        )
+        print(
+            "trace_derived_stage_resource_unavailable: "
+            f"{type(exc).__name__}: {exc}",
+            file=sys.stderr,
+        )
+        return EXIT_BUILD_FAILED
+    except (ImmutableArtifactError, OSError) as exc:
+        publish_committed_failure_event(
+            event_name="preactivation_failed",
+            status="derived_stage_creation_failed",
+            typed_reason="trace_filesystem_invalid",
+        )
+        print(
+            "trace_derived_stage_invalid: "
+            f"{type(exc).__name__}: {exc}",
+            file=sys.stderr,
+        )
+        return EXIT_BUILD_FAILED
+    feature_staging_folder = derived_stage.staging_path
+
+    def close_derived_stage_after_typed_result() -> None:
+        try:
+            derived_stage.close()
+        except BaseException as cleanup_exc:
+            print(
+                "trace_derived_stage_cleanup_failed_after_typed_result: "
+                f"{type(cleanup_exc).__name__}: {cleanup_exc}",
+                file=sys.stderr,
+            )
 
     # C-AC-H slowdown / drop-rate sidecar emission (Loop 2 R13).
     # Two pinned thresholds (`NVBIT_SLOWDOWN_BUDGET_MAX_RATIO`,
@@ -3594,154 +5513,122 @@ def handle_trace(row: dict[str, Any], props: DeviceProps, out_dir: Path,
     if expected_record_count is not None and expected_record_count > 0:
         admitted_for_rate = admitted_record_count or 0
         actual_drop_rate = 1.0 - admitted_for_rate / expected_record_count
-    sidecar = traces_folder / "nvbit_slowdown_budget_exceeded.json"
-    (artifact_dir / "nvbit_slowdown_budget_exceeded.json").unlink(
-        missing_ok=True
-    )
-    if (
-        actual_slowdown_ratio is not None
-        and baseline_wall_time_s is not None
-        and float(baseline_wall_time_s)
-        >= _trace_budgets.NVBIT_SLOWDOWN_BUDGET_MIN_BASELINE_TIME_S
-        and actual_slowdown_ratio > _trace_budgets.NVBIT_SLOWDOWN_BUDGET_MAX_RATIO
-    ):
-        import hashlib
-        tb_hash = hashlib.sha256(
-            (SUITE_ROOT / "trace_budgets.toml").read_bytes()
-        ).hexdigest()
-        sidecar.write_text(json.dumps({
-            "schema_version": 1,
-            "slug": slug,
-            "shape_point": shape_point["name"],
-            "max_slowdown_ratio": _trace_budgets.NVBIT_SLOWDOWN_BUDGET_MAX_RATIO,
-            "actual_slowdown_ratio": actual_slowdown_ratio,
-            "baseline_wall_time_s": float(baseline_wall_time_s),
-            "actual_wall_time_s": actual_wall_time_s,
-            "trace_budgets_sha256": tb_hash,
-        }, indent=2))
-        print(
-            f"nvbit_slowdown_budget_exceeded: actual_ratio="
-            f"{actual_slowdown_ratio:.3f} > max_ratio="
-            f"{_trace_budgets.NVBIT_SLOWDOWN_BUDGET_MAX_RATIO}",
-            file=sys.stderr,
+    try:
+        budget_sidecars = _emit_nvbit_budget_sidecars(
+            output_root=feature_staging_folder,
+            artifact_dir=artifact_dir,
+            slug=slug,
+            shape_point=shape_point["name"],
+            actual_slowdown_ratio=actual_slowdown_ratio,
+            baseline_wall_time_s=baseline_wall_time_s,
+            actual_wall_time_s=actual_wall_time_s,
+            actual_drop_rate=actual_drop_rate,
+            expected_record_count=expected_record_count,
+            admitted_record_count=admitted_record_count,
+        )
+    except ImmutableArtifactLimitError as exc:
+        close_derived_stage_after_typed_result()
+        publish_committed_failure_event(
+            event_name="preactivation_failed",
+            status="budget_sidecar_publication_failed",
+            typed_reason="trace_inventory_limit_exceeded",
+            derived_staging_path=feature_staging_folder,
         )
         print(
-            f"nvbit_slowdown_budget_exceeded: sidecar at {sidecar}",
+            "trace_budget_sidecar_limit_exceeded: "
+            f"{type(exc).__name__}: {exc}",
             file=sys.stderr,
         )
-    else:
-        # Reruns into an existing artifact_dir can leave a stale sidecar
-        # from a prior run when the producer's emission predicate
-        # suppresses (baseline below the min-baseline-time floor, or
-        # ratio at/below MAX). The verifier's binding check would then
-        # mismatch the stale sidecar's cached fields against the new
-        # run summary; remove the stale sidecar to keep on-disk state
-        # in lockstep with the producer's intent for THIS run.
-        sidecar.unlink(missing_ok=True)
-    sidecar = traces_folder / "nvbit_drop_rate_exceeded.json"
-    (artifact_dir / "nvbit_drop_rate_exceeded.json").unlink(missing_ok=True)
-    if (
-        actual_drop_rate is not None
-        and expected_record_count is not None
-        and actual_drop_rate > _trace_budgets.NVBIT_DROP_RATE_BUDGET_MAX
-    ):
-        import hashlib
-        tb_hash = hashlib.sha256(
-            (SUITE_ROOT / "trace_budgets.toml").read_bytes()
-        ).hexdigest()
-        # The R11 producer surface populates only the residual
-        # source counter (`expected_record_mismatch_dropped`) with
-        # `expected - admitted`; the other three named source
-        # counters stay at 0 until the per-source NVBit producer
-        # surface lands. The schema requires all four fields so a
-        # future per-source landing fails the C-AC-C parity scanner
-        # without simultaneously updating the schema + this writer.
-        admitted_int = int(admitted_record_count or 0)
-        residual = int(expected_record_count) - admitted_int
-        sidecar.write_text(json.dumps({
-            "schema_version": 1,
-            "slug": slug,
-            "shape_point": shape_point["name"],
-            "max_drop_rate": _trace_budgets.NVBIT_DROP_RATE_BUDGET_MAX,
-            "actual_drop_rate": actual_drop_rate,
-            "expected_record_count": int(expected_record_count),
-            "admitted_record_count": admitted_int,
-            "channel_overflow_dropped": 0,
-            "ring_buffer_loss_dropped": 0,
-            "decoder_gap_dropped": 0,
-            "expected_record_mismatch_dropped": residual,
-            "trace_budgets_sha256": tb_hash,
-        }, indent=2))
-        print(
-            f"nvbit_drop_rate_exceeded: actual_rate="
-            f"{actual_drop_rate:.3f} > max_rate="
-            f"{_trace_budgets.NVBIT_DROP_RATE_BUDGET_MAX}",
-            file=sys.stderr,
+        return EXIT_BUILD_FAILED
+    except ImmutableArtifactResourceError as exc:
+        close_derived_stage_after_typed_result()
+        publish_committed_failure_event(
+            event_name="preactivation_failed",
+            status="budget_sidecar_publication_failed",
+            typed_reason="trace_snapshot_resource_unavailable",
+            derived_staging_path=feature_staging_folder,
         )
         print(
-            f"nvbit_drop_rate_exceeded: sidecar at {sidecar}",
+            "trace_budget_sidecar_resource_unavailable: "
+            f"{type(exc).__name__}: {exc}",
             file=sys.stderr,
         )
-    else:
-        # Reruns into an existing artifact_dir can leave a stale
-        # drop-rate sidecar from a prior failing run. The verifier
-        # at `_verify_canonical_trace_pb_admission` treats the mere
-        # presence of `nvbit_drop_rate_exceeded.json` as a
-        # budget-exceeded carve-out and skips the feature-sidecar
-        # checks; remove the stale sidecar to keep on-disk state
-        # in lockstep with the producer's intent for THIS run.
-        # Parallels the unlink in the slowdown branch above.
-        sidecar.unlink(missing_ok=True)
+        return EXIT_BUILD_FAILED
+    except (ImmutableArtifactError, OSError) as exc:
+        close_derived_stage_after_typed_result()
+        publish_committed_failure_event(
+            event_name="preactivation_failed",
+            status="budget_sidecar_publication_failed",
+            typed_reason="trace_filesystem_invalid",
+            derived_staging_path=feature_staging_folder,
+        )
+        print(
+            "trace_budget_sidecar_publication_failed: "
+            f"{type(exc).__name__}: {exc}",
+            file=sys.stderr,
+        )
+        return EXIT_BUILD_FAILED
 
     # Serialize the tracer .so path as repo-relative when possible (readable
     # in committed manifests); fall back to absolute for paths outside the
     # repo tree (monkeypatched in tests, or externally installed tracers).
     try:
-        tracer_so_serialized = str(NVBIT_TRACER_SO.relative_to(SUITE_ROOT.parent.parent))
-    except ValueError:
-        tracer_so_serialized = str(NVBIT_TRACER_SO)
-
-    # Per-launch NVBit trace summary emission (consumed by
-    # workloads/simbench_bw/merge_evidence.py join-cupti-nvbit). The
-    # adapter enumerates kernels in dynamic_trace.pb and emits one
-    # summary per launch; the offline two-run join requires one
-    # summary per CUPTI sidecar. Tracked-binding corruption, a missing runtime
-    # prerequisite, and every other adapter exception are hard producer
-    # failures so non-joinable trace evidence is never reported as success.
-    nvbit_emit_result = _emit_nvbit_trace_summaries_for_trace_artifact(
-        traces_folder=traces_folder,
-        trace_pb=trace_pb,
-        slug=slug,
-        shape_point=shape_point["name"],
-        executable=executable,
-        tracer_so_path=NVBIT_TRACER_SO,
-        artifact_dir=artifact_dir,
-    )
-    nvbit_summary_status = nvbit_emit_result["status"]
-    nvbit_summary_paths = nvbit_emit_result["paths"]
-    nvbit_summary_failure_reason = nvbit_emit_result["failure_reason"]
-    nvbit_emit_failed_hard = nvbit_emit_result["failed_hard"]
-    if nvbit_emit_failed_hard:
-        print(
-            f"trace_nvbit_summary_emit_failed: status={nvbit_summary_status} "
-            f"reason={nvbit_summary_failure_reason}",
-            file=sys.stderr,
+        tracer_so_serialized = str(
+            retained_tracer.path.relative_to(SUITE_ROOT.parent.parent)
         )
-        return EXIT_BUILD_FAILED
+    except ValueError:
+        tracer_so_serialized = str(retained_tracer.path)
 
-    artifact_path = artifact_dir / f"trace_{shape_point['name']}.json"
     artifact_record: dict[str, Any] = {
         "schema_version": 1,
         "slug": slug,
         "shape_set": "trace_shapes",
         "shape_point": shape_point["name"],
+        "trace_capture_attempt_id": attempt_id,
+        "raw_trace_generation": raw_generation_record,
         "trace_pb_path": str(trace_pb.relative_to(artifact_dir)),
         "trace_bytes": trace_bytes,
         "wall_time_s": actual_wall_time_s,
         "tracer_so_path": tracer_so_serialized,
-        "nvbit_trace_summary_emit_status": nvbit_summary_status,
-        "nvbit_trace_summary_paths": nvbit_summary_paths,
+        "binary_sha256": execution["binary_sha256"],
+        "nvbit_tracer_build_hash": execution["tracer_build_sha256"],
+        "kernel_signature_sha256": kernel_signature_sha256,
+        "source_commit": _resolve_source_commit(),
+        # The portable seal intentionally excludes inode/local-generation
+        # metadata.  The second field scopes the immutable summary generation
+        # on this host without contaminating the portable admission identity.
+        "trace_admission_sha256": trace_admission.trace_admission_sha256,
+        "trace_filesystem_generation_sha256": (
+            trace_admission.trace_filesystem_generation_sha256
+        ),
+        "dynamic_trace_sha256": trace_admission.dynamic_trace_sha256,
+        "stats_sha256": trace_admission.stats_sha256,
+        "stats_size_bytes": trace_admission.stats_size_bytes,
+        "threadblock_payload_manifest_sha256": (
+            trace_admission.threadblock_payload_manifest_sha256
+        ),
+        "threadblock_payload_size_bytes": (
+            trace_admission.threadblock_payload_size_bytes
+        ),
+        "allocations_sidecar_sha256": (
+            trace_admission.allocations_sidecar_sha256
+        ),
+        "allocations_sidecar_size_bytes": (
+            trace_admission.allocations_sidecar_size_bytes
+        ),
     }
+    for sidecar_kind, sidecar_path in budget_sidecars.items():
+        field = (
+            "nvbit_slowdown_budget_sidecar_path"
+            if sidecar_kind == "slowdown"
+            else "nvbit_drop_rate_sidecar_path"
+        )
+        artifact_record[field] = (
+            Path(os.path.abspath(os.fspath(sidecar_path)))
+            .relative_to(Path(os.path.abspath(os.fspath(artifact_dir))))
+            .as_posix()
+            if sidecar_path is not None else None
+        )
     # C-AC-H evidence the post-collection verifier reads back to
     # recompute slowdown / drop-rate against the pinned budgets
     # (Loop 2 R12). When a raw-evidence value is None the verifier
@@ -3770,132 +5657,558 @@ def handle_trace(row: dict[str, Any], props: DeviceProps, out_dir: Path,
     artifact_record["decoder_gap_dropped"] = 0
     artifact_record["expected_record_mismatch_dropped"] = residual
 
-    # task11 / the HRD-profiler clause: emit the HRD bundle and
-    # persist Section 10 evidence fields. The bundle producer
-    # reads the sector-stream JSONL the consumer wrote alongside
-    # the trace; if the consumer hasn't run yet (or the proto
-    # walk failed), the HRD bundle is skipped with a typed-
-    # unavailable annotation in the run summary.
-    _emit_hrd_bundle_for_run_summary(
-        artifact_record=artifact_record,
-        artifact_dir=artifact_dir,
-        traces_folder=traces_folder,
-        slug=slug,
-        shape_point=shape_point,
-        executable=executable,
-        props=props,
-    )
-
-    # R53 / Codex's R52 review mainline gap #2: the canonical
-    # capture path was missing the `divergence_proxies/` and
-    # `sharing_locality/` per-shape feature sidecars sidecars. Wired here so a
-    # canonical `run_suite.py --mode trace` capture emits the
-    # full sidecar set the verifier requires.
-    _emit_divergence_proxies_for_run_summary(
-        artifact_record=artifact_record,
-        artifact_dir=artifact_dir,
-        traces_folder=traces_folder,
-        slug=slug,
-        shape_point=shape_point,
-        executable=executable,
-        props=props,
-    )
-    _emit_sharing_locality_for_run_summary(
-        artifact_record=artifact_record,
-        artifact_dir=artifact_dir,
-        traces_folder=traces_folder,
-        slug=slug,
-        shape_point=shape_point,
-        executable=executable,
-        props=props,
-    )
-
-    # task13 / the order-projections clause: emit the six-
-    # projection bundle and persist its evidence into the run
-    # summary. The producer reuses the same threadblock proto
-    # walk the HRD profiler already validated; no additional
-    # sidecar is required. Skip path: a producer failure leaves
-    # all order_projections_* fields None and records a typed
-    # `order_projections_skip_reason`.
-    _emit_order_projections_for_run_summary(
-        artifact_record=artifact_record,
-        artifact_dir=artifact_dir,
-        traces_folder=traces_folder,
-        slug=slug,
-        shape_point=shape_point,
-        executable=executable,
-        props=props,
-    )
-
-    # task15 / the perturbation-harness clause: build the 9
-    # loop-scope perturbation records (cache_modifier_ca,
-    # cache_modifier_cg, working_set_sweep MiB ladder), confirm SASS,
-    # check correctness equivalence, and persist the bundle + run-
-    # summary fields. The producer is best-effort; build failures
-    # leave a typed `perturbation_run_ledger_skip_reason` so the
-    # verifier skips enforcement on partial sweeps.
-    _emit_perturbation_run_ledger_for_run_summary(
-        artifact_record=artifact_record,
-        artifact_dir=artifact_dir,
-        traces_folder=traces_folder,
-        slug=slug,
-        shape_point=shape_point,
-        executable=executable,
-        props=props,
-    )
-
-    # task17 / the adaptive-sampler clause: build the
-    # trace_convergence_confidence bundle from the upstream HRD bundle
-    # produced earlier in this same handle_trace flow. The producer is
-    # best-effort; missing HRD evidence leaves a typed
-    # `trace_convergence_skip_reason` so the verifier skips
-    # enforcement on partial sweeps.
-    _emit_trace_convergence_confidence_for_run_summary(
-        artifact_record=artifact_record,
-        artifact_dir=artifact_dir,
-        traces_folder=traces_folder,
-        slug=slug,
-        shape_point=shape_point,
-        props=props,
-    )
-
-    if nvbit_summary_failure_reason is not None:
-        artifact_record["nvbit_trace_summary_failure_reason"] = (
-            nvbit_summary_failure_reason
-        )
-    artifact_path.write_text(json.dumps(artifact_record, indent=2))
-
-    manifest = build_measurement_manifest(
-        slug=slug, mode="trace",
-        warm_up_iters=0, repeat_iters=1, cv_pct=0.0,
-        props=props, binary_path=executable,
-        compiler_flags=_gencode_flags_for_arch_gate(row.get("arch_gate", [])),
-        shape_point=shape_point["name"],
-    )
-    _emit_manifest(manifest, artifact_dir)
-    print(f"run_suite: trace for {slug}: {trace_bytes} bytes at {trace_pb} (artifact at {artifact_path})")
-
-    # Non-root measurement NVBit phase-injection contract: when --phase-inject-ab
-    # is set, run a paired no-injection / with-injection trace pair to
-    # compute the A/B Heisenberg-overhead record, then decode the
-    # per-launch phase_records_<repeat>_<launch>.bin files emitted by
-    # the consolidated tracer extension and emit
-    # phase_cycle_ledger_<repeat>_<launch>.json sidecars.
-    if phase_inject_ab:
-        rc_ab = _run_phase_inject_ab_for_handle_trace(
-            slug=slug,
-            shape_point_name=shape_point["name"],
-            executable=executable,
-            args=args,
-            tracer_so_path=tracer_so,
-            traces_folder=traces_folder,
+    # Every producer, publication, and final source-generation gate runs before
+    # the canonical trace leaf is created.  Keep Task235's admitted-source
+    # capability open across the entire pre-activation pipeline so a mutation
+    # during summary, manifest, or optional phase work is still observable at
+    # the final gate.
+    preactivation_stage = "trace_capability_open"
+    derived_generation_record: dict[str, Any] | None = None
+    phase_ledger_generation: ImmutableDirectoryGeneration | None = None
+    phase_ledger_generation_record: dict[str, Any] | None = None
+    phase_ledger_staging_path = (
+        _trace_generation_root(
             artifact_dir=artifact_dir,
-            ab_repeat_count=ab_repeat_count,
-            row=row,
+            namespace=PHASE_LEDGER_GENERATION_NAMESPACE,
+            shape_point=shape_point["name"],
         )
-        if rc_ab != EXIT_OK:
-            return rc_ab
+        / f".{attempt_id}.staging"
+        if phase_inject_ab
+        else None
+    )
+    feature_evidence: list[dict[str, Any]] = []
+    summary_generation: dict[str, Any] | None = None
+    manifest_identity: dict[str, Any] | None = None
+    activation_committed = False
+    activation_payload: bytes | None = None
+    derived_stage_close_error: BaseException | None = None
 
+    def retire_failed_activation() -> None:
+        nonlocal activation_committed
+        if not activation_committed:
+            return
+        if activation_payload is None:
+            raise ImmutableArtifactError(
+                "committed trace activation has no retained locator payload"
+            )
+        try:
+            retire_regular_file(
+                artifact_path,
+                expected_payload=activation_payload,
+            )
+        except (ImmutableArtifactError, OSError) as retirement_error:
+            print(
+                "trace_failed_activation_retirement_failed: "
+                f"{type(retirement_error).__name__}: {retirement_error}",
+                file=sys.stderr,
+            )
+        else:
+            activation_committed = False
+
+    try:
+        with open_admitted_trace_sources(
+            traces_folder,
+            expected_admission=trace_admission,
+        ) as trace_sources:
+            preactivation_stage = "features"
+            _emit_admitted_trace_features(
+                artifact_record=artifact_record,
+                artifact_dir=artifact_dir,
+                traces_folder=feature_staging_folder,
+                trace_admission=trace_admission,
+                slug=slug,
+                shape_point=shape_point,
+                binary_sha256=execution["binary_sha256"],
+                kernel_signature_sha256=kernel_signature_sha256,
+                props=props,
+                trace_sources=trace_sources,
+            )
+
+            # A/B trace byproducts remain inside the hidden derived stage.  The
+            # admitted phase ledgers commit as their own attempt-scoped immutable
+            # generation and become authoritative only through the final active
+            # trace record.
+            phase_evidence: list[dict[str, Any]] = []
+            if phase_inject_ab:
+                preactivation_stage = "optional_phase"
+                phase_result = _run_phase_inject_ab_for_handle_trace(
+                    slug=slug,
+                    shape_point_name=shape_point["name"],
+                    attempt_id=attempt_id,
+                    retained_executable=retained_executable,
+                    args=args,
+                    retained_tracer=retained_tracer,
+                    traces_folder=feature_staging_folder,
+                    artifact_dir=artifact_dir,
+                    ab_repeat_count=ab_repeat_count,
+                    expected_launch_indices=tuple(
+                        launch.launch_index
+                        for launch in trace_admission.launches
+                    ),
+                    row=row,
+                    binary_sha256=execution["binary_sha256"],
+                    kernel_signature_sha256=kernel_signature_sha256,
+                    tracer_build_sha256=execution["tracer_build_sha256"],
+                )
+                rc_ab = int(phase_result["return_code"])
+                if rc_ab != EXIT_OK:
+                    failed_phase_generation = phase_result.get("generation")
+                    if isinstance(
+                        failed_phase_generation, ImmutableDirectoryGeneration
+                    ):
+                        phase_ledger_generation = failed_phase_generation
+                        phase_ledger_generation_record = (
+                            _directory_generation_record(
+                                generation=failed_phase_generation,
+                                artifact_dir=artifact_dir,
+                                attempt_id=attempt_id,
+                            )
+                        )
+                    publish_committed_failure_event(
+                        event_name="preactivation_failed",
+                        status="optional_phase_failed",
+                        typed_reason=str(
+                            phase_result.get("typed_reason")
+                            or "optional_phase_failed"
+                        ),
+                        derived_staging_path=feature_staging_folder,
+                        phase_ledger_generation=(
+                            phase_ledger_generation_record
+                        ),
+                        phase_ledger_staging_path=(
+                            None
+                            if phase_ledger_generation_record is not None
+                            else phase_result.get("staging_path")
+                        ),
+                    )
+                    return rc_ab
+                phase_ledger_generation = phase_result.get("generation")
+                if not isinstance(
+                    phase_ledger_generation, ImmutableDirectoryGeneration
+                ):
+                    raise ImmutableArtifactError(
+                        "optional phase producer returned no committed generation"
+                    )
+                phase_ledger_generation_record = _directory_generation_record(
+                    generation=phase_ledger_generation,
+                    artifact_dir=artifact_dir,
+                    attempt_id=attempt_id,
+                )
+                phase_evidence = _phase_evidence_identities(
+                    artifact_dir=artifact_dir,
+                    shape_point_name=shape_point["name"],
+                    expected_repeat_count=ab_repeat_count,
+                    expected_launch_indices=tuple(
+                        launch.launch_index
+                        for launch in trace_admission.launches
+                    ),
+                    phase_requested=phase_inject_ab,
+                    generation=phase_ledger_generation,
+                )
+            artifact_record["phase_inject_ab"] = {
+                "requested": phase_inject_ab,
+                "repeat_count": ab_repeat_count if phase_inject_ab else 0,
+                "generation": phase_ledger_generation_record,
+                "evidence": phase_evidence,
+            }
+
+            preactivation_stage = "derived_commit"
+            derived_generation = derived_stage.commit(
+                require_nonempty=False,
+                **_trace_generation_commit_limits(),
+            )
+            derived_generation_record = _directory_generation_record(
+                generation=derived_generation,
+                artifact_dir=artifact_dir,
+                attempt_id=attempt_id,
+            )
+            _rebase_trace_feature_paths(
+                artifact_record=artifact_record,
+                artifact_dir=artifact_dir,
+                staged_root=feature_staging_folder,
+                committed_root=derived_generation.path,
+            )
+            artifact_record["trace_derived_generation"] = (
+                derived_generation_record
+            )
+            feature_evidence = _collect_trace_feature_evidence_identities(
+                artifact_record=artifact_record,
+                artifact_dir=artifact_dir,
+            )
+            artifact_record["trace_feature_evidence"] = feature_evidence
+
+            # Publish all launches together only after both raw and derived
+            # generations are final.  No summary path can authorize a partial
+            # feature tree.
+            preactivation_stage = "summary_publish"
+            nvbit_emit_result = _emit_nvbit_trace_summaries_for_trace_artifact(
+                trace_admission=trace_admission,
+                slug=slug,
+                shape_point=shape_point["name"],
+                binary_sha256=execution["binary_sha256"],
+                tracer_build_sha256=execution["tracer_build_sha256"],
+                artifact_dir=artifact_dir,
+            )
+            nvbit_summary_status = nvbit_emit_result["status"]
+            nvbit_summary_paths = nvbit_emit_result["paths"]
+            nvbit_summary_failure_reason = nvbit_emit_result["failure_reason"]
+            if nvbit_emit_result["failed_hard"]:
+                publish_committed_failure_event(
+                    event_name="preactivation_failed",
+                    status="summary_publish_failed",
+                    typed_reason=str(nvbit_summary_status),
+                    derived_generation=derived_generation_record,
+                    phase_ledger_generation=phase_ledger_generation_record,
+                )
+                print(
+                    "trace_nvbit_summary_emit_failed: "
+                    f"status={nvbit_summary_status} "
+                    f"reason={nvbit_summary_failure_reason}",
+                    file=sys.stderr,
+                )
+                return EXIT_BUILD_FAILED
+
+            preactivation_stage = "summary_generation_gate"
+            summary_generation = (
+                _require_one_committed_nvbit_summary_generation(
+                    emit_result=nvbit_emit_result,
+                    trace_admission=trace_admission,
+                    slug=slug,
+                    shape_point=shape_point["name"],
+                    binary_sha256=execution["binary_sha256"],
+                    tracer_build_sha256=execution["tracer_build_sha256"],
+                    artifact_dir=artifact_dir,
+                )
+            )
+            artifact_record["nvbit_trace_summary_emit_status"] = (
+                nvbit_summary_status
+            )
+            artifact_record["nvbit_trace_summary_paths"] = nvbit_summary_paths
+            artifact_record["nvbit_trace_summary_generation"] = (
+                summary_generation
+            )
+            if nvbit_summary_failure_reason is not None:
+                artifact_record["nvbit_trace_summary_failure_reason"] = (
+                    nvbit_summary_failure_reason
+                )
+
+            preactivation_stage = "manifest"
+            manifest = build_measurement_manifest(
+                slug=slug, mode="trace",
+                warm_up_iters=0, repeat_iters=1, cv_pct=0.0,
+                props=props, binary_path=retained_executable.path,
+                compiler_flags=_gencode_flags_for_arch_gate(
+                    row.get("arch_gate", [])
+                ),
+                shape_point=shape_point["name"],
+                binary_sha256=execution["binary_sha256"],
+            )
+            manifest_path = _emit_manifest(
+                manifest,
+                artifact_dir,
+                filename=f"measurement_manifest_{shape_point['name']}.json",
+                preserve_previous=True,
+            )
+            manifest_identity = _retained_artifact_identity(
+                path=manifest_path, artifact_dir=artifact_dir
+            )
+            artifact_record["measurement_manifest"] = manifest_identity
+
+            preactivation_stage = "final_evidence_generation_gate"
+            observed_summary_generation = (
+                _require_one_committed_nvbit_summary_generation(
+                    emit_result=nvbit_emit_result,
+                    trace_admission=trace_admission,
+                    slug=slug,
+                    shape_point=shape_point["name"],
+                    binary_sha256=execution["binary_sha256"],
+                    tracer_build_sha256=execution["tracer_build_sha256"],
+                    artifact_dir=artifact_dir,
+                )
+            )
+            if observed_summary_generation != summary_generation:
+                raise ImmutableArtifactError(
+                    "NVBit summary generation changed before activation"
+                )
+            observed_manifest = _retained_artifact_identity(
+                path=manifest_path, artifact_dir=artifact_dir
+            )
+            if observed_manifest != manifest_identity:
+                raise ImmutableArtifactError(
+                    "measurement manifest generation changed before activation"
+                )
+            observed_feature_evidence = (
+                _collect_trace_feature_evidence_identities(
+                    artifact_record=artifact_record,
+                    artifact_dir=artifact_dir,
+                )
+            )
+            if observed_feature_evidence != feature_evidence:
+                raise ImmutableArtifactError(
+                    "trace feature evidence generation changed before activation"
+                )
+            observed_derived_generation = (
+                inspect_immutable_directory_generation(
+                    derived_generation.path,
+                    require_nonempty=False,
+                    **_trace_generation_commit_limits(),
+                )
+            )
+            if observed_derived_generation != derived_generation:
+                raise ImmutableArtifactError(
+                    "trace derived generation changed before activation"
+                )
+            observed_raw_generation = inspect_immutable_directory_generation(
+                raw_generation.path,
+                require_nonempty=True,
+                **_trace_generation_commit_limits(),
+            )
+            if observed_raw_generation != raw_generation:
+                raise ImmutableArtifactError(
+                    "complete raw trace generation changed before activation"
+                )
+            if phase_inject_ab:
+                if phase_ledger_generation is None:
+                    raise ImmutableArtifactError(
+                        "optional phase generation is absent at final gate"
+                    )
+                observed_phase_evidence = _phase_evidence_identities(
+                    artifact_dir=artifact_dir,
+                    shape_point_name=shape_point["name"],
+                    expected_repeat_count=ab_repeat_count,
+                    expected_launch_indices=tuple(
+                        launch.launch_index
+                        for launch in trace_admission.launches
+                    ),
+                    phase_requested=phase_inject_ab,
+                    generation=phase_ledger_generation,
+                )
+                if observed_phase_evidence != phase_evidence:
+                    raise ImmutableArtifactError(
+                        "optional phase evidence generation changed before activation"
+                    )
+
+            preactivation_stage = "final_trace_generation_gate"
+            trace_sources.verify_unchanged()
+            preactivation_stage = "attempt_ready"
+            attempt_event = _publish_trace_attempt_event(
+                artifact_dir=artifact_dir,
+                slug=slug,
+                shape_point=shape_point["name"],
+                attempt_id=attempt_id,
+                event_name="activation_ready",
+                status="activation_ready",
+                typed_reason=None,
+                raw_trace_generation=raw_generation_record,
+                derived_generation=derived_generation_record,
+                phase_ledger_generation=phase_ledger_generation_record,
+                summary_generation=summary_generation,
+                measurement_manifest=manifest_identity,
+            )
+            artifact_record["trace_capture_attempt_event"] = attempt_event
+
+            # The sole active leaf is committed while every executable, tracer,
+            # and admitted raw-source capability remains live.  Closing the
+            # executable/tracer stack here makes close-time revalidation part of
+            # the transaction; any failure is caught below and retires this exact
+            # active generation before control returns.
+            preactivation_stage = "activation"
+            artifact_record["activation_state"] = "active"
+            artifact_record["typed_tombstone"] = False
+            retained_executable.verify_unchanged()
+            retained_tracer.verify_unchanged()
+            trace_sources.verify_unchanged()
+            activation_payload = _trace_artifact_record_payload(
+                artifact_record
+            )
+            _publish_trace_artifact_record(artifact_path, artifact_record)
+            activation_committed = True
+            preactivation_stage = "activation_source_closure"
+            trace_sources.verify_unchanged()
+            retained_executable.verify_unchanged()
+            retained_tracer.verify_unchanged()
+            source_stack.pop_all().close()
+    except ImmutableArtifactLimitError as exc:
+        retire_failed_activation()
+        publish_committed_failure_event(
+            event_name="preactivation_failed",
+            status=f"preactivation_{preactivation_stage}_failed",
+            typed_reason="trace_inventory_limit_exceeded",
+            derived_generation=derived_generation_record,
+            derived_staging_path=(
+                None if derived_stage.committed else feature_staging_folder
+            ),
+            phase_ledger_generation=phase_ledger_generation_record,
+            phase_ledger_staging_path=(
+                None
+                if phase_ledger_generation is not None
+                else phase_ledger_staging_path
+            ),
+            summary_generation=summary_generation,
+            measurement_manifest=manifest_identity,
+        )
+        print(
+            "trace_preactivation_limit_exceeded: "
+            f"{type(exc).__name__}: {exc}",
+            file=sys.stderr,
+        )
+        return EXIT_BUILD_FAILED
+    except TraceAdmissionError as exc:
+        retire_failed_activation()
+        if exc.typed_reason == "trace_snapshot_resource_unavailable":
+            diagnostic = (
+                "trace_feature_source_resource_unavailable"
+                if preactivation_stage == "features"
+                else "trace_preactivation_resource_unavailable"
+            )
+        elif preactivation_stage == "features":
+            diagnostic = "trace_feature_source_changed"
+        else:
+            diagnostic = "trace_preactivation_snapshot_changed"
+        publish_committed_failure_event(
+            event_name="preactivation_failed",
+            status=f"preactivation_{preactivation_stage}_failed",
+            typed_reason=exc.typed_reason,
+            derived_generation=derived_generation_record,
+            derived_staging_path=(
+                None if derived_stage.committed else feature_staging_folder
+            ),
+            phase_ledger_generation=phase_ledger_generation_record,
+            phase_ledger_staging_path=(
+                None
+                if phase_ledger_generation is not None
+                else phase_ledger_staging_path
+            ),
+            summary_generation=summary_generation,
+            measurement_manifest=manifest_identity,
+        )
+        print(
+            f"{diagnostic}: {exc.typed_reason}: {exc.detail}",
+            file=sys.stderr,
+        )
+        return EXIT_BUILD_FAILED
+    except ImmutableArtifactResourceError as exc:
+        retire_failed_activation()
+        activation_failure = preactivation_stage.startswith("activation")
+        diagnostic = (
+            "trace_activation_resource_unavailable"
+            if activation_failure
+            else (
+                "trace_feature_source_resource_unavailable"
+                if preactivation_stage == "features"
+                else "trace_preactivation_resource_unavailable"
+            )
+        )
+        publish_committed_failure_event(
+            event_name=(
+                "activation_failed"
+                if activation_failure
+                else "preactivation_failed"
+            ),
+            status=(
+                "activation_failed"
+                if activation_failure
+                else f"preactivation_{preactivation_stage}_failed"
+            ),
+            typed_reason="trace_snapshot_resource_unavailable",
+            derived_generation=derived_generation_record,
+            derived_staging_path=(
+                None if derived_stage.committed else feature_staging_folder
+            ),
+            phase_ledger_generation=phase_ledger_generation_record,
+            phase_ledger_staging_path=(
+                None
+                if phase_ledger_generation is not None
+                else phase_ledger_staging_path
+            ),
+            summary_generation=summary_generation,
+            measurement_manifest=manifest_identity,
+        )
+        print(
+            f"{diagnostic}: trace_snapshot_resource_unavailable: "
+            f"{type(exc).__name__}: {exc}",
+            file=sys.stderr,
+        )
+        return EXIT_BUILD_FAILED
+    except (ImmutableArtifactError, OSError) as exc:
+        retire_failed_activation()
+        activation_failure = preactivation_stage.startswith("activation")
+        if preactivation_stage == "features":
+            diagnostic = "trace_feature_source_changed: trace_snapshot_changed"
+        elif activation_failure:
+            diagnostic = "trace_activation_failed"
+        else:
+            diagnostic = f"trace_preactivation_{preactivation_stage}_failed"
+        publish_committed_failure_event(
+            event_name=(
+                "activation_failed"
+                if activation_failure
+                else "preactivation_failed"
+            ),
+            status=(
+                "activation_failed"
+                if activation_failure
+                else f"preactivation_{preactivation_stage}_failed"
+            ),
+            typed_reason=(
+                "trace_activation_failed"
+                if activation_failure
+                else "trace_filesystem_invalid"
+            ),
+            derived_generation=derived_generation_record,
+            derived_staging_path=(
+                None if derived_stage.committed else feature_staging_folder
+            ),
+            phase_ledger_generation=phase_ledger_generation_record,
+            phase_ledger_staging_path=(
+                None
+                if phase_ledger_generation is not None
+                else phase_ledger_staging_path
+            ),
+            summary_generation=summary_generation,
+            measurement_manifest=manifest_identity,
+        )
+        print(
+            f"{diagnostic}: {type(exc).__name__}: {exc}",
+            file=sys.stderr,
+        )
+        return EXIT_BUILD_FAILED
+    finally:
+        try:
+            derived_stage.close()
+        except BaseException as cleanup_exc:
+            derived_stage_close_error = cleanup_exc
+            retire_failed_activation()
+            print(
+                "trace_derived_stage_cleanup_failed: "
+                f"{type(cleanup_exc).__name__}: {cleanup_exc}",
+                file=sys.stderr,
+            )
+
+    if derived_stage_close_error is not None:
+        typed_reason = (
+            "trace_snapshot_resource_unavailable"
+            if isinstance(
+                derived_stage_close_error,
+                ImmutableArtifactResourceError,
+            )
+            else "trace_filesystem_invalid"
+        )
+        publish_committed_failure_event(
+            event_name="activation_failed",
+            status="activation_derived_stage_closure_failed",
+            typed_reason=typed_reason,
+            derived_generation=derived_generation_record,
+            phase_ledger_generation=phase_ledger_generation_record,
+            summary_generation=summary_generation,
+            measurement_manifest=manifest_identity,
+        )
+        return EXIT_BUILD_FAILED
+
+    print(
+        f"run_suite: trace for {slug}: {trace_bytes} bytes at {trace_pb} "
+        f"(artifact at {artifact_path})"
+    )
     return EXIT_OK
 
 
@@ -3903,130 +6216,274 @@ def _run_phase_inject_ab_for_handle_trace(
     *,
     slug: str,
     shape_point_name: str,
-    executable: Path,
+    attempt_id: str,
+    retained_executable: RetainedExecutable,
     args: list[str],
-    tracer_so_path: Path,
+    retained_tracer: RetainedRegular,
     traces_folder: Path,
     artifact_dir: Path,
     ab_repeat_count: int,
+    expected_launch_indices: tuple[int, ...],
     row: dict[str, Any],
-) -> int:
-    """Run the A/B overhead pair + emit per-launch phase ledgers.
-    Helper extracted from handle_trace to keep the trace handler's
-    main path readable. Returns EXIT_OK on success or
-    EXIT_BUILD_FAILED on producer failure."""
+    binary_sha256: str,
+    kernel_signature_sha256: str,
+    tracer_build_sha256: str,
+) -> dict[str, Any]:
+    """Run the A/B pair and atomically publish its exact ledger generation."""
     import phase_inject_orchestrator as _pinj  # type: ignore[import-not-found]
     import phase_cycle_ledger_consumer as _pcons  # type: ignore[import-not-found]
+
+    def failed(
+        typed_reason: str,
+        *,
+        generation: ImmutableDirectoryGeneration | None = None,
+        staging_path: Path | None = None,
+        summary: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        return {
+            "return_code": EXIT_BUILD_FAILED,
+            "typed_reason": typed_reason,
+            "generation": generation,
+            "staging_path": staging_path,
+            "summary": summary,
+        }
+
     try:
-        base_env = tracer_runtime_env(tracer_so_path)
+        _pinj._validated_repeat_and_launch_domain(
+            ab_repeat_count,
+            expected_launch_indices,
+        )
+        _pinj._validated_arguments(args)
+        retained_executable.verify_unchanged()
+        retained_tracer.verify_unchanged()
+        base_env = tracer_runtime_env(
+            retained_tracer.path,
+            retained_descriptor=retained_tracer.descriptor,
+        )
     except TracerRuntimeError as exc:
         print(f"tracer_so_deps_unresolved: {exc}", file=sys.stderr)
-        return EXIT_BUILD_FAILED
-    # Isolate the A/B subprocesses' NVBit outputs from the canonical
-    # trace folder. handle_trace has already emitted dynamic_trace.pb,
-    # stats.csv, threadblocks/, extra_info/, and the per-shape feature
-    # sidecars under traces_folder; the run summary and verify_artifacts
-    # admission describe THOSE bytes. With USER_DEFINED_FOLDERS=1, each
-    # A/B subprocess writes a fresh dynamic_trace.pb / stats.csv /
-    # threadblocks/ / extra_info/ to its TRACES_FOLDER; routing those
-    # to the canonical traces_folder would overwrite the canonical
-    # evidence. Drop A/B output into a phase_inject_ab/ sub-directory
-    # so producer phase records co-locate with the canonical capture
-    # but never clobber it.
-    phase_traces_folder = traces_folder / "phase_inject_ab"
-    phase_traces_folder.mkdir(parents=True, exist_ok=True)
-    inputs = _pinj.AbOverheadInputs(
-        executable=executable,
-        args=list(args),
-        tracer_so_path=tracer_so_path,
-        traces_folder=phase_traces_folder,
-        repeat_count=ab_repeat_count,
-        base_env=base_env,
-    )
-    admission = _pcons.load_admission_registry()
-    admission_threshold_pct = _pcons.admission_threshold_for_slug(
-        admission, slug
-    )
-    try:
-        ab_overhead_record = _pinj.run_ab_overhead_pair(
-            inputs, admission_threshold_pct=admission_threshold_pct
-        )
-    except _pinj.PhaseInjectAbRunFailed as e:
-        print(
-            f"phase_inject_ab_run_failed: side={e.side!r} rc={e.returncode}: "
-            f"{e.stderr.strip()[:200]}",
-            file=sys.stderr,
-        )
-        return EXIT_BUILD_FAILED
-    except _pinj.PhaseInjectAbRunTimeout as e:
-        print(
-            f"phase_inject_ab_run_timeout: side={e.side!r} timeout_s={e.timeout_s}: "
-            f"{e.stderr.strip()[:200]}",
-            file=sys.stderr,
-        )
-        return EXIT_BUILD_FAILED
-    except _pinj.PhaseInjectRuntimeUnavailable as e:
-        print(f"phase_inject_runtime_unavailable: {e.detail}", file=sys.stderr)
-        return EXIT_BUILD_FAILED
+        return failed("tracer_so_deps_unresolved")
+    except (
+        _pinj.PhaseInjectAbRepeatCountInvalid,
+        _pinj.PhaseInjectLaunchAuthorityInvalid,
+        _pinj.PhaseInjectResourceLimitExceeded,
+    ) as exc:
+        print(str(exc), file=sys.stderr)
+        return failed(exc.TOKEN)
 
-    ledger_dir = artifact_dir / f"phase_cycle_ledgers_{shape_point_name}"
-    binary_sha = _binary_sha256(executable)
-    # Provenance: derive a stable kernel_signature_sha256 placeholder
-    # from the binary's sha + shape_point. Real per-launch kernel
-    # signatures land when the kernel-feature-vector emitter for the
-    # six-axis kernel-feature-vector contract is wired in (sequenced
-    # alongside that producer surface).
-    import hashlib as _hashlib
-    kernel_sig = _hashlib.sha256(
-        f"{binary_sha}:{shape_point_name}".encode("utf-8")
-    ).hexdigest()
-    nvbit_tracer_build_hash = _hashlib.sha256(
-        tracer_so_path.read_bytes()
-    ).hexdigest()
-    import phase_cycle_ledger_aggregator as _agg  # type: ignore[import-not-found]
-    # Catch typed aggregator/consumer diagnostics so a real producer-side
-    # phase-pairing anomaly (e.g. a kernel whose SASS has multiple EXIT
-    # terminators causing duplicate function_entry close records) surfaces
-    # to stderr as a stable diagnostic token + EXIT_BUILD_FAILED, mirroring
-    # the PhaseInjectAbRunFailed / PhaseInjectAbRunTimeout pattern above.
-    # The token + payload are recoverable from the captured stderr; the
-    # caller can decide whether to treat the typed-failure as evidence
-    # of a producer regression or as an expected per-arch outcome.
-    _typed_ledger_excs = (
-        _agg.PhaseRecordPairingFailed,
-        _agg.PhaseRecordCycleDeltaNegative,
-        _agg.PhaseLedgerSchemaInvalid,
-        _agg.PhaseRecordDuplicateOpen,
-        _agg.PhaseRecordDuplicateClose,
-        _agg.PhaseRecordLaunchIndexMismatch,
-        _agg.PhaseDefinitionInconsistent,
-        _pinj.PhaseLedgerEvidenceMissing,
-    )
+    # A/B tracer bytes stay inside the hidden derived stage.  Pin the dedicated
+    # child and pass its descriptor through /proc so no mutable lexical path is
+    # authoritative for either subprocess or the ledger consumer.
+    phase_traces_folder = traces_folder / "phase_inject_ab"
+    admission = _pcons.load_admission_registry()
     try:
-        summary = _pinj.emit_per_launch_phase_ledgers(
-            traces_folder=phase_traces_folder,
-            ledger_output_dir=ledger_dir,
-            slug=slug,
-            shape_point=shape_point_name,
-            kernel_signature_sha256=kernel_sig,
-            binary_sha256=binary_sha,
-            nvbit_tracer_build_hash=nvbit_tracer_build_hash,
-            claim_scope=row.get("claim_scope", "measured_local"),
-            ab_overhead_record=ab_overhead_record,
-            dual_run_manifest_ref=str(
-                artifact_dir / "dual_run_manifest.json"
-            ),
-            admission=admission,
-            admission_threshold_pct=admission_threshold_pct,
+        admission_threshold_pct = _pinj._validated_admission_threshold(
+            _pcons.admission_threshold_for_slug(admission, slug)
         )
-    except _typed_ledger_excs as e:
+    except _pinj.PhaseInjectAdmissionThresholdInvalid as exc:
+        print(str(exc), file=sys.stderr)
+        return failed(exc.TOKEN)
+    ensure_directory(phase_traces_folder)
+    generation: ImmutableDirectoryGeneration | None = None
+    summary: dict[str, Any] | None = None
+    postcommit_unwind_failure: _pinj.PhaseLedgerPostCommitFailure | None = None
+
+    @contextmanager
+    def preserve_phase_source_generation():
+        nonlocal postcommit_unwind_failure
+        try:
+            with PinnedDirectoryReader(phase_traces_folder) as phase_sources:
+                yield phase_sources
+        except BaseException as exc:
+            if generation is None:
+                raise
+            postcommit_unwind_failure = _pinj._postcommit_failure(
+                generation,
+                exc,
+            )
+
+    with preserve_phase_source_generation() as phase_sources:
+        inputs = _pinj.AbOverheadInputs(
+            executable_authority=retained_executable,
+            args=list(args),
+            tracer_so_path=retained_tracer.path,
+            tracer_descriptor=retained_tracer.descriptor,
+            traces_folder=phase_traces_folder,
+            expected_launch_indices=expected_launch_indices,
+            traces_descriptor=phase_sources.descriptor,
+            traces_reader=phase_sources,
+            repeat_count=ab_repeat_count,
+            base_env=base_env,
+        )
+        try:
+            ab_overhead_result = _pinj.run_ab_overhead_pair(
+                inputs, admission_threshold_pct=admission_threshold_pct
+            )
+            phase_source_snapshot = ab_overhead_result.pop(
+                "_phase_source_snapshot", None
+            )
+            if not isinstance(phase_source_snapshot, PinnedTreeSnapshot):
+                raise ImmutableArtifactError(
+                    "phase A/B producer returned no retained source snapshot"
+                )
+            ab_overhead_record = ab_overhead_result
+            retained_executable.verify_unchanged()
+            retained_tracer.verify_unchanged()
+        except _pinj.PhaseInjectAbRepeatCountInvalid as exc:
+            print(str(exc), file=sys.stderr)
+            return failed(exc.TOKEN)
+        except _pinj.PhaseRecordSourceNotFresh as exc:
+            print(str(exc), file=sys.stderr)
+            return failed(exc.TOKEN)
+        except _pinj.PhaseInjectAbRunFailed as exc:
+            print(
+                "phase_inject_ab_run_failed: "
+                f"side={exc.side!r} rc={exc.returncode}: "
+                f"{exc.stderr.strip()[:200]}",
+                file=sys.stderr,
+            )
+            return failed(exc.TOKEN)
+        except _pinj.PhaseInjectAbRunTimeout as exc:
+            print(
+                "phase_inject_ab_run_timeout: "
+                f"side={exc.side!r} timeout_s={exc.timeout_s}: "
+                f"{exc.stderr.strip()[:200]}",
+                file=sys.stderr,
+            )
+            return failed(exc.TOKEN)
+        except _pinj.PhaseInjectRuntimeUnavailable as exc:
+            print(
+                f"phase_inject_runtime_unavailable: {exc.detail}",
+                file=sys.stderr,
+            )
+            return failed(exc.TOKEN)
+        except (
+            _pinj.PhaseInjectLaunchAuthorityInvalid,
+            _pinj.PhaseInjectAdmissionThresholdInvalid,
+            _pinj.PhaseInjectTimeoutInvalid,
+            _pinj.PhaseInjectResourceLimitExceeded,
+            _pinj.PhaseInjectExecutableAuthorityInvalid,
+            _pinj.PhaseRecordEvidenceInvalid,
+            _pinj.PhaseRecordPayloadInvalid,
+        ) as exc:
+            print(str(exc), file=sys.stderr)
+            return failed(exc.TOKEN)
+
+        ledger_root = _trace_generation_root(
+            artifact_dir=artifact_dir,
+            namespace=PHASE_LEDGER_GENERATION_NAMESPACE,
+            shape_point=shape_point_name,
+        )
+        ledger_staging_path = ledger_root / f".{attempt_id}.staging"
+        import phase_cycle_ledger_aggregator as _agg  # type: ignore[import-not-found]
+
+        typed_ledger_exceptions = (
+            _agg.PhaseRecordPairingFailed,
+            _agg.PhaseRecordCycleDeltaNegative,
+            _agg.PhaseLedgerSchemaInvalid,
+            _agg.PhaseRecordDuplicateOpen,
+            _agg.PhaseRecordDuplicateClose,
+            _agg.PhaseRecordLaunchIndexMismatch,
+            _agg.PhaseDefinitionInconsistent,
+            _pinj.PhaseLedgerEvidenceMissing,
+            _pinj.PhaseLedgerRepeatCoverageInvalid,
+            _pinj.PhaseInjectLaunchAuthorityInvalid,
+            _pinj.PhaseInjectAdmissionThresholdInvalid,
+            _pinj.PhaseInjectResourceLimitExceeded,
+            _pinj.PhaseRecordEvidenceInvalid,
+            _pinj.PhaseRecordPayloadInvalid,
+        )
+        phase_sources.verify_path()
+        try:
+            summary = _pinj.emit_per_launch_phase_ledgers(
+                traces_folder=phase_traces_folder,
+                ledger_output_dir=ledger_root,
+                attempt_id=attempt_id,
+                expected_repeat_count=ab_repeat_count,
+                expected_launch_indices=expected_launch_indices,
+                slug=slug,
+                shape_point=shape_point_name,
+                kernel_signature_sha256=kernel_signature_sha256,
+                binary_sha256=binary_sha256,
+                nvbit_tracer_build_hash=tracer_build_sha256,
+                claim_scope=row.get("claim_scope", "measured_local"),
+                ab_overhead_record=ab_overhead_record,
+                dual_run_manifest_ref=str(
+                    artifact_dir / "dual_run_manifest.json"
+                ),
+                admission=admission,
+                admission_threshold_pct=admission_threshold_pct,
+                source_reader=phase_sources,
+                expected_source_snapshot=phase_source_snapshot,
+            )
+        except _pinj.PhaseLedgerPostCommitFailure as exc:
+            generation = exc.generation
+            print(
+                "phase_inject_ab_postcommit_source_invalid: "
+                f"{exc}",
+                file=sys.stderr,
+            )
+            return failed(
+                exc.typed_reason,
+                generation=generation,
+            )
+        except typed_ledger_exceptions as exc:
+            print(
+                "phase_inject_ab_ledger_typed_failure: "
+                f"token={exc.TOKEN} slug={slug} "
+                f"shape_point={shape_point_name}: "
+                f"{str(exc).strip()[:400]}",
+                file=sys.stderr,
+            )
+            return failed(
+                exc.TOKEN,
+                staging_path=ledger_staging_path,
+            )
+        generation = summary.get("generation")
+        if not isinstance(generation, ImmutableDirectoryGeneration):
+            raise ImmutableArtifactError(
+                "phase ledger producer returned no immutable generation"
+            )
+        try:
+            phase_sources.verify_path()
+            retained_executable.verify_unchanged()
+            retained_tracer.verify_unchanged()
+        except ImmutableArtifactResourceError as exc:
+            print(
+                "phase_inject_ab_source_resource_unavailable: "
+                f"{type(exc).__name__}: {exc}",
+                file=sys.stderr,
+            )
+            return failed(
+                "trace_snapshot_resource_unavailable",
+                generation=generation,
+                summary=summary,
+            )
+        except (ImmutableArtifactError, OSError) as exc:
+            print(
+                "phase_inject_ab_source_changed: "
+                f"{type(exc).__name__}: {exc}",
+                file=sys.stderr,
+            )
+            return failed(
+                "trace_filesystem_invalid",
+                generation=generation,
+                summary=summary,
+            )
+
+    if postcommit_unwind_failure is not None:
         print(
-            f"phase_inject_ab_ledger_typed_failure: token={e.TOKEN} "
-            f"slug={slug} shape_point={shape_point_name}: "
-            f"{str(e).strip()[:400]}",
+            "phase_inject_ab_postcommit_source_cleanup_invalid: "
+            f"{postcommit_unwind_failure}",
             file=sys.stderr,
         )
-        return EXIT_BUILD_FAILED
+        return failed(
+            postcommit_unwind_failure.typed_reason,
+            generation=postcommit_unwind_failure.generation,
+            summary=summary,
+        )
+    assert generation is not None
+    assert summary is not None
     print(
         "run_suite: phase_inject_ab "
         f"slug={slug} shape_point={shape_point_name} "
@@ -4035,7 +6492,12 @@ def _run_phase_inject_ab_for_handle_trace(
         f"emitted_admitted={summary['n_admitted']} "
         f"emitted_rejected={summary['n_rejected']}"
     )
-    return EXIT_OK
+    return {
+        "return_code": EXIT_OK,
+        "typed_reason": None,
+        "generation": generation,
+        "summary": summary,
+    }
 
 
 def handle_emit_dual_run_manifest(
@@ -4367,6 +6829,16 @@ def main(argv: list[str] | None = None) -> int:
                         "`defaults.drift_tolerance_ns`.")
     args = p.parse_args(argv)
 
+    import phase_inject_orchestrator as _pinj  # type: ignore[import-not-found]
+
+    if not (1 <= args.ab_repeat_count <= _pinj.PHASE_AB_MAX_REPEAT_COUNT):
+        print(
+            "phase_inject_ab_repeat_count_invalid: "
+            "--ab-repeat-count must be in "
+            f"[1, {_pinj.PHASE_AB_MAX_REPEAT_COUNT}]",
+            file=sys.stderr,
+        )
+        return EXIT_USAGE
     if args.dry_run_cpu and args.mode in GPU_ONLY_MODES:
         print(f"run_suite: --dry-run-cpu cannot be combined with --mode {args.mode}", file=sys.stderr)
         return EXIT_DRY_RUN_NOT_SUPPORTED

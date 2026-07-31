@@ -6,14 +6,10 @@ per-warp memory access record, runs it through
 writes one JSONL line per record to
 ``<trace_dir>/sector_stream/sector_stream.jsonl``.
 
-The consumer is the offline-checkable path that closes the
-C-AC-F live-evidence requirement: a sm_120 simbench trace flows
-end-to-end through the generator and produces schema-valid
-output. The wire-format contract (``threadblocks/**/*.pb`` plus
-``extra_info/allocations.json``) is validated by the existing
-:mod:`tools.nvbit_tracer.import_trace_contract` validator before
-this module walks the records, so a malformed trace is caught at
-its surface rather than producing nonsense sector-stream output.
+The capability core consumes only an ``AdmittedTraceSources`` allowlist and
+pinned snapshots. ``consume_trace_dir`` preserves path-based CLI/direct-caller
+compatibility by requiring admission, opening the capability, and invoking the
+core.
 
 Three classes of input record map to one of three output
 dispositions:
@@ -40,13 +36,30 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from collections.abc import Mapping
+from dataclasses import dataclass
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any
 
 
 _HERE = Path(__file__).resolve().parent
 _REPO_ROOT = _HERE.parent.parent
-_TOOLS_NVBIT = _REPO_ROOT / "tools" / "nvbit_tracer"
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from tools.local_labels.immutable_artifact import (  # noqa: E402
+    ensure_directory,
+    read_regular,
+    replace_regular_bytes,
+)
+from tools.nvbit_tracer.trace_admission import (  # noqa: E402
+    AdmittedTraceSources,
+    TraceAdmissionError,
+    open_admitted_trace_sources,
+    require_trace_admission,
+)
+
 _SCHEMA_PATH = (
     _REPO_ROOT
     / "workloads"
@@ -54,6 +67,152 @@ _SCHEMA_PATH = (
     / "schemas"
     / "sector_stream.schema.json"
 )
+
+
+def _freeze_json(value: Any) -> Any:
+    """Return a recursively immutable copy of one JSON value."""
+    if isinstance(value, dict):
+        return MappingProxyType({
+            str(key): _freeze_json(item) for key, item in value.items()
+        })
+    if isinstance(value, list):
+        return tuple(_freeze_json(item) for item in value)
+    if value is None or type(value) in (bool, int, float, str):
+        return value
+    raise TypeError(
+        "sector-stream records must contain only JSON-compatible values; "
+        f"found {type(value).__name__}"
+    )
+
+
+@dataclass(frozen=True, slots=True, init=False)
+class AdmittedSectorStream:
+    """Immutable sector records bound to one admitted trace generation.
+
+    Construction is intentionally private to this module's capability-backed
+    producer. Downstream consumers receive this object rather than an unbound
+    list and must call :meth:`verify_for` before using its records.
+    """
+
+    records: tuple[Mapping[str, Any], ...]
+    provenance: tuple[Mapping[str, Any], ...]
+    trace_admission_sha256: str
+    trace_filesystem_generation_sha256: str
+    contract_ok: bool
+    contract_typed_reason: str | None
+    contract_detail: str | None
+    total_records: int
+    admitted_records: int
+    typed_exclusions: Mapping[str, int]
+    schema_admits_all: bool
+    schema_first_failure: str | None
+    jsonl_path: Path | None
+    _jsonl_payload: bytes
+
+    def __new__(cls) -> "AdmittedSectorStream":
+        raise TypeError(
+            "AdmittedSectorStream can only be constructed by the "
+            "capability-backed sector-stream producer"
+        )
+
+    @classmethod
+    def _from_admitted_sources(
+        cls,
+        *,
+        sources: AdmittedTraceSources,
+        records: list[dict[str, Any]],
+        provenance: list[dict[str, Any]],
+        admitted_records: int,
+        typed_exclusions: dict[str, int],
+        schema_admits_all: bool,
+        schema_first_failure: str | None,
+        jsonl_path: Path | None,
+        jsonl_payload: bytes,
+    ) -> "AdmittedSectorStream":
+        if not isinstance(sources, AdmittedTraceSources):
+            raise TypeError("sources must be an AdmittedTraceSources capability")
+        sources.verify_unchanged()
+        admission = sources.admission
+        instance = object.__new__(cls)
+        object.__setattr__(
+            instance,
+            "records",
+            tuple(_freeze_json(record) for record in records),
+        )
+        object.__setattr__(
+            instance,
+            "provenance",
+            tuple(_freeze_json(record) for record in provenance),
+        )
+        object.__setattr__(
+            instance,
+            "trace_admission_sha256",
+            admission.trace_admission_sha256,
+        )
+        object.__setattr__(
+            instance,
+            "trace_filesystem_generation_sha256",
+            admission.trace_filesystem_generation_sha256,
+        )
+        object.__setattr__(instance, "contract_ok", True)
+        object.__setattr__(instance, "contract_typed_reason", None)
+        object.__setattr__(instance, "contract_detail", None)
+        object.__setattr__(instance, "total_records", len(records))
+        object.__setattr__(instance, "admitted_records", admitted_records)
+        object.__setattr__(
+            instance,
+            "typed_exclusions",
+            MappingProxyType(dict(typed_exclusions)),
+        )
+        object.__setattr__(instance, "schema_admits_all", schema_admits_all)
+        object.__setattr__(instance, "schema_first_failure", schema_first_failure)
+        object.__setattr__(instance, "jsonl_path", jsonl_path)
+        object.__setattr__(instance, "_jsonl_payload", bytes(jsonl_payload))
+        return instance
+
+    def verify_for(self, sources: AdmittedTraceSources) -> None:
+        """Bind both portable and local-generation seals to ``sources``."""
+        if not isinstance(sources, AdmittedTraceSources):
+            raise TypeError("sources must be an AdmittedTraceSources capability")
+        sources.verify_unchanged()
+        admission = sources.admission
+        mismatches: list[str] = []
+        if self.trace_admission_sha256 != admission.trace_admission_sha256:
+            mismatches.append(
+                "trace_admission_sha256 "
+                f"sector={self.trace_admission_sha256} "
+                f"source={admission.trace_admission_sha256}"
+            )
+        if (
+            self.trace_filesystem_generation_sha256
+            != admission.trace_filesystem_generation_sha256
+        ):
+            mismatches.append(
+                "trace_filesystem_generation_sha256 "
+                f"sector={self.trace_filesystem_generation_sha256} "
+                f"source={admission.trace_filesystem_generation_sha256}"
+            )
+        if mismatches:
+            raise TraceAdmissionError(
+                "trace_snapshot_changed",
+                "sector-stream result does not belong to the admitted trace "
+                "capability: " + "; ".join(mismatches),
+            )
+        sources.verify_unchanged()
+
+    def jsonl_bytes(self) -> bytes:
+        """Return the canonical generated JSONL bytes without filesystem I/O."""
+        return self._jsonl_payload
+
+    def mutable_records(self) -> list[dict[str, Any]]:
+        """Return detached JSON records after capability identity is verified."""
+        records: list[dict[str, Any]] = []
+        for line in self._jsonl_payload.splitlines():
+            value = json.loads(line)
+            if not isinstance(value, dict):  # construction invariant
+                raise TypeError("sector-stream JSONL record must be an object")
+            records.append(value)
+        return records
 
 
 # Lazy-importable references that the body of consume_trace_dir
@@ -71,16 +230,10 @@ def _import_helpers() -> tuple[Any, Any, Any]:
     ``tools/nvbit_tracer/traces_enhanced/dynamic_trace/`` on
     first call and caches them.
     """
-    if str(_TOOLS_NVBIT) not in sys.path:
-        sys.path.insert(0, str(_TOOLS_NVBIT))
-    if str(_HERE) not in sys.path:
-        sys.path.insert(0, str(_HERE))
-    import import_trace_contract  # type: ignore[import-not-found]
-    import generator  # type: ignore[import-not-found]
+    from tools.nvbit_tracer import import_trace_contract
+    from tools.sector_stream import generator
 
-    _, instruction_pb2, _ = (
-        import_trace_contract._import_pb_modules()
-    )
+    _, instruction_pb2, _ = import_trace_contract._import_pb_modules()
     return import_trace_contract, generator, instruction_pb2
 
 
@@ -298,95 +451,57 @@ def _admits_against_schema(
     return True, None
 
 
-def consume_trace_dir(
-    trace_dir: Path,
+def consume_admitted_trace_sources(
     *,
+    sources: AdmittedTraceSources,
+    output_root: Path | None = None,
     write_jsonl: bool = True,
-) -> dict[str, Any]:
-    """Consume one simbench trace directory through the
-    sector-stream generator.
+) -> AdmittedSectorStream:
+    """Consume one already-admitted trace through the sector generator.
 
-    Layout assumed: ``trace_dir/threadblocks/**/*.pb`` plus
-    optional ``trace_dir/extra_info/allocations.json``. The
-    function:
+    ``sources`` is mandatory and keyword-only. The core enumerates only
+    ``sources.threadblock_paths`` and reads every payload through
+    ``read_threadblock_snapshot``; it never validates, inventories, or reopens
+    the trace by pathname. ``output_root`` is used only as an output
+    destination when ``write_jsonl`` is true.
 
-    1. Validates the wire contract via
-       :func:`tools.nvbit_tracer.import_trace_contract.validate_trace_dir`.
-       If the trace fails the contract, returns immediately with
-       ``contract_ok=False``; downstream sector-stream output is
-       not produced.
-    2. Walks every threadblock and emits one JSONL line per
-       address record (admitted or typed exclusion).
-    3. Validates every emitted line against the sector-stream
-       JSON Schema.
-
-    Returns a dict with:
-
-    * ``contract_ok``: bool — overall AC4 contract result.
-    * ``contract_typed_reason``: str | None — the typed-reason
-      identifier if the contract failed.
-    * ``contract_detail``: str | None — the failing record path.
-    * ``total_records``: int — number of sector-stream records
-      produced (admitted + typed exclusions).
-    * ``admitted_records``: int — number with
-      ``result_kind=sector_stream``.
-    * ``typed_exclusions``: dict[str, int] — counts keyed by
-      typed_reason.
-    * ``schema_admits_all``: bool.
-    * ``schema_first_failure``: str | None — schema-rejection
-      reason from the first failing record.
-    * ``jsonl_path``: Path | None — written file path
-      (``None`` if ``write_jsonl=False``).
-    * ``records``: list[dict] — strictly schema-conformant
-      record dicts (the same content the JSONL artifact
-      contains). Returned in-process for callers that want to
-      inspect output without re-reading the file.
-    * ``provenance``: list[dict] — per-record debug provenance
-      (``label``, ``warp_index``, ``inst_index``, ``vpc``)
-      aligned with ``records`` by index. NOT written to disk;
-      only available in-process. The R7 split keeps the on-disk
-      JSONL strictly schema-conformant while preserving the
-      debug pathway for callers who want to map a record back
-      to its trace location.
+    The immutable result carries the exact generated records plus both the
+    portable trace-admission seal and the local filesystem-generation seal.
+    Downstream consumers must verify the result against their capability before
+    consuming records; an unbound bare-list core contract is deliberately not
+    exposed.
     """
-    import_trace_contract, generator, instruction_pb2 = (
-        _import_helpers()
-    )
+    if not isinstance(sources, AdmittedTraceSources):
+        raise TypeError("sources must be an AdmittedTraceSources capability")
+    if type(write_jsonl) is not bool:
+        raise TypeError("write_jsonl must be boolean")
+    if write_jsonl and output_root is None:
+        raise ValueError("output_root is required when write_jsonl is true")
 
-    contract_result = import_trace_contract.validate_trace_dir(
-        trace_dir
-    )
-    if not contract_result.ok:
-        return {
-            "contract_ok": False,
-            "contract_typed_reason": contract_result.typed_reason,
-            "contract_detail": contract_result.detail,
-            "total_records": 0,
-            "admitted_records": 0,
-            "typed_exclusions": {},
-            "schema_admits_all": False,
-            "schema_first_failure": None,
-            "jsonl_path": None,
-            "records": [],
-            "provenance": [],
-        }
+    sources.verify_unchanged()
+    admission = sources.admission
+    pb_paths = sources.threadblock_paths
+    if len(pb_paths) != admission.threadblock_count:
+        raise TraceAdmissionError(
+            "trace_snapshot_changed",
+            "admitted threadblock path count disagrees with admission",
+        )
 
-    schema = json.loads(_SCHEMA_PATH.read_text(encoding="utf-8"))
-    threadblock_pb2, _, _ = (
-        import_trace_contract._import_pb_modules()
-    )
+    import_trace_contract, generator, instruction_pb2 = _import_helpers()
+    schema = json.loads(read_regular(_SCHEMA_PATH))
+    if not isinstance(schema, dict):
+        raise TypeError("sector-stream schema must be a JSON object")
+    threadblock_pb2 = import_trace_contract._import_pb_modules()[0]
 
-    pb_paths = sorted(
-        (trace_dir / "threadblocks").rglob("*.pb")
-    )
     all_records: list[dict[str, Any]] = []
     all_provenance: list[dict[str, Any]] = []
-    for pb_path in pb_paths:
+    for relative_path in pb_paths:
+        snapshot = sources.read_threadblock_snapshot(relative_path)
         tb = threadblock_pb2.threadblock()
-        tb.ParseFromString(pb_path.read_bytes())
+        tb.ParseFromString(snapshot.payload)
         records, provenance = _consume_threadblock(
             tb,
-            label=str(pb_path.relative_to(trace_dir)),
+            label=relative_path,
             import_trace_contract=import_trace_contract,
             generator=generator,
             instruction_pb2=instruction_pb2,
@@ -411,30 +526,61 @@ def consume_trace_dir(
             schema_admits_all = False
             schema_first_failure = why
 
+    payload = b"".join(
+        (json.dumps(rec, sort_keys=True) + "\n").encode("utf-8")
+        for rec in all_records
+    )
     jsonl_path: Path | None = None
     if write_jsonl:
-        out_dir = trace_dir / "sector_stream"
-        out_dir.mkdir(parents=True, exist_ok=True)
+        if not schema_admits_all:
+            raise TraceAdmissionError(
+                "sector_stream_schema_invalid",
+                "refusing to publish schema-invalid sector-stream bytes: "
+                f"{schema_first_failure}",
+            )
+        if output_root is None:  # guarded above; keep failure explicit
+            raise ValueError("output_root is required when write_jsonl is true")
+        out_dir = Path(output_root) / "sector_stream"
+        ensure_directory(out_dir)
         jsonl_path = out_dir / "sector_stream.jsonl"
-        with jsonl_path.open("w", encoding="utf-8") as fh:
-            for rec in all_records:
-                fh.write(
-                    json.dumps(rec, sort_keys=True) + "\n"
-                )
+        replace_regular_bytes(jsonl_path, payload)
 
-    return {
-        "contract_ok": True,
-        "contract_typed_reason": None,
-        "contract_detail": None,
-        "total_records": len(all_records),
-        "admitted_records": admitted,
-        "typed_exclusions": typed_exclusions,
-        "schema_admits_all": schema_admits_all,
-        "schema_first_failure": schema_first_failure,
-        "jsonl_path": jsonl_path,
-        "records": all_records,
-        "provenance": all_provenance,
-    }
+    sources.verify_unchanged()
+    return AdmittedSectorStream._from_admitted_sources(
+        sources=sources,
+        records=all_records,
+        provenance=all_provenance,
+        admitted_records=admitted,
+        typed_exclusions=typed_exclusions,
+        schema_admits_all=schema_admits_all,
+        schema_first_failure=schema_first_failure,
+        jsonl_path=jsonl_path,
+        jsonl_payload=payload,
+    )
+
+
+def consume_trace_dir(
+    trace_dir: Path,
+    *,
+    write_jsonl: bool = True,
+) -> AdmittedSectorStream:
+    """Path-compatible wrapper around the admitted-source core."""
+    admission = require_trace_admission(trace_dir)
+    with open_admitted_trace_sources(
+        trace_dir, expected_admission=admission
+    ) as sources:
+        return consume_admitted_trace_sources(
+            sources=sources,
+            output_root=trace_dir,
+            write_jsonl=write_jsonl,
+        )
+
+
+__all__ = [
+    "AdmittedSectorStream",
+    "consume_admitted_trace_sources",
+    "consume_trace_dir",
+]
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -478,33 +624,23 @@ def main(argv: list[str] | None = None) -> int:
         write_jsonl=not args.no_write_jsonl,
     )
 
-    # Print only the count/status fields on the CLI; the
-    # `records` and `provenance` fields are large and only
-    # useful in-process. Callers that want them should use the
-    # library API.
-    summary_keys = {
-        "contract_ok",
-        "contract_typed_reason",
-        "contract_detail",
-        "total_records",
-        "admitted_records",
-        "typed_exclusions",
-        "schema_admits_all",
-        "schema_first_failure",
-        "jsonl_path",
+    summary = {
+        "contract_ok": result.contract_ok,
+        "contract_typed_reason": result.contract_typed_reason,
+        "contract_detail": result.contract_detail,
+        "total_records": result.total_records,
+        "admitted_records": result.admitted_records,
+        "typed_exclusions": dict(result.typed_exclusions),
+        "schema_admits_all": result.schema_admits_all,
+        "schema_first_failure": result.schema_first_failure,
+        "jsonl_path": (
+            str(result.jsonl_path) if result.jsonl_path is not None else None
+        ),
     }
-    sys.stdout.write(
-        json.dumps(
-            {k: (str(v) if isinstance(v, Path) else v)
-             for k, v in result.items() if k in summary_keys},
-            indent=2,
-            sort_keys=True,
-        )
-        + "\n"
-    )
-    if not result["contract_ok"]:
+    sys.stdout.write(json.dumps(summary, indent=2, sort_keys=True) + "\n")
+    if not result.contract_ok:
         return 1
-    if not result["schema_admits_all"]:
+    if not result.schema_admits_all:
         return 1
     return 0
 

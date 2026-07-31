@@ -1,9 +1,9 @@
 """Live divergence-proxies bundle producer (C-AC-G live-evidence path).
 
-Reads a simbench NVBit trace directory's already-emitted
-``sector_stream/sector_stream.jsonl`` plus ``stats.csv`` (the
-trace-level instruction count) and writes a per-kernel-per-launch
-proxy bundle to ``<trace_dir>/divergence_proxies/divergence_proxies.json``.
+Consumes in-process sector-stream records plus the admitted ``stats.csv``
+snapshot and writes a per-kernel-per-launch proxy bundle to
+``<output_root>/divergence_proxies/divergence_proxies.json``. The generated
+sector JSONL path is never treated as an input authority.
 
 The bundle conforms to
 ``workloads/simbench_bw/schemas/divergence_proxies.schema.json`` under
@@ -45,7 +45,9 @@ from __future__ import annotations
 
 import argparse
 import csv
+import io
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -53,12 +55,28 @@ from typing import Any
 import jsonschema
 
 _HERE = Path(__file__).resolve().parent
-if str(_HERE) not in sys.path:
-    sys.path.insert(0, str(_HERE))
-
-from proxies import compute_divergence_proxies  # noqa: E402
-
 _REPO_ROOT = _HERE.parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from tools.divergence_proxies.proxies import (  # noqa: E402
+    compute_divergence_proxies,
+)
+from tools.local_labels.immutable_artifact import (  # noqa: E402
+    ensure_directory,
+    read_regular,
+    replace_regular_bytes,
+)
+from tools.nvbit_tracer.trace_admission import (  # noqa: E402
+    AdmittedTraceSources,
+    TraceAdmissionError,
+    open_admitted_trace_sources,
+    require_trace_admission,
+)
+from tools.sector_stream.consume_trace import (  # noqa: E402
+    AdmittedSectorStream,
+    consume_admitted_trace_sources as consume_sector_stream_sources,
+)
 _SCHEMA_PATH = (
     _REPO_ROOT
     / "workloads"
@@ -69,64 +87,67 @@ _SCHEMA_PATH = (
 
 
 def _load_schema() -> dict:
-    return json.loads(_SCHEMA_PATH.read_text(encoding="utf-8"))
+    schema = json.loads(read_regular(_SCHEMA_PATH))
+    if not isinstance(schema, dict):
+        raise TypeError("divergence-proxies schema must be a JSON object")
+    return schema
 
 
-def _read_sector_stream_records(jsonl_path: Path) -> list[dict[str, Any]]:
-    records: list[dict[str, Any]] = []
-    with jsonl_path.open("r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            records.append(json.loads(line))
-    return records
-
-
-def _read_stats(stats_path: Path) -> dict[str, Any]:
-    """Parse ``stats.csv`` produced alongside the NVBit trace.
-
-    The file has a single header row followed by one data row per
-    kernel launch in the trace. For the R8 single-launch trace the
-    second row is the only data row. Every column header is stripped
-    of leading/trailing whitespace before lookup so the simbench
-    writer's two-space-after-comma format does not require special
-    handling at the call site.
-    """
-    with stats_path.open("r", encoding="utf-8") as f:
-        rows = list(csv.reader(f))
+def _read_stats(raw: bytes, *, label: str = "stats.csv") -> dict[str, Any]:
+    """Parse the sole stats row required by the single-launch schema."""
+    try:
+        text = raw.decode("utf-8")
+        rows = list(csv.reader(io.StringIO(text, newline="")))
+    except (UnicodeDecodeError, csv.Error) as exc:
+        raise TraceAdmissionError(
+            "stats_schema_invalid", f"{label} is not valid UTF-8 CSV: {exc}"
+        ) from exc
     if not rows:
-        raise ValueError(f"stats.csv at {stats_path} is empty")
-    header = [h.strip() for h in rows[0]]
-    data_rows = rows[1:]
-    if not data_rows:
-        raise ValueError(
-            f"stats.csv at {stats_path} has no data rows"
+        raise TraceAdmissionError("stats_empty", f"{label} is empty")
+    header = [cell.strip() for cell in rows[0]]
+    data_rows = [
+        [cell.strip() for cell in row]
+        for row in rows[1:]
+        if any(cell.strip() for cell in row)
+    ]
+    if len(data_rows) != 1:
+        raise TraceAdmissionError(
+            "stats_schema_invalid",
+            f"{label} must contain exactly one data row; observed "
+            f"row_count={len(data_rows)}",
         )
-    # Take the first data row; the R8 contract pins this to the
-    # single-launch trace shape.
-    cells = [c.strip() for c in data_rows[0]]
-    return dict(zip(header, cells))
+    cells = data_rows[0]
+    if len(cells) != len(header):
+        raise TraceAdmissionError(
+            "stats_schema_invalid",
+            f"{label} row has {len(cells)} cells for {len(header)} headers",
+        )
+    stats = dict(zip(header, cells))
+    for required in ("kernel id", "kernel mangled name", "total_insts"):
+        if not stats.get(required):
+            raise TraceAdmissionError(
+                "stats_schema_invalid", f"{label} missing {required!r} cell"
+            )
+    return stats
 
 
 def _kernel_unique_id_from_stats(stats: dict[str, Any]) -> int:
-    """Parse the ``kernel id`` cell into an integer.
-
-    The simbench writer emits the cell as ``kernel-<id>.trace`` (e.g.
-    ``kernel-1.trace``). Strip the prefix / suffix and parse the
-    remaining digits. A malformed cell raises ``ValueError`` rather
-    than silently substituting 0, so a mis-formatted trace does not
-    hide behind an admitted bundle.
-    """
+    """Parse the strict ``kernel-<id>.trace`` stats identity."""
     raw = stats.get("kernel id", "")
-    if not raw:
-        raise ValueError(f"stats.csv missing 'kernel id' cell")
-    s = raw
-    if s.startswith("kernel-"):
-        s = s[len("kernel-"):]
-    if s.endswith(".trace"):
-        s = s[: -len(".trace")]
-    return int(s)
+    prefix = "kernel-"
+    suffix = ".trace"
+    if not raw.startswith(prefix) or not raw.endswith(suffix):
+        raise TraceAdmissionError(
+            "stats_schema_invalid",
+            f"stats.csv 'kernel id' is not kernel-<id>.trace: {raw!r}",
+        )
+    token = raw[len(prefix): -len(suffix)]
+    if not token.isascii() or not token.isdigit():
+        raise TraceAdmissionError(
+            "stats_schema_invalid",
+            f"stats.csv 'kernel id' has a non-decimal id: {raw!r}",
+        )
+    return int(token, 10)
 
 
 def _total_instruction_count_from_stats(
@@ -154,74 +175,76 @@ _PLACEHOLDER_MANIFEST_PAIRING_INDEX: dict[str, str] = {
 }
 
 
-def consume_trace_dir(
-    trace_dir: Path,
+def consume_admitted_trace_sources(
+    *,
+    sources: AdmittedTraceSources,
+    sector_stream: AdmittedSectorStream,
+    output_root: Path,
     device: str,
-    manifest_pairing_index: dict[str, str] | None = None,
+    manifest_pairing_index: dict[str, str],
 ) -> dict[str, Any]:
-    """Read the trace directory and return a status dict.
-
-    The status dict carries the produced bundle, the number of
-    sector-stream records consumed, the strict-schema admit result,
-    and the path on disk.
-
-    ``manifest_pairing_index`` carries the canonical 5-field
-    bundle-provenance shape (``slug``, ``shape_point``,
-    ``binary_sha256``, ``source_commit``,
-    ``kernel_signature_sha256``). When omitted, a zero-fingerprint
-    placeholder is used so the standalone CLI keeps working for
-    ad-hoc inspection; the canonical ``run_suite.py`` path always
-    passes a real value derived from live ``DeviceProps`` plus
-    repo state.
-    """
-    sector_stream_jsonl = (
-        trace_dir / "sector_stream" / "sector_stream.jsonl"
-    )
-    stats_csv = trace_dir / "stats.csv"
-
-    if not sector_stream_jsonl.is_file():
-        raise FileNotFoundError(
-            f"Expected sector_stream.jsonl at {sector_stream_jsonl}; "
-            f"run tools/sector_stream/consume_trace.py first."
+    """Build one divergence bundle from admission-bound in-memory sectors."""
+    if not isinstance(sources, AdmittedTraceSources):
+        raise TypeError("sources must be an AdmittedTraceSources capability")
+    if not isinstance(sector_stream, AdmittedSectorStream):
+        raise TypeError("sector_stream must be an AdmittedSectorStream")
+    if not isinstance(manifest_pairing_index, dict):
+        raise TypeError("manifest_pairing_index must be a dictionary")
+    sources.verify_unchanged()
+    admission = sources.admission
+    if admission.launch_count != 1:
+        raise TraceAdmissionError(
+            "trace_launch_count_unsupported",
+            "divergence-proxies schema requires exactly one admitted launch; "
+            f"observed launch_count={admission.launch_count}",
         )
-    if not stats_csv.is_file():
-        raise FileNotFoundError(
-            f"Expected stats.csv at {stats_csv}; the simbench writer "
-            f"emits this file alongside the trace."
+    if admission.stats_row_count != 1:
+        raise TraceAdmissionError(
+            "stats_schema_invalid",
+            "divergence-proxies requires exactly one admitted stats row; "
+            f"observed stats_row_count={admission.stats_row_count}",
         )
-
-    sector_stream_records = _read_sector_stream_records(
-        sector_stream_jsonl
-    )
-    stats = _read_stats(stats_csv)
+    sector_stream.verify_for(sources)
+    if len(sources.threadblock_paths) != admission.threadblock_count:
+        raise TraceAdmissionError(
+            "trace_snapshot_changed",
+            "admitted threadblock path count disagrees with admission",
+        )
+    records = sector_stream.mutable_records()
+    stats = _read_stats(sources.read_stats_snapshot().payload)
     kernel_unique_id = _kernel_unique_id_from_stats(stats)
+    stats_kernel_name = str(stats["kernel mangled name"])
+    launch = admission.launches[0]
+    if (
+        kernel_unique_id != launch.kernel_id
+        or stats_kernel_name != launch.kernel_name
+    ):
+        raise TraceAdmissionError(
+            "trace_launch_identity_mismatch",
+            "stats.csv identity does not match the sole admitted launch: "
+            f"stats_kernel_id={kernel_unique_id} "
+            f"admitted_kernel_id={launch.kernel_id} "
+            f"stats_kernel_name={stats_kernel_name!r} "
+            f"admitted_kernel_name={launch.kernel_name!r}",
+        )
     total_instruction_count = _total_instruction_count_from_stats(stats)
 
-    effective_mpi: dict[str, str] = (
-        dict(manifest_pairing_index)
-        if manifest_pairing_index is not None
-        else dict(_PLACEHOLDER_MANIFEST_PAIRING_INDEX)
-    )
     bundle = compute_divergence_proxies(
-        manifest_pairing_index=effective_mpi,
+        manifest_pairing_index=dict(manifest_pairing_index),
         kernel_unique_id=kernel_unique_id,
         device=device,
-        sector_stream_records=sector_stream_records,
+        sector_stream_records=records,
         total_instruction_count=total_instruction_count,
     )
 
-    out_dir = trace_dir / "divergence_proxies"
-    out_dir.mkdir(parents=True, exist_ok=True)
+    out_dir = Path(output_root) / "divergence_proxies"
+    ensure_directory(out_dir)
     out_path = out_dir / "divergence_proxies.json"
-    out_path.write_text(
-        json.dumps(bundle, indent=2) + "\n", encoding="utf-8"
-    )
+    payload = (json.dumps(bundle, indent=2) + "\n").encode("utf-8")
+    replace_regular_bytes(out_path, payload)
 
-    # R7 lesson: validate the bytes the producer wrote, not the
-    # in-process bundle. Re-read the on-disk file before strict
-    # validation so a discrepancy between in-memory shape and
-    # serialized shape cannot recur silently.
-    on_disk = json.loads(out_path.read_text(encoding="utf-8"))
+    # Validate the exact serialized bytes read back from the output destination.
+    on_disk = json.loads(read_regular(out_path))
     schema = _load_schema()
     validator = jsonschema.Draft202012Validator(schema)
     errors = list(validator.iter_errors(on_disk))
@@ -231,16 +254,52 @@ def consume_trace_dir(
         if errors else None
     )
 
+    sources.verify_unchanged()
     return {
         "bundle_path": str(out_path),
         "kernel_unique_id": kernel_unique_id,
         "device": device,
-        "sector_stream_records_consumed": len(sector_stream_records),
+        "sector_stream_records_consumed": len(records),
         "total_instruction_count": total_instruction_count,
         "schema_admits": schema_admits,
         "schema_first_failure": first_failure,
         "proxy_summary": _summarize_proxies(bundle),
     }
+
+
+def consume_trace_dir(
+    trace_dir: Path,
+    device: str,
+    manifest_pairing_index: dict[str, str] | None = None,
+) -> dict[str, Any]:
+    """Path-compatible wrapper that regenerates sector records in memory."""
+    admission = require_trace_admission(trace_dir)
+    with open_admitted_trace_sources(
+        trace_dir, expected_admission=admission
+    ) as sources:
+        sector_result = consume_sector_stream_sources(
+            sources=sources,
+            output_root=None,
+            write_jsonl=False,
+        )
+        if not sector_result.schema_admits_all:
+            raise TraceAdmissionError(
+                "sector_stream_schema_invalid",
+                "sector-stream producer generated a schema-invalid record: "
+                f"{sector_result.schema_first_failure}",
+            )
+        effective_mpi = (
+            dict(manifest_pairing_index)
+            if manifest_pairing_index is not None
+            else dict(_PLACEHOLDER_MANIFEST_PAIRING_INDEX)
+        )
+        return consume_admitted_trace_sources(
+            sources=sources,
+            sector_stream=sector_result,
+            output_root=trace_dir,
+            device=device,
+            manifest_pairing_index=effective_mpi,
+        )
 
 
 def _summarize_proxies(bundle: dict[str, Any]) -> dict[str, Any]:
@@ -260,20 +319,22 @@ def _summarize_proxies(bundle: dict[str, Any]) -> dict[str, Any]:
     return summary
 
 
+__all__ = ["consume_admitted_trace_sources", "consume_trace_dir"]
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="python tools/divergence_proxies/bundle_from_trace.py",
         description=(
-            "Read a simbench NVBit trace directory's "
-            "sector_stream.jsonl and stats.csv and emit the "
-            "divergence-proxies bundle."
+            "Consume admitted trace snapshots and in-memory sector records "
+            "and emit the divergence-proxies bundle."
         ),
     )
     parser.add_argument(
         "--trace-dir", required=True, metavar="PATH",
         help=(
-            "Path to the trace directory containing "
-            "sector_stream/sector_stream.jsonl and stats.csv."
+            "Path to the admitted trace directory. Sector records are "
+            "regenerated from its capability-backed threadblock snapshots."
         ),
     )
     parser.add_argument(
@@ -287,7 +348,7 @@ def main(argv: list[str] | None = None) -> int:
     )
     args = parser.parse_args(argv)
 
-    trace_dir = Path(args.trace_dir).resolve()
+    trace_dir = Path(os.path.abspath(os.fspath(args.trace_dir)))
     status = consume_trace_dir(trace_dir, args.device)
     sys.stdout.write(json.dumps(status, indent=2) + "\n")
     return 0 if status["schema_admits"] else 2

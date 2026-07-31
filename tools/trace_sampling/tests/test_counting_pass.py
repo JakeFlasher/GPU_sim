@@ -3,6 +3,8 @@ from pathlib import Path
 
 import pytest
 
+from tools.nvbit_tracer.proto_binding_loader import load_dynamic_trace_bindings
+
 from counting_pass import (ATOMIC, ASYNC_COPY, BlockStat, _gini,
                            _reconstruct_waves, _resident_from_slots,
                            _top_fraction_share, analyze_trace_dir)
@@ -40,8 +42,9 @@ def test_wave_reconstruction_on_launch_index():
 
 
 def _write_two_launch_trace(root: Path) -> None:
-    import threadblock_pb2  # type: ignore
-    import trace_pb2  # type: ignore
+    bindings = load_dynamic_trace_bindings()
+    threadblock_pb2 = bindings.threadblock_pb2
+    trace_pb2 = bindings.trace_pb2
 
     t = trace_pb2.Trace()
     st = t.gpu_device[0].streams[0]
@@ -65,8 +68,9 @@ def _write_two_launch_trace(root: Path) -> None:
 
 def _write_sector_trace(root: Path, records) -> Path:
     """Write one block; each record is (class, width, space, operands, masks)."""
-    import threadblock_pb2  # type: ignore
-    import trace_pb2  # type: ignore
+    bindings = load_dynamic_trace_bindings()
+    threadblock_pb2 = bindings.threadblock_pb2
+    trace_pb2 = bindings.trace_pb2
 
     t = trace_pb2.Trace()
     k = t.gpu_device[0].streams[0].kernels.add()
@@ -147,8 +151,9 @@ def test_full_trace_global_missing_space_uses_class_fallback(tmp_path):
 
 
 def test_analyze_trace_dir_rejects_per_axis_out_of_grid_cta(tmp_path):
-    import threadblock_pb2  # type: ignore
-    import trace_pb2  # type: ignore
+    bindings = load_dynamic_trace_bindings()
+    threadblock_pb2 = bindings.threadblock_pb2
+    trace_pb2 = bindings.trace_pb2
 
     t = trace_pb2.Trace()
     k = t.gpu_device[0].streams[0].kernels.add()
@@ -175,7 +180,7 @@ def _write_capture(root, *, grid, block, launch=(0, 0, 1), cap_launch=None,
                    mode=1, stats_pass_version=2, block_overrides=None,
                    block_omit=None):
     import json as _json
-    import trace_pb2  # type: ignore
+    trace_pb2 = load_dynamic_trace_bindings().trace_pb2
 
     t = trace_pb2.Trace()
     st = t.gpu_device[launch[0]].streams[launch[1]]

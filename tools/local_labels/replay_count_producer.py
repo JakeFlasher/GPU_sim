@@ -72,14 +72,17 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
-_PB_DIR = REPO_ROOT / "workloads" / "simbench_bw" / "_pb_generated"
-if str(_PB_DIR) not in sys.path:
-    sys.path.insert(0, str(_PB_DIR))
 _TRACER_DIR = REPO_ROOT / "tools" / "nvbit_tracer"
 if str(_TRACER_DIR) not in sys.path:
     sys.path.insert(0, str(_TRACER_DIR))
+
+from tools.nvbit_tracer.proto_binding_loader import (  # noqa: E402
+    load_dynamic_trace_bindings,
+)
 
 from observation_contract import (  # noqa: E402
     ContractEntryMissingError,
@@ -420,7 +423,7 @@ def walk_trace_dir(trace_dir: Path) -> dict:
     """Walk every threadblock .pb under the trace dir and merge the
     aggregates; load the typed exclusion sidecar (per-PC counts for
     the recognized-but-excluded classes + the UNSPECIFIED fallback)."""
-    import threadblock_pb2
+    threadblock_pb2 = load_dynamic_trace_bindings().threadblock_pb2
 
     # Restrict to the lowest (device, stream, kernel) launch — the one the
     # label measured — via the shared launch-scoping helper.

@@ -40,6 +40,34 @@ def test_runtime_env_prepends_pinned_lib_once(tmp_path: Path) -> None:
     assert env["LD_LIBRARY_PATH"] == f"{pb_lib}:/other:/tail"
 
 
+def test_runtime_env_preflights_retained_tracer_descriptor(tmp_path: Path) -> None:
+    tracer, pb_lib = _fixture_paths(tmp_path)
+    completed = subprocess.CompletedProcess(
+        ["ldd"],
+        0,
+        f"libprotobuf.so.34.1.0 => {pb_lib}/libprotobuf.so.34.1.0 (0x1)\n",
+        "",
+    )
+    descriptor = os.open(tracer, os.O_RDONLY)
+    try:
+        with mock.patch(
+            "tools.nvbit_tracer.runtime_env.subprocess.run",
+            return_value=completed,
+        ) as run:
+            tracer_runtime_env(
+                tracer,
+                pb_lib=pb_lib,
+                base_env={},
+                retained_descriptor=descriptor,
+            )
+    finally:
+        os.close(descriptor)
+
+    args, kwargs = run.call_args
+    assert args[0] == ["ldd", f"/proc/self/fd/{descriptor}"]
+    assert kwargs["pass_fds"] == (descriptor,)
+
+
 def test_runtime_env_rejects_missing_pinned_runtime(tmp_path: Path) -> None:
     tracer = tmp_path / "tracer.so"
     tracer.write_bytes(b"ELF fixture")

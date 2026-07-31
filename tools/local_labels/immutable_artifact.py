@@ -7,15 +7,19 @@ import ctypes
 import dataclasses
 import errno
 import fcntl
+import functools
 import hashlib
+import heapq
 import json
 import math
 import os
 import resource
 import stat
 import sys
+import threading
+import warnings
 from pathlib import Path, PurePosixPath
-from typing import Any, Callable, Iterable, Mapping
+from typing import Any, Callable, Iterable, Mapping, NoReturn
 
 
 _CHUNK = 1024 * 1024
@@ -26,6 +30,7 @@ _MAX_RELATIVE_BYTES = 4096
 _MAX_FINAL_NAME_BYTES = 246
 _MAX_REGULAR_LEAF_BYTES = 243
 _SNAPSHOT_CLOSURE_THRESHOLD = 512
+_INOTIFY_Q_OVERFLOW = 0x00004000
 _INOTIFY_MUTATION_EVENTS = (
     0x00000002  # IN_MODIFY
     | 0x00000004  # IN_ATTRIB
@@ -37,10 +42,24 @@ _INOTIFY_MUTATION_EVENTS = (
     | 0x00000400  # IN_DELETE_SELF
     | 0x00000800  # IN_MOVE_SELF
     | 0x00002000  # IN_UNMOUNT
-    | 0x00004000  # IN_Q_OVERFLOW
+    | _INOTIFY_Q_OVERFLOW
     | 0x00008000  # IN_IGNORED
 )
 _INOTIFY_DIRECTORY_MASK = _INOTIFY_MUTATION_EVENTS | 0x01000000  # IN_ONLYDIR
+_INOTIFY_NAMESPACE_EVENTS = (
+    0x00000040  # IN_MOVED_FROM
+    | 0x00000080  # IN_MOVED_TO
+    | 0x00000100  # IN_CREATE
+    | 0x00000200  # IN_DELETE
+)
+_INOTIFY_READ_BYTES = 64 * 1024
+_INOTIFY_MAX_DRAIN_ATTEMPTS = 128
+_INOTIFY_MAX_DRAIN_BATCHES = 64
+_INOTIFY_MAX_DRAIN_BYTES = 4 * 1024 * 1024
+_INOTIFY_MAX_DRAIN_EVENTS = 65_536
+_INVENTORY_DIAGNOSTIC_SAMPLE = 8
+_ROLLBACK_GUARD_DIAGNOSTIC_LIMIT = 128
+_DESCRIPTOR_RESOURCE_ERRNOS = frozenset({errno.EMFILE, errno.ENFILE})
 _PARTIAL_SUFFIX = ".m5-partial"
 _PARTIAL_SUFFIXES = frozenset({
     ".m5-partial", ".m6-partial", ".ncu-details-partial",
@@ -59,6 +78,63 @@ NAMESPACE_PREFIX_CONFLICT = "NAMESPACE_PREFIX_CONFLICT"
 
 class ImmutableArtifactError(RuntimeError):
     """An immutable-artifact contract or filesystem operation failed."""
+
+
+class ImmutableArtifactLimitError(ImmutableArtifactError):
+    """A caller-supplied bounded-read or inventory ceiling was exceeded."""
+
+
+class ImmutableArtifactResourceError(ImmutableArtifactError):
+    """The host cannot provide a required bounded verification resource."""
+
+
+def _descriptor_resource_cause(
+    error: BaseException,
+) -> OSError | None:
+    pending: list[BaseException] = [error]
+    observed: set[int] = set()
+    while pending:
+        current = pending.pop()
+        identity = id(current)
+        if identity in observed:
+            continue
+        observed.add(identity)
+        if (
+            isinstance(current, OSError)
+            and current.errno in _DESCRIPTOR_RESOURCE_ERRNOS
+        ):
+            return current
+        explicit_cause = current.__cause__
+        if isinstance(explicit_cause, BaseException):
+            pending.append(explicit_cause)
+        elif not current.__suppress_context__:
+            implicit_context = current.__context__
+            if isinstance(implicit_context, BaseException):
+                pending.append(implicit_context)
+    return None
+
+
+def _translate_descriptor_resource_errors(
+    label: str,
+) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
+    def decorate(function: Callable[..., Any]) -> Callable[..., Any]:
+        @functools.wraps(function)
+        def translated(*args: Any, **kwargs: Any) -> Any:
+            try:
+                return function(*args, **kwargs)
+            except ImmutableArtifactResourceError:
+                raise
+            except BaseException as exc:
+                resource_cause = _descriptor_resource_cause(exc)
+                if resource_cause is None:
+                    raise
+                raise ImmutableArtifactResourceError(
+                    f"{VERIFY_RESOURCE_BOUND}: {label}: {resource_cause}"
+                ) from exc
+
+        return translated
+
+    return decorate
 
 
 @dataclasses.dataclass(frozen=True)
@@ -291,6 +367,7 @@ def _consume_stable_regular(
     consume: Callable[[bytes], None],
     *,
     allow_hardlinks: bool = False,
+    max_bytes: int | None = None,
 ) -> tuple[int, int, MetadataSnapshot]:
     """Consume a pinned leaf through the anchored-reader state machine.
 
@@ -306,6 +383,14 @@ def _consume_stable_regular(
         raise ImmutableArtifactError("opened artifact is not a regular file")
     if not allow_hardlinks and before.st_nlink != 1:
         raise ImmutableArtifactError("hard-linked regular file is not immutable")
+    if max_bytes is not None:
+        if isinstance(max_bytes, bool) or not isinstance(max_bytes, int) or max_bytes < 0:
+            raise ImmutableArtifactError("regular snapshot byte limit is invalid")
+        if before.st_size > max_bytes:
+            raise ImmutableArtifactLimitError(
+                f"regular file exceeds bounded snapshot limit: "
+                f"{before.st_size} > {max_bytes} bytes"
+            )
     remaining = before.st_size
     consumed = 0
     while remaining:
@@ -332,11 +417,17 @@ def _consume_stable_regular(
 
 
 def _read_fd_snapshot(
-    descriptor: int, *, allow_hardlinks: bool = False,
+    descriptor: int,
+    *,
+    allow_hardlinks: bool = False,
+    max_bytes: int | None = None,
 ) -> tuple[bytes, MetadataSnapshot]:
     blocks: list[bytes] = []
     _size, _mode, snapshot = _consume_stable_regular(
-        descriptor, blocks.append, allow_hardlinks=allow_hardlinks
+        descriptor,
+        blocks.append,
+        allow_hardlinks=allow_hardlinks,
+        max_bytes=max_bytes,
     )
     return b"".join(blocks), snapshot
 
@@ -426,6 +517,33 @@ def _close_descriptors(
     raise ImmutableArtifactError(
         f"{DURABILITY_UNPROVEN}: {label}: {close_error}"
     ) from close_error
+
+
+def _close_descriptors_without_callback(
+    descriptors: Iterable[int],
+    *,
+    label: str,
+) -> None:
+    """Release final sentinels through libc without a Python close callback."""
+    libc = ctypes.CDLL(None, use_errno=True)
+    close_call = libc.close
+    close_call.argtypes = [ctypes.c_int]
+    close_call.restype = ctypes.c_int
+    close_error: OSError | None = None
+    for descriptor in descriptors:
+        ctypes.set_errno(0)
+        if close_call(descriptor) == 0:
+            continue
+        error_number = ctypes.get_errno() or errno.EIO
+        if close_error is None:
+            close_error = OSError(
+                error_number,
+                f"{label}: {os.strerror(error_number)}",
+            )
+    if close_error is not None:
+        raise ImmutableArtifactError(
+            f"{DURABILITY_UNPROVEN}: {label}: {close_error}"
+        ) from close_error
 
 
 def _close_callables(
@@ -678,6 +796,9 @@ class RetainedExecutable:
     sha256: str
     snapshot: _Snapshot
     _pinned: _PinnedRegular
+    _monitor_state: Any = dataclasses.field(
+        default=None, init=False, repr=False,
+    )
 
     @property
     def descriptor(self) -> int:
@@ -685,8 +806,13 @@ class RetainedExecutable:
             raise ImmutableArtifactError("retained executable is closed")
         return self._pinned.descriptor
 
+    @property
+    def proc_path(self) -> str:
+        return f"/proc/self/fd/{self.descriptor}"
+
     def verify_unchanged(self) -> None:
         """Rebind path, inode, metadata, and bytes to the initial observation."""
+        _require_retained_path_monitor_quiet(self._monitor_state)
         descriptor = self.descriptor
         self._pinned.verify_path()
         if _snapshot_fields(os.fstat(descriptor)) != self.snapshot:
@@ -701,12 +827,27 @@ class RetainedExecutable:
             raise ImmutableArtifactError("retained executable lost execute permission")
         self._pinned.verify_path()
         os.lseek(descriptor, 0, os.SEEK_SET)
+        _require_retained_path_monitor_quiet(self._monitor_state)
 
     def close(self) -> None:
-        self._pinned.close()
+        state = self._monitor_state
+        self._monitor_state = None
+        closers: list[Callable[[], None]] = []
+        if state is not None:
+            closers.append(state.monitor.close)
+        closers.append(self._pinned.close)
+        _close_callables(closers, label="retained executable close")
 
     def __enter__(self) -> RetainedExecutable:
-        self.verify_unchanged()
+        if self._monitor_state is None:
+            self._monitor_state = _arm_retained_path_monitor(self._pinned)
+        try:
+            self.verify_unchanged()
+        except BaseException:
+            _close_callables(
+                (self.close,), label="retained executable entry close"
+            )
+            raise
         return self
 
     def __exit__(self, exc_type, exc, traceback) -> bool:
@@ -730,25 +871,42 @@ class RetainedExecutable:
         return False
 
 
+@_translate_descriptor_resource_errors("retained executable open")
 def open_retained_executable(path: Path) -> RetainedExecutable:
     """Open, hash, and retain one executable without following any symlink."""
     absolute = Path(os.path.abspath(os.fspath(path)))
-    pinned = _open_regular(absolute)
+    pinned, monitor_state = _open_regular_with_early_path_monitor(absolute)
+    retained: RetainedExecutable | None = None
     try:
         descriptor = pinned.descriptor
         before = _snapshot_fields(os.fstat(descriptor))
         if before[2] & 0o111 == 0:
             raise ImmutableArtifactError(f"regular file is not executable: {absolute}")
+        # Ancestor and leaf watches are armed before path traversal completes,
+        # so a transient namespace swap cannot hide before this identity hash.
         os.lseek(descriptor, 0, os.SEEK_SET)
         digest, _size, _mode = _hash_fd(descriptor)
         after = _snapshot_fields(os.fstat(descriptor))
         if after != before:
             raise ImmutableArtifactError("executable metadata changed during identity read")
+        _require_retained_path_monitor_quiet(monitor_state)
         pinned.verify_path()
+        _require_retained_path_monitor_quiet(monitor_state)
         os.lseek(descriptor, 0, os.SEEK_SET)
-        return RetainedExecutable(absolute, digest, before, pinned)
+        retained = RetainedExecutable(absolute, digest, before, pinned)
+        retained._monitor_state = monitor_state
+        monitor_state = None
+        retained.verify_unchanged()
+        return retained
     except BaseException:
-        pinned.close()
+        if retained is None:
+            closers: list[Callable[[], None]] = []
+            if monitor_state is not None:
+                closers.append(monitor_state.monitor.close)
+            closers.append(pinned.close)
+            _close_callables(closers, label="retained executable open cleanup")
+        else:
+            retained.close()
         raise
 
 
@@ -761,6 +919,9 @@ class RetainedRegular:
     size_bytes: int
     snapshot: _Snapshot
     _pinned: _PinnedRegular
+    _monitor_state: Any = dataclasses.field(
+        default=None, init=False, repr=False,
+    )
 
     @property
     def descriptor(self) -> int:
@@ -774,6 +935,7 @@ class RetainedRegular:
 
     def read_bytes(self) -> bytes:
         """Read this retained inode while preserving path and snapshot identity."""
+        _require_retained_path_monitor_quiet(self._monitor_state)
         descriptor = self.descriptor
         self._pinned.verify_path()
         if _snapshot_fields(os.fstat(descriptor)) != self.snapshot:
@@ -788,10 +950,12 @@ class RetainedRegular:
             raise ImmutableArtifactError("retained regular-file SHA-256 changed")
         self._pinned.verify_path()
         os.lseek(descriptor, 0, os.SEEK_SET)
+        _require_retained_path_monitor_quiet(self._monitor_state)
         return payload
 
     def verify_unchanged(self) -> None:
         """Rebind path, inode, metadata, size, and bytes to the initial read."""
+        _require_retained_path_monitor_quiet(self._monitor_state)
         descriptor = self.descriptor
         self._pinned.verify_path()
         if _snapshot_fields(os.fstat(descriptor)) != self.snapshot:
@@ -806,11 +970,20 @@ class RetainedRegular:
             raise ImmutableArtifactError("retained regular-file SHA-256 changed")
         self._pinned.verify_path()
         os.lseek(descriptor, 0, os.SEEK_SET)
+        _require_retained_path_monitor_quiet(self._monitor_state)
 
     def close(self) -> None:
-        self._pinned.close()
+        state = self._monitor_state
+        self._monitor_state = None
+        closers: list[Callable[[], None]] = []
+        if state is not None:
+            closers.append(state.monitor.close)
+        closers.append(self._pinned.close)
+        _close_callables(closers, label="retained regular-file close")
 
     def __enter__(self) -> RetainedRegular:
+        if self._monitor_state is None:
+            self._monitor_state = _arm_retained_path_monitor(self._pinned)
         try:
             self.verify_unchanged()
         except BaseException:
@@ -841,13 +1014,16 @@ class RetainedRegular:
         return False
 
 
+@_translate_descriptor_resource_errors("retained regular-file open")
 def open_retained_regular(path: Path) -> RetainedRegular:
     """Open, hash, and retain one regular file without following any symlink."""
     absolute = Path(os.path.abspath(os.fspath(path)))
-    pinned = _open_regular(absolute)
+    pinned, monitor_state = _open_regular_with_early_path_monitor(absolute)
+    retained: RetainedRegular | None = None
     try:
         descriptor = pinned.descriptor
         before = _snapshot_fields(os.fstat(descriptor))
+        # Ancestor and leaf watches already cover this first identity hash.
         os.lseek(descriptor, 0, os.SEEK_SET)
         digest, size, _mode = _hash_fd(descriptor)
         after = _snapshot_fields(os.fstat(descriptor))
@@ -855,21 +1031,425 @@ def open_retained_regular(path: Path) -> RetainedRegular:
             raise ImmutableArtifactError(
                 "regular-file metadata changed during identity read"
             )
+        _require_retained_path_monitor_quiet(monitor_state)
         pinned.verify_path()
+        _require_retained_path_monitor_quiet(monitor_state)
         os.lseek(descriptor, 0, os.SEEK_SET)
-        return RetainedRegular(absolute, digest, size, before, pinned)
+        retained = RetainedRegular(absolute, digest, size, before, pinned)
+        retained._monitor_state = monitor_state
+        monitor_state = None
+        retained.verify_unchanged()
+        return retained
     except BaseException:
-        pinned.close()
+        if retained is None:
+            closers: list[Callable[[], None]] = []
+            if monitor_state is not None:
+                closers.append(monitor_state.monitor.close)
+            closers.append(pinned.close)
+            _close_callables(closers, label="retained regular-file open cleanup")
+        else:
+            retained.close()
         raise
 
 
+def _duplicate_pinned_regular_for_close(
+    pinned: _PinnedRegular,
+) -> _PinnedRegular:
+    """Duplicate one exact inode/ancestor capability without closing via hooks."""
+    directory_descriptors: list[int] = []
+    descriptor = -1
+    duplicate: _PinnedRegular | None = None
+    try:
+        ancestor_nodes = tuple(
+            _node_identity(os.fstat(value))
+            for value in pinned.directory_descriptors
+        )
+        leaf_snapshot = _snapshot_fields(os.fstat(pinned.descriptor))
+        for value in pinned.directory_descriptors:
+            directory_descriptors.append(os.dup(value))
+        descriptor = os.dup(pinned.descriptor)
+        duplicate = _PinnedRegular(
+            descriptor,
+            tuple(directory_descriptors),
+            pinned.directory_names,
+            pinned.leaf_name,
+            allow_hardlinks=pinned.allow_hardlinks,
+        )
+        descriptor = -1
+        directory_descriptors = []
+        duplicate.verify_path()
+        if (
+            tuple(
+                _node_identity(os.fstat(value))
+                for value in duplicate.directory_descriptors
+            )
+            != ancestor_nodes
+            or _snapshot_fields(os.fstat(duplicate.descriptor))
+            != leaf_snapshot
+        ):
+            raise ImmutableArtifactError(
+                "retained regular-file close guard changed while duplicating"
+            )
+        return duplicate
+    except BaseException:
+        descriptors = tuple(
+            value
+            for value in (
+                descriptor,
+                *reversed(directory_descriptors),
+            )
+            if value >= 0
+        )
+        if duplicate is not None:
+            descriptors = (
+                duplicate.descriptor,
+                *reversed(duplicate.directory_descriptors),
+            )
+            duplicate.descriptor = -1
+            duplicate.directory_descriptors = ()
+        if descriptors:
+            _close_descriptors(
+                descriptors,
+                label="retained regular-file close guard cleanup",
+            )
+        raise
+
+
+def _close_pinned_regular_without_hook(
+    pinned: _PinnedRegular,
+    *,
+    label: str,
+) -> None:
+    descriptor = pinned.descriptor
+    directory_descriptors = pinned.directory_descriptors
+    descriptors = tuple(
+        value
+        for value in (descriptor, *reversed(directory_descriptors))
+        if value >= 0
+    )
+    # close(2) may release a descriptor even when the reporting boundary raises.
+    # Consume numeric ownership before the first attempt so no caller can retry
+    # an uncertain number after another thread or callback has reused it.
+    pinned.descriptor = -1
+    pinned.directory_descriptors = ()
+    if descriptors:
+        _close_descriptors(descriptors, label=label)
+
+
+def _close_pinned_regular_final_sentinels(
+    pinned_files: tuple[_PinnedRegular, ...],
+    *,
+    label: str = "authenticated retained final sentinel release",
+) -> None:
+    """Release a complete sentinel set without another hookable close boundary."""
+    descriptors = tuple(
+        descriptor
+        for pinned in reversed(pinned_files)
+        for descriptor in (
+            pinned.descriptor,
+            *reversed(pinned.directory_descriptors),
+        )
+        if descriptor >= 0
+    )
+    try:
+        if descriptors:
+            _close_descriptors_without_callback(descriptors, label=label)
+    finally:
+        # Raw close(2) is attempted for every descriptor before an error is
+        # reported. Never expose an uncertain descriptor number for reuse.
+        for pinned in pinned_files:
+            pinned.descriptor = -1
+            pinned.directory_descriptors = ()
+
+
+def _verify_retained_regular_with_pinned(
+    retained: RetainedRegular,
+    pinned: _PinnedRegular,
+    *,
+    monitor_state: _RetainedPathMonitorState | None,
+) -> None:
+    _require_retained_path_monitor_quiet(monitor_state)
+    pinned.verify_path()
+    descriptor = pinned.descriptor
+    if _snapshot_fields(os.fstat(descriptor)) != retained.snapshot:
+        raise ImmutableArtifactError("retained regular-file metadata changed")
+    os.lseek(descriptor, 0, os.SEEK_SET)
+    digest, size, _mode = _hash_fd(descriptor)
+    if _snapshot_fields(os.fstat(descriptor)) != retained.snapshot:
+        raise ImmutableArtifactError("retained regular-file metadata changed")
+    if size != retained.size_bytes:
+        raise ImmutableArtifactError("retained regular-file size changed")
+    if digest != retained.sha256:
+        raise ImmutableArtifactError("retained regular-file SHA-256 changed")
+    pinned.verify_path()
+    os.lseek(descriptor, 0, os.SEEK_SET)
+    _require_retained_path_monitor_quiet(monitor_state)
+
+
+@_translate_descriptor_resource_errors(
+    "authenticated retained regular-file close"
+)
+def close_retained_regular_files_authenticated(
+    retained_files: tuple[RetainedRegular, ...],
+    *,
+    lock_reader: PinnedDirectoryReader,
+    closure_callbacks: tuple[Callable[[], None], ...] = (),
+) -> None:
+    """Authenticate and close retained files while holding one publisher lock.
+
+    Every original inode/ancestor capability is duplicated into an independent
+    rollback guard before closure. Mutation monitors remain armed while the
+    original ``_PinnedRegular.close`` operations and caller lock/source callbacks
+    run. After monitor closure and guard authentication, a final sentinel set is
+    created before the hookable guard-release boundary and authenticated again
+    afterward. Failure transfers the current complete recovery set back into its
+    ``RetainedRegular`` owners; success releases all final sentinels through raw
+    libc ``close(2)`` without a later Python close callback.
+    """
+    if type(retained_files) is not tuple or not retained_files:
+        raise ImmutableArtifactError(
+            "authenticated retained close requires a nonempty exact tuple"
+        )
+    if type(lock_reader) is not PinnedDirectoryReader:
+        raise ImmutableArtifactError(
+            "authenticated retained close requires an exact pinned lock reader"
+        )
+    if any(type(retained) is not RetainedRegular for retained in retained_files):
+        raise ImmutableArtifactError(
+            "authenticated retained close requires exact retained regular files"
+        )
+    if len({id(retained) for retained in retained_files}) != len(retained_files):
+        raise ImmutableArtifactError(
+            "authenticated retained close rejects duplicate capabilities"
+        )
+    if type(closure_callbacks) is not tuple or any(
+        not callable(callback) for callback in closure_callbacks
+    ):
+        raise ImmutableArtifactError(
+            "authenticated retained close callbacks must be an exact callable tuple"
+        )
+
+    lock_reader.verify_path()
+    _lock_directory(
+        lock_reader.descriptor,
+        "authenticated retained regular-file close",
+        blocking=False,
+    )
+    lock_reader.verify_path()
+    for retained in retained_files:
+        retained.verify_unchanged()
+    lock_reader.verify_path()
+
+    originals = tuple(retained._pinned for retained in retained_files)
+    guards: list[_PinnedRegular | None] = []
+    try:
+        for original in originals:
+            guards.append(_duplicate_pinned_regular_for_close(original))
+    except BaseException:
+        for guard in reversed(guards):
+            if guard is not None:
+                _close_pinned_regular_without_hook(
+                    guard, label="retained close guard construction cleanup",
+                )
+        raise
+
+    def transfer_guards() -> None:
+        for retained, original, guard in zip(
+            retained_files, originals, guards, strict=True,
+        ):
+            if guard is None:
+                continue
+            if original.descriptor >= 0 or original.directory_descriptors:
+                try:
+                    _close_pinned_regular_without_hook(
+                        original,
+                        label="failed authenticated original capability cleanup",
+                    )
+                except BaseException:
+                    pass
+            retained._pinned = guard
+        guards[:] = [None] * len(guards)
+
+    pinned_close_errors: list[BaseException] = []
+    for original in reversed(originals):
+        try:
+            original.close()
+        except BaseException as exc:
+            pinned_close_errors.append(exc)
+
+    callback_errors: list[BaseException] = []
+    for callback in closure_callbacks:
+        try:
+            callback()
+        except BaseException as exc:
+            callback_errors.append(exc)
+
+    verification_errors: list[BaseException] = []
+    for retained, guard in zip(retained_files, guards, strict=True):
+        assert guard is not None
+        try:
+            _verify_retained_regular_with_pinned(
+                retained,
+                guard,
+                monitor_state=retained._monitor_state,
+            )
+        except BaseException as exc:
+            verification_errors.append(exc)
+
+    first_phase_errors = (
+        callback_errors + pinned_close_errors + verification_errors
+    )
+    if first_phase_errors:
+        transfer_guards()
+        primary = first_phase_errors[0]
+        for additional in first_phase_errors[1:]:
+            try:
+                primary.add_note(
+                    "additional authenticated retained-close failure: "
+                    f"{additional}"
+                )
+            except (AttributeError, TypeError):
+                pass
+        raise primary
+
+    monitor_close_errors: list[BaseException] = []
+    for retained in retained_files:
+        state = retained._monitor_state
+        if state is None:
+            continue
+        try:
+            _require_retained_path_monitor_quiet(state)
+            state.monitor.close()
+        except BaseException as exc:
+            monitor_close_errors.append(exc)
+        else:
+            retained._monitor_state = None
+
+    post_close_errors: list[BaseException] = []
+    for retained, guard in zip(retained_files, guards, strict=True):
+        assert guard is not None
+        try:
+            _verify_retained_regular_with_pinned(
+                retained,
+                guard,
+                monitor_state=retained._monitor_state,
+            )
+        except BaseException as exc:
+            post_close_errors.append(exc)
+
+    final_errors = monitor_close_errors + post_close_errors
+    if final_errors:
+        transfer_guards()
+        primary = final_errors[0]
+        for additional in final_errors[1:]:
+            try:
+                primary.add_note(
+                    "additional authenticated retained-close failure: "
+                    f"{additional}"
+                )
+            except (AttributeError, TypeError):
+                pass
+        raise primary
+
+    final_sentinels: list[_PinnedRegular | None] = []
+    try:
+        for guard in guards:
+            assert guard is not None
+            final_sentinels.append(_duplicate_pinned_regular_for_close(guard))
+    except BaseException as sentinel_error:
+        sentinel_cleanup_error: BaseException | None = None
+        constructed_sentinels = tuple(
+            sentinel
+            for sentinel in final_sentinels
+            if sentinel is not None
+        )
+        if constructed_sentinels:
+            try:
+                _close_pinned_regular_final_sentinels(
+                    constructed_sentinels,
+                    label="failed final sentinel construction cleanup",
+                )
+            except BaseException as exc:
+                sentinel_cleanup_error = exc
+        transfer_guards()
+        if sentinel_cleanup_error is not None:
+            try:
+                sentinel_error.add_note(
+                    "additional final sentinel construction cleanup failure: "
+                    f"{sentinel_cleanup_error}"
+                )
+            except (AttributeError, TypeError):
+                pass
+        raise
+
+    guard_release_errors: list[BaseException] = []
+    for guard in reversed(guards):
+        assert guard is not None
+        try:
+            _close_pinned_regular_without_hook(
+                guard, label="authenticated retained close guard release",
+            )
+        except BaseException as exc:
+            guard_release_errors.append(exc)
+
+    guards[:] = [None] * len(guards)
+
+    sentinel_verification_errors: list[BaseException] = []
+    for retained, sentinel in zip(
+        retained_files, final_sentinels, strict=True,
+    ):
+        assert sentinel is not None
+        try:
+            _verify_retained_regular_with_pinned(
+                retained,
+                sentinel,
+                monitor_state=retained._monitor_state,
+            )
+        except BaseException as exc:
+            sentinel_verification_errors.append(exc)
+
+    successor_errors = guard_release_errors + sentinel_verification_errors
+    if successor_errors:
+        for retained, sentinel in zip(
+            retained_files, final_sentinels, strict=True,
+        ):
+            assert sentinel is not None
+            retained._pinned = sentinel
+        final_sentinels[:] = [None] * len(final_sentinels)
+        primary = successor_errors[0]
+        for additional in successor_errors[1:]:
+            try:
+                primary.add_note(
+                    "additional authenticated retained-close successor failure: "
+                    f"{additional}"
+                )
+            except (AttributeError, TypeError):
+                pass
+        raise primary
+
+    authenticated_sentinels = tuple(
+        sentinel
+        for sentinel in final_sentinels
+        if sentinel is not None
+    )
+    try:
+        _close_pinned_regular_final_sentinels(authenticated_sentinels)
+    finally:
+        final_sentinels[:] = [None] * len(final_sentinels)
+
+
 def read_regular_snapshot(
-    path: Path, *, allow_hardlinks: bool = False,
+    path: Path,
+    *,
+    allow_hardlinks: bool = False,
+    max_bytes: int | None = None,
 ) -> PinnedRegularSnapshot:
     pinned = _open_regular(Path(path), allow_hardlinks=allow_hardlinks)
     try:
         payload, metadata = _read_fd_snapshot(
-            pinned.descriptor, allow_hardlinks=allow_hardlinks,
+            pinned.descriptor,
+            allow_hardlinks=allow_hardlinks,
+            max_bytes=max_bytes,
         )
         pinned.verify_path()
         if _snapshot_fields(os.fstat(pinned.descriptor)) != metadata:
@@ -1071,38 +1651,91 @@ def read_relative(root: Path, relative_path: str) -> bytes:
 class PinnedDirectoryReader:
     """Read one tree through a single pinned, continuously revalidated root."""
 
+    @_translate_descriptor_resource_errors("pinned directory reader open")
     def __init__(self, root: Path) -> None:
-        self._root = _open_pinned_directory(Path(root))
+        self._root, self._path_monitor = (
+            _open_directory_with_early_path_monitor(Path(root))
+        )
 
     @property
     def descriptor(self) -> int:
         return self._root.descriptor
 
+    def path_chain_nodes(self) -> tuple[tuple[str, int, int, int], ...]:
+        """Return the ordered lexical directory chain's stable node identity."""
+        self.verify_path()
+        labels = (os.path.sep, *self._root.names)
+        nodes: list[tuple[str, int, int, int]] = []
+        for label, descriptor in zip(
+            labels,
+            self._root.descriptors,
+            strict=True,
+        ):
+            metadata = os.fstat(descriptor)
+            nodes.append((
+                label,
+                metadata.st_dev,
+                metadata.st_ino,
+                metadata.st_mode,
+            ))
+        self.verify_path()
+        return tuple(nodes)
+
     def verify_path(self) -> None:
         self._root.verify_path()
-
-    def read_snapshot(self, relative_path: str) -> PinnedRegularSnapshot:
+        _require_retained_directory_path_monitor_quiet(self._path_monitor)
         self._root.verify_path()
+
+    def read_snapshot(
+        self,
+        relative_path: str,
+        *,
+        max_bytes: int | None = None,
+        expected_metadata: MetadataSnapshot | None = None,
+    ) -> PinnedRegularSnapshot:
+        self.verify_path()
         pinned = _open_relative_regular_at(self._root.descriptor, relative_path)
         try:
-            payload, metadata = _read_fd_snapshot(pinned.descriptor)
+            if (
+                expected_metadata is not None
+                and _snapshot_fields(os.fstat(pinned.descriptor))
+                != expected_metadata
+            ):
+                raise ImmutableArtifactError(
+                    f"pinned regular-file generation changed: {relative_path}"
+                )
+            if max_bytes is None:
+                payload, metadata = _read_fd_snapshot(pinned.descriptor)
+            else:
+                payload, metadata = _read_fd_snapshot(
+                    pinned.descriptor, max_bytes=max_bytes,
+                )
             pinned.verify_path()
+            if (
+                expected_metadata is not None
+                and metadata != expected_metadata
+            ):
+                raise ImmutableArtifactError(
+                    f"pinned regular-file generation changed: {relative_path}"
+                )
             if _snapshot_fields(os.fstat(pinned.descriptor)) != metadata:
                 raise ImmutableArtifactError(
                     "regular file changed after snapshot read"
                 )
-            self._root.verify_path()
+            self.verify_path()
             return PinnedRegularSnapshot(payload, metadata)
         finally:
             pinned.close()
 
-    def read(self, relative_path: str) -> bytes:
-        return self.read_snapshot(relative_path).payload
+    def read(
+        self, relative_path: str, *, max_bytes: int | None = None,
+    ) -> bytes:
+        return self.read_snapshot(relative_path, max_bytes=max_bytes).payload
 
     def verify_regular(
         self, relative_path: str, expected: MetadataSnapshot,
     ) -> None:
-        self._root.verify_path()
+        self.verify_path()
         pinned = _open_relative_regular_at(self._root.descriptor, relative_path)
         try:
             if _snapshot_fields(os.fstat(pinned.descriptor)) != expected:
@@ -1114,7 +1747,7 @@ class PinnedDirectoryReader:
                 raise ImmutableArtifactError(
                     f"pinned regular-file generation changed: {relative_path}"
                 )
-            self._root.verify_path()
+            self.verify_path()
         finally:
             pinned.close()
 
@@ -1123,24 +1756,755 @@ class PinnedDirectoryReader:
         *,
         require_readonly_files: bool = False,
         require_readonly_directories: bool = False,
+        max_files: int | None = None,
+        max_directories: int | None = None,
+        max_total_file_bytes: int | None = None,
+        max_total_relative_path_bytes: int | None = None,
     ) -> PinnedTreeSnapshot:
-        self._root.verify_path()
+        self.verify_path()
         snapshot = _snapshot_pinned_tree_at(
             self._root.descriptor,
             require_readonly_files=require_readonly_files,
             require_readonly_directories=require_readonly_directories,
+            max_files=max_files,
+            max_directories=max_directories,
+            max_total_file_bytes=max_total_file_bytes,
+            max_total_relative_path_bytes=max_total_relative_path_bytes,
         )
-        self._root.verify_path()
+        self.verify_path()
         return snapshot
 
     def close(self) -> None:
-        self._root.close()
+        path_monitor = self._path_monitor
+        self._path_monitor = None
+        closers: list[Callable[[], None]] = []
+        if path_monitor is not None:
+            closers.append(path_monitor.monitor.close)
+        closers.append(self._root.close)
+        _close_callables(closers, label="pinned directory reader close")
 
     def __enter__(self) -> "PinnedDirectoryReader":
+        self.verify_path()
         return self
 
-    def __exit__(self, _type: object, _value: object, _traceback: object) -> None:
-        self.close()
+    def __exit__(self, _type: object, value: object, _traceback: object) -> bool:
+        if value is not None:
+            try:
+                self.verify_path()
+            except BaseException as verification_error:
+                try:
+                    value.add_note(
+                        "pinned directory reader revalidation failed: "
+                        f"{verification_error}"
+                    )
+                except (AttributeError, TypeError):
+                    pass
+            try:
+                self.close()
+            except BaseException as close_error:
+                try:
+                    value.add_note(
+                        f"pinned directory reader close failed: {close_error}"
+                    )
+                except (AttributeError, TypeError):
+                    pass
+            return False
+        try:
+            self.verify_path()
+        finally:
+            self.close()
+        return False
+
+
+def write_regular_bytes_at(
+    parent_descriptor: int,
+    name: str,
+    payload: bytes,
+    *,
+    mode: int = 0o444,
+) -> None:
+    """Create one immutable regular leaf through an already-pinned parent.
+
+    The destination is exclusive and never recovered or replaced. Failures leave
+    uncertain bytes in the caller-owned staging directory for later inspection.
+    """
+    if type(parent_descriptor) is not int or parent_descriptor < 0:
+        raise ImmutableArtifactError(
+            "descriptor-bound output parent must be a nonnegative integer"
+        )
+    _validate_publication_name(name)
+    if type(payload) is not bytes:
+        raise ImmutableArtifactError("descriptor-bound output payload must be bytes")
+    if type(mode) is not int or mode < 0 or mode & ~0o777 or mode & 0o222:
+        raise ImmutableArtifactError(
+            "descriptor-bound output mode must be a read-only permission mode"
+        )
+    parent_before = os.fstat(parent_descriptor)
+    if not stat.S_ISDIR(parent_before.st_mode):
+        raise ImmutableArtifactError(
+            "descriptor-bound output parent is not a directory"
+        )
+
+    descriptor = -1
+    try:
+        try:
+            descriptor = os.open(
+                name,
+                os.O_RDWR
+                | os.O_CREAT
+                | os.O_EXCL
+                | getattr(os, "O_CLOEXEC", 0)
+                | _nofollow_flag(),
+                0o400,
+                dir_fd=parent_descriptor,
+            )
+        except FileExistsError as exc:
+            raise ImmutableArtifactError(
+                f"descriptor-bound output already exists: {name}"
+            ) from exc
+        _write_all(descriptor, memoryview(payload))
+        os.fchmod(descriptor, mode)
+        _fsync_or_fail(descriptor, f"descriptor-bound output {name}")
+        opened = os.fstat(descriptor)
+        linked = os.stat(
+            name,
+            dir_fd=parent_descriptor,
+            follow_symlinks=False,
+        )
+        if (
+            not stat.S_ISREG(opened.st_mode)
+            or not stat.S_ISREG(linked.st_mode)
+            or opened.st_nlink != 1
+            or linked.st_nlink != 1
+            or stat.S_IMODE(opened.st_mode) != mode
+            or _snapshot_fields(linked) != _snapshot_fields(opened)
+        ):
+            raise ImmutableArtifactError(
+                f"descriptor-bound output path changed: {name}"
+            )
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        observed, snapshot = _read_fd_snapshot(descriptor)
+        if observed != payload or snapshot != _snapshot_fields(opened):
+            raise ImmutableArtifactError(
+                f"descriptor-bound output bytes changed: {name}"
+            )
+        linked_after = os.stat(
+            name,
+            dir_fd=parent_descriptor,
+            follow_symlinks=False,
+        )
+        if _snapshot_fields(linked_after) != snapshot:
+            raise ImmutableArtifactError(
+                f"descriptor-bound output changed during closure: {name}"
+            )
+        _fsync_or_fail(parent_descriptor, f"descriptor-bound output parent {name}")
+        parent_after = os.fstat(parent_descriptor)
+        if _node_identity(parent_after) != _node_identity(parent_before):
+            raise ImmutableArtifactError(
+                "descriptor-bound output parent identity changed"
+            )
+    finally:
+        if descriptor >= 0:
+            _close_descriptors(
+                (descriptor,), label=f"descriptor-bound output {name} close"
+            )
+
+
+def replace_regular_bytes(
+    path: Path,
+    payload: bytes,
+    *,
+    mode: int = 0o644,
+) -> None:
+    """Durably replace one regular leaf without following any path symlink."""
+    if not isinstance(payload, bytes):
+        raise ImmutableArtifactError("replacement payload must be bytes")
+    if type(mode) is not int or mode < 0 or mode & ~0o777:
+        raise ImmutableArtifactError("replacement mode is invalid")
+    absolute = Path(os.path.abspath(os.fspath(path)))
+    if absolute.parent == absolute:
+        raise ImmutableArtifactError("replacement path has no regular leaf")
+    safe_relative_path(absolute.name)
+    if len(os.fsencode(absolute.name)) > _MAX_FINAL_NAME_BYTES:
+        raise ImmutableArtifactError("replacement leaf name exceeds bounded limits")
+
+    parent = _open_pinned_directory(absolute.parent)
+    descriptor = -1
+    temporary_name: str | None = None
+    published = False
+    try:
+        parent.verify_path()
+        try:
+            existing = os.stat(
+                absolute.name,
+                dir_fd=parent.descriptor,
+                follow_symlinks=False,
+            )
+        except FileNotFoundError:
+            existing = None
+        except OSError as exc:
+            raise ImmutableArtifactError(
+                f"cannot inspect replacement destination {absolute}: {exc}"
+            ) from exc
+        if existing is not None and (
+            stat.S_ISLNK(existing.st_mode)
+            or not stat.S_ISREG(existing.st_mode)
+            or existing.st_nlink != 1
+        ):
+            raise ImmutableArtifactError(
+                f"replacement destination is not a single-link regular file: {absolute}"
+            )
+
+        flags = (
+            os.O_RDWR
+            | os.O_CREAT
+            | os.O_EXCL
+            | getattr(os, "O_CLOEXEC", 0)
+            | _nofollow_flag()
+        )
+        for _attempt in range(32):
+            token = os.urandom(12).hex()
+            candidate = f".{absolute.name}.{token}.partial"
+            if len(os.fsencode(candidate)) > _MAX_FINAL_NAME_BYTES:
+                candidate = f".summary-{token}.partial"
+            try:
+                descriptor = os.open(
+                    candidate,
+                    flags,
+                    mode,
+                    dir_fd=parent.descriptor,
+                )
+                temporary_name = candidate
+                break
+            except FileExistsError:
+                continue
+            except OSError as exc:
+                raise ImmutableArtifactError(
+                    f"cannot create replacement temporary for {absolute}: {exc}"
+                ) from exc
+        if descriptor < 0 or temporary_name is None:
+            raise ImmutableArtifactError(
+                f"cannot allocate unique replacement temporary for {absolute}"
+            )
+
+        opened = os.fstat(descriptor)
+        if not stat.S_ISREG(opened.st_mode) or opened.st_nlink != 1:
+            raise ImmutableArtifactError("replacement temporary is not a regular file")
+        _write_all(descriptor, memoryview(payload))
+        os.fchmod(descriptor, mode)
+        _fsync_or_fail(descriptor, f"replacement temporary {absolute.name}")
+        written = os.fstat(descriptor)
+        if written.st_size != len(payload) or written.st_nlink != 1:
+            raise ImmutableArtifactError("replacement temporary changed during write")
+        linked = os.stat(
+            temporary_name,
+            dir_fd=parent.descriptor,
+            follow_symlinks=False,
+        )
+        if _node_identity(linked) != _node_identity(written):
+            raise ImmutableArtifactError("replacement temporary path changed")
+
+        os.replace(
+            temporary_name,
+            absolute.name,
+            src_dir_fd=parent.descriptor,
+            dst_dir_fd=parent.descriptor,
+        )
+        published = True
+        _fsync_or_fail(parent.descriptor, f"replacement parent {absolute.parent}")
+        named = os.stat(
+            absolute.name,
+            dir_fd=parent.descriptor,
+            follow_symlinks=False,
+        )
+        retained = os.fstat(descriptor)
+        named_snapshot = _snapshot_fields(named)
+        retained_snapshot = _snapshot_fields(retained)
+        if (
+            not stat.S_ISREG(named.st_mode)
+            or named.st_nlink != 1
+            or _node_identity(named) != _node_identity(retained)
+            or named.st_size != len(payload)
+            or stat.S_IMODE(named.st_mode) != mode
+        ):
+            raise ImmutableArtifactError("published replacement path changed")
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        digest, size, observed_mode = _hash_fd(descriptor)
+        if (
+            digest != hashlib.sha256(payload).hexdigest()
+            or size != len(payload)
+            or stat.S_IMODE(observed_mode) != mode
+        ):
+            raise ImmutableArtifactError("published replacement bytes changed")
+        _fsync_or_fail(descriptor, f"published replacement {absolute.name}")
+        closed_named = os.stat(
+            absolute.name,
+            dir_fd=parent.descriptor,
+            follow_symlinks=False,
+        )
+        if (
+            _snapshot_fields(closed_named) != named_snapshot
+            or _snapshot_fields(os.fstat(descriptor)) != retained_snapshot
+            or _node_identity(closed_named)
+            != _node_identity(os.fstat(descriptor))
+        ):
+            raise ImmutableArtifactError(
+                "published replacement changed during content closure"
+            )
+        parent.verify_path()
+    finally:
+        active_error = sys.exc_info()[1]
+        if published and active_error is not None and descriptor >= 0:
+            try:
+                retired_name = _retire_failed_publication_at(
+                    parent.descriptor,
+                    absolute.name,
+                    descriptor,
+                    directory=False,
+                )
+            except BaseException as retirement_error:
+                active_error.add_note(
+                    "failed replacement could not leave the active namespace: "
+                    f"{retirement_error}"
+                )
+            else:
+                active_error.add_note(
+                    "failed replacement preserved outside the active namespace "
+                    f"as {retired_name}"
+                )
+        if descriptor >= 0:
+            if temporary_name is not None and not published:
+                try:
+                    linked = os.stat(
+                        temporary_name,
+                        dir_fd=parent.descriptor,
+                        follow_symlinks=False,
+                    )
+                    opened = os.fstat(descriptor)
+                    if _node_identity(linked) == _node_identity(opened):
+                        os.unlink(temporary_name, dir_fd=parent.descriptor)
+                        _fsync_or_fail(
+                            parent.descriptor,
+                            f"replacement temporary cleanup {absolute.name}",
+                        )
+                except FileNotFoundError:
+                    pass
+                except BaseException as exc:
+                    if active_error is not None:
+                        try:
+                            active_error.add_note(
+                                f"replacement temporary cleanup failed: {exc}"
+                            )
+                        except (AttributeError, TypeError):
+                            pass
+                    else:
+                        active_error = exc
+            _close_descriptors(
+                (descriptor,),
+                active_error=active_error,
+                label="replacement temporary close",
+            )
+        try:
+            parent.close()
+        except BaseException as exc:
+            if active_error is not None:
+                try:
+                    active_error.add_note(f"replacement parent close failed: {exc}")
+                except (AttributeError, TypeError):
+                    pass
+            else:
+                active_error = exc
+        if sys.exc_info()[1] is None and active_error is not None:
+            raise active_error
+
+
+def retire_regular_file(
+    path: Path,
+    *,
+    expected_payload: bytes | None = None,
+    expected_snapshot: MetadataSnapshot | None = None,
+) -> Path | None:
+    """Atomically move one stale regular leaf to a hidden retained name.
+
+    When ``expected_payload`` is supplied, the opened source must carry those
+    exact bytes. When ``expected_snapshot`` is supplied, it must also be the
+    exact seven-field file generation previously retained by the caller. A
+    source-name race detected after rename is restored when the canonical name
+    is still free, so a concurrent replacement is preserved rather than
+    silently retired as the stale generation.
+    """
+    absolute = Path(os.path.abspath(os.fspath(path)))
+    if absolute.parent == absolute:
+        raise ImmutableArtifactError("retirement path has no regular leaf")
+    safe_relative_path(absolute.name)
+    parent = _open_pinned_directory(absolute.parent)
+    pinned: _PinnedRegular | None = None
+    try:
+        parent.verify_path()
+        try:
+            present = os.stat(
+                absolute.name,
+                dir_fd=parent.descriptor,
+                follow_symlinks=False,
+            )
+        except FileNotFoundError:
+            return None
+        if (
+            stat.S_ISLNK(present.st_mode)
+            or not stat.S_ISREG(present.st_mode)
+            or present.st_nlink != 1
+        ):
+            raise ImmutableArtifactError(
+                f"retirement source is not a single-link regular file: {absolute}"
+            )
+        pinned = _open_relative_regular_at(parent.descriptor, absolute.name)
+        opened = os.fstat(pinned.descriptor)
+        pinned.verify_path()
+        if expected_snapshot is not None:
+            if (
+                type(expected_snapshot) is not tuple
+                or len(expected_snapshot) != 7
+                or any(type(value) is not int for value in expected_snapshot)
+            ):
+                raise ImmutableArtifactError(
+                    "retirement expected snapshot must be seven integers"
+                )
+            if _snapshot_fields(opened) != expected_snapshot:
+                raise ImmutableArtifactError(
+                    f"retirement source generation changed: {absolute}"
+                )
+        if expected_payload is not None:
+            if type(expected_payload) is not bytes:
+                raise ImmutableArtifactError(
+                    "retirement expected payload must be bytes"
+                )
+            os.lseek(pinned.descriptor, 0, os.SEEK_SET)
+            observed_payload, observed_snapshot = _read_fd_snapshot(
+                pinned.descriptor,
+                max_bytes=len(expected_payload),
+            )
+            if (
+                observed_payload != expected_payload
+                or observed_snapshot != _snapshot_fields(opened)
+                or _snapshot_fields(os.fstat(pinned.descriptor))
+                != observed_snapshot
+            ):
+                raise ImmutableArtifactError(
+                    f"retirement source payload changed: {absolute}"
+                )
+            pinned.verify_path()
+        retired_name: str | None = None
+        for _attempt in range(32):
+            token = os.urandom(12).hex()
+            candidate = f".{absolute.name}.{token}.retired"
+            if len(os.fsencode(candidate)) > _MAX_FINAL_NAME_BYTES:
+                candidate = f".artifact-{token}.retired"
+            try:
+                _rename_noreplace_at(
+                    parent.descriptor,
+                    absolute.name,
+                    parent.descriptor,
+                    candidate,
+                )
+                retired_name = candidate
+                break
+            except FileExistsError:
+                continue
+        if retired_name is None:
+            raise ImmutableArtifactError(
+                f"cannot allocate unique retirement name for {absolute}"
+            )
+        def restore_retired_entry(
+            error: ImmutableArtifactError,
+            *,
+            retired_name: str,
+            retired_snapshot: os.stat_result,
+        ) -> None:
+            restored_to_canonical = False
+            try:
+                _rename_noreplace_at(
+                    parent.descriptor,
+                    retired_name,
+                    parent.descriptor,
+                    absolute.name,
+                )
+                restored_to_canonical = True
+                restored = os.stat(
+                    absolute.name,
+                    dir_fd=parent.descriptor,
+                    follow_symlinks=False,
+                )
+                if (
+                    stat.S_IFMT(restored.st_mode)
+                    != stat.S_IFMT(retired_snapshot.st_mode)
+                    or restored.st_nlink != retired_snapshot.st_nlink
+                    or _node_identity(restored)
+                    != _node_identity(retired_snapshot)
+                    or restored.st_size != retired_snapshot.st_size
+                ):
+                    raise ImmutableArtifactError(
+                        "retirement race restoration changed identity"
+                    )
+                _fsync_or_fail(
+                    parent.descriptor,
+                    f"retirement race restoration {absolute.parent}",
+                )
+                parent.verify_path()
+                error.add_note(
+                    "concurrent retirement-source replacement was restored "
+                    f"to {absolute}"
+                )
+            except BaseException as restore_error:
+                if restored_to_canonical:
+                    error.add_note(
+                        "concurrent retirement-source replacement was restored "
+                        "to the canonical name but restoration durability "
+                        f"verification failed: {restore_error}"
+                    )
+                else:
+                    error.add_note(
+                        "concurrent retirement-source replacement remains "
+                        f"retained as {absolute.with_name(retired_name)}: "
+                        f"{restore_error}"
+                    )
+            raise error
+
+        def inspect_retired_entry() -> os.stat_result:
+            retired_snapshot = os.stat(
+                retired_name,
+                dir_fd=parent.descriptor,
+                follow_symlinks=False,
+            )
+            if (
+                not stat.S_ISREG(retired_snapshot.st_mode)
+                or retired_snapshot.st_nlink != 1
+                or _node_identity(retired_snapshot) != _node_identity(opened)
+                or retired_snapshot.st_size != opened.st_size
+            ):
+                restore_retired_entry(
+                    ImmutableArtifactError(
+                        "retired regular-file identity changed"
+                    ),
+                    retired_name=retired_name,
+                    retired_snapshot=retired_snapshot,
+                )
+            if expected_payload is not None:
+                before_read = os.fstat(pinned.descriptor)
+                os.lseek(pinned.descriptor, 0, os.SEEK_SET)
+                retired_payload, retired_read_snapshot = _read_fd_snapshot(
+                    pinned.descriptor,
+                    max_bytes=len(expected_payload),
+                )
+                after_read = os.fstat(pinned.descriptor)
+                linked_after_read = os.stat(
+                    retired_name,
+                    dir_fd=parent.descriptor,
+                    follow_symlinks=False,
+                )
+                if (
+                    retired_payload != expected_payload
+                    or retired_read_snapshot != _snapshot_fields(before_read)
+                    or _snapshot_fields(after_read) != retired_read_snapshot
+                    or _snapshot_fields(linked_after_read)
+                    != retired_read_snapshot
+                ):
+                    restore_retired_entry(
+                        ImmutableArtifactError(
+                            "retired regular-file payload changed"
+                        ),
+                        retired_name=retired_name,
+                        retired_snapshot=linked_after_read,
+                    )
+                retired_snapshot = linked_after_read
+            return retired_snapshot
+
+        def salvage_unlinked_retirement() -> Path:
+            retained = os.fstat(pinned.descriptor)
+            retained_snapshot = _snapshot_fields(retained)
+            if (
+                not stat.S_ISREG(retained.st_mode)
+                or retained_snapshot[0] != _snapshot_fields(opened)[0]
+                or retained_snapshot[1] != _snapshot_fields(opened)[1]
+                or retained_snapshot[2] != _snapshot_fields(opened)[2]
+                or retained_snapshot[4] != _snapshot_fields(opened)[4]
+                or retained_snapshot[5] != _snapshot_fields(opened)[5]
+            ):
+                raise ImmutableArtifactError(
+                    "unlinked retirement source generation changed"
+                )
+            if expected_payload is not None:
+                os.lseek(pinned.descriptor, 0, os.SEEK_SET)
+                authenticated_payload, authenticated_snapshot = (
+                    _read_fd_snapshot(
+                        pinned.descriptor,
+                        allow_hardlinks=True,
+                        max_bytes=len(expected_payload),
+                    )
+                )
+                if (
+                    authenticated_payload != expected_payload
+                    or authenticated_snapshot != retained_snapshot
+                    or _snapshot_fields(os.fstat(pinned.descriptor))
+                    != retained_snapshot
+                ):
+                    raise ImmutableArtifactError(
+                        "unlinked retirement source payload changed"
+                    )
+            salvaged_name = _salvage_failed_regular_publication_at(
+                parent.descriptor,
+                pinned.descriptor,
+            )
+            return absolute.with_name(salvaged_name)
+
+        # Identify and, when necessary, restore the exact directory entry before
+        # the first post-rename durability operation.  A durability failure must
+        # never strand a concurrent replacement under the hidden retirement name.
+        try:
+            inspect_retired_entry()
+        except FileNotFoundError:
+            return salvage_unlinked_retirement()
+        try:
+            _fsync_or_fail(
+                parent.descriptor, f"retirement parent {absolute.parent}"
+            )
+        except BaseException as durability_error:
+            try:
+                os.stat(
+                    retired_name,
+                    dir_fd=parent.descriptor,
+                    follow_symlinks=False,
+                )
+            except FileNotFoundError:
+                try:
+                    salvaged = salvage_unlinked_retirement()
+                except BaseException as salvage_error:
+                    durability_error.add_note(
+                        "unlinked retirement evidence salvage failed: "
+                        f"{salvage_error}"
+                    )
+                else:
+                    durability_error.add_note(
+                        "unlinked retirement evidence was durably salvaged as "
+                        f"{salvaged}"
+                    )
+            raise
+        # Reauthenticate after the durability boundary so a same-inode overwrite
+        # during rename/fsync cannot count as successful expected-payload cleanup.
+        try:
+            inspect_retired_entry()
+        except FileNotFoundError:
+            return salvage_unlinked_retirement()
+        try:
+            os.stat(
+                absolute.name,
+                dir_fd=parent.descriptor,
+                follow_symlinks=False,
+            )
+        except FileNotFoundError:
+            pass
+        else:
+            raise ImmutableArtifactError("retirement source name remains present")
+        parent.verify_path()
+        return absolute.with_name(retired_name)
+    finally:
+        active_error = sys.exc_info()[1]
+        if pinned is not None:
+            try:
+                pinned.close()
+            except BaseException as exc:
+                if active_error is not None:
+                    try:
+                        active_error.add_note(f"retained retirement close failed: {exc}")
+                    except (AttributeError, TypeError):
+                        pass
+                else:
+                    active_error = exc
+        try:
+            parent.close()
+        except BaseException as exc:
+            if active_error is not None:
+                try:
+                    active_error.add_note(f"retirement parent close failed: {exc}")
+                except (AttributeError, TypeError):
+                    pass
+            else:
+                active_error = exc
+        if sys.exc_info()[1] is None and active_error is not None:
+            raise active_error
+
+
+def salvage_retained_regular_descriptor(
+    path: Path,
+    descriptor: int,
+    *,
+    expected_payload: bytes,
+    expected_snapshot: MetadataSnapshot,
+) -> Path:
+    """Preserve one retained regular inode after its locator was replaced.
+
+    Link count and ctime may change when the canonical name is replaced. Every
+    other generation field plus the exact bytes must still match the snapshot
+    captured while this descriptor owned the canonical locator. The evidence is
+    copied to a hidden durable leaf without reading from or changing the active
+    name.
+    """
+    absolute = Path(os.path.abspath(os.fspath(path)))
+    if absolute.parent == absolute:
+        raise ImmutableArtifactError("salvage path has no regular leaf")
+    safe_relative_path(absolute.name)
+    if type(descriptor) is not int or descriptor < 0:
+        raise ImmutableArtifactError(
+            "salvage retained descriptor must be a nonnegative integer"
+        )
+    if type(expected_payload) is not bytes:
+        raise ImmutableArtifactError("salvage expected payload must be bytes")
+    if (
+        type(expected_snapshot) is not tuple
+        or len(expected_snapshot) != 7
+        or any(type(value) is not int for value in expected_snapshot)
+    ):
+        raise ImmutableArtifactError(
+            "salvage expected snapshot must be seven integers"
+        )
+
+    parent = _open_pinned_directory(absolute.parent)
+    try:
+        parent.verify_path()
+        before = os.fstat(descriptor)
+        current_snapshot = _snapshot_fields(before)
+        if (
+            not stat.S_ISREG(before.st_mode)
+            or current_snapshot[0] != expected_snapshot[0]
+            or current_snapshot[1] != expected_snapshot[1]
+            or current_snapshot[2] != expected_snapshot[2]
+            or current_snapshot[4] != expected_snapshot[4]
+            or current_snapshot[5] != expected_snapshot[5]
+        ):
+            raise ImmutableArtifactError(
+                "salvage retained regular-file generation changed"
+            )
+        os.lseek(descriptor, 0, os.SEEK_SET)
+        observed_payload, observed_snapshot = _read_fd_snapshot(
+            descriptor,
+            allow_hardlinks=True,
+            max_bytes=len(expected_payload),
+        )
+        if (
+            observed_payload != expected_payload
+            or observed_snapshot != current_snapshot
+            or _snapshot_fields(os.fstat(descriptor)) != current_snapshot
+        ):
+            raise ImmutableArtifactError(
+                "salvage retained regular-file payload changed"
+            )
+        retained_name = _salvage_failed_regular_publication_at(
+            parent.descriptor,
+            descriptor,
+        )
+        parent.verify_path()
+        return absolute.with_name(retained_name)
+    finally:
+        parent.close()
 
 
 def sha256_relative(root: Path, relative_path: str) -> tuple[str, int]:
@@ -1258,6 +2622,527 @@ def _rename_noreplace_at(
     )
 
 
+def _retire_failed_publication_at(
+    parent_descriptor: int,
+    active_name: str,
+    retained_descriptor: int,
+    *,
+    directory: bool,
+) -> str:
+    """Move one failed committed generation out of its active namespace."""
+    linked = os.stat(
+        active_name, dir_fd=parent_descriptor, follow_symlinks=False,
+    )
+    opened = os.fstat(retained_descriptor)
+    expected_type = stat.S_ISDIR if directory else stat.S_ISREG
+    if (
+        stat.S_ISLNK(linked.st_mode)
+        or not expected_type(linked.st_mode)
+        or not expected_type(opened.st_mode)
+        or _node_identity(linked) != _node_identity(opened)
+    ):
+        raise ImmutableArtifactError(
+            f"failed publication path cannot be retired safely: {active_name}"
+        )
+    kind = "directory" if directory else "regular"
+    for _attempt in range(32):
+        retired_name = f".failed-{kind}-{os.urandom(12).hex()}"
+        try:
+            _rename_noreplace_at(
+                parent_descriptor,
+                active_name,
+                parent_descriptor,
+                retired_name,
+            )
+        except FileExistsError:
+            continue
+        retired = os.stat(
+            retired_name,
+            dir_fd=parent_descriptor,
+            follow_symlinks=False,
+        )
+        if (
+            _entry_mode(parent_descriptor, active_name) is not None
+            or _node_identity(retired) != _node_identity(opened)
+        ):
+            raise ImmutableArtifactError(
+                f"failed publication retirement changed identity: {active_name}"
+            )
+        _fsync_or_fail(
+            parent_descriptor, f"failed publication retirement {active_name}",
+        )
+        try:
+            closed = os.stat(
+                retired_name,
+                dir_fd=parent_descriptor,
+                follow_symlinks=False,
+            )
+        except FileNotFoundError as exc:
+            raise ImmutableArtifactError(
+                "failed publication hidden retirement entry was unlinked"
+            ) from exc
+        if (
+            _entry_mode(parent_descriptor, active_name) is not None
+            or _node_identity(closed) != _node_identity(opened)
+        ):
+            raise ImmutableArtifactError(
+                f"failed publication retirement changed after durability: "
+                f"{active_name}"
+            )
+        return retired_name
+    raise ImmutableArtifactResourceError(
+        f"{VERIFY_RESOURCE_BOUND}: cannot allocate failed-publication name"
+    )
+
+
+def _salvage_failed_regular_publication_at(
+    parent_descriptor: int,
+    retained_descriptor: int,
+) -> str:
+    """Copy an unlinked failed generation to a hidden durable evidence leaf."""
+    opened = os.fstat(retained_descriptor)
+    if not stat.S_ISREG(opened.st_mode):
+        raise ImmutableArtifactError(
+            "failed regular publication descriptor is not regular"
+        )
+
+    destination_descriptor = -1
+    temporary_name: str | None = None
+    retired_name: str | None = None
+    committed = False
+    try:
+        flags = (
+            os.O_RDWR
+            | os.O_CREAT
+            | os.O_EXCL
+            | getattr(os, "O_CLOEXEC", 0)
+            | _nofollow_flag()
+        )
+        for _attempt in range(32):
+            token = os.urandom(12).hex()
+            candidate = f".failed-regular-{token}"
+            temporary = f"{candidate}.salvaging"
+            try:
+                destination_descriptor = os.open(
+                    temporary,
+                    flags,
+                    0o400,
+                    dir_fd=parent_descriptor,
+                )
+            except FileExistsError:
+                continue
+            retired_name = candidate
+            temporary_name = temporary
+            break
+        if destination_descriptor < 0 or temporary_name is None or retired_name is None:
+            raise ImmutableArtifactResourceError(
+                f"{VERIFY_RESOURCE_BOUND}: cannot allocate failed-publication salvage"
+            )
+
+        digest = hashlib.sha256()
+
+        def copy_block(block: bytes) -> None:
+            digest.update(block)
+            _write_all(destination_descriptor, memoryview(block))
+
+        os.lseek(retained_descriptor, 0, os.SEEK_SET)
+        size_bytes, _mode, source_snapshot = _consume_stable_regular(
+            retained_descriptor,
+            copy_block,
+            allow_hardlinks=True,
+        )
+        if _snapshot_fields(os.fstat(retained_descriptor)) != source_snapshot:
+            raise ImmutableArtifactError(
+                "failed regular publication changed during salvage"
+            )
+        os.fchmod(destination_descriptor, 0o444)
+        _fsync_or_fail(
+            destination_descriptor, "failed regular publication salvage"
+        )
+        os.lseek(destination_descriptor, 0, os.SEEK_SET)
+        copied_digest, copied_size, copied_mode = _hash_fd(
+            destination_descriptor
+        )
+        if (
+            copied_digest != digest.hexdigest()
+            or copied_size != size_bytes
+            or copied_mode & 0o222
+        ):
+            raise ImmutableArtifactError(
+                "failed regular publication salvage bytes changed"
+            )
+        _fsync_or_fail(
+            parent_descriptor,
+            "failed regular publication salvage parent before commit",
+        )
+        _rename_noreplace_at(
+            parent_descriptor,
+            temporary_name,
+            parent_descriptor,
+            retired_name,
+        )
+        committed = True
+        _fsync_or_fail(
+            parent_descriptor,
+            "failed regular publication salvage parent after commit",
+        )
+        linked = os.stat(
+            retired_name,
+            dir_fd=parent_descriptor,
+            follow_symlinks=False,
+        )
+        if (
+            not stat.S_ISREG(linked.st_mode)
+            or linked.st_nlink != 1
+            or _node_identity(linked)
+            != _node_identity(os.fstat(destination_descriptor))
+        ):
+            raise ImmutableArtifactError(
+                "failed regular publication salvage identity changed"
+            )
+        return retired_name
+    except BaseException as exc:
+        if committed and retired_name is not None:
+            exc.add_note(
+                "failed regular publication salvage remains outside the active "
+                f"namespace as {retired_name}"
+            )
+        elif temporary_name is not None:
+            exc.add_note(
+                "incomplete failed regular publication salvage remains outside "
+                f"the active namespace as {temporary_name}"
+            )
+        raise
+    finally:
+        if destination_descriptor >= 0:
+            _close_descriptors(
+                (destination_descriptor,),
+                active_error=sys.exc_info()[1],
+                label="failed regular publication salvage close",
+            )
+
+
+def preserve_retained_regular_file(
+    retained: RetainedRegular,
+    *,
+    expected_payload: bytes,
+) -> Path:
+    """Preserve a failed retained locator without retiring a replacement.
+
+    The initial payload/snapshot is retired when it still owns the canonical
+    name. A concurrently installed name is left active while the retained inode
+    is salvaged through its descriptor. If the same inode was mutated, that
+    changed generation is moved out of the active namespace as evidence.
+    """
+    if not isinstance(retained, RetainedRegular):
+        raise ImmutableArtifactError(
+            "failed regular preservation requires a retained capability"
+        )
+    if type(expected_payload) is not bytes:
+        raise ImmutableArtifactError(
+            "failed regular preservation payload must be bytes"
+        )
+    if (
+        len(expected_payload) != retained.size_bytes
+        or sha256_bytes(expected_payload) != retained.sha256
+    ):
+        raise ImmutableArtifactError(
+            "failed regular preservation payload disagrees with capability"
+        )
+
+    exact_error: BaseException | None = None
+    try:
+        retired = retire_regular_file(
+            retained.path,
+            expected_payload=expected_payload,
+            expected_snapshot=retained.snapshot,
+        )
+    except BaseException as exc:
+        exact_error = exc
+    else:
+        if retired is not None:
+            return retired
+
+    try:
+        descriptor = retained.descriptor
+    except ImmutableArtifactError:
+        if exact_error is not None:
+            raise exact_error
+        raise ImmutableArtifactError(
+            "retained regular evidence disappeared before preservation"
+        )
+
+    current_error: BaseException | None = None
+    try:
+        retained._pinned.verify_path()
+        current_snapshot = _snapshot_fields(os.fstat(descriptor))
+    except BaseException:
+        current_snapshot = None
+    if current_snapshot is not None:
+        try:
+            retired = retire_regular_file(
+                retained.path,
+                expected_snapshot=current_snapshot,
+            )
+        except BaseException as exc:
+            current_error = exc
+        else:
+            if retired is not None:
+                return retired
+
+    try:
+        return salvage_retained_regular_descriptor(
+            retained.path,
+            descriptor,
+            expected_payload=expected_payload,
+            expected_snapshot=retained.snapshot,
+        )
+    except BaseException as initial_salvage_error:
+        try:
+            retained_name = _salvage_failed_regular_publication_at(
+                retained._pinned.directory_descriptors[-1],
+                descriptor,
+            )
+        except BaseException as current_salvage_error:
+            failure = ImmutableArtifactError(
+                "retained regular evidence preservation failed"
+            )
+            for detail in (
+                exact_error,
+                current_error,
+                initial_salvage_error,
+                current_salvage_error,
+            ):
+                if detail is not None:
+                    failure.add_note(str(detail))
+            raise failure from current_salvage_error
+        return retained.path.with_name(retained_name)
+
+
+def _preserve_failed_regular_publication_at(
+    error: BaseException,
+    parent_descriptor: int,
+    active_name: str,
+    retained_descriptor: int,
+    *,
+    evidence_descriptor: int | None = None,
+) -> None:
+    try:
+        retired_name = _retire_failed_publication_at(
+            parent_descriptor,
+            active_name,
+            retained_descriptor,
+            directory=False,
+        )
+    except BaseException as retirement_error:
+        try:
+            salvaged_name = _salvage_failed_regular_publication_at(
+                parent_descriptor,
+                (
+                    retained_descriptor
+                    if evidence_descriptor is None
+                    else evidence_descriptor
+                ),
+            )
+        except BaseException as salvage_error:
+            error.add_note(
+                "failed regular publication could not leave the active "
+                f"namespace: {retirement_error}"
+            )
+            error.add_note(
+                "failed regular publication descriptor salvage failed: "
+                f"{salvage_error}"
+            )
+        else:
+            error.add_note(
+                "failed regular publication path could not be retired safely: "
+                f"{retirement_error}"
+            )
+            error.add_note(
+                "failed regular publication bytes were copied outside the "
+                f"active namespace as {salvaged_name}"
+            )
+    else:
+        error.add_note(
+            "failed regular publication preserved outside the active "
+            f"namespace as {retired_name}"
+        )
+
+
+def _open_independent_parent_guard(descriptor: int) -> int:
+    guard = os.open(
+        ".",
+        _directory_flags(),
+        dir_fd=descriptor,
+    )
+    try:
+        if _node_identity(os.fstat(guard)) != _node_identity(
+            os.fstat(descriptor)
+        ):
+            raise ImmutableArtifactError(
+                "publication parent rollback guard identity mismatch"
+            )
+        return guard
+    except BaseException:
+        _close_descriptors(
+            (guard,),
+            active_error=sys.exc_info()[1],
+            label="publication parent rollback guard close",
+        )
+        raise
+
+
+def _open_regular_rollback_guard(
+    parent_descriptor: int,
+    name: str,
+    retained_descriptor: int,
+) -> int:
+    path_flag = getattr(os, "O_PATH", 0)
+    if not path_flag:
+        raise ImmutableArtifactResourceError(
+            f"{VERIFY_RESOURCE_BOUND}: O_PATH rollback guard unavailable"
+        )
+    guard = os.open(
+        name,
+        path_flag
+        | getattr(os, "O_CLOEXEC", 0)
+        | _nofollow_flag(),
+        dir_fd=parent_descriptor,
+    )
+    try:
+        guarded = os.fstat(guard)
+        retained = os.fstat(retained_descriptor)
+        if (
+            not stat.S_ISREG(guarded.st_mode)
+            or _node_identity(guarded) != _node_identity(retained)
+        ):
+            raise ImmutableArtifactError(
+                "regular publication rollback guard identity mismatch"
+            )
+        return guard
+    except BaseException:
+        _close_descriptors(
+            (guard,),
+            active_error=sys.exc_info()[1],
+            label="regular publication rollback guard close",
+        )
+        raise
+
+
+def _open_regular_evidence_guard(
+    parent_descriptor: int,
+    name: str,
+    retained_descriptor: int,
+) -> int:
+    guard = os.open(
+        name,
+        os.O_RDONLY
+        | getattr(os, "O_CLOEXEC", 0)
+        | getattr(os, "O_NONBLOCK", 0)
+        | _nofollow_flag(),
+        dir_fd=parent_descriptor,
+    )
+    try:
+        guarded = os.fstat(guard)
+        retained = os.fstat(retained_descriptor)
+        if (
+            not stat.S_ISREG(guarded.st_mode)
+            or _node_identity(guarded) != _node_identity(retained)
+        ):
+            raise ImmutableArtifactError(
+                "regular publication evidence guard identity mismatch"
+            )
+        return guard
+    except BaseException:
+        _close_descriptors(
+            (guard,),
+            active_error=sys.exc_info()[1],
+            label="regular publication evidence guard close",
+        )
+        raise
+
+
+def _open_directory_rollback_guard(descriptor: int) -> int:
+    path_flag = getattr(os, "O_PATH", 0)
+    if not path_flag:
+        raise ImmutableArtifactResourceError(
+            f"{VERIFY_RESOURCE_BOUND}: O_PATH rollback guard unavailable"
+        )
+    guard = os.open(
+        ".",
+        path_flag
+        | os.O_DIRECTORY
+        | getattr(os, "O_CLOEXEC", 0)
+        | _nofollow_flag(),
+        dir_fd=descriptor,
+    )
+    try:
+        guarded = os.fstat(guard)
+        retained = os.fstat(descriptor)
+        if (
+            not stat.S_ISDIR(guarded.st_mode)
+            or _node_identity(guarded) != _node_identity(retained)
+        ):
+            raise ImmutableArtifactError(
+                "directory publication rollback guard identity mismatch"
+            )
+        return guard
+    except BaseException:
+        _close_descriptors(
+            (guard,),
+            active_error=sys.exc_info()[1],
+            label="directory publication rollback guard close",
+        )
+        raise
+
+
+_rollback_guard_state_lock = threading.Lock()
+_rollback_guard_diagnostics: list[str] = []
+
+
+def rollback_guard_cleanup_diagnostics() -> tuple[str, ...]:
+    """Return bounded process-local diagnostics for nonfatal guard cleanup."""
+    with _rollback_guard_state_lock:
+        return tuple(_rollback_guard_diagnostics)
+
+
+def _record_rollback_guard_diagnostic(detail: str) -> None:
+    with _rollback_guard_state_lock:
+        _rollback_guard_diagnostics.append(detail)
+        overflow = (
+            len(_rollback_guard_diagnostics)
+            - _ROLLBACK_GUARD_DIAGNOSTIC_LIMIT
+        )
+        if overflow > 0:
+            del _rollback_guard_diagnostics[:overflow]
+    try:
+        warnings.warn(detail, RuntimeWarning, stacklevel=3)
+    except Exception:
+        # Warning policy must not turn a post-retirement diagnostic into an
+        # unretireable publication failure; the bounded sink remains observable.
+        pass
+
+
+def _close_rollback_guards(
+    descriptors: Iterable[int], *, label: str,
+) -> tuple[str, ...]:
+    # These independent open descriptions exist so primary cleanup can fail
+    # without forfeiting rollback authority. Once close() has been attempted,
+    # Linux may have released the numeric descriptor even when it reports EIO.
+    # Never inspect or retry that number: another thread may already own it.
+    diagnostics: list[str] = []
+    for descriptor in descriptors:
+        try:
+            os.close(descriptor)
+        except OSError as exc:
+            detail = (
+                f"{DURABILITY_UNPROVEN}: {label}: descriptor {descriptor}: {exc}"
+            )
+            diagnostics.append(detail)
+            _record_rollback_guard_diagnostic(detail)
+    return tuple(diagnostics)
+
+
 def rename_noreplace(source: Path, destination: Path) -> Path:
     """Publish one source without replacing a concurrent destination winner.
 
@@ -1372,6 +3257,138 @@ def _verify_open_file(descriptor: int, file: ImmutableFile) -> bool:
     return digest == file.sha256 and size == file.size_bytes and not (mode & 0o222)
 
 
+def _open_exact_published_regular(
+    path: Path,
+    publication_descriptor: int,
+    *,
+    expected_sha256: str,
+    expected_size_bytes: int,
+    expected_snapshot: MetadataSnapshot,
+) -> RetainedRegular:
+    """Retain the exact inode still owned by a completed publication."""
+    retained = open_retained_regular(path)
+    try:
+        published_snapshot = _snapshot_fields(
+            os.fstat(publication_descriptor)
+        )
+        if (
+            published_snapshot != expected_snapshot
+            or retained.snapshot != expected_snapshot
+            or retained.size_bytes != expected_size_bytes
+            or retained.sha256 != expected_sha256
+            or _node_identity(os.fstat(retained.descriptor))
+            != _node_identity(os.fstat(publication_descriptor))
+        ):
+            raise ImmutableArtifactError(
+                "published regular-file retained capability changed"
+            )
+        retained.verify_unchanged()
+        if (
+            _snapshot_fields(os.fstat(publication_descriptor))
+            != expected_snapshot
+        ):
+            raise ImmutableArtifactError(
+                "published regular-file changed while retaining capability"
+            )
+        return retained
+    except BaseException:
+        retained.close()
+        raise
+
+
+def _verify_publication_parent_binding(
+    pinned_parent: PinnedDirectoryReader,
+    declared_parent: PinnedDirectoryReader | None,
+) -> None:
+    """Bind a caller-supplied parent capability to the declared parent path."""
+    pinned_parent.verify_path()
+    if declared_parent is None:
+        return
+    declared_parent.verify_path()
+    if _node_identity(os.fstat(pinned_parent.descriptor)) != _node_identity(
+        os.fstat(declared_parent.descriptor)
+    ):
+        raise ImmutableArtifactError(
+            "caller-supplied pinned publication parent disagrees with parent path"
+        )
+    pinned_parent.verify_path()
+    declared_parent.verify_path()
+
+
+def _verify_declared_parent_descriptor_generation(
+    parent: Path,
+    expected_descriptor: int,
+) -> None:
+    """Rebind a lexical parent after pinned-reader monitor/descriptor closure."""
+    expected = _node_identity(os.fstat(expected_descriptor))
+    absolute = Path(os.path.abspath(os.fspath(parent)))
+    descriptors: tuple[int, ...] = ()
+    names: tuple[str, ...] = ()
+    try:
+        descriptors, names = _open_directory_chain(absolute)
+        _verify_directory_chain(descriptors, names)
+        if _node_identity(os.fstat(descriptors[-1])) != expected:
+            raise ImmutableArtifactError(
+                "declared publication parent generation changed during closure"
+            )
+        _verify_directory_chain(descriptors, names)
+    finally:
+        if descriptors:
+            _close_descriptors(
+                reversed(descriptors),
+                label="declared publication parent final guard close",
+            )
+    try:
+        linked = os.stat(absolute, follow_symlinks=False)
+    except OSError as exc:
+        raise ImmutableArtifactError(
+            "declared publication parent generation changed during closure"
+        ) from exc
+    if (
+        stat.S_ISLNK(linked.st_mode)
+        or not stat.S_ISDIR(linked.st_mode)
+        or _node_identity(linked) != expected
+    ):
+        raise ImmutableArtifactError(
+            "declared publication parent generation changed during closure"
+        )
+
+
+def _open_publication_parent_binding(
+    parent: Path,
+    pinned_parent: PinnedDirectoryReader | None,
+) -> tuple[PinnedDirectoryReader, bool, PinnedDirectoryReader | None]:
+    if pinned_parent is not None and type(pinned_parent) is not PinnedDirectoryReader:
+        raise ImmutableArtifactError(
+            "pinned_parent must be an exact PinnedDirectoryReader"
+        )
+    if pinned_parent is None:
+        try:
+            return PinnedDirectoryReader(Path(parent)), True, None
+        except (OSError, ImmutableArtifactError) as exc:
+            raise ImmutableArtifactError(
+                f"publication parent is unavailable: {parent}"
+            ) from exc
+
+    declared_parent: PinnedDirectoryReader | None = None
+    try:
+        declared_parent = PinnedDirectoryReader(Path(parent))
+        _verify_publication_parent_binding(pinned_parent, declared_parent)
+        return pinned_parent, False, declared_parent
+    except BaseException as exc:
+        if declared_parent is not None:
+            _close_callables(
+                (declared_parent.close,),
+                label="declared publication parent binding cleanup",
+            )
+        if isinstance(exc, ImmutableArtifactError):
+            raise
+        raise ImmutableArtifactError(
+            f"publication parent is unavailable: {parent}"
+        ) from exc
+
+
+@_translate_descriptor_resource_errors("regular-file publication")
 def publish_regular_file(
     parent: Path,
     name: str,
@@ -1380,7 +3397,8 @@ def publish_regular_file(
     partial_suffix: str = _PARTIAL_SUFFIX,
     pinned_parent: PinnedDirectoryReader | None = None,
     executable: bool = False,
-) -> Path:
+    _retain_capability: bool = False,
+) -> Path | RetainedRegular:
     """Publish one regular file without destructive failure cleanup.
 
     The transaction owns only its descriptor and deterministic partial name.
@@ -1394,6 +3412,8 @@ def publish_regular_file(
         )
     if type(executable) is not bool:
         raise ImmutableArtifactError("executable must be boolean")
+    if type(_retain_capability) is not bool:
+        raise ImmutableArtifactError("retain capability selector must be boolean")
     if len(os.fsencode(name)) + len(os.fsencode(partial_suffix)) + 1 > 255:
         raise ImmutableArtifactError(
             f"{NAMESPACE_NAME_OVERFLOW}: regular publication partial name: {name!r}"
@@ -1416,22 +3436,17 @@ def publish_regular_file(
     else:
         raise ImmutableArtifactError("regular-file payload must be bytes, Path, or ImmutableFile")
 
-    owns_parent = pinned_parent is None
-    if pinned_parent is None:
-        try:
-            pinned_parent = PinnedDirectoryReader(Path(parent))
-        except (OSError, ImmutableArtifactError) as exc:
-            raise ImmutableArtifactError(f"publication parent is unavailable: {parent}") from exc
-    else:
-        try:
-            pinned_parent.verify_path()
-        except (OSError, ImmutableArtifactError) as exc:
-            raise ImmutableArtifactError(f"publication parent is unavailable: {parent}") from exc
+    pinned_parent, owns_parent, declared_parent = (
+        _open_publication_parent_binding(Path(parent), pinned_parent)
+    )
     descriptor: int | None = None
     lock_descriptor: int | None = None
+    retained_publication: RetainedRegular | None = None
+    rollback_parent = rollback_regular = rollback_evidence = -1
+    committed = False
     partial_name = f".{name}{partial_suffix}"
     try:
-        pinned_parent.verify_path()
+        _verify_publication_parent_binding(pinned_parent, declared_parent)
         parent_descriptor = pinned_parent.descriptor
         if _entry_mode(parent_descriptor, name) is not None:
             raise ImmutableArtifactError(f"publication already exists: {name}")
@@ -1488,25 +3503,194 @@ def publish_regular_file(
             descriptor = None
 
         assert lock_descriptor is not None
-        pinned_parent.verify_path()
+        try:
+            rollback_parent = _open_independent_parent_guard(
+                pinned_parent.descriptor
+            )
+            rollback_regular = _open_regular_rollback_guard(
+                pinned_parent.descriptor,
+                partial_name,
+                lock_descriptor,
+            )
+            rollback_evidence = _open_regular_evidence_guard(
+                pinned_parent.descriptor,
+                partial_name,
+                lock_descriptor,
+            )
+        except BaseException as guard_error:
+            _close_descriptors(
+                tuple(
+                    descriptor_value
+                    for descriptor_value in (
+                        rollback_evidence,
+                        rollback_regular,
+                        rollback_parent,
+                    )
+                    if descriptor_value >= 0
+                ),
+                active_error=guard_error,
+                label=f"regular publication {name} rollback guard cleanup",
+            )
+            rollback_parent = rollback_regular = rollback_evidence = -1
+            raise
+        _verify_publication_parent_binding(pinned_parent, declared_parent)
         _fsync_or_fail(parent_descriptor, f"parent before {name}")
-        pinned_parent.verify_path()
+        _verify_publication_parent_binding(pinned_parent, declared_parent)
         _rename_noreplace_at(parent_descriptor, partial_name, parent_descriptor, name)
-        pinned_parent.verify_path()
+        committed = True
+        _verify_publication_parent_binding(pinned_parent, declared_parent)
         _fsync_or_fail(parent_descriptor, f"parent after {name}")
         linked = _entry_metadata(parent_descriptor, name)
         opened = os.fstat(lock_descriptor)
+        if linked is None:
+            raise ImmutableArtifactError(f"named regular-file path changed: {name}")
+        linked_snapshot = _snapshot_fields(linked)
+        opened_snapshot = _snapshot_fields(opened)
         if (
-            linked is None
-            or _snapshot_fields(linked) != _snapshot_fields(opened)
+            linked_snapshot != opened_snapshot
             or linked.st_nlink != 1
             or opened.st_nlink != 1
             or (executable and not (linked.st_mode & 0o111))
         ):
             raise ImmutableArtifactError(f"named regular-file path changed: {name}")
-        return Path(parent) / name
-    except OSError as exc:
-        raise ImmutableArtifactError(f"regular-file publication I/O failed: {exc}") from exc
+        if not _verify_open_file(lock_descriptor, material):
+            raise ImmutableArtifactError(
+                f"published regular-file bytes changed: {name}"
+            )
+        _fsync_or_fail(lock_descriptor, f"published regular file {name}")
+        closed_linked = _entry_metadata(parent_descriptor, name)
+        if (
+            closed_linked is None
+            or _snapshot_fields(closed_linked) != linked_snapshot
+            or _snapshot_fields(os.fstat(lock_descriptor)) != opened_snapshot
+        ):
+            raise ImmutableArtifactError(
+                f"published regular file changed during content closure: {name}"
+            )
+        _verify_publication_parent_binding(pinned_parent, declared_parent)
+
+        cleanup_error: BaseException | None = None
+        try:
+            try:
+                _close_descriptors(
+                    (lock_descriptor,),
+                    label=f"regular publication {name} close",
+                )
+            finally:
+                lock_descriptor = None
+        except BaseException as exc:
+            cleanup_error = exc
+        readers_to_close: list[tuple[str, PinnedDirectoryReader]] = []
+        if owns_parent:
+            readers_to_close.append(("publication parent", pinned_parent))
+        if declared_parent is not None:
+            readers_to_close.append(("declared parent binding", declared_parent))
+        for reader_label, reader in readers_to_close:
+            try:
+                reader.close()
+            except BaseException as exc:
+                if cleanup_error is None:
+                    cleanup_error = exc
+                else:
+                    cleanup_error.add_note(
+                        f"{DURABILITY_UNPROVEN}: regular publication "
+                        f"{reader_label} cleanup: {exc}"
+                    )
+            finally:
+                if reader is declared_parent:
+                    declared_parent = None
+        if cleanup_error is not None:
+            _preserve_failed_regular_publication_at(
+                cleanup_error,
+                rollback_parent,
+                name,
+                rollback_regular,
+                evidence_descriptor=rollback_evidence,
+            )
+            guard_diagnostics = _close_rollback_guards(
+                (rollback_evidence, rollback_regular, rollback_parent),
+                label=f"regular publication {name} rollback guards",
+            )
+            for detail in guard_diagnostics:
+                cleanup_error.add_note(detail)
+            rollback_parent = rollback_regular = rollback_evidence = -1
+            raise cleanup_error
+        _verify_declared_parent_descriptor_generation(
+            Path(parent), rollback_parent,
+        )
+        if _retain_capability:
+            try:
+                retained_publication = _open_exact_published_regular(
+                    Path(parent) / name,
+                    rollback_evidence,
+                    expected_sha256=material.sha256,
+                    expected_size_bytes=material.size_bytes,
+                    expected_snapshot=opened_snapshot,
+                )
+            except BaseException as capability_error:
+                _preserve_failed_regular_publication_at(
+                    capability_error,
+                    rollback_parent,
+                    name,
+                    rollback_regular,
+                    evidence_descriptor=rollback_evidence,
+                )
+                guard_diagnostics = _close_rollback_guards(
+                    (rollback_evidence, rollback_regular, rollback_parent),
+                    label=f"regular publication {name} rollback guards",
+                )
+                for detail in guard_diagnostics:
+                    capability_error.add_note(detail)
+                rollback_parent = rollback_regular = rollback_evidence = -1
+                raise
+        _verify_declared_parent_descriptor_generation(
+            Path(parent), rollback_parent,
+        )
+        _close_rollback_guards(
+            (rollback_evidence, rollback_regular, rollback_parent),
+            label=f"regular publication {name} rollback guards",
+        )
+        rollback_parent = rollback_regular = rollback_evidence = -1
+        result: Path | RetainedRegular = (
+            retained_publication
+            if retained_publication is not None
+            else Path(parent) / name
+        )
+        retained_publication = None
+        return result
+    except BaseException as exc:
+        if committed and lock_descriptor is not None:
+            _preserve_failed_regular_publication_at(
+                exc, parent_descriptor, name, lock_descriptor,
+            )
+        elif (
+            committed
+            and rollback_parent >= 0
+            and rollback_regular >= 0
+        ):
+            try:
+                _preserve_failed_regular_publication_at(
+                    exc,
+                    rollback_parent,
+                    name,
+                    rollback_regular,
+                    evidence_descriptor=(
+                        rollback_evidence if rollback_evidence >= 0 else None
+                    ),
+                )
+            except BaseException as preservation_error:
+                try:
+                    exc.add_note(
+                        "failed regular publication final-path preservation: "
+                        f"{preservation_error}"
+                    )
+                except (AttributeError, TypeError):
+                    pass
+        if isinstance(exc, OSError):
+            raise ImmutableArtifactError(
+                f"regular-file publication I/O failed: {exc}"
+            ) from exc
+        raise
     finally:
         closers: list[Callable[[], None]] = [
             lambda: _close_descriptors(
@@ -1518,10 +3702,55 @@ def publish_regular_file(
                 label=f"regular publication {name} close",
             )
         ]
+        if retained_publication is not None:
+            closers.append(retained_publication.close)
+        rollback_guards = tuple(
+            descriptor_value
+            for descriptor_value in (
+                rollback_evidence,
+                rollback_regular,
+                rollback_parent,
+            )
+            if descriptor_value >= 0
+        )
+        if rollback_guards:
+            closers.append(
+                lambda: _close_rollback_guards(
+                    rollback_guards,
+                    label=f"regular publication {name} rollback guards",
+                )
+            )
         if owns_parent:
-            assert pinned_parent is not None
             closers.append(pinned_parent.close)
+        if declared_parent is not None:
+            closers.append(declared_parent.close)
         _close_callables(closers, label=f"regular publication {name} cleanup")
+
+
+def publish_retained_regular_file(
+    parent: Path,
+    name: str,
+    payload_or_source: bytes | Path | ImmutableFile,
+    *,
+    partial_suffix: str = _PARTIAL_SUFFIX,
+    pinned_parent: PinnedDirectoryReader | None = None,
+    executable: bool = False,
+) -> RetainedRegular:
+    """Publish and return the exact committed locator as a live capability."""
+    result = publish_regular_file(
+        parent,
+        name,
+        payload_or_source,
+        partial_suffix=partial_suffix,
+        pinned_parent=pinned_parent,
+        executable=executable,
+        _retain_capability=True,
+    )
+    if not isinstance(result, RetainedRegular):  # pragma: no cover - invariant
+        raise ImmutableArtifactError(
+            "retained regular publication did not return a capability"
+        )
+    return result
 
 
 def _install_staged_file_at(root_descriptor: int, file: ImmutableFile) -> None:
@@ -1651,10 +3880,31 @@ def fsync_directory(path: Path) -> None:
         _close_descriptors((descriptor,), label=f"directory {path} close")
 
 
+def _bounded_inventory_difference(
+    expected: set[str], observed: set[str],
+) -> str:
+    missing_count = sum(path not in observed for path in expected)
+    sample = heapq.nsmallest(
+        _INVENTORY_DIAGNOSTIC_SAMPLE,
+        (path for path in expected if path not in observed),
+    )
+    return f"count={missing_count}, sample={sample}"
+
+
 def _tree_inventory_descriptor(
     root_descriptor: int,
+    *,
+    expected_files: set[str],
+    expected_directories: set[str],
+    mismatch_label: str,
+    allowed_files: set[str] | None = None,
 ) -> tuple[set[str], set[str]]:
-    """Inventory one pinned root with bounded descriptor-relative traversal."""
+    """Inventory one pinned root within its permitted namespace bounds."""
+    permitted_files = (
+        expected_files
+        if allowed_files is None
+        else expected_files | allowed_files
+    )
     observed_files: set[str] = set()
     observed_directories: set[str] = set()
     pending: list[tuple[str, ...]] = [()]
@@ -1663,33 +3913,51 @@ def _tree_inventory_descriptor(
         pinned = _open_pinned_relative_directory(root_descriptor, parts)
         try:
             with os.scandir(pinned.descriptor) as entries:
-                snapshot = [
-                    (entry.name, entry.stat(follow_symlinks=False).st_mode)
-                    for entry in entries
-                ]
+                for entry in entries:
+                    metadata = entry.stat(follow_symlinks=False)
+                    child_parts = (*parts, entry.name)
+                    relative = PurePosixPath(*child_parts).as_posix()
+                    safe_relative_path(relative)
+                    if stat.S_ISLNK(metadata.st_mode):
+                        raise ImmutableArtifactError(
+                            f"symlink in immutable tree: {relative}"
+                        )
+                    if stat.S_ISDIR(metadata.st_mode):
+                        if relative not in expected_directories:
+                            raise ImmutableArtifactError(
+                                f"{mismatch_label}: unexpected_directory={relative!r}"
+                            )
+                        observed_directories.add(relative)
+                        pending.append(child_parts)
+                    elif stat.S_ISREG(metadata.st_mode):
+                        if relative not in permitted_files:
+                            raise ImmutableArtifactError(
+                                f"{mismatch_label}: unexpected_file={relative!r}"
+                            )
+                        observed_files.add(relative)
+                    else:
+                        raise ImmutableArtifactError(
+                            f"non-regular entry in immutable tree: {relative}"
+                        )
             pinned.verify_path()
         finally:
             pinned.close()
-        for name, mode in snapshot:
-            child_parts = (*parts, name)
-            relative = PurePosixPath(*child_parts).as_posix()
-            safe_relative_path(relative)
-            if stat.S_ISLNK(mode):
-                raise ImmutableArtifactError(f"symlink in immutable tree: {relative}")
-            if stat.S_ISDIR(mode):
-                observed_directories.add(relative)
-                pending.append(child_parts)
-            elif stat.S_ISREG(mode):
-                observed_files.add(relative)
-            else:
-                raise ImmutableArtifactError(f"non-regular entry in immutable tree: {relative}")
     return observed_files, observed_directories
 
 
-def _tree_inventory(root: Path) -> tuple[set[str], set[str]]:
+def _tree_inventory(
+    root: Path, expected_files: Iterable[str], *, mismatch_label: str,
+) -> tuple[set[str], set[str]]:
+    expected = set(expected_files)
+    expected_directories = _expected_directories(expected)
     pinned = _open_pinned_directory(root)
     try:
-        inventory = _tree_inventory_descriptor(pinned.descriptor)
+        inventory = _tree_inventory_descriptor(
+            pinned.descriptor,
+            expected_files=expected,
+            expected_directories=expected_directories,
+            mismatch_label=mismatch_label,
+        )
         pinned.verify_path()
         return inventory
     finally:
@@ -1704,10 +3972,6 @@ def _expected_directories(relative_paths: Iterable[str]) -> set[str]:
             expected.add(parent.as_posix())
             parent = parent.parent
     return expected
-
-
-def _tree_files(root: Path) -> set[str]:
-    return _tree_inventory(root)[0]
 
 
 def _material_component_error(part: str, *, relative: str, leaf: bool) -> None:
@@ -1769,6 +4033,12 @@ def _material_map(files: Iterable[ImmutableFile]) -> dict[str, ImmutableFile]:
     return expected
 
 
+@dataclasses.dataclass(frozen=True)
+class _MutationDrainResult:
+    events: tuple[tuple[int, int, bytes], ...]
+    resource_error: ImmutableArtifactResourceError | None = None
+
+
 class _DirectoryMutationMonitor:
     """Fail closed on local syscall mutations during bounded verification."""
 
@@ -1778,7 +4048,7 @@ class _DirectoryMutationMonitor:
         add_watch = getattr(libc, "inotify_add_watch", None)
         close_on_exec = getattr(os, "O_CLOEXEC", None)
         if initialize is None or add_watch is None or not close_on_exec:
-            raise ImmutableArtifactError(
+            raise ImmutableArtifactResourceError(
                 f"{VERIFY_RESOURCE_BOUND}: inotify mutation monitor unavailable"
             )
         initialize.argtypes = (ctypes.c_int,)
@@ -1788,7 +4058,7 @@ class _DirectoryMutationMonitor:
         descriptor = initialize(os.O_NONBLOCK | close_on_exec)
         if descriptor < 0:
             error = ctypes.get_errno()
-            raise ImmutableArtifactError(
+            raise ImmutableArtifactResourceError(
                 f"{VERIFY_RESOURCE_BOUND}: inotify initialization failed: "
                 f"[{error}] {os.strerror(error)}"
             )
@@ -1797,7 +4067,7 @@ class _DirectoryMutationMonitor:
 
     def _watch_inode(
         self, descriptor: int, *, directory: bool,
-    ) -> None:
+    ) -> int:
         suffix = "/." if directory else ""
         path = os.fsencode(f"/proc/self/fd/{descriptor}{suffix}")
         mask = (
@@ -1807,38 +4077,130 @@ class _DirectoryMutationMonitor:
         )
         result = self._add_watch(self.descriptor, path, mask)
         if result >= 0:
-            return
+            return result
         error = ctypes.get_errno()
-        raise ImmutableArtifactError(
+        raise ImmutableArtifactResourceError(
             f"{VERIFY_RESOURCE_BOUND}: inotify inode watch failed: "
             f"[{error}] {os.strerror(error)}"
         )
 
-    def watch_directory(self, descriptor: int) -> None:
-        self._watch_inode(descriptor, directory=True)
+    def watch_directory(self, descriptor: int) -> int:
+        return self._watch_inode(descriptor, directory=True)
 
-    def watch_regular(self, descriptor: int) -> None:
-        self._watch_inode(descriptor, directory=False)
+    def watch_regular(self, descriptor: int) -> int:
+        return self._watch_inode(descriptor, directory=False)
 
-    def require_quiet(self) -> None:
+    def read_events(self) -> _MutationDrainResult:
+        parsed: list[tuple[int, int, bytes]] = []
+        attempts = batches = total_bytes = 0
+        deferred_resource_error: ImmutableArtifactResourceError | None = None
+
+        def remember_resource_failure(
+            detail: str,
+            cause: BaseException | None = None,
+        ) -> None:
+            nonlocal deferred_resource_error
+            error = ImmutableArtifactResourceError(
+                f"{VERIFY_RESOURCE_BOUND}: {detail}"
+            )
+            if cause is not None:
+                error.__cause__ = cause
+            if deferred_resource_error is None:
+                deferred_resource_error = error
+            else:
+                deferred_resource_error.add_note(str(error))
+
+        def resource_failure(
+            detail: str,
+            cause: BaseException | None = None,
+        ) -> _MutationDrainResult:
+            remember_resource_failure(detail, cause)
+            return _MutationDrainResult(
+                tuple(parsed), deferred_resource_error,
+            )
+
+        def completed() -> _MutationDrainResult:
+            return _MutationDrainResult(
+                tuple(parsed), deferred_resource_error,
+            )
+
         while True:
+            attempts += 1
+            if attempts > _INOTIFY_MAX_DRAIN_ATTEMPTS:
+                return resource_failure(
+                    "inotify event drain exceeded bounded read attempts"
+                )
+            if (
+                batches >= _INOTIFY_MAX_DRAIN_BATCHES
+                or total_bytes >= _INOTIFY_MAX_DRAIN_BYTES
+            ):
+                return resource_failure(
+                    "inotify event drain exceeded bounded bytes or batches"
+                )
             try:
-                events = os.read(self.descriptor, 64 * 1024)
+                events = os.read(self.descriptor, _INOTIFY_READ_BYTES)
             except BlockingIOError:
-                return
+                return completed()
             except InterruptedError:
                 continue
             except OSError as exc:
-                raise ImmutableArtifactError(
-                    f"{VERIFY_RESOURCE_BOUND}: inotify event read failed"
-                ) from exc
-            if events:
-                raise ImmutableArtifactError(
-                    "immutable tree changed during bounded verification"
+                return resource_failure("inotify event read failed", exc)
+            if not events:
+                return resource_failure("inotify monitor closed unexpectedly")
+            batches += 1
+            total_bytes += len(events)
+            if total_bytes > _INOTIFY_MAX_DRAIN_BYTES:
+                return resource_failure(
+                    "inotify event drain exceeded bounded aggregate bytes"
                 )
-            raise ImmutableArtifactError(
-                f"{VERIFY_RESOURCE_BOUND}: inotify monitor closed unexpectedly"
+            offset = 0
+            overflow_in_batch = False
+            while offset < len(events):
+                if len(events) - offset < 16:
+                    return resource_failure("truncated inotify event header")
+                watch_descriptor = int.from_bytes(
+                    events[offset : offset + 4], sys.byteorder, signed=True,
+                )
+                mask = int.from_bytes(
+                    events[offset + 4 : offset + 8], sys.byteorder,
+                )
+                name_length = int.from_bytes(
+                    events[offset + 12 : offset + 16], sys.byteorder,
+                )
+                event_end = offset + 16 + name_length
+                if event_end > len(events):
+                    return resource_failure("truncated inotify event payload")
+                if mask & _INOTIFY_Q_OVERFLOW:
+                    # Keep draining this already-read batch: a concrete mutation
+                    # that follows the overflow marker is stronger evidence than
+                    # the resource failure and must remain visible to callers.
+                    remember_resource_failure(
+                        "inotify event queue overflowed"
+                    )
+                    overflow_in_batch = True
+                    offset = event_end
+                    continue
+                if len(parsed) >= _INOTIFY_MAX_DRAIN_EVENTS:
+                    return resource_failure(
+                        "inotify event drain exceeded bounded event count"
+                    )
+                name = events[offset + 16 : event_end].rstrip(b"\0")
+                parsed.append((watch_descriptor, mask, name))
+                offset = event_end
+            if overflow_in_batch:
+                return completed()
+
+    def require_quiet(self) -> None:
+        result = self.read_events()
+        if result.events:
+            error = ImmutableArtifactError(
+                "immutable tree changed during bounded verification"
             )
+            if result.resource_error is not None:
+                error.add_note(str(result.resource_error))
+            raise error
+        if result.resource_error is not None:
+            raise result.resource_error
 
     def close(self) -> None:
         descriptor = self.descriptor
@@ -1849,15 +4211,398 @@ class _DirectoryMutationMonitor:
             )
 
 
+def _raise_monitored_mutation(
+    message: str,
+    result: _MutationDrainResult,
+) -> NoReturn:
+    error = ImmutableArtifactError(message)
+    if result.resource_error is not None:
+        error.add_note(str(result.resource_error))
+    raise error
+
+
+@dataclasses.dataclass(frozen=True)
+class _RetainedDirectoryPathMonitorState:
+    monitor: _DirectoryMutationMonitor
+    directory_watches: frozenset[int]
+    protected_names: tuple[tuple[int, bytes], ...]
+
+
+@dataclasses.dataclass(frozen=True)
+class _RetainedPathMonitorState:
+    monitor: _DirectoryMutationMonitor
+    directory_watches: frozenset[int]
+    protected_names: tuple[tuple[int, bytes], ...]
+    regular_watch: int
+
+
+def _require_retained_directory_path_monitor_quiet(
+    state: _RetainedDirectoryPathMonitorState | None,
+) -> None:
+    if state is None:
+        return
+    result = state.monitor.read_events()
+    for watch_descriptor, _mask, name in result.events:
+        if watch_descriptor not in state.directory_watches:
+            _raise_monitored_mutation(
+                "retained directory monitor observed an unknown watch",
+                result,
+            )
+        if not name:
+            _raise_monitored_mutation(
+                "retained directory ancestor changed during use",
+                result,
+            )
+        if any(
+            watch_descriptor == protected_watch
+            and name == protected_name
+            for protected_watch, protected_name in state.protected_names
+        ):
+            _raise_monitored_mutation(
+                "retained directory ancestor changed during use",
+                result,
+            )
+    if result.resource_error is not None:
+        raise result.resource_error
+
+
+def _open_directory_with_early_path_monitor(
+    path: Path,
+) -> tuple[_PinnedDirectory, _RetainedDirectoryPathMonitorState]:
+    """Pin one directory while protecting every name before traversal."""
+    absolute = Path(os.path.abspath(os.fspath(path)))
+    names = tuple(absolute.parts[1:])
+    if (
+        len(names) > _MAX_COMPONENTS
+        or len(os.fsencode(os.fspath(absolute))) > _MAX_RELATIVE_BYTES
+    ):
+        raise ImmutableArtifactError(
+            "absolute directory traversal exceeds bounded limits"
+        )
+
+    monitor = _DirectoryMutationMonitor()
+    descriptors: list[int] = []
+    directory_watches: list[int] = []
+    protected_names: list[tuple[int, bytes]] = []
+    pinned: _PinnedDirectory | None = None
+    transferred = False
+    try:
+        try:
+            descriptors.append(
+                os.open(os.path.sep, _directory_flags() & ~_nofollow_flag())
+            )
+        except OSError as exc:
+            raise ImmutableArtifactError(
+                f"cannot open retained directory root for {absolute}: {exc}"
+            ) from exc
+        directory_watches.append(
+            monitor.watch_directory(descriptors[-1])
+        )
+        for component_name in names:
+            protected_names.append((
+                directory_watches[-1], os.fsencode(component_name),
+            ))
+            try:
+                descriptors.append(
+                    _open_dir_at(descriptors[-1], component_name)
+                )
+            except FileNotFoundError:
+                raise
+            except OSError as exc:
+                raise ImmutableArtifactError(
+                    "cannot traverse retained directory ancestors for "
+                    f"{absolute}: {exc}"
+                ) from exc
+            directory_watches.append(
+                monitor.watch_directory(descriptors[-1])
+            )
+        pinned = _PinnedDirectory(tuple(descriptors), names)
+        descriptors = []
+        state = _RetainedDirectoryPathMonitorState(
+            monitor=monitor,
+            directory_watches=frozenset(directory_watches),
+            protected_names=tuple(protected_names),
+        )
+        pinned.verify_path()
+        _require_retained_directory_path_monitor_quiet(state)
+        pinned.verify_path()
+        transferred = True
+        return pinned, state
+    finally:
+        if not transferred:
+            closers: list[Callable[[], None]] = [monitor.close]
+            if pinned is not None:
+                closers.append(pinned.close)
+            elif descriptors:
+                closers.append(
+                    lambda: _close_descriptors(
+                        reversed(descriptors),
+                        label="early retained directory open cleanup",
+                    )
+                )
+            _close_callables(
+                closers, label="early retained directory monitor cleanup"
+            )
+
+
+def _arm_retained_path_monitor(
+    pinned: _PinnedRegular,
+) -> _RetainedPathMonitorState:
+    monitor = _DirectoryMutationMonitor()
+    try:
+        ancestor_snapshots = tuple(
+            _snapshot_fields(os.fstat(descriptor))
+            for descriptor in pinned.directory_descriptors
+        )
+        leaf_snapshot = _snapshot_fields(os.fstat(pinned.descriptor))
+        pinned.verify_path()
+        directory_watches = tuple(
+            monitor.watch_directory(descriptor)
+            for descriptor in pinned.directory_descriptors
+        )
+        protected_names = tuple(
+            (
+                directory_watches[index],
+                os.fsencode(component_name),
+            )
+            for index, component_name in enumerate(pinned.directory_names)
+        ) + ((directory_watches[-1], os.fsencode(pinned.leaf_name)),)
+        state = _RetainedPathMonitorState(
+            monitor=monitor,
+            directory_watches=frozenset(directory_watches),
+            protected_names=protected_names,
+            regular_watch=monitor.watch_regular(pinned.descriptor),
+        )
+        pinned.verify_path()
+        if tuple(
+            _snapshot_fields(os.fstat(descriptor))
+            for descriptor in pinned.directory_descriptors
+        ) != ancestor_snapshots or _snapshot_fields(
+            os.fstat(pinned.descriptor)
+        ) != leaf_snapshot:
+            raise ImmutableArtifactError(
+                "retained regular-file path changed while arming monitor"
+            )
+        _require_retained_path_monitor_quiet(state)
+        return state
+    except BaseException:
+        monitor.close()
+        raise
+
+
+def _open_regular_with_early_path_monitor(
+    path: Path, *, allow_hardlinks: bool = False,
+) -> tuple[_PinnedRegular, _RetainedPathMonitorState]:
+    """Open one regular leaf while watching every not-yet-traversed name."""
+    absolute = Path(os.path.abspath(os.fspath(path)))
+    if absolute.parent == absolute:
+        raise ImmutableArtifactError(f"not a regular file: {absolute}")
+    directory_names = tuple(absolute.parent.parts[1:])
+    if (
+        len(directory_names) > _MAX_COMPONENTS
+        or len(os.fsencode(os.fspath(absolute.parent))) > _MAX_RELATIVE_BYTES
+    ):
+        raise ImmutableArtifactError(
+            "absolute directory traversal exceeds bounded limits"
+        )
+
+    monitor = _DirectoryMutationMonitor()
+    directory_descriptors: list[int] = []
+    directory_watches: list[int] = []
+    protected_names: list[tuple[int, bytes]] = []
+    descriptor = -1
+    pinned: _PinnedRegular | None = None
+    transferred = False
+    try:
+        try:
+            directory_descriptors.append(
+                os.open(os.path.sep, _directory_flags() & ~_nofollow_flag())
+            )
+            directory_watches.append(
+                monitor.watch_directory(directory_descriptors[-1])
+            )
+            for component_name in directory_names:
+                protected_names.append((
+                    directory_watches[-1],
+                    os.fsencode(component_name),
+                ))
+                directory_descriptors.append(
+                    _open_dir_at(directory_descriptors[-1], component_name)
+                )
+                directory_watches.append(
+                    monitor.watch_directory(directory_descriptors[-1])
+                )
+        except (OSError, ImmutableArtifactError) as exc:
+            raise ImmutableArtifactError(
+                f"cannot traverse regular-file ancestors for {absolute}: {exc}"
+            ) from exc
+
+        protected_names.append((
+            directory_watches[-1], os.fsencode(absolute.name),
+        ))
+        try:
+            declared = os.stat(
+                absolute.name,
+                dir_fd=directory_descriptors[-1],
+                follow_symlinks=False,
+            )
+        except OSError as exc:
+            raise ImmutableArtifactError(
+                f"cannot inspect regular file {absolute}: {exc}"
+            ) from exc
+        if stat.S_ISLNK(declared.st_mode) or not stat.S_ISREG(declared.st_mode):
+            raise ImmutableArtifactError(f"not a regular file: {absolute}")
+        if declared.st_nlink != 1 and not allow_hardlinks:
+            raise ImmutableArtifactError(
+                f"hard-linked regular file is not immutable: {absolute}"
+            )
+
+        flags = (
+            os.O_RDONLY
+            | getattr(os, "O_CLOEXEC", 0)
+            | _nofollow_flag()
+            | getattr(os, "O_NONBLOCK", 0)
+        )
+        try:
+            descriptor = os.open(
+                absolute.name,
+                flags,
+                dir_fd=directory_descriptors[-1],
+            )
+        except OSError as exc:
+            raise ImmutableArtifactError(
+                f"cannot open regular file {absolute}: {exc}"
+            ) from exc
+        pinned = _PinnedRegular(
+            descriptor,
+            tuple(directory_descriptors),
+            directory_names,
+            absolute.name,
+            allow_hardlinks=allow_hardlinks,
+        )
+        descriptor = -1
+        directory_descriptors = []
+        before = _snapshot_fields(os.fstat(pinned.descriptor))
+        regular_watch = monitor.watch_regular(pinned.descriptor)
+        state = _RetainedPathMonitorState(
+            monitor=monitor,
+            directory_watches=frozenset(directory_watches),
+            protected_names=tuple(protected_names),
+            regular_watch=regular_watch,
+        )
+        pinned.verify_path()
+        if _snapshot_fields(os.fstat(pinned.descriptor)) != before:
+            raise ImmutableArtifactError(
+                "retained regular-file path changed while arming monitor"
+            )
+        _require_retained_path_monitor_quiet(state)
+        transferred = True
+        return pinned, state
+    finally:
+        if not transferred:
+            closers: list[Callable[[], None]] = [monitor.close]
+            if pinned is not None:
+                closers.append(pinned.close)
+            else:
+                closers.append(
+                    lambda: _close_descriptors(
+                        tuple(
+                            value
+                            for value in (
+                                descriptor,
+                                *reversed(directory_descriptors),
+                            )
+                            if value >= 0
+                        ),
+                        label="early retained regular open cleanup",
+                    )
+                )
+            _close_callables(
+                closers, label="early retained regular monitor cleanup"
+            )
+
+
+def _require_retained_path_monitor_quiet(
+    state: _RetainedPathMonitorState | None,
+) -> None:
+    if state is None:
+        return
+    result = state.monitor.read_events()
+    for watch_descriptor, mask, name in result.events:
+        if watch_descriptor == state.regular_watch:
+            _raise_monitored_mutation(
+                "retained regular-file generation changed during use",
+                result,
+            )
+        if watch_descriptor not in state.directory_watches:
+            _raise_monitored_mutation(
+                "retained regular-file monitor observed an unknown watch",
+                result,
+            )
+        if not name:
+            _raise_monitored_mutation(
+                "retained regular-file ancestor changed during use",
+                result,
+            )
+        if any(
+            watch_descriptor == protected_watch
+            and name == protected_name
+            for protected_watch, protected_name in state.protected_names
+        ):
+            if mask & _INOTIFY_NAMESPACE_EVENTS:
+                if (
+                    watch_descriptor,
+                    name,
+                ) == state.protected_names[-1]:
+                    _raise_monitored_mutation(
+                        "named regular-file path changed",
+                        result,
+                    )
+                _raise_monitored_mutation(
+                    "retained regular-file ancestor changed during use",
+                    result,
+                )
+            _raise_monitored_mutation(
+                "retained regular-file generation changed during use",
+                result,
+            )
+    if result.resource_error is not None:
+        raise result.resource_error
+
+
 def _walk_tree_descriptor(
     root_descriptor: int,
     *,
     observe_directory: Callable[[int], None] | None = None,
+    max_files: int | None = None,
+    max_directories: int | None = None,
+    max_total_file_bytes: int | None = None,
+    max_total_relative_path_bytes: int | None = None,
 ) -> _TreeSnapshot:
     """Inventory one tree while retaining only an O(depth) descriptor stack."""
+    limits = (
+        ("file", max_files),
+        ("directory", max_directories),
+        ("aggregate file-byte", max_total_file_bytes),
+        ("aggregate relative-path-byte", max_total_relative_path_bytes),
+    )
+    for label, limit in limits:
+        if limit is not None and (
+            isinstance(limit, bool) or not isinstance(limit, int) or limit < 0
+        ):
+            raise ImmutableArtifactError(f"pinned tree {label} limit is invalid")
+    if max_directories is not None and max_directories < 1:
+        raise ImmutableArtifactError(
+            "pinned tree directory limit does not admit the root"
+        )
+
     files: dict[str, _Snapshot] = {}
     directories: dict[str, _Snapshot] = {}
     pending: list[tuple[str, ...]] = [()]
+    discovered_files = 0
+    discovered_directories = 1
+    total_file_bytes = 0
+    total_relative_path_bytes = 0
     while pending:
         parts = pending.pop()
         directory = _open_pinned_relative_directory(root_descriptor, parts)
@@ -1867,45 +4612,549 @@ def _walk_tree_descriptor(
             directories[PurePosixPath(*parts).as_posix() if parts else "."] = (
                 _snapshot_fields(os.fstat(directory.descriptor))
             )
+            children: list[tuple[str, os.stat_result]] = []
             with os.scandir(directory.descriptor) as entries:
-                children = sorted(
-                    (entry.name, entry.stat(follow_symlinks=False))
-                    for entry in entries
-                )
+                for entry in entries:
+                    metadata = entry.stat(follow_symlinks=False)
+                    child = (*parts, entry.name)
+                    relative = PurePosixPath(*child).as_posix()
+                    safe_relative_path(relative)
+                    total_relative_path_bytes += len(os.fsencode(relative))
+                    if (
+                        max_total_relative_path_bytes is not None
+                        and total_relative_path_bytes
+                        > max_total_relative_path_bytes
+                    ):
+                        raise ImmutableArtifactLimitError(
+                            "pinned tree exceeds bounded aggregate relative-path-"
+                            f"byte limit: {total_relative_path_bytes} > "
+                            f"{max_total_relative_path_bytes}"
+                        )
+                    if stat.S_ISLNK(metadata.st_mode):
+                        raise ImmutableArtifactError(
+                            f"symlink in immutable tree: {relative}"
+                        )
+                    if stat.S_ISDIR(metadata.st_mode):
+                        discovered_directories += 1
+                        if (
+                            max_directories is not None
+                            and discovered_directories > max_directories
+                        ):
+                            raise ImmutableArtifactLimitError(
+                                "pinned tree exceeds bounded directory limit: "
+                                f"{discovered_directories} > {max_directories}"
+                            )
+                    elif stat.S_ISREG(metadata.st_mode):
+                        discovered_files += 1
+                        if max_files is not None and discovered_files > max_files:
+                            raise ImmutableArtifactLimitError(
+                                "pinned tree exceeds bounded file limit: "
+                                f"{discovered_files} > {max_files}"
+                            )
+                        total_file_bytes += metadata.st_size
+                        if (
+                            max_total_file_bytes is not None
+                            and total_file_bytes > max_total_file_bytes
+                        ):
+                            raise ImmutableArtifactLimitError(
+                                "pinned tree exceeds bounded aggregate file-byte "
+                                f"limit: {total_file_bytes} > "
+                                f"{max_total_file_bytes}"
+                            )
+                    else:
+                        raise ImmutableArtifactError(
+                            f"non-regular entry in immutable tree: {relative}"
+                        )
+                    children.append((entry.name, metadata))
+            children.sort(key=lambda item: item[0])
             directory.verify_path()
         finally:
             directory.close()
         for name, metadata in children:
             child = (*parts, name)
             relative = PurePosixPath(*child).as_posix()
-            safe_relative_path(relative)
-            if stat.S_ISLNK(metadata.st_mode):
-                raise ImmutableArtifactError(f"symlink in immutable tree: {relative}")
             if stat.S_ISDIR(metadata.st_mode):
                 pending.append(child)
-            elif stat.S_ISREG(metadata.st_mode):
-                files[relative] = _snapshot_fields(metadata)
             else:
-                raise ImmutableArtifactError(
-                    f"non-regular entry in immutable tree: {relative}"
-                )
+                files[relative] = _snapshot_fields(metadata)
     return files, directories
+
+
+class PinnedPathSetMonitor:
+    """Continuously guard selected regular files and recursive input trees.
+
+    Directory watches on the lexical ancestor chain reject self-moves while
+    allowing unrelated child publication. Recursive directories reject every
+    mutation. Filtered directories reject self-moves plus changes to named
+    children. Optional regular paths protect either the opened generation or
+    descriptor-anchored absence at the nearest existing parent.
+    """
+
+    def __init__(
+        self,
+        root: Path,
+        *,
+        regular_paths: Iterable[str],
+        recursive_directories: Iterable[str],
+        optional_regular_paths: Iterable[str] = (),
+        filtered_directories: Mapping[str, Iterable[str]] | None = None,
+        max_files: int | None = None,
+        max_directories: int | None = None,
+        max_total_file_bytes: int | None = None,
+        max_total_relative_path_bytes: int | None = None,
+    ) -> None:
+        self._reader = PinnedDirectoryReader(Path(root))
+        self._root = self._reader._root
+        self._owns_root = True
+        self._monitor: _DirectoryMutationMonitor | None = None
+        try:
+            self._arm(
+                regular_paths=regular_paths,
+                optional_regular_paths=optional_regular_paths,
+                recursive_directories=recursive_directories,
+                filtered_directories=filtered_directories,
+                max_files=max_files,
+                max_directories=max_directories,
+                max_total_file_bytes=max_total_file_bytes,
+                max_total_relative_path_bytes=max_total_relative_path_bytes,
+            )
+        except BaseException:
+            self.close()
+            raise
+
+    @classmethod
+    def from_reader(
+        cls,
+        reader: PinnedDirectoryReader,
+        *,
+        regular_paths: Iterable[str],
+        recursive_directories: Iterable[str],
+        optional_regular_paths: Iterable[str] = (),
+        filtered_directories: Mapping[str, Iterable[str]] | None = None,
+        max_files: int | None = None,
+        max_directories: int | None = None,
+        max_total_file_bytes: int | None = None,
+        max_total_relative_path_bytes: int | None = None,
+    ) -> PinnedPathSetMonitor:
+        """Arm watches from an existing pinned root without reopening its path."""
+        if not isinstance(reader, PinnedDirectoryReader):
+            raise TypeError("reader must be a PinnedDirectoryReader")
+        reader.verify_path()
+        monitor = cls.__new__(cls)
+        monitor._reader = reader
+        monitor._root = reader._root
+        monitor._owns_root = False
+        monitor._monitor = None
+        try:
+            monitor._arm(
+                regular_paths=regular_paths,
+                optional_regular_paths=optional_regular_paths,
+                recursive_directories=recursive_directories,
+                filtered_directories=filtered_directories,
+                max_files=max_files,
+                max_directories=max_directories,
+                max_total_file_bytes=max_total_file_bytes,
+                max_total_relative_path_bytes=max_total_relative_path_bytes,
+            )
+        except BaseException:
+            monitor.close()
+            raise
+        return monitor
+
+    def _verify_root_path(self) -> None:
+        reader = getattr(self, "_reader", None)
+        if reader is None:
+            raise ImmutableArtifactError("protected input root is closed")
+        reader.verify_path()
+
+    def _arm(
+        self,
+        *,
+        regular_paths: Iterable[str],
+        recursive_directories: Iterable[str],
+        optional_regular_paths: Iterable[str],
+        filtered_directories: Mapping[str, Iterable[str]] | None,
+        max_files: int | None,
+        max_directories: int | None,
+        max_total_file_bytes: int | None,
+        max_total_relative_path_bytes: int | None,
+    ) -> None:
+        self._monitor = _DirectoryMutationMonitor()
+        self._any_watches: set[int] = set()
+        self._self_watches: set[int] = set()
+        self._named_watches: dict[int, set[bytes]] = {}
+        self._nested_directory_identities: dict[
+            tuple[str, ...], tuple[int, int, int]
+        ] = {}
+        self._verify_root_path()
+        for descriptor in self._root.descriptors:
+            self._watch_self(descriptor)
+        for index, component_name in enumerate(self._root.names):
+            self._watch_named_children(
+                self._root.descriptors[index],
+                (component_name,),
+            )
+        for relative_path in regular_paths:
+            self._watch_regular(relative_path)
+        for relative_path in optional_regular_paths:
+            self._watch_optional_regular(relative_path)
+        for relative_path in recursive_directories:
+            self._watch_recursive(
+                relative_path,
+                max_files=max_files,
+                max_directories=max_directories,
+                max_total_file_bytes=max_total_file_bytes,
+                max_total_relative_path_bytes=(
+                    max_total_relative_path_bytes
+                ),
+            )
+        for relative_path, names in (filtered_directories or {}).items():
+            self._watch_filtered_directory(relative_path, names)
+        self._verify_root_path()
+        self.verify_unchanged()
+
+    def _remember_nested_directory(
+        self, parts: tuple[str, ...], descriptor: int,
+    ) -> None:
+        if not parts:
+            return
+        observed = _node_identity(os.fstat(descriptor))
+        expected = self._nested_directory_identities.get(parts)
+        if expected is not None and observed != expected:
+            raise ImmutableArtifactError(
+                "protected input nested ancestor changed while arming: "
+                f"{PurePosixPath(*parts).as_posix()}"
+            )
+        self._nested_directory_identities[parts] = observed
+
+    def _remember_nested_chain(
+        self,
+        descriptors: tuple[int, ...],
+        names: tuple[str, ...],
+    ) -> None:
+        if len(descriptors) != len(names) + 1:
+            raise ImmutableArtifactError(
+                "protected input nested ancestor chain is invalid"
+            )
+        for depth in range(1, len(descriptors)):
+            self._remember_nested_directory(
+                names[:depth], descriptors[depth],
+            )
+
+    def _verify_nested_directory_identities(self) -> None:
+        for parts, expected in sorted(
+            self._nested_directory_identities.items(),
+            key=lambda item: (len(item[0]), item[0]),
+        ):
+            relative_path = PurePosixPath(*parts).as_posix()
+            try:
+                directory = _open_pinned_relative_directory(
+                    self._root.descriptor, parts,
+                )
+            except (OSError, ImmutableArtifactError) as exc:
+                raise ImmutableArtifactError(
+                    "protected input nested ancestor changed during "
+                    f"downstream use: {relative_path}"
+                ) from exc
+            try:
+                if _node_identity(os.fstat(directory.descriptor)) != expected:
+                    raise ImmutableArtifactError(
+                        "protected input nested ancestor changed during "
+                        f"downstream use: {relative_path}"
+                    )
+                directory.verify_path()
+            finally:
+                directory.close()
+
+    def _watch_self(self, descriptor: int) -> None:
+        self._self_watches.add(self._monitor.watch_directory(descriptor))
+
+    def _watch_any_directory(self, descriptor: int) -> None:
+        watch = self._monitor.watch_directory(descriptor)
+        self._any_watches.add(watch)
+        self._self_watches.discard(watch)
+        self._named_watches.pop(watch, None)
+
+    def _watch_regular_descriptor(self, descriptor: int) -> None:
+        watch = self._monitor.watch_regular(descriptor)
+        self._any_watches.add(watch)
+        self._self_watches.discard(watch)
+        self._named_watches.pop(watch, None)
+
+    def _watch_regular(self, relative_path: str) -> None:
+        pinned = _open_relative_regular_at(self._root.descriptor, relative_path)
+        try:
+            self._remember_nested_chain(
+                pinned.directory_descriptors,
+                pinned.directory_names,
+            )
+            self._watch_regular_descriptor(pinned.descriptor)
+            pinned.verify_path()
+        finally:
+            pinned.close()
+
+    def _watch_named_children(
+        self, descriptor: int, names: Iterable[str],
+    ) -> None:
+        protected_names: set[bytes] = set()
+        for name in names:
+            child = safe_relative_path(name)
+            if len(child.parts) != 1:
+                raise ImmutableArtifactError(
+                    "filtered mutation-monitor child must be one component"
+                )
+            protected_names.add(os.fsencode(name))
+        watch = self._monitor.watch_directory(descriptor)
+        if watch not in self._any_watches:
+            self._self_watches.discard(watch)
+            self._named_watches.setdefault(watch, set()).update(
+                protected_names,
+            )
+
+    def _watch_optional_regular(self, relative_path: str) -> None:
+        """Protect either one regular generation or its descriptor-bound absence."""
+        relative = safe_relative_path(relative_path)
+        descriptors = [os.dup(self._root.descriptor)]
+        try:
+            for index, part in enumerate(relative.parts[:-1]):
+                self._watch_named_children(descriptors[-1], (part,))
+                try:
+                    descriptors.append(_open_dir_at(descriptors[-1], part))
+                except FileNotFoundError:
+                    return
+                except OSError as exc:
+                    raise ImmutableArtifactError(
+                        "optional regular-file ancestor is not a no-follow "
+                        f"directory: {relative_path}"
+                    ) from exc
+                self._remember_nested_directory(
+                    relative.parts[: index + 1], descriptors[-1],
+                )
+            leaf_name = relative.parts[-1]
+            self._watch_named_children(descriptors[-1], (leaf_name,))
+            try:
+                metadata = os.stat(
+                    leaf_name,
+                    dir_fd=descriptors[-1],
+                    follow_symlinks=False,
+                )
+            except FileNotFoundError:
+                return
+            except OSError as exc:
+                raise ImmutableArtifactError(
+                    f"cannot inspect optional regular file: {relative_path}"
+                ) from exc
+            if (
+                stat.S_ISLNK(metadata.st_mode)
+                or not stat.S_ISREG(metadata.st_mode)
+                or metadata.st_nlink != 1
+            ):
+                raise ImmutableArtifactError(
+                    "optional artifact is not a single-link regular file: "
+                    f"{relative_path}"
+                )
+            self._watch_regular(relative_path)
+        finally:
+            _close_descriptors(
+                reversed(descriptors),
+                label="optional regular monitor traversal close",
+            )
+
+    def _watch_recursive(
+        self,
+        relative_path: str,
+        *,
+        max_files: int | None,
+        max_directories: int | None,
+        max_total_file_bytes: int | None,
+        max_total_relative_path_bytes: int | None,
+    ) -> None:
+        if relative_path == ".":
+            directory = _PinnedDirectory(
+                (os.dup(self._root.descriptor),), ()
+            )
+        else:
+            relative = safe_relative_path(relative_path)
+            directory = _open_pinned_relative_directory(
+                self._root.descriptor, relative.parts,
+            )
+        try:
+            self._remember_nested_chain(
+                directory.descriptors, directory.names,
+            )
+            files, _directories = _walk_tree_descriptor(
+                directory.descriptor,
+                observe_directory=self._watch_any_directory,
+                max_files=max_files,
+                max_directories=max_directories,
+                max_total_file_bytes=max_total_file_bytes,
+                max_total_relative_path_bytes=max_total_relative_path_bytes,
+            )
+            for child_path in sorted(files):
+                pinned = _open_relative_regular_at(
+                    directory.descriptor, child_path,
+                )
+                try:
+                    self._watch_regular_descriptor(pinned.descriptor)
+                    pinned.verify_path()
+                finally:
+                    pinned.close()
+            directory.verify_path()
+            self._verify_root_path()
+        finally:
+            directory.close()
+
+    def _watch_filtered_directory(
+        self, relative_path: str, names: Iterable[str],
+    ) -> None:
+        relative = safe_relative_path(relative_path)
+        directory = _open_pinned_relative_directory(
+            self._root.descriptor, relative.parts,
+        )
+        try:
+            self._remember_nested_chain(
+                directory.descriptors, directory.names,
+            )
+            self._watch_named_children(directory.descriptor, names)
+            directory.verify_path()
+        finally:
+            directory.close()
+
+    def verify_unchanged(self) -> None:
+        self._verify_root_path()
+        self._verify_nested_directory_identities()
+        result = self._monitor.read_events()
+        for watch_descriptor, _mask, name in result.events:
+            if watch_descriptor in self._any_watches:
+                _raise_monitored_mutation(
+                    "protected input tree changed during downstream use",
+                    result,
+                )
+            protected_names = self._named_watches.get(watch_descriptor)
+            if protected_names is not None:
+                if not name or name in protected_names:
+                    _raise_monitored_mutation(
+                        "protected input path changed during downstream use",
+                        result,
+                    )
+                continue
+            if watch_descriptor in self._self_watches:
+                if not name:
+                    _raise_monitored_mutation(
+                        "protected input ancestor changed during downstream use",
+                        result,
+                    )
+                continue
+            _raise_monitored_mutation(
+                "protected input monitor observed an unknown watch",
+                result,
+            )
+        if result.resource_error is not None:
+            raise result.resource_error
+        self._verify_nested_directory_identities()
+        self._verify_root_path()
+
+    def close(self) -> None:
+        monitor = getattr(self, "_monitor", None)
+        reader = getattr(self, "_reader", None)
+        owns_root = getattr(self, "_owns_root", False)
+        self._monitor = None
+        self._reader = None
+        self._root = None
+        self._nested_directory_identities = {}
+        self._owns_root = False
+        closers: list[Callable[[], None]] = []
+        if monitor is not None:
+            closers.append(monitor.close)
+        if reader is not None and owns_root:
+            closers.append(reader.close)
+        if closers:
+            _close_callables(closers, label="protected input monitor close")
+
+    def __enter__(self) -> PinnedPathSetMonitor:
+        try:
+            self.verify_unchanged()
+        except BaseException:
+            _close_callables(
+                (self.close,), label="protected input monitor entry close"
+            )
+            raise
+        return self
+
+    def __exit__(self, exc_type, exc, traceback) -> bool:
+        if exc is not None:
+            try:
+                self.verify_unchanged()
+            except BaseException as verification_error:
+                try:
+                    exc.add_note(
+                        "protected input revalidation failed: "
+                        f"{verification_error}"
+                    )
+                except (AttributeError, TypeError):
+                    pass
+            self.close()
+            return False
+        try:
+            self.verify_unchanged()
+        finally:
+            self.close()
+        return False
 
 
 def _snapshot_tree_descriptor(
     root_descriptor: int,
+    *,
+    max_files: int | None = None,
+    max_directories: int | None = None,
+    max_total_file_bytes: int | None = None,
+    max_total_relative_path_bytes: int | None = None,
 ) -> _TreeSnapshot:
-    return _walk_tree_descriptor(root_descriptor)
+    if all(
+        limit is None
+        for limit in (
+            max_files,
+            max_directories,
+            max_total_file_bytes,
+            max_total_relative_path_bytes,
+        )
+    ):
+        return _walk_tree_descriptor(root_descriptor)
+    return _walk_tree_descriptor(
+        root_descriptor,
+        max_files=max_files,
+        max_directories=max_directories,
+        max_total_file_bytes=max_total_file_bytes,
+        max_total_relative_path_bytes=max_total_relative_path_bytes,
+    )
 
 
 def _arm_directory_mutation_monitor(
     root_descriptor: int,
+    *,
+    max_files: int | None = None,
+    max_directories: int | None = None,
+    max_total_file_bytes: int | None = None,
+    max_total_relative_path_bytes: int | None = None,
 ) -> _DirectoryMutationMonitor:
     monitor = _DirectoryMutationMonitor()
     try:
-        files, _directories = _walk_tree_descriptor(
-            root_descriptor, observe_directory=monitor.watch_directory,
-        )
+        walk_kwargs = {
+            "max_files": max_files,
+            "max_directories": max_directories,
+            "max_total_file_bytes": max_total_file_bytes,
+            "max_total_relative_path_bytes": max_total_relative_path_bytes,
+        }
+        if all(value is None for value in walk_kwargs.values()):
+            files, _directories = _walk_tree_descriptor(
+                root_descriptor, observe_directory=monitor.watch_directory,
+            )
+        else:
+            files, _directories = _walk_tree_descriptor(
+                root_descriptor,
+                observe_directory=monitor.watch_directory,
+                **walk_kwargs,
+            )
         for relative_path in sorted(files):
             pinned = _open_relative_regular_at(root_descriptor, relative_path)
             try:
@@ -1925,15 +5174,27 @@ def _snapshot_pinned_tree_at(
     *,
     require_readonly_files: bool,
     require_readonly_directories: bool,
+    max_files: int | None = None,
+    max_directories: int | None = None,
+    max_total_file_bytes: int | None = None,
+    max_total_relative_path_bytes: int | None = None,
 ) -> PinnedTreeSnapshot:
-    monitor = _arm_directory_mutation_monitor(root_descriptor)
+    limits = {
+        "max_files": max_files,
+        "max_directories": max_directories,
+        "max_total_file_bytes": max_total_file_bytes,
+        "max_total_relative_path_bytes": max_total_relative_path_bytes,
+    }
+    monitor = _arm_directory_mutation_monitor(root_descriptor, **limits)
     try:
         root_before = _snapshot_fields(os.fstat(root_descriptor))
         if not stat.S_ISDIR(root_before[2]):
             raise ImmutableArtifactError("pinned tree root is not a directory")
         if require_readonly_directories and root_before[2] & 0o222:
             raise ImmutableArtifactError("pinned tree root directory is writable")
-        files, directories = _snapshot_tree_descriptor(root_descriptor)
+        files, directories = _snapshot_tree_descriptor(
+            root_descriptor, **limits,
+        )
         if directories.get(".") != root_before:
             raise ImmutableArtifactError("pinned tree root changed during inventory")
         for relative_path, snapshot in files.items():
@@ -1961,6 +5222,80 @@ def _snapshot_pinned_tree_at(
         monitor.close()
 
 
+def _expected_tree_limits(
+    expected: Mapping[str, ImmutableFile],
+) -> dict[str, int]:
+    expected_directories = _expected_directories(expected)
+    return {
+        "max_files": len(expected),
+        "max_directories": len(expected_directories) + 1,
+        "max_total_file_bytes": sum(file.size_bytes for file in expected.values()),
+        "max_total_relative_path_bytes": (
+            sum(len(os.fsencode(relative_path)) for relative_path in expected)
+            + sum(
+                len(os.fsencode(relative_path))
+                for relative_path in expected_directories
+            )
+        ),
+    }
+
+
+def _available_file_descriptor_capacity() -> int | None:
+    try:
+        soft_limit, _hard_limit = resource.getrlimit(resource.RLIMIT_NOFILE)
+    except (AttributeError, OSError, ValueError) as exc:
+        raise ImmutableArtifactResourceError(
+            f"{VERIFY_RESOURCE_BOUND}: unable to inspect RLIMIT_NOFILE"
+        ) from exc
+    if soft_limit == resource.RLIM_INFINITY:
+        return None
+    if isinstance(soft_limit, bool) or not isinstance(soft_limit, int) or soft_limit < 0:
+        raise ImmutableArtifactResourceError(
+            f"{VERIFY_RESOURCE_BOUND}: invalid RLIMIT_NOFILE={soft_limit!r}"
+        )
+    try:
+        with os.scandir("/proc/self/fd") as entries:
+            open_descriptors = sum(1 for _entry in entries)
+    except OSError as exc:
+        raise ImmutableArtifactResourceError(
+            f"{VERIFY_RESOURCE_BOUND}: unable to count open descriptors"
+        ) from exc
+    return max(0, soft_limit - open_descriptors)
+
+
+def require_file_descriptor_headroom(required: int, *, label: str) -> None:
+    """Fail typed when a bounded retained-capability plan cannot fit.
+
+    This is a conservative preflight, not a reservation: callers must still
+    translate a later ``EMFILE``/``ENFILE`` through the same resource taxonomy.
+    """
+    if type(required) is not int or required < 0:
+        raise ImmutableArtifactError(
+            "required file-descriptor headroom must be a nonnegative integer"
+        )
+    if type(label) is not str or not label or "\x00" in label:
+        raise ImmutableArtifactError(
+            "file-descriptor headroom label must be a nonempty string"
+        )
+    available = _available_file_descriptor_capacity()
+    if available is not None and available < required:
+        raise ImmutableArtifactResourceError(
+            f"{VERIFY_RESOURCE_BOUND}: {label}: available file descriptors "
+            f"{available} < required headroom {required}"
+        )
+
+
+def _snapshot_descriptor_headroom(
+    expected: Mapping[str, ImmutableFile],
+) -> int:
+    maximum_depth = max(
+        (len(safe_relative_path(relative_path).parts) for relative_path in expected),
+        default=1,
+    )
+    return maximum_depth + 32
+
+
+@_translate_descriptor_resource_errors("snapshot-tree verification")
 def _verify_snapshot_contents_at(
     root_descriptor: int,
     expected: dict[str, ImmutableFile],
@@ -1968,22 +5303,29 @@ def _verify_snapshot_contents_at(
     require_readonly_directories: bool,
 ) -> _TreeSnapshot:
     """Verify large trees with one hash and bounded simultaneous descriptors."""
-    try:
-        soft_limit, _hard_limit = resource.getrlimit(resource.RLIMIT_NOFILE)
-    except (AttributeError, OSError, ValueError) as exc:
-        raise ImmutableArtifactError(
-            f"{VERIFY_RESOURCE_BOUND}: unable to inspect RLIMIT_NOFILE"
-        ) from exc
-    if soft_limit < 96:
-        raise ImmutableArtifactError(
-            f"{VERIFY_RESOURCE_BOUND}: RLIMIT_NOFILE={soft_limit}"
+    available_descriptors = _available_file_descriptor_capacity()
+    required_descriptors = _snapshot_descriptor_headroom(expected)
+    if (
+        available_descriptors is not None
+        and available_descriptors < required_descriptors
+    ):
+        raise ImmutableArtifactResourceError(
+            f"{VERIFY_RESOURCE_BOUND}: available file descriptors "
+            f"{available_descriptors} < required headroom {required_descriptors}"
         )
+    limits = _expected_tree_limits(expected)
+    expected_files = set(expected)
+    expected_directories = _expected_directories(expected_files)
     root_before = _snapshot_fields(os.fstat(root_descriptor))
     if require_readonly_directories and root_before[2] & 0o222:
         raise ImmutableArtifactError("finalized publication root is writable")
-    first_files, first_directories = _snapshot_tree_descriptor(root_descriptor)
-    expected_directories = _expected_directories(expected)
-    if set(first_files) != set(expected) or set(first_directories) - {"."} != expected_directories:
+    first_files, first_directories = _snapshot_tree_descriptor(
+        root_descriptor, **limits,
+    )
+    if (
+        set(first_files) != expected_files
+        or set(first_directories) - {"."} != expected_directories
+    ):
         raise ImmutableArtifactError("immutable tree inventory mismatch")
     for relative_directory in expected_directories:
         snapshot = first_directories[relative_directory]
@@ -2008,8 +5350,13 @@ def _verify_snapshot_contents_at(
             hashed[relative_path] = snapshot
         finally:
             pinned.close()
-    second_files, second_directories = _snapshot_tree_descriptor(root_descriptor)
-    if set(second_files) != set(expected) or set(second_directories) - {"."} != expected_directories:
+    second_files, second_directories = _snapshot_tree_descriptor(
+        root_descriptor, **limits,
+    )
+    if (
+        set(second_files) != expected_files
+        or set(second_directories) - {"."} != expected_directories
+    ):
         raise ImmutableArtifactError("immutable tree inventory changed during closure")
     for relative_path, snapshot in hashed.items():
         if second_files[relative_path] != snapshot:
@@ -2043,8 +5390,13 @@ def _verify_snapshot_contents_at(
             directory.verify_path()
         finally:
             directory.close()
-    final_files, final_directories = _snapshot_tree_descriptor(root_descriptor)
-    if set(final_files) != set(expected) or set(final_directories) - {"."} != expected_directories:
+    final_files, final_directories = _snapshot_tree_descriptor(
+        root_descriptor, **limits,
+    )
+    if (
+        set(final_files) != expected_files
+        or set(final_directories) - {"."} != expected_directories
+    ):
         raise ImmutableArtifactError("immutable tree inventory changed during final closure")
     for relative_path, snapshot in hashed.items():
         if final_files[relative_path] != snapshot:
@@ -2063,13 +5415,16 @@ def _verify_snapshot_contents_at(
     return final_files, final_directories
 
 
+@_translate_descriptor_resource_errors("snapshot closure")
 def _verify_snapshot_closure_at(
     root_descriptor: int,
     expected: dict[str, ImmutableFile],
     *,
     require_readonly_directories: bool,
 ) -> _TreeSnapshot:
-    monitor = _arm_directory_mutation_monitor(root_descriptor)
+    monitor = _arm_directory_mutation_monitor(
+        root_descriptor, **_expected_tree_limits(expected),
+    )
     try:
         snapshot = _verify_snapshot_contents_at(
             root_descriptor,
@@ -2084,6 +5439,7 @@ def _verify_snapshot_closure_at(
         monitor.close()
 
 
+@_translate_descriptor_resource_errors("immutable tree verification")
 def _verify_published_files_at(
     root_descriptor: int,
     files: Iterable[ImmutableFile],
@@ -2091,14 +5447,19 @@ def _verify_published_files_at(
     require_readonly_directories: bool = True,
 ) -> _TreeSnapshot:
     expected = _material_map(files)
-    expected_directories = _expected_directories(expected)
-    try:
-        soft_limit, _hard_limit = resource.getrlimit(resource.RLIMIT_NOFILE)
-    except (AttributeError, OSError, ValueError):
-        soft_limit = None
-    estimated_retained = len(expected) + len(expected_directories) + 1
+    expected_files = set(expected)
+    expected_directories = _expected_directories(expected_files)
+    available_descriptors = _available_file_descriptor_capacity()
+    estimated_retained = (
+        len(expected_files)
+        + len(expected_directories)
+        + _snapshot_descriptor_headroom(expected)
+    )
     use_snapshot_closure = len(expected) > _SNAPSHOT_CLOSURE_THRESHOLD
-    if soft_limit is not None and estimated_retained + 32 >= soft_limit:
+    if (
+        available_descriptors is not None
+        and estimated_retained >= available_descriptors
+    ):
         use_snapshot_closure = True
     if use_snapshot_closure:
         return _verify_snapshot_closure_at(
@@ -2111,17 +5472,19 @@ def _verify_published_files_at(
         raise ImmutableArtifactError("publication root descriptor is not a directory")
 
     def require_inventory() -> tuple[set[str], set[str]]:
-        observed, observed_directories = _tree_inventory_descriptor(root_descriptor)
-        if observed != set(expected) or observed_directories != expected_directories:
-            missing = sorted(set(expected) - observed)
-            extra = sorted(observed - set(expected))
-            missing_directories = sorted(expected_directories - observed_directories)
-            extra_directories = sorted(observed_directories - expected_directories)
+        observed, observed_directories = _tree_inventory_descriptor(
+            root_descriptor,
+            expected_files=expected_files,
+            expected_directories=expected_directories,
+            mismatch_label="immutable tree inventory mismatch",
+        )
+        if observed != expected_files or observed_directories != expected_directories:
             raise ImmutableArtifactError(
                 "immutable tree inventory mismatch: "
-                f"missing={missing}, extra={extra}, "
-                f"missing_directories={missing_directories}, "
-                f"extra_directories={extra_directories}"
+                "missing_files="
+                f"{_bounded_inventory_difference(expected_files, observed)}, "
+                "missing_directories="
+                f"{_bounded_inventory_difference(expected_directories, observed_directories)}"
             )
         return observed, observed_directories
 
@@ -2279,16 +5642,41 @@ def _verify_published_files_at(
     )
 
 
+def _baseline_tree_limits(
+    baseline: _TreeSnapshot,
+) -> dict[str, int]:
+    files, directories = baseline
+    if "." not in directories:
+        raise ImmutableArtifactError(
+            "authorization baseline omits the root directory"
+        )
+    return {
+        "max_files": len(files),
+        "max_directories": len(directories),
+        "max_total_file_bytes": sum(
+            metadata[4] for metadata in files.values()
+        ),
+        "max_total_relative_path_bytes": sum(
+            len(os.fsencode(relative_path)) for relative_path in files
+        ) + sum(
+            len(os.fsencode(relative_path))
+            for relative_path in directories
+            if relative_path != "."
+        ),
+    }
+
+
 def _verify_snapshot_against_at(
     root_descriptor: int, baseline: _TreeSnapshot,
 ) -> None:
     """Close a verified tree after authorization without rehashing it."""
-    first = _snapshot_tree_descriptor(root_descriptor)
+    limits = _baseline_tree_limits(baseline)
+    first = _snapshot_tree_descriptor(root_descriptor, **limits)
     if first != baseline:
         raise ImmutableArtifactError(
             "immutable tree changed after authorization"
         )
-    second = _snapshot_tree_descriptor(root_descriptor)
+    second = _snapshot_tree_descriptor(root_descriptor, **limits)
     if second != first:
         raise ImmutableArtifactError(
             "immutable tree changed during authorization closure"
@@ -2420,6 +5808,7 @@ def _accept_exact_concurrent_winner(
             pinned_final.close()
 
 
+@_translate_descriptor_resource_errors("directory publication")
 def publish_directory(
     output_root: Path,
     final_name: str,
@@ -2427,9 +5816,17 @@ def publish_directory(
     *,
     before_commit: Callable[[Path, int], None] | None = None,
     pinned_root: PinnedDirectoryReader | None = None,
+    accept_existing: bool = True,
 ) -> Path:
-    """Publish one immutable tree through a locked, pinned deterministic stage."""
+    """Publish one immutable tree through a locked, pinned deterministic stage.
+
+    ``accept_existing`` preserves the historical idempotent exact-winner mode by
+    default.  Attempt-scoped and merge publications set it to ``False`` so a
+    pre-existing or racing destination generation is always a hard failure.
+    """
     _validate_publication_name(final_name)
+    if type(accept_existing) is not bool:
+        raise ImmutableArtifactError("accept_existing must be boolean")
     material = tuple(files)
     expected = _material_map(material)
     root = Path(os.path.abspath(os.fspath(output_root)))
@@ -2442,6 +5839,8 @@ def publish_directory(
     stage_name = f".{final_name}.staging"
     final = root / final_name
     pinned_stage: _PinnedDirectory | None = None
+    rollback_root = rollback_stage = -1
+    committed = False
 
     def authorize() -> None:
         if before_commit is not None:
@@ -2451,6 +5850,10 @@ def publish_directory(
     def accept_winner() -> bool:
         if _entry_mode(pinned_root.descriptor, final_name) is None:
             return False
+        if not accept_existing:
+            raise ImmutableArtifactError(
+                f"publication already exists or raced: {final_name}"
+            )
         accepted = _accept_exact_concurrent_winner(
             pinned_root.descriptor, stage_name, final_name, material
         )
@@ -2512,7 +5915,30 @@ def publish_directory(
                 "concurrent final appeared beside the locked deterministic stage"
             )
 
-        observed, _ = _tree_inventory_descriptor(pinned_stage.descriptor)
+        expected_files = set(expected)
+        expected_directories = _expected_directories(expected_files)
+        recoverable_partials = {
+            relative_path: PurePosixPath(
+                *safe_relative_path(relative_path).parts[:-1],
+                _partial_name(
+                    safe_relative_path(relative_path).parts[-1]
+                ),
+            ).as_posix()
+            for relative_path in expected_files
+        }
+        observed, _ = _tree_inventory_descriptor(
+            pinned_stage.descriptor,
+            expected_files=expected_files,
+            expected_directories=expected_directories,
+            mismatch_label="deterministic stage inventory mismatch",
+            allowed_files=set(recoverable_partials.values()),
+        )
+        for relative_path, partial_path in recoverable_partials.items():
+            if relative_path in observed and partial_path in observed:
+                raise ImmutableArtifactError(
+                    "ambiguous final and deterministic partial coexist: "
+                    f"{relative_path}"
+                )
         for relative_path in sorted(expected):
             file = expected[relative_path]
             if relative_path in observed:
@@ -2532,23 +5958,18 @@ def publish_directory(
             pinned_stage.verify_path()
 
         observed, observed_directories = _tree_inventory_descriptor(
-            pinned_stage.descriptor
+            pinned_stage.descriptor,
+            expected_files=expected_files,
+            expected_directories=expected_directories,
+            mismatch_label="deterministic stage inventory mismatch",
         )
-        expected_directories = _expected_directories(expected)
-        if observed != set(expected) or observed_directories != expected_directories:
-            missing = sorted(set(expected) - observed)
-            extra = sorted(observed - set(expected))
-            missing_directories = sorted(
-                expected_directories - observed_directories
-            )
-            extra_directories = sorted(
-                observed_directories - expected_directories
-            )
+        if observed != expected_files or observed_directories != expected_directories:
             raise ImmutableArtifactError(
                 "deterministic stage inventory mismatch: "
-                f"missing={missing}, extra={extra}, "
-                f"missing_directories={missing_directories}, "
-                f"extra_directories={extra_directories}"
+                "missing_files="
+                f"{_bounded_inventory_difference(expected_files, observed)}, "
+                "missing_directories="
+                f"{_bounded_inventory_difference(expected_directories, observed_directories)}"
             )
         _verify_published_files_at(
             pinned_stage.descriptor,
@@ -2589,40 +6010,70 @@ def publish_directory(
             root_descriptor, stage_name, pinned_stage.descriptor
         )
         pinned_root.verify_path()
+        try:
+            rollback_root = _open_independent_parent_guard(root_descriptor)
+            rollback_stage = _open_directory_rollback_guard(
+                pinned_stage.descriptor
+            )
+        except BaseException as guard_error:
+            _close_descriptors(
+                tuple(
+                    descriptor_value
+                    for descriptor_value in (rollback_stage, rollback_root)
+                    if descriptor_value >= 0
+                ),
+                active_error=guard_error,
+                label=f"directory publication {final_name} rollback guard cleanup",
+            )
+            rollback_root = rollback_stage = -1
+            raise
         _fsync_or_fail(root_descriptor, "publication parent before commit")
         pinned_root.verify_path()
         try:
             _rename_noreplace_at(
                 root_descriptor, stage_name, root_descriptor, final_name
             )
+            committed = True
         except (FileExistsError, ImmutableArtifactError):
+            recovered_own_commit = False
             if _entry_mode(root_descriptor, stage_name) is None:
                 _verify_named_directory(
                     root_descriptor, final_name, pinned_stage.descriptor
                 )
-                if accept_winner():
-                    return final
-            raise
+                # The rename committed this exact pinned stage before the
+                # helper reported an ambiguous failure. Record ownership before
+                # fallback authorization so a later failure triggers retirement.
+                committed = True
+                recovered_own_commit = accept_winner()
+            if not recovered_own_commit:
+                raise
         _verify_named_directory(
             root_descriptor, final_name, pinned_stage.descriptor
         )
         pinned_root.verify_path()
         _fsync_or_fail(root_descriptor, "publication parent after commit")
-        # Rehash the committed inode tree.  A detected race is a typed failure;
-        # the committed directory is deliberately preserved as possible unique
-        # evidence rather than being rolled back or overwritten.
+        # Rehash the committed inode tree. A detected race retires this exact
+        # generation to a hidden evidence name before the failure escapes.
         committed_snapshot = _verify_published_files_at(
             pinned_stage.descriptor, material
+        )
+        _verify_tree_rename_continuity(
+            staged_snapshot,
+            committed_snapshot,
+            label=(
+                "immutable tree child generation changed across publication commit"
+            ),
         )
         authorize()
         if _entry_mode(root_descriptor, stage_name) is not None:
             raise ImmutableArtifactError(
                 "deterministic stage remained after immutable publication"
             )
-        # The authorization callback is an external observation boundary.  It
+        # The authorization callback is an external observation boundary. It
         # may inspect or mutate same-UID state, so close the committed inode
         # tree against the pre-authorization snapshot without rehashing it.
-        # Preserve the committed directory as evidence if this check fails.
+        # Failure retires the exact committed generation outside the active
+        # namespace while retaining its bytes as evidence.
         _verify_snapshot_against_at(
             pinned_stage.descriptor, committed_snapshot
         )
@@ -2634,12 +6085,797 @@ def publish_directory(
             root_descriptor, final_name, pinned_stage.descriptor
         )
         pinned_root.verify_path()
+
+        cleanup_error: BaseException | None = None
+        try:
+            pinned_stage.close()
+        except BaseException as exc:
+            cleanup_error = exc
+        if owns_root:
+            try:
+                pinned_root.close()
+            except BaseException as exc:
+                if cleanup_error is None:
+                    cleanup_error = exc
+                else:
+                    cleanup_error.add_note(
+                        f"{DURABILITY_UNPROVEN}: directory publication parent "
+                        f"cleanup: {exc}"
+                    )
+        if cleanup_error is not None:
+            try:
+                retired_name = _retire_failed_publication_at(
+                    rollback_root,
+                    final_name,
+                    rollback_stage,
+                    directory=True,
+                )
+            except BaseException as retirement_error:
+                cleanup_error.add_note(
+                    "failed directory publication could not leave the active "
+                    f"namespace after cleanup failure: {retirement_error}"
+                )
+            else:
+                cleanup_error.add_note(
+                    "failed directory publication preserved outside the active "
+                    f"namespace as {retired_name}"
+                )
+            guard_diagnostics = _close_rollback_guards(
+                (rollback_stage, rollback_root),
+                label=f"directory publication {final_name} rollback guards",
+            )
+            for detail in guard_diagnostics:
+                cleanup_error.add_note(detail)
+            rollback_root = rollback_stage = -1
+            committed = False
+            pinned_stage = None
+            raise cleanup_error
+        _close_rollback_guards(
+            (rollback_stage, rollback_root),
+            label=f"directory publication {final_name} rollback guards",
+        )
+        rollback_root = rollback_stage = -1
+        pinned_stage = None
         return final
+    except BaseException as exc:
+        if committed and pinned_stage is not None:
+            try:
+                retired_name = _retire_failed_publication_at(
+                    pinned_root.descriptor,
+                    final_name,
+                    pinned_stage.descriptor,
+                    directory=True,
+                )
+            except BaseException as retirement_error:
+                exc.add_note(
+                    "failed directory publication could not leave the active "
+                    f"namespace: {retirement_error}"
+                )
+            else:
+                exc.add_note(
+                    "failed directory publication preserved outside the active "
+                    f"namespace as {retired_name}"
+                )
+        raise
     finally:
         closers: list[Callable[[], None]] = []
         if pinned_stage is not None:
             closers.append(pinned_stage.close)
+        rollback_guards = tuple(
+            descriptor_value
+            for descriptor_value in (rollback_stage, rollback_root)
+            if descriptor_value >= 0
+        )
+        if rollback_guards:
+            closers.append(
+                lambda: _close_rollback_guards(
+                    rollback_guards,
+                    label=f"directory publication {final_name} rollback guards",
+                )
+            )
         if owns_root:
             assert pinned_root is not None
             closers.append(pinned_root.close)
         _close_callables(closers, label=f"directory publication {final_name} cleanup")
+
+
+@dataclasses.dataclass(frozen=True)
+class DirectoryGenerationFile:
+    """One file identity in a sealed immutable directory generation."""
+
+    relative_path: str
+    sha256: str
+    size_bytes: int
+
+    def __post_init__(self) -> None:
+        safe_relative_path(self.relative_path)
+        if not _is_sha256(self.sha256):
+            raise ImmutableArtifactError(
+                "directory generation file sha256 must be lowercase 64-hex"
+            )
+        if type(self.size_bytes) is not int or self.size_bytes < 0:
+            raise ImmutableArtifactError(
+                "directory generation file size_bytes must be a nonnegative integer"
+            )
+
+
+@dataclasses.dataclass(frozen=True)
+class ImmutableDirectoryGeneration:
+    """Portable content and host-local identity for one directory generation."""
+
+    path: Path
+    content_manifest_sha256: str
+    filesystem_generation_sha256: str
+    file_count: int
+    directory_count: int
+    total_file_bytes: int
+    files: tuple[DirectoryGenerationFile, ...]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.path, Path):
+            raise ImmutableArtifactError(
+                "directory generation path must be a Path"
+            )
+        for label, digest in (
+            ("content_manifest_sha256", self.content_manifest_sha256),
+            ("filesystem_generation_sha256", self.filesystem_generation_sha256),
+        ):
+            if not _is_sha256(digest):
+                raise ImmutableArtifactError(
+                    f"directory generation {label} must be lowercase 64-hex"
+                )
+        for label, value in (
+            ("file_count", self.file_count),
+            ("directory_count", self.directory_count),
+            ("total_file_bytes", self.total_file_bytes),
+        ):
+            if type(value) is not int or value < 0:
+                raise ImmutableArtifactError(
+                    f"directory generation {label} must be a nonnegative integer"
+                )
+        if self.directory_count < 1:
+            raise ImmutableArtifactError(
+                "directory generation directory_count must include the root"
+            )
+        if type(self.files) is not tuple or any(
+            type(file) is not DirectoryGenerationFile for file in self.files
+        ):
+            raise ImmutableArtifactError(
+                "directory generation files must be an exact identity tuple"
+            )
+        if self.file_count != len(self.files):
+            raise ImmutableArtifactError(
+                "directory generation file_count disagrees with files"
+            )
+        if self.total_file_bytes != sum(
+            file.size_bytes for file in self.files
+        ):
+            raise ImmutableArtifactError(
+                "directory generation total_file_bytes disagrees with files"
+            )
+
+
+_GENERATION_LIMIT_KEYS = (
+    "max_files",
+    "max_directories",
+    "max_total_file_bytes",
+    "max_total_relative_path_bytes",
+)
+
+
+def _generation_limits(
+    *,
+    max_files: int | None,
+    max_directories: int | None,
+    max_total_file_bytes: int | None,
+    max_total_relative_path_bytes: int | None,
+) -> dict[str, int | None]:
+    return {
+        "max_files": max_files,
+        "max_directories": max_directories,
+        "max_total_file_bytes": max_total_file_bytes,
+        "max_total_relative_path_bytes": max_total_relative_path_bytes,
+    }
+
+
+def _filesystem_generation_sha256(
+    files: Mapping[str, _Snapshot],
+    directories: Mapping[str, _Snapshot],
+) -> str:
+    filesystem_model = {
+        "schema_version": 1,
+        "scope": "immutable_directory_filesystem_generation",
+        "directories": [
+            {
+                "path": relative_path,
+                "metadata": [str(value) for value in metadata],
+            }
+            for relative_path, metadata in sorted(directories.items())
+        ],
+        "files": [
+            {
+                "path": relative_path,
+                "metadata": [str(value) for value in metadata],
+            }
+            for relative_path, metadata in sorted(files.items())
+        ],
+    }
+    return hashlib.sha256(
+        b"immutable-directory-filesystem-generation-v1\n"
+        + canonical_json_bytes(filesystem_model)
+    ).hexdigest()
+
+
+def _verify_tree_rename_continuity(
+    before: _TreeSnapshot,
+    after: _TreeSnapshot,
+    *,
+    label: str,
+) -> None:
+    before_files, before_directories = before
+    after_files, after_directories = after
+    if before_files != after_files or {
+        path: metadata
+        for path, metadata in before_directories.items()
+        if path != "."
+    } != {
+        path: metadata
+        for path, metadata in after_directories.items()
+        if path != "."
+    }:
+        raise ImmutableArtifactError(label)
+
+
+@_translate_descriptor_resource_errors(
+    "immutable directory generation inspection"
+)
+def _inspect_immutable_directory_generation_at(
+    root_descriptor: int,
+    *,
+    path: Path,
+    require_nonempty: bool,
+    max_files: int | None,
+    max_directories: int | None,
+    max_total_file_bytes: int | None,
+    max_total_relative_path_bytes: int | None,
+) -> ImmutableDirectoryGeneration:
+    """Hash one finalized tree through a pinned root and close every race."""
+    if type(require_nonempty) is not bool:
+        raise ImmutableArtifactError("require_nonempty must be boolean")
+    limits = _generation_limits(
+        max_files=max_files,
+        max_directories=max_directories,
+        max_total_file_bytes=max_total_file_bytes,
+        max_total_relative_path_bytes=max_total_relative_path_bytes,
+    )
+    monitor = _arm_directory_mutation_monitor(root_descriptor, **limits)
+    try:
+        tree = _snapshot_pinned_tree_at(
+            root_descriptor,
+            require_readonly_files=True,
+            require_readonly_directories=True,
+            **limits,
+        )
+        files = dict(tree.files)
+        directories = dict(tree.directories)
+        if require_nonempty and not files:
+            raise ImmutableArtifactError(
+                "immutable directory generation contains no regular files"
+            )
+        for relative_path, metadata in files.items():
+            if stat.S_IMODE(metadata[2]) != 0o444 or metadata[3] != 1:
+                raise ImmutableArtifactError(
+                    "immutable generation file is not single-link 0444: "
+                    f"{relative_path}"
+                )
+        for relative_path, metadata in directories.items():
+            if stat.S_IMODE(metadata[2]) != 0o555:
+                raise ImmutableArtifactError(
+                    "immutable generation directory is not 0555: "
+                    f"{relative_path}"
+                )
+
+        identities: list[DirectoryGenerationFile] = []
+        total_file_bytes = 0
+        for relative_path, expected_metadata in sorted(files.items()):
+            pinned = _open_relative_regular_at(root_descriptor, relative_path)
+            try:
+                if _snapshot_fields(os.fstat(pinned.descriptor)) != expected_metadata:
+                    raise ImmutableArtifactError(
+                        "immutable generation file changed before hash: "
+                        f"{relative_path}"
+                    )
+                digest, size_bytes, _mode = _hash_fd(pinned.descriptor)
+                pinned.verify_path()
+                if _snapshot_fields(os.fstat(pinned.descriptor)) != expected_metadata:
+                    raise ImmutableArtifactError(
+                        "immutable generation file changed during hash: "
+                        f"{relative_path}"
+                    )
+            finally:
+                pinned.close()
+            identities.append(
+                DirectoryGenerationFile(relative_path, digest, size_bytes)
+            )
+            total_file_bytes += size_bytes
+
+        closure = _snapshot_tree_descriptor(root_descriptor, **limits)
+        if closure != (files, directories):
+            raise ImmutableArtifactError(
+                "immutable directory generation changed during content sealing"
+            )
+        monitor.require_quiet()
+        model = {
+            "schema_version": 1,
+            "scope": "immutable_directory_generation",
+            "directories": sorted(directories),
+            "files": [
+                {
+                    "path": identity.relative_path,
+                    "sha256": identity.sha256,
+                    "size_bytes": identity.size_bytes,
+                }
+                for identity in identities
+            ],
+        }
+        content_manifest_sha256 = hashlib.sha256(
+            b"immutable-directory-generation-v1\n" + canonical_json_bytes(model)
+        ).hexdigest()
+        filesystem_generation_sha256 = _filesystem_generation_sha256(
+            files, directories,
+        )
+        return ImmutableDirectoryGeneration(
+            path=Path(path),
+            content_manifest_sha256=content_manifest_sha256,
+            filesystem_generation_sha256=filesystem_generation_sha256,
+            file_count=len(identities),
+            directory_count=len(directories),
+            total_file_bytes=total_file_bytes,
+            files=tuple(identities),
+        )
+    finally:
+        monitor.close()
+
+
+@_translate_descriptor_resource_errors(
+    "immutable directory generation path inspection"
+)
+def inspect_immutable_directory_generation(
+    path: Path,
+    *,
+    require_nonempty: bool = True,
+    max_files: int | None = None,
+    max_directories: int | None = None,
+    max_total_file_bytes: int | None = None,
+    max_total_relative_path_bytes: int | None = None,
+) -> ImmutableDirectoryGeneration:
+    """Recompute one committed generation's descriptor-anchored content seal."""
+    absolute = Path(os.path.abspath(os.fspath(path)))
+    try:
+        root = _open_pinned_directory(absolute)
+    except (ImmutableArtifactError, OSError) as exc:
+        raise ImmutableArtifactError(
+            f"immutable directory generation is unavailable: {absolute}"
+        ) from exc
+    try:
+        generation = _inspect_immutable_directory_generation_at(
+            root.descriptor,
+            path=absolute,
+            require_nonempty=require_nonempty,
+            max_files=max_files,
+            max_directories=max_directories,
+            max_total_file_bytes=max_total_file_bytes,
+            max_total_relative_path_bytes=max_total_relative_path_bytes,
+        )
+        root.verify_path()
+        return generation
+    finally:
+        root.close()
+
+
+@_translate_descriptor_resource_errors(
+    "external directory generation freeze"
+)
+def _freeze_external_directory_generation_at(
+    root_descriptor: int,
+    *,
+    path: Path,
+    require_nonempty: bool,
+    max_files: int | None,
+    max_directories: int | None,
+    max_total_file_bytes: int | None,
+    max_total_relative_path_bytes: int | None,
+) -> ImmutableDirectoryGeneration:
+    """Validate an externally written stage, make it read-only, and seal it."""
+    limits = _generation_limits(
+        max_files=max_files,
+        max_directories=max_directories,
+        max_total_file_bytes=max_total_file_bytes,
+        max_total_relative_path_bytes=max_total_relative_path_bytes,
+    )
+    tree = _snapshot_pinned_tree_at(
+        root_descriptor,
+        require_readonly_files=False,
+        require_readonly_directories=False,
+        **limits,
+    )
+    files = dict(tree.files)
+    directories = dict(tree.directories)
+    if require_nonempty and not files:
+        raise ImmutableArtifactError(
+            "external directory generation contains no regular files"
+        )
+
+    for relative_path, expected_metadata in sorted(files.items()):
+        pinned = _open_relative_regular_at(root_descriptor, relative_path)
+        try:
+            if _snapshot_fields(os.fstat(pinned.descriptor)) != expected_metadata:
+                raise ImmutableArtifactError(
+                    "external generation file changed before finalization: "
+                    f"{relative_path}"
+                )
+            os.fchmod(pinned.descriptor, 0o444)
+            _fsync_or_fail(
+                pinned.descriptor, f"external generation file {relative_path}"
+            )
+            pinned.verify_path()
+        finally:
+            pinned.close()
+
+    for relative_path in sorted(
+        (name for name in directories if name != "."),
+        key=lambda value: len(safe_relative_path(value).parts),
+        reverse=True,
+    ):
+        directory = _open_pinned_relative_directory(
+            root_descriptor, safe_relative_path(relative_path).parts
+        )
+        try:
+            os.fchmod(directory.descriptor, 0o555)
+            _fsync_or_fail(
+                directory.descriptor,
+                f"external generation directory {relative_path}",
+            )
+            directory.verify_path()
+        finally:
+            directory.close()
+    os.fchmod(root_descriptor, 0o555)
+    _fsync_or_fail(root_descriptor, "external generation root")
+    return _inspect_immutable_directory_generation_at(
+        root_descriptor,
+        path=path,
+        require_nonempty=require_nonempty,
+        **limits,
+    )
+
+
+@dataclasses.dataclass
+class ExclusiveDirectoryStage:
+    """A no-follow, no-reuse directory stage for an external producer.
+
+    The stage directory stays pinned while a subprocess writes through
+    ``proc_path``.  ``commit`` freezes and seals the complete tree, then performs
+    one ``RENAME_NOREPLACE`` into its unique final generation.  Every failure
+    preserves either the hidden stage or the already-renamed final inode tree.
+    """
+
+    output_root: Path
+    final_name: str
+    staging_name: str
+    _root: _PinnedDirectory
+    _stage: _PinnedDirectory
+    _committed: bool = False
+    _closed: bool = False
+    _committed_generation: ImmutableDirectoryGeneration | None = dataclasses.field(
+        default=None,
+        init=False,
+        repr=False,
+    )
+
+    @property
+    def descriptor(self) -> int:
+        if self._closed:
+            raise ImmutableArtifactError("exclusive directory stage is closed")
+        return self._stage.descriptor
+
+    @property
+    def staging_path(self) -> Path:
+        return self.output_root / self.staging_name
+
+    @property
+    def final_path(self) -> Path:
+        return self.output_root / self.final_name
+
+    @property
+    def path(self) -> Path:
+        return self.final_path if self._committed else self.staging_path
+
+    @property
+    def proc_path(self) -> str:
+        return f"/proc/self/fd/{self.descriptor}"
+
+    @property
+    def committed(self) -> bool:
+        return self._committed
+
+    @property
+    def committed_generation(self) -> ImmutableDirectoryGeneration | None:
+        """Return the exact identity already sealed by a successful commit.
+
+        The identity remains available after descriptor cleanup so callers can
+        report a later authentication or context-unwind failure without losing
+        which immutable generation was renamed.
+        """
+        return self._committed_generation
+
+    def verify_path(self) -> None:
+        if self._closed:
+            raise ImmutableArtifactError("exclusive directory stage is closed")
+        self._root.verify_path()
+        if self._committed:
+            _verify_named_directory(
+                self._root.descriptor, self.final_name, self._stage.descriptor
+            )
+        else:
+            self._stage.verify_path()
+            if _entry_mode(self._root.descriptor, self.final_name) is not None:
+                raise ImmutableArtifactError(
+                    "directory generation destination appeared before commit"
+                )
+        self._root.verify_path()
+
+    @_translate_descriptor_resource_errors(
+        "exclusive directory generation commit"
+    )
+    def commit(
+        self,
+        *,
+        require_nonempty: bool = True,
+        max_files: int | None = None,
+        max_directories: int | None = None,
+        max_total_file_bytes: int | None = None,
+        max_total_relative_path_bytes: int | None = None,
+        expected_files: tuple[DirectoryGenerationFile, ...] | None = None,
+    ) -> ImmutableDirectoryGeneration:
+        """Freeze and atomically commit this exact externally written tree.
+
+        ``expected_files`` is an optional producer-side admission seal.  It is
+        compared after the stage has been frozen and hashed but before the
+        no-replace rename, so bytes that differ from the already-admitted
+        identities remain hidden and cannot become the committed generation.
+        """
+        if self._committed:
+            raise ImmutableArtifactError(
+                "exclusive directory stage has already been committed"
+            )
+        if expected_files is not None and (
+            type(expected_files) is not tuple
+            or any(
+                type(identity) is not DirectoryGenerationFile
+                for identity in expected_files
+            )
+            or tuple(sorted(expected_files, key=lambda item: item.relative_path))
+            != expected_files
+            or len({item.relative_path for item in expected_files})
+            != len(expected_files)
+        ):
+            raise ImmutableArtifactError(
+                "expected external generation files must be a sorted exact "
+                "identity tuple"
+            )
+        self.verify_path()
+        limits = _generation_limits(
+            max_files=max_files,
+            max_directories=max_directories,
+            max_total_file_bytes=max_total_file_bytes,
+            max_total_relative_path_bytes=max_total_relative_path_bytes,
+        )
+        staged = _freeze_external_directory_generation_at(
+            self._stage.descriptor,
+            path=self.staging_path,
+            require_nonempty=require_nonempty,
+            **limits,
+        )
+        if expected_files is not None and staged.files != expected_files:
+            raise ImmutableArtifactError(
+                "external directory generation disagrees with the admitted "
+                "file seal"
+            )
+        staged_tree = _snapshot_pinned_tree_at(
+            self._stage.descriptor,
+            require_readonly_files=True,
+            require_readonly_directories=True,
+            **limits,
+        )
+        staged_snapshot: _TreeSnapshot = (
+            dict(staged_tree.files), dict(staged_tree.directories),
+        )
+        if _filesystem_generation_sha256(*staged_snapshot) != (
+            staged.filesystem_generation_sha256
+        ):
+            raise ImmutableArtifactError(
+                "external directory generation changed after staging seal"
+            )
+        self._stage.verify_path()
+        if _entry_mode(self._root.descriptor, self.final_name) is not None:
+            raise ImmutableArtifactError(
+                "directory generation destination appeared before commit"
+            )
+        _fsync_or_fail(
+            self._root.descriptor,
+            "external generation parent before commit",
+        )
+        self._stage.verify_path()
+        try:
+            _rename_noreplace_at(
+                self._root.descriptor,
+                self.staging_name,
+                self._root.descriptor,
+                self.final_name,
+            )
+        except FileExistsError as exc:
+            # Never accept an exact winner for an attempt-scoped generation.  If
+            # the rename took effect before an injected/ambiguous error, retain
+            # that final inode as non-active evidence and report the race.
+            if _entry_mode(self._root.descriptor, self.staging_name) is None:
+                try:
+                    _verify_named_directory(
+                        self._root.descriptor,
+                        self.final_name,
+                        self._stage.descriptor,
+                    )
+                except BaseException:
+                    pass
+                else:
+                    self._committed = True
+            raise ImmutableArtifactError(
+                "directory generation destination race rejected"
+            ) from exc
+        self._committed = True
+        _verify_named_directory(
+            self._root.descriptor, self.final_name, self._stage.descriptor
+        )
+        _fsync_or_fail(
+            self._root.descriptor,
+            "external generation parent after commit",
+        )
+        renamed_tree = _snapshot_pinned_tree_at(
+            self._stage.descriptor,
+            require_readonly_files=True,
+            require_readonly_directories=True,
+            **limits,
+        )
+        renamed_snapshot: _TreeSnapshot = (
+            dict(renamed_tree.files), dict(renamed_tree.directories),
+        )
+        _verify_tree_rename_continuity(
+            staged_snapshot,
+            renamed_snapshot,
+            label="external directory child generation changed across commit",
+        )
+        committed = _inspect_immutable_directory_generation_at(
+            self._stage.descriptor,
+            path=self.final_path,
+            require_nonempty=require_nonempty,
+            **limits,
+        )
+        # The root directory's host-local ctime may advance during rename, so
+        # portable content must match across the commit while the authoritative
+        # filesystem-generation seal is the one recomputed after rename.
+        if (
+            committed.content_manifest_sha256
+            != staged.content_manifest_sha256
+            or committed.file_count != staged.file_count
+            or committed.directory_count != staged.directory_count
+            or committed.total_file_bytes != staged.total_file_bytes
+            or committed.files != staged.files
+        ):
+            raise ImmutableArtifactError(
+                "external directory generation changed across commit"
+            )
+        closure_tree = _snapshot_pinned_tree_at(
+            self._stage.descriptor,
+            require_readonly_files=True,
+            require_readonly_directories=True,
+            **limits,
+        )
+        closure_snapshot: _TreeSnapshot = (
+            dict(closure_tree.files), dict(closure_tree.directories),
+        )
+        _verify_tree_rename_continuity(
+            staged_snapshot,
+            closure_snapshot,
+            label=(
+                "external directory child generation changed during commit closure"
+            ),
+        )
+        self._committed_generation = committed
+        self.verify_path()
+        return committed
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        _close_callables(
+            (self._stage.close, self._root.close),
+            label=f"exclusive directory stage {self.final_name} close",
+        )
+
+    def __enter__(self) -> "ExclusiveDirectoryStage":
+        try:
+            self.verify_path()
+        except BaseException:
+            _close_callables(
+                (self.close,), label="exclusive directory stage entry close"
+            )
+            raise
+        return self
+
+    def __exit__(self, _type: object, _value: object, _traceback: object) -> None:
+        self.close()
+
+
+@_translate_descriptor_resource_errors("exclusive directory stage creation")
+def create_exclusive_directory_stage(
+    output_root: Path,
+    final_name: str,
+) -> ExclusiveDirectoryStage:
+    """Create one exclusive hidden stage without reusing any prior pathname."""
+    _validate_publication_name(final_name)
+    staging_name = f".{final_name}.staging"
+    if len(os.fsencode(staging_name)) > 255:
+        raise ImmutableArtifactError(
+            f"{NAMESPACE_NAME_OVERFLOW}: external generation staging name"
+        )
+    root_path = Path(os.path.abspath(os.fspath(output_root)))
+    ensure_directory(root_path)
+    root = _open_pinned_directory(root_path)
+    stage: _PinnedDirectory | None = None
+    try:
+        root.verify_path()
+        if _entry_mode(root.descriptor, final_name) is not None:
+            raise ImmutableArtifactError(
+                f"directory generation destination already exists: {final_name}"
+            )
+        if _entry_mode(root.descriptor, staging_name) is not None:
+            raise ImmutableArtifactError(
+                f"exclusive directory stage already exists: {staging_name}"
+            )
+        try:
+            os.mkdir(staging_name, mode=0o700, dir_fd=root.descriptor)
+        except FileExistsError as exc:
+            raise ImmutableArtifactError(
+                f"exclusive directory stage creation raced: {staging_name}"
+            ) from exc
+        stage = _open_pinned_relative_directory(root.descriptor, (staging_name,))
+        _lock_directory(stage.descriptor, staging_name, blocking=False)
+        os.fchmod(stage.descriptor, 0o700)
+        _fsync_or_fail(stage.descriptor, "new exclusive directory stage")
+        _fsync_or_fail(root.descriptor, "exclusive directory stage parent")
+        stage.verify_path()
+        if _entry_mode(root.descriptor, final_name) is not None:
+            raise ImmutableArtifactError(
+                "directory generation destination appeared during stage creation"
+            )
+        root.verify_path()
+        result = ExclusiveDirectoryStage(
+            output_root=root_path,
+            final_name=final_name,
+            staging_name=staging_name,
+            _root=root,
+            _stage=stage,
+        )
+        stage = None
+        root = None  # type: ignore[assignment]
+        return result
+    finally:
+        closers: list[Callable[[], None]] = []
+        if stage is not None:
+            closers.append(stage.close)
+        if root is not None:
+            closers.append(root.close)
+        if closers:
+            _close_callables(
+                closers, label="exclusive directory stage creation cleanup"
+            )

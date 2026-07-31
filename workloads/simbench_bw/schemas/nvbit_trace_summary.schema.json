@@ -2,83 +2,133 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "simbench_bw/schemas/nvbit_trace_summary.schema.json",
   "title": "NVBitTraceSummary",
-  "description": "Per-launch NVBit trace summary emitted alongside every kernel launch when run_suite.py is invoked with --mode trace. The full NVBit dynamic_trace.pb is too large to be the join unit; this summary carries the (slug, shape_point, repeat_index, launch_index, kernel_signature_sha256) key per workloads/simbench_bw/schemas/kernel_signature.spec.md, NVBit-derived per-launch metrics (inst_count), and provenance pinning back to the source trace .pb. For retained pre-S4 evidence only, workloads/simbench_bw/merge_evidence.py may replay this record as the NVBit side of the retired two-run join against a frozen CUPTI sidecar validated by workloads/simbench_bw/schemas/historical/cupti_activity_sidecar.v1.schema.json. Active NVBit production neither emits nor requires a CUPTI sidecar. Other cross-references: workloads/simbench_bw/schemas/kernel_signature.spec.md (the canonical kernel-signature inputs) and tools/nvbit_tracer/ (the NVBit tracer that produces the source .pb).",
+  "description": "Per-launch NVBit trace summary. Version 1 is retained only for historical replay and explicit diagnostic parsing. Active admitted production emits version 2, which binds the NVBit-derived instruction count to the complete admitted threadblock payload manifest and admission seal.",
   "type": "object",
-  "required": [
-    "schema_version",
-    "slug",
-    "shape_point",
-    "repeat_index",
-    "launch_index",
-    "kernel_name",
-    "kernel_signature_sha256",
-    "inst_count",
-    "binary_sha256",
-    "nvbit_trace_pb_path",
-    "nvbit_trace_pb_sha256",
-    "nvbit_tracer_build_hash"
-  ],
   "additionalProperties": false,
   "properties": {
     "schema_version": {
       "type": "integer",
-      "minimum": 1,
-      "description": "NVBit trace summary schema version. v1 is the initial revision."
+      "enum": [1, 2],
+      "description": "Version 1 is historical/diagnostic-only; version 2 is required for active admitted production."
     },
     "slug": {
       "type": "string",
-      "minLength": 1,
-      "description": "SimBench-BW row slug. In retained historical dual-run evidence, this equals the frozen CUPTI sidecar's slug field; active NVBit production has no CUPTI-sidecar dependency."
+      "minLength": 1
     },
     "shape_point": {
       "type": "string",
-      "minLength": 1,
-      "description": "SimBench-BW shape-point identifier. In retained historical dual-run evidence, this equals the frozen CUPTI sidecar's shape_point field; active NVBit production has no CUPTI-sidecar dependency."
+      "minLength": 1
     },
     "repeat_index": {
       "type": "integer",
-      "minimum": 0,
-      "description": "Zero-based repeat index within the run. In retained historical dual-run evidence, this equals the frozen CUPTI sidecar's repeat_index field."
+      "minimum": 0
     },
     "launch_index": {
       "type": "integer",
-      "minimum": 0,
-      "description": "Zero-based launch index within the repeat. In retained historical dual-run evidence, this equals the frozen CUPTI sidecar's launch_index field."
+      "minimum": 0
     },
     "kernel_name": {
       "type": "string",
-      "minLength": 1,
-      "description": "Demangled kernel symbol name as reported by NVBit. In retained historical dual-run evidence, this equals the frozen CUPTI sidecar's kernel_name field."
+      "minLength": 1
     },
     "kernel_signature_sha256": {
       "type": "string",
-      "pattern": "^[0-9a-f]{64}$",
-      "description": "SHA-256 over the canonical kernel-signature inputs defined in workloads/simbench_bw/schemas/kernel_signature.spec.md, computed by the NVBit-side adapter. During replay of retained historical dual-run evidence, this MUST match the frozen CUPTI sidecar's kernel_signature_sha256 field; a disagreement on the same (slug, shape_point, repeat_index, launch_index) 4-tuple produces joined_evidence_signature_mismatch. This replay rule does not require a live CUPTI producer."
+      "pattern": "^[0-9a-f]{64}$"
     },
     "inst_count": {
       "type": "integer",
       "minimum": 0,
-      "description": "Total instruction count for the launch as reported by NVBit's per-kernel instrumentation. NVBit-derived and independent of CUPTI Activity. Replayers of retained historical dual-run evidence may combine the frozen CUPTI start_ns/end_ns values with inst_count to derive an empirical IPC-like timing feature."
+      "description": "Total admitted threadblock instruction count for this launch. In version 2 its source snapshot is bound by nvbit_threadblock_payload_manifest_sha256 and trace_admission_sha256."
     },
     "binary_sha256": {
       "type": "string",
-      "pattern": "^[0-9a-f]{64}$",
-      "description": "SHA-256 of the kernel runner binary that produced the NVBit run. During replay of retained historical dual-run evidence, this MUST equal the frozen CUPTI sidecar's binary_sha256 field; disagreement on the matched 5-tuple produces joined_evidence_binary_sha256_mismatch. The rule preserves the retired join's bit-identical-binary check without creating a live CUPTI dependency."
+      "pattern": "^[0-9a-f]{64}$"
     },
     "nvbit_trace_pb_path": {
       "type": "string",
-      "minLength": 1,
-      "description": "Repo-relative path to the source dynamic_trace.pb file produced by the NVBit-instrumented run. Provenance pin so reviewers can locate the binary trace this summary derived from."
+      "minLength": 1
     },
     "nvbit_trace_pb_sha256": {
       "type": "string",
-      "pattern": "^[0-9a-f]{64}$",
-      "description": "SHA-256 of the source dynamic_trace.pb contents at the time this summary was emitted. Provenance pin so a future tree-state mismatch is detectable."
+      "pattern": "^[0-9a-f]{64}$"
     },
     "nvbit_tracer_build_hash": {
       "type": "string",
-      "minLength": 1,
-      "description": "Mirror of the preflight manifest's toolchain.nvbit_build_hash for the NVBit run that produced this summary. Provenance pin tying the summary back to the tracer build."
+      "minLength": 1
+    },
+    "nvbit_threadblock_payload_size_bytes": {
+      "type": "integer",
+      "minimum": 0,
+      "description": "Aggregate raw byte size of every admitted threadblock protobuf."
+    },
+    "nvbit_threadblock_payload_manifest_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "SHA-256 of the canonical path, size, and digest manifest for every admitted threadblock protobuf."
+    },
+    "trace_admission_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$",
+      "description": "Domain-separated SHA-256 sealing all retained root, sidecar, stats, payload-manifest, counter, and per-launch summary identities."
     }
-  }
+  },
+  "oneOf": [
+    {
+      "title": "HistoricalOrDiagnosticV1",
+      "required": [
+        "schema_version",
+        "slug",
+        "shape_point",
+        "repeat_index",
+        "launch_index",
+        "kernel_name",
+        "kernel_signature_sha256",
+        "inst_count",
+        "binary_sha256",
+        "nvbit_trace_pb_path",
+        "nvbit_trace_pb_sha256",
+        "nvbit_tracer_build_hash"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": 1
+        }
+      },
+      "not": {
+        "anyOf": [
+          {"required": ["nvbit_threadblock_payload_size_bytes"]},
+          {"required": ["nvbit_threadblock_payload_manifest_sha256"]},
+          {"required": ["trace_admission_sha256"]}
+        ]
+      }
+    },
+    {
+      "title": "AdmittedProductionV2",
+      "required": [
+        "schema_version",
+        "slug",
+        "shape_point",
+        "repeat_index",
+        "launch_index",
+        "kernel_name",
+        "kernel_signature_sha256",
+        "inst_count",
+        "binary_sha256",
+        "nvbit_trace_pb_path",
+        "nvbit_trace_pb_sha256",
+        "nvbit_tracer_build_hash",
+        "nvbit_threadblock_payload_size_bytes",
+        "nvbit_threadblock_payload_manifest_sha256",
+        "trace_admission_sha256"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": 2
+        },
+        "nvbit_tracer_build_hash": {
+          "pattern": "^[0-9a-f]{64}$"
+        }
+      }
+    }
+  ]
 }

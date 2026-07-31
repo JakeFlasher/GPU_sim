@@ -72,6 +72,10 @@ from tools.local_labels.protected_paths import (  # noqa: E402
     assert_external_output,
     assert_write_allowed,
 )
+from tools.nvbit_tracer.proto_binding_loader import (  # noqa: E402
+    ProtoBindingError,
+    load_dynamic_trace_bindings,
+)
 
 STATUS_OK = "ok"
 STATUS_MISMATCH = "mismatch"
@@ -652,10 +656,7 @@ def full_trace_coverage_verdict(
 
 def _decode_all_launch_coverage(traces_dir: Path, root_trace: dict) -> tuple[int, int, int, int]:
     """Decode every declared launch and require exact per-launch CTA coverage."""
-    pb_generated = REPO_ROOT / "workloads" / "simbench_bw" / "_pb_generated"
-    if str(pb_generated) not in sys.path:
-        sys.path.insert(0, str(pb_generated))
-    import threadblock_pb2  # type: ignore[import-not-found]
+    threadblock_pb2 = load_dynamic_trace_bindings().threadblock_pb2
 
     launches = root_trace.get("launches")
     if not isinstance(launches, list) or not launches:
@@ -742,6 +743,10 @@ def _analyze_full_trace_coverage(
                 grid_blocks, decoded_blocks, decoded_records, zero_record_blocks,
             ) = _decode_all_launch_coverage(traces_dir, root_trace)
         decode_error = None
+    except ProtoBindingError:
+        # Binding authority/runtime failures are hard prerequisites, never a
+        # smoke-result status or typed trace exclusion.
+        raise
     except PreflightStorageFailure:
         raise
     except OSError as exc:
@@ -868,11 +873,8 @@ def _validate_root_trace(pb_path: Path, repo_root: Path) -> dict:
     launches: list[dict] | None = None
     parse_error = read_error
     if parse_error is None and raw:
-        pb_generated = repo_root / "workloads" / "simbench_bw" / "_pb_generated"
         try:
-            if str(pb_generated) not in sys.path:
-                sys.path.insert(0, str(pb_generated))
-            import trace_pb2  # type: ignore[import-not-found]
+            trace_pb2 = load_dynamic_trace_bindings().trace_pb2
 
             trace = trace_pb2.Trace()
             trace.ParseFromString(raw)
@@ -896,6 +898,8 @@ def _validate_root_trace(pb_path: Path, repo_root: Path) -> dict:
                                 int(kernel.block_dim.z),
                             ],
                         })
+        except ProtoBindingError:
+            raise
         except Exception as exc:  # noqa: BLE001 — typed below
             parse_error = str(exc)
 

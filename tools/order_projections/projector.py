@@ -53,21 +53,24 @@ typed-unavailable record carrying
 from __future__ import annotations
 
 import sys
-from pathlib import Path
+from collections.abc import Mapping
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 _HERE = Path(__file__).resolve().parent
-_TOOLS_NVBIT = _HERE.parent / "nvbit_tracer"
-_TOOLS_HRD_PROFILER = _HERE.parent / "hrd_profiler"
-if str(_TOOLS_NVBIT) not in sys.path:
-    sys.path.insert(0, str(_TOOLS_NVBIT))
-if str(_TOOLS_HRD_PROFILER) not in sys.path:
-    sys.path.insert(0, str(_TOOLS_HRD_PROFILER))
+_REPO_ROOT = _HERE.parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
 
-import import_trace_contract  # type: ignore[import-not-found]  # noqa: E402
-
-from reuse_distance_tracker import (  # type: ignore[import-not-found]  # noqa: E402
+from tools.hrd_profiler.reuse_distance_tracker import (  # noqa: E402
     ReuseDistanceTracker,
+)
+from tools.nvbit_tracer import import_trace_contract  # noqa: E402
+from tools.nvbit_tracer.trace_admission import (  # noqa: E402
+    AdmittedTraceSources,
+    TraceAdmissionError,
+    open_admitted_trace_sources,
+    require_trace_admission,
 )
 
 
@@ -128,23 +131,35 @@ _PROVENANCE: dict[str, str] = {
 
 
 def _access_events(
-    trace_dir: Path,
     *,
+    sources: AdmittedTraceSources,
     threadblock_pb2_mod: Any,
-    allocations: dict[int, Any] | None,
+    allocations: Mapping[int, Any] | None,
 ) -> tuple[list[dict[str, Any]], int, bool]:
-    """Walk every threadblock proto and emit per-touched-sector
-    access events. Returns ``(events, total_threadblocks, any_sm_id)``
-    where ``any_sm_id`` is True when at least one event carried a
-    ``sm_id`` (so the SM-local projection is observable)."""
+    """Walk admitted threadblock payloads and emit touched-sector events.
+
+    Returns ``(events, total_threadblocks, any_sm_id)`` where ``any_sm_id``
+    is true when at least one event carried an ``sm_id``.
+    """
+    if not isinstance(sources, AdmittedTraceSources):
+        raise TypeError("sources must be an AdmittedTraceSources capability")
+    sources.verify_unchanged()
     events: list[dict[str, Any]] = []
-    threadblocks_root = trace_dir / "threadblocks"
     any_sm_id = False
     total_tbs = 0
-    for tb_path in sorted(threadblocks_root.rglob("*.pb")):
-        cta_key = tb_path.relative_to(threadblocks_root).as_posix()
+    for relative_path in sources.threadblock_paths:
+        parts = PurePosixPath(relative_path).parts
+        if not parts or parts[0] != "threadblocks":
+            # The read enforces the capability allowlist before any parse.
+            sources.read_threadblock_snapshot(relative_path)
+            raise TraceAdmissionError(
+                "trace_source_not_admitted",
+                f"threadblock source has an invalid relative path: {relative_path}",
+            )
+        cta_key = PurePosixPath(*parts[1:]).as_posix()
+        snapshot = sources.read_threadblock_snapshot(relative_path)
         tb = threadblock_pb2_mod.threadblock()
-        tb.ParseFromString(tb_path.read_bytes())
+        tb.ParseFromString(snapshot.payload)
         total_tbs += 1
         for warp_index_in_tb, warp_id in enumerate(sorted(tb.warps.keys())):
             warp = tb.warps[warp_id]
@@ -204,12 +219,13 @@ def _access_events(
                                 "sm_id": sm_id,
                                 "allocation_key": allocation_key,
                             })
+    sources.verify_unchanged()
     return events, total_tbs, any_sm_id
 
 
 def _resolve_allocation_key(
     sector_byte_addr: int,
-    allocations: dict[int, Any] | None,
+    allocations: Mapping[int, Any] | None,
     wire_allocation_id: int,
 ) -> str | None:
     """Resolve a stable allocation key for an access event.
@@ -343,44 +359,36 @@ def _population_variance(values: list[float]) -> float:
     return sum((v - mean) ** 2 for v in values) / len(values)
 
 
-def compute_order_projections(
+def compute_order_projections_from_admitted_sources(
     *,
-    trace_dir: Path,
+    sources: AdmittedTraceSources,
     manifest_pairing_index: dict[str, str],
     device: dict[str, Any],
     capacity_bytes: int,
 ) -> dict[str, Any]:
-    """Walk the trace directory's threadblock protos, build the
-    six order projections, compute per-projection hit-rate
-    proxies, and aggregate the disagreement-variance scalar.
-
-    Raises RuntimeError on wire-contract failure (the producer
-    cannot emit a meaningful bundle from broken evidence; the
-    caller surfaces the failure into a typed
-    `hrd_skip_reason`-equivalent if needed).
-    """
-    contract = import_trace_contract.validate_trace_dir(trace_dir)
-    if not contract.ok:
-        raise RuntimeError(
-            f"order-projections producer rejects trace_dir "
-            f"{trace_dir}: {contract.typed_reason}: "
-            f"{contract.detail}"
+    """Build projections exclusively from an admitted-source capability."""
+    if not isinstance(sources, AdmittedTraceSources):
+        raise TypeError("sources must be an AdmittedTraceSources capability")
+    sources.verify_unchanged()
+    admission = sources.admission
+    if admission.launch_count != 1:
+        raise TraceAdmissionError(
+            "trace_launch_count_unsupported",
+            "order-projections schema requires exactly one admitted launch; "
+            f"observed launch_count={admission.launch_count}",
+        )
+    if len(sources.threadblock_paths) != admission.threadblock_count:
+        raise TraceAdmissionError(
+            "trace_snapshot_changed",
+            "admitted threadblock path count disagrees with admission",
         )
     threadblock_pb2_mod = import_trace_contract._import_pb_modules()[0]
-    allocations, alloc_err = (
-        import_trace_contract.load_allocations_sidecar(trace_dir)
-    )
-    if alloc_err is not None:
-        raise RuntimeError(
-            f"order-projections producer rejects allocations sidecar: "
-            f"{alloc_err.typed_reason}: {alloc_err.detail}"
-        )
     events, total_tbs, any_sm_id = _access_events(
-        trace_dir,
+        sources=sources,
         threadblock_pb2_mod=threadblock_pb2_mod,
-        allocations=allocations,
+        allocations=sources.allocations,
     )
-    return _build_bundle(
+    bundle = _build_bundle(
         events=events,
         total_tbs=total_tbs,
         any_sm_id=any_sm_id,
@@ -388,6 +396,28 @@ def compute_order_projections(
         device=device,
         capacity_bytes=capacity_bytes,
     )
+    sources.verify_unchanged()
+    return bundle
+
+
+def compute_order_projections(
+    *,
+    trace_dir: Path,
+    manifest_pairing_index: dict[str, str],
+    device: dict[str, Any],
+    capacity_bytes: int,
+) -> dict[str, Any]:
+    """Path-compatible wrapper around the admitted-source core."""
+    admission = require_trace_admission(trace_dir)
+    with open_admitted_trace_sources(
+        trace_dir, expected_admission=admission
+    ) as sources:
+        return compute_order_projections_from_admitted_sources(
+            sources=sources,
+            manifest_pairing_index=manifest_pairing_index,
+            device=device,
+            capacity_bytes=capacity_bytes,
+        )
 
 
 def _build_bundle(
@@ -472,6 +502,7 @@ def _build_bundle(
 
 __all__ = [
     "compute_order_projections",
+    "compute_order_projections_from_admitted_sources",
     "ORDER_PROJECTIONS_TYPED_REASONS",
     "PROJECTION_NAMES",
 ]

@@ -31,14 +31,17 @@ from pathlib import Path
 
 HERE = Path(__file__).resolve().parent
 REPO_ROOT = HERE.parents[1]
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
 if str(HERE) not in sys.path:
     sys.path.insert(0, str(HERE))
 _LL = REPO_ROOT / "tools" / "local_labels"
 if str(_LL) not in sys.path:
     sys.path.insert(0, str(_LL))
-_PB_DIR = REPO_ROOT / "workloads" / "simbench_bw" / "_pb_generated"
-if str(_PB_DIR) not in sys.path:
-    sys.path.insert(0, str(_PB_DIR))
+
+from tools.nvbit_tracer.proto_binding_loader import (  # noqa: E402
+    load_dynamic_trace_bindings,
+)
 
 from extractor import extract_for_binary  # noqa: E402
 
@@ -48,7 +51,7 @@ DEFAULT_WITNESS_OUT = "data/sass_control/pc_join_witness_sm_86.json"
 def traced_pcs_for_cell(trace_dir: Path) -> dict:
     """Distinct (function_unique_id -> {pc}) from the FIRST launch's
     threadblocks, with the vpc low-32 consistency check."""
-    import threadblock_pb2
+    threadblock_pb2 = load_dynamic_trace_bindings().threadblock_pb2
 
     tb_root = trace_dir / "threadblocks"
 
@@ -89,7 +92,7 @@ def traced_pcs_for_cell(trace_dir: Path) -> dict:
 
 def kernel_names_by_function_id(trace_dir: Path) -> dict[int, str]:
     """function_unique_id -> kernel name from the top-level Trace."""
-    import trace_pb2
+    trace_pb2 = load_dynamic_trace_bindings().trace_pb2
 
     trace = trace_pb2.Trace()
     trace.ParseFromString((trace_dir / "dynamic_trace.pb").read_bytes())

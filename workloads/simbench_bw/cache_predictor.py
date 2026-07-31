@@ -1786,12 +1786,23 @@ baseline UNCHANGED.
 import hashlib
 import json
 import math
+import os
 import random
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
 from arch_profiles import is_research_gap, load_profile
+from tools.local_labels.immutable_artifact import (
+    ImmutableArtifactError,
+    ImmutableArtifactLimitError,
+    ImmutableArtifactResourceError,
+)
+from tools.nvbit_tracer.trace_admission import (
+    AdmittedTraceSources,
+    TraceAdmissionError,
+)
+from tools.sector_stream.consume_trace import AdmittedSectorStream
 
 # Repository root, used to normalize input_sidecar_digests paths to
 # repo-relative form when the input resolves under the repo. Keeping
@@ -1799,6 +1810,12 @@ from arch_profiles import is_research_gap, load_profile
 # across hosts requires that on-disk paths in the bundle never carry
 # a host-absolute prefix when the file lives inside the repo.
 _REPO_ROOT = Path(__file__).resolve().parents[2]
+_HARD_TRACE_SOURCE_ERRORS = (
+    TraceAdmissionError,
+    ImmutableArtifactLimitError,
+    ImmutableArtifactResourceError,
+    ImmutableArtifactError,
+)
 
 
 def _repo_relative_str(path: Path) -> str:
@@ -1818,6 +1835,15 @@ def _repo_relative_str(path: Path) -> str:
         return str(path.resolve().relative_to(_REPO_ROOT))
     except ValueError:
         return str(path)
+
+
+def _repo_relative_lexical_str(path: Path) -> str:
+    """Render a witness path without resolving or inspecting its target."""
+    candidate = Path(os.path.abspath(os.fspath(path)))
+    try:
+        return str(candidate.relative_to(_REPO_ROOT))
+    except ValueError:
+        return str(candidate)
 
 
 # Constants mirroring tools/hrd_profiler/profiler.py for cross-sidecar
@@ -2868,6 +2894,8 @@ def _compute_canonical_pre_calibration_features_for_bundle(
     sharing_locality_path: Path | None,
     hrd_profile_path: Path | None,
     sector_stream_path: Path | None,
+    admitted_sources: AdmittedTraceSources | None = None,
+    admitted_sector_stream: AdmittedSectorStream | None = None,
     grid_volume: int | None,
     device: str | None,
     sector_size_bytes: int = SECTOR_SIZE_BYTES,
@@ -2895,11 +2923,22 @@ def _compute_canonical_pre_calibration_features_for_bundle(
     hrd_profile, hrd_reason = _load_sidecar_json(hrd_profile_path)
     if hrd_reason is not None:
         return None, f"canonical_pre_calibration_features_unavailable:{hrd_reason}"
-    sector_stream_records, ss_reason = _load_sector_stream_records(
-        sector_stream_path,
-    )
-    if ss_reason is not None:
-        return None, f"canonical_pre_calibration_features_unavailable:{ss_reason}"
+    if (admitted_sources is None) != (admitted_sector_stream is None):
+        raise TypeError(
+            "admitted_sources and admitted_sector_stream must be supplied together"
+        )
+    if admitted_sources is not None and admitted_sector_stream is not None:
+        admitted_sector_stream.verify_for(admitted_sources)
+        sector_stream_records = admitted_sector_stream.mutable_records()
+    else:
+        sector_stream_records, ss_reason = _load_sector_stream_records(
+            sector_stream_path,
+        )
+        if ss_reason is not None:
+            return None, (
+                "canonical_pre_calibration_features_unavailable:"
+                f"{ss_reason}"
+            )
     # Auto-derive unique_sector_count from the hrd_profile when not
     # supplied. The producer entry point typically doesn't have it in
     # scope (the observation_builder pass that computes it is internal
@@ -3877,6 +3916,8 @@ def predict_cache_hit_rate(
     sharing_locality_path: Path | None = None,
     hrd_profile_path: Path | None = None,
     unique_sector_count: int | None = None,
+    admitted_sources: AdmittedTraceSources | None = None,
+    admitted_sector_stream: AdmittedSectorStream | None = None,
 ) -> dict:
     """Predict the per-kernel cache hit rate.
 
@@ -3887,9 +3928,10 @@ def predict_cache_hit_rate(
     and applies the modeled-hit rule
     (``rd < capacity_bytes // sector_size_bytes``).
 
-    ``sector_stream_path`` points to the sector_stream sidecar (its
-    digest is recorded as a corroborating witness). If ``None``, the
-    bundle returns ``typed_unavailable: sector_stream_input_missing``.
+    ``sector_stream_path`` is a legacy/path-compatible witness location. When
+    ``admitted_sources`` and ``admitted_sector_stream`` are supplied, the file
+    is never opened: both sector seals are verified against the capability and
+    the generated in-memory JSONL bytes determine the digest and features.
 
     ``manifest_pairing_index`` carries the 5-field provenance
     binding (slug, shape_point, binary_sha256, source_commit,
@@ -3901,6 +3943,13 @@ def predict_cache_hit_rate(
     Any reference to an ``hrd_profile`` field is rejected with
     typed ``circular_predictor_input_rejected`` per the
     non-circular discipline."""
+    if (admitted_sources is None) != (admitted_sector_stream is None):
+        raise TypeError(
+            "admitted_sources and admitted_sector_stream must be supplied together"
+        )
+    if admitted_sources is not None and admitted_sector_stream is not None:
+        admitted_sector_stream.verify_for(admitted_sources)
+
     # Forbid circular inputs (any reference to hrd_profile or modeled-hit fields).
     if extra_input_descriptor:
         _validate_input_keys(extra_input_descriptor)
@@ -3991,51 +4040,69 @@ def predict_cache_hit_rate(
             ],
         )
 
-    # Build the input_sidecar_digests payload (sector_stream is mandatory).
+    # Build the input-sidecar digest payload. Capability-backed callers derive
+    # both digests from admitted/generated bytes and never stat or open a stale
+    # sector JSONL or dynamic-trace pathname.
     input_sidecar_digests: dict[str, dict] = {}
-    if sector_stream_path is None or not sector_stream_path.exists():
-        # The schema requires sector_stream presence; surface the
-        # typed-unavailable arm.
-        return _typed_unavailable_bundle(
-            typed_reason="sector_stream_input_missing",
-            manifest_pairing_index=manifest_pairing_index,
-            input_sidecar_digests={},
-            device=device,
-            cache_model_capacity_bytes=cache_model_capacity_bytes,
-            bootstrap_seed=bootstrap_seed,
-            epsilon=epsilon,
-            cache_model_num_l2_slices=cache_model_num_l2_slices,
-            cache_model_num_l2_slices_source=(
-                cache_model_num_l2_slices_source
-            ),
-            cache_model_cta_interleave_enabled=(
-                cache_model_cta_interleave_enabled
-            ),
-            cache_model_hrd_second_layer_enabled=(
-                cache_model_hrd_second_layer_enabled
-            ),
-            cache_model_cross_launch_state_carryover=(
-                cache_model_cross_launch_state_carryover
-            ),
-            cache_model_geometry_provenance=(
-                cache_model_geometry_provenance
-            ),
-            evidence={
-                "sector_stream_expected_path": (
-                    str(sector_stream_path) if sector_stream_path else ""
-                ),
-            },
+    if admitted_sources is not None and admitted_sector_stream is not None:
+        witness_path = (
+            sector_stream_path
+            or admitted_sector_stream.jsonl_path
+            or trace_dir / "sector_stream" / "sector_stream.jsonl"
         )
-    input_sidecar_digests["sector_stream"] = {
-        "path": _repo_relative_str(sector_stream_path),
-        "sha256": _sha256_of_file(sector_stream_path),
-    }
-    dynamic_trace_pb = trace_dir / "dynamic_trace.pb"
-    if dynamic_trace_pb.exists():
-        input_sidecar_digests["dynamic_trace_pb"] = {
-            "path": _repo_relative_str(dynamic_trace_pb),
-            "sha256": _sha256_of_file(dynamic_trace_pb),
+        input_sidecar_digests["sector_stream"] = {
+            "path": _repo_relative_lexical_str(witness_path),
+            "sha256": hashlib.sha256(
+                admitted_sector_stream.jsonl_bytes()
+            ).hexdigest(),
         }
+        admission = admitted_sources.admission
+        input_sidecar_digests["dynamic_trace_pb"] = {
+            "path": _repo_relative_lexical_str(trace_dir / "dynamic_trace.pb"),
+            "sha256": admission.dynamic_trace_sha256,
+        }
+    else:
+        if sector_stream_path is None or not sector_stream_path.exists():
+            return _typed_unavailable_bundle(
+                typed_reason="sector_stream_input_missing",
+                manifest_pairing_index=manifest_pairing_index,
+                input_sidecar_digests={},
+                device=device,
+                cache_model_capacity_bytes=cache_model_capacity_bytes,
+                bootstrap_seed=bootstrap_seed,
+                epsilon=epsilon,
+                cache_model_num_l2_slices=cache_model_num_l2_slices,
+                cache_model_num_l2_slices_source=(
+                    cache_model_num_l2_slices_source
+                ),
+                cache_model_cta_interleave_enabled=(
+                    cache_model_cta_interleave_enabled
+                ),
+                cache_model_hrd_second_layer_enabled=(
+                    cache_model_hrd_second_layer_enabled
+                ),
+                cache_model_cross_launch_state_carryover=(
+                    cache_model_cross_launch_state_carryover
+                ),
+                cache_model_geometry_provenance=(
+                    cache_model_geometry_provenance
+                ),
+                evidence={
+                    "sector_stream_expected_path": (
+                        str(sector_stream_path) if sector_stream_path else ""
+                    ),
+                },
+            )
+        input_sidecar_digests["sector_stream"] = {
+            "path": _repo_relative_str(sector_stream_path),
+            "sha256": _sha256_of_file(sector_stream_path),
+        }
+        dynamic_trace_pb = trace_dir / "dynamic_trace.pb"
+        if dynamic_trace_pb.exists():
+            input_sidecar_digests["dynamic_trace_pb"] = {
+                "path": _repo_relative_str(dynamic_trace_pb),
+                "sha256": _sha256_of_file(dynamic_trace_pb),
+            }
     # Record the launch-parameter sidecar in input_sidecar_digests
     # when the caller validated + sourced it. The sidecar influences
     # predicted_hit_rate via _gridDim_density_correction below; per
@@ -4078,8 +4145,11 @@ def predict_cache_hit_rate(
         if str(hrd_path) not in sys.path:
             sys.path.insert(0, str(hrd_path))
         from observation_builder import (  # type: ignore[import-not-found]
+            build_launches_from_admitted_sources,
             build_launches_from_trace_dir,
         )
+    except _HARD_TRACE_SOURCE_ERRORS:
+        raise
     except Exception as exc:  # pragma: no cover
         return _typed_unavailable_bundle(
             typed_reason="hrd_layer_unavailable",
@@ -4109,18 +4179,27 @@ def predict_cache_hit_rate(
         )
 
     try:
-        build_result = build_launches_from_trace_dir(
-            trace_dir=trace_dir,
-            capacity_bytes=cache_model_capacity_bytes,
-            num_l2_slices=cache_model_num_l2_slices,
-            cta_interleave_enabled=cache_model_cta_interleave_enabled,
-            hrd_second_layer_enabled=(
-                cache_model_hrd_second_layer_enabled
-            ),
-            cross_launch_state_carryover=(
+        builder_kwargs = {
+            "capacity_bytes": cache_model_capacity_bytes,
+            "num_l2_slices": cache_model_num_l2_slices,
+            "cta_interleave_enabled": cache_model_cta_interleave_enabled,
+            "hrd_second_layer_enabled": cache_model_hrd_second_layer_enabled,
+            "cross_launch_state_carryover": (
                 cache_model_cross_launch_state_carryover
             ),
-        )
+        }
+        if admitted_sources is not None:
+            build_result = build_launches_from_admitted_sources(
+                sources=admitted_sources,
+                **builder_kwargs,
+            )
+        else:
+            build_result = build_launches_from_trace_dir(
+                trace_dir=trace_dir,
+                **builder_kwargs,
+            )
+    except _HARD_TRACE_SOURCE_ERRORS:
+        raise
     except Exception as exc:  # pragma: no cover
         return _typed_unavailable_bundle(
             typed_reason="hrd_layer_unavailable",
@@ -4615,6 +4694,8 @@ def predict_cache_hit_rate(
                 sharing_locality_path=sharing_locality_path,
                 hrd_profile_path=hrd_profile_path,
                 sector_stream_path=sector_stream_path,
+                admitted_sources=admitted_sources,
+                admitted_sector_stream=admitted_sector_stream,
                 grid_volume=grid_volume_input,
                 device=device,
             )
@@ -4631,6 +4712,42 @@ def predict_cache_hit_rate(
                 "canonical_pre_calibration_features_unavailable_reason"
             ] = canon_reason
     return bundle
+
+
+def predict_cache_hit_rate_from_admitted_sources(
+    *,
+    sources: AdmittedTraceSources,
+    sector_stream: AdmittedSectorStream,
+    **predictor_inputs: Any,
+) -> dict:
+    """Capability-only cache predictor entry with end-to-end seal checks."""
+    if not isinstance(sources, AdmittedTraceSources):
+        raise TypeError("sources must be an AdmittedTraceSources capability")
+    if not isinstance(sector_stream, AdmittedSectorStream):
+        raise TypeError("sector_stream must be an AdmittedSectorStream")
+    if "admitted_sources" in predictor_inputs or "admitted_sector_stream" in predictor_inputs:
+        raise TypeError("admitted capability inputs may not be overridden")
+    sector_stream.verify_for(sources)
+    try:
+        result = predict_cache_hit_rate(
+            admitted_sources=sources,
+            admitted_sector_stream=sector_stream,
+            **predictor_inputs,
+        )
+    except BaseException as exc:
+        try:
+            sources.verify_unchanged()
+        except BaseException as verification_error:
+            try:
+                exc.add_note(
+                    "cache predictor source revalidation failed: "
+                    f"{verification_error}"
+                )
+            except (AttributeError, TypeError):
+                pass
+        raise
+    sources.verify_unchanged()
+    return result
 
 
 def predict_from_aggregates(

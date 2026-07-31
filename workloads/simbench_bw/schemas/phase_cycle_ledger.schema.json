@@ -70,7 +70,8 @@
         "admission_threshold_pct": {
           "type": "number",
           "minimum": 0,
-          "description": "Per-kernel admission threshold as registered in the pre-frozen `nvbit_phase_injection.toml`."
+          "maximum": 1000,
+          "description": "Per-kernel admission threshold as registered in the pre-frozen `nvbit_phase_injection.toml`; the producer's explicit finite implementation domain is 0 through 1000 percent."
         },
         "admitted": {
           "type": "boolean",

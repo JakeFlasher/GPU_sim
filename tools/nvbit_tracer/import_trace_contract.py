@@ -79,6 +79,11 @@ Neither condition is encoded as trace evidence or repaired by generation.
   ``instruction_cache_op``, or an explicit ``address_space`` carries a number
   outside the committed protobuf enum; this is schema skew, not an unsupported
   known operation.
+- ``memory_metadata_on_non_memory_instruction``: a record with neither addresses
+  nor ``memory_op_class`` nevertheless carries a known access-kind or cache-op.
+- ``memory_op_access_kind_unspecified`` / ``instruction_cache_op_unspecified``:
+  the corresponding optional field is present with its proto-default value;
+  absence alone represents unavailable additive provenance.
 - ``data_width_missing``: ``data_width`` is absent on the wire on
   an instruction that looks like memory (addresses non-empty or
   memory_op_class present).
@@ -230,8 +235,13 @@ from typing import Any
 
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-_PB_GENERATED_DIR = (
-    _REPO_ROOT / "workloads" / "simbench_bw" / "_pb_generated"
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
+from tools.nvbit_tracer.proto_binding_loader import (  # noqa: E402
+    ProtoBindingIntegrityError,
+    ProtoBindingRuntimePrerequisiteError,
+    load_dynamic_trace_bindings,
 )
 
 
@@ -271,10 +281,137 @@ _I64_MIN = -(2**63)
 _I64_MAX = 2**63 - 1
 _U32_MAX = 2**32 - 1
 _U64_MAX = 2**64 - 1
+_DEFAULT_ALLOCATION_SIDECAR_ENTRIES = 131_072
+_DEFAULT_ALLOCATION_SIDECAR_NESTING = 32
+_MAX_ALLOCATION_OBJECT_MEMBERS = 64
 
 
 class _DuplicateJsonKeyError(ValueError):
     pass
+
+
+class _AllocationJsonPreflightError(ValueError):
+    pass
+
+
+class _AllocationJsonResourceLimitError(ValueError):
+    pass
+
+
+def _preflight_allocation_json(
+    payload: bytes,
+    *,
+    max_entries: int,
+    max_nesting: int,
+) -> None:
+    """Bound decoded cardinality before ``json.loads`` materializes objects."""
+    index = 0
+    while index < len(payload) and payload[index] in b" \t\r\n":
+        index += 1
+    if index >= len(payload) or payload[index] != ord("["):
+        raise _AllocationJsonPreflightError("top-level value is not a JSON list")
+
+    containers: list[int] = []
+    entry_count = 0
+    member_count = 0
+    expecting_entry = True
+    in_string = False
+    escaped = False
+    while index < len(payload):
+        token = payload[index]
+        depth = len(containers)
+        if in_string:
+            if escaped:
+                escaped = False
+            elif token == ord("\\"):
+                escaped = True
+            elif token == ord('"'):
+                in_string = False
+            index += 1
+            continue
+        if token == ord('"'):
+            if depth == 1 and expecting_entry:
+                entry_count += 1
+                if entry_count > max_entries:
+                    raise _AllocationJsonResourceLimitError(
+                        f"allocation entry count exceeds limit {max_entries}"
+                    )
+                expecting_entry = False
+            in_string = True
+        elif token in (ord("["), ord("{")):
+            if depth == 0:
+                if token != ord("["):
+                    raise _AllocationJsonPreflightError(
+                        "top-level value is not a JSON list"
+                    )
+            elif depth == 1:
+                if token != ord("{"):
+                    raise _AllocationJsonResourceLimitError(
+                        "allocation entries must be flat JSON objects"
+                    )
+                if not expecting_entry:
+                    raise _AllocationJsonPreflightError(
+                        "allocation entries must be separated by commas"
+                    )
+                entry_count += 1
+                if entry_count > max_entries:
+                    raise _AllocationJsonResourceLimitError(
+                        f"allocation entry count exceeds limit {max_entries}"
+                    )
+                expecting_entry = False
+                member_count = 0
+            else:
+                raise _AllocationJsonResourceLimitError(
+                    "nested allocation JSON containers are prohibited"
+                )
+            containers.append(token)
+            if len(containers) > max_nesting:
+                raise _AllocationJsonResourceLimitError(
+                    f"allocation JSON nesting exceeds limit {max_nesting}"
+                )
+        elif token in (ord("]"), ord("}")):
+            if not containers:
+                raise _AllocationJsonPreflightError(
+                    "allocation JSON has an unmatched closing delimiter"
+                )
+            expected_open = ord("[") if token == ord("]") else ord("{")
+            if containers[-1] != expected_open:
+                raise _AllocationJsonPreflightError(
+                    "allocation JSON has mismatched delimiters"
+                )
+            if (
+                token == ord("}")
+                and len(containers) == 2
+                and member_count > _MAX_ALLOCATION_OBJECT_MEMBERS
+            ):
+                raise _AllocationJsonResourceLimitError(
+                    "allocation object member count exceeds pre-decode limit "
+                    f"{_MAX_ALLOCATION_OBJECT_MEMBERS}"
+                )
+            containers.pop()
+            if not containers:
+                index += 1
+                while index < len(payload) and payload[index] in b" \t\r\n":
+                    index += 1
+                if index != len(payload):
+                    raise _AllocationJsonPreflightError(
+                        "allocation JSON has trailing non-whitespace bytes"
+                    )
+                return
+        elif depth == 2 and token == ord(":"):
+            member_count += 1
+        elif depth == 1:
+            if token == ord(","):
+                expecting_entry = True
+            elif token not in b" \t\r\n" and expecting_entry:
+                entry_count += 1
+                if entry_count > max_entries:
+                    raise _AllocationJsonResourceLimitError(
+                        f"allocation entry count exceeds limit {max_entries}"
+                    )
+                expecting_entry = False
+        index += 1
+    raise _AllocationJsonPreflightError("allocation JSON is truncated")
 
 
 def _reject_duplicate_json_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -632,98 +769,25 @@ class TraceContractRuntimePrerequisiteMissing(TraceContractBindingsMissing):
     """The project-pinned Python protobuf runtime cannot load the bindings."""
 
 
-_TRACKED_BINDING_NAMES: tuple[str, ...] = (
-    "address_pb2.py",
-    "cuda_stream_pb2.py",
-    "dim3d_pb2.py",
-    "gpu_device_pb2.py",
-    "instruction_pb2.py",
-    "kernel_pb2.py",
-    "threadblock_pb2.py",
-    "trace_pb2.py",
-    "warp_pb2.py",
-)
-
-
-def _binding_restore_guidance(paths: list[Path]) -> str:
-    relative = " ".join(
-        str(path.relative_to(_REPO_ROOT)) for path in sorted(paths)
-    )
-    return (
-        "tracked protobuf authority is missing or unusable; restore its "
-        "byte-exact committed content with `git restore --source=HEAD "
-        f"--worktree -- {relative}`; do not regenerate bindings in the "
-        "canonical checkout"
-    )
-
-
 def _import_pb_modules() -> tuple[Any, Any, Any]:
-    """Import ``threadblock_pb2``, ``instruction_pb2`` and ``address_pb2``
-    from the generated bindings under
-    ``workloads/simbench_bw/_pb_generated/``.
+    """Return authenticated threadblock, instruction, and address bindings.
 
-    Raises a distinct hard exception for a runtime prerequisite failure or
-    tracked repository corruption. Callers must not translate either into a
-    graceful or typed-unavailable trace result.
+    The central loader authenticates and compiles all nine tracked authorities
+    before executing any generated code.  This compatibility tuple must remain a
+    hard dependency boundary: repository contamination and runtime prerequisites
+    are never translated into trace evidence or a graceful fallback.
     """
     try:
-        import google.protobuf  # noqa: F401  # pyright: ignore[reportMissingModuleSource, reportUnusedImport]
-    except ImportError as exc:
-        raise TraceContractRuntimePrerequisiteMissing(
-            "protobuf runtime prerequisite is missing; install the exact "
-            "version pinned in requirements.txt before consuming the "
-            "tracked dynamic-trace bindings"
-        ) from exc
-    required = [_PB_GENERATED_DIR / name for name in _TRACKED_BINDING_NAMES]
-    missing = [
-        path for path in required if not path.is_file() or path.is_symlink()
-    ]
-    if missing:
-        raise TraceContractTrackedBindingsCorrupt(
-            _binding_restore_guidance(missing)
-        )
-    if str(_PB_GENERATED_DIR) not in sys.path:
-        sys.path.insert(0, str(_PB_GENERATED_DIR))
-    try:
-        import threadblock_pb2  # pyright: ignore[reportMissingImports]
-        import instruction_pb2  # pyright: ignore[reportMissingImports]
-        import address_pb2  # pyright: ignore[reportMissingImports]
-    except Exception as exc:
-        if exc.__class__.__module__.startswith("google.protobuf"):
-            raise TraceContractRuntimePrerequisiteMissing(
-                "protobuf runtime prerequisite is incompatible with the "
-                f"tracked bindings: {type(exc).__name__}: {exc}"
-            ) from exc
-        raise TraceContractTrackedBindingsCorrupt(
-            f"{_binding_restore_guidance(required)}: "
-            f"{type(exc).__name__}: {exc}"
-        ) from exc
-    for module, filename in (
-        (threadblock_pb2, "threadblock_pb2.py"),
-        (instruction_pb2, "instruction_pb2.py"),
-        (address_pb2, "address_pb2.py"),
-    ):
-        expected = (_PB_GENERATED_DIR / filename).resolve()
-        module_file = getattr(module, "__file__", None)
-        if module_file is None or Path(module_file).resolve() != expected:
-            raise TraceContractTrackedBindingsCorrupt(
-                f"tracked protobuf authority resolved outside its owner: "
-                f"{module.__name__} -> {getattr(module, '__file__', None)}; "
-                f"{_binding_restore_guidance([_PB_GENERATED_DIR / filename])}"
-            )
-    for filename in _TRACKED_BINDING_NAMES:
-        module = sys.modules.get(filename.removesuffix(".py"))
-        if module is None:
-            continue
-        expected = (_PB_GENERATED_DIR / filename).resolve()
-        module_file = getattr(module, "__file__", None)
-        if module_file is None or Path(module_file).resolve() != expected:
-            raise TraceContractTrackedBindingsCorrupt(
-                f"tracked protobuf authority {module.__name__} resolved "
-                f"outside its owner: {getattr(module, '__file__', None)}; "
-                f"{_binding_restore_guidance([_PB_GENERATED_DIR / filename])}"
-            )
-    return threadblock_pb2, instruction_pb2, address_pb2
+        bindings = load_dynamic_trace_bindings()
+    except ProtoBindingRuntimePrerequisiteError as exc:
+        raise TraceContractRuntimePrerequisiteMissing(str(exc)) from exc
+    except ProtoBindingIntegrityError as exc:
+        raise TraceContractTrackedBindingsCorrupt(str(exc)) from exc
+    return (
+        bindings.threadblock_pb2,
+        bindings.instruction_pb2,
+        bindings.address_pb2,
+    )
 
 
 @dataclass
@@ -743,19 +807,14 @@ class ValidationResult:
     detail: str = ""
 
 
-def load_allocations_sidecar(
-    traces_dir: Path,
+def _parse_allocations_sidecar_bytes_after_preflight(
+    raw_bytes: bytes,
+    sidecar_path: Path,
 ) -> tuple[dict[int, AllocationEntry] | None, ValidationResult | None]:
-    """Load and validate ``<traces_dir>/extra_info/allocations.json``.
+    """Parse exact already-snapshotted ``allocations.json`` bytes.
 
-    Returns:
-      - ``(table, None)`` on success, where ``table`` maps
-        ``allocation_id`` to :class:`AllocationEntry`.
-      - ``(None, None)`` when the sidecar file is missing. The
-        caller decides whether that's acceptable (it is, as long as
-        no memory record carries ``allocation_id != 0``).
-      - ``(None, ValidationResult(...))`` on a hard failure
-        (malformed entry / duplicate id).
+    Returns ``(table, None)`` on success or ``(None, ValidationResult(...))``
+    on malformed input. The path is diagnostic only and is never opened here.
 
     Per-entry validation:
       - All six fields must be present.
@@ -769,22 +828,18 @@ def load_allocations_sidecar(
       - ``alive`` must be a ``bool``.
       - Two entries must not share an ``allocation_id``.
     """
-    sidecar_path = traces_dir / "extra_info" / "allocations.json"
-    if not sidecar_path.is_file():
-        return None, None
     try:
-        with sidecar_path.open(encoding="utf-8") as fh:
-            raw = json.load(
-                fh,
-                object_pairs_hook=_reject_duplicate_json_keys,
-                parse_int=_parse_bounded_json_integer,
-            )
-    except (OSError, UnicodeError, ValueError) as exc:
+        raw = json.loads(
+            raw_bytes.decode("utf-8"),
+            object_pairs_hook=_reject_duplicate_json_keys,
+            parse_int=_parse_bounded_json_integer,
+        )
+    except (UnicodeError, ValueError, RecursionError) as exc:
         return None, ValidationResult(
             ok=False,
             typed_reason="allocations_sidecar_malformed",
             detail=(
-                f"could not read allocations sidecar "
+                f"could not parse allocations sidecar "
                 f"{sidecar_path}: {exc}"
             ),
         )
@@ -966,6 +1021,66 @@ def load_allocations_sidecar(
             alive=alive,
         )
     return table, None
+
+
+def parse_allocations_sidecar_bytes(
+    raw_bytes: bytes,
+    sidecar_path: Path,
+    *,
+    max_entries: int = _DEFAULT_ALLOCATION_SIDECAR_ENTRIES,
+    max_nesting: int = _DEFAULT_ALLOCATION_SIDECAR_NESTING,
+) -> tuple[dict[int, AllocationEntry] | None, ValidationResult | None]:
+    """Parse exact snapshotted sidecar bytes under decoded-resource limits."""
+    if not isinstance(raw_bytes, bytes):
+        raise TypeError("raw_bytes must be bytes")
+    if type(max_entries) is not int or max_entries <= 0:
+        raise ValueError("max_entries must be a positive integer")
+    if type(max_nesting) is not int or max_nesting <= 0:
+        raise ValueError("max_nesting must be a positive integer")
+    try:
+        _preflight_allocation_json(
+            raw_bytes,
+            max_entries=max_entries,
+            max_nesting=max_nesting,
+        )
+        return _parse_allocations_sidecar_bytes_after_preflight(
+            raw_bytes,
+            sidecar_path,
+        )
+    except _AllocationJsonResourceLimitError as exc:
+        return None, ValidationResult(
+            ok=False,
+            typed_reason="allocations_sidecar_resource_limit_exceeded",
+            detail=f"{sidecar_path}: {exc}",
+        )
+    except _AllocationJsonPreflightError as exc:
+        return None, ValidationResult(
+            ok=False,
+            typed_reason="allocations_sidecar_malformed",
+            detail=f"could not parse allocations sidecar {sidecar_path}: {exc}",
+        )
+
+
+def load_allocations_sidecar(
+    traces_dir: Path,
+) -> tuple[dict[int, AllocationEntry] | None, ValidationResult | None]:
+    """Load the optional sidecar for compatibility path-based validators.
+
+    Forward capture admission uses :func:`parse_allocations_sidecar_bytes`
+    with descriptor-anchored bounded bytes instead of this path wrapper.
+    """
+    sidecar_path = traces_dir / "extra_info" / "allocations.json"
+    if not sidecar_path.is_file():
+        return None, None
+    try:
+        raw_bytes = sidecar_path.read_bytes()
+    except OSError as exc:
+        return None, ValidationResult(
+            ok=False,
+            typed_reason="allocations_sidecar_malformed",
+            detail=f"could not read allocations sidecar {sidecar_path}: {exc}",
+        )
+    return parse_allocations_sidecar_bytes(raw_bytes, sidecar_path)
 
 
 def _expected_address_spaces(
@@ -1333,7 +1448,7 @@ def _check_instruction(
 
     # Additive instruction metadata is part of complete wire preflight and has
     # precedence over allocation identity, matching the Rust validator.
-    if looks_like_memory and inst.HasField("memory_op_access_kind"):
+    if inst.HasField("memory_op_access_kind"):
         known_access_kinds = frozenset(
             instruction_pb2_mod.MemoryOpAccessKind.values()
         )
@@ -1362,9 +1477,7 @@ def _check_instruction(
                 ),
             )
 
-    # Cache-op UNSPECIFIED is an admitted typed provenance gap, but an unknown
-    # numeric value is still wire-schema skew.
-    if looks_like_memory and inst.HasField("instruction_cache_op"):
+    if inst.HasField("instruction_cache_op"):
         known_cache_ops = frozenset(
             instruction_pb2_mod.InstructionCacheOp.values()
         )
@@ -1378,6 +1491,37 @@ def _check_instruction(
                     "protobuf schema"
                 ),
             )
+        if (
+            inst.instruction_cache_op
+            == instruction_pb2_mod.INSTRUCTION_CACHE_OP_UNSPECIFIED
+        ):
+            return ValidationResult(
+                ok=False,
+                typed_reason="instruction_cache_op_unspecified",
+                detail=(
+                    f"{record_path}: instruction_cache_op is present but "
+                    "UNSPECIFIED; absence alone represents unavailable "
+                    "additive cache provenance"
+                ),
+            )
+
+    additive_memory_fields = tuple(
+        field
+        for field in (
+            "memory_op_access_kind",
+            "instruction_cache_op",
+        )
+        if inst.HasField(field)
+    )
+    if not looks_like_memory and additive_memory_fields:
+        return ValidationResult(
+            ok=False,
+            typed_reason="memory_metadata_on_non_memory_instruction",
+            detail=(
+                f"{record_path}: non-memory instruction carries additive "
+                f"memory metadata: {', '.join(additive_memory_fields)}"
+            ),
+        )
 
     if (
         expected_function_unique_id is not None

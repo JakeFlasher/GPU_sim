@@ -53,8 +53,32 @@ from tools.local_labels.regenerate_v5_trace_sidecars import (  # noqa: E402
     _DEVICE_BLOCKS,
     _HRD_CACHE_INPUTS,
     _HRD_DEVICE_BLOCKS,
-    _regenerate_sector_stream,
     _resolve_trace_dir,
+)
+from tools.local_labels.immutable_artifact import (  # noqa: E402
+    ImmutableArtifactError,
+    ImmutableArtifactLimitError,
+    ImmutableArtifactResourceError,
+    ensure_directory,
+    read_regular,
+    replace_regular_bytes,
+)
+from tools.nvbit_tracer.trace_admission import (  # noqa: E402
+    AdmittedTraceSources,
+    TraceAdmissionError,
+    open_admitted_trace_sources,
+    require_trace_admission,
+)
+from tools.sector_stream.consume_trace import (  # noqa: E402
+    AdmittedSectorStream,
+    consume_admitted_trace_sources,
+)
+
+_HARD_TRACE_SOURCE_ERRORS = (
+    TraceAdmissionError,
+    ImmutableArtifactLimitError,
+    ImmutableArtifactResourceError,
+    ImmutableArtifactError,
 )
 
 # Shared mixed-arity build-variant identity helper (sibling import so the
@@ -177,12 +201,13 @@ def label_mpi_for_cell(
 
 
 def _regenerate_sharing_locality_with_label_mpi(
-    *, arch: str, trace_dir: Path, label_mpi: dict[str, str],
+    *,
+    arch: str,
+    trace_dir: Path,
+    label_mpi: dict[str, str],
+    sources: AdmittedTraceSources,
 ) -> dict[str, Any]:
-    """Invoke ``compute_sharing_locality`` in-process with the label
-    MPI 5-tuple (no placeholder fallback) and write the bundle to
-    ``<trace_dir>/sharing_locality/sharing_locality.json``.
-    """
+    """Emit sharing-locality from the batch's admitted capability."""
     device_block = _DEVICE_BLOCKS.get(arch)
     if device_block is None:
         return {
@@ -192,18 +217,17 @@ def _regenerate_sharing_locality_with_label_mpi(
             "producer_invoked": "compute_sharing_locality",
         }
     try:
-        sys.path.insert(
-            0, str(_REPO_ROOT / "tools" / "sharing_locality"),
+        from tools.sharing_locality.classifier import (
+            compute_sharing_locality_from_admitted_sources,
         )
-        from classifier import (  # type: ignore[import-not-found]
-            compute_sharing_locality,
-        )
-        bundle = compute_sharing_locality(
-            trace_dir=trace_dir,
+        bundle = compute_sharing_locality_from_admitted_sources(
+            sources=sources,
             manifest_pairing_index=label_mpi,
             device=device_block,
         )
-    except (RuntimeError, ImportError, OSError) as exc:
+    except _HARD_TRACE_SOURCE_ERRORS:
+        raise
+    except (ImportError, OSError, RuntimeError) as exc:
         return {
             "status": "failed_with_typed_reason",
             "typed_failure_reason": (
@@ -214,21 +238,12 @@ def _regenerate_sharing_locality_with_label_mpi(
             "producer_invoked": "compute_sharing_locality",
         }
     sl_dir = trace_dir / "sharing_locality"
-    sl_dir.mkdir(parents=True, exist_ok=True)
     output_path = sl_dir / "sharing_locality.json"
-    try:
-        output_path.write_text(
-            json.dumps(bundle, indent=2) + "\n", encoding="utf-8",
-        )
-    except OSError as exc:
-        return {
-            "status": "failed_with_typed_reason",
-            "typed_failure_reason": (
-                f"write_failed:{type(exc).__name__}:{exc!s}"
-            )[:512],
-            "output_path": str(output_path),
-            "producer_invoked": "compute_sharing_locality",
-        }
+    ensure_directory(sl_dir)
+    replace_regular_bytes(
+        output_path,
+        (json.dumps(bundle, indent=2) + "\n").encode("utf-8"),
+    )
     return {
         "status": "written",
         "typed_failure_reason": None,
@@ -238,7 +253,12 @@ def _regenerate_sharing_locality_with_label_mpi(
 
 
 def _regenerate_hrd_profile_with_label_mpi(
-    *, arch: str, trace_dir: Path, label_mpi: dict[str, str],
+    *,
+    arch: str,
+    trace_dir: Path,
+    label_mpi: dict[str, str],
+    sources: AdmittedTraceSources,
+    sector_stream: AdmittedSectorStream,
 ) -> dict[str, Any]:
     """Invoke ``emit_hrd_bundle`` in-process with the label MPI
     5-tuple (no dependency on an already-admitted predictor
@@ -263,12 +283,13 @@ def _regenerate_hrd_profile_with_label_mpi(
             "producer_invoked": "emit_hrd_bundle",
         }
     try:
-        sys.path.insert(0, str(_REPO_ROOT))
-        from tools.hrd_profiler.bundle_from_trace import (  # noqa: E402
-            emit_hrd_bundle,
+        from tools.hrd_profiler.bundle_from_trace import (
+            emit_hrd_bundle_from_admitted_sources,
         )
-        producer_result = emit_hrd_bundle(
-            trace_dir=trace_dir,
+        producer_result = emit_hrd_bundle_from_admitted_sources(
+            sources=sources,
+            sector_stream=sector_stream,
+            output_root=trace_dir,
             manifest_pairing_index=label_mpi,
             device=device_block,
             cuda_l2_cache_size_bytes=cache_inputs[
@@ -282,6 +303,8 @@ def _regenerate_hrd_profile_with_label_mpi(
                 "static_card_num_l2_slices"
             ],
         )
+    except _HARD_TRACE_SOURCE_ERRORS:
+        raise
     except (RuntimeError, ImportError, OSError, ValueError) as exc:
         return {
             "status": "failed_with_typed_reason",
@@ -318,13 +341,6 @@ def _regenerate_hrd_profile_with_label_mpi(
             "contract_ok": True,
             "schema_admits": False,
         }
-    if not output_path.is_file():
-        return {
-            "status": "failed_with_typed_reason",
-            "typed_failure_reason": "emit_hrd_bundle_no_output_on_disk",
-            "output_path": str(output_path),
-            "producer_invoked": "emit_hrd_bundle",
-        }
     return {
         "status": "written",
         "typed_failure_reason": None,
@@ -348,22 +364,12 @@ def _write_sector_stream_mpi_sibling(
     JSONL itself is record-level and does not embed identity.
     """
     sibling = trace_dir / "sector_stream" / "manifest_pairing_index.json"
-    sibling.parent.mkdir(parents=True, exist_ok=True)
+    ensure_directory(sibling.parent)
     payload = {key: label_mpi[key] for key in _LABEL_IDENTITY_KEYS}
-    try:
-        sibling.write_text(
-            json.dumps(payload, indent=2, sort_keys=True) + "\n",
-            encoding="utf-8",
-        )
-    except OSError as exc:
-        return {
-            "status": "failed_with_typed_reason",
-            "typed_failure_reason": (
-                f"write_failed:{type(exc).__name__}:{exc!s}"
-            )[:512],
-            "output_path": str(sibling),
-            "producer_invoked": "sector_stream_mpi_sibling",
-        }
+    replace_regular_bytes(
+        sibling,
+        (json.dumps(payload, indent=2, sort_keys=True) + "\n").encode("utf-8"),
+    )
     return {
         "status": "written",
         "typed_failure_reason": None,
@@ -373,20 +379,14 @@ def _write_sector_stream_mpi_sibling(
 
 
 def _regenerate_divergence_proxies_with_label_mpi(
-    *, arch: str, trace_dir: Path, label_mpi: dict[str, str],
+    *,
+    arch: str,
+    trace_dir: Path,
+    label_mpi: dict[str, str],
+    sources: AdmittedTraceSources,
+    sector_stream: AdmittedSectorStream,
 ) -> dict[str, Any]:
-    """Invoke ``consume_trace_dir`` from
-    ``tools.divergence_proxies.bundle_from_trace`` with the label
-    MPI 5-tuple and surface its on-disk schema verdict as the
-    producer's status. The producer writes
-    ``<trace_dir>/divergence_proxies/divergence_proxies.json`` and
-    re-reads + validates it via
-    ``jsonschema.Draft202012Validator`` (the
-    "R7 lesson: validate the bytes the producer wrote" pattern
-    documented in ``bundle_from_trace.py:226-235``); this wrapper
-    surfaces ``schema_admits`` as a typed failure so the bytes-on-
-    disk verdict drives the ledger gate, not the in-memory bundle.
-    """
+    """Emit divergence proxies from the batch's admitted capability."""
     device_str = _DIVERGENCE_PROXIES_DEVICE_STRING.get(arch)
     if device_str is None:
         return {
@@ -396,14 +396,18 @@ def _regenerate_divergence_proxies_with_label_mpi(
             "producer_invoked": "divergence_proxies/consume_trace_dir",
         }
     try:
-        from tools.divergence_proxies.bundle_from_trace import (  # noqa: E402
-            consume_trace_dir,
+        from tools.divergence_proxies.bundle_from_trace import (
+            consume_admitted_trace_sources,
         )
-        result = consume_trace_dir(
-            trace_dir=trace_dir,
+        result = consume_admitted_trace_sources(
+            sources=sources,
+            sector_stream=sector_stream,
+            output_root=trace_dir,
             device=device_str,
             manifest_pairing_index=label_mpi,
         )
+    except _HARD_TRACE_SOURCE_ERRORS:
+        raise
     except (
         RuntimeError, ImportError, OSError, ValueError,
         FileNotFoundError,
@@ -430,15 +434,6 @@ def _regenerate_divergence_proxies_with_label_mpi(
             "producer_invoked": "divergence_proxies/consume_trace_dir",
             "schema_admits": False,
         }
-    if not output_path or not Path(output_path).is_file():
-        return {
-            "status": "failed_with_typed_reason",
-            "typed_failure_reason": (
-                "divergence_proxies_no_output_on_disk"
-            ),
-            "output_path": output_path,
-            "producer_invoked": "divergence_proxies/consume_trace_dir",
-        }
     return {
         "status": "written",
         "typed_failure_reason": None,
@@ -449,23 +444,13 @@ def _regenerate_divergence_proxies_with_label_mpi(
 
 
 def _regenerate_order_projections_with_label_mpi(
-    *, arch: str, trace_dir: Path, label_mpi: dict[str, str],
+    *,
+    arch: str,
+    trace_dir: Path,
+    label_mpi: dict[str, str],
+    sources: AdmittedTraceSources,
 ) -> dict[str, Any]:
-    """Invoke ``compute_order_projections`` from
-    ``tools.order_projections.projector`` with the label MPI
-    5-tuple, write the returned bundle to
-    ``<trace_dir>/order_projections/order_projections.json``, and
-    validate the on-disk bytes against
-    ``workloads/simbench_bw/schemas/order_projections.schema.json``
-    via ``jsonschema.Draft202012Validator``.
-
-    Unlike ``consume_trace_dir`` (which writes + validates
-    internally), ``compute_order_projections`` returns the bundle
-    in-memory; the schema validation is THIS wrapper's
-    responsibility. Following the R7 lesson ("validate the bytes
-    the producer wrote, not the in-process bundle") we re-read
-    the file after write and validate the on-disk bytes.
-    """
+    """Emit order projections from the batch's admitted capability."""
     device_block = _ORDER_PROJECTIONS_DEVICE_BLOCKS.get(arch)
     capacity_bytes = _ORDER_PROJECTIONS_CAPACITY_BYTES.get(arch)
     if device_block is None or capacity_bytes is None:
@@ -476,15 +461,17 @@ def _regenerate_order_projections_with_label_mpi(
             "producer_invoked": "order_projections/compute_order_projections",
         }
     try:
-        from tools.order_projections.projector import (  # noqa: E402
-            compute_order_projections,
+        from tools.order_projections.projector import (
+            compute_order_projections_from_admitted_sources,
         )
-        bundle = compute_order_projections(
-            trace_dir=trace_dir,
+        bundle = compute_order_projections_from_admitted_sources(
+            sources=sources,
             manifest_pairing_index=label_mpi,
             device=device_block,
             capacity_bytes=capacity_bytes,
         )
+    except _HARD_TRACE_SOURCE_ERRORS:
+        raise
     except (
         RuntimeError, ImportError, OSError, ValueError,
         FileNotFoundError,
@@ -499,33 +486,24 @@ def _regenerate_order_projections_with_label_mpi(
             "producer_invoked": "order_projections/compute_order_projections",
         }
     op_dir = trace_dir / "order_projections"
-    op_dir.mkdir(parents=True, exist_ok=True)
     output_path = op_dir / "order_projections.json"
-    try:
-        output_path.write_text(
-            json.dumps(bundle, indent=2) + "\n", encoding="utf-8",
-        )
-    except OSError as exc:
-        return {
-            "status": "failed_with_typed_reason",
-            "typed_failure_reason": (
-                f"write_failed:{type(exc).__name__}:{exc!s}"
-            )[:512],
-            "output_path": str(output_path),
-            "producer_invoked": "order_projections/compute_order_projections",
-        }
+    ensure_directory(op_dir)
+    replace_regular_bytes(
+        output_path,
+        (json.dumps(bundle, indent=2) + "\n").encode("utf-8"),
+    )
     try:
         import jsonschema  # noqa: E402
         schema_path = (
             _REPO_ROOT / "workloads" / "simbench_bw" / "schemas"
             / "order_projections.schema.json"
         )
-        schema = json.loads(schema_path.read_text(encoding="utf-8"))
-        on_disk = json.loads(
-            output_path.read_text(encoding="utf-8"),
-        )
+        schema = json.loads(read_regular(schema_path))
+        on_disk = json.loads(read_regular(output_path))
         validator = jsonschema.Draft202012Validator(schema)
         errors = list(validator.iter_errors(on_disk))
+    except _HARD_TRACE_SOURCE_ERRORS:
+        raise
     except (OSError, json.JSONDecodeError, ImportError) as exc:
         return {
             "status": "failed_with_typed_reason",
@@ -572,9 +550,9 @@ def regenerate_sidecars_for_cell(
 
     Returns a per-cell report dict with the cell key, a list of
     per-producer status entries (including the sector_stream MPI
-    sibling), and a top-level overall_status summary. The function
-    never raises; it surfaces every typed failure through the
-    per-producer status entries.
+    sibling), and a top-level overall_status summary. Admission, immutable
+    artifact, resource, and limit failures escape unchanged and stop the batch;
+    ordinary producer/schema failures retain explicit status entries.
 
     The six producers, in order:
       1. ``compute_sharing_locality`` →
@@ -664,22 +642,63 @@ def regenerate_sidecars_for_cell(
                 )
             ],
         }
-    sharing = _regenerate_sharing_locality_with_label_mpi(
-        arch=arch, trace_dir=trace_dir, label_mpi=label_mpi,
-    )
-    hrd = _regenerate_hrd_profile_with_label_mpi(
-        arch=arch, trace_dir=trace_dir, label_mpi=label_mpi,
-    )
-    sector = _regenerate_sector_stream(trace_dir=trace_dir)
-    sector_mpi = _write_sector_stream_mpi_sibling(
-        trace_dir=trace_dir, label_mpi=label_mpi,
-    )
-    divergence = _regenerate_divergence_proxies_with_label_mpi(
-        arch=arch, trace_dir=trace_dir, label_mpi=label_mpi,
-    )
-    order = _regenerate_order_projections_with_label_mpi(
-        arch=arch, trace_dir=trace_dir, label_mpi=label_mpi,
-    )
+    admission = require_trace_admission(trace_dir)
+    if admission.launch_count != 1:
+        raise TraceAdmissionError(
+            "trace_launch_count_unsupported",
+            "coherent sidecar regeneration requires exactly one admitted "
+            f"launch; observed launch_count={admission.launch_count}",
+        )
+    with open_admitted_trace_sources(
+        trace_dir, expected_admission=admission
+    ) as sources:
+        sector_stream = consume_admitted_trace_sources(
+            sources=sources,
+            output_root=trace_dir,
+            write_jsonl=True,
+        )
+        if not sector_stream.schema_admits_all:
+            raise TraceAdmissionError(
+                "sector_stream_schema_invalid",
+                "sidecar regeneration sector-stream schema rejection: "
+                f"{sector_stream.schema_first_failure}",
+            )
+        sector_stream.verify_for(sources)
+        sector = {
+            "status": "written",
+            "typed_failure_reason": None,
+            "output_path": str(sector_stream.jsonl_path),
+        }
+        sharing = _regenerate_sharing_locality_with_label_mpi(
+            arch=arch,
+            trace_dir=trace_dir,
+            label_mpi=label_mpi,
+            sources=sources,
+        )
+        hrd = _regenerate_hrd_profile_with_label_mpi(
+            arch=arch,
+            trace_dir=trace_dir,
+            label_mpi=label_mpi,
+            sources=sources,
+            sector_stream=sector_stream,
+        )
+        sector_mpi = _write_sector_stream_mpi_sibling(
+            trace_dir=trace_dir, label_mpi=label_mpi,
+        )
+        divergence = _regenerate_divergence_proxies_with_label_mpi(
+            arch=arch,
+            trace_dir=trace_dir,
+            label_mpi=label_mpi,
+            sources=sources,
+            sector_stream=sector_stream,
+        )
+        order = _regenerate_order_projections_with_label_mpi(
+            arch=arch,
+            trace_dir=trace_dir,
+            label_mpi=label_mpi,
+            sources=sources,
+        )
+        sources.verify_unchanged()
     per_producer = [
         {
             "producer": "compute_sharing_locality",

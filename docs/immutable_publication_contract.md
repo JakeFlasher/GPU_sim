@@ -44,6 +44,52 @@ post-authorization closure does not rehash content, but it may traverse the
 retained tree; it is bounded by descriptor depth rather than a constant-time
 guarantee.
 
+Regular-file publication accepts a caller-supplied `pinned_parent` only when it
+is an exact `PinnedDirectoryReader`. Before creating or recovering any partial,
+an independent reader binds the declared `parent` path to the same device/inode
+as that capability; a type or inode mismatch leaves both the partial and final
+leaf absent. Both bindings remain revalidated across the namespace commit. An
+independent rollback-parent descriptor remains live through pinned-reader
+monitor and directory closure, followed by a raw no-hook lexical rebind before
+return. Renaming and recreating the declared parent during close therefore
+fails publication, preserves the committed bytes through the exact displaced
+parent, and leaves any recreated-path winner untouched.
+
+`publish_retained_regular_file` keeps an independently opened, no-follow
+capability to the exact committed inode after the publisher's writable handle
+closes. Callers reauthenticate its payload hash, seven-field snapshot, named
+path, and mutation monitor through downstream closure. On failed closure,
+`preserve_retained_regular_file` retires that exact generation when it still
+owns the name; if another publisher replaced the name, the replacement remains
+active and the retained inode is salvaged through its descriptor instead.
+Same-inode mutations are moved out of the active namespace as failed evidence.
+
+`close_retained_regular_files_authenticated` closes one or more locators as a
+single publisher-locked set. It first duplicates every exact inode and ancestor
+chain into independent rollback guards. Mutation monitors remain armed while
+the original `_PinnedRegular` capabilities and optional source/lock callbacks
+close. A caller that owns a publication-lock reader transfers its sole reader
+or reader-stack close callback into this phase; activation transfers its
+lock-source stack, and roster detaches its aggregate reader owner before the
+handoff. If setup fails before the callback is invoked, the detached owner
+closes against that active error. Once invoked, no caller-owned reader close
+remains after the last locator observation. The guards then reauthenticate
+every path, snapshot, size, and payload
+before and after monitor closure. Each authenticated guard is duplicated once
+more into a final sentinel before the ordinary guards cross their hookable
+`_close_descriptors` release boundary. Guard descriptor ownership is detached
+before that close attempt: a reported close failure may already have released
+an fd, so its uncertain numeric value is never retried and cannot close an
+unrelated descriptor that reused the number. The complete sentinel set is
+reauthenticated after the hookable release. Any pinned-close, monitor-close,
+callback,
+guard-release, or final-identity failure transfers every current recovery set
+back to its caller, so the concurrent winner and all original
+activation/aggregate evidence remain preservable. Only a fully authenticated
+final-sentinel set is released, in one raw libc `close(2)` pass that attempts all
+owned descriptors and exposes no later Python cleanup callback able to mutate a
+locator after its last authentication.
+
 Retained trees may use snapshot-closure verification with an iterative,
 O(depth) descriptor budget: each file is hashed once, metadata is retained in
 memory, the tree is reinventoried, and named entries are reopened no-follow for

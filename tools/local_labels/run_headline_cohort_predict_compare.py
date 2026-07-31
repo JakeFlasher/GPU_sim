@@ -39,6 +39,29 @@ import cache_predictor as cp  # noqa: E402
 import comparison_runner as cr  # noqa: E402
 import comparison_contract_overlay as cco  # noqa: E402
 import device_properties  # noqa: E402
+from tools.local_labels.immutable_artifact import (  # noqa: E402
+    ImmutableArtifactError,
+    ImmutableArtifactLimitError,
+    ImmutableArtifactResourceError,
+)
+from tools.nvbit_tracer.trace_admission import (  # noqa: E402
+    AdmittedTraceSources,
+    TraceAdmissionError,
+    open_admitted_trace_sources,
+    require_trace_admission,
+)
+from tools.sector_stream.consume_trace import (  # noqa: E402
+    AdmittedSectorStream,
+    consume_admitted_trace_sources,
+)
+
+_HARD_TRACE_SOURCE_ERRORS = (
+    TraceAdmissionError,
+    ImmutableArtifactLimitError,
+    ImmutableArtifactResourceError,
+    ImmutableArtifactError,
+)
+
 try:
     from tools.local_labels.sm120_template_safety import (  # noqa: E402
         SM120_ARCH,
@@ -869,26 +892,25 @@ def _trace_sidecar_for(slug: str, shape_point: str) -> Path:
     )
 
 
-def _ensure_sector_stream(traces_folder: Path) -> None:
-    """Generate the sector_stream JSONL from the threadblock proto
-    if absent. Mirrors the run_suite._ensure_sector_stream_jsonl
-    behavior so activation traces (which the simbench run_suite
-    doesn't drive) get the same downstream sector_stream sidecar."""
-    sector_stream_jsonl = (
-        traces_folder / "sector_stream" / "sector_stream.jsonl"
+def _ensure_sector_stream(
+    traces_folder: Path,
+    *,
+    sources: AdmittedTraceSources,
+) -> AdmittedSectorStream:
+    """Regenerate sector JSONL from the currently admitted snapshots."""
+    result = consume_admitted_trace_sources(
+        sources=sources,
+        output_root=traces_folder,
+        write_jsonl=True,
     )
-    if sector_stream_jsonl.is_file():
-        return
-    from consume_trace import (  # type: ignore[import-not-found]
-        consume_trace_dir as _consume_trace_dir,
-    )
-    result = _consume_trace_dir(traces_folder, write_jsonl=True)
-    if not result.get("contract_ok"):
-        raise RuntimeError(
-            f"sector_stream consumer rejected the trace at "
-            f"{traces_folder}: contract_typed_reason="
-            f"{result.get('contract_typed_reason')!r}"
+    if not result.schema_admits_all:
+        raise TraceAdmissionError(
+            "sector_stream_schema_invalid",
+            "headline sector-stream producer generated a schema-invalid "
+            f"record: {result.schema_first_failure}",
         )
+    result.verify_for(sources)
+    return result
 
 
 def _read_manifest_pairing_index(slug: str, shape_point: str) -> dict:
@@ -1014,13 +1036,8 @@ def predict_one_cell(
     no gate behavior; preserves byte-for-byte legacy for callers
     that don't pass the kwarg."""
     traces_folder = _trace_dir_for(slug, shape_point)
-    if not (traces_folder / "dynamic_trace.pb").is_file():
-        raise FileNotFoundError(
-            f"missing dynamic_trace.pb for {slug}/{shape_point} at "
-            f"{traces_folder}"
-        )
-    _ensure_sector_stream(traces_folder)
-    sector_stream = (
+    admission = require_trace_admission(traces_folder)
+    sector_stream_path = (
         traces_folder / "sector_stream" / "sector_stream.jsonl"
     )
     mpi = _read_manifest_pairing_index(slug, shape_point)
@@ -1046,51 +1063,45 @@ def predict_one_cell(
             expected_identity=expected_identity,
         )
     )
-    bundle = cp.predict_cache_hit_rate(
-        trace_dir=traces_folder,
-        sector_stream_path=sector_stream,
-        cache_model_capacity_bytes=entry.l2_capacity_bytes,
-        manifest_pairing_index=mpi,
-        device=_DEFAULT_DEVICE,
-        bootstrap_seed=bootstrap_seed,
-        cache_model_num_l2_slices=entry.num_l2_slices,
-        cache_model_num_l2_slices_source="device_properties_manifest",
-        cache_model_cta_interleave_enabled=(
-            _DEFAULT_CACHE_MODEL_CTA_INTERLEAVE_ENABLED
-        ),
-        cache_model_hrd_second_layer_enabled=True,
-        cache_model_geometry_provenance=provenance,
-        cache_model_variance_precondition_stddev=(
-            variance_precondition_stddev
-        ),
-        grid_dim=grid_dim,
-        launch_parameters_sidecar_path=sidecar_path,
-        launch_parameters_sidecar_sha256=sidecar_sha256,
-        # Producer-side canonical pre-calibration block emission per
-        # the goal tracker's canonical-feature wire-surface row: pass
-        # the two sibling sidecar paths so predict_cache_hit_rate
-        # auto-derives unique_sector_count from the hrd_profile and
-        # attaches the 6-feature canonical block. Failure to load any
-        # sidecar records a typed reason under
-        # evidence.canonical_pre_calibration_features_unavailable_reason
-        # (schema-valid fail-closed).
-        sharing_locality_path=(
-            traces_folder / "sharing_locality" / "sharing_locality.json"
-        ),
-        hrd_profile_path=(
-            traces_folder / "hrd_profile" / "hrd_profile.json"
-        ),
-        # R45 close-out of R44-review blocking side issue #1:
-        # forward the validated identity tuple into the bundle's
-        # `evidence.launch_parameters_sidecar_identity` field so
-        # the bundle reader can re-verify which sidecar the
-        # gridDim correction was bound to. Pass None on the
-        # legacy fall-through arm (no sidecar on disk) so the
-        # evidence field is omitted.
-        launch_parameters_sidecar_identity=(
-            expected_identity if sidecar_path is not None else None
-        ),
-    )
+    with open_admitted_trace_sources(
+        traces_folder, expected_admission=admission
+    ) as sources:
+        sector_stream = _ensure_sector_stream(
+            traces_folder,
+            sources=sources,
+        )
+        bundle = cp.predict_cache_hit_rate_from_admitted_sources(
+            sources=sources,
+            sector_stream=sector_stream,
+            trace_dir=traces_folder,
+            sector_stream_path=sector_stream_path,
+            cache_model_capacity_bytes=entry.l2_capacity_bytes,
+            manifest_pairing_index=mpi,
+            device=_DEFAULT_DEVICE,
+            bootstrap_seed=bootstrap_seed,
+            cache_model_num_l2_slices=entry.num_l2_slices,
+            cache_model_num_l2_slices_source="device_properties_manifest",
+            cache_model_cta_interleave_enabled=(
+                _DEFAULT_CACHE_MODEL_CTA_INTERLEAVE_ENABLED
+            ),
+            cache_model_hrd_second_layer_enabled=True,
+            cache_model_geometry_provenance=provenance,
+            cache_model_variance_precondition_stddev=(
+                variance_precondition_stddev
+            ),
+            grid_dim=grid_dim,
+            launch_parameters_sidecar_path=sidecar_path,
+            launch_parameters_sidecar_sha256=sidecar_sha256,
+            sharing_locality_path=(
+                traces_folder / "sharing_locality" / "sharing_locality.json"
+            ),
+            hrd_profile_path=(
+                traces_folder / "hrd_profile" / "hrd_profile.json"
+            ),
+            launch_parameters_sidecar_identity=(
+                expected_identity if sidecar_path is not None else None
+            ),
+        )
     bundle["predictor_build_commit"] = _current_producer_build_commit()
     output_dir.mkdir(parents=True, exist_ok=True)
     out_path = output_dir / f"sm_86__{slug}__{shape_point}.json"
@@ -1844,6 +1855,8 @@ def main(argv: list[str] | None = None) -> int:
                             ),
                         )
                         l1_diagnostic_paths.append(l1_path)
+                    except _HARD_TRACE_SOURCE_ERRORS:
+                        raise
                     except Exception as l1_exc:
                         # An L1 diagnostic emission failure is logged
                         # but does NOT fail the round: the diagnostic is
@@ -1855,6 +1868,8 @@ def main(argv: list[str] | None = None) -> int:
                             f"{slug}/{shape_point}: {l1_exc}",
                             file=sys.stderr,
                         )
+            except _HARD_TRACE_SOURCE_ERRORS:
+                raise
             except Exception as exc:
                 failures.append((slug, shape_point, str(exc)))
                 print(

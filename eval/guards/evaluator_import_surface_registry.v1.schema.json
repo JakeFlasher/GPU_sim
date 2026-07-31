@@ -1,0 +1,276 @@
+{
+  "$id": "https://gpu-simulator.invalid/schemas/evaluator_import_surface_registry.v1.schema.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": false,
+  "properties": {
+    "$schema": {
+      "const": "https://gpu-simulator.invalid/schemas/evaluator_import_surface_registry.v1.schema.json"
+    },
+    "authorities": {
+      "additionalProperties": false,
+      "properties": {
+        "cohort_membership": {
+          "$ref": "#/$defs/unresolvedAuthority"
+        },
+        "coverage_thresholds": {
+          "$ref": "#/$defs/unresolvedAuthority"
+        },
+        "cycle_aggregation_semantics": {
+          "$ref": "#/$defs/unresolvedAuthority"
+        },
+        "hardware_authority": {
+          "$ref": "#/$defs/unresolvedAuthority"
+        },
+        "operator_approval": {
+          "$ref": "#/$defs/unresolvedAuthority"
+        },
+        "protocol_values": {
+          "$ref": "#/$defs/unresolvedAuthority"
+        },
+        "reviewer_approval": {
+          "$ref": "#/$defs/unresolvedAuthority"
+        },
+        "trust_anchors": {
+          "$ref": "#/$defs/unresolvedAuthority"
+        }
+      },
+      "required": [
+        "cohort_membership",
+        "coverage_thresholds",
+        "cycle_aggregation_semantics",
+        "hardware_authority",
+        "operator_approval",
+        "protocol_values",
+        "reviewer_approval",
+        "trust_anchors"
+      ],
+      "type": "object"
+    },
+    "boundary": {
+      "additionalProperties": false,
+      "properties": {
+        "entrypoint_access": {
+          "const": "descriptor_snapshot_only"
+        },
+        "label_value_reads": {
+          "const": "forbidden"
+        },
+        "ordinary_package_import": {
+          "const": "forbidden"
+        },
+        "score_emission": {
+          "const": "none"
+        },
+        "status": {
+          "const": "blocked_offline"
+        }
+      },
+      "required": [
+        "entrypoint_access",
+        "label_value_reads",
+        "ordinary_package_import",
+        "score_emission",
+        "status"
+      ],
+      "type": "object"
+    },
+    "classifications": {
+      "items": {
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "classification": {
+                  "enum": [
+                    "production_boundary",
+                    "production_dependency"
+                  ]
+                }
+              },
+              "required": [
+                "classification"
+              ]
+            },
+            "then": {
+              "properties": {
+                "import_policy": {
+                  "const": "allow"
+                },
+                "review_status": {
+                  "const": "reviewed"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "classification": {
+                  "enum": [
+                    "non_evaluator",
+                    "prohibited_evaluator",
+                    "unreviewed"
+                  ]
+                }
+              },
+              "required": [
+                "classification"
+              ]
+            },
+            "then": {
+              "properties": {
+                "import_policy": {
+                  "const": "deny"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "classification": {
+                  "const": "unreviewed"
+                }
+              },
+              "required": [
+                "classification"
+              ]
+            },
+            "then": {
+              "properties": {
+                "review_status": {
+                  "const": "provisional"
+                }
+              }
+            }
+          },
+          {
+            "if": {
+              "properties": {
+                "classification": {
+                  "enum": [
+                    "non_evaluator",
+                    "prohibited_evaluator"
+                  ]
+                }
+              },
+              "required": [
+                "classification"
+              ]
+            },
+            "then": {
+              "properties": {
+                "review_status": {
+                  "const": "reviewed"
+                }
+              }
+            }
+          }
+        ],
+        "properties": {
+          "classification": {
+            "enum": [
+              "non_evaluator",
+              "production_boundary",
+              "production_dependency",
+              "prohibited_evaluator",
+              "unreviewed"
+            ]
+          },
+          "import_policy": {
+            "enum": [
+              "allow",
+              "deny"
+            ]
+          },
+          "path": {
+            "$ref": "#/$defs/repositoryPath"
+          },
+          "review_status": {
+            "enum": [
+              "provisional",
+              "reviewed"
+            ]
+          },
+          "sha256": {
+            "$ref": "#/$defs/sha256"
+          }
+        },
+        "required": [
+          "classification",
+          "import_policy",
+          "path",
+          "review_status",
+          "sha256"
+        ],
+        "type": "object"
+      },
+      "minItems": 1,
+      "type": "array"
+    },
+    "default_repo_local_import_policy": {
+      "const": "deny"
+    },
+    "hash_algorithm": {
+      "const": "sha256"
+    },
+    "production_entrypoint": {
+      "const": "eval/production_evaluator/__init__.py"
+    },
+    "registry_version": {
+      "const": "evaluator_import_surface_registry.v1"
+    },
+    "schema_binding": {
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "const": "eval/guards/evaluator_import_surface_registry.v1.schema.json"
+        },
+        "sha256": {
+          "$ref": "#/$defs/sha256"
+        }
+      },
+      "required": [
+        "path",
+        "sha256"
+      ],
+      "type": "object"
+    }
+  },
+  "required": [
+    "$schema",
+    "authorities",
+    "boundary",
+    "classifications",
+    "default_repo_local_import_policy",
+    "hash_algorithm",
+    "production_entrypoint",
+    "registry_version",
+    "schema_binding"
+  ],
+  "title": "Evaluator import-surface classification registry v1",
+  "type": "object",
+  "$defs": {
+    "repositoryPath": {
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.{1,2}(?:/|$))(?!.*//)[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*$",
+      "type": "string"
+    },
+    "sha256": {
+      "pattern": "^[0-9a-f]{64}$",
+      "type": "string"
+    },
+    "unresolvedAuthority": {
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "const": "typed_unresolved"
+        }
+      },
+      "required": [
+        "status"
+      ],
+      "type": "object"
+    }
+  }
+}

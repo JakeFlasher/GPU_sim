@@ -58,6 +58,30 @@ from tools.local_labels.sm120_template_safety import (  # noqa: E402
     is_sm120_template_arch,
     unavailable_result,
 )
+from tools.local_labels.immutable_artifact import (  # noqa: E402
+    ImmutableArtifactError,
+    ImmutableArtifactLimitError,
+    ImmutableArtifactResourceError,
+    ensure_directory,
+    replace_regular_bytes,
+)
+from tools.nvbit_tracer.trace_admission import (  # noqa: E402
+    AdmittedTraceSources,
+    TraceAdmissionError,
+    open_admitted_trace_sources,
+    require_trace_admission,
+)
+from tools.sector_stream.consume_trace import (  # noqa: E402
+    AdmittedSectorStream,
+    consume_admitted_trace_sources,
+)
+
+_HARD_TRACE_SOURCE_ERRORS = (
+    TraceAdmissionError,
+    ImmutableArtifactLimitError,
+    ImmutableArtifactResourceError,
+    ImmutableArtifactError,
+)
 
 
 _DEFAULT_MANIFEST = (
@@ -319,11 +343,15 @@ def _load_manifest_pairing_index_for_cell(
 
 
 def _regenerate_sharing_locality(
-    *, arch: str, slug: str, shape_point: str, trace_dir: Path,
+    *,
+    arch: str,
+    slug: str,
+    shape_point: str,
+    trace_dir: Path,
+    sources: AdmittedTraceSources,
+    mpi: dict[str, Any],
 ) -> dict[str, Any]:
-    """Invoke compute_sharing_locality in-process + write to
-    trace_dir / sharing_locality / sharing_locality.json. Returns a
-    per-cell report dict."""
+    """Emit sharing locality from the batch's admitted capability."""
     if is_sm120_template_arch(arch):
         return unavailable_result(
             operation="regenerate_v5_trace_sidecars.sharing_locality",
@@ -340,22 +368,17 @@ def _regenerate_sharing_locality(
             "output_path": None,
             "producer_invoked": "compute_sharing_locality",
         }
-    mpi = _load_manifest_pairing_index_for_cell(
-        arch=arch, slug=slug, shape_point=shape_point,
-    )
     try:
-        sys.path.insert(
-            0,
-            str(REPO_ROOT / "tools" / "sharing_locality"),
+        from tools.sharing_locality.classifier import (
+            compute_sharing_locality_from_admitted_sources,
         )
-        from classifier import (  # type: ignore[import-not-found]
-            compute_sharing_locality,
-        )
-        bundle = compute_sharing_locality(
-            trace_dir=trace_dir,
+        bundle = compute_sharing_locality_from_admitted_sources(
+            sources=sources,
             manifest_pairing_index=mpi,
             device=device_block,
         )
+    except _HARD_TRACE_SOURCE_ERRORS:
+        raise
     except (RuntimeError, ImportError, OSError) as exc:
         return {
             "status": "failed_with_typed_reason",
@@ -367,21 +390,12 @@ def _regenerate_sharing_locality(
             "producer_invoked": "compute_sharing_locality",
         }
     sl_dir = trace_dir / "sharing_locality"
-    sl_dir.mkdir(parents=True, exist_ok=True)
     output_path = sl_dir / "sharing_locality.json"
-    try:
-        output_path.write_text(
-            json.dumps(bundle, indent=2) + "\n", encoding="utf-8",
-        )
-    except OSError as exc:
-        return {
-            "status": "failed_with_typed_reason",
-            "typed_failure_reason": (
-                f"write_failed:{type(exc).__name__}:{exc!s}"
-            )[:512],
-            "output_path": str(output_path),
-            "producer_invoked": "compute_sharing_locality",
-        }
+    ensure_directory(sl_dir)
+    replace_regular_bytes(
+        output_path,
+        (json.dumps(bundle, indent=2) + "\n").encode("utf-8"),
+    )
     return {
         "status": "written",
         "typed_failure_reason": None,
@@ -482,25 +496,16 @@ def _resolve_real_mpi_from_admitted_bundle(
 
 
 def _regenerate_hrd_profile(
-    *, arch: str, slug: str, shape_point: str, trace_dir: Path,
+    *,
+    arch: str,
+    slug: str,
+    shape_point: str,
+    trace_dir: Path,
+    sources: AdmittedTraceSources,
+    sector_stream: AdmittedSectorStream,
+    mpi: dict[str, Any],
 ) -> dict[str, Any]:
-    """In-process HRD bundle producer call. Resolves real per-cell
-    MPI from the admitted predictor bundle on disk + arch-specific
-    device block + L2 cache inputs, then calls
-    ``tools.hrd_profiler.bundle_from_trace.emit_hrd_bundle`` to
-    write ``<trace_dir>/hrd_profile/hrd_profile.json``.
-
-    Fails the cell with a typed reason when:
-      - the arch is unknown (no _HRD_DEVICE_BLOCKS entry),
-      - no admitted predictor bundle exists for the cell (so MPI
-        cannot be resolved without fabricating placeholder values),
-      - the producer raises any exception,
-      - the producer returns ``contract_ok=False``.
-
-    Replaces the Round-15 CLI subprocess path that the upstream
-    bundle_from_trace.py module documents as "ad-hoc convenience"
-    + that fabricates placeholder MPI / defaults to sm_120 device.
-    """
+    """Emit HRD from the batch's capability and admission-bound sectors."""
     if is_sm120_template_arch(arch):
         return unavailable_result(
             operation="regenerate_v5_trace_sidecars.hrd_profile",
@@ -518,29 +523,14 @@ def _regenerate_hrd_profile(
             "producer_invoked": "emit_hrd_bundle",
         }
     cache_inputs = _HRD_CACHE_INPUTS.get(arch, {})
-    mpi = _resolve_real_mpi_from_admitted_bundle(
-        arch=arch, slug=slug, shape_point=shape_point,
-    )
-    if mpi is None:
-        return {
-            "status": "failed_with_typed_reason",
-            "typed_failure_reason": (
-                "hrd_mpi_unresolvable:no_admitted_predictor_bundle_for_cell"
-            ),
-            "output_path": None,
-            "producer_invoked": "emit_hrd_bundle",
-        }
-    # Lazy in-process import. The producer module's path lives under
-    # tools/hrd_profiler/; sys.path is injected so the bare
-    # `bundle_from_trace` import that the module uses internally
-    # also resolves.
     try:
-        sys.path.insert(
-            0, str(REPO_ROOT / "tools" / "hrd_profiler"),
+        from tools.hrd_profiler.bundle_from_trace import (
+            emit_hrd_bundle_from_admitted_sources,
         )
-        import bundle_from_trace  # type: ignore[import-not-found]
-        result = bundle_from_trace.emit_hrd_bundle(
-            trace_dir=trace_dir,
+        result = emit_hrd_bundle_from_admitted_sources(
+            sources=sources,
+            sector_stream=sector_stream,
+            output_root=trace_dir,
             manifest_pairing_index=mpi,
             device=device_block,
             cuda_l2_cache_size_bytes=(
@@ -554,6 +544,8 @@ def _regenerate_hrd_profile(
                 cache_inputs.get("static_card_num_l2_slices")
             ),
         )
+    except _HARD_TRACE_SOURCE_ERRORS:
+        raise
     except (RuntimeError, ImportError, OSError, ValueError) as exc:
         return {
             "status": "failed_with_typed_reason",
@@ -582,7 +574,13 @@ def _regenerate_hrd_profile(
     }
 
 
-def _regenerate_sector_stream(*, trace_dir: Path, arch: str | None = None) -> dict[str, Any]:
+def _regenerate_sector_stream(
+    *,
+    trace_dir: Path,
+    sources: AdmittedTraceSources,
+    sector_stream: AdmittedSectorStream,
+    arch: str | None = None,
+) -> dict[str, Any]:
     if arch is not None and is_sm120_template_arch(arch):
         return unavailable_result(
             operation="regenerate_v5_trace_sidecars.sector_stream",
@@ -590,12 +588,21 @@ def _regenerate_sector_stream(*, trace_dir: Path, arch: str | None = None) -> di
             producer_invoked=None,
             output_path=None,
         )
-    return _regenerate_via_subprocess(
-        producer_path=_SECTOR_STREAM_PRODUCER,
-        trace_dir=trace_dir,
-        expected_output_subpath="sector_stream/sector_stream.jsonl",
-        producer_label="sector_stream/consume_trace.py",
-    )
+    sector_stream.verify_for(sources)
+    expected_path = trace_dir / "sector_stream" / "sector_stream.jsonl"
+    if sector_stream.jsonl_path != expected_path:
+        raise TraceAdmissionError(
+            "sector_stream_result_missing",
+            "bulk regeneration sector result was not published at the "
+            f"expected destination: observed={sector_stream.jsonl_path} "
+            f"expected={expected_path}",
+        )
+    return {
+        "status": "written",
+        "typed_failure_reason": None,
+        "output_path": str(expected_path),
+        "producer_invoked": "sector_stream/consume_trace.py",
+    }
 
 
 def _action_to_producer(
@@ -621,107 +628,204 @@ def regenerate_manifest_regenerate_rows(
     write a JSON report. Returns the report dict for testability."""
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     rows = manifest.get("rows", []) or []
+    grouped: dict[tuple[str, str, str], list[tuple[str, dict[str, Any]]]] = {}
+    for raw_row in rows:
+        action = str(raw_row.get("suggested_operator_action", ""))
+        if not action.startswith("REGENERATE_"):
+            continue
+        key = (
+            str(raw_row.get("arch", "")),
+            str(raw_row.get("slug", "")),
+            str(raw_row.get("shape_point", "")),
+        )
+        grouped.setdefault(key, []).append((action, raw_row))
+
     per_cell_reports: list[dict[str, Any]] = []
     counts = {
-        "total_regenerate_rows": 0,
+        "total_regenerate_rows": sum(len(group) for group in grouped.values()),
         "written": 0,
         "failed_with_typed_reason": 0,
         "trace_dir_unresolved": 0,
         "dry_run_skipped": 0,
     }
-    for row in rows:
-        action = row.get("suggested_operator_action", "")
-        if not action.startswith("REGENERATE_"):
-            continue
-        counts["total_regenerate_rows"] += 1
-        arch = str(row.get("arch", ""))
-        slug = str(row.get("slug", ""))
-        shape_point = str(row.get("shape_point", ""))
+
+    def append_result(
+        *,
+        cell_key: str,
+        action: str,
+        result: dict[str, Any],
+    ) -> None:
+        record = dict(result)
+        record["cell_key"] = cell_key
+        record["requested_action"] = action
+        per_cell_reports.append(record)
+        status = str(record["status"])
+        counts[status] = counts.get(status, 0) + 1
+
+    for (arch, slug, shape_point), group in grouped.items():
         cell_key = f"{arch}/{slug}/{shape_point}"
         if is_sm120_template_arch(arch):
-            # Historical sm_120 sidecars remain untouched. Do not resolve a
-            # trace or dispatch a producer merely because a manifest asks for
-            # regeneration; represent the blocked lane explicitly.
-            per_cell_reports.append({
-                **unavailable_result(
-                    operation="regenerate_v5_trace_sidecars",
-                    arch=arch,
+            for action, _row in group:
+                append_result(
                     cell_key=cell_key,
-                    producer_invoked=None,
-                    output_path=None,
-                    requested_action=action,
-                ),
-                "cell_key": cell_key,
-                "requested_action": action,
-            })
-            counts["typed_unavailable"] = counts.get(
-                "typed_unavailable", 0,
-            ) + 1
+                    action=action,
+                    result=unavailable_result(
+                        operation="regenerate_v5_trace_sidecars",
+                        arch=arch,
+                        cell_key=cell_key,
+                        producer_invoked=None,
+                        output_path=None,
+                        requested_action=action,
+                    ),
+                )
             continue
-        producer = _action_to_producer(action)
-        if producer is None:
-            per_cell_reports.append({
-                "cell_key": cell_key,
-                "requested_action": action,
-                "producer_invoked": None,
-                "output_path": None,
-                "status": "failed_with_typed_reason",
-                "typed_failure_reason": f"unknown_action:{action}",
-            })
-            counts["failed_with_typed_reason"] += 1
+
+        known_actions = [
+            action for action, _row in group
+            if _action_to_producer(action) is not None
+        ]
+        for action, _row in group:
+            if _action_to_producer(action) is None:
+                append_result(
+                    cell_key=cell_key,
+                    action=action,
+                    result={
+                        "producer_invoked": None,
+                        "output_path": None,
+                        "status": "failed_with_typed_reason",
+                        "typed_failure_reason": f"unknown_action:{action}",
+                    },
+                )
+        if not known_actions:
             continue
+
         trace_dir = _resolve_trace_dir(
             arch=arch, slug=slug, shape_point=shape_point,
         )
         if trace_dir is None:
-            per_cell_reports.append({
-                "cell_key": cell_key,
-                "requested_action": action,
-                "producer_invoked": None,
-                "output_path": None,
-                "status": "failed_with_typed_reason",
-                "typed_failure_reason": (
-                    "trace_dir_unresolved:dynamic_trace.pb_absent_under_"
-                    "simbench_or_portable_lcd_roots"
-                ),
-            })
-            counts["trace_dir_unresolved"] += 1
-            counts["failed_with_typed_reason"] += 1
+            for action in known_actions:
+                append_result(
+                    cell_key=cell_key,
+                    action=action,
+                    result={
+                        "producer_invoked": None,
+                        "output_path": None,
+                        "status": "failed_with_typed_reason",
+                        "typed_failure_reason": (
+                            "trace_dir_unresolved:dynamic_trace.pb_absent_under_"
+                            "simbench_or_portable_lcd_roots"
+                        ),
+                    },
+                )
+                counts["trace_dir_unresolved"] += 1
             continue
         if dry_run:
-            per_cell_reports.append({
-                "cell_key": cell_key,
-                "requested_action": action,
-                "producer_invoked": None,
-                "output_path": None,
-                "status": "dry_run_skipped",
-                "typed_failure_reason": None,
-                "trace_dir": str(trace_dir),
-            })
-            counts["dry_run_skipped"] += 1
+            for action in known_actions:
+                append_result(
+                    cell_key=cell_key,
+                    action=action,
+                    result={
+                        "producer_invoked": None,
+                        "output_path": None,
+                        "status": "dry_run_skipped",
+                        "typed_failure_reason": None,
+                        "trace_dir": str(trace_dir),
+                    },
+                )
             continue
-        # Dispatch by action type. The sharing_locality + hrd_profile
-        # helpers both need arch/slug/shape_point/trace_dir (the HRD
-        # helper resolves real per-cell MPI from the admitted bundle
-        # to avoid fabricating placeholder identity, per Codex Round
-        # 15 review's HRD-fix demand); the sector_stream helper is
-        # still subprocess-only because `consume_trace.py --trace-dir`
-        # is a real producer CLI that does not fabricate cell
-        # identity.
-        if action in (
-            "REGENERATE_SHARING_LOCALITY_FROM_TRACE",
-            "REGENERATE_HRD_PROFILE_FROM_TRACE",
-        ):
-            result = producer(
+
+        if "REGENERATE_HRD_PROFILE_FROM_TRACE" in known_actions:
+            mpi = _resolve_real_mpi_from_admitted_bundle(
                 arch=arch, slug=slug, shape_point=shape_point,
-                trace_dir=trace_dir,
             )
+            if mpi is None:
+                reason = (
+                    "coherent_batch_precondition_failed:"
+                    "hrd_mpi_unresolvable:no_admitted_predictor_bundle_for_cell"
+                )
+                for action in known_actions:
+                    append_result(
+                        cell_key=cell_key,
+                        action=action,
+                        result={
+                            "producer_invoked": None,
+                            "output_path": None,
+                            "status": "failed_with_typed_reason",
+                            "typed_failure_reason": reason,
+                        },
+                    )
+                continue
         else:
-            result = producer(trace_dir=trace_dir)
-        result["cell_key"] = cell_key
-        result["requested_action"] = action
-        per_cell_reports.append(result)
-        counts[result["status"]] = counts.get(result["status"], 0) + 1
+            mpi = _load_manifest_pairing_index_for_cell(
+                arch=arch, slug=slug, shape_point=shape_point,
+            )
+
+        admission = require_trace_admission(trace_dir)
+        if admission.launch_count != 1:
+            raise TraceAdmissionError(
+                "trace_launch_count_unsupported",
+                "coherent bulk regeneration requires exactly one admitted "
+                f"launch for {cell_key}; observed "
+                f"launch_count={admission.launch_count}",
+            )
+        write_sector_jsonl = (
+            "REGENERATE_SECTOR_STREAM_FROM_TRACE" in known_actions
+        )
+        results_by_action: dict[str, dict[str, Any]] = {}
+        with open_admitted_trace_sources(
+            trace_dir, expected_admission=admission
+        ) as sources:
+            sector_stream = consume_admitted_trace_sources(
+                sources=sources,
+                output_root=(trace_dir if write_sector_jsonl else None),
+                write_jsonl=write_sector_jsonl,
+            )
+            if not sector_stream.schema_admits_all:
+                raise TraceAdmissionError(
+                    "sector_stream_schema_invalid",
+                    "bulk regeneration sector-stream schema rejection for "
+                    f"{cell_key}: {sector_stream.schema_first_failure}",
+                )
+            sector_stream.verify_for(sources)
+            for action in known_actions:
+                if action in results_by_action:
+                    continue
+                if action == "REGENERATE_SHARING_LOCALITY_FROM_TRACE":
+                    result = _regenerate_sharing_locality(
+                        arch=arch,
+                        slug=slug,
+                        shape_point=shape_point,
+                        trace_dir=trace_dir,
+                        sources=sources,
+                        mpi=mpi,
+                    )
+                elif action == "REGENERATE_HRD_PROFILE_FROM_TRACE":
+                    result = _regenerate_hrd_profile(
+                        arch=arch,
+                        slug=slug,
+                        shape_point=shape_point,
+                        trace_dir=trace_dir,
+                        sources=sources,
+                        sector_stream=sector_stream,
+                        mpi=mpi,
+                    )
+                else:
+                    result = _regenerate_sector_stream(
+                        trace_dir=trace_dir,
+                        arch=arch,
+                        sources=sources,
+                        sector_stream=sector_stream,
+                    )
+                results_by_action[action] = result
+            sources.verify_unchanged()
+
+        for action in known_actions:
+            append_result(
+                cell_key=cell_key,
+                action=action,
+                result=results_by_action[action],
+            )
+
     report = {
         "schema_version": 1,
         "manifest_path": str(manifest_path),
@@ -729,9 +833,10 @@ def regenerate_manifest_regenerate_rows(
         "counts": counts,
         "per_cell_reports": per_cell_reports,
     }
-    report_path.write_text(
-        json.dumps(report, indent=2, sort_keys=True) + "\n",
-        encoding="utf-8",
+    ensure_directory(report_path.parent)
+    replace_regular_bytes(
+        report_path,
+        (json.dumps(report, indent=2, sort_keys=True) + "\n").encode("utf-8"),
     )
     return report
 

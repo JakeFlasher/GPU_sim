@@ -345,6 +345,12 @@ def _build_case(trace_dir: Path, mutation: str) -> None:
             allocation_id=None,
         )
         instruction.memory_op_access_kind = 99
+    elif mutation == "unspecified_cache_op":
+        instruction.memory_op_class = instruction_pb2.MEMORY_OP_CLASS_GLOBAL
+        instruction.data_width = 4
+        instruction.instruction_cache_op = (
+            instruction_pb2.INSTRUCTION_CACHE_OP_UNSPECIFIED
+        )
     elif mutation == "unknown_cache_op":
         instruction.memory_op_class = instruction_pb2.MEMORY_OP_CLASS_GLOBAL
         instruction.data_width = 4
@@ -360,7 +366,9 @@ def _build_case(trace_dir: Path, mutation: str) -> None:
     elif mutation == "metadata_only_nonmemory":
         instruction.data_width = 4
         instruction.memory_op_access_kind = instruction_pb2.MEMORY_OP_ACCESS_KIND_LOAD
-        instruction.instruction_cache_op = 0
+        instruction.instruction_cache_op = (
+            instruction_pb2.INSTRUCTION_CACHE_OP_LDG_E_CA
+        )
     elif mutation == "allocation_id_missing":
         _make_memory(
             instruction,

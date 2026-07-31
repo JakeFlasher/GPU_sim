@@ -1,7 +1,7 @@
 """NVBit-side adapter for the offline two-run join.
 
-Provides two surfaces consumed by `merge_evidence.py join-cupti-nvbit`
-and by `run_suite.py --mode trace`:
+Provides three surfaces consumed by `merge_evidence.py join-cupti-nvbit`,
+`run_suite.py --mode trace`, and diagnostic callers:
 
 1. `compute_kernel_signature_sha256(inputs)` — production NVBit-side
    reference implementation of `workloads/simbench_bw/schemas/
@@ -12,19 +12,24 @@ and by `run_suite.py --mode trace`:
    iteration, JSON canonical serialization with `ensure_ascii=False`
    and `separators=(",", ":")`, SHA-256 hex-lowercase 64 chars.
 
-2. `emit_nvbit_trace_summary(...)` — opt-in helper invoked by
-   `run_suite.py` after a successful `--mode trace` capture. Reads the
-   `dynamic_trace.pb` produced by the NVBit tracer, walks the
-   `traces/threadblocks/**/*.pb` subtree to sum instruction counts
-   across warps × threadblocks, computes provenance hashes, and writes
-   `nvbit_trace_summary_<repeat>_<launch>.json` next to the source
-   `.pb`. Requires the `google.protobuf` Python runtime and the tracked
-   `_pb_generated/*_pb2.py` authorities. A missing runtime is a host
-   prerequisite failure; a missing or unusable tracked binding is repository
-   corruption. Both conditions are hard failures and are never repaired by
-   generating files in the checkout.
+2. `emit_admitted_nvbit_trace_summary(...)` — evidence-producing helper
+   invoked by `run_suite.py` after forward admission. It consumes only immutable
+   launch metadata, instruction counts, root identity, payload-manifest identity,
+   and complete admission seal retained by `TraceAdmission`; it never reopens the
+   trace root or threadblock payloads.
 
-The two surfaces are intentionally split so the conformance test can
+3. `emit_nvbit_trace_summary(...)` — compatibility parser for diagnostic callers
+   that do not hold an admitted snapshot. It reads `dynamic_trace.pb` and walks
+   `traces/threadblocks/**/*.pb`; it must not be substituted at an admission-to-
+   publication boundary.
+
+Both parser surfaces require the `google.protobuf` Python runtime and tracked
+`_pb_generated/*_pb2.py` authorities during admission or direct parsing. A
+missing runtime is a host prerequisite failure; a missing or unusable tracked
+binding is repository corruption. Neither condition is repaired by generating
+files in the checkout.
+
+The surfaces are intentionally split so the conformance test can
 exercise the signature-spec implementation without depending on
 protobuf being installed.
 """
@@ -40,7 +45,20 @@ from typing import Any
 
 SUITE_ROOT = Path(__file__).resolve().parent
 REPO_ROOT = SUITE_ROOT.parent.parent
-PB_GENERATED_DIR = SUITE_ROOT / "_pb_generated"
+if str(REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(REPO_ROOT))
+
+from tools.local_labels.immutable_artifact import (  # noqa: E402
+    ensure_directory,
+    replace_regular_bytes,
+    write_regular_bytes_at,
+)
+from tools.nvbit_tracer.trace_admission import TraceAdmission  # noqa: E402
+from tools.nvbit_tracer.proto_binding_loader import (  # noqa: E402
+    ProtoBindingIntegrityError,
+    ProtoBindingRuntimePrerequisiteError,
+    load_dynamic_trace_bindings,
+)
 
 
 def _repo_relative_or_absolute(path: Path) -> str:
@@ -164,6 +182,16 @@ def compute_kernel_signature_sha256(inputs: dict[str, Any]) -> str:
     return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
 
 
+def _require_sha256(value: object, *, label: str) -> str:
+    if (
+        type(value) is not str
+        or len(value) != 64
+        or any(character not in "0123456789abcdef" for character in value)
+    ):
+        raise ValueError(f"{label} must be lowercase 64-hex")
+    return value
+
+
 def sha256_of_file(path: Path) -> str:
     """Compute SHA-256 of a file's contents, hex-lowercase, 64 chars.
     Streamed in 1 MB chunks for memory-friendly hashing of large
@@ -192,90 +220,15 @@ class NvbitProtobufRuntimePrerequisiteMissing(NvbitProtobufBindingsMissing):
     """The project-pinned Python protobuf runtime is absent or incompatible."""
 
 
-_TRACKED_BINDING_NAMES: tuple[str, ...] = (
-    "address_pb2.py",
-    "cuda_stream_pb2.py",
-    "dim3d_pb2.py",
-    "gpu_device_pb2.py",
-    "instruction_pb2.py",
-    "kernel_pb2.py",
-    "threadblock_pb2.py",
-    "trace_pb2.py",
-    "warp_pb2.py",
-)
-
-
-def _binding_restore_guidance(paths: list[Path]) -> str:
-    relative = " ".join(
-        str(path.relative_to(REPO_ROOT)) for path in sorted(paths)
-    )
-    return (
-        "tracked protobuf authority is missing or unusable; restore its "
-        "byte-exact committed content with `git restore --source=HEAD "
-        f"--worktree -- {relative}`; do not regenerate bindings in the "
-        "canonical checkout"
-    )
-
-
-def _import_pb_modules():
-    """Import tracked dynamic-trace authorities and their pinned runtime.
-
-    Dependency failures are deliberately split so callers can report
-    repository corruption separately from a missing host prerequisite.
-    """
+def _import_pb_modules() -> tuple[Any, Any]:
+    """Return centrally authenticated trace and threadblock authorities."""
     try:
-        import google.protobuf  # noqa: F401  # pyright: ignore[reportMissingModuleSource, reportUnusedImport]
-    except ImportError as exc:
-        raise NvbitProtobufRuntimePrerequisiteMissing(
-            "protobuf runtime prerequisite is missing; install the exact "
-            "version pinned in requirements.txt before consuming the "
-            "tracked dynamic-trace bindings"
-        ) from exc
-    required = [PB_GENERATED_DIR / name for name in _TRACKED_BINDING_NAMES]
-    missing = [
-        path for path in required if not path.is_file() or path.is_symlink()
-    ]
-    if missing:
-        raise NvbitTrackedProtobufCorruption(_binding_restore_guidance(missing))
-    if str(PB_GENERATED_DIR) not in sys.path:
-        sys.path.insert(0, str(PB_GENERATED_DIR))
-    try:
-        import trace_pb2  # pyright: ignore[reportMissingImports]
-        import threadblock_pb2  # pyright: ignore[reportMissingImports]
-    except Exception as exc:
-        if exc.__class__.__module__.startswith("google.protobuf"):
-            raise NvbitProtobufRuntimePrerequisiteMissing(
-                "protobuf runtime prerequisite is incompatible with the "
-                f"tracked bindings: {type(exc).__name__}: {exc}"
-            ) from exc
-        raise NvbitTrackedProtobufCorruption(
-            f"{_binding_restore_guidance(required)}: "
-            f"{type(exc).__name__}: {exc}"
-        ) from exc
-    for module, path in (
-        (trace_pb2, PB_GENERATED_DIR / "trace_pb2.py"),
-        (threadblock_pb2, PB_GENERATED_DIR / "threadblock_pb2.py"),
-    ):
-        module_file = getattr(module, "__file__", None)
-        if module_file is None or Path(module_file).resolve() != path.resolve():
-            raise NvbitTrackedProtobufCorruption(
-                f"tracked protobuf authority resolved outside its owner: "
-                f"{module.__name__} -> {getattr(module, '__file__', None)}; "
-                f"{_binding_restore_guidance([path])}"
-            )
-    for filename in _TRACKED_BINDING_NAMES:
-        module = sys.modules.get(filename.removesuffix(".py"))
-        if module is None:
-            continue
-        expected = (PB_GENERATED_DIR / filename).resolve()
-        module_file = getattr(module, "__file__", None)
-        if module_file is None or Path(module_file).resolve() != expected:
-            raise NvbitTrackedProtobufCorruption(
-                f"tracked protobuf authority {module.__name__} resolved "
-                f"outside its owner: {getattr(module, '__file__', None)}; "
-                f"{_binding_restore_guidance([PB_GENERATED_DIR / filename])}"
-            )
-    return trace_pb2, threadblock_pb2
+        bindings = load_dynamic_trace_bindings()
+    except ProtoBindingRuntimePrerequisiteError as exc:
+        raise NvbitProtobufRuntimePrerequisiteMissing(str(exc)) from exc
+    except ProtoBindingIntegrityError as exc:
+        raise NvbitTrackedProtobufCorruption(str(exc)) from exc
+    return bindings.trace_pb2, bindings.threadblock_pb2
 
 
 def _enumerate_kernels(trace_pb2_mod, trace_pb_path: Path) -> list[Any]:
@@ -386,6 +339,159 @@ def _sum_inst_count_for_kernel(
     return total
 
 
+def _write_summary_record(
+    *,
+    kernel_metadata: dict[str, Any],
+    inst_count: int,
+    trace_pb_path: str,
+    trace_pb_hash: str,
+    slug: str,
+    shape_point: str,
+    repeat_index: int,
+    launch_index: int,
+    binary_sha256: str,
+    tracer_build_sha256: str,
+    output_path: Path,
+    output_descriptor: int | None = None,
+    threadblock_payload_size_bytes: int | None = None,
+    threadblock_payload_manifest_sha256: str | None = None,
+    trace_admission_sha256: str | None = None,
+) -> dict[str, Any]:
+    admission_fields = (
+        threadblock_payload_size_bytes,
+        threadblock_payload_manifest_sha256,
+        trace_admission_sha256,
+    )
+    if all(value is None for value in admission_fields):
+        schema_version = 1
+    elif any(value is None for value in admission_fields):
+        raise ValueError(
+            "admitted summary identity fields must be supplied as one complete set"
+        )
+    else:
+        if (
+            type(threadblock_payload_size_bytes) is not int
+            or threadblock_payload_size_bytes < 0
+        ):
+            raise ValueError(
+                "threadblock_payload_size_bytes must be a nonnegative integer"
+            )
+        schema_version = 2
+
+    record: dict[str, Any] = {
+        "schema_version": schema_version,
+        "slug": slug,
+        "shape_point": shape_point,
+        "repeat_index": repeat_index,
+        "launch_index": launch_index,
+        "kernel_name": kernel_metadata["kernel_name"],
+        "kernel_signature_sha256": compute_kernel_signature_sha256(
+            kernel_metadata
+        ),
+        "inst_count": inst_count,
+        "binary_sha256": _require_sha256(
+            binary_sha256, label="binary_sha256"
+        ),
+        "nvbit_trace_pb_path": trace_pb_path,
+        "nvbit_trace_pb_sha256": _require_sha256(
+            trace_pb_hash, label="trace_pb_hash"
+        ),
+        "nvbit_tracer_build_hash": _require_sha256(
+            tracer_build_sha256, label="tracer_build_sha256"
+        ),
+    }
+    if schema_version == 2:
+        record.update(
+            {
+                "nvbit_threadblock_payload_size_bytes": (
+                    threadblock_payload_size_bytes
+                ),
+                "nvbit_threadblock_payload_manifest_sha256": _require_sha256(
+                    threadblock_payload_manifest_sha256,
+                    label="threadblock_payload_manifest_sha256",
+                ),
+                "trace_admission_sha256": _require_sha256(
+                    trace_admission_sha256,
+                    label="trace_admission_sha256",
+                ),
+            }
+        )
+    payload = (
+        json.dumps(record, indent=2, sort_keys=False) + "\n"
+    ).encode("utf-8")
+    if output_descriptor is None:
+        ensure_directory(output_path.parent)
+        replace_regular_bytes(output_path, payload)
+    else:
+        if output_path.parent != Path("."):
+            raise ValueError(
+                "descriptor-bound summary output_path must be one relative leaf"
+            )
+        write_regular_bytes_at(
+            output_descriptor,
+            output_path.name,
+            payload,
+        )
+    return record
+
+
+def emit_admitted_nvbit_trace_summary(
+    *,
+    admission: TraceAdmission,
+    slug: str,
+    shape_point: str,
+    repeat_index: int,
+    launch_index: int,
+    binary_sha256: str,
+    tracer_build_sha256: str,
+    output_path: Path,
+    output_descriptor: int | None = None,
+) -> dict[str, Any]:
+    """Emit one summary exclusively from immutable admission-derived inputs.
+
+    The dynamic root and threadblock payload paths are never reopened. Version 2
+    binds the instruction count to the admitted payload manifest and complete
+    admission seal, alongside root identity and immutable launch metadata.
+    """
+    if not isinstance(admission, TraceAdmission):
+        raise TypeError("admission must be a TraceAdmission value")
+    if admission.launch_count != len(admission.launches):
+        raise RuntimeError(
+            "trace admission launch count disagrees with retained launch inputs"
+        )
+    if launch_index < 0 or launch_index >= admission.launch_count:
+        raise IndexError(
+            f"launch_index {launch_index} out of range; admitted snapshot carries "
+            f"{admission.launch_count} launch record(s)"
+        )
+    launch = admission.launches[launch_index]
+    if launch.launch_index != launch_index:
+        raise RuntimeError(
+            "trace admission launch ordering is internally inconsistent"
+        )
+    return _write_summary_record(
+        kernel_metadata=launch.kernel_signature_inputs(),
+        inst_count=launch.inst_count,
+        trace_pb_path=admission.dynamic_trace_path,
+        trace_pb_hash=admission.dynamic_trace_sha256,
+        slug=slug,
+        shape_point=shape_point,
+        repeat_index=repeat_index,
+        launch_index=launch_index,
+        binary_sha256=binary_sha256,
+        tracer_build_sha256=tracer_build_sha256,
+        output_path=output_path,
+        output_descriptor=output_descriptor,
+        threadblock_payload_size_bytes=(
+            admission.threadblock_payload_size_bytes
+        ),
+        threadblock_payload_manifest_sha256=(
+            admission.threadblock_payload_manifest_sha256
+        ),
+        trace_admission_sha256=admission.trace_admission_sha256,
+    )
+
+
 def emit_nvbit_trace_summary(
     *,
     traces_dir: Path,
@@ -423,30 +529,19 @@ def emit_nvbit_trace_summary(
     inst_count = _sum_inst_count_for_kernel(
         threadblock_pb2_mod, threadblocks_root, kernel_id,
     )
-    kernel_signature = compute_kernel_signature_sha256(kernel_metadata)
-    binary_hash = sha256_of_file(executable_path)
-    trace_pb_hash = sha256_of_file(trace_pb_path)
-    tracer_build_hash = sha256_of_file(tracer_so_path)
-
-    record: dict[str, Any] = {
-        "schema_version": 1,
-        "slug": slug,
-        "shape_point": shape_point,
-        "repeat_index": repeat_index,
-        "launch_index": launch_index,
-        "kernel_name": kernel_metadata["kernel_name"],
-        "kernel_signature_sha256": kernel_signature,
-        "inst_count": inst_count,
-        "binary_sha256": binary_hash,
-        "nvbit_trace_pb_path": _repo_relative_or_absolute(trace_pb_path),
-        "nvbit_trace_pb_sha256": trace_pb_hash,
-        "nvbit_tracer_build_hash": tracer_build_hash,
-    }
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    with open(output_path, "w") as f:
-        json.dump(record, f, indent=2, sort_keys=False)
-        f.write("\n")
-    return record
+    return _write_summary_record(
+        kernel_metadata=kernel_metadata,
+        inst_count=inst_count,
+        trace_pb_path=_repo_relative_or_absolute(trace_pb_path),
+        trace_pb_hash=sha256_of_file(trace_pb_path),
+        slug=slug,
+        shape_point=shape_point,
+        repeat_index=repeat_index,
+        launch_index=launch_index,
+        binary_sha256=sha256_of_file(executable_path),
+        tracer_build_sha256=sha256_of_file(tracer_so_path),
+        output_path=output_path,
+    )
 
 
 __all__ = [
@@ -456,6 +551,7 @@ __all__ = [
     "NvbitTrackedProtobufCorruption",
     "canonical_serialize",
     "compute_kernel_signature_sha256",
+    "emit_admitted_nvbit_trace_summary",
     "emit_nvbit_trace_summary",
     "enumerate_launches",
     "sha256_of_file",

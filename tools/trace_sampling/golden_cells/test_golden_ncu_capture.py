@@ -4,12 +4,12 @@ from __future__ import annotations
 from pathlib import Path
 import socket
 import subprocess
+from types import SimpleNamespace
 
 import pytest
 
 from tools.local_labels import immutable_artifact as immutable
 from tools.local_labels import ncu_action_executor
-from tools.nvbit_tracer import trace_admission
 from tools.trace_sampling.golden_cells import golden_capture_lock
 from tools.trace_sampling.golden_cells import golden_ncu_receipt
 from tools.trace_sampling.golden_cells import retained_nvbit_launch
@@ -265,7 +265,13 @@ def test_collection_binds_identity_controls_and_published_artifacts(
     monkeypatch.setattr(
         golden.trace_admission,
         "require_trace_admission",
-        lambda _trace: trace_admission.TraceAdmission(1, 1, 1, 1, 1),
+        lambda _trace: SimpleNamespace(
+            launch_count=1,
+            threadblock_count=1,
+            instruction_count=1,
+            expected_record_count=1,
+            admitted_record_count=1,
+        ),
     )
     calls: list[tuple[object, ...]] = []
 

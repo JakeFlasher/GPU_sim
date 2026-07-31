@@ -17,8 +17,6 @@ import pytest
 
 _HERE = Path(__file__).resolve().parent
 sys.path.insert(0, str(_HERE))
-_REPO_ROOT = _HERE.parents[1]
-sys.path.insert(0, str(_REPO_ROOT / "workloads" / "simbench_bw" / "_pb_generated"))
 
 import import_trace_contract as itc  # noqa: E402
 

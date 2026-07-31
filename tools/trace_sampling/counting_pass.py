@@ -24,12 +24,15 @@ from pathlib import Path
 from typing import Any
 
 _REPO = Path(__file__).resolve().parents[2]
-_PB_GEN = _REPO / "workloads" / "simbench_bw" / "_pb_generated"
 _NVBIT = _REPO / "tools" / "nvbit_tracer"
 _LOCAL_LABELS = _REPO / "tools" / "local_labels"
-for _p in (str(_PB_GEN), str(_NVBIT), str(_LOCAL_LABELS)):
+for _p in (str(_REPO), str(_NVBIT), str(_LOCAL_LABELS)):
     if _p not in sys.path:
         sys.path.insert(0, _p)
+
+from tools.nvbit_tracer.proto_binding_loader import (  # noqa: E402
+    load_dynamic_trace_bindings,
+)
 
 # MemoryOpClass wire values (instruction.proto).
 GLOBAL, SHARED, LOCAL, ATOMIC, ASYNC_COPY = 1, 2, 3, 6, 8
@@ -208,8 +211,9 @@ def _lowest_kernel(trace) -> Any:
 
 def analyze_trace_dir(trace_dir: Path, cell_id: str, *, cooperative: bool = False) -> CellStats:
     """Decode a trace dir into CellStats. Fail-closed on missing grid_dim."""
-    import threadblock_pb2  # type: ignore
-    import trace_pb2  # type: ignore
+    bindings = load_dynamic_trace_bindings()
+    threadblock_pb2 = bindings.threadblock_pb2
+    trace_pb2 = bindings.trace_pb2
     import import_trace_contract as itc  # type: ignore
     from replay_count_producer import first_launch_dir  # type: ignore
 
@@ -306,7 +310,7 @@ def cell_stats_from_capture(trace_dir: Path, cell_id: str, *,
     grid/block from `dynamic_trace.pb` + per-block stats + the atomic sketch from
     `extra_info/trace_sampling_capture.json`. The gate consumes the same CellStats
     whether it comes from a full trace or the cheap counting pass."""
-    import trace_pb2  # type: ignore
+    trace_pb2 = load_dynamic_trace_bindings().trace_pb2
 
     trace = trace_pb2.Trace()
     trace.ParseFromString((trace_dir / "dynamic_trace.pb").read_bytes())
