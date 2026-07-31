@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use prost::Message;
 use serde_json::{Value, json};
-use sim_runner::{RunError, run_manifest};
+use sim_run::{RunError, run_manifest};
 use sim_sm::admit_launch_evidence;
 use sim_trace::{Sha256Digest, TraceDirSnapshot, canonical_json};
 use tempfile::TempDir;

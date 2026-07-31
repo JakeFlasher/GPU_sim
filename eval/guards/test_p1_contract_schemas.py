@@ -35,10 +35,10 @@ PROJECTION_PATH = ROOT / "eval/contracts/metric_registry.7plus1.v1.json"
 CANONICAL_REGISTRY_PATH = ROOT / "tools/local_labels/metric_registry.json"
 CURRENT_V1_RESULT_PATH = (
     ROOT
-    / "sim/runner/tests/fixtures/addr_carry_canary_bundle/result.golden.json"
+    / "sim/run/tests/fixtures/addr_carry_canary_bundle/result.golden.json"
 )
-MANIFEST_V1_SCHEMA_PATH = ROOT / "sim/runner/schema/sim_run_manifest.v1.schema.json"
-RESULT_V1_SCHEMA_PATH = ROOT / "sim/runner/schema/sim_result.v1.schema.json"
+MANIFEST_V1_SCHEMA_PATH = ROOT / "sim/run/schema/sim_run_manifest.v1.schema.json"
+RESULT_V1_SCHEMA_PATH = ROOT / "sim/run/schema/sim_result.v1.schema.json"
 
 LOCAL_LABELS = ROOT / "tools/local_labels"
 if str(LOCAL_LABELS) not in sys.path:

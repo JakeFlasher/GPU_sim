@@ -243,7 +243,7 @@ name = "sim-cli"
 version = "0.0.1"
 dependencies = [
  "serde_json",
- "sim-runner",
+ "sim-run",
  "sim-trace",
  "tempfile",
 ]
@@ -278,7 +278,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "sim-runner"
+name = "sim-run"
 version = "0.0.1"
 dependencies = [
  "prost",

@@ -10,7 +10,7 @@ name = "sim-cli"
 path = "src/main.rs"
 
 [dependencies]
-sim-runner = { path = "../runner" }
+sim-run = { path = "../run" }
 
 [dev-dependencies]
 serde_json = { workspace = true }

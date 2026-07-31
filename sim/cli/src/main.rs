@@ -1,7 +1,7 @@
 use std::io::Write;
 use std::process::ExitCode;
 
-use sim_runner::{RunError, run_manifest};
+use sim_run::{RunError, run_manifest};
 
 fn write_error(error: &RunError) -> ExitCode {
     let (document, exit_code) = match error.canonical_json() {

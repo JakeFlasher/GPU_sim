@@ -83,7 +83,7 @@ Undocumented replacement, associativity, hash, and latency choices remain
 explicit architecture hypotheses or typed gaps. NCU labels are not used to
 fill them per scored cell.
 
-`sim-runner` is the production composition boundary. A strict
+`sim-run` is the production composition boundary. A strict
 `sim_run_manifest.v1` selects only a scope, architecture/SKU, sealed v2 launch
 evidence, expected card digests, and a typed memory mode. It admits every launch
 before constructing one shared card-derived configuration, rejects sampled
@@ -168,7 +168,7 @@ advisory, not authority, because Git cannot reproduce it for ordinary files.
 
 The core now has an offline production runner and thin CLI. A strict versioned
 run manifest binds admitted launch evidence and architecture-local cards,
-`sim-runner` replays only through `replay_kernel`, exact full-coverage launch
+`sim-run` replays only through `replay_kernel`, exact full-coverage launch
 sets use checked aggregation, and all descriptors are emitted through
 `sim-emit` as sealed canonical JSON. Sampled coverage is rejected from this
 exact aggregation path, and the CLI does not accept numeric configuration or

@@ -7,9 +7,9 @@ import jsonschema
 import pytest
 
 
-RUNNER_ROOT = Path(__file__).resolve().parents[1]
-SCHEMA_ROOT = RUNNER_ROOT / "schema"
-FIXTURE_ROOT = RUNNER_ROOT / "tests" / "fixtures" / "addr_carry_canary_bundle"
+RUN_ROOT = Path(__file__).resolve().parents[1]
+SCHEMA_ROOT = RUN_ROOT / "schema"
+FIXTURE_ROOT = RUN_ROOT / "tests" / "fixtures" / "addr_carry_canary_bundle"
 
 
 def _load(path: Path) -> dict:
@@ -60,7 +60,7 @@ def _resolve_path(value: object, path: tuple[object, ...]) -> object:
     return current
 
 
-def test_runner_schemas_are_valid_and_accept_canonical_fixtures() -> None:
+def test_run_schemas_are_valid_and_accept_canonical_fixtures() -> None:
     manifest_schema = _load(SCHEMA_ROOT / "sim_run_manifest.v1.schema.json")
     result_schema = _load(SCHEMA_ROOT / "sim_result.v1.schema.json")
     error_schema = _load(SCHEMA_ROOT / "sim_error.v1.schema.json")

@@ -77,9 +77,9 @@ _PROJECTED_ROW_FIELDS = (
 
 _SCHEMA_PATHS = {
     "launch_key": ROOT / "eval/schemas/launch_key.v1.schema.json",
-    "manifest": ROOT / "sim/runner/schema/sim_run_manifest.v2.schema.json",
-    "result": ROOT / "sim/runner/schema/sim_result.v2.schema.json",
-    "sim_error": ROOT / "sim/runner/schema/sim_error.v2.schema.json",
+    "manifest": ROOT / "sim/run/schema/sim_run_manifest.v2.schema.json",
+    "result": ROOT / "sim/run/schema/sim_result.v2.schema.json",
+    "sim_error": ROOT / "sim/run/schema/sim_error.v2.schema.json",
     "matched_labels": ROOT / "eval/schemas/matched_labels.v1.schema.json",
     "projection": ROOT / "eval/schemas/metric_registry_projection.v1.schema.json",
     "report": ROOT / "eval/schemas/accuracy_report.v1.schema.json",

@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use serde_json::{Value, json};
-use sim_runner::RunError;
+use sim_run::RunError;
 use sim_trace::{Sha256Digest, canonical_json};
 use tempfile::TempDir;
 
@@ -17,7 +17,7 @@ fn fixture_root() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap()
-        .join("runner/tests/fixtures/addr_carry_canary_bundle")
+        .join("run/tests/fixtures/addr_carry_canary_bundle")
 }
 
 fn fixture_manifest() -> PathBuf {
@@ -78,7 +78,7 @@ fn cli_emits_only_the_canonical_result_on_success() {
     assert!(output.stderr.is_empty());
     let expected = format!(
         "{}\n",
-        include_str!("../../runner/tests/fixtures/addr_carry_canary_bundle/result.golden.json")
+        include_str!("../../run/tests/fixtures/addr_carry_canary_bundle/result.golden.json")
     );
     assert_eq!(output.stdout, expected.as_bytes());
     let parsed: Value = serde_json::from_slice(&output.stdout).unwrap();
@@ -154,7 +154,7 @@ fn noncanonical_manifest_path_spellings_are_rejected_literally() {
     let aliases = [
         format!("{canonical}/."),
         format!("{canonical}//"),
-        canonical.replacen("/runner/", "/runner/./", 1),
+        canonical.replacen("/run/", "/run/./", 1),
     ];
     for alias in aliases {
         let output = Command::new(binary()).arg(alias).output().unwrap();

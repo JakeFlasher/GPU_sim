@@ -62,7 +62,7 @@ Promotion is forbidden until architecture-local authority for the exact SKU admi
 
 ### Target-free findings
 
-[Full launch-set aggregation](../sim/sm/src/replay/aggregation.rs) sums checked counters while retaining one timing-diagnostic record per launch in canonical roster order; it exposes no scalar temporal reducer. The real [`sim_runner::run_manifest`](../sim/runner/src/lib.rs) consumer serializes those diagnostics under each launch, marks aggregate timing composition `required_unimplemented_pending_aggregation_semantics_study`, and calls [`sim_emit::emit_all`](../sim/emit/src/lib.rs). The aggregate `exec_cycles_gpc_max` row remains exactly `RequiredUnimplemented(AggregationSemanticsStudy)` and has no numeric binding value.
+[Full launch-set aggregation](../sim/sm/src/replay/aggregation.rs) sums checked counters while retaining one timing-diagnostic record per launch in canonical roster order; it exposes no scalar temporal reducer. The real [`sim_run::run_manifest`](../sim/run/src/lib.rs) consumer serializes those diagnostics under each launch, marks aggregate timing composition `required_unimplemented_pending_aggregation_semantics_study`, and calls [`sim_emit::emit_all`](../sim/emit/src/lib.rs). The aggregate `exec_cycles_gpc_max` row remains exactly `RequiredUnimplemented(AggregationSemanticsStudy)` and has no numeric binding value.
 
 ### Hypotheses only
 
