@@ -239,18 +239,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sim-emit"
-version = "0.0.1"
-dependencies = [
- "serde",
- "serde_json",
- "sim-arch",
- "sim-mem",
- "sim-sm",
- "thiserror",
-]
-
-[[package]]
 name = "sim-engine"
 version = "0.0.1"
 dependencies = [
@@ -275,7 +263,6 @@ dependencies = [
  "serde",
  "serde_json",
  "sim-arch",
- "sim-emit",
  "sim-mem",
  "sim-sm",
  "sim-trace",
@@ -291,7 +278,6 @@ dependencies = [
  "serde",
  "serde_json",
  "sim-arch",
- "sim-emit",
  "sim-engine",
  "sim-mem",
  "sim-trace",

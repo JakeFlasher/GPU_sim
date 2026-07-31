@@ -4,7 +4,6 @@ use std::path::{Path, PathBuf};
 
 use prost::Message;
 use serde_json::{Value, json};
-use sim_emit::{EmitOutcome, RequiredUnimplementedBlocker, emit_all};
 use sim_sm::{
     BinaryDigestGap, FullLaunchSetDeclaration, IssueModelParams, KernelReplayOutcome,
     ManifestError, ReplayError, ReplayMemMode, admit_launch_evidence, aggregate_full_launch_set,
@@ -471,23 +470,6 @@ fn admitted_evidence_mints_the_public_replay_result() {
     assert_eq!(
         aggregate.launch_timing_diagnostics()[0].terminal_modeled_event_time(),
         terminal_modeled_event_time
-    );
-
-    let predictions = emit_all(&aggregate).expect("emit admitted aggregate");
-    assert_eq!(
-        predictions.launch_timing_diagnostics(),
-        aggregate.launch_timing_diagnostics()
-    );
-    let cycles = predictions
-        .metrics()
-        .iter()
-        .find(|prediction| prediction.key() == "exec_cycles_gpc_max")
-        .expect("mandatory binding-cycle row");
-    assert_eq!(
-        cycles.outcome(),
-        &EmitOutcome::RequiredUnimplemented {
-            blocking: RequiredUnimplementedBlocker::AggregationSemanticsStudy,
-        }
     );
 }
 

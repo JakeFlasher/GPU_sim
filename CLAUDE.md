@@ -11,7 +11,7 @@ The live dataflow is:
 
 `NVBit tracer_tool` → `traces_enhanced` protobuf → committed Prost bindings in
 `sim/trace` → `sim-sm` replay → `sim-mem` → `sim-engine` → NCU-shaped outputs
-from `sim-emit`.
+from `sim_run::emit` inside `sim-run`.
 
 M-SIM-1 binds accuracy to `gpc__cycles_elapsed.max`, the sole
 publication-binding headline: MAPE ≤10% meets the engineering target, >10% and
@@ -21,7 +21,7 @@ study validates the single-launch mapping and selects a multi-launch composition
 rule from admitted silicon evidence. `KernelReplayResult`'s
 `diagnostic_last_issue_cycles` and `terminal_modeled_event_time` fields are
 separate directional diagnostics, not admissible primary predictions. The seven current
-`sim-emit` descriptors are secondary, implemented, reported, and ungated.
+`sim_run::emit` descriptors are secondary, implemented, reported, and ungated.
 
 ## Binding rules
 

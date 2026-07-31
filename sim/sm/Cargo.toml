@@ -15,7 +15,6 @@ sim-trace = { path = "../trace" }
 thiserror = { workspace = true }
 
 [dev-dependencies]
-sim-emit = { path = "../emit" }
 prost = { workspace = true }
 tempfile = { workspace = true }
 

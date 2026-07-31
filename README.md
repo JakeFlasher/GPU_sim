@@ -40,10 +40,11 @@ Markdown rows.
 
 The repository has working Rust libraries for deterministic event scheduling,
 NVBit trace decoding, SM replay, L1/L2/DRAM modeling, architecture-card
-loading, checked launch-set aggregation, and NCU-shaped emission. `sim-runner`
-and `sim-cli` now provide a strict manifest-only production composition path and
-canonical sealed JSON output. The current release Rust workspace gate reports
-543 passing tests and three explicitly ignored machine-local evidence tests.
+loading, checked launch-set aggregation, and NCU-shaped emission. `sim-run`
+provides the strict manifest-only production composition path, the
+`sim_run::emit` boundary, and canonical sealed JSON output. The current offline
+Rust workspace gate passes with three explicitly ignored machine-local evidence
+tests.
 
 This is an offline simulator application boundary, not publication closure:
 
@@ -67,7 +68,7 @@ NVBit tracer_tool
   -> sim-sm replay and issue model
   -> sim-mem L1 / shared L2 / DRAM model
   -> sim-engine deterministic event queue
-  -> sim-emit NCU-shaped predictions
+  -> sim-run (`sim_run::emit` predictions and sealed output)
 ```
 
 NCU capture is a separate label path. Prediction and label artifacts meet only
@@ -91,8 +92,8 @@ The checked-in offline canary exercises the manifest-only CLI without GPU or
 hardware authority:
 
 ```bash
-cargo run --manifest-path sim/Cargo.toml -p sim-cli -- \
-  sim/runner/tests/fixtures/addr_carry_canary_bundle/run_manifest.json
+cargo run --manifest-path sim/Cargo.toml -p sim-run -- \
+  sim/run/tests/fixtures/addr_carry_canary_bundle/run_manifest.json
 ```
 
 The command writes one canonical `sim_result.v1` document to stdout. Typed input

@@ -37,7 +37,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 REGISTRY_RELATIVE = "eval/guards/evaluator_import_surface_registry.v1.json"
 SCHEMA_RELATIVE = "eval/guards/evaluator_import_surface_registry.v1.schema.json"
-REGISTRY_SHA256 = "9ecd202f8773d6adf921715867e43eb0d9afebc0d30309eec132c711be100384"
+REGISTRY_SHA256 = "3983327704b921933fa385e12259986e0fa5692cf2bc598351fe38462cad5b3c"
 ENTRYPOINT = "eval/production_evaluator/__init__.py"
 ENTRYPOINT_MODULE = "eval.production_evaluator"
 SCHEMA_ID = (
@@ -73,7 +73,7 @@ EXPECTED_PROHIBITED_EVALUATORS = {
     "workloads/simbench_bw/timing_cycle_predictor.py",
 }
 EXPECTED_NON_EVALUATORS = {
-    "sim/emit/src/lib.rs",
+    "sim/run/src/emit.rs",
     "sim/mem/src/l2.rs",
     "sim/sm/src/issue.rs",
     "sim/sm/src/replay.rs",

@@ -89,7 +89,7 @@ evidence, expected card digests, and a typed memory mode. It admits every launch
 before constructing one shared card-derived configuration, rejects sampled
 launches from exact aggregation, calls only the admitted `replay_kernel` path,
 and passes the complete roster through `aggregate_full_launch_set` and
-`sim-emit`. Configuration values cannot be supplied as manifest scalars or
+`sim_run::emit`. Configuration values cannot be supplied as manifest scalars or
 environment overrides. The `sim-run` binary accepts exactly one manifest path and
 emits a sealed canonical result or typed canonical error.
 
@@ -100,7 +100,7 @@ explicitly confer no hardware or scientific authority.
 
 ## Output contracts
 
-`sim-emit` converts raw replay counters into typed NCU-shaped predictions. Raw
+`sim_run::emit` converts raw replay counters into typed NCU-shaped predictions. Raw
 counts remain in the simulator; rate numerators and denominators are composed
 at the output boundary. A real zero, an NCU-style not-applicable rate, and a
 metric unavailable from the selected replay mode are distinct states.
@@ -170,7 +170,7 @@ The core now has an offline production runner and thin CLI. A strict versioned
 run manifest binds admitted launch evidence and architecture-local cards,
 `sim-run` replays only through `replay_kernel`, exact full-coverage launch
 sets use checked aggregation, and all descriptors are emitted through
-`sim-emit` as sealed canonical JSON. Sampled coverage is rejected from this
+`sim_run::emit` as sealed canonical JSON. Sampled coverage is rejected from this
 exact aggregation path, and the CLI does not accept numeric configuration or
 label inputs.
 
@@ -197,5 +197,5 @@ not claims made by the current implementation.
 | Workload provenance | active measurement-manifest v2 schema | Additively extensible active contract |
 | Silicon labels | three-part v5 label authority | Additively extensible, lockstep tested |
 | Historical CUPTI duration | frozen v1 schema and hash manifest | Byte-frozen; explicit version dispatch only |
-| Simulator predictions | `sim-emit` descriptor set | Seven secondary descriptors implemented; primary cycles descriptor present with mandatory `required_unimplemented` outcome |
+| Simulator predictions | `sim_run::emit` descriptor set | Seven secondary descriptors implemented; primary cycles descriptor present with mandatory `required_unimplemented` outcome |
 | Migrated Round-28 bytes | `evidence/MANIFEST.sha256`; v1 alias resolution remains blocked on missing decision authority | Hash and clean-tree verified; relocation fails closed |

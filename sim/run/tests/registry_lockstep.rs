@@ -10,7 +10,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 
 use serde_json::Value;
-use sim_emit::{
+use sim_run::emit::{
     DESCRIPTORS, MetricKind, ModelIoRole, ParserTransform, RegistryValidMax, TYPED_EXCLUSIONS,
     TypedExclusionReason, Unit,
 };

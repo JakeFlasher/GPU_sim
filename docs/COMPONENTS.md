@@ -20,9 +20,8 @@ Status vocabulary:
 | `sim-trace` / `sim/trace` | active | Prost trace decode, lane reconstruction, completeness and identity checks | Machine-local smoke policy still being refit |
 | `sim-sm` / `sim/sm` | active | Control-bit join, four-SMSP issue, traced placement, admitted launch replay, and checked full-launch aggregation | Per-launch issue/terminal timing fields remain diagnostic |
 | `sim-mem` / `sim/mem` | active | Sectored L1/L2 and DRAM bandwidth model | Several microarchitecture choices remain explicit hypotheses |
-| `sim-emit` / `sim/emit` | active | Seven typed NCU-shaped secondary predictions plus the mandatory blocked cycles row | Binding-cycle implementation awaits admitted aggregation semantics |
 | `sim-arch` / `sim/arch` | active | Typed architecture identities/capabilities and fail-closed architecture-card loading | Production runner supports `sm_86`; `sm_120` gaps remain closed |
-| `sim-run` / `sim/run` | active | Strict run-manifest admission, card-derived configuration, replay, checked aggregation, canonical sealed results, and the one-manifest `sim-run` executable | No production launch-manifest producer or admitted cycle semantics |
+| `sim-run` / `sim/run` | active | Strict run-manifest admission, card-derived configuration, replay, checked aggregation, `sim_run::emit` with seven typed secondary predictions plus blocked cycles, canonical sealed results, and the one-manifest executable | No production launch-manifest producer or admitted cycle semantics |
 | `sim-ffi` / `sim/ffi` | retire | Three-line unused placeholder | Already excluded from Cargo workspace; leftover path is HEAD-only cleanup, not active architecture |
 | `sim/trace/pbgen` | build helper | One-shot Prost binding generation | Not a workspace member; generated target is disposable |
 

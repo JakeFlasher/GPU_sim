@@ -12,8 +12,7 @@ phases A→E (engine → memory → trace → modern features → accuracy tunin
 | `sim-sm` | Generic 4-sub-core issue/replay algorithms. Static control decoding is capability-gated: the checked-in Ampere sidecar path is active for `sm_86`; no unproven Blackwell decoder is implied. |
 | `sim-mem` | Generic sectored L1/L2 state machines and warp-pool interleave. Geometry, cache-op defaults, MSHR approximations, and latency ladders enter through typed architecture/card resolvers; an `sm_120` gap cannot inherit an `sm_86` hypothesis. |
 | `sim-trace` | NVBit protobuf trace ingestion through the committed Rust/prost bindings for the existing `traces_enhanced` wire format. Wire decoding remains architecture-neutral. |
-| `sim-emit` | NCU-metric emission boundary — seven implemented secondary descriptors plus the mandatory `exec_cycles_gpc_max` row, which remains `required_unimplemented` pending admitted aggregation semantics. The descriptor/exclusion tables partition the 61-row registry exactly. |
-| `sim-run` | Manifest-only production composition and one-argument `sim-run` binary: sealed launch admission, architecture-local configuration resolution, full-coverage replay, checked launch-set aggregation, emission, and sealed canonical `sim_result.v1` output. Stdout is result-only, stderr is typed canonical error-only, and no replay setting comes from flags or environment variables. |
+| `sim-run` | Manifest-only production composition, `sim_run::emit` metric boundary, and one-argument `sim-run` binary: sealed launch admission, architecture-local configuration resolution, full-coverage replay, checked launch-set aggregation, seven implemented secondary descriptors plus blocked `exec_cycles_gpc_max`, and sealed canonical `sim_result.v1` output. Stdout is result-only, stderr is typed canonical error-only, and no replay setting comes from flags or environment variables. |
 
 ## Architecture scope
 

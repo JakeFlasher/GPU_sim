@@ -3,10 +3,10 @@
 CLAUDE.md Rule 1 (re-founded 2026-07-02): NCU / hardware-counter values are
 prediction *targets and validation references only*. They must never enter
 simulator inputs: no label-artifact reads, no NCU invocation, and no
-label-pipeline imports inside ``sim/`` — except the ``sim/emit`` observation-
-contract surface, whose whole job is to name the metrics being emitted (metric
-*names* are the output contract and are allowed everywhere; label *values* are
-not).
+label-pipeline imports inside ``sim/`` — except the exact
+``sim/run/src/emit.rs`` observation-contract surface, whose whole job is to name
+the metrics being emitted (metric *names* are the output contract and are
+allowed everywhere; label *values* are not).
 
 Scope now, growth later: scans ``sim/`` sources (Rust + Python + build files).
 The eval harness may read labels (it scores predictions against them); the
@@ -22,6 +22,7 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 SIM_ROOT = REPO_ROOT / "sim"
+EMIT_CONTRACT_PARTS = ("run", "src", "emit.rs")
 
 # Token classes forbidden inside sim/ sources. Word-ish boundaries where the
 # bare token would otherwise be a common substring.
@@ -65,13 +66,17 @@ def _sim_sources():
         yield p
 
 
+def _is_emit_contract(src: Path) -> bool:
+    return src.relative_to(SIM_ROOT).parts == EMIT_CONTRACT_PARTS
+
+
 def test_sim_sources_never_consume_ncu_labels():
     violations: list[str] = []
     scanned = 0
     for src in _sim_sources():
         scanned += 1
         rel = src.relative_to(REPO_ROOT)
-        in_emit = "emit" in src.relative_to(SIM_ROOT).parts[:2]
+        in_emit = _is_emit_contract(src)
         text = src.read_text(encoding="utf-8", errors="replace")
         for cls, pat in FORBIDDEN_PATTERNS.items():
             if in_emit and cls in EMIT_RELAXED_CLASSES:
@@ -85,6 +90,19 @@ def test_sim_sources_never_consume_ncu_labels():
     )
     # sim/ may legitimately not exist before the Phase-0 scaffold lands; the
     # registry assertion below still runs, so the guard is never vacuous.
+
+
+def test_emit_relaxation_is_exact_to_current_module():
+    current = SIM_ROOT.joinpath(*EMIT_CONTRACT_PARTS)
+    assert current.is_file()
+    assert _is_emit_contract(current)
+    for alias in (
+        SIM_ROOT / "emit/src/lib.rs",
+        SIM_ROOT / "run/emit.rs",
+        SIM_ROOT / "run/src/emit/mod.rs",
+        SIM_ROOT / "run/tests/emit.rs",
+    ):
+        assert not _is_emit_contract(alias)
 
 
 def test_metric_registry_declares_model_io_role_or_deployability():

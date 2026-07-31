@@ -3,15 +3,17 @@
 //! The runner accepts no command-line overrides, environment-selected modes, or
 //! target values. Every replay input is admitted through `sim-sm`, exact launch
 //! sets use the checked aggregation algebra, and binding cycles remain the typed
-//! `required_unimplemented` emission produced by `sim-emit`.
+//! `required_unimplemented` emission produced by [`emit`].
+
+pub mod emit;
 
 use std::collections::BTreeSet;
 use std::path::{Component, Path, PathBuf};
 
+use crate::emit::emit_all;
 use serde::{Deserialize, Deserializer, Serialize, de};
 use sim_arch::card::CalibError;
 use sim_arch::{ArchId, Sku};
-use sim_emit::emit_all;
 use sim_mem::{
     L1Config, L1Counters, L1OriginCounters, L2Config, L2ConfigError, L2Counters, L2Replacement,
     L2Source, MemoryOrigin, PchaseCardError, SliceHash, WalkGeometry,
@@ -1495,6 +1497,11 @@ pub fn run_manifest(path: impl AsRef<Path>) -> Result<SimRunOutput, RunError> {
     let predictions = emit_all(&aggregate).map_err(|source| RunError::EmissionFailed {
         reason: source.to_string(),
     })?;
+    if predictions.launch_timing_diagnostics() != aggregate.launch_timing_diagnostics() {
+        return Err(RunError::EmissionFailed {
+            reason: "emitter did not preserve canonical launch timing diagnostics".to_owned(),
+        });
+    }
     let emissions =
         serde_json::to_value(predictions.metrics()).map_err(output_serialization_error)?;
     let aggregate_wire = aggregate_wire(&aggregate);

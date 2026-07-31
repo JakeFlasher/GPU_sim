@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["arch", "engine", "sm", "mem", "trace", "emit", "run"]
+members = ["arch", "engine", "sm", "mem", "trace", "run"]
 
 [workspace.package]
 version = "0.0.1"

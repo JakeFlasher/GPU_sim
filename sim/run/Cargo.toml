@@ -13,7 +13,6 @@ path = "src/main.rs"
 serde = { workspace = true }
 serde_json = { workspace = true }
 sim-arch = { path = "../arch" }
-sim-emit = { path = "../emit" }
 sim-mem = { path = "../mem" }
 sim-sm = { path = "../sm" }
 sim-trace = { path = "../trace" }

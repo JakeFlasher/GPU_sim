@@ -115,7 +115,7 @@ Companion audit: `plans/deep_research_audit_and_extraction_plan_2026-07-06.md`.
   `tools/cache_replay/` semantics (32 B
   sector / 128 B line; widen the slice hash for GB202's **128 MB** L2); DRAM
   GDDR6X/GDDR7 bandwidth-latency.
-- Emission (`sim/emit`): every metric implements its
+- Emission (`sim/run/src/emit.rs` via `sim_run::emit`): every metric implements its
   `tools/local_labels/metric_registry.json` v2 `ncu_observation_contract`,
   including NCU sector-accounting semantics and cold-cache-per-kernel defaults
   (`--cache-control all` parity).

@@ -44,13 +44,6 @@
     {
       "classification": "non_evaluator",
       "import_policy": "deny",
-      "path": "sim/emit/src/lib.rs",
-      "review_status": "reviewed",
-      "sha256": "913c41524c0235581c959c8ff1db1eeca8089cd833a2546949a7a25ce04d772a"
-    },
-    {
-      "classification": "non_evaluator",
-      "import_policy": "deny",
       "path": "sim/mem/src/l2.rs",
       "review_status": "reviewed",
       "sha256": "9c608db63274a8f0aacec1b8c19f7a261001793756b06f5ae2678768a489b675"
@@ -58,23 +51,30 @@
     {
       "classification": "non_evaluator",
       "import_policy": "deny",
+      "path": "sim/run/src/emit.rs",
+      "review_status": "reviewed",
+      "sha256": "6230797bbad55926b72d519c1e7eec2e66eab9bec6a46b77369864b5b2399ca7"
+    },
+    {
+      "classification": "non_evaluator",
+      "import_policy": "deny",
       "path": "sim/sm/src/issue.rs",
       "review_status": "reviewed",
-      "sha256": "71e1410f29bba59f2819e769b14ae83bf3316e72bcfd756e2dc1d502cd628fa3"
+      "sha256": "5ae851bfc706bb6377b7d0c7daf47fcbbb01d5440e12572fc20d5fde2f4f9b5b"
     },
     {
       "classification": "non_evaluator",
       "import_policy": "deny",
       "path": "sim/sm/src/replay.rs",
       "review_status": "reviewed",
-      "sha256": "eb63013765df8e4c35d2181e121b5abeb1fcaf2b5552953ec866f3ab9ffd32f1"
+      "sha256": "202b377107850e0ac6391a4948fcbaec4583b442eb68fe2d6ae7a5cd9b7bed2b"
     },
     {
       "classification": "non_evaluator",
       "import_policy": "deny",
       "path": "sim/sm/tests/machine_local_replay.rs",
       "review_status": "reviewed",
-      "sha256": "01144938008820e95d30df0b8adf65b914d052139d4c2b616ec6214cd5be5864"
+      "sha256": "7dacd8fa5198fc59a33083517c9c6b8a3b8d7e611c38e549b4068001ae11f1b6"
     },
     {
       "classification": "unreviewed",

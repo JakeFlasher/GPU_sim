@@ -1,10 +1,10 @@
-//! sim-emit: the NCU-metric emission layer (design §6.4).
+//! `sim_run::emit`: the NCU-metric emission layer (design §6.4).
 //!
 //! Takes checked counters for an exact full-coverage launch set, produces a
 //! launch-set-bound vector of NCU metric descriptor outcomes, and classifies
 //! every remaining observation contract in
 //! `tools/local_labels/metric_registry.json` with a typed exclusion.
-//! It is the only sim crate that names label-pipeline contracts: metric NAMES
+//! It is the only simulator module that names label-pipeline contracts: metric NAMES
 //! are the output contract and are allowed here; label VALUES still never enter
 //! (Rule 1, enforced by `eval/guards/test_targets_not_features_guard.py`).
 //!
@@ -155,7 +155,7 @@ mod binding_cycles {
 /// into this type:
 ///
 /// ```compile_fail
-/// use sim_emit::BindingCycles;
+/// use sim_run::emit::BindingCycles;
 /// use sim_sm::FullKernelReplayResult;
 ///
 /// fn reject_diagnostic_as_binding(result: &FullKernelReplayResult) -> BindingCycles {
@@ -535,7 +535,7 @@ impl Serialize for EmitOutcome {
 /// intentionally neither `Clone` nor `Copy`.
 ///
 /// ```compile_fail
-/// use sim_emit::MetricPrediction;
+/// use sim_run::emit::MetricPrediction;
 ///
 /// fn detach(prediction: &MetricPrediction) -> MetricPrediction {
 ///     *prediction
@@ -1417,7 +1417,7 @@ fn emit_snapshot(snap: &CounterSnapshot) -> Result<Vec<MetricPrediction>, EmitEr
 /// observation or caller-built counter snapshot can enter this boundary.
 ///
 /// ```compile_fail
-/// use sim_emit::emit_all;
+/// use sim_run::emit::emit_all;
 /// use sim_sm::SampledKernelReplayResult;
 ///
 /// fn reject_sampled(sampled: &SampledKernelReplayResult) {
@@ -1450,7 +1450,7 @@ fn index_metrics_by_key(
 /// Raw metric slices are deliberately rejected:
 ///
 /// ```compile_fail
-/// use sim_emit::{MetricPrediction, index_by_key};
+/// use sim_run::emit::{MetricPrediction, index_by_key};
 ///
 /// fn reject_detached(metrics: &[MetricPrediction]) {
 ///     let _ = index_by_key(metrics);

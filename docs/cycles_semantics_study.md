@@ -26,7 +26,7 @@ Promotion is forbidden until admitted, launch-identity-bound silicon evidence va
 
 ### Target-free findings
 
-The simulator exposes `diagnostic_last_issue_cycles` and `terminal_modeled_event_time` per launch. [ADR 0002](decisions/0002-publication-metric-scope.md) makes both nonbinding diagnostics, and [launch aggregation](../sim/sm/src/replay/aggregation.rs) preserves them in `launch_timing_diagnostics` without composing a launch-set timing scalar. The [cycle emitter](../sim/emit/src/lib.rs) receives a counter snapshot that deliberately excludes both diagnostics.
+The simulator exposes `diagnostic_last_issue_cycles` and `terminal_modeled_event_time` per launch. [ADR 0002](decisions/0002-publication-metric-scope.md) makes both nonbinding diagnostics, and [launch aggregation](../sim/sm/src/replay/aggregation.rs) preserves them in `launch_timing_diagnostics` without composing a launch-set timing scalar. The [cycle emitter](../sim/run/src/emit.rs) receives a counter snapshot that deliberately excludes both diagnostics.
 
 ### Hypotheses only
 
@@ -62,7 +62,7 @@ Promotion is forbidden until architecture-local authority for the exact SKU admi
 
 ### Target-free findings
 
-[Full launch-set aggregation](../sim/sm/src/replay/aggregation.rs) sums checked counters while retaining one timing-diagnostic record per launch in canonical roster order; it exposes no scalar temporal reducer. The real [`sim_run::run_manifest`](../sim/run/src/lib.rs) consumer serializes those diagnostics under each launch, marks aggregate timing composition `required_unimplemented_pending_aggregation_semantics_study`, and calls [`sim_emit::emit_all`](../sim/emit/src/lib.rs). The aggregate `exec_cycles_gpc_max` row remains exactly `RequiredUnimplemented(AggregationSemanticsStudy)` and has no numeric binding value.
+[Full launch-set aggregation](../sim/sm/src/replay/aggregation.rs) sums checked counters while retaining one timing-diagnostic record per launch in canonical roster order; it exposes no scalar temporal reducer. The real [`sim_run::run_manifest`](../sim/run/src/lib.rs) consumer serializes those diagnostics under each launch, marks aggregate timing composition `required_unimplemented_pending_aggregation_semantics_study`, and calls [`sim_run::emit::emit_all`](../sim/run/src/emit.rs). The aggregate `exec_cycles_gpc_max` row remains exactly `RequiredUnimplemented(AggregationSemanticsStudy)` and has no numeric binding value.
 
 ### Hypotheses only
 
