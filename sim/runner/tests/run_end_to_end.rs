@@ -75,6 +75,91 @@ fn refresh_trace_artifact_claims(root: &Path, launch_manifest: &mut Value) {
 
 const CANARY_KERNEL_NAME: &str = "_Z17addr_carry_canaryPKiPiS1_S1_i___0";
 const SAMPLED_BLOCKS: [i32; 12] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 57, 58, 59];
+const CYCLE_STUDY_SECTIONS: [&str; 4] = [
+    "D1 — NCU observable contract",
+    "D2 — Simulator diagnostic candidates",
+    "D3 — SM/GPC topology and spatial mapping",
+    "D4 — Launch composition and emission boundary",
+];
+const CYCLE_STUDY_SUBSECTIONS: [&str; 4] = [
+    "Target-free findings",
+    "Hypotheses only",
+    "Silicon-blocked decisions",
+    "Promotion forbidden until",
+];
+
+#[derive(Debug)]
+struct StudySubsection {
+    heading: String,
+    body: String,
+}
+
+#[derive(Debug)]
+struct StudySection {
+    heading: String,
+    subsections: Vec<StudySubsection>,
+}
+
+fn cycle_study_path() -> PathBuf {
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../docs/cycles_semantics_study.md")
+}
+
+fn parse_cycle_study(markdown: &str) -> Result<Vec<StudySection>, String> {
+    let mut sections = Vec::new();
+    let mut current: Option<StudySection> = None;
+
+    for line in markdown.lines() {
+        if let Some(heading) = line.strip_prefix("## ") {
+            if let Some(section) = current.take() {
+                sections.push(section);
+            }
+            current = Some(StudySection {
+                heading: heading.to_owned(),
+                subsections: Vec::new(),
+            });
+            continue;
+        }
+
+        if let Some(heading) = line.strip_prefix("### ") {
+            let section = current
+                .as_mut()
+                .ok_or_else(|| format!("subsection {heading:?} precedes every study section"))?;
+            section.subsections.push(StudySubsection {
+                heading: heading.to_owned(),
+                body: String::new(),
+            });
+            continue;
+        }
+
+        let Some(section) = current.as_mut() else {
+            continue;
+        };
+        let Some(subsection) = section.subsections.last_mut() else {
+            if line.trim().is_empty() {
+                continue;
+            }
+            return Err(format!(
+                "study section {:?} has content outside an exact subsection",
+                section.heading
+            ));
+        };
+        subsection.body.push_str(line);
+        subsection.body.push('\n');
+    }
+
+    if let Some(section) = current {
+        sections.push(section);
+    }
+    Ok(sections)
+}
+
+fn study_section_text(section: &StudySection) -> String {
+    let mut text = String::new();
+    for subsection in &section.subsections {
+        text.push_str(&subsection.body);
+    }
+    text
+}
 
 fn sampled_threadblock(block_x: i32) -> Vec<u8> {
     let instruction = sim_trace::pb::Instruction {
@@ -274,6 +359,160 @@ fn convert_to_sampled_fixture(root: &Path, launch_manifest: &mut Value) {
         "artifact": artifact_claim(root, "trace/trace_sampling.json"),
     });
     refresh_trace_artifact_claims(root, launch_manifest);
+}
+
+#[test]
+fn p8_cycle_study_and_real_runner_guard_are_nonvacuous() {
+    let study_path = cycle_study_path();
+    let markdown = fs::read_to_string(&study_path).expect("read checked-in P8 cycle study");
+    let sections = parse_cycle_study(&markdown).expect("parse P8 cycle study sections");
+
+    assert_eq!(
+        sections.len(),
+        CYCLE_STUDY_SECTIONS.len(),
+        "study must contain exactly D1-D4"
+    );
+    for (section_index, expected_heading) in CYCLE_STUDY_SECTIONS.iter().enumerate() {
+        let section = &sections[section_index];
+        assert_eq!(&section.heading, expected_heading);
+        assert_eq!(
+            section.subsections.len(),
+            CYCLE_STUDY_SUBSECTIONS.len(),
+            "{} must contain exactly the four required subsections",
+            section.heading
+        );
+        for (subsection_index, expected_heading) in CYCLE_STUDY_SUBSECTIONS.iter().enumerate() {
+            let subsection = &section.subsections[subsection_index];
+            assert_eq!(&subsection.heading, expected_heading);
+            assert!(
+                !subsection.body.trim().is_empty(),
+                "{} / {} must be nonempty",
+                section.heading,
+                subsection.heading
+            );
+        }
+    }
+
+    let d1 = study_section_text(&sections[0]);
+    assert!(d1.contains("`gpc__cycles_elapsed.max`"));
+    assert!(d1.contains("counting unit `GPC`"));
+    assert!(d1.contains("maximum counter value across all unit instances"));
+    assert!(d1.contains("unit's clock domain"));
+
+    let d2 = study_section_text(&sections[1]);
+    assert!(d2.contains("`diagnostic_last_issue_cycles`"));
+    assert!(d2.contains("`terminal_modeled_event_time`"));
+    assert!(d2.contains("nonbinding diagnostics"));
+    assert!(d2.contains("selects neither diagnostic"));
+
+    let d3 = study_section_text(&sections[2]);
+    assert!(d3.contains("total `sm_count`"));
+    assert!(d3.contains("no admitted `gpc_count`"));
+    assert!(d3.contains("SM-to-GPC map"));
+    assert!(d3.contains("invents no GPC count"));
+
+    let d4 = study_section_text(&sections[3]);
+    assert!(d4.contains("one timing-diagnostic record per launch"));
+    assert!(d4.contains("no scalar temporal reducer"));
+    assert!(d4.contains("`RequiredUnimplemented(AggregationSemanticsStudy)`"));
+    assert!(d4.contains("Completion of this target-free study does not itself promote emission"));
+
+    let output = run_manifest(fixture_root().join("run_manifest.json"))
+        .expect("run existing nonempty canary through real consumer");
+    let result: Value = serde_json::from_str(output.canonical_json()).unwrap();
+    assert_eq!(result["schema_version"], "sim_result.v1");
+
+    let launches = result["launches"]
+        .as_array()
+        .expect("runner result launches are an array");
+    assert_eq!(launches.len(), 1, "existing canary must produce one launch");
+    let aggregate = result["aggregate"]
+        .as_object()
+        .expect("runner result aggregate is an object");
+    let aggregate_launch_count = aggregate["launch_count"]
+        .as_u64()
+        .expect("aggregate launch_count is numeric");
+    assert_eq!(
+        usize::try_from(aggregate_launch_count).unwrap(),
+        launches.len()
+    );
+    assert!(
+        aggregate["counters"]["instructions_issued"]
+            .as_u64()
+            .is_some_and(|count| count > 0),
+        "canary replay must be nonempty"
+    );
+
+    for launch in launches {
+        assert!(
+            launch["counters"]["instructions_issued"]
+                .as_u64()
+                .is_some_and(|count| count > 0)
+        );
+        let diagnostics = launch["timing_diagnostics"]
+            .as_object()
+            .expect("timing diagnostics stay attached to each launch");
+        assert_eq!(
+            diagnostics["binding_cycles_role"],
+            "diagnostic_only_not_binding_prediction"
+        );
+        assert!(
+            diagnostics["diagnostic_last_issue_cycles"]
+                .as_u64()
+                .is_some_and(|cycles| cycles > 0)
+        );
+        assert_eq!(
+            diagnostics["terminal_modeled_event_time"]["status"],
+            "modeled"
+        );
+        assert!(
+            diagnostics["terminal_modeled_event_time"]["value"]
+                .as_u64()
+                .is_some_and(|time| time > 0)
+        );
+    }
+
+    assert!(result.get("timing_diagnostics").is_none());
+    assert!(aggregate.get("timing_diagnostics").is_none());
+    assert!(aggregate.get("cycles").is_none());
+    assert_eq!(
+        aggregate["timing_composition"],
+        "required_unimplemented_pending_aggregation_semantics_study"
+    );
+
+    let emissions = result["emissions"]
+        .as_array()
+        .expect("runner emissions are an array");
+    assert!(
+        !emissions.is_empty(),
+        "real emitter output must be nonempty"
+    );
+    let cycle_rows = emissions
+        .iter()
+        .filter(|row| row["unit"] == "cycles")
+        .collect::<Vec<_>>();
+    assert_eq!(
+        cycle_rows.len(),
+        1,
+        "aggregate emissions must contain exactly one cycle row"
+    );
+    let cycle_row = cycle_rows[0];
+    assert_eq!(cycle_row["key"], "exec_cycles_gpc_max");
+    assert_eq!(cycle_row["ncu_metric"], "gpc__cycles_elapsed.max");
+    assert_eq!(
+        cycle_row["outcome"],
+        json!({
+            "status": "required_unimplemented",
+            "blocking": "aggregation_semantics_study",
+        })
+    );
+    assert!(cycle_row.get("value").is_none());
+    assert!(cycle_row["outcome"].get("value").is_none());
+
+    for row in emissions {
+        assert_ne!(row["key"], "diagnostic_last_issue_cycles");
+        assert_ne!(row["key"], "terminal_modeled_event_time");
+    }
 }
 
 #[test]
