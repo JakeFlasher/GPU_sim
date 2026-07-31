@@ -13,8 +13,7 @@ phases A→E (engine → memory → trace → modern features → accuracy tunin
 | `sim-mem` | Generic sectored L1/L2 state machines and warp-pool interleave. Geometry, cache-op defaults, MSHR approximations, and latency ladders enter through typed architecture/card resolvers; an `sm_120` gap cannot inherit an `sm_86` hypothesis. |
 | `sim-trace` | NVBit protobuf trace ingestion through the committed Rust/prost bindings for the existing `traces_enhanced` wire format. Wire decoding remains architecture-neutral. |
 | `sim-emit` | NCU-metric emission boundary — seven implemented secondary descriptors plus the mandatory `exec_cycles_gpc_max` row, which remains `required_unimplemented` pending admitted aggregation semantics. The descriptor/exclusion tables partition the 61-row registry exactly. |
-| `sim-run` | Manifest-only production composition: sealed launch admission, architecture-local configuration resolution, full-coverage replay, checked launch-set aggregation, emission, and sealed canonical `sim_result.v1` output. |
-| `sim-cli` | Thin one-argument binary over `sim-run`; stdout is result-only, stderr is typed canonical error-only, and no replay setting comes from flags or environment variables. |
+| `sim-run` | Manifest-only production composition and one-argument `sim-run` binary: sealed launch admission, architecture-local configuration resolution, full-coverage replay, checked launch-set aggregation, emission, and sealed canonical `sim_result.v1` output. Stdout is result-only, stderr is typed canonical error-only, and no replay setting comes from flags or environment variables. |
 
 ## Architecture scope
 
@@ -42,7 +41,7 @@ Build: `cargo build` from this directory (workspace).
 Run the self-contained offline canary from the repository root:
 
 ```bash
-cargo run --manifest-path sim/Cargo.toml -p sim-cli -- \
+cargo run --manifest-path sim/Cargo.toml -p sim-run -- \
   sim/run/tests/fixtures/addr_carry_canary_bundle/run_manifest.json
 ```
 

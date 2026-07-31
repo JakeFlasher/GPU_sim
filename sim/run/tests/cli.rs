@@ -10,14 +10,11 @@ use sim_trace::{Sha256Digest, canonical_json};
 use tempfile::TempDir;
 
 fn binary() -> &'static str {
-    env!("CARGO_BIN_EXE_sim-cli")
+    env!("CARGO_BIN_EXE_sim-run")
 }
 
 fn fixture_root() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .unwrap()
-        .join("run/tests/fixtures/addr_carry_canary_bundle")
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/addr_carry_canary_bundle")
 }
 
 fn fixture_manifest() -> PathBuf {
@@ -78,7 +75,7 @@ fn cli_emits_only_the_canonical_result_on_success() {
     assert!(output.stderr.is_empty());
     let expected = format!(
         "{}\n",
-        include_str!("../../run/tests/fixtures/addr_carry_canary_bundle/result.golden.json")
+        include_str!("fixtures/addr_carry_canary_bundle/result.golden.json")
     );
     assert_eq!(output.stdout, expected.as_bytes());
     let parsed: Value = serde_json::from_slice(&output.stdout).unwrap();

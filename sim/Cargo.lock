@@ -239,16 +239,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sim-cli"
-version = "0.0.1"
-dependencies = [
- "serde_json",
- "sim-run",
- "sim-trace",
- "tempfile",
-]
-
-[[package]]
 name = "sim-emit"
 version = "0.0.1"
 dependencies = [

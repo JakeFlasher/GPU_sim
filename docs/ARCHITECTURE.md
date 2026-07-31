@@ -90,8 +90,8 @@ before constructing one shared card-derived configuration, rejects sampled
 launches from exact aggregation, calls only the admitted `replay_kernel` path,
 and passes the complete roster through `aggregate_full_launch_set` and
 `sim-emit`. Configuration values cannot be supplied as manifest scalars or
-environment overrides. `sim-cli` accepts exactly one manifest path and emits a
-sealed canonical result or typed canonical error.
+environment overrides. The `sim-run` binary accepts exactly one manifest path and
+emits a sealed canonical result or typed canonical error.
 
 The result preserves per-launch last-issue and terminal-event diagnostics without
 composing them into a launch-set timing scalar. Counter availability and
