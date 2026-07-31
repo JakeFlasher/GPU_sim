@@ -75,6 +75,29 @@ fn set_fixture_block_dim(fixture: &mut Fixture, block: (i32, i32, i32)) {
     write_json(&fixture.manifest_path, &fixture.manifest);
 }
 
+fn set_fixture_stream_id(fixture: &mut Fixture, stream_id: i64) {
+    let dynamic_path = fixture.root.join("trace/dynamic_trace.pb");
+    let raw = fs::read(&dynamic_path).expect("read dynamic trace");
+    let mut trace = sim_trace::pb::Trace::decode(raw.as_slice()).expect("decode dynamic trace");
+    let device = trace.gpu_device.get_mut(&0).expect("fixture device");
+    let mut stream = device.streams.remove(&0).expect("fixture stream");
+    stream.id = stream_id;
+    device.streams.insert(stream_id, stream);
+    fs::write(&dynamic_path, trace.encode_to_vec()).expect("rewrite dynamic trace");
+
+    let old_payload_dir = fixture
+        .root
+        .join("trace/threadblocks/device_0/stream_0/kernel_1");
+    let new_payload_dir = fixture.root.join(format!(
+        "trace/threadblocks/device_0/stream_{stream_id}/kernel_1"
+    ));
+    fs::create_dir_all(new_payload_dir.parent().expect("payload parent"))
+        .expect("create rewritten stream directory");
+    fs::rename(old_payload_dir, new_payload_dir).expect("rewrite payload stream directory");
+    fixture.manifest["launch_selector"]["stream_id"] = json!(stream_id);
+    refresh_trace_artifacts(fixture);
+}
+
 fn refresh_trace_artifacts(fixture: &mut Fixture) {
     let trace_root = fixture.root.join("trace");
     let snapshot = TraceDirSnapshot::capture(&trace_root).expect("recapture fixture trace");
@@ -359,6 +382,13 @@ fn canary_admits_to_one_stable_canonical_seal() {
         first_seal.to_string(),
         "ab173443f81eaaa5c26fabe24258d02cab2c5266207ced0f174ebd043a62ef45"
     );
+    assert!(
+        !first.identity().canonical_json().contains("\"bundle_id\"")
+            && !first
+                .identity()
+                .canonical_json()
+                .contains("\"bundle_sha256\"")
+    );
     assert_eq!(
         first.identity().arch().expect("sealed arch"),
         sim_arch::ArchId::Sm86
@@ -419,6 +449,191 @@ fn canary_admits_to_one_stable_canonical_seal() {
         reordered.identity().canonical_json(),
         first.identity().canonical_json()
     );
+    assert_eq!(
+        reordered.identity().trace_bundle_identity(),
+        first.identity().trace_bundle_identity()
+    );
+    assert_eq!(
+        reordered.identity().replay_authenticated_launch(),
+        first.identity().replay_authenticated_launch()
+    );
+}
+
+#[test]
+fn trace_bundle_projection_binds_v2_components_and_replay_identity() {
+    let fixture = fixture();
+    let admitted = admit_launch_evidence(&fixture.manifest_path)
+        .expect("admit canary manifest for projection");
+    let identity = admitted.identity();
+    let bundle = identity.trace_bundle_identity();
+    let components = bundle.components();
+
+    let artifact_value = |name: &str| &fixture.manifest["artifacts"][name];
+    let artifact_size = |name: &str| {
+        artifact_value(name)["size_bytes"]
+            .as_u64()
+            .expect("fixture artifact size is u64")
+    };
+    let artifact_sha = |name: &str| {
+        Sha256Digest::parse(
+            artifact_value(name)["sha256"]
+                .as_str()
+                .expect("fixture artifact SHA is a string"),
+        )
+        .expect("fixture artifact SHA parses")
+    };
+    let payload = &fixture.manifest["artifacts"]["threadblock_payload"];
+    let payload_files = payload["file_count"]
+        .as_u64()
+        .expect("fixture payload file count is u64");
+    let payload_bytes = payload["raw_bytes"]
+        .as_u64()
+        .expect("fixture payload byte count is u64");
+    let payload_manifest_sha = Sha256Digest::parse(
+        payload["sorted_path_manifest_sha256"]
+            .as_str()
+            .expect("fixture payload manifest SHA is a string"),
+    )
+    .expect("fixture payload manifest SHA parses");
+    let payload_content_sha = Sha256Digest::parse(
+        payload["sorted_path_stream_sha256"]
+            .as_str()
+            .expect("fixture payload content SHA is a string"),
+    )
+    .expect("fixture payload content SHA parses");
+
+    assert_eq!(bundle.bundle_path().as_str(), "trace");
+    assert_eq!(bundle.wire_version(), "sim_trace_wire_v1");
+    assert_eq!(bundle.record_count(), 54);
+    assert_eq!(bundle.instruction_count(), 54);
+    assert_eq!(
+        components.root_dynamic_trace().size_bytes(),
+        artifact_size("dynamic_trace_pb")
+    );
+    assert_eq!(
+        components.root_dynamic_trace().sha256(),
+        artifact_sha("dynamic_trace_pb")
+    );
+    assert_eq!(
+        components.threadblock_payloads().file_count(),
+        payload_files
+    );
+    assert_eq!(
+        components.threadblock_payloads().total_size_bytes(),
+        payload_bytes
+    );
+    assert_eq!(
+        components.threadblock_payloads().manifest_sha256(),
+        payload_manifest_sha
+    );
+    assert_eq!(
+        components.threadblock_payloads().content_sha256(),
+        payload_content_sha
+    );
+    assert_eq!(
+        components.execution_metadata().size_bytes(),
+        artifact_size("enhanced_execution_info_json")
+    );
+    assert_eq!(
+        components.execution_metadata().sha256(),
+        artifact_sha("enhanced_execution_info_json")
+    );
+    assert_eq!(
+        components.control_bits_sidecar().size_bytes(),
+        artifact_size("control_bits_sidecar")
+    );
+    assert_eq!(
+        components.control_bits_sidecar().sha256(),
+        artifact_sha("control_bits_sidecar")
+    );
+    assert_eq!(components.stats().size_bytes(), artifact_size("stats_csv"));
+    assert_eq!(components.stats().sha256(), artifact_sha("stats_csv"));
+
+    let total_size_bytes = artifact_size("dynamic_trace_pb")
+        + payload_bytes
+        + artifact_size("enhanced_execution_info_json")
+        + artifact_size("control_bits_sidecar")
+        + artifact_size("stats_csv");
+    assert_eq!(bundle.total_size_bytes(), total_size_bytes);
+
+    let expected_components = json!({
+        "root_dynamic_trace": {
+            "size_bytes": artifact_size("dynamic_trace_pb"),
+            "sha256": artifact_sha("dynamic_trace_pb"),
+        },
+        "threadblock_payloads": {
+            "file_count": payload_files,
+            "total_size_bytes": payload_bytes,
+            "manifest_sha256": payload_manifest_sha,
+            "content_sha256": payload_content_sha,
+        },
+        "execution_metadata": {
+            "size_bytes": artifact_size("enhanced_execution_info_json"),
+            "sha256": artifact_sha("enhanced_execution_info_json"),
+        },
+        "control_bits_sidecar": {
+            "size_bytes": artifact_size("control_bits_sidecar"),
+            "sha256": artifact_sha("control_bits_sidecar"),
+        },
+        "stats": {
+            "size_bytes": artifact_size("stats_csv"),
+            "sha256": artifact_sha("stats_csv"),
+        },
+    });
+    let digest_preimage = json!({
+        "digest_contract_id": "sim-sm.trace-bundle-identity.v1",
+        "wire_version": "sim_trace_wire_v1",
+        "total_size_bytes": total_size_bytes,
+        "record_count": 54,
+        "instruction_count": 54,
+        "components": expected_components,
+    });
+    let expected_bundle_sha = Sha256Digest::of(
+        canonical_json(&digest_preimage)
+            .expect("canonicalize trace-bundle digest preimage")
+            .as_bytes(),
+    );
+    assert_eq!(bundle.bundle_sha256(), expected_bundle_sha);
+    assert_eq!(
+        bundle.bundle_id(),
+        format!("trace-bundle-v1-{expected_bundle_sha}")
+    );
+    let projection = serde_json::to_value(bundle).expect("serialize typed trace-bundle projection");
+    assert_eq!(
+        projection,
+        json!({
+            "bundle_id": format!("trace-bundle-v1-{expected_bundle_sha}"),
+            "bundle_path": "trace",
+            "bundle_sha256": expected_bundle_sha,
+            "wire_version": "sim_trace_wire_v1",
+            "total_size_bytes": total_size_bytes,
+            "record_count": 54,
+            "instruction_count": 54,
+            "components": digest_preimage["components"].clone(),
+        })
+    );
+
+    let replay = identity.replay_authenticated_launch();
+    assert_eq!(replay.kernel_mangled_name(), KERNEL_NAME);
+    assert_eq!(replay.grid(), (1, 1, 1));
+    assert_eq!(replay.block(), (32, 1, 1));
+    assert_eq!(replay.device_id(), 0_u32);
+    assert_eq!(replay.stream_id(), 0_u64);
+    assert_eq!(replay.binary_architecture(), sim_arch::ArchId::Sm86);
+}
+
+#[test]
+fn admitted_projection_rejects_stream_outside_v2_unsigned_domain() {
+    let mut fixture = fixture();
+    set_fixture_stream_id(&mut fixture, -1);
+    assert!(matches!(
+        admit_launch_evidence(&fixture.manifest_path),
+        Err(ManifestError::ReplayIdentityValueOutOfRange {
+            field: "stream_id",
+            value: -1,
+            expected_domain: "uint64",
+        })
+    ));
 }
 
 #[test]
@@ -621,6 +836,42 @@ fn resealed_stats_must_be_semantically_valid() {
         Err(ManifestError::Trace(
             sim_trace::TraceError::StatsCountersInvalid { .. }
         ))
+    ));
+}
+
+#[test]
+fn trace_bundle_projection_rejects_vacuous_and_mixed_record_counts() {
+    let mut vacuous = fixture();
+    let stats_path = vacuous.root.join("trace/stats.csv");
+    fs::write(&stats_path, b"total_insts,total_reported_insts\n0,0\n")
+        .expect("write vacuous producer stats");
+    vacuous.manifest["artifacts"]["stats_csv"] = artifact(&vacuous.root, "trace/stats.csv");
+    write_json(&vacuous.manifest_path, &vacuous.manifest);
+    assert!(matches!(
+        admit_launch_evidence(&vacuous.manifest_path),
+        Err(ManifestError::Trace(
+            sim_trace::TraceError::TracePayloadEmpty {
+                rows: 1,
+                expected: 0,
+                admitted: 0,
+                ..
+            }
+        ))
+    ));
+
+    let mut mixed = fixture();
+    let stats_path = mixed.root.join("trace/stats.csv");
+    fs::write(&stats_path, b"total_insts,total_reported_insts\n53,53\n")
+        .expect("write mixed producer stats");
+    mixed.manifest["artifacts"]["stats_csv"] = artifact(&mixed.root, "trace/stats.csv");
+    write_json(&mixed.manifest_path, &mixed.manifest);
+    assert!(matches!(
+        admit_launch_evidence(&mixed.manifest_path),
+        Err(ManifestError::TraceBundleCountMismatch {
+            edge: "stats admitted record count->validated instruction count",
+            expected: 54,
+            actual: 53,
+        })
     ));
 }
 

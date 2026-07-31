@@ -37,7 +37,9 @@ pub use control_bits::{
     FunctionControl, InstructionControl, WaitMask,
 };
 pub use evidence::{
-    AdmittedLaunchEvidence, BinaryDigestGap, LaunchEvidenceIdentity, ManifestError,
+    AdmittedLaunchEvidence, BinaryDigestGap, CanonicalTraceBundlePath, LaunchEvidenceIdentity,
+    ManifestError, ReplayAuthenticatedLaunchIdentity, ThreadblockPayloadSetIdentity,
+    TraceBundleComponentIdentity, TraceBundleComponents, TraceBundleIdentity,
     admit_launch_evidence,
 };
 pub use issue::{

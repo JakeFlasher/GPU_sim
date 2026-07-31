@@ -6,6 +6,7 @@
 //! typed gap: the current trace contract has no producer-bound binary digest.
 
 use std::collections::{BTreeMap, BTreeSet};
+use std::num::NonZeroU64;
 use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -27,6 +28,8 @@ use crate::replay::{
 
 const MANIFEST_SCHEMA_VERSION: u32 = 2;
 const WIRE_VALIDATOR_CONTRACT_ID: &str = "sim_trace_wire_v1";
+const TRACE_BUNDLE_DIGEST_CONTRACT_ID: &str = "sim-sm.trace-bundle-identity.v1";
+const TRACE_BUNDLE_ID_PREFIX: &str = "trace-bundle-v1-";
 const MAX_MANIFEST_BYTES: u64 = 16 * 1024 * 1024;
 const MAX_REGULAR_ARTIFACT_BYTES: u64 = 64 * 1024 * 1024;
 const MAX_THREADBLOCK_PAYLOAD_FILES: u64 = 1_000_000;
@@ -99,6 +102,32 @@ pub enum ManifestError {
         "launch-evidence manifest declares {declared} aggregate artifact bytes, exceeding implementation limit {limit}"
     )]
     SnapshotResourceLimitExceeded { declared: u64, limit: u64 },
+    #[error("trace-bundle path must be a nonempty canonical relative path; got {path:?}")]
+    TraceBundlePathInvalid { path: String },
+    #[error("trace-bundle field {field} must be positive; got {actual}")]
+    TraceBundleNonpositive { field: &'static str, actual: u64 },
+    #[error(
+        "trace-bundle total size overflow while adding {component}: accumulated {accumulated}, addend {addend}"
+    )]
+    TraceBundleSizeOverflow {
+        component: &'static str,
+        accumulated: u64,
+        addend: u64,
+    },
+    #[error("trace-bundle count edge {edge} mismatch: expected {expected}, got {actual}")]
+    TraceBundleCountMismatch {
+        edge: &'static str,
+        expected: u64,
+        actual: u64,
+    },
+    #[error("trace-bundle wire-version contract token is invalid: {value:?}")]
+    TraceBundleWireVersionInvalid { value: String },
+    #[error("replay-authenticated launch field {field} value {value} is outside {expected_domain}")]
+    ReplayIdentityValueOutOfRange {
+        field: &'static str,
+        value: i64,
+        expected_domain: &'static str,
+    },
     #[error("trace contract/capability admission failed: {source}")]
     CapabilityMissing {
         #[source]
@@ -249,6 +278,391 @@ pub enum BinaryDigestGap {
     TraceContractDoesNotEmitBinaryDigest,
 }
 
+/// Canonical trace-root path relative to the launch-evidence manifest directory.
+///
+/// Construction is private to admission, so consumers cannot mint a path that
+/// bypasses the manifest's canonical-relative-path checks.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(transparent)]
+pub struct CanonicalTraceBundlePath(String);
+
+impl CanonicalTraceBundlePath {
+    fn checked(raw: &str) -> Result<Self, ManifestError> {
+        let path = Path::new(raw);
+        if raw.is_empty()
+            || raw.starts_with('/')
+            || raw.ends_with('/')
+            || raw.contains("//")
+            || raw
+                .split('/')
+                .any(|component| matches!(component, "." | ".."))
+            || !raw.bytes().all(|byte| {
+                byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'/' | b'-')
+            })
+            || path.is_absolute()
+            || path
+                .components()
+                .any(|component| !matches!(component, Component::Normal(_)))
+        {
+            return Err(ManifestError::TraceBundlePathInvalid {
+                path: raw.to_owned(),
+            });
+        }
+        Ok(Self(raw.to_owned()))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    pub fn as_path(&self) -> &Path {
+        Path::new(&self.0)
+    }
+}
+
+/// Positive byte size and raw SHA-256 for one replay-consumed bundle component.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+pub struct TraceBundleComponentIdentity {
+    size_bytes: NonZeroU64,
+    sha256: Sha256Digest,
+}
+
+impl TraceBundleComponentIdentity {
+    fn checked(
+        field: &'static str,
+        size_bytes: u64,
+        sha256: Sha256Digest,
+    ) -> Result<Self, ManifestError> {
+        Ok(Self {
+            size_bytes: require_positive_trace_bundle_value(field, size_bytes)?,
+            sha256,
+        })
+    }
+
+    pub fn size_bytes(self) -> u64 {
+        self.size_bytes.get()
+    }
+
+    pub fn sha256(self) -> Sha256Digest {
+        self.sha256
+    }
+}
+
+/// Transitive identity of every snapshotted threadblock protobuf payload.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ThreadblockPayloadSetIdentity {
+    file_count: NonZeroU64,
+    total_size_bytes: NonZeroU64,
+    manifest_sha256: Sha256Digest,
+    content_sha256: Sha256Digest,
+}
+
+impl ThreadblockPayloadSetIdentity {
+    fn checked(
+        file_count: u64,
+        total_size_bytes: u64,
+        manifest_sha256: Sha256Digest,
+        content_sha256: Sha256Digest,
+    ) -> Result<Self, ManifestError> {
+        Ok(Self {
+            file_count: require_positive_trace_bundle_value(
+                "components.threadblock_payloads.file_count",
+                file_count,
+            )?,
+            total_size_bytes: require_positive_trace_bundle_value(
+                "components.threadblock_payloads.total_size_bytes",
+                total_size_bytes,
+            )?,
+            manifest_sha256,
+            content_sha256,
+        })
+    }
+
+    pub fn file_count(&self) -> u64 {
+        self.file_count.get()
+    }
+
+    pub fn total_size_bytes(&self) -> u64 {
+        self.total_size_bytes.get()
+    }
+
+    pub fn manifest_sha256(&self) -> Sha256Digest {
+        self.manifest_sha256
+    }
+
+    pub fn content_sha256(&self) -> Sha256Digest {
+        self.content_sha256
+    }
+}
+
+/// The five component identities required by `sim_result.v2.trace_identity`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TraceBundleComponents {
+    root_dynamic_trace: TraceBundleComponentIdentity,
+    threadblock_payloads: ThreadblockPayloadSetIdentity,
+    execution_metadata: TraceBundleComponentIdentity,
+    control_bits_sidecar: TraceBundleComponentIdentity,
+    stats: TraceBundleComponentIdentity,
+}
+
+impl TraceBundleComponents {
+    pub fn root_dynamic_trace(&self) -> TraceBundleComponentIdentity {
+        self.root_dynamic_trace
+    }
+
+    pub fn threadblock_payloads(&self) -> &ThreadblockPayloadSetIdentity {
+        &self.threadblock_payloads
+    }
+
+    pub fn execution_metadata(&self) -> TraceBundleComponentIdentity {
+        self.execution_metadata
+    }
+
+    pub fn control_bits_sidecar(&self) -> TraceBundleComponentIdentity {
+        self.control_bits_sidecar
+    }
+
+    pub fn stats(&self) -> TraceBundleComponentIdentity {
+        self.stats
+    }
+}
+
+#[derive(Serialize)]
+struct TraceBundleDigestPreimage<'a> {
+    digest_contract_id: &'static str,
+    wire_version: &'a str,
+    total_size_bytes: NonZeroU64,
+    record_count: NonZeroU64,
+    instruction_count: NonZeroU64,
+    components: &'a TraceBundleComponents,
+}
+
+/// Immutable authenticated projection matching `sim_result.v2.trace_identity`.
+///
+/// The content-addressed bundle SHA uses a domain-separated canonical-JSON
+/// preimage and commits all five replay-consumed component identities plus the
+/// validated wire/count contract. The bundle path is deliberately relocation
+/// metadata and is not part of the content digest.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct TraceBundleIdentity {
+    bundle_id: String,
+    bundle_path: CanonicalTraceBundlePath,
+    bundle_sha256: Sha256Digest,
+    wire_version: String,
+    total_size_bytes: NonZeroU64,
+    record_count: NonZeroU64,
+    instruction_count: NonZeroU64,
+    components: TraceBundleComponents,
+}
+
+impl TraceBundleIdentity {
+    #[allow(clippy::too_many_arguments)]
+    fn checked(
+        bundle_path: CanonicalTraceBundlePath,
+        wire_version: &str,
+        validation_launch_count: u64,
+        validation_threadblock_count: u64,
+        validation_instruction_count: u64,
+        stats_admitted_record_count: u64,
+        components: TraceBundleComponents,
+    ) -> Result<Self, ManifestError> {
+        if wire_version.is_empty() || !wire_version.bytes().all(|byte| byte.is_ascii_graphic()) {
+            return Err(ManifestError::TraceBundleWireVersionInvalid {
+                value: wire_version.to_owned(),
+            });
+        }
+        require_positive_trace_bundle_value(
+            "wire_admission.launch_count",
+            validation_launch_count,
+        )?;
+        let validated_threadblocks = require_positive_trace_bundle_value(
+            "wire_admission.threadblock_count",
+            validation_threadblock_count,
+        )?;
+        if validated_threadblocks.get() != components.threadblock_payloads.file_count() {
+            return Err(ManifestError::TraceBundleCountMismatch {
+                edge: "snapshotted payload file count->validated threadblock count",
+                expected: components.threadblock_payloads.file_count(),
+                actual: validated_threadblocks.get(),
+            });
+        }
+        let instruction_count =
+            require_positive_trace_bundle_value("instruction_count", validation_instruction_count)?;
+        let record_count =
+            require_positive_trace_bundle_value("record_count", stats_admitted_record_count)?;
+        if record_count != instruction_count {
+            return Err(ManifestError::TraceBundleCountMismatch {
+                edge: "stats admitted record count->validated instruction count",
+                expected: instruction_count.get(),
+                actual: record_count.get(),
+            });
+        }
+
+        let mut total_size_bytes = 0_u64;
+        for (component, addend) in [
+            (
+                "root_dynamic_trace",
+                components.root_dynamic_trace.size_bytes(),
+            ),
+            (
+                "threadblock_payloads",
+                components.threadblock_payloads.total_size_bytes(),
+            ),
+            (
+                "execution_metadata",
+                components.execution_metadata.size_bytes(),
+            ),
+            (
+                "control_bits_sidecar",
+                components.control_bits_sidecar.size_bytes(),
+            ),
+            ("stats", components.stats.size_bytes()),
+        ] {
+            total_size_bytes = total_size_bytes.checked_add(addend).ok_or(
+                ManifestError::TraceBundleSizeOverflow {
+                    component,
+                    accumulated: total_size_bytes,
+                    addend,
+                },
+            )?;
+        }
+        let total_size_bytes =
+            require_positive_trace_bundle_value("total_size_bytes", total_size_bytes)?;
+        let preimage = TraceBundleDigestPreimage {
+            digest_contract_id: TRACE_BUNDLE_DIGEST_CONTRACT_ID,
+            wire_version,
+            total_size_bytes,
+            record_count,
+            instruction_count,
+            components: &components,
+        };
+        let preimage = serde_json::to_value(preimage)?;
+        let preimage = canonical_json(&preimage)?;
+        let bundle_sha256 = Sha256Digest::of(preimage.as_bytes());
+        let bundle_id = format!("{TRACE_BUNDLE_ID_PREFIX}{bundle_sha256}");
+        Ok(Self {
+            bundle_id,
+            bundle_path,
+            bundle_sha256,
+            wire_version: wire_version.to_owned(),
+            total_size_bytes,
+            record_count,
+            instruction_count,
+            components,
+        })
+    }
+
+    pub fn bundle_id(&self) -> &str {
+        &self.bundle_id
+    }
+
+    pub fn bundle_path(&self) -> &CanonicalTraceBundlePath {
+        &self.bundle_path
+    }
+
+    pub fn bundle_sha256(&self) -> Sha256Digest {
+        self.bundle_sha256
+    }
+
+    pub fn wire_version(&self) -> &str {
+        &self.wire_version
+    }
+
+    pub fn total_size_bytes(&self) -> u64 {
+        self.total_size_bytes.get()
+    }
+
+    pub fn record_count(&self) -> u64 {
+        self.record_count.get()
+    }
+
+    pub fn instruction_count(&self) -> u64 {
+        self.instruction_count.get()
+    }
+
+    pub fn components(&self) -> &TraceBundleComponents {
+        &self.components
+    }
+}
+
+/// Replay-visible launch fields authenticated by trace, metadata, and coverage admission.
+///
+/// The unsigned device/stream domains match the reusable v2 launch-key schema;
+/// cohort-only workload/execution/ordinal assertions are intentionally absent.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct ReplayAuthenticatedLaunchIdentity {
+    kernel_mangled_name: String,
+    grid: (u32, u32, u32),
+    block: (u32, u32, u32),
+    device_id: u32,
+    stream_id: u64,
+    binary_architecture: ArchId,
+}
+
+impl ReplayAuthenticatedLaunchIdentity {
+    fn checked(
+        binding: &ReplayLaunchCoverageBinding,
+        binary_architecture: ArchId,
+    ) -> Result<Self, ManifestError> {
+        let device_id = u32::try_from(binding.device_id()).map_err(|_| {
+            ManifestError::ReplayIdentityValueOutOfRange {
+                field: "device_id",
+                value: binding.device_id(),
+                expected_domain: "uint32",
+            }
+        })?;
+        let stream_id = u64::try_from(binding.stream_id()).map_err(|_| {
+            ManifestError::ReplayIdentityValueOutOfRange {
+                field: "stream_id",
+                value: binding.stream_id(),
+                expected_domain: "uint64",
+            }
+        })?;
+        let block = binding.block().ok_or(ManifestError::IdentityFieldMissing {
+            field: "dynamic_trace.kernel.block_dim",
+        })?;
+        Ok(Self {
+            kernel_mangled_name: binding.kernel_mangled_name().to_owned(),
+            grid: binding.grid(),
+            block,
+            device_id,
+            stream_id,
+            binary_architecture,
+        })
+    }
+
+    pub fn kernel_mangled_name(&self) -> &str {
+        &self.kernel_mangled_name
+    }
+
+    pub fn grid(&self) -> (u32, u32, u32) {
+        self.grid
+    }
+
+    pub fn block(&self) -> (u32, u32, u32) {
+        self.block
+    }
+
+    pub fn device_id(&self) -> u32 {
+        self.device_id
+    }
+
+    pub fn stream_id(&self) -> u64 {
+        self.stream_id
+    }
+
+    pub fn binary_architecture(&self) -> ArchId {
+        self.binary_architecture
+    }
+}
+
+fn require_positive_trace_bundle_value(
+    field: &'static str,
+    actual: u64,
+) -> Result<NonZeroU64, ManifestError> {
+    NonZeroU64::new(actual).ok_or(ManifestError::TraceBundleNonpositive { field, actual })
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(deny_unknown_fields)]
 struct SealedArtifact {
@@ -379,12 +793,18 @@ enum CoverageIdentity {
 #[derive(Debug, Clone)]
 pub struct LaunchEvidenceIdentity {
     payload: LaunchEvidencePayload,
+    trace_bundle: TraceBundleIdentity,
+    replay_launch: ReplayAuthenticatedLaunchIdentity,
     seal: Sha256Digest,
     canonical_json: String,
 }
 
 impl LaunchEvidenceIdentity {
-    fn seal(payload: LaunchEvidencePayload) -> Result<Self, ManifestError> {
+    fn seal(
+        payload: LaunchEvidencePayload,
+        trace_bundle: TraceBundleIdentity,
+        replay_launch: ReplayAuthenticatedLaunchIdentity,
+    ) -> Result<Self, ManifestError> {
         let unsigned = serde_json::to_value(&payload)?;
         let unsigned_canonical = canonical_json(&unsigned)?;
         let seal = Sha256Digest::of(unsigned_canonical.as_bytes());
@@ -402,6 +822,8 @@ impl LaunchEvidenceIdentity {
         let canonical_json = canonical_json(&sealed)?;
         Ok(Self {
             payload,
+            trace_bundle,
+            replay_launch,
             seal,
             canonical_json,
         })
@@ -413,6 +835,16 @@ impl LaunchEvidenceIdentity {
 
     pub fn canonical_json(&self) -> &str {
         &self.canonical_json
+    }
+
+    /// Authenticated trace-bundle projection ready for `sim_result.v2` emission.
+    pub fn trace_bundle_identity(&self) -> &TraceBundleIdentity {
+        &self.trace_bundle
+    }
+
+    /// Replay-visible subset of the v2 launch key, with unsigned wire domains.
+    pub fn replay_authenticated_launch(&self) -> &ReplayAuthenticatedLaunchIdentity {
+        &self.replay_launch
     }
 
     pub fn arch(&self) -> Result<ArchId, ArchError> {
@@ -738,6 +1170,7 @@ fn insert_manifest_file_identity(
     Ok(())
 }
 
+#[derive(Clone, Copy)]
 struct ReadArtifactIdentity {
     size_bytes: u64,
     sha256: Sha256Digest,
@@ -968,6 +1401,12 @@ pub fn admit_launch_evidence(
             field: "dynamic_trace_pb relative parent",
         },
     )?;
+    let trace_bundle_path =
+        CanonicalTraceBundlePath::checked(trace_root_relative.to_str().ok_or_else(|| {
+            ManifestError::TraceBundlePathInvalid {
+                path: trace_root_relative.to_string_lossy().into_owned(),
+            }
+        })?)?;
     let snapshot_limits = TraceSnapshotLimits::new(
         artifacts.dynamic_trace_pb.size_bytes,
         artifacts
@@ -1238,6 +1677,7 @@ pub fn admit_launch_evidence(
         .ok_or(ManifestError::IdentityFieldMissing {
             field: "dynamic_trace.kernel.block_dim",
         })?;
+    let replay_launch = ReplayAuthenticatedLaunchIdentity::checked(&launch_binding, expected_arch)?;
     let coverage_identity = match coverage {
         ExtractedCoverage::Full(full) => match full.source() {
             FullCoverageSource::UnsampledComplete => CoverageIdentity::ExactFull {
@@ -1324,6 +1764,48 @@ pub fn admit_launch_evidence(
         }
     };
 
+    let trace_bundle_components = TraceBundleComponents {
+        root_dynamic_trace: TraceBundleComponentIdentity::checked(
+            "components.root_dynamic_trace.size_bytes",
+            trace_identity.dynamic_trace_pb().size_bytes(),
+            trace_identity.dynamic_trace_pb().sha256(),
+        )?,
+        threadblock_payloads: ThreadblockPayloadSetIdentity::checked(
+            trace_identity.threadblock_payload().file_count(),
+            trace_identity.threadblock_payload().raw_bytes(),
+            trace_identity
+                .threadblock_payload()
+                .sorted_path_manifest_sha256(),
+            trace_identity
+                .threadblock_payload()
+                .sorted_path_stream_sha256(),
+        )?,
+        execution_metadata: TraceBundleComponentIdentity::checked(
+            "components.execution_metadata.size_bytes",
+            exec_digest.size_bytes,
+            exec_digest.sha256,
+        )?,
+        control_bits_sidecar: TraceBundleComponentIdentity::checked(
+            "components.control_bits_sidecar.size_bytes",
+            control_digest.size_bytes,
+            control_digest.sha256,
+        )?,
+        stats: TraceBundleComponentIdentity::checked(
+            "components.stats.size_bytes",
+            stats_identity.size_bytes(),
+            stats_identity.sha256(),
+        )?,
+    };
+    let trace_bundle = TraceBundleIdentity::checked(
+        trace_bundle_path,
+        WIRE_VALIDATOR_CONTRACT_ID,
+        wire_summary.launch_count(),
+        wire_summary.threadblock_count(),
+        wire_summary.instruction_count(),
+        trace_stats.admitted_record_count(),
+        trace_bundle_components,
+    )?;
+
     let memory_payload_classes = ["global", "shared", "local", "atomic", "async_copy"]
         .into_iter()
         .map(str::to_owned)
@@ -1386,7 +1868,7 @@ pub fn admit_launch_evidence(
         },
         coverage: coverage_identity,
     };
-    let identity = LaunchEvidenceIdentity::seal(payload)?;
+    let identity = LaunchEvidenceIdentity::seal(payload, trace_bundle, replay_launch)?;
     Ok(AdmittedLaunchEvidence {
         identity,
         trace_dir,
