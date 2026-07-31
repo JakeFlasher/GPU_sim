@@ -1018,6 +1018,28 @@ def _validate_rejected_report(
                 )
 
 
+def _comparison_cell_key(context: Mapping[str, Any]) -> tuple[Any, ...]:
+    launch_key = context["launch_key"]
+    grid = launch_key["grid"]
+    block = launch_key["block"]
+    return (
+        launch_key["workload_id"],
+        launch_key["matched_execution_id"],
+        launch_key["process_launch_ordinal"],
+        launch_key["kernel_mangled_name"],
+        grid["x"],
+        grid["y"],
+        grid["z"],
+        block["x"],
+        block["y"],
+        block["z"],
+        launch_key["device_id"],
+        launch_key["stream_id"],
+        launch_key["binary_architecture"],
+        context["metric_key"],
+    )
+
+
 def _validate_admitted_report(outcome: Mapping[str, Any]) -> None:
     coverage = outcome["coverage"]
     if coverage["labeled_cells"] + coverage["unlabeled_cells"] != coverage[
@@ -1043,17 +1065,9 @@ def _validate_admitted_report(outcome: Mapping[str, Any]) -> None:
             "comparison failure records do not match coverage",
         )
 
-    failed_cells: set[str] = set()
+    failed_cells: set[tuple[Any, ...]] = set()
     for failure in outcome["comparison_failures"]:
-        context = failure["context"]
-        token = json.dumps(
-            {
-                "launch_key": context["launch_key"],
-                "metric_key": context["metric_key"],
-            },
-            sort_keys=True,
-            separators=(",", ":"),
-        )
+        token = _comparison_cell_key(failure["context"])
         if token in failed_cells:
             raise ContractValidationError(
                 "DUPLICATE_COMPARISON_FAILURE",

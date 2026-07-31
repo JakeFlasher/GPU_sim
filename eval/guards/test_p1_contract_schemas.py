@@ -1765,8 +1765,16 @@ def test_duplicate_candidate_cell_cannot_hide_behind_cross_type_or_detail() -> N
     }
     same_cell_different_json_numbers = deepcopy(context)
     same_cell_different_json_numbers["launch_key"]["process_launch_ordinal"] = 0.0
-    same_cell_different_json_numbers["launch_key"]["grid"]["x"] = 2.0
     same_cell_different_json_numbers["launch_key"]["device_id"] = 0.0
+    same_cell_different_json_numbers["launch_key"]["stream_id"] = 7.0
+    for geometry in ("grid", "block"):
+        for dimension in ("x", "y", "z"):
+            value = same_cell_different_json_numbers["launch_key"][geometry][
+                dimension
+            ]
+            same_cell_different_json_numbers["launch_key"][geometry][dimension] = float(
+                value
+            )
     outcome["comparison_failures"] = [
         {
             "failure_type": "MISSING_LABEL",
