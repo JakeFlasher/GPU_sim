@@ -26,7 +26,7 @@
 use std::path::{Path, PathBuf};
 
 use sim_arch::BuildArch;
-use sim_calib::ArchCard;
+use sim_arch::card::ArchCard;
 use sim_mem::{L2Config, PchaseCard};
 use sim_sm::{
     CoResidency, ControlSidecar, IssueModelParams, ReplayConfiguration, ReplayMemMode,

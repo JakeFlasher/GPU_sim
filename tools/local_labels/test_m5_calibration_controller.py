@@ -1404,6 +1404,12 @@ def test_v2_authority_and_empty_public_trust_registry_are_pinned(
         assert schema["additionalProperties"] is False
         assert immutable.sha256_file(path)[0] == expected_sha256
         assert controller_sha256 == expected_sha256
+    assert immutable.sha256_file(m5.M5_SOURCE_REGISTRY_PATH_V1)[0] == (
+        "de937a90c920ea9eef0229bf67a0aa9348b97657f2be6643df856f945518e060"
+    )
+    assert m5.M5_SOURCE_REGISTRY_SHA256_V1 == (
+        "de937a90c920ea9eef0229bf67a0aa9348b97657f2be6643df856f945518e060"
+    )
     assert immutable.sha256_file(m5.AUTHORITY_ANCESTRY_AUDIT_TOOL_PATH_V1)[0] == (
         "99a0cdf1ea1cc777d64b87538d15a6289a64d001341b0af64d5ff5ad3406963e"
     )

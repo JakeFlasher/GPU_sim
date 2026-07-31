@@ -21,7 +21,7 @@ Status vocabulary:
 | `sim-sm` / `sim/sm` | active | Control-bit join, four-SMSP issue, traced placement, admitted launch replay, and checked full-launch aggregation | Per-launch issue/terminal timing fields remain diagnostic |
 | `sim-mem` / `sim/mem` | active | Sectored L1/L2 and DRAM bandwidth model | Several microarchitecture choices remain explicit hypotheses |
 | `sim-emit` / `sim/emit` | active | Seven typed NCU-shaped secondary predictions plus the mandatory blocked cycles row | Binding-cycle implementation awaits admitted aggregation semantics |
-| `sim-calib` / `sim/calib` | active | Fail-closed architecture-card loading | Production runner supports `sm_86`; `sm_120` gaps remain closed |
+| `sim-arch` / `sim/arch` | active | Typed architecture identities/capabilities and fail-closed architecture-card loading | Production runner supports `sm_86`; `sm_120` gaps remain closed |
 | `sim-runner` / `sim/runner` | active | Strict run-manifest admission, card-derived configuration, replay, checked aggregation, and canonical sealed results | No production launch-manifest producer or admitted cycle semantics |
 | `sim-cli` / `sim/cli` | active | One-manifest command-line boundary with canonical result/error streams | Offline execution confers no hardware readiness |
 | `sim-ffi` / `sim/ffi` | retire | Three-line unused placeholder | Already excluded from Cargo workspace; leftover path is HEAD-only cleanup, not active architecture |

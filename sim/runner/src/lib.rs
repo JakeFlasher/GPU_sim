@@ -9,8 +9,8 @@ use std::collections::BTreeSet;
 use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Deserializer, Serialize, de};
+use sim_arch::card::CalibError;
 use sim_arch::{ArchId, Sku};
-use sim_calib::CalibError;
 use sim_emit::emit_all;
 use sim_mem::{
     L1Config, L1Counters, L1OriginCounters, L2Config, L2ConfigError, L2Counters, L2Replacement,

@@ -7,13 +7,12 @@ phases A→E (engine → memory → trace → modern features → accuracy tunin
 
 | Crate | Role (target fidelity) |
 |---|---|
-| `sim-arch` | Typed deployment/build/SKU identities plus reviewed capability states. `sm_86` capabilities are admitted; `sm_120` is an explicit template with typed research gaps/unsupported control paths. |
+| `sim-arch` | Typed deployment/build/SKU identities and reviewed capability states, plus the fail-closed architecture-card loader and provenance boundary for per-architecture latencies/throughputs. `sm_86` capabilities are admitted; `sm_120` is an explicit template with typed research gaps/unsupported control paths. Cards are simulator inputs; NCU labels remain targets and never enter the feature/configuration path. |
 | `sim-engine` | Event queue (binary-heap → timing-wheel hybrid later), tagged-enum dispatch, current event tuple `{time, seq, target, kind}`, per-SM actor mini-loop batching. Throughput target ≥3–10 M events/s. |
 | `sim-sm` | Generic 4-sub-core issue/replay algorithms. Static control decoding is capability-gated: the checked-in Ampere sidecar path is active for `sm_86`; no unproven Blackwell decoder is implied. |
 | `sim-mem` | Generic sectored L1/L2 state machines and warp-pool interleave. Geometry, cache-op defaults, MSHR approximations, and latency ladders enter through typed architecture/card resolvers; an `sm_120` gap cannot inherit an `sm_86` hypothesis. |
 | `sim-trace` | NVBit protobuf trace ingestion through the committed Rust/prost bindings for the existing `traces_enhanced` wire format. Wire decoding remains architecture-neutral. |
 | `sim-emit` | NCU-metric emission boundary — seven implemented secondary descriptors plus the mandatory `exec_cycles_gpc_max` row, which remains `required_unimplemented` pending admitted aggregation semantics. The descriptor/exclusion tables partition the 61-row registry exactly. |
-| `sim-calib` | Card loader and typed provenance boundary for per-architecture latencies/throughputs. Cards are simulator inputs; NCU labels remain targets and never enter this crate's feature/configuration path. |
 | `sim-runner` | Manifest-only production composition: sealed launch admission, architecture-local configuration resolution, full-coverage replay, checked launch-set aggregation, emission, and sealed canonical `sim_result.v1` output. |
 | `sim-cli` | Thin one-argument binary over `sim-runner`; stdout is result-only, stderr is typed canonical error-only, and no replay setting comes from flags or environment variables. |
 

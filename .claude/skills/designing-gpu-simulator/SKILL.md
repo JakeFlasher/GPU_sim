@@ -77,8 +77,8 @@ Companion audit: `plans/deep_research_audit_and_extraction_plan_2026-07-06.md`.
   64 B-pair 62.5 / measured ~55 — close by microbench, arch-gated);
   RED/ATOM addresses excluded at capture (histogram L2 label
   unscorable until tracer extension + re-capture).
-- `sim/calib` — ArchProfile loader; research_gap = typed error; block-level
-  Carded gaps.
+- `sim/arch/src/card.rs` (`sim_arch::card`) — ArchProfile loader;
+  research_gap = typed error; block-level Carded gaps.
 - `sim/engine` — (time,seq) deterministic event queue, live under
   `sim/sm/src/system.rs` for the shared-L2 co-simulation.
 - Progress log: `plans/phase2_sim_core_progress.md`.

@@ -116,7 +116,7 @@ class TestSm86CacheLayers:
 class TestSm86LatenciesLockstep:
     """Plan §1D: card latencies == the pchase static-card evidence, exactly.
 
-    The ArchProfile ``latencies_cycles`` block is what sim-calib consumes;
+    The ArchProfile ``latencies_cycles`` block is what ``sim_arch::card`` consumes;
     the pchase card is the measurement evidence. Transcription drift between
     them would silently decouple the simulator from its measured inputs.
     """

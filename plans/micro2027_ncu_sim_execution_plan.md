@@ -114,7 +114,7 @@ cross_arch_gpu_profiler_suite/
 │   │                            #   L2 slice actors (cache_replay semantics), DRAM (GDDR6X/GDDR7)
 │   ├── trace/                   #   NVBit protobuf ingestion (C++/protobuf shim → Rust)
 │   ├── emit/                    #   NCU-metric emission layer — contract = metric_registry v2 observation contracts
-│   ├── calib/                   #   per-arch fitted latencies/throughputs; optional monotone low-capacity heads
+│   ├── arch/                    #   arch types + sim_arch::card loader for per-arch fitted latencies/throughputs
 │   └── ffi/                     #   C++ shim for the existing NVBit wire format
 ├── labels/                      # the NCU label factory (from tools/local_labels): capture→gate→admit, registry
 ├── eval/                        # generalized comparison_runner → per-(kernel,metric,arch) harness + baselines/
@@ -182,7 +182,7 @@ reverse-engineered facts + the repo's own failure→fix map (`plans/research/sot
 - **6.2 SM model** (fidelity MEDIUM). 4 sub-cores; CGGTY issue; **dependence stalls read from SASS control bits (Phase 1E), not simulated scoreboards** — the 13–17% cycles-MAPE lever [F6]. Unified INT32/FP32 pipe for sm_120 (verified GB202 fact); tensor path = HMMA (sm_86) / block-scaled `mma.sync` + FP8/FP6/FP4 (sm_120). **No tcgen05/TMEM** (sm_100-only; out of scope).
 - **6.3 Memory hierarchy.** L1 = sectored + **finite MSHR** + **warp-pool FIFO interleaving** + **carveout-aware capacity** [F1–F3, Nugteren HPCA'14 warp-pool 6.4–8.3% L1 MAE; HRD(32,128) two-granularity reuse distance]; geometry from the per-arch cards [F2, Mei&Chu p-chase]. L2 = slice actors ported from `tools/cache_replay/sector_cache_replay.py` semantics (32 B sector fills, hashed slice mapping — **widen the IPOLY-style hash for GB202's large L2**; note the L40/5090 non-uniform-L2-latency finding). DRAM = GDDR6X/GDDR7 bandwidth-latency (fidelity HIGH only if error attribution demands it).
 - **6.4 NCU-emission layer** (`sim/emit`). Every emitted metric implements the registry-v2 observation contract, **including NCU's sector-accounting semantics** (the ~15 pp hazard Accel-Sim's authors attribute to profiler accounting) and NCU's **isolated-execution / per-pass cache-flush** assumption → simulate **cold-cache per kernel by default**, matching `--cache-control all` labels.
-- **6.5 Calibration layer** (`sim/calib`). Per-arch fitted latencies/throughputs from 1D; optional **monotone low-capacity residual heads** (the v5 isotonic pattern, D1's demoted hybrid) on top of simulator outputs — fit **slug-disjointly**, never truth-fitted per cell [F5].
+- **6.5 Calibration layer** (`sim/arch/src/card.rs` via `sim_arch::card`). Per-arch fitted latencies/throughputs from 1D; optional **monotone low-capacity residual heads** (the v5 isotonic pattern, D1's demoted hybrid) on top of simulator outputs — fit **slug-disjointly**, never truth-fitted per cell [F5].
 - **6.6 Fidelity knobs** (per component, the what-if differentiator): frontend LOW · warp-scheduler MEDIUM · exec-units MEDIUM · tensor MEDIUM · L1 MEDIUM · interconnect LOW · L2 MEDIUM · DRAM HIGH. Codex-flagged **hypotheses-not-spec** (RF cache, uniform unit, L0 icache stream-buffer): keep behind knobs, validate before claiming.
 
 ---

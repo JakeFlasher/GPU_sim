@@ -115,8 +115,8 @@
       "can_collect": false,
       "category": "downstream_consumer",
       "lifecycle": "active",
-      "path": "sim/calib/src/lib.rs",
-      "reason": "Typed calibration consumer requiring a future admitted M5 gap handoff."
+      "path": "sim/arch/src/card.rs",
+      "reason": "sim_arch::card is the typed downstream consumer requiring a future admitted M5 gap handoff."
     },
     {
       "authority_candidate": false,

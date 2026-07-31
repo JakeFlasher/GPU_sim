@@ -1,4 +1,4 @@
-//! sim-calib: loader for the per-arch calibration cards
+//! `sim_arch::card`: loader for the per-arch calibration cards
 //! (`arch_profiles/cards/*.json`).
 //!
 //! The simulator's latencies, geometries, and clock anchors come from these
@@ -19,12 +19,12 @@
 use std::collections::BTreeSet;
 use std::path::Path;
 
-use serde::Deserialize;
-use serde::de::DeserializeOwned;
-use sim_arch::{
+use crate::{
     ArchError, ArchId, ArchIdentity, BareLdgECardDeclaration, BareLdgECardDeclarationError,
     BareLdgEDefault, BuildArch, CapabilityError, CapabilityStatus, Sku,
 };
+use serde::Deserialize;
+use serde::de::DeserializeOwned;
 
 #[derive(Debug, thiserror::Error)]
 pub enum CalibError {
@@ -702,7 +702,7 @@ struct RawArchCard {
 /// also carry label-side bookkeeping that must never leak into simulator inputs.
 ///
 /// ```compile_fail
-/// let _: sim_calib::ArchCard = serde_json::from_str("{}").unwrap();
+/// let _: sim_arch::card::ArchCard = serde_json::from_str("{}").unwrap();
 /// ```
 #[derive(Debug, Clone)]
 pub struct ArchCard {

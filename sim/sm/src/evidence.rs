@@ -9,8 +9,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Component, Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+use sim_arch::card::{ArchCard, CalibError};
 use sim_arch::{ArchError, ArchId, Sku};
-use sim_calib::{ArchCard, CalibError};
 use sim_mem::{PchaseCard, PchaseCardError};
 use sim_trace::reader::{ADDRESS_CARRYING_TRACE_CONTRACT_ID, MemoryPayloadContract};
 use sim_trace::{

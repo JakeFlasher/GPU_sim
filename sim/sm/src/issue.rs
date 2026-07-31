@@ -58,7 +58,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::atomic::{AtomicU64, Ordering};
 
 use sim_arch::ArchId;
-use sim_calib::{ArchCard, CalibError, RequiredIssueResources};
+use sim_arch::card::{ArchCard, CalibError, RequiredIssueResources};
 use sim_mem::{
     CacheOpToken, EvAccess, EvAccessUnobserved, FillKey, L1AccessError, L1Cache, L1Config,
     L1Counters, L1MutationBudget, L2OpClass, L2Source, MemoryOrigin,

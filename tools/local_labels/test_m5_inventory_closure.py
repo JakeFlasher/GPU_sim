@@ -87,7 +87,7 @@ EXPLICIT_SURFACES = {
     "plans/sm86_comprehensive_live_capture_campaign_plan.md",
     "plans/sm86_cp_async_timing_probe_fable5_answer.md",
     "plans/sm86_cp_async_timing_probe_fable5_prompt.md",
-    "sim/calib/src/lib.rs",
+    "sim/arch/src/card.rs",
     "sim/mem/src/l1.rs",
     "sim/mem/src/lib.rs",
     "sim/mem/src/pchase_card.rs",
@@ -194,11 +194,33 @@ def _available_paths() -> set[str]:
         capture_output=True,
         check=True,
     )
-    return {
+    deleted = subprocess.run(
+        [
+            "git",
+            "ls-files",
+            "-z",
+            "--deleted",
+            "--",
+            *CLOSURE_ROOTS,
+        ],
+        cwd=REPO_ROOT,
+        capture_output=True,
+        check=True,
+    )
+    listed = {
         raw.decode("utf-8")
         for raw in completed.stdout.split(b"\0")
         if raw
     }
+    unstaged_deletions = {
+        raw.decode("utf-8")
+        for raw in deleted.stdout.split(b"\0")
+        if raw
+    }
+    # `--cached` includes paths deleted only from the working tree. Inventory
+    # the prospective source surface, while `registered <= available` still
+    # rejects stale entries.
+    return listed - unstaged_deletions
 
 
 def _read_declared_regular(relative_path: str) -> bytes | None:

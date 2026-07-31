@@ -303,7 +303,7 @@ _ACTIVE_CLAIM_PATHS = (
     "arch_profiles/cards/sm_86.json",
     "docs/predictors.md",
     "plans/micro2027_ncu_sim_execution_plan.md",
-    "sim/calib/src/lib.rs",
+    "sim/arch/src/card.rs",
 )
 _HISTORICAL_FUNCTION_EXCLUSIONS = {
     "tools/local_labels/emit_timing_prediction_contract.py": {

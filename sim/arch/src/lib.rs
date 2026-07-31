@@ -7,6 +7,8 @@
 //! typed error.  This keeps the sm_86 reviewed hypotheses from becoming
 //! accidental sm_120 defaults.
 
+pub mod card;
+
 use std::fmt;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]

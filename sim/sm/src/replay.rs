@@ -34,8 +34,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
+use sim_arch::card::{ArchCard, CalibError};
 use sim_arch::{ArchId, Sku};
-use sim_calib::{ArchCard, CalibError};
 use sim_mem::{L1Config, L1CounterError, L1Counters, SectorExpansionError, SectorExpansionPlan};
 use sim_trace::lanes::LANE_INACTIVE_SENTINEL;
 use sim_trace::pb;

@@ -232,16 +232,8 @@ dependencies = [
 name = "sim-arch"
 version = "0.0.1"
 dependencies = [
- "thiserror",
-]
-
-[[package]]
-name = "sim-calib"
-version = "0.0.1"
-dependencies = [
  "serde",
  "serde_json",
- "sim-arch",
  "tempfile",
  "thiserror",
 ]
@@ -293,7 +285,6 @@ dependencies = [
  "serde",
  "serde_json",
  "sim-arch",
- "sim-calib",
  "sim-emit",
  "sim-mem",
  "sim-sm",
@@ -310,7 +301,6 @@ dependencies = [
  "serde",
  "serde_json",
  "sim-arch",
- "sim-calib",
  "sim-emit",
  "sim-engine",
  "sim-mem",
