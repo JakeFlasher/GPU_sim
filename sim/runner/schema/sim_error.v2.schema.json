@@ -1,0 +1,531 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gpu-simulator.local/sim/run/schema/sim_error.v2.schema.json",
+  "title": "Canonical simulator early error v2",
+  "description": "Closed canonical error document for failures before a complete successful sim_result.v2 exists. Every admitted failure is stage-discriminated; replay and emission have explicit arms and no catch-all internal-error arm may launder an unclassified RunError.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "error_sha256",
+    "error",
+    "exit_status"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "sim_error.v2"
+    },
+    "error_sha256": {
+      "$ref": "#/$defs/sha256",
+      "description": "SHA-256 of repository-canonical JSON with this member omitted."
+    },
+    "build_identity": {
+      "$ref": "#/$defs/buildIdentity"
+    },
+    "error": {
+      "$ref": "#/$defs/typedError"
+    },
+    "exit_status": {
+      "$ref": "#/$defs/failureExitStatus"
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "gitCommit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "nonemptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "buildClaimability": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "basis"
+          ],
+          "properties": {
+            "status": {
+              "const": "claimable"
+            },
+            "basis": {
+              "const": "clean_build"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "reason"
+          ],
+          "properties": {
+            "status": {
+              "const": "unclaimable"
+            },
+            "reason": {
+              "const": "dirty_build"
+            }
+          }
+        }
+      ]
+    },
+    "buildIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sim_git_commit",
+        "sim_git_dirty",
+        "binary_sha256",
+        "rustc_version",
+        "cargo_profile",
+        "claimability"
+      ],
+      "properties": {
+        "sim_git_commit": {
+          "$ref": "#/$defs/gitCommit"
+        },
+        "sim_git_dirty": {
+          "type": "boolean"
+        },
+        "binary_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "rustc_version": {
+          "$ref": "#/$defs/nonemptyString"
+        },
+        "cargo_profile": {
+          "$ref": "#/$defs/nonemptyString"
+        },
+        "claimability": {
+          "$ref": "#/$defs/buildClaimability"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "sim_git_dirty": {
+                "const": false
+              }
+            },
+            "required": [
+              "sim_git_dirty"
+            ]
+          },
+          "then": {
+            "properties": {
+              "claimability": {
+                "properties": {
+                  "status": {
+                    "const": "claimable"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "sim_git_dirty": {
+                "const": true
+              }
+            },
+            "required": [
+              "sim_git_dirty"
+            ]
+          },
+          "then": {
+            "properties": {
+              "claimability": {
+                "properties": {
+                  "status": {
+                    "const": "unclaimable"
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "canonicalRelativePath": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^[A-Za-z0-9._/-]+$",
+      "not": {
+        "anyOf": [
+          {
+            "pattern": "^/"
+          },
+          {
+            "pattern": "/$"
+          },
+          {
+            "pattern": "//"
+          },
+          {
+            "pattern": "[\\r\\n]"
+          },
+          {
+            "pattern": "(^|/)\\.\\.?(/|$)"
+          }
+        ]
+      }
+    },
+    "metricKey": {
+      "enum": [
+        "smsp_inst_executed_sum",
+        "traffic_gmem_ld_sectors",
+        "traffic_gmem_st_sectors",
+        "traffic_dram_read_sectors",
+        "cache_hit_rate_l1tex_read_sector",
+        "cache_hit_rate_l1tex_sector",
+        "cache_hit_rate_l2_sector",
+        "exec_cycles_gpc_max"
+      ]
+    },
+    "typedError": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "failure_type",
+            "stage",
+            "detail",
+            "evidence"
+          ],
+          "properties": {
+            "failure_type": {
+              "const": "CLI_USAGE_FAILED"
+            },
+            "stage": {
+              "const": "cli_usage"
+            },
+            "detail": {
+              "$ref": "#/$defs/nonemptyString"
+            },
+            "evidence": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "provided_positional_argument_count",
+                "expected_positional_argument_count"
+              ],
+              "properties": {
+                "provided_positional_argument_count": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 4294967295
+                },
+                "expected_positional_argument_count": {
+                  "const": 1
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "failure_type",
+            "stage",
+            "detail"
+          ],
+          "properties": {
+            "failure_type": {
+              "const": "MANIFEST_ADMISSION_FAILED"
+            },
+            "stage": {
+              "const": "manifest_admission"
+            },
+            "detail": {
+              "$ref": "#/$defs/nonemptyString"
+            },
+            "evidence": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "manifest_path",
+                "manifest_sha256"
+              ],
+              "properties": {
+                "manifest_path": {
+                  "$ref": "#/$defs/canonicalRelativePath"
+                },
+                "manifest_sha256": {
+                  "$ref": "#/$defs/sha256"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "failure_type",
+            "stage",
+            "detail"
+          ],
+          "properties": {
+            "failure_type": {
+              "const": "TRACE_ADMISSION_FAILED"
+            },
+            "stage": {
+              "const": "trace_admission"
+            },
+            "detail": {
+              "$ref": "#/$defs/nonemptyString"
+            },
+            "evidence": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "bundle_id",
+                "bundle_sha256"
+              ],
+              "properties": {
+                "bundle_id": {
+                  "$ref": "#/$defs/nonemptyString"
+                },
+                "bundle_sha256": {
+                  "$ref": "#/$defs/sha256"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "failure_type",
+            "stage",
+            "detail"
+          ],
+          "properties": {
+            "failure_type": {
+              "const": "ARCH_CARD_ADMISSION_FAILED"
+            },
+            "stage": {
+              "const": "arch_card_admission"
+            },
+            "detail": {
+              "$ref": "#/$defs/nonemptyString"
+            },
+            "evidence": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "card_id",
+                "card_sha256"
+              ],
+              "properties": {
+                "card_id": {
+                  "$ref": "#/$defs/nonemptyString"
+                },
+                "card_sha256": {
+                  "$ref": "#/$defs/sha256"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "failure_type",
+            "stage",
+            "detail"
+          ],
+          "properties": {
+            "failure_type": {
+              "const": "CONFIGURATION_RESOLUTION_FAILED"
+            },
+            "stage": {
+              "const": "configuration_resolution"
+            },
+            "detail": {
+              "$ref": "#/$defs/nonemptyString"
+            },
+            "evidence": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "configuration_id",
+                "run_manifest_sha256"
+              ],
+              "properties": {
+                "configuration_id": {
+                  "$ref": "#/$defs/nonemptyString"
+                },
+                "run_manifest_sha256": {
+                  "$ref": "#/$defs/sha256"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "failure_type",
+            "stage",
+            "detail"
+          ],
+          "properties": {
+            "failure_type": {
+              "const": "REPLAY_FAILED"
+            },
+            "stage": {
+              "const": "replay"
+            },
+            "detail": {
+              "$ref": "#/$defs/nonemptyString"
+            },
+            "evidence": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "launch_key"
+              ],
+              "properties": {
+                "launch_key": {
+                  "$ref": "https://gpu-simulator.local/eval/schemas/launch_key.v1.schema.json"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "failure_type",
+            "stage",
+            "detail"
+          ],
+          "properties": {
+            "failure_type": {
+              "const": "EMISSION_FAILED"
+            },
+            "stage": {
+              "const": "emission"
+            },
+            "detail": {
+              "$ref": "#/$defs/nonemptyString"
+            },
+            "evidence": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "metric_key"
+              ],
+              "properties": {
+                "metric_key": {
+                  "$ref": "#/$defs/metricKey"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "failure_type",
+            "stage",
+            "detail"
+          ],
+          "properties": {
+            "failure_type": {
+              "const": "RESULT_SERIALIZATION_FAILED"
+            },
+            "stage": {
+              "const": "result_serialization"
+            },
+            "detail": {
+              "$ref": "#/$defs/nonemptyString"
+            },
+            "evidence": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "unsigned_result_sha256"
+              ],
+              "properties": {
+                "unsigned_result_sha256": {
+                  "$ref": "#/$defs/sha256"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "failure_type",
+            "stage",
+            "detail"
+          ],
+          "properties": {
+            "failure_type": {
+              "const": "OUTPUT_WRITE_FAILED"
+            },
+            "stage": {
+              "const": "output_write"
+            },
+            "detail": {
+              "$ref": "#/$defs/nonemptyString"
+            },
+            "evidence": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "output_path"
+              ],
+              "properties": {
+                "output_path": {
+                  "$ref": "#/$defs/canonicalRelativePath"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "failureExitStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "exit_code"
+      ],
+      "properties": {
+        "status": {
+          "const": "failure"
+        },
+        "exit_code": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 255
+        }
+      }
+    }
+  }
+}

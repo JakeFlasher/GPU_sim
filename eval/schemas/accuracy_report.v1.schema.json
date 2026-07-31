@@ -1,0 +1,1951 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gpu-simulator.local/eval/schemas/accuracy_report.v1.schema.json",
+  "title": "Generic simulator accuracy report v1",
+  "description": "Canonical closed evaluator report. Admitted outcomes carry nonvacuous scoring partitions; rejected outcomes carry typed admission failure and an honest unknown/zero candidate status without fabricated metric-family rows. Cycles cannot be numerically scored in v1.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "report_sha256",
+    "identities",
+    "outcome"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "accuracy_report.v1"
+    },
+    "report_sha256": {
+      "$ref": "#/$defs/sha256",
+      "description": "SHA-256 of repository-canonical JSON with this member omitted."
+    },
+    "identities": {
+      "$ref": "#/$defs/identities"
+    },
+    "outcome": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/admittedOutcome"
+        },
+        {
+          "$ref": "#/$defs/rejectedOutcome"
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "properties": {
+          "outcome": {
+            "properties": {
+              "status": {
+                "const": "admitted"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          }
+        },
+        "required": [
+          "outcome"
+        ]
+      },
+      "then": {
+        "properties": {
+          "identities": {
+            "properties": {
+              "label_binding": {
+                "$ref": "#/$defs/boundLabelBinding"
+              }
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "gitCommit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "nonemptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "u64": {
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 18446744073709551615
+    },
+    "positiveU64": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 18446744073709551615
+    },
+    "nonnegativeNumber": {
+      "type": "number",
+      "minimum": 0
+    },
+    "nullableNumber": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "type": "number"
+        }
+      ]
+    },
+    "nullableNonnegativeNumber": {
+      "oneOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/nonnegativeNumber"
+        }
+      ]
+    },
+    "buildClaimability": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "basis"
+          ],
+          "properties": {
+            "status": {
+              "const": "claimable"
+            },
+            "basis": {
+              "const": "clean_build"
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "reason"
+          ],
+          "properties": {
+            "status": {
+              "const": "unclaimable"
+            },
+            "reason": {
+              "const": "dirty_build"
+            }
+          }
+        }
+      ]
+    },
+    "boundLabelBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "matched_labels_sha256",
+        "label_set_id",
+        "label_set_sha256",
+        "crosswalk_id",
+        "crosswalk_sha256",
+        "authority_role"
+      ],
+      "properties": {
+        "status": {
+          "const": "bound"
+        },
+        "matched_labels_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "label_set_id": {
+          "$ref": "#/$defs/nonemptyString"
+        },
+        "label_set_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "crosswalk_id": {
+          "$ref": "#/$defs/nonemptyString"
+        },
+        "crosswalk_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "authority_role": {
+          "const": "independently_admitted_label_and_crosswalk"
+        }
+      }
+    },
+    "unavailableLabelBinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "requested_label_set_id",
+        "reason"
+      ],
+      "properties": {
+        "status": {
+          "const": "unavailable"
+        },
+        "requested_label_set_id": {
+          "$ref": "#/$defs/nonemptyString"
+        },
+        "reason": {
+          "const": "no_independently_admitted_matched_labels"
+        }
+      }
+    },
+    "labelBinding": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/boundLabelBinding"
+        },
+        {
+          "$ref": "#/$defs/unavailableLabelBinding"
+        }
+      ]
+    },
+    "identities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "report_id",
+        "result_schema_version",
+        "result_file_sha256",
+        "result_canonical_sha256",
+        "registry_projection_id",
+        "registry_projection_sha256",
+        "source_registry_sha256",
+        "arch_card_id",
+        "arch_card_sha256",
+        "binary_architecture",
+        "gpu_sku",
+        "simulator_git_dirty",
+        "simulator_build_claimability",
+        "evaluator_git_commit",
+        "evaluator_git_dirty",
+        "evaluator_build_claimability",
+        "label_binding"
+      ],
+      "properties": {
+        "report_id": {
+          "$ref": "#/$defs/nonemptyString"
+        },
+        "result_schema_version": {
+          "const": "sim_result.v2"
+        },
+        "result_file_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "result_canonical_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "registry_projection_id": {
+          "const": "metric_registry_projection.v1"
+        },
+        "registry_projection_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "source_registry_sha256": {
+          "const": "95d90f8c4fffd9376b8d785047a9e02ecafc81ed43da6081985958c2b9dec62d"
+        },
+        "arch_card_id": {
+          "$ref": "#/$defs/nonemptyString"
+        },
+        "arch_card_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "binary_architecture": {
+          "const": "sm_86"
+        },
+        "gpu_sku": {
+          "const": "rtx_3090_ti"
+        },
+        "simulator_git_dirty": {
+          "type": "boolean"
+        },
+        "simulator_build_claimability": {
+          "$ref": "#/$defs/buildClaimability"
+        },
+        "evaluator_git_commit": {
+          "$ref": "#/$defs/gitCommit"
+        },
+        "evaluator_git_dirty": {
+          "type": "boolean"
+        },
+        "evaluator_build_claimability": {
+          "$ref": "#/$defs/buildClaimability"
+        },
+        "label_binding": {
+          "$ref": "#/$defs/labelBinding"
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "simulator_git_dirty": {
+                "const": false
+              }
+            },
+            "required": [
+              "simulator_git_dirty"
+            ]
+          },
+          "then": {
+            "properties": {
+              "simulator_build_claimability": {
+                "properties": {
+                  "status": {
+                    "const": "claimable"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "simulator_git_dirty": {
+                "const": true
+              }
+            },
+            "required": [
+              "simulator_git_dirty"
+            ]
+          },
+          "then": {
+            "properties": {
+              "simulator_build_claimability": {
+                "properties": {
+                  "status": {
+                    "const": "unclaimable"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "evaluator_git_dirty": {
+                "const": false
+              }
+            },
+            "required": [
+              "evaluator_git_dirty"
+            ]
+          },
+          "then": {
+            "properties": {
+              "evaluator_build_claimability": {
+                "properties": {
+                  "status": {
+                    "const": "claimable"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "evaluator_git_dirty": {
+                "const": true
+              }
+            },
+            "required": [
+              "evaluator_git_dirty"
+            ]
+          },
+          "then": {
+            "properties": {
+              "evaluator_build_claimability": {
+                "properties": {
+                  "status": {
+                    "const": "unclaimable"
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "checkStatus": {
+      "enum": [
+        "passed",
+        "failed",
+        "not_run"
+      ]
+    },
+    "admittedChecks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "result_schema",
+        "result_seal",
+        "registry_projection",
+        "architecture",
+        "matched_label_schema",
+        "matched_label_seal",
+        "crosswalk_identity",
+        "label_input_availability",
+        "units"
+      ],
+      "properties": {
+        "result_schema": {
+          "const": "passed"
+        },
+        "result_seal": {
+          "const": "passed"
+        },
+        "registry_projection": {
+          "const": "passed"
+        },
+        "architecture": {
+          "const": "passed"
+        },
+        "matched_label_schema": {
+          "const": "passed"
+        },
+        "matched_label_seal": {
+          "const": "passed"
+        },
+        "crosswalk_identity": {
+          "const": "passed"
+        },
+        "label_input_availability": {
+          "const": "passed"
+        },
+        "units": {
+          "const": "passed"
+        }
+      }
+    },
+    "rejectedChecks": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "result_schema",
+        "result_seal",
+        "registry_projection",
+        "architecture",
+        "matched_label_schema",
+        "matched_label_seal",
+        "crosswalk_identity",
+        "label_input_availability",
+        "units"
+      ],
+      "properties": {
+        "result_schema": {
+          "$ref": "#/$defs/checkStatus"
+        },
+        "result_seal": {
+          "$ref": "#/$defs/checkStatus"
+        },
+        "registry_projection": {
+          "$ref": "#/$defs/checkStatus"
+        },
+        "architecture": {
+          "$ref": "#/$defs/checkStatus"
+        },
+        "matched_label_schema": {
+          "$ref": "#/$defs/checkStatus"
+        },
+        "matched_label_seal": {
+          "$ref": "#/$defs/checkStatus"
+        },
+        "crosswalk_identity": {
+          "$ref": "#/$defs/checkStatus"
+        },
+        "label_input_availability": {
+          "$ref": "#/$defs/checkStatus"
+        },
+        "units": {
+          "$ref": "#/$defs/checkStatus"
+        }
+      },
+      "allOf": [
+        {
+          "anyOf": [
+            {
+              "properties": {
+                "result_schema": {
+                  "const": "failed"
+                }
+              },
+              "required": [
+                "result_schema"
+              ]
+            },
+            {
+              "properties": {
+                "result_seal": {
+                  "const": "failed"
+                }
+              },
+              "required": [
+                "result_seal"
+              ]
+            },
+            {
+              "properties": {
+                "registry_projection": {
+                  "const": "failed"
+                }
+              },
+              "required": [
+                "registry_projection"
+              ]
+            },
+            {
+              "properties": {
+                "architecture": {
+                  "const": "failed"
+                }
+              },
+              "required": [
+                "architecture"
+              ]
+            },
+            {
+              "properties": {
+                "matched_label_schema": {
+                  "const": "failed"
+                }
+              },
+              "required": [
+                "matched_label_schema"
+              ]
+            },
+            {
+              "properties": {
+                "matched_label_seal": {
+                  "const": "failed"
+                }
+              },
+              "required": [
+                "matched_label_seal"
+              ]
+            },
+            {
+              "properties": {
+                "crosswalk_identity": {
+                  "const": "failed"
+                }
+              },
+              "required": [
+                "crosswalk_identity"
+              ]
+            },
+            {
+              "properties": {
+                "label_input_availability": {
+                  "const": "failed"
+                }
+              },
+              "required": [
+                "label_input_availability"
+              ]
+            },
+            {
+              "properties": {
+                "units": {
+                  "const": "failed"
+                }
+              },
+              "required": [
+                "units"
+              ]
+            }
+          ]
+        }
+      ]
+    },
+    "metricKey": {
+      "enum": [
+        "smsp_inst_executed_sum",
+        "traffic_gmem_ld_sectors",
+        "traffic_gmem_st_sectors",
+        "traffic_dram_read_sectors",
+        "cache_hit_rate_l1tex_read_sector",
+        "cache_hit_rate_l1tex_sector",
+        "cache_hit_rate_l2_sector",
+        "exec_cycles_gpc_max"
+      ]
+    },
+    "admissionFailure": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "failure_type",
+            "detail",
+            "context"
+          ],
+          "properties": {
+            "failure_type": {
+              "const": "RESULT_SCHEMA_UNSUPPORTED"
+            },
+            "detail": {
+              "$ref": "#/$defs/nonemptyString"
+            },
+            "context": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "observed_schema_version"
+              ],
+              "properties": {
+                "observed_schema_version": {
+                  "$ref": "#/$defs/nonemptyString"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "failure_type",
+            "detail",
+            "context"
+          ],
+          "properties": {
+            "failure_type": {
+              "const": "RESULT_SCHEMA_INVALID"
+            },
+            "detail": {
+              "$ref": "#/$defs/nonemptyString"
+            },
+            "context": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "json_path"
+              ],
+              "properties": {
+                "json_path": {
+                  "$ref": "#/$defs/nonemptyString"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "failure_type",
+            "detail",
+            "context"
+          ],
+          "properties": {
+            "failure_type": {
+              "const": "RESULT_SEAL_INVALID"
+            },
+            "detail": {
+              "$ref": "#/$defs/nonemptyString"
+            },
+            "context": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "expected_sha256",
+                "observed_sha256"
+              ],
+              "properties": {
+                "expected_sha256": {
+                  "$ref": "#/$defs/sha256"
+                },
+                "observed_sha256": {
+                  "$ref": "#/$defs/sha256"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "failure_type",
+            "detail",
+            "context"
+          ],
+          "properties": {
+            "failure_type": {
+              "const": "LABEL_SCHEMA_UNSUPPORTED"
+            },
+            "detail": {
+              "$ref": "#/$defs/nonemptyString"
+            },
+            "context": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "requested_label_set_id",
+                "observed_schema_version"
+              ],
+              "properties": {
+                "requested_label_set_id": {
+                  "$ref": "#/$defs/nonemptyString"
+                },
+                "observed_schema_version": {
+                  "$ref": "#/$defs/nonemptyString"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "failure_type",
+            "detail",
+            "context"
+          ],
+          "properties": {
+            "failure_type": {
+              "const": "LABEL_INPUT_UNAVAILABLE"
+            },
+            "detail": {
+              "$ref": "#/$defs/nonemptyString"
+            },
+            "context": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "requested_label_set_id",
+                "availability"
+              ],
+              "properties": {
+                "requested_label_set_id": {
+                  "$ref": "#/$defs/nonemptyString"
+                },
+                "availability": {
+                  "const": "unavailable"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "failure_type",
+            "detail",
+            "context"
+          ],
+          "properties": {
+            "failure_type": {
+              "const": "LABEL_SEAL_INVALID"
+            },
+            "detail": {
+              "$ref": "#/$defs/nonemptyString"
+            },
+            "context": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "label_set_id",
+                "expected_sha256",
+                "observed_sha256"
+              ],
+              "properties": {
+                "label_set_id": {
+                  "$ref": "#/$defs/nonemptyString"
+                },
+                "expected_sha256": {
+                  "$ref": "#/$defs/sha256"
+                },
+                "observed_sha256": {
+                  "$ref": "#/$defs/sha256"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "failure_type",
+            "detail",
+            "context"
+          ],
+          "properties": {
+            "failure_type": {
+              "const": "CROSSWALK_IDENTITY_INVALID"
+            },
+            "detail": {
+              "$ref": "#/$defs/nonemptyString"
+            },
+            "context": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "label_set_id",
+                "crosswalk_id",
+                "reason"
+              ],
+              "properties": {
+                "label_set_id": {
+                  "$ref": "#/$defs/nonemptyString"
+                },
+                "crosswalk_id": {
+                  "$ref": "#/$defs/nonemptyString"
+                },
+                "reason": {
+                  "enum": [
+                    "hash_mismatch",
+                    "authority_role_mismatch",
+                    "identity_missing"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "failure_type",
+            "detail",
+            "context"
+          ],
+          "properties": {
+            "failure_type": {
+              "const": "REGISTRY_PROJECTION_MISMATCH"
+            },
+            "detail": {
+              "$ref": "#/$defs/nonemptyString"
+            },
+            "context": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "projection_id",
+                "expected_sha256",
+                "observed_sha256"
+              ],
+              "properties": {
+                "projection_id": {
+                  "$ref": "#/$defs/nonemptyString"
+                },
+                "expected_sha256": {
+                  "$ref": "#/$defs/sha256"
+                },
+                "observed_sha256": {
+                  "$ref": "#/$defs/sha256"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "failure_type",
+            "detail",
+            "context"
+          ],
+          "properties": {
+            "failure_type": {
+              "const": "ARCH_MISMATCH"
+            },
+            "detail": {
+              "$ref": "#/$defs/nonemptyString"
+            },
+            "context": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "result_architecture",
+                "result_sku",
+                "label_architecture",
+                "label_sku"
+              ],
+              "properties": {
+                "result_architecture": {
+                  "$ref": "#/$defs/nonemptyString"
+                },
+                "result_sku": {
+                  "$ref": "#/$defs/nonemptyString"
+                },
+                "label_architecture": {
+                  "$ref": "#/$defs/nonemptyString"
+                },
+                "label_sku": {
+                  "$ref": "#/$defs/nonemptyString"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "failure_type",
+            "detail",
+            "context"
+          ],
+          "properties": {
+            "failure_type": {
+              "const": "UNIT_MISMATCH"
+            },
+            "detail": {
+              "$ref": "#/$defs/nonemptyString"
+            },
+            "context": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "metric_key",
+                "expected_unit",
+                "observed_unit"
+              ],
+              "properties": {
+                "metric_key": {
+                  "$ref": "#/$defs/metricKey"
+                },
+                "expected_unit": {
+                  "enum": [
+                    "count",
+                    "pct",
+                    "cycles"
+                  ]
+                },
+                "observed_unit": {
+                  "$ref": "#/$defs/nonemptyString"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "comparisonFailure": {
+      "oneOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "failure_type",
+            "detail",
+            "context"
+          ],
+          "properties": {
+            "failure_type": {
+              "const": "JOIN_AMBIGUOUS"
+            },
+            "detail": {
+              "$ref": "#/$defs/nonemptyString"
+            },
+            "context": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "launch_key",
+                "metric_key",
+                "match_count"
+              ],
+              "properties": {
+                "launch_key": {
+                  "$ref": "https://gpu-simulator.local/eval/schemas/launch_key.v1.schema.json"
+                },
+                "metric_key": {
+                  "$ref": "#/$defs/metricKey"
+                },
+                "match_count": {
+                  "type": "integer",
+                  "minimum": 2,
+                  "maximum": 18446744073709551615
+                },
+                "kernel_family": {
+                  "$ref": "#/$defs/nonemptyString"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "failure_type",
+            "detail",
+            "context"
+          ],
+          "properties": {
+            "failure_type": {
+              "const": "MISSING_LABEL"
+            },
+            "detail": {
+              "$ref": "#/$defs/nonemptyString"
+            },
+            "context": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "launch_key",
+                "metric_key"
+              ],
+              "properties": {
+                "launch_key": {
+                  "$ref": "https://gpu-simulator.local/eval/schemas/launch_key.v1.schema.json"
+                },
+                "metric_key": {
+                  "$ref": "#/$defs/metricKey"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "failure_type",
+            "detail",
+            "context"
+          ],
+          "properties": {
+            "failure_type": {
+              "const": "MISSING_PREDICTION"
+            },
+            "detail": {
+              "$ref": "#/$defs/nonemptyString"
+            },
+            "context": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "launch_key",
+                "metric_key",
+                "kernel_family"
+              ],
+              "properties": {
+                "launch_key": {
+                  "$ref": "https://gpu-simulator.local/eval/schemas/launch_key.v1.schema.json"
+                },
+                "metric_key": {
+                  "$ref": "#/$defs/metricKey"
+                },
+                "kernel_family": {
+                  "$ref": "#/$defs/nonemptyString"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "failure_type",
+            "detail",
+            "context"
+          ],
+          "properties": {
+            "failure_type": {
+              "const": "UNIT_MISMATCH"
+            },
+            "detail": {
+              "$ref": "#/$defs/nonemptyString"
+            },
+            "context": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "launch_key",
+                "metric_key",
+                "kernel_family",
+                "expected_unit",
+                "observed_unit"
+              ],
+              "properties": {
+                "launch_key": {
+                  "$ref": "https://gpu-simulator.local/eval/schemas/launch_key.v1.schema.json"
+                },
+                "metric_key": {
+                  "$ref": "#/$defs/metricKey"
+                },
+                "kernel_family": {
+                  "$ref": "#/$defs/nonemptyString"
+                },
+                "expected_unit": {
+                  "enum": [
+                    "count",
+                    "pct",
+                    "cycles"
+                  ]
+                },
+                "observed_unit": {
+                  "$ref": "#/$defs/nonemptyString"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "failure_type",
+            "detail",
+            "context"
+          ],
+          "properties": {
+            "failure_type": {
+              "const": "UNSUPPORTED_OUTCOME"
+            },
+            "detail": {
+              "$ref": "#/$defs/nonemptyString"
+            },
+            "context": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "launch_key",
+                "metric_key",
+                "observed_status"
+              ],
+              "properties": {
+                "launch_key": {
+                  "$ref": "https://gpu-simulator.local/eval/schemas/launch_key.v1.schema.json"
+                },
+                "metric_key": {
+                  "$ref": "#/$defs/metricKey"
+                },
+                "observed_status": {
+                  "$ref": "#/$defs/nonemptyString"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "failure_type",
+            "detail",
+            "context"
+          ],
+          "properties": {
+            "failure_type": {
+              "const": "MISSING_IDENTITY"
+            },
+            "detail": {
+              "$ref": "#/$defs/nonemptyString"
+            },
+            "context": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "launch_key",
+                "metric_key",
+                "row_source",
+                "missing_fields"
+              ],
+              "properties": {
+                "launch_key": {
+                  "$ref": "https://gpu-simulator.local/eval/schemas/launch_key.v1.schema.json"
+                },
+                "metric_key": {
+                  "$ref": "#/$defs/metricKey"
+                },
+                "row_source": {
+                  "enum": [
+                    "label",
+                    "prediction"
+                  ]
+                },
+                "missing_fields": {
+                  "type": "array",
+                  "minItems": 1,
+                  "uniqueItems": true,
+                  "items": {
+                    "$ref": "#/$defs/nonemptyString"
+                  }
+                }
+              },
+              "description": "The candidate cell itself remains identified by a complete launch_key and metric_key. Rows lacking either cannot enter comparison-failure coverage and must fail admission before candidate enumeration."
+            }
+          }
+        }
+      ]
+    },
+    "admittedAdmission": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "checks",
+        "failures"
+      ],
+      "properties": {
+        "status": {
+          "const": "admitted"
+        },
+        "checks": {
+          "$ref": "#/$defs/admittedChecks"
+        },
+        "failures": {
+          "type": "array",
+          "maxItems": 0
+        }
+      }
+    },
+    "rejectedAdmission": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "checks",
+        "failures"
+      ],
+      "properties": {
+        "status": {
+          "const": "rejected"
+        },
+        "checks": {
+          "$ref": "#/$defs/rejectedChecks"
+        },
+        "failures": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "$ref": "#/$defs/admissionFailure"
+          }
+        }
+      }
+    },
+    "unitUnavailable": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "reason",
+        "needs",
+        "count"
+      ],
+      "properties": {
+        "status": {
+          "const": "unavailable"
+        },
+        "reason": {
+          "const": "mem_mode_lacks_unit"
+        },
+        "needs": {
+          "enum": [
+            "l1tex",
+            "lts",
+            "dram"
+          ]
+        },
+        "count": {
+          "$ref": "#/$defs/u64"
+        }
+      }
+    },
+    "undefinedFraction": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "reason",
+        "detail",
+        "count"
+      ],
+      "properties": {
+        "status": {
+          "const": "unavailable"
+        },
+        "reason": {
+          "const": "undefined_fraction"
+        },
+        "detail": {
+          "const": "zero_denominator"
+        },
+        "count": {
+          "$ref": "#/$defs/u64"
+        }
+      }
+    },
+    "requiredCyclesUnavailable": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "blocking",
+        "count"
+      ],
+      "properties": {
+        "status": {
+          "const": "required_unimplemented"
+        },
+        "blocking": {
+          "const": "aggregation_semantics_study"
+        },
+        "count": {
+          "$ref": "#/$defs/u64"
+        }
+      }
+    },
+    "unavailableByType": {
+      "type": "array",
+      "items": {
+        "oneOf": [
+          {
+            "$ref": "#/$defs/unitUnavailable"
+          },
+          {
+            "$ref": "#/$defs/undefinedFraction"
+          },
+          {
+            "$ref": "#/$defs/requiredCyclesUnavailable"
+          }
+        ]
+      }
+    },
+    "coverage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "total_cells",
+        "labeled_cells",
+        "unlabeled_cells",
+        "scored_cells",
+        "unavailable_cells",
+        "comparison_failure_cells",
+        "silent_absence_count",
+        "unavailable_by_type"
+      ],
+      "properties": {
+        "total_cells": {
+          "$ref": "#/$defs/positiveU64"
+        },
+        "labeled_cells": {
+          "$ref": "#/$defs/u64"
+        },
+        "unlabeled_cells": {
+          "$ref": "#/$defs/u64"
+        },
+        "scored_cells": {
+          "$ref": "#/$defs/u64"
+        },
+        "unavailable_cells": {
+          "$ref": "#/$defs/u64"
+        },
+        "comparison_failure_cells": {
+          "$ref": "#/$defs/u64"
+        },
+        "silent_absence_count": {
+          "const": 0
+        },
+        "unavailable_by_type": {
+          "$ref": "#/$defs/unavailableByType"
+        }
+      }
+    },
+    "errorStats": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "n",
+        "mean_absolute_error",
+        "max_absolute_error",
+        "signed_bias"
+      ],
+      "properties": {
+        "n": {
+          "$ref": "#/$defs/u64"
+        },
+        "mean_absolute_error": {
+          "$ref": "#/$defs/nullableNonnegativeNumber"
+        },
+        "max_absolute_error": {
+          "$ref": "#/$defs/nullableNonnegativeNumber"
+        },
+        "signed_bias": {
+          "$ref": "#/$defs/nullableNumber"
+        }
+      }
+    },
+    "countSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "exact_count",
+        "zero_label_nonzero_prediction_count",
+        "relative_error",
+        "absolute_error"
+      ],
+      "properties": {
+        "kind": {
+          "const": "count"
+        },
+        "exact_count": {
+          "$ref": "#/$defs/u64"
+        },
+        "zero_label_nonzero_prediction_count": {
+          "$ref": "#/$defs/u64"
+        },
+        "relative_error": {
+          "$ref": "#/$defs/errorStats"
+        },
+        "absolute_error": {
+          "$ref": "#/$defs/errorStats"
+        }
+      }
+    },
+    "rateSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "exact_count",
+        "error_percentage_points"
+      ],
+      "properties": {
+        "kind": {
+          "const": "rate"
+        },
+        "exact_count": {
+          "$ref": "#/$defs/u64"
+        },
+        "error_percentage_points": {
+          "$ref": "#/$defs/errorStats"
+        }
+      }
+    },
+    "cycleSummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "status",
+        "blocking"
+      ],
+      "properties": {
+        "kind": {
+          "const": "cycle"
+        },
+        "status": {
+          "const": "required_unimplemented"
+        },
+        "blocking": {
+          "const": "aggregation_semantics_study"
+        }
+      },
+      "description": "No numeric cycle-scoring arm exists in accuracy_report.v1. Promotion requires a future version/capability and admitted study identity."
+    },
+    "withinLabelNoise": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "comparison_semantics",
+        "evaluated_count",
+        "within_count",
+        "not_applicable_count",
+        "not_applicable_reasons"
+      ],
+      "properties": {
+        "comparison_semantics": {
+          "const": "absolute_error_native_unit_lte_declared_dispersion_threshold"
+        },
+        "evaluated_count": {
+          "$ref": "#/$defs/u64"
+        },
+        "within_count": {
+          "$ref": "#/$defs/u64"
+        },
+        "not_applicable_count": {
+          "$ref": "#/$defs/u64"
+        },
+        "not_applicable_reasons": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "enum": [
+              "dispersion_unavailable",
+              "rule_not_absolute_interpretable"
+            ]
+          }
+        }
+      },
+      "description": "Per cell, compare absolute prediction error in the canonical native unit to: scalar for stddev_abs; abs(label_value)*scalar for relative_tolerance or coefficient_of_variation. If no declared scalar or conversion is interpretable, count the cell as not_applicable with a typed reason; never invent a standard deviation."
+    },
+    "metricFamilySummary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "metric_key",
+        "ncu_metric",
+        "unit",
+        "kernel_family",
+        "n_labeled",
+        "n_scored",
+        "n_unavailable",
+        "unavailable_by_type",
+        "within_label_noise",
+        "summary"
+      ],
+      "properties": {
+        "metric_key": {
+          "$ref": "#/$defs/metricKey"
+        },
+        "ncu_metric": {
+          "$ref": "#/$defs/nonemptyString"
+        },
+        "unit": {
+          "enum": [
+            "count",
+            "pct",
+            "cycles"
+          ]
+        },
+        "kernel_family": {
+          "$ref": "#/$defs/nonemptyString"
+        },
+        "n_labeled": {
+          "$ref": "#/$defs/u64"
+        },
+        "n_scored": {
+          "$ref": "#/$defs/u64"
+        },
+        "n_unavailable": {
+          "$ref": "#/$defs/u64"
+        },
+        "unavailable_by_type": {
+          "$ref": "#/$defs/unavailableByType"
+        },
+        "within_label_noise": {
+          "$ref": "#/$defs/withinLabelNoise"
+        },
+        "summary": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/countSummary"
+            },
+            {
+              "$ref": "#/$defs/rateSummary"
+            },
+            {
+              "$ref": "#/$defs/cycleSummary"
+            }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "metric_key": {
+                "enum": [
+                  "smsp_inst_executed_sum",
+                  "traffic_gmem_ld_sectors",
+                  "traffic_gmem_st_sectors",
+                  "traffic_dram_read_sectors"
+                ]
+              }
+            },
+            "required": [
+              "metric_key"
+            ]
+          },
+          "then": {
+            "properties": {
+              "unit": {
+                "const": "count"
+              },
+              "summary": {
+                "$ref": "#/$defs/countSummary"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "metric_key": {
+                "enum": [
+                  "cache_hit_rate_l1tex_read_sector",
+                  "cache_hit_rate_l1tex_sector",
+                  "cache_hit_rate_l2_sector"
+                ]
+              }
+            },
+            "required": [
+              "metric_key"
+            ]
+          },
+          "then": {
+            "properties": {
+              "unit": {
+                "const": "pct"
+              },
+              "summary": {
+                "$ref": "#/$defs/rateSummary"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "metric_key": {
+                "const": "exec_cycles_gpc_max"
+              }
+            },
+            "required": [
+              "metric_key"
+            ]
+          },
+          "then": {
+            "properties": {
+              "unit": {
+                "const": "cycles"
+              },
+              "n_scored": {
+                "const": 0
+              },
+              "summary": {
+                "$ref": "#/$defs/cycleSummary"
+              },
+              "unavailable_by_type": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 1,
+                "items": {
+                  "$ref": "#/$defs/requiredCyclesUnavailable"
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "metric_key": {
+                "const": "smsp_inst_executed_sum"
+              }
+            },
+            "required": [
+              "metric_key"
+            ]
+          },
+          "then": {
+            "properties": {
+              "ncu_metric": {
+                "const": "smsp__inst_executed.sum"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "metric_key": {
+                "const": "traffic_gmem_ld_sectors"
+              }
+            },
+            "required": [
+              "metric_key"
+            ]
+          },
+          "then": {
+            "properties": {
+              "ncu_metric": {
+                "const": "l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "metric_key": {
+                "const": "traffic_gmem_st_sectors"
+              }
+            },
+            "required": [
+              "metric_key"
+            ]
+          },
+          "then": {
+            "properties": {
+              "ncu_metric": {
+                "const": "l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "metric_key": {
+                "const": "traffic_dram_read_sectors"
+              }
+            },
+            "required": [
+              "metric_key"
+            ]
+          },
+          "then": {
+            "properties": {
+              "ncu_metric": {
+                "const": "dram__sectors_read.sum"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "metric_key": {
+                "const": "cache_hit_rate_l1tex_read_sector"
+              }
+            },
+            "required": [
+              "metric_key"
+            ]
+          },
+          "then": {
+            "properties": {
+              "ncu_metric": {
+                "const": "l1tex__t_sector_pipe_lsu_mem_global_op_ld_hit_rate.pct"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "metric_key": {
+                "const": "cache_hit_rate_l1tex_sector"
+              }
+            },
+            "required": [
+              "metric_key"
+            ]
+          },
+          "then": {
+            "properties": {
+              "ncu_metric": {
+                "const": "l1tex__t_sector_hit_rate.pct"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "metric_key": {
+                "const": "cache_hit_rate_l2_sector"
+              }
+            },
+            "required": [
+              "metric_key"
+            ]
+          },
+          "then": {
+            "properties": {
+              "ncu_metric": {
+                "const": "lts__t_sector_hit_rate.pct"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "metric_key": {
+                "const": "exec_cycles_gpc_max"
+              }
+            },
+            "required": [
+              "metric_key"
+            ]
+          },
+          "then": {
+            "properties": {
+              "ncu_metric": {
+                "const": "gpc__cycles_elapsed.max"
+              }
+            }
+          }
+        }
+      ]
+    },
+    "admittedOutcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "admission",
+        "comparison_failures",
+        "coverage",
+        "per_metric_family"
+      ],
+      "properties": {
+        "status": {
+          "const": "admitted"
+        },
+        "admission": {
+          "$ref": "#/$defs/admittedAdmission"
+        },
+        "comparison_failures": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/comparisonFailure"
+          }
+        },
+        "coverage": {
+          "$ref": "#/$defs/coverage"
+        },
+        "per_metric_family": {
+          "type": "array",
+          "minItems": 8,
+          "items": {
+            "$ref": "#/$defs/metricFamilySummary"
+          }
+        }
+      }
+    },
+    "unknownCandidateStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "reason"
+      ],
+      "properties": {
+        "status": {
+          "const": "unknown"
+        },
+        "reason": {
+          "enum": [
+            "label_input_unavailable",
+            "result_unavailable",
+            "admission_failed_before_enumeration"
+          ]
+        }
+      }
+    },
+    "authenticatedEmptyCohortEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "empty_cohort_sha256",
+        "matched_labels_sha256",
+        "label_set_id",
+        "label_set_sha256",
+        "crosswalk_id",
+        "crosswalk_sha256",
+        "authority_role"
+      ],
+      "properties": {
+        "empty_cohort_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "matched_labels_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "label_set_id": {
+          "$ref": "#/$defs/nonemptyString"
+        },
+        "label_set_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "crosswalk_id": {
+          "$ref": "#/$defs/nonemptyString"
+        },
+        "crosswalk_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "authority_role": {
+          "const": "independently_authenticated_empty_cohort"
+        }
+      },
+      "description": "Identity of independently supplied empty-cohort evidence. The report seal is not authority for this claim; the production validator must match every field to its external MatchedLabelAuthority."
+    },
+    "knownZeroCandidateStatus": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "total_cells",
+        "reason",
+        "authenticated_evidence"
+      ],
+      "properties": {
+        "status": {
+          "const": "known_zero"
+        },
+        "total_cells": {
+          "const": 0
+        },
+        "reason": {
+          "const": "authenticated_empty_cohort"
+        },
+        "authenticated_evidence": {
+          "$ref": "#/$defs/authenticatedEmptyCohortEvidence"
+        }
+      }
+    },
+    "candidateStatus": {
+      "oneOf": [
+        {
+          "$ref": "#/$defs/unknownCandidateStatus"
+        },
+        {
+          "$ref": "#/$defs/knownZeroCandidateStatus"
+        }
+      ]
+    },
+    "rejectedOutcome": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "admission",
+        "candidate_status"
+      ],
+      "properties": {
+        "status": {
+          "const": "rejected"
+        },
+        "admission": {
+          "$ref": "#/$defs/rejectedAdmission"
+        },
+        "candidate_status": {
+          "$ref": "#/$defs/candidateStatus"
+        }
+      }
+    }
+  }
+}

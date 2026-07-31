@@ -1,0 +1,182 @@
+{
+  "schema_version": "metric_registry_projection.v1",
+  "projection_sha256": "e75b85752ab1173bd621c703fbe25866b80b0c7ff4752c5db47dc83181a00e81",
+  "source_registry_version": 2,
+  "source_registry_sha256": "95d90f8c4fffd9376b8d785047a9e02ecafc81ed43da6081985958c2b9dec62d",
+  "source_label_schema_version": 5,
+  "repeatability_thresholds": {
+    "stddev_abs": 0.03,
+    "coefficient_of_variation": 0.05,
+    "relative_tolerance": 0.05
+  },
+  "metrics": [
+    {
+      "key": "smsp_inst_executed_sum",
+      "ncu_metric": "smsp__inst_executed.sum",
+      "unit": "count",
+      "family": "instruction",
+      "metric_class": "replay_count",
+      "carrier": "unit_tagged_metric",
+      "valid_min": 0.0,
+      "valid_max": null,
+      "parser_transform": "identity_nonneg",
+      "aggregation": "mean_nonneg",
+      "repeatability_rule": "relative_tolerance",
+      "nullable": true,
+      "deployability": "label_only",
+      "availability": "available",
+      "per_arch_availability": {
+        "sm_86": "available",
+        "sm_120": "sm_120_deferred_no_live_evidence"
+      },
+      "model_io_role": "target"
+    },
+    {
+      "key": "traffic_gmem_ld_sectors",
+      "ncu_metric": "l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum",
+      "unit": "count",
+      "family": "traffic",
+      "metric_class": "replay_count",
+      "carrier": "unit_tagged_metric",
+      "valid_min": 0.0,
+      "valid_max": null,
+      "parser_transform": "identity_nonneg",
+      "aggregation": "mean_nonneg",
+      "repeatability_rule": "relative_tolerance",
+      "nullable": true,
+      "deployability": "label_only",
+      "availability": "available",
+      "per_arch_availability": {
+        "sm_86": "available",
+        "sm_120": "sm_120_deferred_no_live_evidence"
+      },
+      "model_io_role": "target"
+    },
+    {
+      "key": "traffic_gmem_st_sectors",
+      "ncu_metric": "l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum",
+      "unit": "count",
+      "family": "traffic",
+      "metric_class": "replay_count",
+      "carrier": "unit_tagged_metric",
+      "valid_min": 0.0,
+      "valid_max": null,
+      "parser_transform": "identity_nonneg",
+      "aggregation": "mean_nonneg",
+      "repeatability_rule": "relative_tolerance",
+      "nullable": true,
+      "deployability": "label_only",
+      "availability": "available",
+      "per_arch_availability": {
+        "sm_86": "available",
+        "sm_120": "sm_120_deferred_no_live_evidence"
+      },
+      "model_io_role": "target"
+    },
+    {
+      "key": "traffic_dram_read_sectors",
+      "ncu_metric": "dram__sectors_read.sum",
+      "unit": "count",
+      "family": "traffic",
+      "metric_class": "cache_stream",
+      "carrier": "unit_tagged_metric",
+      "valid_min": 0.0,
+      "valid_max": null,
+      "parser_transform": "identity_nonneg",
+      "aggregation": "mean_nonneg",
+      "repeatability_rule": "relative_tolerance",
+      "nullable": true,
+      "deployability": "label_only",
+      "availability": "available",
+      "per_arch_availability": {
+        "sm_86": "available",
+        "sm_120": "sm_120_deferred_no_live_evidence"
+      },
+      "model_io_role": "target"
+    },
+    {
+      "key": "cache_hit_rate_l1tex_read_sector",
+      "ncu_metric": "l1tex__t_sector_pipe_lsu_mem_global_op_ld_hit_rate.pct",
+      "unit": "pct",
+      "family": "cache_hit_rate",
+      "metric_class": "derived_ratio",
+      "carrier": "unit_tagged_metric",
+      "valid_min": 0.0,
+      "valid_max": 1.0,
+      "parser_transform": "percent_to_fraction",
+      "aggregation": "mean_fraction",
+      "repeatability_rule": "stddev_abs",
+      "nullable": true,
+      "deployability": "label_only",
+      "availability": "available",
+      "per_arch_availability": {
+        "sm_86": "available",
+        "sm_120": "sm_120_deferred_no_live_evidence"
+      },
+      "model_io_role": "target"
+    },
+    {
+      "key": "cache_hit_rate_l1tex_sector",
+      "ncu_metric": "l1tex__t_sector_hit_rate.pct",
+      "unit": "pct",
+      "family": "cache_hit_rate",
+      "metric_class": "derived_ratio",
+      "carrier": "flat_field",
+      "valid_min": 0.0,
+      "valid_max": 1.0,
+      "parser_transform": "percent_to_fraction",
+      "aggregation": "mean_fraction",
+      "repeatability_rule": "stddev_abs",
+      "nullable": true,
+      "deployability": "label_only",
+      "availability": "available",
+      "per_arch_availability": {
+        "sm_86": "available",
+        "sm_120": "sm_120_deferred_no_live_evidence"
+      },
+      "model_io_role": "target"
+    },
+    {
+      "key": "cache_hit_rate_l2_sector",
+      "ncu_metric": "lts__t_sector_hit_rate.pct",
+      "unit": "pct",
+      "family": "cache_hit_rate",
+      "metric_class": "derived_ratio",
+      "carrier": "flat_field",
+      "valid_min": 0.0,
+      "valid_max": 1.0,
+      "parser_transform": "percent_to_fraction",
+      "aggregation": "mean_fraction",
+      "repeatability_rule": "stddev_abs",
+      "nullable": false,
+      "deployability": "label_only",
+      "availability": "available",
+      "per_arch_availability": {
+        "sm_86": "available",
+        "sm_120": "sm_120_deferred_no_live_evidence"
+      },
+      "model_io_role": "target"
+    },
+    {
+      "key": "exec_cycles_gpc_max",
+      "ncu_metric": "gpc__cycles_elapsed.max",
+      "unit": "cycles",
+      "family": "execution_time",
+      "metric_class": "time_clock",
+      "carrier": "unit_tagged_metric",
+      "valid_min": 0.0,
+      "valid_max": null,
+      "parser_transform": "identity_nonneg",
+      "aggregation": "mean_nonneg",
+      "repeatability_rule": "coefficient_of_variation",
+      "nullable": true,
+      "deployability": "label_only",
+      "availability": "available",
+      "per_arch_availability": {
+        "sm_86": "available",
+        "sm_120": "sm_120_deferred_no_live_evidence"
+      },
+      "model_io_role": "target"
+    }
+  ]
+}
