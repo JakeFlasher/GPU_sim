@@ -235,7 +235,7 @@
       "import_policy": "deny",
       "path": "tools/local_labels/sm86_capture_chunk.py",
       "review_status": "reviewed",
-      "sha256": "06957166a5f47486862f5ae406868c19e3c042484f0ce09929191a633ec140b6"
+      "sha256": "b756073306e889f47e14517c76f309653431bf80401be81f837fbcc4cc60b3d0"
     },
     {
       "classification": "unreviewed",

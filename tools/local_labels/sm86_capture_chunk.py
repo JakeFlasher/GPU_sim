@@ -11042,9 +11042,8 @@ def _publish_finalized_tree(publication_root: Path, final_dir: Path) -> None:
             destination_reader = stack.enter_context(
                 immutable.PinnedDirectoryReader(destination_parent)
             )
-            tree_reader = stack.enter_context(
-                immutable.PinnedDirectoryReader(publication_root)
-            )
+            tree_reader = immutable.PinnedDirectoryReader(publication_root)
+            stack.callback(tree_reader.close)
             source_reader.verify_path()
             destination_reader.verify_path()
             tree_reader.verify_path()
