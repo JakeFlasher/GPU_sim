@@ -6,6 +6,9 @@
 //! `required_unimplemented` emission produced by [`emit`].
 
 pub mod emit;
+// Task 343 consumes this staging module; production remains on the v1 path here.
+#[allow(dead_code)]
+pub(crate) mod wire;
 
 use std::collections::BTreeSet;
 use std::path::{Component, Path, PathBuf};
