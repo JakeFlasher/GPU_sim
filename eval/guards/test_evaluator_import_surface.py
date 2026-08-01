@@ -1919,6 +1919,203 @@ def test_production_evaluator_transitive_import_graph_is_closed() -> None:
     assert edges == set()
 
 
+@pytest.fixture(scope="module", autouse=True)
+def _canonical_evaluator_guard_import_state() -> Any:
+    """Collapse only duplicate exact repo paths introduced during collection."""
+    path_entries, modules = _safe_system_import_state()
+    resolved_repository_root = REPO_ROOT.resolve()
+    repository_root = str(resolved_repository_root)
+
+    def normalize_repository_roots(
+        entries: tuple[str, ...], context: str
+    ) -> tuple[list[str], int]:
+        normalized_entries: list[str] = []
+        repository_root_count = 0
+        for entry in entries:
+            try:
+                resolves_to_repository = (
+                    Path(entry).resolve() == resolved_repository_root
+                )
+            except OSError:
+                resolves_to_repository = False
+            if resolves_to_repository:
+                if not _exact_string_equal(entry, repository_root):
+                    _fail(f"{context} uses an aliased repository path")
+                repository_root_count += 1
+                if repository_root_count > 1:
+                    continue
+            normalized_entries.append(entry)
+        if repository_root_count == 0:
+            _fail(f"{context} lacks the exact repository path")
+        return normalized_entries, repository_root_count
+
+    normalized, repository_root_count = normalize_repository_roots(
+        path_entries, "evaluator guard test host"
+    )
+
+    original_shadows = _loader_shadow_paths(
+        ENTRYPOINT_MODULE, REPO_ROOT, path_entries
+    )
+    duplicate_parent_issue = "repository-parent path is missing or aliased"
+    for issue in original_shadows:
+        if not _exact_string_equal(issue, duplicate_parent_issue):
+            _fail(f"evaluator guard test host has an import shadow: {issue}")
+    if repository_root_count == 1 and original_shadows:
+        _fail("evaluator guard test host has unexpected import shadow state")
+
+    sys_namespace = object.__getattribute__(sys, "__dict__")
+    original_sys_path = dict.__getitem__(sys_namespace, "path")
+    normalized_parent_path = tuple(normalized)
+    if not dict.__contains__(modules, "eval"):
+        try:
+            dict.__setitem__(sys_namespace, "path", normalized)
+            shadows = _loader_shadow_paths(
+                ENTRYPOINT_MODULE, REPO_ROOT, normalized_parent_path
+            )
+            if shadows:
+                _fail(f"normalized evaluator import shadows remain: {shadows}")
+            yield
+        finally:
+            dict.__setitem__(sys_namespace, "path", original_sys_path)
+        return
+
+    module = dict.__getitem__(modules, "eval")
+    original_violation = _loaded_namespace_ancestor_violation(
+        "eval", module, REPO_ROOT / "eval", path_entries
+    )
+    duplicate_portions_issue = "NamespacePath has missing or alternate portions"
+    stale_parent_issue = "NamespacePath parent snapshot is stale"
+    if original_violation is not None and not (
+        _exact_string_equal(original_violation, duplicate_portions_issue)
+        or _exact_string_equal(original_violation, stale_parent_issue)
+    ):
+        _fail(f"collected eval namespace is hostile: {original_violation}")
+
+    namespace = object.__getattribute__(module, "__dict__")
+    namespace_path = dict.__getitem__(namespace, "__path__")
+    path_state = object.__getattribute__(namespace_path, "__dict__")
+    original_portions = dict.__getitem__(path_state, "_path")
+    original_parent_path = dict.__getitem__(path_state, "_last_parent_path")
+    original_epoch = dict.__getitem__(path_state, "_last_epoch")
+    expected_portion = str(REPO_ROOT / "eval")
+    portions = _exact_string_list(original_portions, "eval namespace portions")
+    if not portions:
+        _fail("collected eval namespace has no canonical portion")
+    for portion in portions:
+        if not _exact_string_equal(portion, expected_portion):
+            _fail("collected eval namespace has an alternate portion")
+    parent_snapshot = _exact_string_tuple(
+        original_parent_path, "eval NamespacePath parent snapshot"
+    )
+    normalized_snapshot, snapshot_root_count = normalize_repository_roots(
+        parent_snapshot, "collected eval NamespacePath parent snapshot"
+    )
+    if len(portions) != snapshot_root_count:
+        _fail("collected eval namespace portions do not match its parent snapshot")
+
+    parent_matches_current = len(parent_snapshot) == len(path_entries)
+    if parent_matches_current:
+        for index, entry in enumerate(path_entries):
+            if not _exact_string_equal(parent_snapshot[index], entry):
+                parent_matches_current = False
+                break
+    if len(portions) != 1:
+        if not _exact_string_equal(original_violation, duplicate_portions_issue):
+            _fail("collected eval namespace violation is not exact duplication")
+    elif not parent_matches_current:
+        if not _exact_string_equal(original_violation, stale_parent_issue):
+            _fail("collected eval namespace parent drift is not exact staleness")
+    elif original_violation is not None:
+        _fail(f"collected eval namespace is unexpectedly hostile: {original_violation}")
+
+    # Pytest prepends these exact collection/package directories and may reinsert
+    # the repository root after a namespace is materialized. Keep this closed:
+    # collection topology changes must fail until the test boundary is reviewed.
+    approved_collection_insertions = frozenset(
+        {
+            str(REPO_ROOT / "arch_profiles" / "tests"),
+            str(REPO_ROOT / "eval" / "guards"),
+            str(REPO_ROOT / "tools"),
+            str(REPO_ROOT / "tools" / "cache_predictor"),
+            str(REPO_ROOT / "tools" / "cache_replay"),
+            str(REPO_ROOT / "tools" / "cloud"),
+            str(REPO_ROOT / "tools" / "hrd_profiler"),
+            str(REPO_ROOT / "tools" / "local_labels"),
+            str(REPO_ROOT / "tools" / "nvbit_tracer"),
+            str(REPO_ROOT / "tools" / "nvbit_tracer" / "tracer_tool" / "tests"),
+            str(REPO_ROOT / "tools" / "pchase"),
+            str(REPO_ROOT / "tools" / "sass_control"),
+            str(REPO_ROOT / "tools" / "sector_stream"),
+            str(REPO_ROOT / "tools" / "sol_baselines_scaffold"),
+            str(REPO_ROOT / "tools" / "trace_sampling"),
+            str(REPO_ROOT / "tools" / "trace_sampling" / "tests"),
+            str(REPO_ROOT / "workloads" / "simbench_bw"),
+            str(REPO_ROOT / "workloads" / "simbench_bw" / "tests"),
+        }
+    )
+    if repository_root_count > 1 or snapshot_root_count > 1:
+        current_comparison = [
+            entry
+            for entry in normalized
+            if not _exact_string_equal(entry, repository_root)
+        ]
+        snapshot_comparison = [
+            entry
+            for entry in normalized_snapshot
+            if not _exact_string_equal(entry, repository_root)
+        ]
+    else:
+        current_comparison = normalized
+        snapshot_comparison = normalized_snapshot
+    snapshot_index = 0
+    for entry in current_comparison:
+        if snapshot_index < len(snapshot_comparison) and _exact_string_equal(
+            entry, snapshot_comparison[snapshot_index]
+        ):
+            snapshot_index += 1
+        elif entry not in approved_collection_insertions:
+            _fail("collected eval parent changed outside approved collection paths")
+    if snapshot_index != len(snapshot_comparison):
+        _fail("collected eval parent removed or reordered a prior path")
+    current_epoch = type.__getattribute__(_NAMESPACE_PATH_TYPE, "_epoch")
+    if (
+        type(original_epoch) is not int
+        or type(current_epoch) is not int
+        or original_epoch != current_epoch
+    ):
+        _fail("collected eval NamespacePath cache epoch is stale")
+    path_finder = dict.__getitem__(path_state, "_path_finder")
+    if (
+        type(path_finder) is not MethodType
+        or object.__getattribute__(path_finder, "__self__") is not _PATH_FINDER_TYPE
+        or object.__getattribute__(path_finder, "__func__")
+        is not _PATH_FINDER_GET_SPEC
+    ):
+        _fail("collected eval NamespacePath finder binding is hostile")
+
+    try:
+        dict.__setitem__(sys_namespace, "path", normalized)
+        dict.__setitem__(path_state, "_path", [expected_portion])
+        dict.__setitem__(path_state, "_last_parent_path", normalized_parent_path)
+        dict.__setitem__(path_state, "_last_epoch", current_epoch)
+        violation = _loaded_namespace_ancestor_violation(
+            "eval", module, REPO_ROOT / "eval", normalized_parent_path
+        )
+        if violation is not None:
+            _fail(f"normalized eval namespace remains hostile: {violation}")
+        shadows = _loader_shadow_paths(
+            ENTRYPOINT_MODULE, REPO_ROOT, normalized_parent_path
+        )
+        if shadows:
+            _fail(f"normalized evaluator import shadows remain: {shadows}")
+        yield
+    finally:
+        dict.__setitem__(path_state, "_path", original_portions)
+        dict.__setitem__(path_state, "_last_parent_path", original_parent_path)
+        dict.__setitem__(path_state, "_last_epoch", original_epoch)
+        dict.__setitem__(sys_namespace, "path", original_sys_path)
+
+
 def _materialized_eval_parent() -> tuple[ModuleType, tuple[str, ...]]:
     importlib.import_module("eval")
     parent_path, modules = _safe_system_import_state()
