@@ -6,7 +6,12 @@
 //! `required_unimplemented` emission produced by [`emit`].
 
 pub mod emit;
+mod build_provenance {
+    include!(concat!(env!("OUT_DIR"), "/build_provenance.rs"));
+}
 // Task 343 consumes this staging module; production remains on the v1 path here.
+#[allow(dead_code)]
+mod runner_v2;
 #[allow(dead_code)]
 pub(crate) mod wire;
 
@@ -818,14 +823,14 @@ fn resolve_walk_geometry(
         .map_err(|source| pchase_configuration_error("P-chase walk geometry", source))
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(tag = "status", rename_all = "snake_case")]
 enum Availability<T> {
     Modeled { value: T },
     Unmodeled { reason: &'static str },
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 struct ResolvedConfigurationWire {
     replay_mode: ReplayModeWire,
     co_residency: &'static str,
@@ -835,7 +840,7 @@ struct ResolvedConfigurationWire {
     dram: Availability<DramConfigurationWire>,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(tag = "mode", rename_all = "snake_case")]
 enum ReplayModeWire {
     Flat,
@@ -843,7 +848,7 @@ enum ReplayModeWire {
     L1SharedL2 { dram_bandwidth: &'static str },
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 struct IssueConfigurationWire {
     arch: &'static str,
     l1_hit_latency_cycles: u64,
@@ -874,7 +879,7 @@ impl From<sim_sm::IssueModelParams> for IssueConfigurationWire {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 struct L1ConfigurationWire {
     arch: &'static str,
     line_capacity: u64,
@@ -912,7 +917,7 @@ impl L1ConfigurationWire {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 struct L2ConfigurationWire {
     arch: &'static str,
     capacity_bytes: u64,
@@ -956,7 +961,7 @@ impl From<L2Config> for L2ConfigurationWire {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(tag = "mode", rename_all = "snake_case")]
 enum DramConfigurationWire {
     Unmodeled {

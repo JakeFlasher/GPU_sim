@@ -457,6 +457,12 @@ impl LaunchKeyV1 {
         self.stream_id.get()
     }
 
+    pub(crate) const fn binary_architecture(&self) -> ArchId {
+        match self.binary_architecture {
+            Sm86Token::Sm86 => ArchId::Sm86,
+        }
+    }
+
     pub(crate) fn replay_binding(&self) -> ReplayBindingV1 {
         ReplayBindingV1 {
             kernel_mangled_name: self.kernel_mangled_name.clone(),
