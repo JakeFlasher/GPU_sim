@@ -89,6 +89,16 @@ def test_campaign_gate_pins_interpreter_and_exact_owner_tests():
         "test_sol_bridge_rejects_wrong_definition_binding",
         "tools/local_labels/test_sm86_capture_matrix_campaign_evidence.py::"
         "test_sol_bridge_rejects_reduced_to_native_misroute",
+        "tools/trace_sampling/tests/test_golden_set_real.py::"
+        "test_positive_without_ncu_label_fails_closed",
+        "tools/trace_sampling/tests/test_golden_set_real.py::"
+        "test_positive_without_ncu_kernel_identity_fails_closed",
+        "tools/trace_sampling/tests/test_golden_set_real.py::"
+        "test_positive_with_wrong_ncu_kernel_identity_fails_closed",
+        "tools/trace_sampling/tests/test_golden_set_real.py::"
+        "test_authoritative_manifest_bytes_are_policy_pinned",
+        "tools/trace_sampling/tests/test_golden_set_real.py::"
+        "test_real_golden_set_passes_all_gates",
     )
     observed_node_ids = tuple(
         line.rstrip().removesuffix("\\").strip()
