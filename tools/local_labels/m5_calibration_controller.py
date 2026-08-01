@@ -160,7 +160,7 @@ PINNED_AUTHORITY_SHA256 = {
     "canonical_roster": "d02c817091b0a9f06c2106c0987c59a481910afcc3b78ab1de7a7d5bd5a6b4b4",
     "control_emitter": "57b980957972e4032e533b36b88c24cf5d96bd01fddf547efb26c68bf82cf6a2",
     "control_extractor": "98df23450dc5790a1000e41739f78d212ae587c6a0eda9a0c55a33259ac0b4d2",
-    "control_join_tool": "dfe638c9025719e71b5e8023513024cdf548a3c3f20b5cddab0ad17004465fc4",
+    "control_join_tool": "4ea58f3928d13acf2b5cc94071d51b93935a9136118a01fe691db9652daf3bb7",
     "control_join_schema": "f40c14e9fb128cab1f4ed001a204f4ce47d4c945bf18deb8f096a405dcb78359",
     "pchase_source": "ce1ecc34bdee6c3542ba6935d60e9766fcbd0aa52f5a74299090a440c5fa86cd",
     "pchase_v1_card": "e87d2e208f5326a8083d1a54799864953a62ed1fece1b628583cf8d5cafc581d",

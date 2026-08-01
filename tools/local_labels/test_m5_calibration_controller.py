@@ -1416,6 +1416,12 @@ def test_v2_authority_and_empty_public_trust_registry_are_pinned(
     assert m5.AUTHORITY_ANCESTRY_AUDIT_TOOL_SHA256_V1 == (
         "99a0cdf1ea1cc777d64b87538d15a6289a64d001341b0af64d5ff5ad3406963e"
     )
+    assert immutable.sha256_file(m5.CONTROL_JOIN_TOOL_PATH)[0] == (
+        "4ea58f3928d13acf2b5cc94071d51b93935a9136118a01fe691db9652daf3bb7"
+    )
+    assert m5.PINNED_AUTHORITY_SHA256["control_join_tool"] == (
+        "4ea58f3928d13acf2b5cc94071d51b93935a9136118a01fe691db9652daf3bb7"
+    )
 
     assert _PRODUCTION_TRUST_REGISTRY_PATH == (
         _REPOSITORY_ROOT / "tools/local_labels/m5_trust_anchors.json"
