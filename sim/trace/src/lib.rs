@@ -17,7 +17,9 @@ pub mod reader;
 mod wire_preflight;
 
 pub use anchored::{AnchoredDir, AnchoredFile, AnchoredReadError, FileIdentity};
-pub use digest::{CanonicalJsonError, Sha256Digest, Sha256DigestError, canonical_json};
+pub use digest::{
+    CanonicalJsonError, Sha256Digest, Sha256DigestError, canonical_json, canonical_json_utf8,
+};
 pub use exec_info::{ExecInfo, ExecInfoError, KernelStaticInfo};
 pub use lanes::{LANE_INACTIVE_SENTINEL, LANES_PER_WARP, LaneError, reconstruct_lane_vector};
 pub use reader::{

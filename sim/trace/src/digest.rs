@@ -352,9 +352,10 @@ fn write_python_json_number(value: &serde_json::Number, out: &mut String) -> Res
     Ok(())
 }
 
-pub(crate) fn canonical_python_json(
+fn canonical_python_json_with_ascii_policy(
     value: &serde_json::Value,
     out: &mut String,
+    ensure_ascii: bool,
 ) -> Result<(), String> {
     match value {
         serde_json::Value::Null => out.push_str("null"),
@@ -372,6 +373,7 @@ pub(crate) fn canonical_python_json(
                     '\u{0c}' => out.push_str("\\f"),
                     '\r' => out.push_str("\\r"),
                     '\u{20}'..='\u{7e}' => out.push(ch),
+                    ch if !ensure_ascii && u32::from(ch) >= 0x20 => out.push(ch),
                     ch if u32::from(ch) <= 0xffff => {
                         out.push_str(&format!("\\u{:04x}", u32::from(ch)));
                     }
@@ -391,7 +393,7 @@ pub(crate) fn canonical_python_json(
                 if index > 0 {
                     out.push(',');
                 }
-                canonical_python_json(value, out)?;
+                canonical_python_json_with_ascii_policy(value, out, ensure_ascii)?;
             }
             out.push(']');
         }
@@ -403,9 +405,13 @@ pub(crate) fn canonical_python_json(
                 if index > 0 {
                     out.push(',');
                 }
-                canonical_python_json(&serde_json::Value::String(key.clone()), out)?;
+                canonical_python_json_with_ascii_policy(
+                    &serde_json::Value::String(key.clone()),
+                    out,
+                    ensure_ascii,
+                )?;
                 out.push(':');
-                canonical_python_json(value, out)?;
+                canonical_python_json_with_ascii_policy(value, out, ensure_ascii)?;
             }
             out.push('}');
         }
@@ -413,10 +419,23 @@ pub(crate) fn canonical_python_json(
     Ok(())
 }
 
-/// Render one JSON value with the Python canonical spelling used by producer seals.
+/// Render one JSON value with the historical Python `ensure_ascii=True`
+/// canonical spelling used by existing producer seals.
 pub fn canonical_json(value: &serde_json::Value) -> Result<String, CanonicalJsonError> {
     let mut rendered = String::new();
-    canonical_python_json(value, &mut rendered).map_err(CanonicalJsonError)?;
+    canonical_python_json_with_ascii_policy(value, &mut rendered, true)
+        .map_err(CanonicalJsonError)?;
+    Ok(rendered)
+}
+
+/// Render one JSON value with Python `ensure_ascii=False` canonical spelling.
+///
+/// This is a separate surface so v2 UTF-8 document seals cannot alter historical
+/// trace and evidence identities that use [`canonical_json`].
+pub fn canonical_json_utf8(value: &serde_json::Value) -> Result<String, CanonicalJsonError> {
+    let mut rendered = String::new();
+    canonical_python_json_with_ascii_policy(value, &mut rendered, false)
+        .map_err(CanonicalJsonError)?;
     Ok(rendered)
 }
 
@@ -478,5 +497,18 @@ mod tests {
             canonical_json(&value).unwrap(),
             r#"{"a":[1,true,null],"z":"line\n"}"#
         );
+    }
+
+    #[test]
+    fn utf8_canonical_json_matches_python_ensure_ascii_false() {
+        let value = serde_json::json!({
+            "z": "é😀\u{7f}",
+            "λ": "line\u{1f}",
+        });
+        assert_eq!(
+            canonical_json_utf8(&value).unwrap(),
+            "{\"z\":\"é😀\u{7f}\",\"λ\":\"line\\u001f\"}"
+        );
+        assert!(canonical_json(&value).unwrap().is_ascii());
     }
 }
