@@ -123,11 +123,21 @@ def _population(n_segments: int) -> SegmentPopulation:
     ), segment_len=3)
 
 
-def _manifest_ready() -> bool:
+def _require_manifest_ready() -> dict:
     if not _MANIFEST.is_file():
-        return False
-    m = json.loads(_MANIFEST.read_text())
-    return all((_REPO / c["trace_dir"] / "dynamic_trace.pb").is_file() for c in m["cells"])
+        pytest.fail(f"campaign evidence manifest unavailable: {_MANIFEST}")
+    try:
+        manifest = json.loads(_MANIFEST.read_text())
+        trace_paths = [
+            _REPO / cell["trace_dir"] / "dynamic_trace.pb"
+            for cell in manifest["cells"]
+        ]
+    except (OSError, json.JSONDecodeError, KeyError, TypeError) as exc:
+        pytest.fail(f"campaign evidence manifest is invalid: {exc}")
+    missing = [path for path in trace_paths if not path.is_file()]
+    if missing:
+        pytest.fail(f"campaign trace evidence unavailable: {missing[0]}")
+    return manifest
 
 
 def test_fail_closed_on_missing_trace(tmp_path):
@@ -139,12 +149,11 @@ def test_fail_closed_on_missing_trace(tmp_path):
         run_golden_set(m)
 
 
+@pytest.mark.campaign_evidence
 def test_positive_without_ncu_label_fails_closed(tmp_path):
     # A positive cell lacking the error-budget denominator (NCU label) must fail
     # closed — the gate is never silently skipped. Use a real admissible trace.
-    if not _manifest_ready():
-        pytest.skip("golden traces absent")
-    m = json.loads(_MANIFEST.read_text())
+    m = _require_manifest_ready()
     pos = next(c for c in m["cells"] if c["role"] == "positive")
     pos = {k: v for k, v in pos.items() if k != "ncu_l2_hit_pct"}
     mm = tmp_path / "m.json"
@@ -153,10 +162,9 @@ def test_positive_without_ncu_label_fails_closed(tmp_path):
         run_golden_set(mm)
 
 
+@pytest.mark.campaign_evidence
 def test_positive_without_ncu_kernel_identity_fails_closed(tmp_path):
-    if not _manifest_ready():
-        pytest.skip("golden traces absent")
-    manifest = json.loads(_MANIFEST.read_text())
+    manifest = _require_manifest_ready()
     positive = next(c for c in manifest["cells"] if c["role"] == "positive")
     positive = {k: v for k, v in positive.items() if k != "ncu_kernel_name"}
     candidate = tmp_path / "manifest.json"
@@ -165,10 +173,9 @@ def test_positive_without_ncu_kernel_identity_fails_closed(tmp_path):
         run_golden_set(candidate)
 
 
+@pytest.mark.campaign_evidence
 def test_positive_with_wrong_ncu_kernel_identity_fails_closed(tmp_path):
-    if not _manifest_ready():
-        pytest.skip("golden traces absent")
-    manifest = json.loads(_MANIFEST.read_text())
+    manifest = _require_manifest_ready()
     positive = dict(next(c for c in manifest["cells"] if c["role"] == "positive"))
     positive["ncu_kernel_name"] = "different_same_grid_kernel()"
     candidate = tmp_path / "manifest.json"
@@ -363,7 +370,9 @@ def test_ablation_composite_rejects_post_hoc_expectation_relabel():
                for reason in result["typed_failure_reasons"])
 
 
+@pytest.mark.campaign_evidence
 def test_authoritative_manifest_bytes_are_policy_pinned():
+    _require_manifest_ready()
     raw = _MANIFEST.read_bytes()
     assert hashlib.sha256(raw).hexdigest() == GOLDEN_MANIFEST_SHA256
     assert _manifest_policy_status(raw) == (GOLDEN_MANIFEST_SHA256, True)
@@ -576,8 +585,9 @@ def test_ablation_composite_rejects_negative_or_nonfinite_error_ledger(
         in result["typed_failure_reasons"])
 
 
-@pytest.mark.skipif(not _manifest_ready(), reason="golden traces absent")
+@pytest.mark.campaign_evidence
 def test_real_golden_set_passes_all_gates():
+    _require_manifest_ready()
     r = run_golden_set(_MANIFEST)
     assert r["pass"], r["failures"]
     assert r["schema_version"] == 2
