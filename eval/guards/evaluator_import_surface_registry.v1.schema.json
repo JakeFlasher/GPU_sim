@@ -108,8 +108,10 @@
               "properties": {
                 "classification": {
                   "enum": [
+                    "evaluator_contract",
                     "non_evaluator",
                     "prohibited_evaluator",
+                    "synthetic_offline_prototype_evaluator",
                     "unreviewed"
                   ]
                 }
@@ -150,8 +152,10 @@
               "properties": {
                 "classification": {
                   "enum": [
+                    "evaluator_contract",
                     "non_evaluator",
-                    "prohibited_evaluator"
+                    "prohibited_evaluator",
+                    "synthetic_offline_prototype_evaluator"
                   ]
                 }
               },
@@ -171,10 +175,12 @@
         "properties": {
           "classification": {
             "enum": [
+              "evaluator_contract",
               "non_evaluator",
               "production_boundary",
               "production_dependency",
               "prohibited_evaluator",
+              "synthetic_offline_prototype_evaluator",
               "unreviewed"
             ]
           },

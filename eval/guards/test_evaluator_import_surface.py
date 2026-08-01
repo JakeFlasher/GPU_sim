@@ -21,6 +21,7 @@ import hashlib
 import importlib.machinery
 import importlib.util
 import json
+import marshal
 import os
 import re
 import stat
@@ -37,7 +38,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 REGISTRY_RELATIVE = "eval/guards/evaluator_import_surface_registry.v1.json"
 SCHEMA_RELATIVE = "eval/guards/evaluator_import_surface_registry.v1.schema.json"
-REGISTRY_SHA256 = "94ce8b550eaabe9d242bacf78532245d13df8823da68cd40d7c59566c9029326"
+REGISTRY_SHA256 = "f2654f530393482ce2c6fb93f96b4b3ae35a82a40eee6bfbc345465688f793e9"
 ENTRYPOINT = "eval/production_evaluator/__init__.py"
 ENTRYPOINT_MODULE = "eval.production_evaluator"
 SCHEMA_ID = (
@@ -50,6 +51,12 @@ PEP263_CODING_COOKIE = re.compile(
 )
 HEX_SHA256 = frozenset("0123456789abcdef")
 AUTHORITY_SNAPSHOT_MAX_SIZE_BYTES = 1024 * 1024
+MAX_CLASSIFICATION_ROWS = 128
+MAX_CLASSIFIED_SOURCE_BYTES = 8 * 1024 * 1024
+MAX_EVAL_RUNTIME_FILES = 64
+MAX_EVAL_RUNTIME_BYTES = 4 * 1024 * 1024
+MAX_SIM_SOURCE_FILES = 4096
+MAX_SIM_SOURCE_BYTES = 64 * 1024 * 1024
 PRODUCTION_CLASSIFICATIONS = {"production_boundary", "production_dependency"}
 EXPECTED_UNRESOLVED_AUTHORITIES = {
     "cohort_membership",
@@ -89,6 +96,28 @@ EXPECTED_NON_EVALUATORS = {
     "workloads/simbench_bw/phase_cycle_ledger_aggregator.py",
     "workloads/simbench_bw/phase_cycle_ledger_consumer.py",
 }
+EXPECTED_EVALUATOR_CONTRACTS = {
+    "eval/contracts/__init__.py",
+    "eval/contracts/_common.py",
+    "eval/contracts/_receipt_common.py",
+    "eval/contracts/label_opening_receipt.py",
+    "eval/contracts/launch_crosswalk.py",
+    "eval/contracts/model_seal.py",
+    "eval/contracts/prediction_seal_receipt.py",
+    "eval/contracts/preregistration_receipt.py",
+    "eval/contracts/state_lifetime.py",
+    "eval/contracts/validation.py",
+}
+EXPECTED_SYNTHETIC_OFFLINE_PROTOTYPE_EVALUATORS = {
+    "eval/labels.py",
+    "eval/registry.py",
+    "eval/score.py",
+}
+EXPECTED_EVAL_RUNTIME_SOURCES = {
+    ENTRYPOINT,
+    *EXPECTED_EVALUATOR_CONTRACTS,
+    *EXPECTED_SYNTHETIC_OFFLINE_PROTOTYPE_EVALUATORS,
+}
 SOURCE_SUFFIXES = tuple(importlib.machinery.SOURCE_SUFFIXES)
 BYTECODE_SUFFIXES = tuple(importlib.machinery.BYTECODE_SUFFIXES)
 _IMPORT_EXTENSION_SUFFIXES = tuple(importlib.machinery.EXTENSION_SUFFIXES)
@@ -124,11 +153,14 @@ SIM_SOURCE_SUFFIXES = {
 }
 SIM_PYTHON_DYNAMIC_MODULES = {"importlib", "runpy", "zipimport"}
 SIM_PYTHON_PROCESS_MODULES = {"commands", "multiprocessing", "pty", "subprocess"}
+# Attribute-name construction is unbounded, so reflection is rejected rather than
+# treated as a string-folding problem with an incomplete accepted grammar.
 SIM_PYTHON_DYNAMIC_CALL_NAMES = {
     "__import__",
     "compile",
     "eval",
     "exec",
+    "getattr",
     "import_module",
     "run_module",
     "run_path",
@@ -213,20 +245,45 @@ class ValidatedRegistry:
     schema_snapshot: FileSnapshot
 
 
+@dataclass(frozen=True)
+class EvalRuntimeInventory:
+    sources: frozenset[str]
+    bytecode_caches: tuple[str, ...]
+
+
 def _fail(message: str) -> NoReturn:
     raise RegistryViolation(message)
 
 
 def _is_sha256(value: Any) -> bool:
-    return (
-        isinstance(value, str)
-        and len(value) == 64
-        and set(value).issubset(HEX_SHA256)
-    )
+    return type(value) is str and len(value) == 64 and set(value).issubset(HEX_SHA256)
+
+
+def _require_inventory_bounds(
+    context: str,
+    *,
+    file_count: int,
+    total_bytes: int,
+    max_files: int,
+    max_bytes: int,
+) -> None:
+    values = (file_count, total_bytes, max_files, max_bytes)
+    if any(type(value) is not int or value < 0 for value in values):
+        _fail(f"{context} inventory bounds require exact nonnegative integers")
+    if file_count > max_files:
+        _fail(
+            f"{context}_file_limit_exceeded: observed={file_count}; "
+            f"ceiling={max_files}"
+        )
+    if total_bytes > max_bytes:
+        _fail(
+            f"{context}_byte_limit_exceeded: observed={total_bytes}; "
+            f"ceiling={max_bytes}"
+        )
 
 
 def _safe_relative_path(value: Any, context: str) -> str:
-    if not isinstance(value, str) or not value:
+    if type(value) is not str or not value:
         _fail(f"{context} must be a non-empty repository-relative path")
     path = PurePosixPath(value)
     if (
@@ -424,10 +481,16 @@ def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     return result
 
 
+def _reject_json_constant(token: str) -> NoReturn:
+    _fail(f"non-finite JSON constant is forbidden: {token}")
+
+
 def _strict_json(snapshot: FileSnapshot, context: str) -> Any:
     try:
         return json.loads(
-            snapshot.utf8(context), object_pairs_hook=_reject_duplicate_keys
+            snapshot.utf8(context),
+            object_pairs_hook=_reject_duplicate_keys,
+            parse_constant=_reject_json_constant,
         )
     except json.JSONDecodeError as exc:
         _fail(f"{context} is not valid JSON: {exc}")
@@ -445,8 +508,23 @@ def _validate_with_schema(document: Any, schema: dict[str, Any]) -> None:
 
 
 def _classification_by_path(document: dict[str, Any]) -> dict[str, dict[str, Any]]:
-    rows = document["classifications"]
-    paths = [row["path"] for row in rows]
+    if type(document) is not dict:
+        _fail("classification registry must be an exact built-in dict")
+    rows = document.get("classifications")
+    if type(rows) is not list:
+        _fail("classification rows must be an exact built-in list")
+    _require_inventory_bounds(
+        "classification_inventory",
+        file_count=len(rows),
+        total_bytes=0,
+        max_files=MAX_CLASSIFICATION_ROWS,
+        max_bytes=MAX_CLASSIFIED_SOURCE_BYTES,
+    )
+    if any(type(row) is not dict for row in rows):
+        _fail("classification rows must be exact built-in dicts")
+    paths = [row.get("path") for row in rows]
+    if any(type(path) is not str for path in paths):
+        _fail("classification paths must be exact built-in strings")
     if paths != sorted(paths):
         _fail("classification rows must be sorted by path")
     if len(paths) != len(set(paths)):
@@ -467,6 +545,161 @@ def _verify_blocked_package_inventory(repo_root: Path) -> None:
         )
 
 
+def _eval_runtime_source_inventory(repo_root: Path) -> EvalRuntimeInventory:
+    """Close importable evaluator Python sources outside guard and test trees."""
+
+    sources: set[str] = set()
+    bytecode_caches: list[str] = []
+    compiled: list[str] = []
+    excluded = {"eval/guards", "eval/tests"}
+
+    def inspect_bytecode_cache(relative: str) -> None:
+        entries = _directory_entries(
+            repo_root, relative, "evaluator runtime bytecode cache"
+        )
+        for name, mode in entries.items():
+            joined = f"{relative}/{name}"
+            if not stat.S_ISREG(mode) or not name.endswith(BYTECODE_SUFFIXES):
+                _fail(
+                    "evaluator runtime bytecode cache contains an unexpected "
+                    f"artifact: {joined}"
+                )
+            bytecode_caches.append(joined)
+
+    def walk(relative: str) -> None:
+        entries = _directory_entries(repo_root, relative, "evaluator runtime inventory")
+        for name, mode in entries.items():
+            joined = f"{relative}/{name}"
+            if joined in excluded:
+                continue
+            if name == "__pycache__":
+                if not stat.S_ISDIR(mode):
+                    _fail(
+                        "evaluator runtime __pycache__ candidate is not a directory: "
+                        f"{joined}"
+                    )
+                inspect_bytecode_cache(joined)
+                continue
+            if stat.S_ISDIR(mode):
+                walk(joined)
+                continue
+            if not stat.S_ISREG(mode):
+                if name.endswith((*SOURCE_SUFFIXES, *COMPILED_SUFFIXES)):
+                    _fail(
+                        "evaluator runtime candidate is not a regular file: "
+                        f"{joined}"
+                    )
+                continue
+            if name.endswith(SOURCE_SUFFIXES):
+                sources.add(joined)
+            elif name.endswith(COMPILED_SUFFIXES):
+                compiled.append(joined)
+
+    walk("eval")
+    if compiled:
+        _fail(f"evaluator runtime contains compiled candidates: {sorted(compiled)!r}")
+    _require_inventory_bounds(
+        "eval_runtime_inventory",
+        file_count=len(sources) + len(bytecode_caches),
+        total_bytes=0,
+        max_files=MAX_EVAL_RUNTIME_FILES,
+        max_bytes=MAX_EVAL_RUNTIME_BYTES,
+    )
+    return EvalRuntimeInventory(
+        frozenset(sources), tuple(sorted(bytecode_caches))
+    )
+
+
+def _runtime_cache_source_and_optimization(cache_path: str) -> tuple[str, int]:
+    path = PurePosixPath(cache_path)
+    if path.parent.name != "__pycache__":
+        _fail(f"evaluator runtime bytecode cache path is malformed: {cache_path}")
+    cache_tag = sys.implementation.cache_tag
+    if type(cache_tag) is not str or not cache_tag:
+        _fail("interpreter cache tag is unavailable")
+    marker = f".{cache_tag}"
+    filename = path.name
+    if not filename.endswith(".pyc"):
+        _fail(f"evaluator runtime bytecode cache suffix is unknown: {cache_path}")
+    body = filename[: -len(".pyc")]
+    marker_index = body.rfind(marker)
+    if marker_index <= 0:
+        _fail(f"evaluator runtime bytecode cache tag is unknown: {cache_path}")
+    stem = body[:marker_index]
+    trailer = body[marker_index + len(marker) :]
+    if trailer == "":
+        optimization = 0
+    elif trailer in {".opt-1", ".opt-2"}:
+        optimization = int(trailer[-1])
+    else:
+        _fail(
+            f"evaluator runtime bytecode optimization tag is unknown: {cache_path}"
+        )
+    source = path.parent.parent / f"{stem}.py"
+    return source.as_posix(), optimization
+
+
+def _compiled_runtime_source_payload(
+    repo_root: Path,
+    source_path: str,
+    source_snapshot: FileSnapshot,
+    optimization: int,
+) -> bytes:
+    source_text = _strict_python_text(
+        source_snapshot, "evaluator runtime bytecode source"
+    )
+    expected_code = _TRUSTED_COMPILE(
+        source_text,
+        str(repo_root / PurePosixPath(source_path)),
+        "exec",
+        flags=0,
+        dont_inherit=True,
+        optimize=optimization,
+    )
+    return marshal.dumps(expected_code)
+
+
+def _verify_runtime_bytecode_caches(
+    repo_root: Path,
+    inventory: EvalRuntimeInventory,
+    source_snapshots: dict[str, FileSnapshot],
+) -> int:
+    total_bytes = 0
+    for cache_path in inventory.bytecode_caches:
+        source_path, optimization = _runtime_cache_source_and_optimization(cache_path)
+        source_snapshot = source_snapshots.get(source_path)
+        if source_snapshot is None or source_path not in inventory.sources:
+            _fail(
+                "evaluator runtime bytecode cache lacks its retained source: "
+                f"{cache_path}"
+            )
+        cache_snapshot = _snapshot_file(
+            repo_root, cache_path, "evaluator runtime bytecode cache"
+        )
+        total_bytes += len(cache_snapshot.data)
+        data = cache_snapshot.data
+        if len(data) < 16 or data[:4] != importlib.util.MAGIC_NUMBER:
+            _fail(
+                "evaluator runtime bytecode cache header is invalid: "
+                f"{cache_path}"
+            )
+        flags = int.from_bytes(data[4:8], byteorder="little", signed=False)
+        if flags not in {0, 1, 3}:
+            _fail(
+                "evaluator runtime bytecode cache flags are invalid: "
+                f"{cache_path}"
+            )
+        expected_payload = _compiled_runtime_source_payload(
+            repo_root, source_path, source_snapshot, optimization
+        )
+        if data[16:] != expected_payload:
+            _fail(
+                "evaluator runtime bytecode differs from its retained source: "
+                f"{cache_path}"
+            )
+    return total_bytes
+
+
 def _load_registry_document(
     repo_root: Path,
 ) -> tuple[dict[str, Any], FileSnapshot, FileSnapshot]:
@@ -479,13 +712,15 @@ def _load_registry_document(
             f"expected {REGISTRY_SHA256}, got {registry_snapshot.sha256}"
         )
     document = _strict_json(registry_snapshot, "classification registry")
+    if type(document) is not dict:
+        _fail("classification registry root must be an exact JSON object")
     canonical = (
         json.dumps(document, ensure_ascii=False, indent=2, sort_keys=True) + "\n"
     ).encode("utf-8")
     if registry_snapshot.data != canonical:
         _fail("classification registry is not deterministic sorted JSON plus LF")
     binding = document.get("schema_binding")
-    if not isinstance(binding, dict) or binding.get("path") != SCHEMA_RELATIVE:
+    if type(binding) is not dict or binding.get("path") != SCHEMA_RELATIVE:
         _fail("registry schema path binding is absent or unknown")
     schema_snapshot = _snapshot_file(repo_root, SCHEMA_RELATIVE, "registry schema")
     if (
@@ -494,6 +729,15 @@ def _load_registry_document(
     ):
         _fail("registry schema hash binding drifted")
     schema = _strict_json(schema_snapshot, "classification registry schema")
+    if type(schema) is not dict:
+        _fail("classification registry schema root must be an exact JSON object")
+    if type(schema.get("$id")) is not str or schema["$id"] != SCHEMA_ID:
+        _fail("classification registry schema identity is absent or unknown")
+    if (
+        type(schema.get("$schema")) is not str
+        or schema["$schema"] != "https://json-schema.org/draft/2020-12/schema"
+    ):
+        _fail("classification registry schema dialect is absent or unknown")
     _validate_with_schema(document, schema)
     return document, registry_snapshot, schema_snapshot
 
@@ -555,6 +799,38 @@ def _validate_registry(repo_root: Path = REPO_ROOT) -> ValidatedRegistry:
             f"missing={sorted(EXPECTED_NON_EVALUATORS - non_evaluators)!r}, "
             f"unknown={sorted(non_evaluators - EXPECTED_NON_EVALUATORS)!r}"
         )
+    evaluator_contracts = {
+        path
+        for path, row in rows.items()
+        if row["classification"] == "evaluator_contract"
+    }
+    if evaluator_contracts != EXPECTED_EVALUATOR_CONTRACTS:
+        _fail(
+            "reviewed evaluator-contract classification drifted; "
+            f"missing={sorted(EXPECTED_EVALUATOR_CONTRACTS - evaluator_contracts)!r}, "
+            f"unknown={sorted(evaluator_contracts - EXPECTED_EVALUATOR_CONTRACTS)!r}"
+        )
+    prototypes = {
+        path
+        for path, row in rows.items()
+        if row["classification"] == "synthetic_offline_prototype_evaluator"
+    }
+    if prototypes != EXPECTED_SYNTHETIC_OFFLINE_PROTOTYPE_EVALUATORS:
+        _fail(
+            "synthetic offline prototype classification drifted; "
+            "missing="
+            f"{sorted(EXPECTED_SYNTHETIC_OFFLINE_PROTOTYPE_EVALUATORS - prototypes)!r}, "
+            "unknown="
+            f"{sorted(prototypes - EXPECTED_SYNTHETIC_OFFLINE_PROTOTYPE_EVALUATORS)!r}"
+        )
+    runtime_inventory = _eval_runtime_source_inventory(repo_root)
+    runtime_sources = set(runtime_inventory.sources)
+    if runtime_sources != EXPECTED_EVAL_RUNTIME_SOURCES:
+        _fail(
+            "evaluator runtime source inventory is not directory-closed; "
+            f"missing={sorted(EXPECTED_EVAL_RUNTIME_SOURCES - runtime_sources)!r}, "
+            f"unknown={sorted(runtime_sources - EXPECTED_EVAL_RUNTIME_SOURCES)!r}"
+        )
     authority_names = set(document["authorities"])
     if authority_names != EXPECTED_UNRESOLVED_AUTHORITIES:
         _fail("typed-unresolved evaluator authority field set drifted")
@@ -576,8 +852,17 @@ def _validate_registry(repo_root: Path = REPO_ROOT) -> ValidatedRegistry:
     _verify_entrypoint_ancestor_inventory(repo_root)
 
     snapshots: dict[str, FileSnapshot] = {}
+    classified_source_bytes = 0
     for path, row in rows.items():
         snapshot = _snapshot_file(repo_root, path, "classification")
+        classified_source_bytes += len(snapshot.data)
+        _require_inventory_bounds(
+            "classification_inventory",
+            file_count=len(rows),
+            total_bytes=classified_source_bytes,
+            max_files=MAX_CLASSIFICATION_ROWS,
+            max_bytes=MAX_CLASSIFIED_SOURCE_BYTES,
+        )
         expected = row["sha256"]
         if not _is_sha256(expected):
             _fail(f"classification has a malformed SHA-256: {path}")
@@ -587,6 +872,19 @@ def _validate_registry(repo_root: Path = REPO_ROOT) -> ValidatedRegistry:
                 f"{path}; expected {expected}, got {snapshot.sha256}"
             )
         snapshots[path] = snapshot
+    cache_bytes = _verify_runtime_bytecode_caches(
+        repo_root, runtime_inventory, snapshots
+    )
+    runtime_bytes = (
+        sum(len(snapshots[path].data) for path in runtime_sources) + cache_bytes
+    )
+    _require_inventory_bounds(
+        "eval_runtime_inventory",
+        file_count=len(runtime_sources) + len(runtime_inventory.bytecode_caches),
+        total_bytes=runtime_bytes,
+        max_files=MAX_EVAL_RUNTIME_FILES,
+        max_bytes=MAX_EVAL_RUNTIME_BYTES,
+    )
     _verify_blocked_package_inventory(repo_root)
     return ValidatedRegistry(
         document,
@@ -1060,6 +1358,25 @@ def _require_exact_string_keys(mapping: Any, context: str) -> None:
             _fail(f"{context} contains a non-exact string key")
 
 
+def _controlled_future_import_request(
+    name: Any,
+    globals_namespace: Any,
+    locals_namespace: Any,
+    fromlist: Any,
+    level: Any,
+) -> bool:
+    if type(name) is not str:
+        _fail("blocked evaluator import name is not an exact string")
+    if type(level) is not int:
+        _fail("blocked evaluator import level is not an exact integer")
+    imported_names = _exact_string_tuple(
+        fromlist, "blocked evaluator import fromlist"
+    )
+    if type(globals_namespace) is not dict or type(locals_namespace) is not dict:
+        _fail("blocked evaluator import namespaces are not exact dictionaries")
+    return name == "__future__" and imported_names == ("annotations",) and level == 0
+
+
 def _validate_trusted_path_hooks(hooks: list[Any]) -> None:
     if _TRUSTED_PATH_HOOKS is None or len(_TRUSTED_PATH_HOOKS) != 2:
         _fail("trusted interpreter path-hook baseline is unavailable")
@@ -1397,7 +1714,9 @@ def _execute_authenticated_snapshot_ast(
         fromlist: tuple[str, ...] = (),
         level: int = 0,
     ) -> ModuleType:
-        if name == "__future__" and fromlist == ("annotations",) and level == 0:
+        if _controlled_future_import_request(
+            name, globals, locals, fromlist, level
+        ):
             return future_stub
         _fail(f"blocked evaluator attempted an unapproved import: {name!r}")
 
@@ -1583,6 +1902,7 @@ def _sim_snapshots(sim_root: Path) -> list[FileSnapshot]:
     if not sim_root.is_dir() or sim_root.is_symlink():
         _fail(f"sim source root is missing or symlinked: {sim_root}")
     snapshots: list[FileSnapshot] = []
+    total_bytes = 0
 
     def walk_error(error: OSError) -> None:
         _fail(f"sim source inventory is unreadable: {error}")
@@ -1616,6 +1936,14 @@ def _sim_snapshots(sim_root: Path) -> list[FileSnapshot]:
                 continue
             snapshots.append(
                 _snapshot_file(sim_root, relative.as_posix(), "sim source")
+            )
+            total_bytes += len(snapshots[-1].data)
+            _require_inventory_bounds(
+                "sim_source_inventory",
+                file_count=len(snapshots),
+                total_bytes=total_bytes,
+                max_files=MAX_SIM_SOURCE_FILES,
+                max_bytes=MAX_SIM_SOURCE_BYTES,
             )
     return snapshots
 
@@ -1712,6 +2040,46 @@ def _reflected_callable_name(
     return ""
 
 
+def _callable_reference_names(
+    expression: ast.AST, bindings: dict[str, str]
+) -> set[str]:
+    if isinstance(expression, ast.Name):
+        return {expression.id}
+    if isinstance(expression, ast.Attribute):
+        return {expression.attr}
+    if isinstance(expression, ast.Call):
+        callee = _reflected_callable_name(expression.func, bindings)
+        if callee == "getattr" and len(expression.args) >= 2:
+            attribute = _constant_string(expression.args[1], bindings)
+            return {attribute} if attribute else set()
+        return _callable_reference_names(expression.func, bindings)
+    if isinstance(expression, ast.Subscript):
+        names = _callable_reference_names(expression.value, bindings)
+        key = _constant_string(expression.slice, bindings)
+        if key:
+            names.add(key)
+        return names
+    if isinstance(expression, (ast.List, ast.Tuple, ast.Set)):
+        names: set[str] = set()
+        for element in expression.elts:
+            names.update(_callable_reference_names(element, bindings))
+        return names
+    if isinstance(expression, ast.Dict):
+        names = set()
+        for value in expression.values:
+            names.update(_callable_reference_names(value, bindings))
+        return names
+    if isinstance(expression, ast.IfExp):
+        return _callable_reference_names(
+            expression.body, bindings
+        ) | _callable_reference_names(expression.orelse, bindings)
+    if isinstance(expression, ast.NamedExpr):
+        return _callable_reference_names(expression.value, bindings)
+    if isinstance(expression, ast.Starred):
+        return _callable_reference_names(expression.value, bindings)
+    return set()
+
+
 def _reflection_container_name(
     expression: ast.AST, bindings: dict[str, str]
 ) -> str:
@@ -1731,6 +2099,112 @@ def _reflection_container_name(
     return ""
 
 
+def _assignment_target_alias_names(
+    target: ast.AST, bindings: dict[str, str]
+) -> set[str]:
+    if isinstance(target, ast.Name):
+        return {target.id}
+    if isinstance(target, ast.arg):
+        return {target.arg}
+    if isinstance(target, ast.Starred):
+        return _assignment_target_alias_names(target.value, bindings)
+    if isinstance(target, (ast.List, ast.Tuple)):
+        names: set[str] = set()
+        for element in target.elts:
+            names.update(_assignment_target_alias_names(element, bindings))
+        return names
+    if isinstance(target, ast.Attribute):
+        return {target.attr}
+    if isinstance(target, ast.Subscript):
+        return _callable_reference_names(target.value, bindings)
+    return set()
+
+
+def _callable_alias_bindings(
+    tree: ast.Module,
+    string_bindings: dict[str, str],
+    dangerous_names: set[str],
+) -> dict[str, str]:
+    """Resolve callable aliases, defaults, and static containers without execution."""
+    relations: dict[str, set[str]] = {}
+
+    def bind(target: ast.AST, value: ast.AST) -> None:
+        sources = _callable_reference_names(value, string_bindings)
+        if not sources:
+            return
+        for target_name in _assignment_target_alias_names(target, string_bindings):
+            relations.setdefault(target_name, set()).update(sources)
+
+    def bind_defaults(arguments: ast.arguments) -> None:
+        positional = [*arguments.posonlyargs, *arguments.args]
+        if arguments.defaults:
+            for argument, default in zip(
+                positional[-len(arguments.defaults) :], arguments.defaults
+            ):
+                bind(argument, default)
+        for argument, default in zip(
+            arguments.kwonlyargs, arguments.kw_defaults
+        ):
+            if default is not None:
+                bind(argument, default)
+
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                bind(target, node.value)
+        elif isinstance(node, ast.AnnAssign) and node.value is not None:
+            bind(node.target, node.value)
+        elif isinstance(node, ast.NamedExpr):
+            bind(node.target, node.value)
+        elif isinstance(node, ast.ImportFrom):
+            for alias in node.names:
+                if alias.name in dangerous_names:
+                    relations.setdefault(alias.asname or alias.name, set()).add(
+                        alias.name
+                    )
+        elif isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+            bind_defaults(node.args)
+
+    reverse_relations: dict[str, set[str]] = {}
+    for alias_name, source_names in relations.items():
+        for source_name in source_names:
+            reverse_relations.setdefault(source_name, set()).add(alias_name)
+
+    resolved: dict[str, str] = {}
+    pending: list[tuple[str, str]] = [
+        (dangerous_name, dangerous_name)
+        for dangerous_name in sorted(dangerous_names)
+    ]
+    index = 0
+    while index < len(pending):
+        source_name, canonical = pending[index]
+        index += 1
+        for alias_name in sorted(reverse_relations.get(source_name, set())):
+            prior = resolved.get(alias_name)
+            if prior is not None and prior <= canonical:
+                continue
+            resolved[alias_name] = canonical
+            pending.append((alias_name, canonical))
+    return resolved
+
+
+def _resolved_dangerous_callable(
+    expression: ast.AST,
+    bindings: dict[str, str],
+    aliases: dict[str, str],
+    dangerous_names: set[str],
+) -> tuple[str, str] | None:
+    candidates: list[tuple[str, str]] = []
+    for observed in _callable_reference_names(expression, bindings):
+        canonical = aliases.get(observed, observed)
+        if canonical in dangerous_names:
+            candidates.append((canonical, observed))
+    if not candidates:
+        return None
+    canonical, observed = sorted(candidates)[0]
+    return observed, canonical
+
+
 def _sim_python_dynamic_violations(
     tree: ast.Module, relative: str, module_name: str
 ) -> list[str]:
@@ -1742,6 +2216,12 @@ def _sim_python_dynamic_violations(
         module_name.rsplit(".", 1)[-1],
     }
     bindings = _literal_string_bindings(tree)
+    dynamic_aliases = _callable_alias_bindings(
+        tree, bindings, SIM_PYTHON_DYNAMIC_CALL_NAMES
+    )
+    process_aliases = _callable_alias_bindings(
+        tree, bindings, SIM_PYTHON_PROCESS_CALL_NAMES
+    )
     for node in ast.walk(tree):
         if isinstance(node, ast.Import):
             for alias in node.names:
@@ -1775,14 +2255,39 @@ def _sim_python_dynamic_violations(
                         f"{relative}:{node.lineno}: process API import {alias.name!r}"
                     )
         elif isinstance(node, ast.Call):
-            name = _reflected_callable_name(node.func, bindings)
-            if name in SIM_PYTHON_DYNAMIC_CALL_NAMES:
-                violations.append(
-                    f"{relative}:{node.lineno}: dynamic code/import API {name!r}"
+            dynamic_callable = _resolved_dangerous_callable(
+                node.func,
+                bindings,
+                dynamic_aliases,
+                SIM_PYTHON_DYNAMIC_CALL_NAMES,
+            )
+            process_callable = _resolved_dangerous_callable(
+                node.func,
+                bindings,
+                process_aliases,
+                SIM_PYTHON_PROCESS_CALL_NAMES,
+            )
+            if dynamic_callable is not None:
+                name, dynamic_name = dynamic_callable
+                alias_detail = (
+                    f" alias {name!r} -> {dynamic_name!r}"
+                    if name in dynamic_aliases
+                    else f" {dynamic_name!r}"
                 )
-            if name in SIM_PYTHON_PROCESS_CALL_NAMES:
                 violations.append(
-                    f"{relative}:{node.lineno}: process execution API {name!r}"
+                    f"{relative}:{node.lineno}: dynamic code/import API"
+                    f"{alias_detail}"
+                )
+            if process_callable is not None:
+                name, process_name = process_callable
+                alias_detail = (
+                    f" alias {name!r} -> {process_name!r}"
+                    if name in process_aliases
+                    else f" {process_name!r}"
+                )
+                violations.append(
+                    f"{relative}:{node.lineno}: process execution API"
+                    f"{alias_detail}"
                 )
             for argument in [*node.args, *(item.value for item in node.keywords)]:
                 value = _constant_string(argument, bindings)
@@ -1791,17 +2296,24 @@ def _sim_python_dynamic_violations(
                         f"{relative}:{node.lineno}: computed evaluator module "
                         f"reference {value!r}"
                     )
-        elif isinstance(node, ast.Name) and node.id in SIM_PYTHON_DYNAMIC_CALL_NAMES:
-            violations.append(
-                f"{relative}:{node.lineno}: dynamic code/import reference {node.id!r}"
-            )
-        elif (
-            isinstance(node, ast.Attribute)
-            and node.attr in SIM_PYTHON_DYNAMIC_CALL_NAMES
-        ):
-            violations.append(
-                f"{relative}:{node.lineno}: dynamic code/import reference {node.attr!r}"
-            )
+        elif isinstance(node, ast.Name):
+            if node.id in SIM_PYTHON_DYNAMIC_CALL_NAMES:
+                violations.append(
+                    f"{relative}:{node.lineno}: dynamic code/import reference {node.id!r}"
+                )
+            if node.id in SIM_PYTHON_PROCESS_CALL_NAMES:
+                violations.append(
+                    f"{relative}:{node.lineno}: process execution reference {node.id!r}"
+                )
+        elif isinstance(node, ast.Attribute):
+            if node.attr in SIM_PYTHON_DYNAMIC_CALL_NAMES:
+                violations.append(
+                    f"{relative}:{node.lineno}: dynamic code/import reference {node.attr!r}"
+                )
+            if node.attr in SIM_PYTHON_PROCESS_CALL_NAMES:
+                violations.append(
+                    f"{relative}:{node.lineno}: process execution reference {node.attr!r}"
+                )
         elif isinstance(node, ast.Subscript):
             container = _reflection_container_name(node.value, bindings)
             if container:
@@ -2991,6 +3503,106 @@ def test_schema_rejects_unknown_registry_fields() -> None:
         _validate_with_schema(planted, schema)
 
 
+def test_contract_and_prototype_sources_remain_reviewed_denied() -> None:
+    validated = _validate_registry()
+    denied = EXPECTED_EVALUATOR_CONTRACTS | (
+        EXPECTED_SYNTHETIC_OFFLINE_PROTOTYPE_EVALUATORS
+    )
+
+    assert {
+        path
+        for path, row in validated.rows.items()
+        if row["classification"]
+        in {"evaluator_contract", "synthetic_offline_prototype_evaluator"}
+    } == denied
+    assert all(
+        validated.rows[path]["import_policy"] == "deny"
+        and validated.rows[path]["review_status"] == "reviewed"
+        for path in denied
+    )
+
+
+def test_classification_registry_rejects_container_subclasses_without_callbacks() -> None:
+    calls = {"iter": 0, "get": 0, "eq": 0}
+
+    class HostileRows(list):
+        def __iter__(self) -> Any:
+            calls["iter"] += 1
+            raise AssertionError("classification rows iterated")
+
+    class HostileRow(dict):
+        def get(self, key: Any, default: Any = None) -> Any:
+            calls["get"] += 1
+            raise AssertionError("classification row queried")
+
+    class HostilePath(str):
+        def __eq__(self, other: Any) -> bool:
+            calls["eq"] += 1
+            raise AssertionError("classification path compared")
+
+        __hash__ = str.__hash__
+
+    with pytest.raises(RegistryViolation, match="exact built-in list"):
+        _classification_by_path({"classifications": HostileRows()})
+    with pytest.raises(RegistryViolation, match="exact built-in dicts"):
+        _classification_by_path({"classifications": [HostileRow()]})
+    with pytest.raises(RegistryViolation, match="exact built-in strings"):
+        _classification_by_path(
+            {"classifications": [{"path": HostilePath("eval/planted.py")}]}
+        )
+    assert calls == {"iter": 0, "get": 0, "eq": 0}
+
+
+def test_strict_registry_json_rejects_nonfinite_number() -> None:
+    data = b'{"value":NaN}\n'
+    snapshot = FileSnapshot(
+        "fixture.json", data, hashlib.sha256(data).hexdigest()
+    )
+
+    with pytest.raises(RegistryViolation, match="non-finite JSON constant"):
+        _strict_json(snapshot, "fixture registry")
+
+
+def test_controlled_import_requires_exact_level_and_fromlist_types() -> None:
+    namespace: dict[str, Any] = {}
+    assert _controlled_future_import_request(
+        "__future__", namespace, namespace, ("annotations",), 0
+    )
+
+    with pytest.raises(RegistryViolation, match="exact integer"):
+        _controlled_future_import_request(
+            "__future__", namespace, namespace, ("annotations",), False
+        )
+
+    class HostileFromlist(tuple):
+        def __iter__(self) -> Any:
+            raise AssertionError("hostile fromlist iterated")
+
+    with pytest.raises(RegistryViolation, match="exact built-in tuple"):
+        _controlled_future_import_request(
+            "__future__",
+            namespace,
+            namespace,
+            HostileFromlist(("annotations",)),
+            0,
+        )
+
+
+def test_classification_registry_enforces_row_bound(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(sys.modules[__name__], "MAX_CLASSIFICATION_ROWS", 1)
+    document = {
+        "classifications": [
+            {"path": "eval/a.py"},
+            {"path": "eval/b.py"},
+        ]
+    }
+
+    with pytest.raises(RegistryViolation, match="classification_inventory_file_limit"):
+        _classification_by_path(document)
+
+
 def test_exact_whole_file_prohibited_duplicate_is_rejected() -> None:
     validated = _validate_registry()
     planted = copy.deepcopy(validated.document)
@@ -3030,6 +3642,34 @@ def test_sim_reverse_guard_rejects_computed_reflection_import(
     violations = _sim_evaluator_references(sim_root, ENTRYPOINT_MODULE)
     assert any("dynamic code/import API '__import__'" in item for item in violations)
     assert any("computed evaluator" in item for item in violations)
+
+
+@pytest.mark.parametrize(
+    "expression",
+    [
+        "'sys{}tem'.format('')",
+        "'%s%s' % ('sys', 'tem')",
+        "f\"{'sys'}tem\"",
+        "'sysXtem'.replace('X', '')",
+        "'xsystem'[1:]",
+    ],
+    ids=["format", "percent", "f-string", "replace", "slice"],
+)
+def test_sim_reverse_guard_rejects_reflection_without_string_folding(
+    tmp_path: Path, expression: str
+) -> None:
+    sim_root = tmp_path / "sim"
+    sim_root.mkdir()
+    (sim_root / "fixture.py").write_text(
+        f"import os\ngetattr(os, {expression})('true')\n",
+        encoding="utf-8",
+    )
+
+    violations = _sim_evaluator_references(sim_root, ENTRYPOINT_MODULE)
+
+    assert any(
+        "dynamic code/import reference 'getattr'" in item for item in violations
+    )
 
 
 def test_sim_reverse_guard_rejects_join_dataflow_reflection_import(
@@ -3108,6 +3748,236 @@ def test_sim_reverse_guard_rejects_aliased_builtin_import(tmp_path: Path) -> Non
     )
     violations = _sim_evaluator_references(sim_root, ENTRYPOINT_MODULE)
     assert any("dynamic API import" in violation for violation in violations)
+
+
+def test_sim_reverse_guard_rejects_callable_process_alias_chain(
+    tmp_path: Path,
+) -> None:
+    sim_root = tmp_path / "sim"
+    sim_root.mkdir()
+    (sim_root / "fixture.py").write_text(
+        "import os\n"
+        "runner = os.system\n"
+        "invoke = runner\n"
+        "def execute(command):\n    return invoke(command)\n",
+        encoding="utf-8",
+    )
+
+    violations = _sim_evaluator_references(sim_root, ENTRYPOINT_MODULE)
+
+    assert any(
+        "process execution API alias 'invoke' -> 'system'" in violation
+        for violation in violations
+    )
+
+
+@pytest.mark.parametrize(
+    ("source", "alias_name"),
+    [
+        (
+            "import os\n"
+            "def execute(command, runner=os.system):\n"
+            "    return runner(command)\n",
+            "runner",
+        ),
+        (
+            "import os\n"
+            "runner = [os.system][0]\n"
+            "def execute(command):\n    return runner(command)\n",
+            "runner",
+        ),
+        (
+            "import os\n"
+            "runners = {'default': os.system}\n"
+            "def execute(command):\n    return runners['default'](command)\n",
+            "runners",
+        ),
+    ],
+)
+def test_sim_reverse_guard_rejects_process_defaults_and_containers(
+    tmp_path: Path, source: str, alias_name: str
+) -> None:
+    sim_root = tmp_path / "sim"
+    sim_root.mkdir()
+    (sim_root / "fixture.py").write_text(source, encoding="utf-8")
+
+    violations = _sim_evaluator_references(sim_root, ENTRYPOINT_MODULE)
+
+    assert any(
+        f"process execution API alias {alias_name!r} -> 'system'" in violation
+        for violation in violations
+    )
+
+
+@pytest.mark.parametrize(
+    ("source", "alias_name"),
+    [
+        (
+            "import os\n"
+            "runner, = [os.system]\n"
+            "def execute(command):\n    return runner(command)\n",
+            "runner",
+        ),
+        (
+            "import os\n"
+            "runners = {}\n"
+            "runners['default'] = os.system\n"
+            "def execute(command):\n    return runners['default'](command)\n",
+            "runners",
+        ),
+        (
+            "import os\n"
+            "class Holder:\n    pass\n"
+            "holder = Holder()\n"
+            "holder.runner = os.system\n"
+            "def execute(command):\n    return holder.runner(command)\n",
+            "runner",
+        ),
+    ],
+    ids=["tuple-unpack", "mapping-mutation", "attribute-assignment"],
+)
+def test_sim_reverse_guard_rejects_process_assignment_targets(
+    tmp_path: Path, source: str, alias_name: str
+) -> None:
+    sim_root = tmp_path / "sim"
+    sim_root.mkdir()
+    (sim_root / "fixture.py").write_text(source, encoding="utf-8")
+
+    violations = _sim_evaluator_references(sim_root, ENTRYPOINT_MODULE)
+
+    assert any(
+        f"process execution API alias {alias_name!r} -> 'system'" in violation
+        for violation in violations
+    )
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "import os\nfor runner in [os.system]:\n    runner('true')\n",
+        "import os\n[runner('true') for runner in [os.system]]\n",
+        "import os\nrunners = []\nrunners.append(os.system)\nrunners[0]('true')\n",
+        "import os\nrunners = dict(default=os.system)\nrunners['default']('true')\n",
+        "import os\nclass Holder:\n    pass\nholder = Holder()\n"
+        "setattr(holder, 'runner', os.system)\nholder.runner('true')\n",
+    ],
+    ids=["for-loop", "comprehension", "append", "constructor", "setattr"],
+)
+def test_sim_reverse_guard_rejects_process_callable_transfers(
+    tmp_path: Path, source: str
+) -> None:
+    sim_root = tmp_path / "sim"
+    sim_root.mkdir()
+    (sim_root / "fixture.py").write_text(source, encoding="utf-8")
+
+    violations = _sim_evaluator_references(sim_root, ENTRYPOINT_MODULE)
+
+    assert any(
+        "process execution reference 'system'" in violation
+        for violation in violations
+    )
+
+
+def test_eval_runtime_inventory_is_directory_closed(tmp_path: Path) -> None:
+    (tmp_path / "eval/contracts").mkdir(parents=True)
+    (tmp_path / "eval/guards").mkdir()
+    (tmp_path / "eval/tests").mkdir()
+    (tmp_path / "eval/contracts/authority.py").write_text(
+        "VALUE = 1\n", encoding="utf-8"
+    )
+    (tmp_path / "eval/prototype.py").write_text("VALUE = 2\n", encoding="utf-8")
+    (tmp_path / "eval/guards/ignored.py").write_text(
+        "VALUE = 3\n", encoding="utf-8"
+    )
+    (tmp_path / "eval/tests/ignored.py").write_text(
+        "VALUE = 4\n", encoding="utf-8"
+    )
+
+    assert _eval_runtime_source_inventory(tmp_path).sources == frozenset(
+        {
+            "eval/contracts/authority.py",
+            "eval/prototype.py",
+        }
+    )
+
+
+def test_eval_runtime_inventory_rejects_compiled_candidate(tmp_path: Path) -> None:
+    (tmp_path / "eval").mkdir()
+    (tmp_path / "eval/planted.pyc").write_bytes(b"compiled")
+
+    with pytest.raises(RegistryViolation, match="compiled candidates"):
+        _eval_runtime_source_inventory(tmp_path)
+
+
+def test_eval_runtime_inventory_authenticates_bytecode_cache(
+    tmp_path: Path,
+) -> None:
+    eval_root = tmp_path / "eval"
+    cache_root = eval_root / "__pycache__"
+    cache_root.mkdir(parents=True)
+    source_path = eval_root / "benign.py"
+    source_text = "VALUE = 1\n"
+    source_path.write_text(source_text, encoding="utf-8")
+    cache_tag = sys.implementation.cache_tag
+    assert type(cache_tag) is str
+    cache_path = cache_root / f"benign.{cache_tag}.pyc"
+
+    source_snapshot = _snapshot_file(
+        tmp_path, "eval/benign.py", "retained runtime source"
+    )
+    benign_payload = _compiled_runtime_source_payload(
+        tmp_path, "eval/benign.py", source_snapshot, 0
+    )
+    header = importlib.util.MAGIC_NUMBER + (0).to_bytes(4, "little") + b"\0" * 8
+    cache_path.write_bytes(header + benign_payload)
+    inventory = _eval_runtime_source_inventory(tmp_path)
+    cache_size = cache_path.stat().st_size
+
+    assert _verify_runtime_bytecode_caches(
+        tmp_path, inventory, {"eval/benign.py": source_snapshot}
+    ) == cache_size
+
+    malicious_code = _TRUSTED_COMPILE(
+        "PLANTED = True\n",
+        str(source_path),
+        "exec",
+        flags=0,
+        dont_inherit=True,
+        optimize=0,
+    )
+    unchecked_header = (
+        importlib.util.MAGIC_NUMBER + (1).to_bytes(4, "little") + b"\0" * 8
+    )
+    cache_path.write_bytes(unchecked_header + marshal.dumps(malicious_code))
+
+    with pytest.raises(RegistryViolation, match="differs from its retained source"):
+        _verify_runtime_bytecode_caches(
+            tmp_path, inventory, {"eval/benign.py": source_snapshot}
+        )
+
+
+def test_eval_runtime_inventory_enforces_aggregate_file_bound(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "eval").mkdir()
+    (tmp_path / "eval/one.py").write_text("ONE = 1\n", encoding="utf-8")
+    (tmp_path / "eval/two.py").write_text("TWO = 2\n", encoding="utf-8")
+    monkeypatch.setattr(sys.modules[__name__], "MAX_EVAL_RUNTIME_FILES", 1)
+
+    with pytest.raises(RegistryViolation, match="eval_runtime_inventory_file_limit"):
+        _eval_runtime_source_inventory(tmp_path)
+
+
+def test_sim_inventory_enforces_aggregate_byte_bound(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sim_root = tmp_path / "sim"
+    sim_root.mkdir()
+    (sim_root / "fixture.rs").write_text("fn main() {}\n", encoding="utf-8")
+    monkeypatch.setattr(sys.modules[__name__], "MAX_SIM_SOURCE_BYTES", 1)
+
+    with pytest.raises(RegistryViolation, match="sim_source_inventory_byte_limit"):
+        _sim_snapshots(sim_root)
 
 
 def test_retained_snapshot_survives_path_replacement_without_reread(

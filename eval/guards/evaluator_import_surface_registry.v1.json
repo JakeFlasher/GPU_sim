@@ -35,11 +35,102 @@
   },
   "classifications": [
     {
+      "classification": "evaluator_contract",
+      "import_policy": "deny",
+      "path": "eval/contracts/__init__.py",
+      "review_status": "reviewed",
+      "sha256": "246a18e8eb8978b82a3833f0699208940cc637946975dc0df8cf902b73644385"
+    },
+    {
+      "classification": "evaluator_contract",
+      "import_policy": "deny",
+      "path": "eval/contracts/_common.py",
+      "review_status": "reviewed",
+      "sha256": "2139a3998d54b44ffd1cfdf6c08c3f5d5894e432a932c6d65e5db43ff4db9548"
+    },
+    {
+      "classification": "evaluator_contract",
+      "import_policy": "deny",
+      "path": "eval/contracts/_receipt_common.py",
+      "review_status": "reviewed",
+      "sha256": "5bc89d60ce1626be1ca95f75e6809fb30c209cfa00ffc8ef4d48b505cf1eb04d"
+    },
+    {
+      "classification": "evaluator_contract",
+      "import_policy": "deny",
+      "path": "eval/contracts/label_opening_receipt.py",
+      "review_status": "reviewed",
+      "sha256": "475bc6e0b21f218103562a5eb28d482c7ac60ea909892c02d04f08c9ef149d98"
+    },
+    {
+      "classification": "evaluator_contract",
+      "import_policy": "deny",
+      "path": "eval/contracts/launch_crosswalk.py",
+      "review_status": "reviewed",
+      "sha256": "615a0d161acd0b0ae21d3971c5bfb244381fd0f04870cfd6eb1e8532f3baf5f7"
+    },
+    {
+      "classification": "evaluator_contract",
+      "import_policy": "deny",
+      "path": "eval/contracts/model_seal.py",
+      "review_status": "reviewed",
+      "sha256": "0373f9b6e1998dafd66aee73abd24f0f0b9f012755a61722b0514280d995e966"
+    },
+    {
+      "classification": "evaluator_contract",
+      "import_policy": "deny",
+      "path": "eval/contracts/prediction_seal_receipt.py",
+      "review_status": "reviewed",
+      "sha256": "e2e76c871c3bd5d6379ddf444de0413d6df4c1a13cb4c45dc8173a7b2457a909"
+    },
+    {
+      "classification": "evaluator_contract",
+      "import_policy": "deny",
+      "path": "eval/contracts/preregistration_receipt.py",
+      "review_status": "reviewed",
+      "sha256": "1827a6b95c20921fbea24a581b54995cfc3ea659864759670052f1bf0a45f801"
+    },
+    {
+      "classification": "evaluator_contract",
+      "import_policy": "deny",
+      "path": "eval/contracts/state_lifetime.py",
+      "review_status": "reviewed",
+      "sha256": "12440c25afac322672314215e55cbcf8399656f873598bc26bbb36ecb6cc315b"
+    },
+    {
+      "classification": "evaluator_contract",
+      "import_policy": "deny",
+      "path": "eval/contracts/validation.py",
+      "review_status": "reviewed",
+      "sha256": "6c43bd42e2ba14986f4036d36ee07e20e6cf2266abe684beaa400111bec8e6b5"
+    },
+    {
+      "classification": "synthetic_offline_prototype_evaluator",
+      "import_policy": "deny",
+      "path": "eval/labels.py",
+      "review_status": "reviewed",
+      "sha256": "e7d5d06114a6d8546073c1c28369ef03479db5493fed7fd30d0aaba04d2e8c99"
+    },
+    {
       "classification": "production_boundary",
       "import_policy": "allow",
       "path": "eval/production_evaluator/__init__.py",
       "review_status": "reviewed",
       "sha256": "96a7f19d97a7dd49f6a7a9c05bd4fa2de32ed1c3262a0c8efe8db4b422fce5ff"
+    },
+    {
+      "classification": "synthetic_offline_prototype_evaluator",
+      "import_policy": "deny",
+      "path": "eval/registry.py",
+      "review_status": "reviewed",
+      "sha256": "3f52b5148e426b12098e77f5ea4d61515c09ab07a6cb225c2a7c7746527c886c"
+    },
+    {
+      "classification": "synthetic_offline_prototype_evaluator",
+      "import_policy": "deny",
+      "path": "eval/score.py",
+      "review_status": "reviewed",
+      "sha256": "ea9d814fc25b14ca8a6b375386e189d84ffd93e6b7c68a9c581a9df13943b308"
     },
     {
       "classification": "non_evaluator",
@@ -447,6 +538,6 @@
   "registry_version": "evaluator_import_surface_registry.v1",
   "schema_binding": {
     "path": "eval/guards/evaluator_import_surface_registry.v1.schema.json",
-    "sha256": "aded99b64a3e342283447daeb21fe5f58f00654bcce5645b77a681809999ec1b"
+    "sha256": "95776564cbced384c67587538d1f7a40c8e22a75062ba2ab2829025d7afd6495"
   }
 }
