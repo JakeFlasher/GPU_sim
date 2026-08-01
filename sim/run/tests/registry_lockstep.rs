@@ -11,8 +11,8 @@ use std::path::PathBuf;
 
 use serde_json::Value;
 use sim_run::emit::{
-    DESCRIPTORS, MetricKind, ModelIoRole, ParserTransform, RegistryValidMax, TYPED_EXCLUSIONS,
-    TypedExclusionReason, Unit,
+    DESCRIPTORS, EmittedMetricKey, MetricKind, ModelIoRole, ParserTransform, RegistryValidMax,
+    TYPED_EXCLUSIONS, TypedExclusionReason, Unit,
 };
 
 fn registry() -> Value {
@@ -20,6 +20,13 @@ fn registry() -> Value {
     let text = std::fs::read_to_string(&path)
         .unwrap_or_else(|error| panic!("read registry {}: {error}", path.display()));
     serde_json::from_str(&text).expect("registry parses")
+}
+
+fn registry_projection() -> Value {
+    let path = PathBuf::from("../../eval/contracts/metric_registry.7plus1.v1.json");
+    let text = std::fs::read_to_string(&path)
+        .unwrap_or_else(|error| panic!("read projection {}: {error}", path.display()));
+    serde_json::from_str(&text).expect("projection parses")
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -82,6 +89,20 @@ fn registry_is_exactly_partitioned_in_bidirectional_lockstep() {
     let metrics = registry["metrics"].as_array().expect("metrics is an array");
     assert_eq!(metrics.len(), 61, "active registry cardinality drifted");
 
+    let projection = registry_projection();
+    let projected_keys = projection["metrics"]
+        .as_array()
+        .expect("projection metrics is an array")
+        .iter()
+        .map(|entry| entry["key"].as_str().expect("projection key is a string"))
+        .collect::<Vec<_>>();
+    let emitted_v2_keys = EmittedMetricKey::V2_ORDER.map(EmittedMetricKey::as_str);
+    assert_eq!(
+        projected_keys,
+        emitted_v2_keys.to_vec(),
+        "emitter v2 order must equal the frozen 7+1 projection order"
+    );
+
     let mut failures = Vec::new();
     let mut registry_by_key = BTreeMap::new();
     for entry in metrics {
@@ -92,21 +113,19 @@ fn registry_is_exactly_partitioned_in_bidirectional_lockstep() {
     }
 
     let mut descriptor_keys = BTreeSet::new();
-    for descriptor in DESCRIPTORS {
-        if !descriptor_keys.insert(descriptor.key) {
-            failures.push(format!("duplicate descriptor key {:?}", descriptor.key));
+    for descriptor in &DESCRIPTORS {
+        let key = descriptor.key.as_str();
+        if !descriptor_keys.insert(key) {
+            failures.push(format!("duplicate descriptor key {key:?}"));
         }
-        let Some(entry) = registry_by_key.get(descriptor.key) else {
-            failures.push(format!(
-                "{}: descriptor has no active registry row",
-                descriptor.key
-            ));
+        let Some(entry) = registry_by_key.get(key) else {
+            failures.push(format!("{key}: descriptor has no active registry row"));
             continue;
         };
         check_contract(
             &mut failures,
             entry,
-            descriptor.key,
+            key,
             descriptor.ncu_metric,
             descriptor.unit,
             descriptor.valid_max,
@@ -114,10 +133,7 @@ fn registry_is_exactly_partitioned_in_bidirectional_lockstep() {
             descriptor.model_io_role,
         );
         if descriptor.model_io_role != ModelIoRole::Target {
-            failures.push(format!(
-                "{}: a descriptor must bind a target row",
-                descriptor.key
-            ));
+            failures.push(format!("{key}: a descriptor must bind a target row"));
         }
         let kind_matches = match descriptor.kind {
             MetricKind::Count => {
@@ -138,8 +154,8 @@ fn registry_is_exactly_partitioned_in_bidirectional_lockstep() {
         };
         if !kind_matches {
             failures.push(format!(
-                "{}: descriptor kind {:?} contradicts its registry shape",
-                descriptor.key, descriptor.kind
+                "{key}: descriptor kind {:?} contradicts its registry shape",
+                descriptor.kind
             ));
         }
     }
@@ -223,7 +239,7 @@ fn registry_is_exactly_partitioned_in_bidirectional_lockstep() {
 
     let cycles = DESCRIPTORS
         .iter()
-        .find(|descriptor| descriptor.key == "exec_cycles_gpc_max")
+        .find(|descriptor| descriptor.key == EmittedMetricKey::ExecCyclesGpcMax)
         .expect("binding cycle descriptor is mandatory");
     assert_eq!(cycles.ncu_metric, "gpc__cycles_elapsed.max");
     assert_eq!(cycles.unit, Unit::Cycles);

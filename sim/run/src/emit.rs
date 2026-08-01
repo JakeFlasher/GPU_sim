@@ -46,9 +46,9 @@ use serde::ser::{Serialize, SerializeStruct, Serializer};
 use sim_arch::ArchId;
 use sim_mem::{L1CounterError, L1Counters, L1OriginCounters, L2Counters, MemoryOrigin};
 use sim_sm::{
-    DramStats, FullCounterEstimatorProvenance, FullLaunchCoverage, FullLaunchSetCounters,
-    FullLaunchTimingDiagnostic, L2SourceSplit, LaunchSetScope, ReplayConfiguration,
-    SystemCounterError, TailFlags,
+    DramStats, FullCounterEstimatorProvenance, FullKernelReplayResult, FullLaunchCoverage,
+    FullLaunchSetCounters, FullLaunchTimingDiagnostic, L2SourceSplit, LaunchSetScope,
+    ReplayConfiguration, SystemCounterError, TailFlags,
 };
 
 /// The exact counter fields the emission layer reads, borrowed. The type is
@@ -64,6 +64,17 @@ struct CounterSnapshot<'a> {
 }
 
 impl<'a> CounterSnapshot<'a> {
+    fn from_full_launch(result: &'a FullKernelReplayResult) -> Self {
+        Self {
+            arch: result.arch(),
+            instructions_issued: result.instructions_issued(),
+            l1: result.l1(),
+            l2: result.l2(),
+            l2_by_source: result.l2_by_source(),
+            dram: result.dram(),
+        }
+    }
+
     fn from_launch_set(counters: &'a FullLaunchSetCounters) -> Self {
         Self {
             arch: counters.arch(),
@@ -529,9 +540,64 @@ impl Serialize for EmitOutcome {
     }
 }
 
+/// Number of outcomes in the closed simulator-emission surface: seven
+/// implemented secondary metrics plus the mandatory binding-cycle row.
+pub const EMITTED_METRIC_COUNT: usize = 8;
+
+/// Closed identity of every metric the simulator can emit. Result-v2 ordering is
+/// frozen independently from the legacy descriptor-vector order so exact maps can
+/// follow the P1 7+1 authority without changing v1 golden bytes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum EmittedMetricKey {
+    SmspInstExecutedSum,
+    TrafficGmemLdSectors,
+    TrafficGmemStSectors,
+    TrafficDramReadSectors,
+    CacheHitRateL1TexReadSector,
+    CacheHitRateL1TexSector,
+    CacheHitRateL2Sector,
+    ExecCyclesGpcMax,
+}
+
+impl EmittedMetricKey {
+    /// Frozen order from `metric_registry.7plus1.v1` and `sim_result.v2`.
+    pub const V2_ORDER: [Self; EMITTED_METRIC_COUNT] = [
+        Self::SmspInstExecutedSum,
+        Self::TrafficGmemLdSectors,
+        Self::TrafficGmemStSectors,
+        Self::TrafficDramReadSectors,
+        Self::CacheHitRateL1TexReadSector,
+        Self::CacheHitRateL1TexSector,
+        Self::CacheHitRateL2Sector,
+        Self::ExecCyclesGpcMax,
+    ];
+
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::SmspInstExecutedSum => "smsp_inst_executed_sum",
+            Self::TrafficGmemLdSectors => "traffic_gmem_ld_sectors",
+            Self::TrafficGmemStSectors => "traffic_gmem_st_sectors",
+            Self::TrafficDramReadSectors => "traffic_dram_read_sectors",
+            Self::CacheHitRateL1TexReadSector => "cache_hit_rate_l1tex_read_sector",
+            Self::CacheHitRateL1TexSector => "cache_hit_rate_l1tex_sector",
+            Self::CacheHitRateL2Sector => "cache_hit_rate_l2_sector",
+            Self::ExecCyclesGpcMax => "exec_cycles_gpc_max",
+        }
+    }
+}
+
+impl Serialize for EmittedMetricKey {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(self.as_str())
+    }
+}
+
 /// One emitted metric, carrying its registry key + NCU identifier so the eval
 /// join (downstream, outside `sim/`) can match against frozen labels by key.
-/// Values remain borrowed from their [`FullLaunchSetPredictions`] bundle and are
+/// Values remain borrowed from their certified prediction bundle and are
 /// intentionally neither `Clone` nor `Copy`.
 ///
 /// ```compile_fail
@@ -544,7 +610,7 @@ impl Serialize for EmitOutcome {
 #[derive(Debug, PartialEq)]
 pub struct MetricPrediction {
     arch: ArchId,
-    key: &'static str,
+    key: EmittedMetricKey,
     ncu_metric: &'static str,
     unit: Unit,
     outcome: EmitOutcome,
@@ -556,6 +622,10 @@ impl MetricPrediction {
     }
 
     pub fn key(&self) -> &'static str {
+        self.key.as_str()
+    }
+
+    pub fn emitted_key(&self) -> EmittedMetricKey {
         self.key
     }
 
@@ -586,11 +656,59 @@ impl Serialize for MetricPrediction {
     {
         let mut state = serializer.serialize_struct("MetricPrediction", 5)?;
         state.serialize_field("arch", self.arch.token())?;
-        state.serialize_field("key", self.key)?;
+        state.serialize_field("key", &self.key)?;
         state.serialize_field("ncu_metric", self.ncu_metric)?;
         state.serialize_field("unit", &self.unit)?;
         state.serialize_field("outcome", &self.outcome)?;
         state.end()
+    }
+}
+
+/// Certified predictions for one exact full-coverage launch. Construction is
+/// private to [`emit_launch`], so replay configuration, coverage, diagnostics,
+/// tails, and descriptor outcomes cannot be detached and relabelled as another
+/// launch.
+#[derive(Debug)]
+pub struct FullLaunchPredictions {
+    configuration: ReplayConfiguration,
+    coverage: FullLaunchCoverage,
+    diagnostic_last_issue_cycles: u64,
+    terminal_modeled_event_time: Option<u64>,
+    unmodeled_tails: TailFlags,
+    metrics: [MetricPrediction; EMITTED_METRIC_COUNT],
+}
+
+impl FullLaunchPredictions {
+    pub fn configuration(&self) -> ReplayConfiguration {
+        self.configuration
+    }
+
+    pub fn arch(&self) -> ArchId {
+        self.configuration.arch()
+    }
+
+    pub fn coverage(&self) -> &FullLaunchCoverage {
+        &self.coverage
+    }
+
+    /// Maximum per-SM issue frontier (`last local issue timestamp + 1`). This is
+    /// retained diagnostic metadata, never a binding cycle prediction.
+    pub fn diagnostic_last_issue_cycles(&self) -> u64 {
+        self.diagnostic_last_issue_cycles
+    }
+
+    /// Maximum timestamp covered by the modeled event set. This remains
+    /// diagnostic metadata and has no conversion into [`BindingCycles`].
+    pub fn terminal_modeled_event_time(&self) -> Option<u64> {
+        self.terminal_modeled_event_time
+    }
+
+    pub fn unmodeled_tails(&self) -> TailFlags {
+        self.unmodeled_tails
+    }
+
+    pub fn metrics(&self) -> &[MetricPrediction] {
+        &self.metrics
     }
 }
 
@@ -605,7 +723,7 @@ pub struct FullLaunchSetPredictions {
     launch_timing_diagnostics: Vec<FullLaunchTimingDiagnostic>,
     estimator_provenance: FullCounterEstimatorProvenance,
     unmodeled_tails: TailFlags,
-    metrics: Vec<MetricPrediction>,
+    metrics: [MetricPrediction; EMITTED_METRIC_COUNT],
 }
 
 impl FullLaunchSetPredictions {
@@ -646,7 +764,7 @@ impl FullLaunchSetPredictions {
 /// its complete registry contract. [`DESCRIPTORS`] and [`TYPED_EXCLUSIONS`]
 /// form an exact, disjoint partition of the active registry.
 pub struct MetricDescriptor {
-    pub key: &'static str,
+    pub key: EmittedMetricKey,
     pub ncu_metric: &'static str,
     pub unit: Unit,
     pub kind: MetricKind,
@@ -909,9 +1027,9 @@ const ALL_ARCHITECTURES: &[ArchId] = &[ArchId::Sm86, ArchId::Sm120];
 /// The stable emission table. Seven simulator counters retain their established
 /// evaluation order; the publication-binding cycle row is mandatory and remains
 /// required-unimplemented.
-pub const DESCRIPTORS: &[MetricDescriptor] = &[
+pub const DESCRIPTORS: [MetricDescriptor; EMITTED_METRIC_COUNT] = [
     MetricDescriptor {
-        key: "smsp_inst_executed_sum",
+        key: EmittedMetricKey::SmspInstExecutedSum,
         ncu_metric: "smsp__inst_executed.sum",
         unit: Unit::Count,
         kind: MetricKind::Count,
@@ -922,7 +1040,7 @@ pub const DESCRIPTORS: &[MetricDescriptor] = &[
         emit: emit_smsp_inst_executed,
     },
     MetricDescriptor {
-        key: "traffic_gmem_ld_sectors",
+        key: EmittedMetricKey::TrafficGmemLdSectors,
         ncu_metric: "l1tex__t_sectors_pipe_lsu_mem_global_op_ld.sum",
         unit: Unit::Count,
         kind: MetricKind::Count,
@@ -933,7 +1051,7 @@ pub const DESCRIPTORS: &[MetricDescriptor] = &[
         emit: emit_gmem_ld_sectors,
     },
     MetricDescriptor {
-        key: "traffic_gmem_st_sectors",
+        key: EmittedMetricKey::TrafficGmemStSectors,
         ncu_metric: "l1tex__t_sectors_pipe_lsu_mem_global_op_st.sum",
         unit: Unit::Count,
         kind: MetricKind::Count,
@@ -944,7 +1062,7 @@ pub const DESCRIPTORS: &[MetricDescriptor] = &[
         emit: emit_gmem_st_sectors,
     },
     MetricDescriptor {
-        key: "cache_hit_rate_l1tex_read_sector",
+        key: EmittedMetricKey::CacheHitRateL1TexReadSector,
         ncu_metric: "l1tex__t_sector_pipe_lsu_mem_global_op_ld_hit_rate.pct",
         unit: Unit::Pct,
         kind: MetricKind::Fraction,
@@ -955,7 +1073,7 @@ pub const DESCRIPTORS: &[MetricDescriptor] = &[
         emit: emit_l1tex_read_hit_rate,
     },
     MetricDescriptor {
-        key: "cache_hit_rate_l1tex_sector",
+        key: EmittedMetricKey::CacheHitRateL1TexSector,
         ncu_metric: "l1tex__t_sector_hit_rate.pct",
         unit: Unit::Pct,
         kind: MetricKind::Fraction,
@@ -966,7 +1084,7 @@ pub const DESCRIPTORS: &[MetricDescriptor] = &[
         emit: emit_l1tex_unified_hit_rate,
     },
     MetricDescriptor {
-        key: "cache_hit_rate_l2_sector",
+        key: EmittedMetricKey::CacheHitRateL2Sector,
         ncu_metric: "lts__t_sector_hit_rate.pct",
         unit: Unit::Pct,
         kind: MetricKind::Fraction,
@@ -977,7 +1095,7 @@ pub const DESCRIPTORS: &[MetricDescriptor] = &[
         emit: emit_l2_hit_rate,
     },
     MetricDescriptor {
-        key: "traffic_dram_read_sectors",
+        key: EmittedMetricKey::TrafficDramReadSectors,
         ncu_metric: "dram__sectors_read.sum",
         unit: Unit::Count,
         kind: MetricKind::Count,
@@ -988,7 +1106,7 @@ pub const DESCRIPTORS: &[MetricDescriptor] = &[
         emit: emit_dram_read_sectors,
     },
     MetricDescriptor {
-        key: "exec_cycles_gpc_max",
+        key: EmittedMetricKey::ExecCyclesGpcMax,
         ncu_metric: "gpc__cycles_elapsed.max",
         unit: Unit::Cycles,
         kind: MetricKind::BindingCycles,
@@ -1354,15 +1472,14 @@ fn validate_descriptor_outcome(
     descriptor: &MetricDescriptor,
     outcome: &EmitOutcome,
 ) -> Result<(), EmitError> {
+    let key = descriptor.key.as_str();
     if descriptor.kind == MetricKind::BindingCycles {
         if *outcome
             != (EmitOutcome::RequiredUnimplemented {
                 blocking: RequiredUnimplementedBlocker::AggregationSemanticsStudy,
             })
         {
-            return Err(EmitError::BindingCyclesImplementationNotAdmitted {
-                key: descriptor.key,
-            });
+            return Err(EmitError::BindingCyclesImplementationNotAdmitted { key });
         }
         return Ok(());
     }
@@ -1372,7 +1489,7 @@ fn validate_descriptor_outcome(
             let returned = metric_value_kind(value);
             if returned != descriptor.kind {
                 return Err(EmitError::DescriptorValueKindMismatch {
-                    key: descriptor.key,
+                    key,
                     declared: descriptor.kind,
                     returned,
                 });
@@ -1380,7 +1497,7 @@ fn validate_descriptor_outcome(
         }
         EmitOutcome::RequiredUnimplemented { .. } => {
             return Err(EmitError::RequiredUnimplementedKindMismatch {
-                key: descriptor.key,
+                key,
                 declared: descriptor.kind,
             });
         }
@@ -1389,25 +1506,94 @@ fn validate_descriptor_outcome(
     Ok(())
 }
 
-fn emit_snapshot(snap: &CounterSnapshot) -> Result<Vec<MetricPrediction>, EmitError> {
+fn emit_descriptor(
+    snap: &CounterSnapshot,
+    descriptor: &MetricDescriptor,
+) -> Result<MetricPrediction, EmitError> {
+    let outcome = if descriptor.available_on.contains(&snap.arch) {
+        (descriptor.emit)(snap)?
+    } else {
+        EmitOutcome::Unavailable(Unavailable::ArchitectureUnsupported { arch: snap.arch })
+    };
+    validate_descriptor_outcome(descriptor, &outcome)?;
+    Ok(MetricPrediction {
+        arch: snap.arch,
+        key: descriptor.key,
+        ncu_metric: descriptor.ncu_metric,
+        unit: descriptor.unit,
+        outcome,
+    })
+}
+
+fn emit_snapshot_in_order(
+    snap: &CounterSnapshot,
+    descriptors: [&MetricDescriptor; EMITTED_METRIC_COUNT],
+) -> Result<[MetricPrediction; EMITTED_METRIC_COUNT], EmitError> {
     snap.validate_provenance()?;
-    let mut out = Vec::with_capacity(DESCRIPTORS.len());
-    for d in DESCRIPTORS {
-        let outcome = if d.available_on.contains(&snap.arch) {
-            (d.emit)(snap)?
-        } else {
-            EmitOutcome::Unavailable(Unavailable::ArchitectureUnsupported { arch: snap.arch })
-        };
-        validate_descriptor_outcome(d, &outcome)?;
-        out.push(MetricPrediction {
-            arch: snap.arch,
-            key: d.key,
-            ncu_metric: d.ncu_metric,
-            unit: d.unit,
-            outcome,
-        });
-    }
-    Ok(out)
+    let [d0, d1, d2, d3, d4, d5, d6, d7] = descriptors;
+    Ok([
+        emit_descriptor(snap, d0)?,
+        emit_descriptor(snap, d1)?,
+        emit_descriptor(snap, d2)?,
+        emit_descriptor(snap, d3)?,
+        emit_descriptor(snap, d4)?,
+        emit_descriptor(snap, d5)?,
+        emit_descriptor(snap, d6)?,
+        emit_descriptor(snap, d7)?,
+    ])
+}
+
+fn emit_snapshot(
+    snap: &CounterSnapshot,
+) -> Result<[MetricPrediction; EMITTED_METRIC_COUNT], EmitError> {
+    let [d0, d1, d2, d3, d4, d5, d6, d7] = &DESCRIPTORS;
+    emit_snapshot_in_order(snap, [d0, d1, d2, d3, d4, d5, d6, d7])
+}
+
+fn emit_snapshot_v2(
+    snap: &CounterSnapshot,
+) -> Result<[MetricPrediction; EMITTED_METRIC_COUNT], EmitError> {
+    let [d0, d1, d2, d3, d4, d5, d6, d7] = &DESCRIPTORS;
+    emit_snapshot_in_order(snap, [d0, d1, d2, d6, d3, d4, d5, d7])
+}
+
+/// Emit every descriptor from one admitted, exact full-coverage kernel replay in
+/// frozen result-v2 authority order. The returned private-construction bundle retains the
+/// replay configuration, coverage witness, timing diagnostics, and unmodeled
+/// tails. Temporal diagnostics are absent from the descriptor snapshot, so the
+/// binding cycle row remains required-unimplemented.
+///
+/// Sampled observations are statically outside this API:
+///
+/// ```compile_fail
+/// use sim_run::emit::emit_launch;
+/// use sim_sm::SampledKernelReplayResult;
+///
+/// fn reject_sampled(sampled: &SampledKernelReplayResult) {
+///     let _ = emit_launch(sampled);
+/// }
+/// ```
+///
+/// Explicitly unadmitted diagnostics are also statically outside this API:
+///
+/// ```compile_fail
+/// use sim_run::emit::emit_launch;
+/// use sim_sm::UnadmittedReplayDiagnostics;
+///
+/// fn reject_unadmitted(diagnostic: &UnadmittedReplayDiagnostics) {
+///     let _ = emit_launch(diagnostic);
+/// }
+/// ```
+pub fn emit_launch(result: &FullKernelReplayResult) -> Result<FullLaunchPredictions, EmitError> {
+    let metrics = emit_snapshot_v2(&CounterSnapshot::from_full_launch(result))?;
+    Ok(FullLaunchPredictions {
+        configuration: result.configuration(),
+        coverage: result.coverage().clone(),
+        diagnostic_last_issue_cycles: result.diagnostic_last_issue_cycles(),
+        terminal_modeled_event_time: result.terminal_modeled_event_time(),
+        unmodeled_tails: result.unmodeled_tails(),
+        metrics,
+    })
 }
 
 /// Emit every descriptor from one checked, exact full-coverage launch-set
@@ -1442,12 +1628,12 @@ fn index_metrics_by_key(
 ) -> std::collections::BTreeMap<&'static str, &MetricPrediction> {
     metrics
         .iter()
-        .map(|prediction| (prediction.key, prediction))
+        .map(|prediction| (prediction.key(), prediction))
         .collect()
 }
 
-/// A by-key view that remains borrowed from its certified launch-set bundle.
-/// Raw metric slices are deliberately rejected:
+/// A by-key view borrowed from a certified full-coverage launch-set bundle. Raw
+/// metric slices remain deliberately rejected:
 ///
 /// ```compile_fail
 /// use sim_run::emit::{MetricPrediction, index_by_key};
@@ -1472,7 +1658,7 @@ mod tests {
     fn predicted<'a>(preds: &'a [MetricPrediction], key: &str) -> &'a EmitOutcome {
         &preds
             .iter()
-            .find(|p| p.key == key)
+            .find(|p| p.key() == key)
             .expect("key present")
             .outcome
     }
@@ -1483,7 +1669,7 @@ mod tests {
         l1: Option<L1Counters>,
         l2: Option<L2Counters>,
         dram: Option<DramStats>,
-    ) -> Result<Vec<MetricPrediction>, EmitError> {
+    ) -> Result<[MetricPrediction; EMITTED_METRIC_COUNT], EmitError> {
         let l1 = l1.map(|counters| counters.with_unified_origin(MemoryOrigin::Global));
         let dram = dram.map(|stats| stats.with_unified_origin(MemoryOrigin::Global));
         emit_snapshot(&CounterSnapshot {
@@ -1500,7 +1686,7 @@ mod tests {
     fn descriptor_value_kind_mismatch_is_typed_in_all_build_profiles() {
         let descriptor = DESCRIPTORS
             .iter()
-            .find(|descriptor| descriptor.key == "smsp_inst_executed_sum")
+            .find(|descriptor| descriptor.key == EmittedMetricKey::SmspInstExecutedSum)
             .unwrap();
         let outcome = EmitOutcome::Predicted(MetricValue::Fraction {
             value: Some(0.5),
@@ -1537,7 +1723,7 @@ mod tests {
         assert!(
             preds
                 .iter()
-                .filter(|prediction| prediction.key != "exec_cycles_gpc_max")
+                .filter(|prediction| prediction.key() != "exec_cycles_gpc_max")
                 .all(|prediction| {
                     prediction.arch == ArchId::Sm120
                         && prediction.outcome
@@ -1552,7 +1738,7 @@ mod tests {
     fn binding_cycle_descriptor_rejects_every_nonblocking_outcome() {
         let descriptor = DESCRIPTORS
             .iter()
-            .find(|descriptor| descriptor.key == "exec_cycles_gpc_max")
+            .find(|descriptor| descriptor.key == EmittedMetricKey::ExecCyclesGpcMax)
             .unwrap();
         assert_eq!(
             validate_descriptor_outcome(
@@ -1572,7 +1758,7 @@ mod tests {
         let preds = emit(42, None, None, None).unwrap();
         let instructions = preds
             .iter()
-            .find(|prediction| prediction.key == "smsp_inst_executed_sum")
+            .find(|prediction| prediction.key() == "smsp_inst_executed_sum")
             .unwrap();
         assert_eq!(
             instructions.numeric_semantics(),
@@ -1598,7 +1784,7 @@ mod tests {
 
         let cycles = preds
             .iter()
-            .find(|prediction| prediction.key == "exec_cycles_gpc_max")
+            .find(|prediction| prediction.key() == "exec_cycles_gpc_max")
             .unwrap();
         assert_eq!(cycles.numeric_semantics(), None);
         assert_eq!(
@@ -2093,18 +2279,49 @@ mod tests {
         let preds = emit(1, None, None, None).unwrap();
         let idx = index_metrics_by_key(&preds);
         assert_eq!(idx.len(), DESCRIPTORS.len());
-        for d in DESCRIPTORS {
+        for descriptor in &DESCRIPTORS {
             assert!(
-                idx.contains_key(d.key),
+                idx.contains_key(descriptor.key.as_str()),
                 "descriptor {} missing from index",
-                d.key
+                descriptor.key.as_str()
             );
         }
     }
 
     #[test]
+    fn legacy_v1_descriptor_order_is_pinned_separately() {
+        let actual = std::array::from_fn(|index| DESCRIPTORS[index].key);
+        assert_eq!(
+            actual,
+            [
+                EmittedMetricKey::SmspInstExecutedSum,
+                EmittedMetricKey::TrafficGmemLdSectors,
+                EmittedMetricKey::TrafficGmemStSectors,
+                EmittedMetricKey::CacheHitRateL1TexReadSector,
+                EmittedMetricKey::CacheHitRateL1TexSector,
+                EmittedMetricKey::CacheHitRateL2Sector,
+                EmittedMetricKey::TrafficDramReadSectors,
+                EmittedMetricKey::ExecCyclesGpcMax,
+            ]
+        );
+    }
+
+    #[test]
+    fn v2_order_is_independent_of_legacy_descriptor_order() {
+        let legacy = std::array::from_fn(|index| DESCRIPTORS[index].key);
+        assert_ne!(legacy, EmittedMetricKey::V2_ORDER);
+        assert_eq!(
+            EmittedMetricKey::V2_ORDER[3],
+            EmittedMetricKey::TrafficDramReadSectors
+        );
+    }
+
+    #[test]
     fn descriptor_keys_are_unique() {
-        let mut keys: Vec<&str> = DESCRIPTORS.iter().map(|d| d.key).collect();
+        let mut keys: Vec<&str> = DESCRIPTORS
+            .iter()
+            .map(|descriptor| descriptor.key.as_str())
+            .collect();
         keys.sort_unstable();
         let n = keys.len();
         keys.dedup();

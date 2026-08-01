@@ -53,7 +53,7 @@
       "import_policy": "deny",
       "path": "sim/run/src/emit.rs",
       "review_status": "reviewed",
-      "sha256": "6230797bbad55926b72d519c1e7eec2e66eab9bec6a46b77369864b5b2399ca7"
+      "sha256": "63e35671b3e7e1c7340b9ee99b0f6ef195b5b3a49ad16f6afd6ad8f9ddbad799"
     },
     {
       "classification": "non_evaluator",

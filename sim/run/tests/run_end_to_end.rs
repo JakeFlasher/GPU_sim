@@ -1,12 +1,23 @@
 #![allow(clippy::unwrap_used)] // integration-test assertions
 
+use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use prost::Message;
 use serde_json::{Value, json};
+use sim_arch::ArchId;
+use sim_mem::L2Config;
+use sim_run::emit::{
+    EMITTED_METRIC_COUNT, EmitOutcome, EmittedMetricKey, MemUnit, MetricValue,
+    RequiredUnimplementedBlocker, Unavailable, emit_all, emit_launch, index_by_key,
+};
 use sim_run::{RunError, run_manifest};
-use sim_sm::admit_launch_evidence;
+use sim_sm::{
+    AdmittedLaunchEvidence, DramBw, FullKernelReplayResult, FullLaunchSetDeclaration,
+    IssueModelParams, KernelReplayOutcome, ReplayMemMode, admit_launch_evidence,
+    aggregate_full_launch_set, replay_kernel,
+};
 use sim_trace::{Sha256Digest, TraceDirSnapshot, canonical_json};
 use tempfile::TempDir;
 
@@ -87,6 +98,252 @@ const CYCLE_STUDY_SUBSECTIONS: [&str; 4] = [
     "Silicon-blocked decisions",
     "Promotion forbidden until",
 ];
+
+fn replay_modes(
+    evidence: &AdmittedLaunchEvidence,
+) -> (IssueModelParams, [(ReplayMemMode, &'static str); 3]) {
+    let arch = ArchId::Sm86;
+    let latencies = evidence
+        .arch_card()
+        .required_latencies()
+        .expect("fixture has carded latencies");
+    let issue_params = IssueModelParams::from_legacy_card_latencies_for_arch(
+        arch,
+        latencies.l1_hit,
+        latencies.l2_hit,
+        latencies.dram,
+        latencies.shared,
+    )
+    .expect("fixture card resolves strict issue parameters");
+    let geometry = evidence
+        .pchase_card()
+        .resolve_walk_geometry_for_arch(arch, None)
+        .expect("fixture pchase card resolves L1 geometry");
+    let l1 = issue_params.l1_config(geometry.capacity.line_capacity, geometry.mshr.count);
+    let card_l2 = evidence
+        .arch_card()
+        .require_l2_geometry()
+        .expect("fixture has carded L2 geometry");
+    let l2 = L2Config::from_carded_geometry_for_arch(
+        arch,
+        card_l2.capacity_bytes,
+        card_l2.line_bytes,
+        card_l2.sector_bytes,
+        card_l2.num_slices,
+        card_l2.policy.as_deref(),
+    )
+    .expect("fixture card resolves L2 configuration");
+    (
+        issue_params,
+        [
+            (ReplayMemMode::Flat, "flat"),
+            (ReplayMemMode::L1Const(l1), "l1-const"),
+            (
+                ReplayMemMode::L1SharedL2 {
+                    l1,
+                    l2,
+                    dram: DramBw::Unmodeled { arch },
+                },
+                "l1-shared-l2",
+            ),
+        ],
+    )
+}
+
+fn full_replay(
+    evidence: &AdmittedLaunchEvidence,
+    issue_params: &IssueModelParams,
+    mode: ReplayMemMode,
+) -> FullKernelReplayResult {
+    match replay_kernel(evidence, issue_params, mode).expect("fixture replay succeeds") {
+        KernelReplayOutcome::Full(result) => result,
+        KernelReplayOutcome::SampledObserved(_) => {
+            panic!("unsampled fixture must produce full coverage")
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct ExpectedModeledOutcomes {
+    instructions: u64,
+    global_load_sectors: u64,
+    global_store_sectors: u64,
+    l1_read_fraction: (Option<f64>, u64, u64),
+    l1_unified_fraction: (Option<f64>, u64, u64),
+    l2_fraction: (Option<f64>, u64, u64),
+    dram_read_sectors: u64,
+}
+
+fn exact(value: u64) -> EmitOutcome {
+    EmitOutcome::Predicted(MetricValue::Exact(value))
+}
+
+fn fraction(value: (Option<f64>, u64, u64)) -> EmitOutcome {
+    EmitOutcome::Predicted(MetricValue::Fraction {
+        value: value.0,
+        numerator: value.1,
+        denominator: value.2,
+    })
+}
+
+fn unavailable(needs: MemUnit) -> EmitOutcome {
+    EmitOutcome::Unavailable(Unavailable::MemModeLacksUnit { needs })
+}
+
+fn expected_mode_outcomes(
+    mode: ReplayMemMode,
+    expected: ExpectedModeledOutcomes,
+) -> BTreeMap<EmittedMetricKey, EmitOutcome> {
+    let (global_loads, global_stores, l1_read, l1_unified) = match mode {
+        ReplayMemMode::Flat => (
+            unavailable(MemUnit::L1Tex),
+            unavailable(MemUnit::L1Tex),
+            unavailable(MemUnit::L1Tex),
+            unavailable(MemUnit::L1Tex),
+        ),
+        ReplayMemMode::L1Const(_) | ReplayMemMode::L1SharedL2 { .. } => (
+            exact(expected.global_load_sectors),
+            exact(expected.global_store_sectors),
+            fraction(expected.l1_read_fraction),
+            fraction(expected.l1_unified_fraction),
+        ),
+    };
+    let (l2, dram) = match mode {
+        ReplayMemMode::Flat | ReplayMemMode::L1Const(_) => {
+            (unavailable(MemUnit::Lts), unavailable(MemUnit::Dram))
+        }
+        ReplayMemMode::L1SharedL2 { .. } => (
+            fraction(expected.l2_fraction),
+            exact(expected.dram_read_sectors),
+        ),
+    };
+    BTreeMap::from([
+        (
+            EmittedMetricKey::SmspInstExecutedSum,
+            exact(expected.instructions),
+        ),
+        (EmittedMetricKey::TrafficGmemLdSectors, global_loads),
+        (EmittedMetricKey::TrafficGmemStSectors, global_stores),
+        (EmittedMetricKey::TrafficDramReadSectors, dram),
+        (EmittedMetricKey::CacheHitRateL1TexReadSector, l1_read),
+        (EmittedMetricKey::CacheHitRateL1TexSector, l1_unified),
+        (EmittedMetricKey::CacheHitRateL2Sector, l2),
+        (
+            EmittedMetricKey::ExecCyclesGpcMax,
+            EmitOutcome::RequiredUnimplemented {
+                blocking: RequiredUnimplementedBlocker::AggregationSemanticsStudy,
+            },
+        ),
+    ])
+}
+
+fn assert_full_launch_emission_matches_singleton_aggregate(
+    result: FullKernelReplayResult,
+    mode_name: &str,
+    expected: ExpectedModeledOutcomes,
+) {
+    // BL-20260708-vacuous-trace-validator: these counts are taken from the exact
+    // replay result consumed below, not from a separate fixture declaration.
+    assert!(result.coverage().blocks_observed() > 0);
+    assert!(result.records_seen() > 0);
+    assert_eq!(result.instructions_issued(), result.records_seen());
+
+    let per_launch = emit_launch(&result).expect("emit full launch");
+    assert_eq!(per_launch.configuration(), result.configuration());
+    assert_eq!(per_launch.arch(), result.arch());
+    assert_eq!(per_launch.coverage(), result.coverage());
+    assert_eq!(
+        per_launch.diagnostic_last_issue_cycles(),
+        result.diagnostic_last_issue_cycles()
+    );
+    assert_eq!(
+        per_launch.terminal_modeled_event_time(),
+        result.terminal_modeled_event_time()
+    );
+    assert_eq!(per_launch.unmodeled_tails(), result.unmodeled_tails());
+    assert!(per_launch.diagnostic_last_issue_cycles() > 0);
+    assert!(per_launch.terminal_modeled_event_time().is_some());
+
+    let declaration = FullLaunchSetDeclaration::checked(
+        format!("fixture/per-launch-emission-{mode_name}:v1"),
+        result.configuration(),
+        [result.coverage().launch().clone()],
+    )
+    .expect("declare singleton full launch set");
+    let aggregate = aggregate_full_launch_set(declaration, [result.clone()])
+        .expect("aggregate singleton full launch set");
+    let aggregate_predictions = emit_all(&aggregate).expect("emit singleton aggregate");
+
+    let per_launch_keys = per_launch
+        .metrics()
+        .iter()
+        .map(|prediction| prediction.emitted_key())
+        .collect::<Vec<_>>();
+    assert_eq!(per_launch_keys, EmittedMetricKey::V2_ORDER);
+
+    let expected_outcomes = expected_mode_outcomes(result.configuration().memory_mode(), expected);
+    assert_eq!(per_launch.metrics().len(), EMITTED_METRIC_COUNT);
+    assert_eq!(expected_outcomes.len(), EMITTED_METRIC_COUNT);
+    let aggregate_by_key = index_by_key(&aggregate_predictions);
+    for expected_key in EmittedMetricKey::V2_ORDER {
+        let prediction = per_launch
+            .metrics()
+            .iter()
+            .find(|prediction| prediction.emitted_key() == expected_key)
+            .expect("frozen v2 key is present");
+        let expected_outcome = &expected_outcomes[&expected_key];
+        assert_eq!(
+            prediction,
+            aggregate_by_key[expected_key.as_str()],
+            "singleton mode={mode_name}, key={expected_key:?}"
+        );
+        assert_eq!(
+            prediction.outcome(),
+            expected_outcome,
+            "mode={mode_name}, key={expected_key:?}"
+        );
+        assert_eq!(
+            aggregate_by_key[expected_key.as_str()].outcome(),
+            expected_outcome,
+            "aggregate mode={mode_name}, key={expected_key:?}"
+        );
+    }
+}
+
+fn replace_trace_with_one_nonmemory_instruction(root: &Path) {
+    let instruction = sim_trace::pb::Instruction {
+        pc: 16,
+        active_mask: Some(1),
+        predicate_mask: Some(1),
+        function_unique_id: 1,
+        vpc: Some(16),
+        sm_id: Some(0),
+        warpid_sm: Some(0),
+        warpid_tb: Some(0),
+        ..Default::default()
+    };
+    let warp = sim_trace::pb::Warp {
+        id: 0,
+        instructions: vec![instruction],
+    };
+    let threadblock = sim_trace::pb::Threadblock {
+        block_id: Some(sim_trace::pb::Dim3d { x: 0, y: 0, z: 0 }),
+        warps: [(0_i32, warp)].into_iter().collect(),
+    };
+    let payload_path =
+        root.join("trace/threadblocks/device_0/stream_0/kernel_1/d_0_s_0_k_1_0,0,0.pb");
+    fs::write(payload_path, threadblock.encode_to_vec()).unwrap();
+    fs::write(
+        root.join("trace/stats.csv"),
+        b"total_insts,total_reported_insts\n1,1\n",
+    )
+    .unwrap();
+
+    let launch_manifest_path = root.join("launch_evidence.json");
+    let mut launch_manifest = read_json(&launch_manifest_path);
+    refresh_trace_artifact_claims(root, &mut launch_manifest);
+    write_json(&launch_manifest_path, &launch_manifest);
+}
 
 #[derive(Debug)]
 struct StudySubsection {
@@ -512,6 +769,51 @@ fn p8_cycle_study_and_real_runner_guard_are_nonvacuous() {
     for row in emissions {
         assert_ne!(row["key"], "diagnostic_last_issue_cycles");
         assert_ne!(row["key"], "terminal_modeled_event_time");
+    }
+}
+
+#[test]
+fn full_launch_emission_matches_singleton_aggregate_on_real_consumer_path() {
+    let evidence = admit_launch_evidence(fixture_root().join("launch_evidence.json"))
+        .expect("admit nonempty full-coverage canary");
+    let (issue_params, modes) = replay_modes(&evidence);
+
+    let expected = ExpectedModeledOutcomes {
+        instructions: 54,
+        global_load_sectors: 8,
+        global_store_sectors: 0,
+        l1_read_fraction: (Some(0.0), 0, 8),
+        l1_unified_fraction: (Some(0.0), 0, 13),
+        l2_fraction: (Some(3.0 / 13.0), 3, 13),
+        dram_read_sectors: 13,
+    };
+    for (mode, mode_name) in modes {
+        let result = full_replay(&evidence, &issue_params, mode);
+        assert_full_launch_emission_matches_singleton_aggregate(result, mode_name, expected);
+    }
+}
+
+#[test]
+fn full_launch_rates_keep_zero_denominator_nulls_on_real_consumer_path() {
+    let (_temp, manifest_path) = copied_fixture();
+    let root = manifest_path.parent().unwrap();
+    replace_trace_with_one_nonmemory_instruction(root);
+    let evidence = admit_launch_evidence(root.join("launch_evidence.json"))
+        .expect("admit nonempty full-coverage nonmemory trace");
+    let (issue_params, modes) = replay_modes(&evidence);
+
+    let expected = ExpectedModeledOutcomes {
+        instructions: 1,
+        global_load_sectors: 0,
+        global_store_sectors: 0,
+        l1_read_fraction: (None, 0, 0),
+        l1_unified_fraction: (None, 0, 0),
+        l2_fraction: (None, 0, 0),
+        dram_read_sectors: 0,
+    };
+    for (mode, mode_name) in modes {
+        let result = full_replay(&evidence, &issue_params, mode);
+        assert_full_launch_emission_matches_singleton_aggregate(result, mode_name, expected);
     }
 }
 

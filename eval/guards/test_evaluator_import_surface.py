@@ -37,7 +37,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 REGISTRY_RELATIVE = "eval/guards/evaluator_import_surface_registry.v1.json"
 SCHEMA_RELATIVE = "eval/guards/evaluator_import_surface_registry.v1.schema.json"
-REGISTRY_SHA256 = "3983327704b921933fa385e12259986e0fa5692cf2bc598351fe38462cad5b3c"
+REGISTRY_SHA256 = "4f6d0f71d7dee12815b02432cf5b3bd17cec7a3c236561b3c1f4227de1b3fdac"
 ENTRYPOINT = "eval/production_evaluator/__init__.py"
 ENTRYPOINT_MODULE = "eval.production_evaluator"
 SCHEMA_ID = (
@@ -2146,11 +2146,12 @@ def test_isolated_loader_handles_legitimate_combined_order_path_change(
 def test_namespace_validation_rejects_stale_epoch_without_recalculation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    ancestor, _parent_path = _materialized_eval_parent()
+    ancestor, parent_path = _materialized_eval_parent()
     namespace = object.__getattribute__(ancestor, "__dict__")
     namespace_path = dict.__getitem__(namespace, "__path__")
     path_state = object.__getattribute__(namespace_path, "__dict__")
     current_epoch = type.__getattribute__(_NAMESPACE_PATH_TYPE, "_epoch")
+    monkeypatch.setitem(path_state, "_last_parent_path", parent_path)
     monkeypatch.setitem(path_state, "_last_epoch", current_epoch - 1)
     with pytest.raises(RegistryViolation, match="cache epoch is stale"):
         load_blocked_evaluator_snapshot()
