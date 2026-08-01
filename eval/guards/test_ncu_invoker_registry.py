@@ -27,6 +27,9 @@ EXCLUDED_PREFIXES = (
     Path("data"),
     Path("references"),
     Path("results"),
+    # Project-local scratch is never a production source root.  In particular,
+    # pytest may leave intentionally malformed copied sources beneath it.
+    Path("temp"),
     Path("sim/target"),
     Path("sim/trace/pbgen/target"),
     Path("tools/nvbit_tracer/nvbit_release"),
@@ -1377,24 +1380,52 @@ def _source_kind(path: Path) -> str | None:
     return None
 
 
-def _source_paths():
+def _source_paths(repo_root: Path = REPO_ROOT):
     this_file = Path(__file__).resolve()
     for current, directories, files in os.walk(
-        REPO_ROOT, topdown=True, followlinks=False
+        repo_root, topdown=True, followlinks=False
     ):
         current_path = Path(current)
         directories[:] = [
             name
             for name in sorted(directories)
-            if not _is_excluded((current_path / name).relative_to(REPO_ROOT))
+            if not _is_excluded((current_path / name).relative_to(repo_root))
         ]
         for name in sorted(files):
             path = current_path / name
-            relative = path.relative_to(REPO_ROOT)
+            relative = path.relative_to(repo_root)
             if path == this_file or path.is_symlink() or _is_excluded(relative):
                 continue
             if path.is_file() and _source_kind(path) is not None:
                 yield path
+
+
+def test_source_inventory_prunes_only_root_scratch(tmp_path: Path):
+    repo_root = tmp_path / "repo"
+    scratch = repo_root / "temp" / "pytest-copy"
+    scratch.mkdir(parents=True)
+    (scratch / "corrupt.py").write_text("'unterminated\n", encoding="utf-8")
+    production = repo_root / "tools" / "invoker.py"
+    nested_temp = repo_root / "tools" / "temp" / "invoker.py"
+    production.parent.mkdir(parents=True)
+    nested_temp.parent.mkdir(parents=True)
+    production.write_text(
+        "import subprocess\nsubprocess.run(['ncu', '--version'])\n",
+        encoding="utf-8",
+    )
+    nested_temp.write_text(
+        "import subprocess\nsubprocess.run(['ncu', '--version'])\n",
+        encoding="utf-8",
+    )
+
+    observed = {
+        path.relative_to(repo_root)
+        for path in _source_paths(repo_root)
+    }
+    assert observed == {
+        Path("tools/invoker.py"),
+        Path("tools/temp/invoker.py"),
+    }
 
 
 def _discovered_registry() -> dict[str, tuple[str, str, set[str]]]:
