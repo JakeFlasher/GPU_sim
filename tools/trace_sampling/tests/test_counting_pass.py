@@ -1,10 +1,12 @@
 """Counting pass: pure skew/wave helpers + decode of a real captured trace."""
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
 from tools.nvbit_tracer.proto_binding_loader import load_dynamic_trace_bindings
 
+import counting_pass as counting
 from counting_pass import (ATOMIC, ASYNC_COPY, BlockStat, _gini,
                            _reconstruct_waves, _resident_from_slots,
                            _top_fraction_share, analyze_trace_dir)
@@ -110,6 +112,69 @@ def test_counting_is_scoped_to_first_launch(tmp_path):
     stats = analyze_trace_dir(tmp_path, cell_id="two_launch")
     assert stats.n_blocks == 2          # NOT 4 (both launches)
     assert stats.total_records == 2
+
+
+def test_analyze_trace_dir_acquires_generated_classes_once_per_batch(
+        monkeypatch, tmp_path):
+    _write_two_launch_trace(tmp_path)
+    real_bindings = load_dynamic_trace_bindings()
+    threadblock_cls = real_bindings.threadblock_pb2.threadblock
+    trace_cls = real_bindings.trace_pb2.Trace
+
+    class GeneratedModule:
+        def __init__(self, name, value):
+            self.name = name
+            self.value = value
+            self.lookups = 0
+
+        def __getattr__(self, name):
+            if name != self.name:
+                raise AttributeError(name)
+            self.lookups += 1
+            return self.value
+
+    threadblock_module = GeneratedModule("threadblock", threadblock_cls)
+    trace_module = GeneratedModule("Trace", trace_cls)
+    fake_bindings = SimpleNamespace(
+        threadblock_pb2=threadblock_module, trace_pb2=trace_module)
+    load_calls = 0
+
+    def load_bindings():
+        nonlocal load_calls
+        load_calls += 1
+        return fake_bindings
+
+    monkeypatch.setattr(counting, "load_dynamic_trace_bindings", load_bindings)
+    stats = counting.analyze_trace_dir(tmp_path, cell_id="batch")
+
+    assert stats.n_blocks == 2
+    assert load_calls == 2
+    assert threadblock_module.lookups == 1
+    assert trace_module.lookups == 1
+
+
+def test_analyze_trace_dir_fails_closed_on_exit_revalidation(
+        monkeypatch, tmp_path):
+    _write_two_launch_trace(tmp_path)
+    real_bindings = load_dynamic_trace_bindings()
+    fake_bindings = SimpleNamespace(
+        threadblock_pb2=SimpleNamespace(
+            threadblock=real_bindings.threadblock_pb2.threadblock),
+        trace_pb2=SimpleNamespace(Trace=real_bindings.trace_pb2.Trace),
+    )
+    load_calls = 0
+
+    def load_bindings():
+        nonlocal load_calls
+        load_calls += 1
+        if load_calls == 2:
+            raise RuntimeError("authenticated binding state mutated during batch")
+        return fake_bindings
+
+    monkeypatch.setattr(counting, "load_dynamic_trace_bindings", load_bindings)
+    with pytest.raises(RuntimeError, match="mutated during batch"):
+        counting.analyze_trace_dir(tmp_path, cell_id="batch")
+    assert load_calls == 2
 
 
 def test_full_trace_sector_accesses_are_per_operand_deduplicated(tmp_path):

@@ -95,11 +95,23 @@ def _pb_files(trace_dir: Path) -> list[Path]:
     return sorted(launch_dir.rglob("*.pb"))
 
 
-def _flat_idx(pb_path: Path, gx: int, gy: int) -> int:
-    threadblock_pb2 = load_dynamic_trace_bindings().threadblock_pb2
-    tb = threadblock_pb2.threadblock()
-    tb.ParseFromString(pb_path.read_bytes())
-    return int(tb.block_id.x) + int(tb.block_id.y) * gx + int(tb.block_id.z) * gx * gy
+def _block_ids_by_path(
+        pb_paths: list[Path], gx: int, gy: int) -> dict[Path, int]:
+    """Decode each block identity once under one authenticated capability batch."""
+    bindings = load_dynamic_trace_bindings()
+    threadblock_cls = bindings.threadblock_pb2.threadblock
+    block_ids: dict[Path, int] = {}
+    for path in pb_paths:
+        tb = threadblock_cls()
+        tb.ParseFromString(path.read_bytes())
+        block_ids[path] = (
+            int(tb.block_id.x)
+            + int(tb.block_id.y) * gx
+            + int(tb.block_id.z) * gx * gy
+        )
+    # Detect retained binding mutation before the decoded identity map escapes.
+    load_dynamic_trace_bindings()
+    return block_ids
 
 
 def _segment_membership(stats) -> dict[int, int]:
@@ -175,14 +187,14 @@ def _full_shape_rate_interval(raw_lo: float, raw_hi: float) -> tuple[float, floa
     )
 
 
-def _segment_layout(trace_dir: Path, stats) -> list[dict]:
+def _segment_layout(
+        stats, block_ids_by_path: dict[Path, int]) -> list[dict]:
     """Freeze each segment's whole-block ghost/measured membership.
 
     Complete segments contain one ghost wave plus two measured waves.  Modulo-3
     residual complete waves and scheduler-underfilled waves form one
     probability-1 tail; its first wave is ghost and every later wave is measured.
     """
-    gx, gy, _gz = stats.grid
     block_of = {b.block_id: b for b in stats.blocks}
     population = build_segment_population(stats)
     seg_of = {
@@ -193,8 +205,8 @@ def _segment_layout(trace_dir: Path, stats) -> list[dict]:
         segment.id: segment.wave_ids[0] for segment in population.segments
     }
     layouts: dict[int, dict] = {}
-    for path in sorted(_pb_files(trace_dir), key=lambda p: _flat_idx(p, gx, gy)):
-        idx = _flat_idx(path, gx, gy)
+    for path in sorted(block_ids_by_path, key=block_ids_by_path.__getitem__):
+        idx = block_ids_by_path[path]
         block = block_of[idx]
         segment_id = seg_of[idx]
         layout = layouts.setdefault(segment_id, {
@@ -228,15 +240,21 @@ def _segment_layout(trace_dir: Path, stats) -> list[dict]:
     return out
 
 
-def _segment_measurements(trace_dir: Path, stats, scratch: Path) -> tuple[
-        list[dict], list[dict], dict[str, float], dict[str, float | int]]:
+def _segment_measurements(
+        trace_dir: Path, stats, scratch: Path,
+        block_ids_by_path: dict[Path, int] | None = None) -> tuple[
+        list[dict], list[dict], dict[str, float], dict[str, float | int],
+        dict[Path, int]]:
     """Measure every segment with per-segment ghost differencing.
 
     Both replays use the production decoder/cache path and start cold.  The
     ghost-only result is subtracted from ghost-plus-measured, so only the latter
     waves contribute metrics while retaining one wave of warm-up state.
     """
-    layouts = _segment_layout(trace_dir, stats)
+    if block_ids_by_path is None:
+        gx, gy, _gz = stats.grid
+        block_ids_by_path = _block_ids_by_path(_pb_files(trace_dir), gx, gy)
+    layouts = _segment_layout(stats, block_ids_by_path)
     depth1 = []
     oracle = {"sectors": 0.0, "hits": 0.0, "records": 0.0}
     sensitivity_segment_id = layouts[len(layouts) // 2]["id"]
@@ -316,7 +334,7 @@ def _segment_measurements(trace_dir: Path, stats, scratch: Path) -> tuple[
             }
     if sensitivity is None:
         raise GoldenSetError("ghost_depth_sensitivity_segment_missing")
-    return depth1, layouts, oracle, sensitivity
+    return depth1, layouts, oracle, sensitivity, block_ids_by_path
 
 
 def _selection_plan(population, fraction: float, seed: int):
@@ -732,7 +750,8 @@ def _evaluate_ablation_composite(
 
 def _selection_ablation(trace_dir: Path, layouts: list[dict], population, stats,
                         r_full_sectors: float, r_full_hits: float,
-                        scratch: Path, wave_trials: list[dict]) -> dict:
+                        scratch: Path, wave_trials: list[dict],
+                        block_ids_by_path: dict[Path, int]) -> dict:
     """Production ghost-differenced estimator versus an independent-block baseline.
 
     The wave arm reuses the exact estimator trials from the fidelity run.  The
@@ -760,11 +779,10 @@ def _selection_ablation(trace_dir: Path, layouts: list[dict], population, stats,
     ordinary_paths = [
         path for layout in ordinary_layouts for path in paths_by_segment[layout["id"]]
     ]
-    gx, gy, _gz = stats.grid
     records_by_block = {block.block_id: block.records for block in stats.blocks}
 
     def payload(paths: list[Path]) -> dict[str, int | float]:
-        records = sum(records_by_block[_flat_idx(path, gx, gy)] for path in paths)
+        records = sum(records_by_block[block_ids_by_path[path]] for path in paths)
         return {
             "blocks": len(paths),
             "records": records,
@@ -822,9 +840,9 @@ def _selection_ablation(trace_dir: Path, layouts: list[dict], population, stats,
             partial_segment_witness = {
                 "segment_id": partial_layout["id"],
                 "segment_block_ids": sorted(
-                    _flat_idx(path, gx, gy) for path in partial_segment_paths),
+                    block_ids_by_path[path] for path in partial_segment_paths),
                 "selected_block_ids": sorted(
-                    _flat_idx(path, gx, gy)
+                    block_ids_by_path[path]
                     for path in selected_block_set.intersection(
                         partial_segment_paths)),
             }
@@ -1157,8 +1175,8 @@ def run_golden_set(manifest_path: Path, *, scratch: Path | None = None) -> dict:
         full = scr.replay_cell(td, _cache_cfg(), classify_misses=False)
         r_full_sectors = float(full["total_accesses"])
         r_full_hits = float(full["hits"])
-        depth1_meas, layouts, ghost_oracle, ghost_sensitivity = _segment_measurements(
-            td, stats, scratch)
+        (depth1_meas, layouts, ghost_oracle, ghost_sensitivity,
+         block_ids_by_path) = _segment_measurements(td, stats, scratch)
         full_shape_count_scale = stats.total_records / ghost_oracle["records"]
         full_shape_seg_meas = [
             {
@@ -1186,7 +1204,7 @@ def run_golden_set(manifest_path: Path, *, scratch: Path | None = None) -> dict:
                 f"{slug}: invalid or missing ablation_expectation {expectation!r}")
         ablation = _selection_ablation(
             td, layouts, population, stats, r_full_sectors, r_full_hits,
-            scratch, cell_trials)
+            scratch, cell_trials, block_ids_by_path)
         effect_gate_ok = (
             expectation != "co_residency_sensitive"
             or ablation["wave_segment_rate_error_le_independent"])

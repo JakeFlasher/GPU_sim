@@ -12,8 +12,10 @@ import json
 import sys
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 import jsonschema
+import pytest
 
 _HERE = Path(__file__).resolve().parent
 if str(_HERE) not in sys.path:
@@ -28,6 +30,74 @@ _L2 = 32 * 1024 * 1024
 def _validator():
     schema = json.loads(_SCHEMA.read_text())
     return jsonschema.Draft202012Validator(schema)
+
+
+def _write_empty_threadblocks(root: Path, count: int):
+    threadblock_pb2, instruction_pb2, address_pb2 = (
+        scr.import_trace_contract._import_pb_modules())
+    threadblock_cls = threadblock_pb2.threadblock
+    kernel_dir = (
+        root / "threadblocks" / "device_0" / "stream_0" / "kernel_1")
+    kernel_dir.mkdir(parents=True)
+    for index in range(count):
+        tb = threadblock_cls()
+        tb.block_id.x, tb.block_id.y, tb.block_id.z = index, 0, 0
+        (kernel_dir / f"kernel_1_{index},0,0.pb").write_bytes(
+            tb.SerializeToString())
+    return threadblock_cls, instruction_pb2, address_pb2
+
+
+class TestDecodeBatch:
+    def test_generated_class_is_acquired_once_and_batch_revalidated(
+            self, monkeypatch, tmp_path):
+        threadblock_cls, instruction_pb2, address_pb2 = (
+            _write_empty_threadblocks(tmp_path, 3))
+
+        class ThreadblockModule:
+            lookups = 0
+
+            @property
+            def threadblock(self):
+                self.lookups += 1
+                return threadblock_cls
+
+        module = ThreadblockModule()
+        import_calls = 0
+
+        def import_modules():
+            nonlocal import_calls
+            import_calls += 1
+            return module, instruction_pb2, address_pb2
+
+        monkeypatch.setattr(
+            scr.import_trace_contract, "_import_pb_modules", import_modules)
+        stream = scr.decode_cell_access_stream(tmp_path)
+
+        assert stream.n_launches == 1
+        assert stream.n_threadblocks == 3
+        assert import_calls == 2
+        assert module.lookups == 1
+
+    def test_exit_revalidation_failure_prevents_stream_return(
+            self, monkeypatch, tmp_path):
+        threadblock_cls, instruction_pb2, address_pb2 = (
+            _write_empty_threadblocks(tmp_path, 2))
+        module = SimpleNamespace(threadblock=threadblock_cls)
+        import_calls = 0
+
+        def import_modules():
+            nonlocal import_calls
+            import_calls += 1
+            if import_calls == 2:
+                raise RuntimeError(
+                    "authenticated binding state mutated during batch")
+            return module, instruction_pb2, address_pb2
+
+        monkeypatch.setattr(
+            scr.import_trace_contract, "_import_pb_modules", import_modules)
+        with pytest.raises(RuntimeError, match="mutated during batch"):
+            scr.decode_cell_access_stream(tmp_path)
+        assert import_calls == 2
 
 
 class ScopeGuardTest(unittest.TestCase):

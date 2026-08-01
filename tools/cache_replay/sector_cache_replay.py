@@ -269,6 +269,9 @@ def decode_cell_access_stream(
     contribute to the L2 access stream; other classes are tallied and excluded.
     """
     threadblock_pb2, _, _ = import_trace_contract._import_pb_modules()
+    # Retain the authenticated generated class for the decode batch; looking it up
+    # per payload would revalidate the complete private binding state each time.
+    threadblock_cls = threadblock_pb2.threadblock
     op_class_set = frozenset(op_classes)
     stream = AccessStream()
     launch_dirs = _iter_launch_dirs(trace_dir)
@@ -279,7 +282,7 @@ def decode_cell_access_stream(
         per_tb: list[list[tuple[int, int]]] = []
         for tb_path in tb_paths:
             stream.n_threadblocks += 1
-            tb = threadblock_pb2.threadblock()
+            tb = threadblock_cls()
             tb.ParseFromString(tb_path.read_bytes())
             tb_accesses: list[tuple[int, int]] = []
             for warp_index in sorted(tb.warps.keys()):
@@ -362,6 +365,8 @@ def decode_cell_access_stream(
                     stream.sector_offsets.append(sector_offset)
 
     stream.n_accesses = len(stream.line_ids)
+    # Detect any retained binding mutation before the materialized stream escapes.
+    import_trace_contract._import_pb_modules()
     return stream
 
 

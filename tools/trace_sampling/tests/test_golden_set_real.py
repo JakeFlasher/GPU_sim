@@ -221,6 +221,78 @@ def test_subset_helpers_scope_and_preserve_the_first_launch(tmp_path):
         assert not (subset / later.relative_to(trace)).exists()
 
 
+def test_block_identity_batch_parses_once_and_revalidates(monkeypatch, tmp_path):
+    real_bindings = gsr.load_dynamic_trace_bindings()
+    threadblock_cls = real_bindings.threadblock_pb2.threadblock
+    paths = []
+    expected = {}
+    for index, (x, y) in enumerate(((0, 0), (1, 0), (0, 1))):
+        path = tmp_path / f"block_{index}.pb"
+        tb = threadblock_cls()
+        tb.block_id.x, tb.block_id.y, tb.block_id.z = x, y, 0
+        path.write_bytes(tb.SerializeToString())
+        paths.append(path)
+        expected[path] = x + y * 2
+
+    class ThreadblockModule:
+        lookups = 0
+
+        @property
+        def threadblock(self):
+            self.lookups += 1
+            return threadblock_cls
+
+    module = ThreadblockModule()
+    fake_bindings = SimpleNamespace(threadblock_pb2=module)
+    load_calls = 0
+
+    def load_bindings():
+        nonlocal load_calls
+        load_calls += 1
+        return fake_bindings
+
+    original_read_bytes = Path.read_bytes
+    reads = {path: 0 for path in paths}
+
+    def counted_read_bytes(path):
+        if path in reads:
+            reads[path] += 1
+        return original_read_bytes(path)
+
+    monkeypatch.setattr(gsr, "load_dynamic_trace_bindings", load_bindings)
+    monkeypatch.setattr(Path, "read_bytes", counted_read_bytes)
+
+    assert gsr._block_ids_by_path(paths, 2, 2) == expected
+    assert load_calls == 2
+    assert module.lookups == 1
+    assert reads == {path: 1 for path in paths}
+
+
+def test_block_identity_batch_fails_closed_on_exit_revalidation(
+        monkeypatch, tmp_path):
+    real_bindings = gsr.load_dynamic_trace_bindings()
+    threadblock_cls = real_bindings.threadblock_pb2.threadblock
+    path = tmp_path / "block.pb"
+    tb = threadblock_cls()
+    tb.block_id.x, tb.block_id.y, tb.block_id.z = 0, 0, 0
+    path.write_bytes(tb.SerializeToString())
+    fake_bindings = SimpleNamespace(
+        threadblock_pb2=SimpleNamespace(threadblock=threadblock_cls))
+    load_calls = 0
+
+    def load_bindings():
+        nonlocal load_calls
+        load_calls += 1
+        if load_calls == 2:
+            raise RuntimeError("authenticated binding state mutated during batch")
+        return fake_bindings
+
+    monkeypatch.setattr(gsr, "load_dynamic_trace_bindings", load_bindings)
+    with pytest.raises(RuntimeError, match="mutated during batch"):
+        gsr._block_ids_by_path([path], 1, 1)
+    assert load_calls == 2
+
+
 def test_underfilled_waves_fold_into_one_certainty_tail():
     blocks = [SimpleNamespace(
         block_id=i, wave=i, sm_id=0, records=1, sector_accesses=1)
@@ -306,7 +378,9 @@ def test_segment_measurement_uses_ghost_differencing(monkeypatch, tmp_path):
         })
     decode_calls = []
     replay_calls = []
-    monkeypatch.setattr(gsr, "_segment_layout", lambda _trace, _stats: layouts)
+    block_ids_by_path = {path: index for index, path in enumerate(paths)}
+    monkeypatch.setattr(
+        gsr, "_segment_layout", lambda _stats, _block_ids: layouts)
 
     def decode(_trace, selected, _scratch):
         decode_calls.append(list(selected))
@@ -319,8 +393,9 @@ def test_segment_measurement_uses_ghost_differencing(monkeypatch, tmp_path):
 
     monkeypatch.setattr(gsr, "_decode_access_subset", decode)
     monkeypatch.setattr(gsr, "_replay_accesses", replay)
-    depth1, returned_layouts, oracle, sensitivity = gsr._segment_measurements(
-        tmp_path, object(), tmp_path)
+    depth1, returned_layouts, oracle, sensitivity, returned_block_ids = (
+        gsr._segment_measurements(
+            tmp_path, object(), tmp_path, block_ids_by_path))
     assert decode_calls == [[paths[i]] for i in range(6)] + [[paths[2]]]
     assert replay_calls == [
         ([1], [1]), ([1, 2, 3], [1, 2, 3]),
@@ -329,6 +404,7 @@ def test_segment_measurement_uses_ghost_differencing(monkeypatch, tmp_path):
         ([3, 4, 5, 6], [3, 0, 1, 2]),
     ]
     assert returned_layouts == layouts
+    assert returned_block_ids is block_ids_by_path
     assert depth1 == [
         {"id": 0, "sectors": 2.0, "hits": 1.0, "records": 9.0},
         {"id": 1, "sectors": 2.0, "hits": 1.0, "records": 9.0},

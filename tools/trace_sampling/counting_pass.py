@@ -212,12 +212,14 @@ def _lowest_kernel(trace) -> Any:
 def analyze_trace_dir(trace_dir: Path, cell_id: str, *, cooperative: bool = False) -> CellStats:
     """Decode a trace dir into CellStats. Fail-closed on missing grid_dim."""
     bindings = load_dynamic_trace_bindings()
-    threadblock_pb2 = bindings.threadblock_pb2
-    trace_pb2 = bindings.trace_pb2
+    # Class lookup validates the complete sealed bundle, so retain the resulting
+    # capability for this batch and authenticate the bundle again before return.
+    threadblock_cls = bindings.threadblock_pb2.threadblock
+    trace_cls = bindings.trace_pb2.Trace
     import import_trace_contract as itc  # type: ignore
     from replay_count_producer import first_launch_dir  # type: ignore
 
-    trace = trace_pb2.Trace()
+    trace = trace_cls()
     trace.ParseFromString((trace_dir / "dynamic_trace.pb").read_bytes())
     kern = _lowest_kernel(trace)
     if kern is None or not kern.HasField("grid_dim"):
@@ -237,7 +239,7 @@ def analyze_trace_dir(trace_dir: Path, cell_id: str, *, cooperative: bool = Fals
     atomic_sector_hist: dict[int, int] = {}
     atomic_records = 0
     for path in sorted(first_launch_root.rglob("*.pb")):
-        tb = threadblock_pb2.threadblock()
+        tb = threadblock_cls()
         serialized = path.read_bytes()
         tb.ParseFromString(serialized)
         if not tb.HasField("block_id"):
@@ -293,7 +295,7 @@ def analyze_trace_dir(trace_dir: Path, cell_id: str, *, cooperative: bool = Fals
         per_wave_totals[b.wave] = per_wave_totals.get(b.wave, 0) + b.records
     per_sm_block_counts = {sm: len(ids) for sm, ids in per_sm_block_ids.items()}
     top256 = _top_n_share(atomic_sector_hist, 256)
-    return CellStats(
+    result = CellStats(
         cell_id=cell_id, kernel_name=kern.name, grid=(gx, gy, gz), block=(bx, by, bz),
         n_blocks=len(blocks), total_records=total_records, op_class_totals=op_totals,
         blocks=blocks, per_sm_resident=per_sm_resident, per_sm_block_ids=per_sm_block_ids,
@@ -302,6 +304,9 @@ def analyze_trace_dir(trace_dir: Path, cell_id: str, *, cooperative: bool = Fals
         per_sm_block_counts=per_sm_block_counts, cooperative=cooperative,
         stats_pass_version=TRACE_SAMPLING_PASS_VERSION,
         serialized_bytes_exact=True)
+    # Fail closed if retained binding state changed while this batch decoded.
+    load_dynamic_trace_bindings()
+    return result
 
 
 def cell_stats_from_capture(trace_dir: Path, cell_id: str, *,
