@@ -1319,13 +1319,17 @@ class _PinnedTreeTransaction:
         except (OSError, immutable.ImmutableArtifactError) as exc:
             _fail("M6_TREE_SNAPSHOT", f"{role}: {self.root}: {exc}")
         try:
-            self._initial = self._snapshot_inventory()
+            self._initial = self._snapshot_inventory(
+                failure_code="M6_TREE_SNAPSHOT"
+            )
         except BaseException:
             self.reader.close()
             raise
 
     def _snapshot_inventory(
         self,
+        *,
+        failure_code: str,
     ) -> dict[
         str,
         tuple[str, immutable.MetadataSnapshot],
@@ -1336,7 +1340,7 @@ class _PinnedTreeTransaction:
                 require_readonly_directories=self.require_readonly_directories,
             )
         except (OSError, immutable.ImmutableArtifactError) as exc:
-            _fail("M6_TREE_SNAPSHOT", f"{self.role}: {exc}")
+            _fail(failure_code, f"{self.role}: {exc}")
         observed = {
             "" if path == "." else path: ("directory", metadata)
             for path, metadata in snapshot.directories
@@ -1389,7 +1393,7 @@ class _PinnedTreeTransaction:
             _fail(code, f"{role}: {relative_path}: {exc}")
 
     def verify(self) -> None:
-        final = self._snapshot_inventory()
+        final = self._snapshot_inventory(failure_code="M6_TREE_CHANGED")
         if final != self._initial:
             changed = sorted(set(final) ^ set(self._initial))
             if not changed:

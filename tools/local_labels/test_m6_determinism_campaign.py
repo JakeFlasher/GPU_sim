@@ -1663,6 +1663,71 @@ def test_absolute_cache_records_exchanged_generation_from_consumed_descriptor(
     assert error.value.code == "M6_INPUT_SNAPSHOT_MIXED"
 
 
+@pytest.mark.parametrize(
+    "error_type",
+    [OSError, campaign.immutable.ImmutableArtifactError],
+)
+def test_pinned_tree_transaction_types_initial_inventory_failure_and_closes_reader(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    error_type: type[BaseException],
+) -> None:
+    class FailingReader:
+        def __init__(self) -> None:
+            self.closed = False
+
+        def snapshot_tree(self, **_kwargs):  # noqa: ANN003
+            raise error_type("initial snapshot fixture")
+
+        def close(self) -> None:
+            self.closed = True
+
+    reader = FailingReader()
+    monkeypatch.setattr(
+        campaign.immutable,
+        "PinnedDirectoryReader",
+        lambda _root: reader,
+    )
+
+    with pytest.raises(campaign.M6Error) as error:
+        campaign._PinnedTreeTransaction(
+            tmp_path / "unused-root",
+            role="initial snapshot fixture",
+        )
+    assert error.value.code == "M6_TREE_SNAPSHOT"
+    assert reader.closed is True
+
+
+@pytest.mark.parametrize(
+    "error_type",
+    [OSError, campaign.immutable.ImmutableArtifactError],
+)
+def test_pinned_tree_transaction_types_final_inventory_failure_as_changed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    error_type: type[BaseException],
+) -> None:
+    root = tmp_path / "transaction-root"
+    root.mkdir()
+    (root / "value").write_bytes(b"pinned payload")
+
+    with campaign._PinnedTreeTransaction(
+        root,
+        role="final snapshot fixture",
+    ) as transaction:
+        def fail_final_snapshot(**_kwargs):  # noqa: ANN003
+            raise error_type("final snapshot fixture")
+
+        monkeypatch.setattr(
+            transaction.reader,
+            "snapshot_tree",
+            fail_final_snapshot,
+        )
+        with pytest.raises(campaign.M6Error) as error:
+            transaction.verify()
+    assert error.value.code == "M6_TREE_CHANGED"
+
+
 def test_pinned_tree_transaction_binds_consumed_generation_during_ancestor_exchange(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -1672,7 +1737,11 @@ def test_pinned_tree_transaction_binds_consumed_generation_during_ancestor_excha
     (root / "value").write_bytes(b"same-size bytes")
     alternate = tmp_path / "alternate-root"
     alternate.mkdir()
-    (alternate / "value").write_bytes(b"other payload!!")
+    alternate_leaf = alternate / "value"
+    alternate_leaf.write_bytes(b"same-size bytes")
+    alternate_identity = campaign.immutable._snapshot_fields(
+        alternate_leaf.stat(follow_symlinks=False)
+    )
     held = tmp_path / "held-root"
     cache = campaign.InputSnapshotCache()
 
@@ -1682,6 +1751,7 @@ def test_pinned_tree_transaction_binds_consumed_generation_during_ancestor_excha
         input_cache=cache,
     ) as transaction:
         expected = transaction.inventory["value"][1]
+        assert expected != alternate_identity
         original_bind = cache.bind_pinned
         exchanged = False
 
@@ -1699,7 +1769,9 @@ def test_pinned_tree_transaction_binds_consumed_generation_during_ancestor_excha
         monkeypatch.setattr(cache, "bind_pinned", exchange_while_binding)
         assert transaction.read("value", role="exchange role") == b"same-size bytes"
         assert exchanged is True
-        assert cache._entries[os.fspath(root / "value")][3] == expected
+        bound_identity = cache._entries[os.fspath(root / "value")][3]
+        assert bound_identity == expected
+        assert bound_identity != alternate_identity
         with pytest.raises(campaign.M6Error) as changed:
             transaction.verify()
         assert changed.value.code == "M6_TREE_CHANGED"

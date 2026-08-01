@@ -165,7 +165,7 @@
       "import_policy": "deny",
       "path": "tools/local_labels/m6_determinism_campaign.py",
       "review_status": "reviewed",
-      "sha256": "00cf5d63dc49fea8a8d6211e457aab173eafc45bab63f64151b919cc1d597efb"
+      "sha256": "7a537b30ccae2833f3b2b63380c2a6b3dd5ad6a635ba3d424075965a07c9e78f"
     },
     {
       "classification": "unreviewed",
