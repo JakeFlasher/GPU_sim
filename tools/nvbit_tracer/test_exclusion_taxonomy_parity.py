@@ -2068,48 +2068,69 @@ def _iter_python_string_token_contexts(
 def _scan_trace_budget_run_suite_typed_reasons_from_text(
     text: str, source_name: str
 ) -> frozenset[str]:
-    """Tokenize-aware scan of Python source for ``sidecar = <var> /
-    "<reason>.json"`` writer literals.
+    """Syntax-aware scan of Python source for live writer literals.
 
-    Token pattern (rightmost preceding tokens, in order):
-    ``NAME(sidecar) OP(=) NAME(any) OP(/) STRING("<reason>.json")``.
+    Recognized AST shapes are exact:
+
+    - ``sidecar = <name> / "<reason>.json"``
+    - ``publish_regular_file(output_root, "<reason>.json", ...)``
+
+    The second form is the attempt-scoped immutable publication path. Requiring
+    a bare function name, the exact root argument, and an exact string argument
+    prevents attributes, unrelated roots, or computed filenames from expanding
+    the trace-budget taxonomy.
     """
+    try:
+        tree = ast.parse(text, filename=source_name)
+    except SyntaxError as exc:
+        raise ValueError(f"Failed to parse {source_name}: {exc}") from exc
+
     reasons: set[str] = set()
-    for tok, preceding, _ in _iter_python_string_token_contexts(
-        text, source_name
-    ):
-        decoded = _decode_python_string_token(tok.string)
-        if decoded is None:
+    for node in ast.walk(tree):
+        literal: ast.expr | None = None
+        if (
+            isinstance(node, ast.Assign)
+            and len(node.targets) == 1
+            and isinstance(node.targets[0], ast.Name)
+            and node.targets[0].id == "sidecar"
+            and isinstance(node.value, ast.BinOp)
+            and isinstance(node.value.op, ast.Div)
+            and isinstance(node.value.left, ast.Name)
+        ):
+            literal = node.value.right
+        elif (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "publish_regular_file"
+            and len(node.args) >= 2
+            and isinstance(node.args[0], ast.Name)
+            and node.args[0].id == "output_root"
+        ):
+            literal = node.args[1]
+
+        if not isinstance(literal, ast.Constant) or not isinstance(
+            literal.value, str
+        ):
             continue
-        match = _TRACE_BUDGET_JSON_SLUG_RE.match(decoded)
-        if match is None:
-            continue
-        if len(preceding) < 4:
-            continue
-        a, b, c, d = preceding[-4:]
-        if a.type != tokenize.NAME or a.string != "sidecar":
-            continue
-        if b.type != tokenize.OP or b.string != "=":
-            continue
-        if c.type != tokenize.NAME:
-            continue
-        if d.type != tokenize.OP or d.string != "/":
-            continue
-        reasons.add(match.group(1))
+        match = _TRACE_BUDGET_JSON_SLUG_RE.fullmatch(literal.value)
+        if match is not None:
+            reasons.add(match.group(1))
     return frozenset(reasons)
 
 
 def _scan_trace_budget_run_suite_typed_reasons() -> frozenset[str]:
-    """Scan ``workloads/simbench_bw/run_suite.py`` for the live trace-
-    budget producer-use-site literals of the form
-    ``sidecar = <dir> / "<reason>.json"``.
+    """Scan ``workloads/simbench_bw/run_suite.py`` for live trace-budget
+    writer literals.
 
-    Producer use sites in run_suite.py write the trace-budget sidecar
-    by hard-coded filename literal; the parity guard catches drift if
-    that literal disagrees with the constant in ``trace_budgets.py``.
+    The producer uses both direct ``sidecar = <dir> / "<reason>.json"``
+    paths and attempt-scoped ``publish_regular_file(output_root,
+    "<reason>.json", ...)`` publications. The parity guard catches drift if
+    either hard-coded filename disagrees with the constant in
+    ``trace_budgets.py``.
 
-    Uses Python tokenize to skip line comments, docstrings, and
-    string-literal contexts before pattern-matching.
+    Uses ``ast.parse`` to match complete expression shapes, so comments,
+    docstrings, attribute calls, and computed filenames cannot satisfy the
+    writer contract.
     """
     text = _RUN_SUITE_PY.read_text(encoding="utf-8")
     return _scan_trace_budget_run_suite_typed_reasons_from_text(
@@ -4102,9 +4123,10 @@ class TraceBudgetScannerCommentAwarenessTest(unittest.TestCase):
     `_validate_file` schema regex) that would have falsely matched
     the same patterns inside Python line comments, docstrings, or
     string literals — a latent robustness gap Codex's R24 review
-    named explicitly. The current `run_suite.py` and `validate.py`
-    files do not exercise the gap, but the tokenize-based scanners
-    fail closed against future drift.
+    named explicitly. The current ``run_suite.py`` and ``validate.py``
+    files do not exercise the gap, but the syntax-aware scanners (AST for
+    writer expressions and tokenize for validator literals) fail closed
+    against future drift.
 
     These fixtures mirror the R24
     LocalLabelsScannerCommentAwarenessTest pattern: each of the 3
@@ -4122,6 +4144,63 @@ def f(out_dir):
             text, "<fixture>"
         )
         self.assertEqual(result, frozenset({"real_reason"}))
+
+    def test_run_suite_scanner_extracts_attempt_publication_literal(self):
+        text = '''
+def f(output_root, payload):
+    return publish_regular_file(
+        output_root,
+        "published_reason.json",
+        payload,
+    )
+'''
+        result = _scan_trace_budget_run_suite_typed_reasons_from_text(
+            text, "<fixture>"
+        )
+        self.assertEqual(result, frozenset({"published_reason"}))
+
+    def test_run_suite_scanner_ignores_attempt_publication_in_line_comment(self):
+        text = '''
+def f(output_root, payload):
+    # publish_regular_file(output_root, "fake_reason.json", payload)
+    pass
+'''
+        result = _scan_trace_budget_run_suite_typed_reasons_from_text(
+            text, "<fixture>"
+        )
+        self.assertEqual(result, frozenset())
+
+    def test_run_suite_scanner_ignores_attempt_publication_in_docstring(self):
+        text = '''
+def f(output_root, payload):
+    """
+    Example: publish_regular_file(output_root, "fake_reason.json", payload)
+    """
+    pass
+'''
+        result = _scan_trace_budget_run_suite_typed_reasons_from_text(
+            text, "<fixture>"
+        )
+        self.assertEqual(result, frozenset())
+
+    def test_run_suite_scanner_ignores_unrelated_publications(self):
+        text = '''
+def f(output_root, other_root, payload, other):
+    publish_regular_file(other_root, "wrong_root.json", payload)
+    publish_other_file(output_root, "wrong_function.json", payload)
+    other.publish_regular_file(output_root, "qualified_call.json", payload)
+    publish_regular_file(
+        output_root,
+        "computed_publication.json" + ".bak",
+        payload,
+    )
+    publish_regular_file(output_root, "newline_suffix.json\\n", payload)
+    sidecar = output_root / "computed_sidecar.json" + ".bak"
+'''
+        result = _scan_trace_budget_run_suite_typed_reasons_from_text(
+            text, "<fixture>"
+        )
+        self.assertEqual(result, frozenset())
 
     def test_run_suite_scanner_ignores_writer_literal_in_line_comment(self):
         text = '''
@@ -4532,7 +4611,9 @@ class TraceBudgetLiveLayerParityTest(unittest.TestCase):
 
     1. ``tools/cloud/trace_budgets.py`` constants (R20).
     2. ``workloads/simbench_bw/run_suite.py`` writer literals
-       (``sidecar = <dir> / "<reason>.json"``).
+       (direct ``sidecar = <dir> / "<reason>.json"`` paths or
+       attempt-scoped ``publish_regular_file(output_root,
+       "<reason>.json", ...)`` publications).
     3. ``workloads/simbench_bw/validate.py`` discovery literals
        (``rglob("<reason>.json")`` consumed by
        ``validate_trace_sidecar``).
@@ -4551,8 +4632,9 @@ class TraceBudgetLiveLayerParityTest(unittest.TestCase):
             emitted,
             TRACE_BUDGET_TYPED_REASONS_EXPECTED,
             f"Trace-budget run_suite.py writer literals "
-            f"(sidecar = <dir> / \"<reason>.json\") drifted from expected. "
-            f"Update TRACE_BUDGET_TYPED_REASONS_EXPECTED in this test AND "
+            f"(direct sidecar paths or attempt-scoped regular-file "
+            f"publications) drifted from expected. Update "
+            f"TRACE_BUDGET_TYPED_REASONS_EXPECTED in this test AND "
             f"verify the constant in tools/cloud/trace_budgets.py and the "
             f"verifier discovery+schema literals in "
             f"workloads/simbench_bw/validate.py when adding or removing a "
