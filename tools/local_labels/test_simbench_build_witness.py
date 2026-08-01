@@ -152,9 +152,9 @@ def _fake_phase5(
 ) -> list[str]:
     synthetic_commit = witness["source_commit"]
     tree_paths = {
-        path.relative_to(_REPO).as_posix()
-        for path in (_REPO / "workloads/simbench_bw").rglob("*")
-        if path.is_file()
+        path
+        for path in blobs
+        if path.startswith("workloads/simbench_bw/")
     }
     overrides = overrides or {}
 
@@ -749,6 +749,19 @@ def test_p5_row_source_binary_path_mismatch(monkeypatch):
     slug = witness["rows"][0]["slug"]
     _assert_has(result, f"row_source_at_commit:{slug}:binary_path_mismatch",
                 f"row_source_at_commit:{slug}:level_mismatch")
+
+
+def test_p5_nested_source_in_synthetic_tree_requires_recording(monkeypatch):
+    witness, blobs = _phase5_fixture()
+    row = witness["rows"][0]
+    path = (
+        f"workloads/simbench_bw/{row['level']}/{row['slug']}"
+        "/nested/synthetic_input.cu"
+    )
+    blobs[path] = b"synthetic committed input\n"
+    assert _fake_phase5(monkeypatch, witness, blobs) == [
+        f"row_inputs_at_commit:{row['slug']}:{path}:missing_recorded_input"
+    ]
 
 
 def test_p5_missing_recorded_input(monkeypatch):
