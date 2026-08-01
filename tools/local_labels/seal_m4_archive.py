@@ -364,26 +364,42 @@ def _scan_directory(
         _fail("M4_ARCHIVE_TREE_CHANGED", PurePosixPath(*parts).as_posix() or ".")
 
 
-def _scan_tree(root: Path) -> list[_Entry]:
+def _scan_tree(
+    root: Path,
+    *,
+    required_root_mode: int | None = None,
+) -> list[_Entry]:
     try:
-        reader = immutable.PinnedDirectoryReader(root)
-    except (OSError, immutable.ImmutableArtifactError) as exc:
-        _fail("M4_ARCHIVE_TREE_SNAPSHOT", f"{root}: {exc}")
-    try:
-        root_before = os.fstat(reader.descriptor)
-        entries: list[_Entry] = []
-        _scan_directory(reader.descriptor, (), entries)
-        root_after = os.fstat(reader.descriptor)
-        reader.verify_path()
-        if _snapshot(root_before) != _snapshot(root_after):
-            _fail("M4_ARCHIVE_TREE_CHANGED", str(root))
-        return sorted(entries, key=lambda entry: os.fsencode(entry.relative_path))
+        with immutable.PinnedDirectoryReader(root) as reader:
+            root_before = os.fstat(reader.descriptor)
+            if (
+                required_root_mode is not None
+                and stat.S_IMODE(root_before.st_mode) != required_root_mode
+            ):
+                _fail(
+                    "M4_ARCHIVE_MODE_SEAL",
+                    f"archive root mode is "
+                    f"{stat.S_IMODE(root_before.st_mode):#05o}; expected "
+                    f"{required_root_mode:#05o}",
+                )
+            entries: list[_Entry] = []
+            _scan_directory(reader.descriptor, (), entries)
+            root_after = os.fstat(reader.descriptor)
+            reader.verify_path()
+            root_final = os.fstat(reader.descriptor)
+            if (
+                _snapshot(root_before) != _snapshot(root_after)
+                or _snapshot(root_after) != _snapshot(root_final)
+            ):
+                _fail("M4_ARCHIVE_TREE_CHANGED", str(root))
+            return sorted(
+                entries,
+                key=lambda entry: os.fsencode(entry.relative_path),
+            )
     except M4ArchiveSealError:
         raise
     except (OSError, immutable.ImmutableArtifactError) as exc:
         _fail("M4_ARCHIVE_TREE_SNAPSHOT", f"{root}: {exc}")
-    finally:
-        reader.close()
 
 
 def _entry_map(entries: Iterable[_Entry]) -> dict[str, _Entry]:
@@ -593,7 +609,12 @@ def _open_child_for_mode(parent: int, name: str, *, directory: bool) -> int:
     return descriptor
 
 
-def _seal_modes_directory(descriptor: int, parts: tuple[str, ...]) -> None:
+def _seal_modes_directory(
+    descriptor: int,
+    parts: tuple[str, ...],
+    *,
+    seal_self: bool = True,
+) -> None:
     try:
         before = os.fstat(descriptor)
         with os.scandir(descriptor) as iterator:
@@ -638,8 +659,9 @@ def _seal_modes_directory(descriptor: int, parts: tuple[str, ...]) -> None:
         else:
             _fail("M4_ARCHIVE_NONREGULAR", PurePosixPath(*child_parts).as_posix())
     try:
-        os.fchmod(descriptor, 0o555)
-        os.fsync(descriptor)
+        if seal_self:
+            os.fchmod(descriptor, 0o555)
+            os.fsync(descriptor)
         after = os.fstat(descriptor)
     except OSError as exc:
         _fail("M4_ARCHIVE_MODE_SEAL", f"{PurePosixPath(*parts) or '.'}: {exc}")
@@ -649,18 +671,14 @@ def _seal_modes_directory(descriptor: int, parts: tuple[str, ...]) -> None:
 
 def _seal_modes(root: Path) -> None:
     try:
-        reader = immutable.PinnedDirectoryReader(root)
-    except (OSError, immutable.ImmutableArtifactError) as exc:
-        _fail("M4_ARCHIVE_MODE_SEAL", str(exc))
-    try:
-        _seal_modes_directory(reader.descriptor, ())
-        reader.verify_path()
+        with immutable.PinnedDirectoryReader(root) as reader:
+            _seal_modes_directory(reader.descriptor, (), seal_self=False)
+            reader.verify_path()
+            reader.seal_root_directory_mode()
     except M4ArchiveSealError:
         raise
     except (OSError, immutable.ImmutableArtifactError) as exc:
         _fail("M4_ARCHIVE_MODE_SEAL", str(exc))
-    finally:
-        reader.close()
 
 
 def _receipt_model(
@@ -740,7 +758,89 @@ def _receipt_matches(
     )
 
 
-def _publish_receipt(path: Path, value: Mapping[str, Any]) -> dict[str, Any]:
+def _receipt_publication_semantics(
+    value: Mapping[str, Any],
+) -> dict[str, Any]:
+    return {
+        key: item
+        for key, item in value.items()
+        if key not in {"sealed_at_utc", "receipt_sha256"}
+    }
+
+
+def _recover_receipt_publication_candidate(
+    path: Path,
+    fresh: Mapping[str, Any],
+) -> dict[str, Any]:
+    partial = path.with_name(f".{path.name}.m6-partial")
+    maximum_bytes = len(immutable.pretty_json_bytes(fresh)) + 1024
+    try:
+        metadata = partial.lstat()
+    except FileNotFoundError:
+        return dict(fresh)
+    except OSError as exc:
+        _fail("M4_ARCHIVE_RECEIPT_COLLISION", f"{partial}: {exc}")
+    if (
+        stat.S_ISLNK(metadata.st_mode)
+        or not stat.S_ISREG(metadata.st_mode)
+        or metadata.st_nlink != 1
+        or stat.S_IMODE(metadata.st_mode) != 0o444
+    ):
+        _fail("M4_ARCHIVE_RECEIPT_COLLISION", str(partial))
+    try:
+        snapshot = immutable.read_regular_snapshot(
+            partial,
+            max_bytes=maximum_bytes,
+        )
+    except (OSError, immutable.ImmutableArtifactError) as exc:
+        _fail("M4_ARCHIVE_RECEIPT_COLLISION", f"{partial}: {exc}")
+    try:
+        candidate = immutable.strict_json_loads(
+            snapshot.payload,
+            label="M4 archive receipt publication partial",
+        )
+        if not isinstance(candidate, dict):
+            _fail("M4_ARCHIVE_RECEIPT_COLLISION", str(partial))
+        assert isinstance(candidate, dict)
+        immutable.verify_model_seal(candidate, "receipt_sha256")
+        _validate_receipt(candidate)
+    except M4ArchiveSealError as exc:
+        if exc.code == "M4_ARCHIVE_SCHEMA":
+            raise
+        _fail(
+            "M4_ARCHIVE_RECEIPT_COLLISION",
+            f"{partial}: {exc}",
+        )
+    except (OSError, immutable.ImmutableArtifactError) as exc:
+        _fail("M4_ARCHIVE_RECEIPT_COLLISION", f"{partial}: {exc}")
+    if (
+        _receipt_publication_semantics(candidate)
+        != _receipt_publication_semantics(fresh)
+    ):
+        _fail("M4_ARCHIVE_RECEIPT_COLLISION", str(partial))
+    return candidate
+
+
+def _accept_receipt_publication_winner(
+    path: Path,
+    expected: Mapping[str, Any],
+) -> dict[str, Any]:
+    existing = _read_existing_receipt(path)
+    if (
+        _receipt_publication_semantics(existing)
+        != _receipt_publication_semantics(expected)
+    ):
+        _fail("M4_ARCHIVE_RECEIPT_COLLISION", str(path))
+    return existing
+
+
+def _publish_receipt(
+    path: Path,
+    value: Mapping[str, Any],
+    *,
+    before_commit: Callable[[], None] | None = None,
+    after_commit: Callable[[], None] | None = None,
+) -> dict[str, Any]:
     try:
         immutable.ensure_directory(path.parent)
         immutable.publish_regular_file(
@@ -748,15 +848,104 @@ def _publish_receipt(path: Path, value: Mapping[str, Any]) -> dict[str, Any]:
             path.name,
             immutable.pretty_json_bytes(value),
             partial_suffix=".m6-partial",
+            before_commit=before_commit,
+            after_commit=after_commit,
         )
         return dict(value)
     except FileExistsError:
-        existing = _read_existing_receipt(path)
-        return existing
+        return _accept_receipt_publication_winner(path, value)
     except immutable.ImmutableArtifactError as exc:
         if "publication already exists" in str(exc):
-            return _read_existing_receipt(path)
+            return _accept_receipt_publication_winner(path, value)
         _fail("M4_ARCHIVE_RECEIPT_PUBLICATION", str(exc))
+
+
+def _publish_receipt_while_guarding_archive(
+    *,
+    archive_root: Path,
+    entries: Sequence[_Entry],
+    receipt_path: Path,
+    value: Mapping[str, Any],
+) -> dict[str, Any]:
+    file_entries = [entry for entry in entries if entry.kind == "file"]
+    directory_entries = [
+        entry for entry in entries if entry.kind == "directory"
+    ]
+    limits = {
+        "max_files": len(file_entries),
+        "max_directories": len(directory_entries) + 1,
+        "max_total_file_bytes": sum(
+            entry.size_bytes for entry in file_entries
+        ),
+        "max_total_relative_path_bytes": sum(
+            len(os.fsencode(entry.relative_path)) for entry in entries
+        ),
+    }
+    monitor: immutable.PinnedPathSetMonitor | None = None
+    try:
+        monitor = immutable.PinnedPathSetMonitor(
+            archive_root,
+            regular_paths=(),
+            recursive_directories=(".",),
+            **limits,
+        )
+        guarded_entries = _scan_tree(
+            archive_root,
+            required_root_mode=0o555,
+        )
+        _assert_same_tree(entries, guarded_entries, modes=True)
+
+        def verify_archive() -> None:
+            current = monitor
+            if current is None:
+                _fail(
+                    "M4_ARCHIVE_TREE_CHANGED",
+                    "archive publication guard is closed",
+                )
+            assert current is not None
+            try:
+                current.verify_unchanged()
+            except (OSError, immutable.ImmutableArtifactError) as exc:
+                _fail("M4_ARCHIVE_TREE_CHANGED", str(exc))
+
+        def finalize_archive_guard() -> None:
+            nonlocal monitor
+            verify_archive()
+            assert monitor is not None
+            monitor.close()
+            monitor = None
+
+        verify_archive()
+        published = _publish_receipt(
+            receipt_path,
+            value,
+            before_commit=verify_archive,
+            after_commit=finalize_archive_guard,
+        )
+        if monitor is not None:
+            # A concurrent exact receipt winner bypasses producer callbacks.
+            finalize_archive_guard()
+        return published
+    except M4ArchiveSealError:
+        raise
+    except (OSError, immutable.ImmutableArtifactError) as exc:
+        _fail("M4_ARCHIVE_TREE_CHANGED", str(exc))
+    finally:
+        if monitor is not None:
+            active_error = sys.exc_info()[1]
+            try:
+                monitor.close()
+            except BaseException as close_error:
+                if active_error is not None:
+                    try:
+                        active_error.add_note(
+                            f"archive publication guard close failed: "
+                            f"{close_error}"
+                        )
+                    except (AttributeError, TypeError):
+                        pass
+                else:
+                    _fail("M4_ARCHIVE_TREE_CHANGED", str(close_error))
 
 
 def seal_m4_archive(
@@ -783,8 +972,12 @@ def seal_m4_archive(
         else _matrix_chunk_ids(_absolute(matrix_path, role="matrix path"))
     )
     output_receipt = _receipt_path(root, receipt_path)
+    receipt_present = output_receipt.exists() or output_receipt.is_symlink()
 
-    entries = _scan_tree(root)
+    entries = _scan_tree(
+        root,
+        required_root_mode=0o555 if receipt_present else None,
+    )
     by_path = _check_topology(entries, archive_root=root, chunk_ids=chunk_ids)
     done_manifests = _verify_done_manifests(
         entries=by_path,
@@ -795,7 +988,7 @@ def seal_m4_archive(
     )
 
     existing: dict[str, Any] | None = None
-    if output_receipt.exists() or output_receipt.is_symlink():
+    if receipt_present:
         existing = _read_existing_receipt(output_receipt)
         if not _receipt_matches(
             existing, archive_root=root, entries=entries,
@@ -805,7 +998,10 @@ def seal_m4_archive(
 
     # No mode mutation is allowed until every DONE and every tree identity has
     # been captured.  A second scan closes the authorization-to-mutation gap.
-    before = _scan_tree(root)
+    before = _scan_tree(
+        root,
+        required_root_mode=0o555 if existing is not None else None,
+    )
     _assert_same_tree(entries, before, modes=True)
     if existing is None:
         # Exercise the complete receipt/schema/serialization model before any
@@ -816,27 +1012,33 @@ def seal_m4_archive(
             done_manifests=done_manifests,
         )
         _seal_modes(root)
-        sealed_entries = _scan_tree(root)
+        sealed_entries = _scan_tree(root, required_root_mode=0o555)
         _assert_same_tree(before, sealed_entries, modes=False)
         for entry in sealed_entries:
             if entry.kind == "file" and (entry.mode != 0o444 or entry.nlink != 1):
                 _fail("M4_ARCHIVE_MODE_SEAL", entry.relative_path)
             if entry.kind == "directory" and entry.mode != 0o555:
                 _fail("M4_ARCHIVE_MODE_SEAL", entry.relative_path)
-        value = _receipt_model(
+        fresh_value = _receipt_model(
             archive_root=root,
             entries=sealed_entries,
             done_manifests=done_manifests,
         )
-        published = _publish_receipt(output_receipt, value)
-        closed_entries = _scan_tree(root)
-        _assert_same_tree(sealed_entries, closed_entries, modes=True)
-        return published
+        value = _recover_receipt_publication_candidate(
+            output_receipt,
+            fresh_value,
+        )
+        return _publish_receipt_while_guarding_archive(
+            archive_root=root,
+            entries=sealed_entries,
+            receipt_path=output_receipt,
+            value=value,
+        )
 
     # Existing receipts are returned byte-for-byte semantically unchanged.  We
     # still revalidated the current tree and DONEs above, so they cannot mask a
     # modified archive.
-    sealed_entries = _scan_tree(root)
+    sealed_entries = _scan_tree(root, required_root_mode=0o555)
     _assert_same_tree(entries, sealed_entries, modes=True)
     return existing
 

@@ -31,6 +31,7 @@ _MAX_FINAL_NAME_BYTES = 246
 _MAX_REGULAR_LEAF_BYTES = 243
 _SNAPSHOT_CLOSURE_THRESHOLD = 512
 _INOTIFY_Q_OVERFLOW = 0x00004000
+_INOTIFY_ROOT_DIRECTORY_ATTRIB = 0x40000004  # IN_ISDIR | IN_ATTRIB
 _INOTIFY_MUTATION_EVENTS = (
     0x00000002  # IN_MODIFY
     | 0x00000004  # IN_ATTRIB
@@ -1685,6 +1686,40 @@ class PinnedDirectoryReader:
         self._root.verify_path()
         _require_retained_directory_path_monitor_quiet(self._path_monitor)
         self._root.verify_path()
+
+    def seal_root_directory_mode(self) -> None:
+        """Set the pinned root to 0555 while retaining path-race detection."""
+        self.verify_path()
+        before = os.fstat(self._root.descriptor)
+        if not stat.S_ISDIR(before.st_mode):
+            raise ImmutableArtifactError(
+                "retained directory root is not a directory"
+            )
+        os.fchmod(self._root.descriptor, 0o555)
+        os.fsync(self._root.descriptor)
+        after = os.fstat(self._root.descriptor)
+        if (
+            before.st_dev != after.st_dev
+            or before.st_ino != after.st_ino
+            or stat.S_IFMT(before.st_mode) != stat.S_IFMT(after.st_mode)
+            or before.st_nlink != after.st_nlink
+            or before.st_uid != after.st_uid
+            or before.st_gid != after.st_gid
+            or before.st_size != after.st_size
+            or before.st_mtime_ns != after.st_mtime_ns
+            or stat.S_IMODE(after.st_mode) != 0o555
+        ):
+            raise ImmutableArtifactError(
+                "retained directory root changed during mode seal"
+            )
+        self._root.verify_path()
+        _require_retained_directory_root_mode_change(self._path_monitor)
+        self.verify_path()
+        final = _snapshot_fields(os.fstat(self._root.descriptor))
+        if final != _snapshot_fields(after):
+            raise ImmutableArtifactError(
+                "retained directory root changed after mode seal"
+            )
 
     def read_snapshot(
         self,
@@ -3397,6 +3432,8 @@ def publish_regular_file(
     partial_suffix: str = _PARTIAL_SUFFIX,
     pinned_parent: PinnedDirectoryReader | None = None,
     executable: bool = False,
+    before_commit: Callable[[], None] | None = None,
+    after_commit: Callable[[], None] | None = None,
     _retain_capability: bool = False,
 ) -> Path | RetainedRegular:
     """Publish one regular file without destructive failure cleanup.
@@ -3404,6 +3441,10 @@ def publish_regular_file(
     The transaction owns only its descriptor and deterministic partial name.
     Incomplete, replaced, or otherwise uncertain partials are retained; the
     sole producer-side name removal is a verified ``RENAME_NOREPLACE`` commit.
+    ``before_commit`` runs after rollback guards are armed but before that
+    rename. ``after_commit`` is the final, read-only authorization after durable
+    content and parent closure while rollback guards can still retire a failed
+    final generation.
     """
     _validate_publication_name(name)
     if partial_suffix not in _PARTIAL_SUFFIXES:
@@ -3412,6 +3453,12 @@ def publish_regular_file(
         )
     if type(executable) is not bool:
         raise ImmutableArtifactError("executable must be boolean")
+    for label, callback in (
+        ("before_commit", before_commit),
+        ("after_commit", after_commit),
+    ):
+        if callback is not None and not callable(callback):
+            raise ImmutableArtifactError(f"{label} must be callable")
     if type(_retain_capability) is not bool:
         raise ImmutableArtifactError("retain capability selector must be boolean")
     if len(os.fsencode(name)) + len(os.fsencode(partial_suffix)) + 1 > 255:
@@ -3534,6 +3581,8 @@ def publish_regular_file(
             rollback_parent = rollback_regular = rollback_evidence = -1
             raise
         _verify_publication_parent_binding(pinned_parent, declared_parent)
+        if before_commit is not None:
+            before_commit()
         _fsync_or_fail(parent_descriptor, f"parent before {name}")
         _verify_publication_parent_binding(pinned_parent, declared_parent)
         _rename_noreplace_at(parent_descriptor, partial_name, parent_descriptor, name)
@@ -3646,6 +3695,8 @@ def publish_regular_file(
         _verify_declared_parent_descriptor_generation(
             Path(parent), rollback_parent,
         )
+        if after_commit is not None:
+            after_commit()
         _close_rollback_guards(
             (rollback_evidence, rollback_regular, rollback_parent),
             label=f"regular publication {name} rollback guards",
@@ -3735,6 +3786,8 @@ def publish_retained_regular_file(
     partial_suffix: str = _PARTIAL_SUFFIX,
     pinned_parent: PinnedDirectoryReader | None = None,
     executable: bool = False,
+    before_commit: Callable[[], None] | None = None,
+    after_commit: Callable[[], None] | None = None,
 ) -> RetainedRegular:
     """Publish and return the exact committed locator as a live capability."""
     result = publish_regular_file(
@@ -3744,6 +3797,8 @@ def publish_retained_regular_file(
         partial_suffix=partial_suffix,
         pinned_parent=pinned_parent,
         executable=executable,
+        before_commit=before_commit,
+        after_commit=after_commit,
         _retain_capability=True,
     )
     if not isinstance(result, RetainedRegular):  # pragma: no cover - invariant
@@ -4226,6 +4281,7 @@ class _RetainedDirectoryPathMonitorState:
     monitor: _DirectoryMutationMonitor
     directory_watches: frozenset[int]
     protected_names: tuple[tuple[int, bytes], ...]
+    root_watch: int
 
 
 @dataclasses.dataclass(frozen=True)
@@ -4264,6 +4320,52 @@ def _require_retained_directory_path_monitor_quiet(
             )
     if result.resource_error is not None:
         raise result.resource_error
+
+
+def _require_retained_directory_root_mode_change(
+    state: _RetainedDirectoryPathMonitorState | None,
+) -> None:
+    if state is None:
+        raise ImmutableArtifactError("retained directory monitor is closed")
+    if (
+        state.root_watch not in state.directory_watches
+        or not state.protected_names
+    ):
+        raise ImmutableArtifactError(
+            "retained directory monitor lacks a protected root"
+        )
+    parent_watch, root_name = state.protected_names[-1]
+    expected = {
+        (state.root_watch, _INOTIFY_ROOT_DIRECTORY_ATTRIB, b""),
+        (parent_watch, _INOTIFY_ROOT_DIRECTORY_ATTRIB, root_name),
+    }
+    result = state.monitor.read_events()
+    observed: set[tuple[int, int, bytes]] = set()
+    for event in result.events:
+        watch_descriptor, _mask, _name = event
+        if watch_descriptor not in state.directory_watches:
+            _raise_monitored_mutation(
+                "retained directory monitor observed an unknown watch",
+                result,
+            )
+        if event in expected:
+            if event in observed:
+                _raise_monitored_mutation(
+                    "retained directory mode seal emitted a duplicate event",
+                    result,
+                )
+            observed.add(event)
+            continue
+        _raise_monitored_mutation(
+            "retained directory changed outside authorized root mode seal",
+            result,
+        )
+    if result.resource_error is not None:
+        raise result.resource_error
+    if observed != expected:
+        raise ImmutableArtifactError(
+            "authorized retained directory root mode seal was not fully observed"
+        )
 
 
 def _open_directory_with_early_path_monitor(
@@ -4322,6 +4424,7 @@ def _open_directory_with_early_path_monitor(
             monitor=monitor,
             directory_watches=frozenset(directory_watches),
             protected_names=tuple(protected_names),
+            root_watch=directory_watches[-1],
         )
         pinned.verify_path()
         _require_retained_directory_path_monitor_quiet(state)
@@ -5093,7 +5196,15 @@ class PinnedPathSetMonitor:
                     )
                 except (AttributeError, TypeError):
                     pass
-            self.close()
+            try:
+                self.close()
+            except BaseException as close_error:
+                try:
+                    exc.add_note(
+                        f"protected input close failed: {close_error}"
+                    )
+                except (AttributeError, TypeError):
+                    pass
             return False
         try:
             self.verify_unchanged()

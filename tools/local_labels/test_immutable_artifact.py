@@ -679,6 +679,242 @@ def test_pinned_directory_reader_supports_maximum_depth_without_fd_leak(
     assert _open_descriptor_count() == baseline
 
 
+def _authorized_root_mode_events(
+    reader: immutable.PinnedDirectoryReader,
+) -> tuple[tuple[int, int, bytes], tuple[int, int, bytes]]:
+    state = reader._path_monitor
+    parent_watch, root_name = state.protected_names[-1]
+    return (
+        (
+            state.root_watch,
+            immutable._INOTIFY_ROOT_DIRECTORY_ATTRIB,
+            b"",
+        ),
+        (
+            parent_watch,
+            immutable._INOTIFY_ROOT_DIRECTORY_ATTRIB,
+            root_name,
+        ),
+    )
+
+
+def test_pinned_directory_reader_seals_only_root_directory_mode(
+    tmp_path: Path,
+) -> None:
+    root, branch, leaf, payload = _reader_tree(tmp_path)
+    root_before = immutable._node_identity(root.stat())
+    branch_before = immutable._node_identity(branch.stat())
+
+    with immutable.PinnedDirectoryReader(root) as reader:
+        reader.seal_root_directory_mode()
+        reader.verify_path()
+
+    assert immutable._node_identity(root.stat()) == root_before
+    assert immutable._node_identity(branch.stat()) == branch_before
+    assert stat.S_IMODE(root.stat().st_mode) == 0o555
+    assert stat.S_IMODE(branch.stat().st_mode) == 0o755
+    assert leaf.read_bytes() == payload
+
+
+def test_normal_retained_directory_verifier_rejects_root_mode_change(
+    tmp_path: Path,
+) -> None:
+    root, _branch, _leaf, _payload = _reader_tree(tmp_path)
+    reader = immutable.PinnedDirectoryReader(root)
+    try:
+        os.fchmod(reader.descriptor, 0o555)
+        with pytest.raises(
+            immutable.ImmutableArtifactError,
+            match="retained directory ancestor changed during use",
+        ):
+            reader.verify_path()
+    finally:
+        reader.close()
+
+
+def test_root_mode_gate_accepts_complete_exact_event_signature(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root, _branch, _leaf, _payload = _reader_tree(tmp_path)
+    reader = immutable.PinnedDirectoryReader(root)
+    try:
+        events = _authorized_root_mode_events(reader)
+        monkeypatch.setattr(
+            reader._path_monitor.monitor,
+            "read_events",
+            lambda: immutable._MutationDrainResult(events),
+        )
+        immutable._require_retained_directory_root_mode_change(
+            reader._path_monitor
+        )
+    finally:
+        reader.close()
+
+
+@pytest.mark.parametrize("missing", ("root", "parent"))
+def test_root_mode_gate_requires_both_exact_event_signatures(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    missing: str,
+) -> None:
+    root, _branch, _leaf, _payload = _reader_tree(tmp_path)
+    reader = immutable.PinnedDirectoryReader(root)
+    try:
+        root_event, parent_event = _authorized_root_mode_events(reader)
+        events = (parent_event,) if missing == "root" else (root_event,)
+        monkeypatch.setattr(
+            reader._path_monitor.monitor,
+            "read_events",
+            lambda: immutable._MutationDrainResult(events),
+        )
+        with pytest.raises(
+            immutable.ImmutableArtifactError,
+            match="root mode seal was not fully observed",
+        ):
+            immutable._require_retained_directory_root_mode_change(
+                reader._path_monitor
+            )
+    finally:
+        reader.close()
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        "move_self",
+        "delete_self",
+        "moved_from",
+        "moved_to",
+        "create",
+        "delete",
+        "ancestor_attrib",
+        "unrelated",
+        "unknown_watch",
+        "extra_mask",
+        "duplicate_authorized",
+    ),
+)
+def test_root_mode_gate_rejects_every_other_event(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+) -> None:
+    root, _branch, _leaf, _payload = _reader_tree(tmp_path)
+    reader = immutable.PinnedDirectoryReader(root)
+    try:
+        state = reader._path_monitor
+        root_event, parent_event = _authorized_root_mode_events(reader)
+        parent_watch, root_name = state.protected_names[-1]
+        directory_flag = 0x40000000
+        invalid = {
+            "move_self": (
+                state.root_watch,
+                directory_flag | 0x00000800,
+                b"",
+            ),
+            "delete_self": (
+                state.root_watch,
+                directory_flag | 0x00000400,
+                b"",
+            ),
+            "moved_from": (
+                parent_watch,
+                directory_flag | 0x00000040,
+                root_name,
+            ),
+            "moved_to": (
+                parent_watch,
+                directory_flag | 0x00000080,
+                root_name,
+            ),
+            "create": (
+                parent_watch,
+                directory_flag | 0x00000100,
+                root_name,
+            ),
+            "delete": (
+                parent_watch,
+                directory_flag | 0x00000200,
+                root_name,
+            ),
+            "ancestor_attrib": (
+                state.protected_names[-2][0],
+                immutable._INOTIFY_ROOT_DIRECTORY_ATTRIB,
+                state.protected_names[-2][1],
+            ),
+            "unrelated": (
+                parent_watch,
+                immutable._INOTIFY_ROOT_DIRECTORY_ATTRIB,
+                b"unrelated",
+            ),
+            "unknown_watch": (
+                max(state.directory_watches) + 1,
+                immutable._INOTIFY_ROOT_DIRECTORY_ATTRIB,
+                b"",
+            ),
+            "extra_mask": (
+                state.root_watch,
+                immutable._INOTIFY_ROOT_DIRECTORY_ATTRIB | 0x00008000,
+                b"",
+            ),
+            "duplicate_authorized": root_event,
+        }[mutation]
+        result = immutable._MutationDrainResult(
+            (root_event, parent_event, invalid)
+        )
+        monkeypatch.setattr(
+            state.monitor,
+            "read_events",
+            lambda: result,
+        )
+        with pytest.raises(
+            immutable.ImmutableArtifactError,
+            match=(
+                "unknown watch"
+                if mutation == "unknown_watch"
+                else (
+                    "duplicate event"
+                    if mutation == "duplicate_authorized"
+                    else "outside authorized root mode seal"
+                )
+            ),
+        ):
+            immutable._require_retained_directory_root_mode_change(state)
+    finally:
+        reader.close()
+
+
+def test_root_mode_gate_preserves_monitor_resource_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root, _branch, _leaf, _payload = _reader_tree(tmp_path)
+    reader = immutable.PinnedDirectoryReader(root)
+    try:
+        events = _authorized_root_mode_events(reader)
+        resource_error = immutable.ImmutableArtifactResourceError(
+            f"{immutable.VERIFY_RESOURCE_BOUND}: inotify queue overflow"
+        )
+        monkeypatch.setattr(
+            reader._path_monitor.monitor,
+            "read_events",
+            lambda: immutable._MutationDrainResult(
+                events,
+                resource_error=resource_error,
+            ),
+        )
+        with pytest.raises(
+            immutable.ImmutableArtifactResourceError,
+            match="inotify queue overflow",
+        ):
+            immutable._require_retained_directory_root_mode_change(
+                reader._path_monitor
+            )
+    finally:
+        reader.close()
+
+
 @pytest.mark.parametrize(
     "mutation",
     ["root_before", "root_after", "ancestor_after", "leaf_after"],
@@ -2879,6 +3115,56 @@ def test_directory_fallback_rejects_same_byte_inode_replacement(
     ]
     assert len(retired) == 1
     assert (retired[0] / "value").stat().st_ino == replacement_inode
+
+
+def test_regular_publication_callbacks_bracket_commit(tmp_path: Path) -> None:
+    output = tmp_path / "artifact.bin"
+    events: list[str] = []
+
+    def before_commit() -> None:
+        assert not output.exists()
+        events.append("before")
+
+    def after_commit() -> None:
+        assert output.read_bytes() == b"payload"
+        events.append("after")
+
+    result = immutable.publish_regular_file(
+        tmp_path,
+        output.name,
+        b"payload",
+        before_commit=before_commit,
+        after_commit=after_commit,
+    )
+
+    assert result == output
+    assert events == ["before", "after"]
+
+
+def test_regular_publication_retires_after_commit_callback_failure(
+    tmp_path: Path,
+) -> None:
+    output = tmp_path / "artifact.bin"
+
+    def refuse_after_commit() -> None:
+        raise RuntimeError("postcommit authority changed")
+
+    with pytest.raises(RuntimeError, match="postcommit authority changed"):
+        immutable.publish_regular_file(
+            tmp_path,
+            output.name,
+            b"payload",
+            after_commit=refuse_after_commit,
+        )
+
+    assert not output.exists()
+    retired = [
+        path for path in tmp_path.iterdir()
+        if path.name.startswith(".failed-regular-")
+        and not path.name.endswith(".salvaging")
+    ]
+    assert len(retired) == 1
+    assert retired[0].read_bytes() == b"payload"
 
 
 def test_regular_publication_rejects_post_rename_hardlink(
