@@ -2,11 +2,11 @@
 
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Command, Output, Stdio};
 
 use serde_json::{Value, json};
 use sim_run::RunError;
-use sim_trace::{Sha256Digest, canonical_json};
+use sim_trace::{Sha256Digest, canonical_json_utf8};
 use tempfile::TempDir;
 
 fn binary() -> &'static str {
@@ -18,7 +18,7 @@ fn fixture_root() -> PathBuf {
 }
 
 fn fixture_manifest() -> PathBuf {
-    fixture_root().join("run_manifest.json")
+    fixture_root().join("run_manifest.v2.json")
 }
 
 fn copy_tree(source: &Path, destination: &Path) {
@@ -44,48 +44,80 @@ fn copied_fixture() -> (TempDir, PathBuf) {
     let temp = TempDir::new().unwrap();
     let root = temp.path().join("bundle");
     copy_tree(&fixture_root(), &root);
-    let manifest = root.join("run_manifest.json");
+    let manifest = root.join("run_manifest.v2.json");
     (temp, manifest)
 }
 
-fn assert_error_document(raw: &[u8], code: &str, exit_code: u64) {
+fn unframe_one_document(raw: &[u8]) -> &[u8] {
     assert_eq!(raw.last(), Some(&b'\n'));
-    let mut error: Value = serde_json::from_slice(raw).unwrap();
-    let canonical = format!("{}\n", canonical_json(&error).unwrap());
-    assert_eq!(raw, canonical.as_bytes());
-    assert_eq!(error["schema_version"], "sim_error.v1");
-    assert_eq!(error["code"], code);
-    assert_eq!(error["exit_code"], exit_code);
+    let document = &raw[..raw.len() - 1];
+    assert!(!document.contains(&b'\n'));
+    document
+}
+
+fn assert_error_document(raw: &[u8], failure_type: &str, stage: &str, exit_code: u64) -> Value {
+    let document = unframe_one_document(raw);
+    let mut error: Value = serde_json::from_slice(document).unwrap();
+    assert_eq!(canonical_json_utf8(&error).unwrap().as_bytes(), document);
+    assert_eq!(error["schema_version"], "sim_error.v2");
+    assert_eq!(error["error"]["failure_type"], failure_type);
+    assert_eq!(error["error"]["stage"], stage);
+    assert_eq!(error["exit_status"]["status"], "failure");
+    assert_eq!(error["exit_status"]["exit_code"], exit_code);
+
     let seal = error
         .as_object_mut()
         .unwrap()
         .remove("error_sha256")
         .unwrap();
-    let unsigned = canonical_json(&error).unwrap();
+    let unsigned = canonical_json_utf8(&error).unwrap();
     assert_eq!(seal, Sha256Digest::of(unsigned.as_bytes()).to_string());
+    error
+}
+
+fn assert_cli_error(output: &Output, failure_type: &str, stage: &str, exit_code: i32) -> Value {
+    assert_eq!(output.status.code(), Some(exit_code));
+    assert!(output.stdout.is_empty());
+    assert_error_document(
+        &output.stderr,
+        failure_type,
+        stage,
+        u64::try_from(exit_code).unwrap(),
+    )
+}
+
+fn assert_success_document(raw: &[u8]) -> Value {
+    let document = unframe_one_document(raw);
+    let mut result: Value = serde_json::from_slice(document).unwrap();
+    assert_eq!(canonical_json_utf8(&result).unwrap().as_bytes(), document);
+    assert_eq!(result["schema_version"], "sim_result.v2");
+    assert_eq!(
+        result["exit_status"],
+        json!({"status": "success", "exit_code": 0})
+    );
+    let seal = result
+        .as_object_mut()
+        .unwrap()
+        .remove("result_sha256")
+        .unwrap();
+    let unsigned = canonical_json_utf8(&result).unwrap();
+    assert_eq!(seal, Sha256Digest::of(unsigned.as_bytes()).to_string());
+    result
 }
 
 #[test]
-fn cli_emits_only_the_canonical_result_on_success() {
+fn cli_emits_only_one_canonical_v2_result_on_success() {
     let output = Command::new(binary())
         .arg(fixture_manifest())
         .output()
         .unwrap();
     assert!(output.status.success());
     assert!(output.stderr.is_empty());
-    let expected = format!(
-        "{}\n",
-        include_str!("fixtures/addr_carry_canary_bundle/result.golden.json")
+    let parsed = assert_success_document(&output.stdout);
+    assert_eq!(
+        parsed["aggregate"]["metrics"]["exec_cycles_gpc_max"]["status"],
+        "required_unimplemented"
     );
-    assert_eq!(output.stdout, expected.as_bytes());
-    let parsed: Value = serde_json::from_slice(&output.stdout).unwrap();
-    let cycles = parsed["emissions"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|row| row["key"] == "exec_cycles_gpc_max")
-        .unwrap();
-    assert_eq!(cycles["outcome"]["status"], "required_unimplemented");
 }
 
 #[test]
@@ -128,7 +160,7 @@ fn ambient_mode_variables_do_not_change_manifest_selected_replay() {
     assert!(contaminated.status.success());
     assert_eq!(baseline.stdout, contaminated.stdout);
     assert_eq!(baseline.stderr, contaminated.stderr);
-    let result: Value = serde_json::from_slice(&contaminated.stdout).unwrap();
+    let result = assert_success_document(&contaminated.stdout);
     assert_eq!(
         result["resolved_configuration"]["replay_mode"]["mode"],
         "l1_shared_l2"
@@ -136,12 +168,108 @@ fn ambient_mode_variables_do_not_change_manifest_selected_replay() {
 }
 
 #[test]
-fn cli_usage_is_a_canonical_prerequisite_error() {
-    for args in [vec![], vec![""], vec!["one", "two"]] {
+fn cli_usage_counts_every_positional_argument_exactly() {
+    for (args, expected_count) in [
+        (Vec::<&str>::new(), 0),
+        (vec!["one", "two"], 2),
+        (vec!["one", "two", "three"], 3),
+    ] {
         let output = Command::new(binary()).args(args).output().unwrap();
-        assert_eq!(output.status.code(), Some(2));
-        assert!(output.stdout.is_empty());
-        assert_error_document(&output.stderr, "cli_usage", 2);
+        let error = assert_cli_error(&output, "CLI_USAGE_FAILED", "cli_usage", 2);
+        assert_eq!(
+            error["error"]["evidence"]["provided_positional_argument_count"],
+            expected_count
+        );
+        assert_eq!(
+            error["error"]["evidence"]["expected_positional_argument_count"],
+            1
+        );
+    }
+}
+
+#[test]
+fn empty_path_is_one_argument_owned_by_manifest_admission() {
+    let output = Command::new(binary()).arg("").output().unwrap();
+    let error = assert_cli_error(
+        &output,
+        "MANIFEST_ADMISSION_FAILED",
+        "manifest_admission",
+        1,
+    );
+    assert!(error["error"].get("evidence").is_none());
+}
+
+#[test]
+fn production_cli_rejects_v1_without_fallback() {
+    let output = Command::new(binary())
+        .arg(fixture_root().join("run_manifest.json"))
+        .output()
+        .unwrap();
+    assert_cli_error(
+        &output,
+        "MANIFEST_ADMISSION_FAILED",
+        "manifest_admission",
+        1,
+    );
+}
+
+#[test]
+fn duplicate_json_members_are_manifest_admission_failures() {
+    let (_temp, manifest_path) = copied_fixture();
+    let raw = fs::read_to_string(&manifest_path).unwrap();
+    let duplicate = raw.replacen(
+        "\"schema_version\": 2,",
+        "\"schema_version\": 2,\n  \"schema_version\": 2,",
+        1,
+    );
+    assert_ne!(duplicate, raw);
+    fs::write(&manifest_path, duplicate).unwrap();
+
+    let output = Command::new(binary()).arg(manifest_path).output().unwrap();
+    assert_cli_error(
+        &output,
+        "MANIFEST_ADMISSION_FAILED",
+        "manifest_admission",
+        1,
+    );
+}
+
+#[test]
+fn artifact_role_path_duplicates_keep_subprocess_error_boundaries() {
+    for (artifact, duplicate_of, failure_type, stage) in [
+        (
+            "arch_card",
+            "control_bits_sidecar",
+            "ARCH_CARD_ADMISSION_FAILED",
+            "arch_card_admission",
+        ),
+        (
+            "pchase_card",
+            "arch_card",
+            "CONFIGURATION_RESOLUTION_FAILED",
+            "configuration_resolution",
+        ),
+        (
+            "stats_csv",
+            "dynamic_trace_pb",
+            "TRACE_ADMISSION_FAILED",
+            "trace_admission",
+        ),
+    ] {
+        let (_temp, manifest_path) = copied_fixture();
+        let launch_manifest_path = manifest_path.parent().unwrap().join("launch_evidence.json");
+        let mut launch_manifest: Value =
+            serde_json::from_slice(&fs::read(&launch_manifest_path).unwrap()).unwrap();
+        launch_manifest["artifacts"][artifact]["path"] =
+            launch_manifest["artifacts"][duplicate_of]["path"].clone();
+        fs::write(
+            &launch_manifest_path,
+            serde_json::to_vec_pretty(&launch_manifest).unwrap(),
+        )
+        .unwrap();
+
+        let output = Command::new(binary()).arg(&manifest_path).output().unwrap();
+        assert_cli_error(&output, failure_type, stage, 1);
     }
 }
 
@@ -155,9 +283,12 @@ fn noncanonical_manifest_path_spellings_are_rejected_literally() {
     ];
     for alias in aliases {
         let output = Command::new(binary()).arg(alias).output().unwrap();
-        assert_eq!(output.status.code(), Some(1));
-        assert!(output.stdout.is_empty());
-        assert_error_document(&output.stderr, "run_manifest_rejected", 1);
+        assert_cli_error(
+            &output,
+            "MANIFEST_ADMISSION_FAILED",
+            "manifest_admission",
+            1,
+        );
     }
 }
 
@@ -168,36 +299,46 @@ fn missing_and_malformed_manifests_have_distinct_typed_exits() {
         .arg(temp.path().join("missing.json"))
         .output()
         .unwrap();
-    assert_eq!(missing.status.code(), Some(2));
-    assert!(missing.stdout.is_empty());
-    assert_error_document(&missing.stderr, "run_manifest_read", 2);
+    assert_cli_error(
+        &missing,
+        "MANIFEST_ADMISSION_FAILED",
+        "manifest_admission",
+        2,
+    );
 
     let malformed_path = temp.path().join("malformed.json");
     fs::write(&malformed_path, b"{}").unwrap();
     let malformed = Command::new(binary()).arg(malformed_path).output().unwrap();
-    assert_eq!(malformed.status.code(), Some(1));
-    assert!(malformed.stdout.is_empty());
-    assert_error_document(&malformed.stderr, "run_manifest_rejected", 1);
+    assert_cli_error(
+        &malformed,
+        "MANIFEST_ADMISSION_FAILED",
+        "manifest_admission",
+        1,
+    );
 }
 
 #[test]
-fn serialization_fallback_matches_the_error_schema_and_seal() {
+fn serialization_fallback_matches_the_v2_error_schema_and_seal() {
     let document = RunError::canonical_serialization_fallback();
     let framed = format!("{document}\n");
-    assert_error_document(framed.as_bytes(), "output_serialization_failed", 1);
-    let parsed: Value = serde_json::from_str(&document).unwrap();
-    let object = parsed.as_object().unwrap();
-    assert_eq!(object.len(), 6);
-    assert_eq!(parsed["category"], "failure");
+    let parsed = assert_error_document(
+        framed.as_bytes(),
+        "RESULT_SERIALIZATION_FAILED",
+        "result_serialization",
+        1,
+    );
+    assert_eq!(parsed.as_object().unwrap().len(), 3);
+    assert!(parsed.get("build_identity").is_none());
+    assert!(parsed["error"].get("evidence").is_none());
     assert!(
-        parsed["message"]
+        parsed["error"]["detail"]
             .as_str()
             .is_some_and(|value| !value.is_empty())
     );
 }
 
 #[test]
-fn closed_stdout_is_an_output_write_failure() {
+fn closed_stdout_becomes_one_stderr_output_write_failure() {
     let mut child = Command::new(binary())
         .arg(fixture_manifest())
         .stdout(Stdio::piped())
@@ -206,6 +347,5 @@ fn closed_stdout_is_an_output_write_failure() {
         .unwrap();
     drop(child.stdout.take());
     let output = child.wait_with_output().unwrap();
-    assert_eq!(output.status.code(), Some(1));
-    assert_error_document(&output.stderr, "output_write_failed", 1);
+    assert_cli_error(&output, "OUTPUT_WRITE_FAILED", "output_write", 1);
 }

@@ -1,4 +1,4 @@
-//! Private `sim_result.v2` integration staged ahead of the CLI cutover.
+//! Private strict-v2 production runner behind the public `run_manifest` entry point.
 
 use std::collections::BTreeSet;
 use std::fs::File;
@@ -23,9 +23,10 @@ use crate::wire::{
     ReplayModeV2, SimResultV2, SimRunManifestV2, WireError, parse_sim_run_manifest_v2,
 };
 use crate::{
-    MAX_RUN_MANIFEST_BYTES, ManifestDramBandwidth, ManifestReplayMode, RunError, SimRunOutput,
-    identity_mismatch, manifest_base, output_serialization_error, require_canonical_manifest_path,
-    resolve_configuration,
+    IdentityFailureBoundary, MAX_RUN_MANIFEST_BYTES, ManifestDramBandwidth, ManifestReplayMode,
+    RunError, SimRunOutput, identity_mismatch, launch_evidence_error, manifest_base,
+    manifest_read_error, manifest_rejected, manifest_serialization_error,
+    require_canonical_manifest_path, resolve_configuration, result_serialization_error,
 };
 
 const MAX_PROCESS_IMAGE_BYTES: u64 = 512 * 1024 * 1024;
@@ -96,8 +97,7 @@ struct ConfigurationIdPreimage {
     pchase_card_sha256: Sha256Digest,
 }
 
-/// Private production-capable v2 integration entry. Task 344 may expose this
-/// only when the CLI and `sim_error.v2` cutover land atomically.
+/// Sole private strict-v2 integration entry used by the public consumer.
 pub(super) fn run_manifest_v2(path: impl AsRef<Path>) -> Result<SimRunOutput, RunError> {
     let build_context = BuildContextV2::runtime()?;
     run_manifest_v2_with_context(path.as_ref(), &build_context)
@@ -114,10 +114,7 @@ fn run_manifest_v2_with_context(
     let (mut admitted, trace_identity) = admit_all_v2(path, &manifest, arch, sku)?;
     let first = admitted
         .first()
-        .ok_or_else(|| RunError::RunManifestRejected {
-            path: path.to_path_buf(),
-            reason: "launches must be nonempty".to_owned(),
-        })?;
+        .ok_or_else(|| manifest_rejected(path, "launches must be nonempty"))?;
     let requested_mode = manifest_replay_mode(manifest.replay_mode());
     let resolved = resolve_configuration(&first.evidence, arch, requested_mode)?;
     let resolved_configuration_sha256 = canonical_typed_sha256(&resolved.wire)?;
@@ -149,22 +146,20 @@ fn run_manifest_v2_with_context(
         resolved.replay_configuration,
         expected_launches,
     )
-    .map_err(|source| RunError::LaunchSetDeclarationRejected {
-        reason: source.to_string(),
-    })?;
+    .map_err(|source| RunError::replay(format!("launch-set declaration: {source}")))?;
 
     let mut per_launch_results = Vec::new();
     let mut diagnostic_witnesses = Vec::new();
     let mut full_results = Vec::new();
     per_launch_results
         .try_reserve_exact(admitted.len())
-        .map_err(output_serialization_error)?;
+        .map_err(result_serialization_error)?;
     diagnostic_witnesses
         .try_reserve_exact(admitted.len())
-        .map_err(output_serialization_error)?;
+        .map_err(result_serialization_error)?;
     full_results
         .try_reserve_exact(admitted.len())
-        .map_err(output_serialization_error)?;
+        .map_err(result_serialization_error)?;
 
     for entry in admitted.drain(..) {
         let evidence_sha256 = entry.evidence.identity().seal_sha256();
@@ -173,27 +168,24 @@ fn run_manifest_v2_with_context(
             &resolved.issue_params,
             resolved.replay_mode,
         )
-        .map_err(|source| RunError::ReplayFailed {
-            identity_sha256: evidence_sha256,
-            reason: source.to_string(),
+        .map_err(|source| {
+            RunError::replay(format!(
+                "launch {evidence_sha256} replay execution: {source}"
+            ))
         })?;
         match outcome {
             KernelReplayOutcome::Full(result) => {
                 if result.coverage().blocks_observed() == 0 || result.records_seen() == 0 {
-                    return Err(RunError::ReplayFailed {
-                        identity_sha256: evidence_sha256,
-                        reason: "full replay was vacuous over blocks or records".to_owned(),
-                    });
+                    return Err(RunError::replay(format!(
+                        "launch {evidence_sha256} full replay was vacuous over blocks or records"
+                    )));
                 }
-                let predictions =
-                    emit_launch(&result).map_err(|source| RunError::EmissionFailed {
-                        reason: source.to_string(),
-                    })?;
+                let predictions = emit_launch(&result)
+                    .map_err(|source| RunError::emission(source.to_string()))?;
                 if predictions.coverage().launch() != &entry.binding {
-                    return Err(RunError::EmissionFailed {
-                        reason: "per-launch emitter changed the authenticated launch binding"
-                            .to_owned(),
-                    });
+                    return Err(RunError::emission(
+                        "per-launch emitter changed the authenticated launch binding",
+                    ));
                 }
                 let metrics = MetricMapV2::from_predictions(predictions.metrics())
                     .map_err(wire_emission_error)?;
@@ -208,31 +200,25 @@ fn run_manifest_v2_with_context(
                 full_results.push(result);
             }
             KernelReplayOutcome::SampledObserved(result) => {
-                return Err(RunError::CoverageNotAggregatable {
-                    identity_sha256: evidence_sha256,
-                    population_blocks: result.coverage().population_blocks(),
-                    blocks_observed: result.coverage().blocks_observed(),
-                });
+                return Err(RunError::replay(format!(
+                    "launch {evidence_sha256} is sampled ({}/{}) and cannot enter exact aggregation",
+                    result.coverage().blocks_observed(),
+                    result.coverage().population_blocks()
+                )));
             }
         }
     }
 
-    let aggregate_counters =
-        aggregate_full_launch_set(declaration, full_results).map_err(|source| {
-            RunError::LaunchSetAggregationFailed {
-                reason: source.to_string(),
-            }
-        })?;
+    let aggregate_counters = aggregate_full_launch_set(declaration, full_results)
+        .map_err(|source| RunError::replay(format!("launch-set aggregation: {source}")))?;
     let aggregate_predictions =
-        emit_all(&aggregate_counters).map_err(|source| RunError::EmissionFailed {
-            reason: source.to_string(),
-        })?;
+        emit_all(&aggregate_counters).map_err(|source| RunError::emission(source.to_string()))?;
     if aggregate_predictions.launch_timing_diagnostics()
         != aggregate_counters.launch_timing_diagnostics()
     {
-        return Err(RunError::EmissionFailed {
-            reason: "aggregate emitter did not preserve canonical timing diagnostics".to_owned(),
-        });
+        return Err(RunError::emission(
+            "aggregate emitter did not preserve canonical timing diagnostics",
+        ));
     }
     let aggregate_metrics = MetricMapV2::from_predictions(aggregate_predictions.metrics())
         .map_err(wire_emission_error)?;
@@ -241,14 +227,14 @@ fn run_manifest_v2_with_context(
 
     let aggregate_diagnostics = aggregate_predictions.launch_timing_diagnostics();
     if aggregate_diagnostics.len() != diagnostic_witnesses.len() {
-        return Err(RunError::EmissionFailed {
-            reason: "aggregate timing-diagnostic count changed".to_owned(),
-        });
+        return Err(RunError::emission(
+            "aggregate timing-diagnostic count changed",
+        ));
     }
     let mut per_launch_diagnostics = Vec::new();
     per_launch_diagnostics
         .try_reserve_exact(diagnostic_witnesses.len())
-        .map_err(output_serialization_error)?;
+        .map_err(result_serialization_error)?;
     for (witness, aggregate_diagnostic) in diagnostic_witnesses
         .into_iter()
         .zip(aggregate_diagnostics.iter())
@@ -259,10 +245,9 @@ fn run_manifest_v2_with_context(
             || aggregate_diagnostic.terminal_modeled_event_time()
                 != witness.terminal_modeled_event_time
         {
-            return Err(RunError::EmissionFailed {
-                reason: "aggregate diagnostics differ from per-launch emission diagnostics"
-                    .to_owned(),
-            });
+            return Err(RunError::emission(
+                "aggregate diagnostics differ from per-launch emission diagnostics",
+            ));
         }
         per_launch_diagnostics.push(PerLaunchDiagnosticV2::new(
             witness.launch_key,
@@ -290,27 +275,19 @@ fn read_manifest_v2(path: &Path) -> Result<(SimRunManifestV2, Sha256Digest), Run
     let base = manifest_base(path);
     let name = path
         .file_name()
-        .ok_or_else(|| RunError::RunManifestRejected {
-            path: path.to_path_buf(),
-            reason: "manifest path has no file name".to_owned(),
-        })?;
-    let reader =
-        AnchoredDir::open(base.to_path_buf()).map_err(|source| RunError::RunManifestRead {
-            path: path.to_path_buf(),
-            source,
-        })?;
+        .ok_or_else(|| manifest_rejected(path, "manifest path has no file name"))?;
+    let reader = AnchoredDir::open(base.to_path_buf())
+        .map_err(|source| manifest_read_error(path, source))?;
     let file = reader
         .read_bounded_regular(Path::new(name), MAX_RUN_MANIFEST_BYTES)
-        .map_err(|source| RunError::RunManifestRead {
-            path: path.to_path_buf(),
-            source,
-        })?;
+        .map_err(|source| manifest_read_error(path, source))?;
     let manifest =
-        parse_sim_run_manifest_v2(file.raw()).map_err(|source| RunError::RunManifestRejected {
-            path: path.to_path_buf(),
-            reason: source.to_string(),
-        })?;
-    let run_manifest_sha256 = canonical_typed_sha256(&manifest)?;
+        parse_sim_run_manifest_v2(file.raw()).map_err(|source| manifest_rejected(path, source))?;
+    let manifest_value = serde_json::to_value(&manifest)
+        .map_err(|source| manifest_serialization_error(path, source))?;
+    let canonical = canonical_json_utf8(&manifest_value)
+        .map_err(|source| manifest_serialization_error(path, source))?;
+    let run_manifest_sha256 = Sha256Digest::of(canonical.as_bytes());
     Ok((manifest, run_manifest_sha256))
 }
 
@@ -326,48 +303,46 @@ fn admit_all_v2(
     let mut admitted = Vec::new();
     admitted
         .try_reserve_exact(manifest.launches().len())
-        .map_err(output_serialization_error)?;
+        .map_err(result_serialization_error)?;
 
     for launch in manifest.launches() {
         let path = base.join(Path::new(launch.launch_evidence_manifest_path()));
         let evidence =
-            admit_launch_evidence(&path).map_err(|source| RunError::LaunchEvidenceRejected {
-                path: path.clone(),
-                source,
-            })?;
+            admit_launch_evidence(&path).map_err(|source| launch_evidence_error(&path, source))?;
         let identity = evidence.identity();
         let actual_identity_sha256 = identity.seal_sha256();
         if actual_identity_sha256 != launch.expected_identity_sha256() {
             return Err(identity_mismatch(
+                IdentityFailureBoundary::Trace,
                 "launch expected_identity_sha256",
                 launch.expected_identity_sha256(),
                 actual_identity_sha256,
             ));
         }
         if !evidence_identities.insert(actual_identity_sha256) {
-            return Err(RunError::RunManifestRejected {
-                path: manifest_path.to_path_buf(),
-                reason: format!("duplicate launch evidence identity {actual_identity_sha256}"),
-            });
+            return Err(manifest_rejected(
+                manifest_path,
+                format!("duplicate launch evidence identity {actual_identity_sha256}"),
+            ));
         }
 
-        let launch_arch = identity
-            .arch()
-            .map_err(|source| RunError::LaunchEvidenceRejected {
-                path: path.clone(),
-                source: sim_sm::ManifestError::Architecture(source),
-            })?;
-        let launch_sku = identity
-            .sku()
-            .map_err(|source| RunError::LaunchEvidenceRejected {
-                path: path.clone(),
-                source: sim_sm::ManifestError::Architecture(source),
-            })?;
+        let launch_arch = identity.arch().map_err(|source| {
+            launch_evidence_error(&path, sim_sm::ManifestError::Architecture(source))
+        })?;
+        let launch_sku = identity.sku().map_err(|source| {
+            launch_evidence_error(&path, sim_sm::ManifestError::Architecture(source))
+        })?;
         if launch_arch != arch {
-            return Err(identity_mismatch("launch architecture", arch, launch_arch));
+            return Err(identity_mismatch(
+                IdentityFailureBoundary::Trace,
+                "launch architecture",
+                arch,
+                launch_arch,
+            ));
         }
         if launch_sku != sku {
             return Err(identity_mismatch(
+                IdentityFailureBoundary::Trace,
                 "launch SKU",
                 sku.token(),
                 launch_sku.token(),
@@ -375,6 +350,7 @@ fn admit_all_v2(
         }
         if identity.arch_card_sha256() != manifest.configuration_evidence().arch_card_sha256() {
             return Err(identity_mismatch(
+                IdentityFailureBoundary::ArchCard,
                 "launch architecture-card SHA-256",
                 manifest.configuration_evidence().arch_card_sha256(),
                 identity.arch_card_sha256(),
@@ -382,6 +358,7 @@ fn admit_all_v2(
         }
         if identity.pchase_card_sha256() != manifest.configuration_evidence().pchase_card_sha256() {
             return Err(identity_mismatch(
+                IdentityFailureBoundary::Configuration,
                 "launch P-chase-card SHA-256",
                 manifest.configuration_evidence().pchase_card_sha256(),
                 identity.pchase_card_sha256(),
@@ -397,9 +374,10 @@ fn admit_all_v2(
         if let Some(expected) = &shared_trace_identity {
             if expected != trace_identity {
                 return Err(identity_mismatch(
+                    IdentityFailureBoundary::Trace,
                     "authenticated trace-bundle identity",
-                    canonical_typed_utf8(expected)?,
-                    canonical_typed_utf8(trace_identity)?,
+                    format!("{expected:?}"),
+                    format!("{trace_identity:?}"),
                 ));
             }
         } else {
@@ -407,11 +385,12 @@ fn admit_all_v2(
         }
 
         let binding = identity.launch_binding().map_err(|source| {
-            RunError::LaunchSetDeclarationRejected {
-                reason: format!(
+            RunError::trace_admission(
+                format!(
                     "admitted launch identity {actual_identity_sha256} did not reconstruct: {source}"
                 ),
-            }
+                false,
+            )
         })?;
         admitted.push(AdmittedEntryV2 {
             launch_key: launch.launch_key().clone(),
@@ -421,9 +400,11 @@ fn admit_all_v2(
     }
 
     admitted.sort_by(|left, right| left.binding.cmp(&right.binding));
-    let trace_identity = shared_trace_identity.ok_or_else(|| RunError::RunManifestRejected {
-        path: manifest_path.to_path_buf(),
-        reason: "launches must authenticate exactly one nonempty trace bundle".to_owned(),
+    let trace_identity = shared_trace_identity.ok_or_else(|| {
+        manifest_rejected(
+            manifest_path,
+            "launches must authenticate exactly one nonempty trace bundle",
+        )
     })?;
     Ok((admitted, trace_identity))
 }
@@ -434,6 +415,7 @@ fn compare_authenticated_launch_key(
 ) -> Result<(), RunError> {
     if launch_key.kernel_mangled_name() != authenticated.kernel_mangled_name() {
         return Err(identity_mismatch(
+            IdentityFailureBoundary::Trace,
             "launch key kernel_mangled_name",
             launch_key.kernel_mangled_name(),
             authenticated.kernel_mangled_name(),
@@ -441,6 +423,7 @@ fn compare_authenticated_launch_key(
     }
     if launch_key.grid() != authenticated.grid() {
         return Err(identity_mismatch(
+            IdentityFailureBoundary::Trace,
             "launch key grid",
             format!("{:?}", launch_key.grid()),
             format!("{:?}", authenticated.grid()),
@@ -448,6 +431,7 @@ fn compare_authenticated_launch_key(
     }
     if launch_key.block() != authenticated.block() {
         return Err(identity_mismatch(
+            IdentityFailureBoundary::Trace,
             "launch key block",
             format!("{:?}", launch_key.block()),
             format!("{:?}", authenticated.block()),
@@ -455,6 +439,7 @@ fn compare_authenticated_launch_key(
     }
     if launch_key.device_id() != authenticated.device_id() {
         return Err(identity_mismatch(
+            IdentityFailureBoundary::Trace,
             "launch key device_id",
             launch_key.device_id(),
             authenticated.device_id(),
@@ -462,6 +447,7 @@ fn compare_authenticated_launch_key(
     }
     if launch_key.stream_id() != authenticated.stream_id() {
         return Err(identity_mismatch(
+            IdentityFailureBoundary::Trace,
             "launch key stream_id",
             launch_key.stream_id(),
             authenticated.stream_id(),
@@ -469,6 +455,7 @@ fn compare_authenticated_launch_key(
     }
     if launch_key.binary_architecture() != authenticated.binary_architecture() {
         return Err(identity_mismatch(
+            IdentityFailureBoundary::Trace,
             "launch key binary_architecture",
             launch_key.binary_architecture(),
             authenticated.binary_architecture(),
@@ -538,7 +525,7 @@ fn seal_result_v2(
     .map_err(wire_serialization_error)?;
     let unsigned_value = result_value_without_seal(&provisional)?;
     let unsigned_canonical =
-        canonical_json_utf8(&unsigned_value).map_err(output_serialization_error)?;
+        canonical_json_utf8(&unsigned_value).map_err(result_serialization_error)?;
     let result_sha256 = Sha256Digest::of(unsigned_canonical.as_bytes());
 
     // Invoke the checked constructor again with the actual seal so the object
@@ -555,22 +542,22 @@ fn seal_result_v2(
         diagnostics,
     )
     .map_err(wire_serialization_error)?;
-    let sealed_value = serde_json::to_value(&result).map_err(output_serialization_error)?;
+    let sealed_value = serde_json::to_value(&result).map_err(result_serialization_error)?;
     let revalidated_unsigned = value_without_member(sealed_value.clone(), "result_sha256")?;
     let revalidated_canonical =
-        canonical_json_utf8(&revalidated_unsigned).map_err(output_serialization_error)?;
+        canonical_json_utf8(&revalidated_unsigned).map_err(result_serialization_error)?;
     if revalidated_canonical != unsigned_canonical
         || Sha256Digest::of(revalidated_canonical.as_bytes()) != result_sha256
     {
-        return Err(output_serialization_error(
+        return Err(result_serialization_error(
             "sim_result.v2 seal preimage changed during checked construction",
         ));
     }
-    let canonical_json = canonical_json_utf8(&sealed_value).map_err(output_serialization_error)?;
+    let canonical_json = canonical_json_utf8(&sealed_value).map_err(result_serialization_error)?;
     let reparsed: serde_json::Value =
-        serde_json::from_str(&canonical_json).map_err(output_serialization_error)?;
-    if canonical_json_utf8(&reparsed).map_err(output_serialization_error)? != canonical_json {
-        return Err(output_serialization_error(
+        serde_json::from_str(&canonical_json).map_err(result_serialization_error)?;
+    if canonical_json_utf8(&reparsed).map_err(result_serialization_error)? != canonical_json {
+        return Err(result_serialization_error(
             "sim_result.v2 final document did not revalidate as canonical UTF-8 JSON",
         ));
     }
@@ -581,7 +568,7 @@ fn seal_result_v2(
 }
 
 fn result_value_without_seal(result: &SimResultV2) -> Result<serde_json::Value, RunError> {
-    let value = serde_json::to_value(result).map_err(output_serialization_error)?;
+    let value = serde_json::to_value(result).map_err(result_serialization_error)?;
     value_without_member(value, "result_sha256")
 }
 
@@ -591,12 +578,12 @@ fn value_without_member(
 ) -> Result<serde_json::Value, RunError> {
     let object = value
         .as_object_mut()
-        .ok_or_else(|| output_serialization_error("serialized document root is not an object"))?;
+        .ok_or_else(|| result_serialization_error("serialized document root is not an object"))?;
     let removed = object
         .remove(member)
-        .ok_or_else(|| output_serialization_error(format!("missing seal member {member}")))?;
+        .ok_or_else(|| result_serialization_error(format!("missing seal member {member}")))?;
     if !removed.is_string() {
-        return Err(output_serialization_error(format!(
+        return Err(result_serialization_error(format!(
             "seal member {member} is not a string"
         )));
     }
@@ -604,8 +591,8 @@ fn value_without_member(
 }
 
 fn canonical_typed_utf8<T: Serialize>(value: &T) -> Result<String, RunError> {
-    let value = serde_json::to_value(value).map_err(output_serialization_error)?;
-    canonical_json_utf8(&value).map_err(output_serialization_error)
+    let value = serde_json::to_value(value).map_err(result_serialization_error)?;
+    canonical_json_utf8(&value).map_err(result_serialization_error)
 }
 
 fn canonical_typed_sha256<T: Serialize>(value: &T) -> Result<Sha256Digest, RunError> {
@@ -614,17 +601,15 @@ fn canonical_typed_sha256<T: Serialize>(value: &T) -> Result<Sha256Digest, RunEr
 }
 
 fn wire_serialization_error(error: WireError) -> RunError {
-    output_serialization_error(error)
+    result_serialization_error(error)
 }
 
 fn wire_emission_error(error: WireError) -> RunError {
-    RunError::EmissionFailed {
-        reason: error.to_string(),
-    }
+    RunError::emission(error.to_string())
 }
 
 fn build_provenance_error(reason: impl std::fmt::Display) -> RunError {
-    output_serialization_error(format!(
+    result_serialization_error(format!(
         "build provenance could not be established: {reason}"
     ))
 }
@@ -1096,14 +1081,15 @@ mod tests {
             let error =
                 run_manifest_v2_with_context(&manifest_path, &fixed_build_context()).unwrap_err();
             match expected_edge {
-                Some(expected_edge) => match error {
-                    RunError::IdentityMismatch { edge, .. } => assert_eq!(edge, expected_edge),
-                    other => panic!("{field} mismatch produced {other:?}"),
-                },
-                None => assert!(
-                    matches!(error, RunError::RunManifestRejected { .. }),
-                    "schema-fixed binary architecture must reject before evidence admission: {error:?}"
-                ),
+                Some(expected_edge) => {
+                    assert_eq!(error.failure_type(), "TRACE_ADMISSION_FAILED");
+                    assert_eq!(error.stage(), "trace_admission");
+                    assert!(error.to_string().contains(expected_edge));
+                }
+                None => {
+                    assert_eq!(error.failure_type(), "MANIFEST_ADMISSION_FAILED");
+                    assert_eq!(error.stage(), "manifest_admission");
+                }
             }
         }
     }
@@ -1129,10 +1115,14 @@ mod tests {
             write_json(&manifest_path, &manifest);
             let error =
                 run_manifest_v2_with_context(&manifest_path, &fixed_build_context()).unwrap_err();
-            match error {
-                RunError::IdentityMismatch { edge, .. } => assert_eq!(edge, expected_edge),
-                other => panic!("{field} mismatch produced {other:?}"),
-            }
+            let expected_failure = match field {
+                "expected_identity_sha256" => "TRACE_ADMISSION_FAILED",
+                "arch_card_sha256" => "ARCH_CARD_ADMISSION_FAILED",
+                "pchase_card_sha256" => "CONFIGURATION_RESOLUTION_FAILED",
+                _ => unreachable!("closed test case"),
+            };
+            assert_eq!(error.failure_type(), expected_failure);
+            assert!(error.to_string().contains(expected_edge));
         }
     }
 
@@ -1154,12 +1144,12 @@ mod tests {
         write_json(&manifest_path, &manifest);
         let error =
             run_manifest_v2_with_context(&manifest_path, &fixed_build_context()).unwrap_err();
-        match error {
-            RunError::RunManifestRejected { reason, .. } => {
-                assert!(reason.contains("duplicate launch evidence identity"));
-            }
-            other => panic!("duplicate evidence produced {other:?}"),
-        }
+        assert_eq!(error.failure_type(), "MANIFEST_ADMISSION_FAILED");
+        assert!(
+            error
+                .to_string()
+                .contains("duplicate launch evidence identity")
+        );
     }
 
     fn artifact_claim(root: &Path, relative: &str) -> Value {
@@ -1257,12 +1247,12 @@ mod tests {
         write_json(&manifest_path, &manifest);
         let error =
             run_manifest_v2_with_context(&manifest_path, &fixed_build_context()).unwrap_err();
-        match error {
-            RunError::IdentityMismatch { edge, .. } => {
-                assert_eq!(edge, "authenticated trace-bundle identity");
-            }
-            other => panic!("mixed trace identities produced {other:?}"),
-        }
+        assert_eq!(error.failure_type(), "TRACE_ADMISSION_FAILED");
+        assert!(
+            error
+                .to_string()
+                .contains("authenticated trace-bundle identity")
+        );
     }
 
     #[test]
@@ -1302,12 +1292,20 @@ mod tests {
     }
 
     #[test]
-    fn public_v1_runner_and_golden_remain_byte_exact() {
-        let output = crate::run_manifest(fixture_root().join("run_manifest.json")).unwrap();
+    fn private_v1_compatibility_composer_preserves_byte_golden() {
+        const EXPECTED_GOLDEN_SHA256: &str =
+            "e251ce81602409221ce0736ce009babfd263e78e511b7ddf01546af3787c2ed8";
+        let golden = include_str!("../tests/fixtures/addr_carry_canary_bundle/result.golden.json");
         assert_eq!(
-            output.canonical_json(),
-            include_str!("../tests/fixtures/addr_carry_canary_bundle/result.golden.json")
+            Sha256Digest::of(golden.as_bytes()).to_string(),
+            EXPECTED_GOLDEN_SHA256
         );
+
+        let output = crate::v1_result_compat::run_manifest_v1_compat(
+            fixture_root().join("run_manifest.json"),
+        )
+        .unwrap();
+        assert_eq!(output.canonical_json(), golden);
         let parsed: Value = serde_json::from_str(output.canonical_json()).unwrap();
         assert_eq!(parsed["schema_version"], "sim_result.v1");
     }

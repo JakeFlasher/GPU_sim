@@ -7,7 +7,7 @@ use std::num::NonZeroU8;
 use serde::de::{self, DeserializeOwned, DeserializeSeed, MapAccess, SeqAccess, Visitor};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sim_arch::ArchId;
-use sim_sm::{ReplayAuthenticatedLaunchIdentity, TraceBundleIdentity};
+use sim_sm::TraceBundleIdentity;
 use sim_trace::Sha256Digest;
 
 use crate::emit::{
@@ -425,14 +425,7 @@ pub(crate) struct LaunchKeyV1 {
 }
 
 impl LaunchKeyV1 {
-    pub(crate) fn workload_id(&self) -> &str {
-        self.workload_id.as_str()
-    }
-
-    pub(crate) fn matched_execution_id(&self) -> &str {
-        self.matched_execution_id.as_str()
-    }
-
+    #[cfg(test)]
     pub(crate) fn process_launch_ordinal(&self) -> u64 {
         self.process_launch_ordinal.get()
     }
@@ -475,6 +468,7 @@ impl LaunchKeyV1 {
     }
 }
 
+#[cfg(test)]
 pub(crate) fn parse_launch_key_v1(bytes: &[u8]) -> Result<LaunchKeyV1, WireError> {
     strict_json_from_slice(bytes)
 }
@@ -488,20 +482,6 @@ pub(crate) struct ReplayBindingV1 {
     device_id: JsonU32,
     stream_id: JsonU64,
     binary_architecture: Sm86Token,
-}
-
-impl ReplayBindingV1 {
-    pub(crate) fn matches_authenticated(
-        &self,
-        identity: &ReplayAuthenticatedLaunchIdentity,
-    ) -> bool {
-        self.kernel_mangled_name.as_str() == identity.kernel_mangled_name()
-            && self.grid.tuple() == identity.grid()
-            && self.block.tuple() == identity.block()
-            && self.device_id.get() == identity.device_id()
-            && self.stream_id.get() == identity.stream_id()
-            && identity.binary_architecture() == ArchId::Sm86
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1289,6 +1269,7 @@ pub(crate) struct ManifestAdmissionEvidenceV2 {
     manifest_sha256: Sha256Digest,
 }
 
+#[cfg(test)]
 impl ManifestAdmissionEvidenceV2 {
     pub(crate) fn checked(
         manifest_path: impl Into<String>,
@@ -1310,6 +1291,7 @@ pub(crate) struct TraceAdmissionEvidenceV2 {
     bundle_sha256: Sha256Digest,
 }
 
+#[cfg(test)]
 impl TraceAdmissionEvidenceV2 {
     pub(crate) fn checked(
         bundle_id: impl Into<String>,
@@ -1329,6 +1311,7 @@ pub(crate) struct ArchCardAdmissionEvidenceV2 {
     card_sha256: Sha256Digest,
 }
 
+#[cfg(test)]
 impl ArchCardAdmissionEvidenceV2 {
     pub(crate) fn checked(
         card_id: impl Into<String>,
@@ -1348,6 +1331,7 @@ pub(crate) struct ConfigurationResolutionEvidenceV2 {
     run_manifest_sha256: Sha256Digest,
 }
 
+#[cfg(test)]
 impl ConfigurationResolutionEvidenceV2 {
     pub(crate) fn checked(
         configuration_id: impl Into<String>,
@@ -1366,6 +1350,7 @@ pub(crate) struct ReplayFailureEvidenceV2 {
     launch_key: LaunchKeyV1,
 }
 
+#[cfg(test)]
 impl ReplayFailureEvidenceV2 {
     pub(crate) fn new(launch_key: LaunchKeyV1) -> Self {
         Self { launch_key }
@@ -1378,6 +1363,7 @@ pub(crate) struct EmissionFailureEvidenceV2 {
     metric_key: EmittedMetricKey,
 }
 
+#[cfg(test)]
 impl EmissionFailureEvidenceV2 {
     pub(crate) const fn new(metric_key: EmittedMetricKey) -> Self {
         Self { metric_key }
@@ -1390,6 +1376,7 @@ pub(crate) struct ResultSerializationEvidenceV2 {
     unsigned_result_sha256: Sha256Digest,
 }
 
+#[cfg(test)]
 impl ResultSerializationEvidenceV2 {
     pub(crate) const fn new(unsigned_result_sha256: Sha256Digest) -> Self {
         Self {
@@ -1404,6 +1391,7 @@ pub(crate) struct OutputWriteEvidenceV2 {
     output_path: CanonicalRelativePath,
 }
 
+#[cfg(test)]
 impl OutputWriteEvidenceV2 {
     pub(crate) fn checked(output_path: impl Into<String>) -> Result<Self, WireError> {
         let output_path =

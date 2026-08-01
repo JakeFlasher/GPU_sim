@@ -36,6 +36,63 @@ const MAX_THREADBLOCK_PAYLOAD_FILES: u64 = 1_000_000;
 const MAX_THREADBLOCK_PAYLOAD_BYTES: u64 = 768 * 1024 * 1024;
 const MAX_EVIDENCE_SNAPSHOT_BYTES: u64 = 1024 * 1024 * 1024;
 
+/// Closed artifact tokens carried through launch-evidence admission failures.
+///
+/// Keeping these as an enum, rather than dispatching on rendered paths or error
+/// strings, lets downstream error serializers classify card, configuration, and
+/// trace failures exhaustively.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum ManifestArtifactToken {
+    DynamicTracePb,
+    ThreadblockPayload,
+    ThreadblockPayloadSortedPathManifest,
+    ThreadblockPayloadSortedPathStream,
+    AllocationsJson,
+    TraceSamplingJson,
+    StatsCsv,
+    EnhancedExecutionInfoJson,
+    ControlBitsSidecar,
+    ArchCard,
+    PchaseCard,
+}
+
+impl ManifestArtifactToken {
+    pub const fn token(self) -> &'static str {
+        match self {
+            Self::DynamicTracePb => "dynamic_trace_pb",
+            Self::ThreadblockPayload => "threadblock_payload",
+            Self::ThreadblockPayloadSortedPathManifest => {
+                "threadblock_payload.sorted_path_manifest"
+            }
+            Self::ThreadblockPayloadSortedPathStream => "threadblock_payload.sorted_path_stream",
+            Self::AllocationsJson => "allocations_json",
+            Self::TraceSamplingJson => "trace_sampling_json",
+            Self::StatsCsv => "stats_csv",
+            Self::EnhancedExecutionInfoJson => "enhanced_execution_info_json",
+            Self::ControlBitsSidecar => "control_bits_sidecar",
+            Self::ArchCard => "arch_card",
+            Self::PchaseCard => "pchase_card",
+        }
+    }
+
+    fn from_trace_snapshot_token(token: &str) -> Option<Self> {
+        match token {
+            "dynamic_trace_pb" => Some(Self::DynamicTracePb),
+            "threadblock_payload" => Some(Self::ThreadblockPayload),
+            "allocations_json" => Some(Self::AllocationsJson),
+            "trace_sampling_json" => Some(Self::TraceSamplingJson),
+            "stats_csv" => Some(Self::StatsCsv),
+            _ => None,
+        }
+    }
+}
+
+impl std::fmt::Display for ManifestArtifactToken {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(self.token())
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum ManifestError {
     #[error("could not parse launch-evidence manifest {path}: {source}")]
@@ -48,30 +105,46 @@ pub enum ManifestError {
     SchemaVersionUnsupported { got: u32, expected: u32 },
     #[error("manifest artifact {artifact} has a non-canonical relative path {path:?}")]
     ArtifactPathInvalid {
-        artifact: &'static str,
+        artifact: ManifestArtifactToken,
         path: String,
     },
-    #[error("manifest artifact path edge {edge} is invalid: expected {expected}, got {actual}")]
+    #[error(
+        "manifest artifact path edge {edge} for {artifact} is invalid: expected {expected}, got {actual}"
+    )]
     ArtifactPathMismatch {
+        artifact: ManifestArtifactToken,
         edge: &'static str,
         expected: PathBuf,
         actual: PathBuf,
     },
-    #[error("descriptor-anchored evidence read failed: {0}")]
+    #[error("descriptor-anchored root-manifest read failed: {0}")]
     Anchored(#[from] sim_trace::AnchoredReadError),
-    #[error("manifest artifact paths alias one another at {path}")]
-    ArtifactPathDuplicate { path: PathBuf },
-    #[error("manifest artifacts {first} and {second} alias the same inode")]
-    ArtifactFileAlias { first: PathBuf, second: PathBuf },
+    #[error("descriptor-anchored artifact read failed for {artifact}: {source}")]
+    ArtifactRead {
+        artifact: ManifestArtifactToken,
+        #[source]
+        source: sim_trace::AnchoredReadError,
+    },
+    #[error("manifest artifact {artifact} duplicates another artifact path at {path}")]
+    ArtifactPathDuplicate {
+        artifact: ManifestArtifactToken,
+        path: PathBuf,
+    },
+    #[error("manifest artifact {artifact} aliases the same inode as {first} at {second}")]
+    ArtifactFileAlias {
+        artifact: ManifestArtifactToken,
+        first: PathBuf,
+        second: PathBuf,
+    },
     #[error("artifact {artifact} byte size mismatch: manifest {expected}, snapshot {actual}")]
     ArtifactSizeMismatch {
-        artifact: &'static str,
+        artifact: ManifestArtifactToken,
         expected: u64,
         actual: u64,
     },
     #[error("artifact {artifact} SHA-256 mismatch: manifest {expected}, snapshot {actual}")]
     ArtifactDigestMismatch {
-        artifact: &'static str,
+        artifact: ManifestArtifactToken,
         expected: Sha256Digest,
         actual: Sha256Digest,
     },
@@ -79,13 +152,13 @@ pub enum ManifestError {
         "artifact {artifact} presence mismatch: manifest declares {expected}, snapshot has {actual}"
     )]
     ArtifactPresenceMismatch {
-        artifact: &'static str,
+        artifact: ManifestArtifactToken,
         expected: bool,
         actual: bool,
     },
     #[error("artifact {artifact} file count mismatch: manifest {expected}, snapshot {actual}")]
     ArtifactCardinalityMismatch {
-        artifact: &'static str,
+        artifact: ManifestArtifactToken,
         expected: u64,
         actual: u64,
     },
@@ -93,7 +166,7 @@ pub enum ManifestError {
         "artifact {artifact} declares {declared} {resource}, exceeding implementation limit {limit}"
     )]
     ArtifactResourceLimitExceeded {
-        artifact: &'static str,
+        artifact: ManifestArtifactToken,
         resource: &'static str,
         declared: u64,
         limit: u64,
@@ -151,8 +224,11 @@ pub enum ManifestError {
     Coverage(#[from] ReplayError),
     #[error("required identity field {field} is absent or empty")]
     IdentityFieldMissing { field: &'static str },
-    #[error("identity edge {edge} mismatch: expected {expected:?}, got {actual:?}")]
+    #[error(
+        "identity edge for artifact {artifact} {edge} mismatch: expected {expected:?}, got {actual:?}"
+    )]
     IdentityMismatch {
+        artifact: ManifestArtifactToken,
         edge: &'static str,
         expected: String,
         actual: String,
@@ -940,7 +1016,7 @@ impl AdmittedLaunchEvidence {
 
 fn resolve_manifest_path(
     base: &Path,
-    artifact: &'static str,
+    artifact: ManifestArtifactToken,
     raw: &str,
 ) -> Result<PathBuf, ManifestError> {
     if raw.is_empty()
@@ -973,9 +1049,15 @@ fn resolve_manifest_path(
     Ok(base.join(relative))
 }
 
-fn require_path(edge: &'static str, expected: PathBuf, actual: &Path) -> Result<(), ManifestError> {
+fn require_path(
+    artifact: ManifestArtifactToken,
+    edge: &'static str,
+    expected: PathBuf,
+    actual: &Path,
+) -> Result<(), ManifestError> {
     if actual != expected {
         return Err(ManifestError::ArtifactPathMismatch {
+            artifact,
             edge,
             expected,
             actual: actual.to_path_buf(),
@@ -985,7 +1067,7 @@ fn require_path(edge: &'static str, expected: PathBuf, actual: &Path) -> Result<
 }
 
 fn require_resource_limit(
-    artifact: &'static str,
+    artifact: ManifestArtifactToken,
     resource: &'static str,
     declared: u64,
     limit: u64,
@@ -1019,13 +1101,13 @@ fn add_snapshot_bytes(total: &mut u64, bytes: u64) -> Result<(), ManifestError> 
 
 fn validate_manifest_resource_limits(artifacts: &ManifestArtifacts) -> Result<(), ManifestError> {
     require_resource_limit(
-        "threadblock_payload",
+        ManifestArtifactToken::ThreadblockPayload,
         "files",
         artifacts.threadblock_payload.file_count,
         MAX_THREADBLOCK_PAYLOAD_FILES,
     )?;
     require_resource_limit(
-        "threadblock_payload",
+        ManifestArtifactToken::ThreadblockPayload,
         "bytes",
         artifacts.threadblock_payload.raw_bytes,
         MAX_THREADBLOCK_PAYLOAD_BYTES,
@@ -1038,29 +1120,38 @@ fn validate_manifest_resource_limits(artifacts: &ManifestArtifacts) -> Result<()
             limit: MAX_EVIDENCE_SNAPSHOT_BYTES,
         });
     }
-    for (name, artifact) in [
-        ("dynamic_trace_pb", &artifacts.dynamic_trace_pb),
-        ("stats_csv", &artifacts.stats_csv),
+    for (token, artifact) in [
         (
-            "enhanced_execution_info_json",
+            ManifestArtifactToken::DynamicTracePb,
+            &artifacts.dynamic_trace_pb,
+        ),
+        (ManifestArtifactToken::StatsCsv, &artifacts.stats_csv),
+        (
+            ManifestArtifactToken::EnhancedExecutionInfoJson,
             &artifacts.enhanced_execution_info_json,
         ),
-        ("control_bits_sidecar", &artifacts.control_bits_sidecar),
-        ("arch_card", &artifacts.arch_card),
-        ("pchase_card", &artifacts.pchase_card),
+        (
+            ManifestArtifactToken::ControlBitsSidecar,
+            &artifacts.control_bits_sidecar,
+        ),
+        (ManifestArtifactToken::ArchCard, &artifacts.arch_card),
+        (ManifestArtifactToken::PchaseCard, &artifacts.pchase_card),
     ] {
         require_resource_limit(
-            name,
+            token,
             "bytes",
             artifact.size_bytes,
             MAX_REGULAR_ARTIFACT_BYTES,
         )?;
         add_snapshot_bytes(&mut total, artifact.size_bytes)?;
     }
-    for (name, artifact) in [
-        ("allocations_json", artifacts.allocations_json.artifact()),
+    for (token, artifact) in [
         (
-            "trace_sampling_json",
+            ManifestArtifactToken::AllocationsJson,
+            artifacts.allocations_json.artifact(),
+        ),
+        (
+            ManifestArtifactToken::TraceSamplingJson,
             artifacts.trace_sampling_json.artifact(),
         ),
     ] {
@@ -1068,7 +1159,7 @@ fn validate_manifest_resource_limits(artifacts: &ManifestArtifacts) -> Result<()
             continue;
         };
         require_resource_limit(
-            name,
+            token,
             "bytes",
             artifact.size_bytes,
             MAX_REGULAR_ARTIFACT_BYTES,
@@ -1079,7 +1170,7 @@ fn validate_manifest_resource_limits(artifacts: &ManifestArtifacts) -> Result<()
 }
 
 fn verify_artifact(
-    artifact: &'static str,
+    artifact: ManifestArtifactToken,
     expected: &ManifestArtifact,
     actual: ArtifactDigestIdentity,
 ) -> Result<(), ManifestError> {
@@ -1101,7 +1192,7 @@ fn verify_artifact(
 }
 
 fn verify_optional_artifact(
-    artifact: &'static str,
+    artifact: ManifestArtifactToken,
     expected: &ManifestOptionalArtifact,
     actual: Option<ArtifactDigestIdentity>,
 ) -> Result<(), ManifestError> {
@@ -1120,7 +1211,7 @@ fn read_manifest_artifact(
     reader: &AnchoredDir,
     base: &Path,
     file_identities: &mut BTreeMap<FileIdentity, PathBuf>,
-    artifact: &'static str,
+    artifact: ManifestArtifactToken,
     expected: &ManifestArtifact,
 ) -> Result<(PathBuf, Vec<u8>, ReadArtifactIdentity), ManifestError> {
     let path = resolve_manifest_path(base, artifact, &expected.path)?;
@@ -1134,9 +1225,12 @@ fn read_manifest_artifact(
                 expected,
                 actual,
             },
-            other => ManifestError::Anchored(other),
+            other => ManifestError::ArtifactRead {
+                artifact,
+                source: other,
+            },
         })?;
-    insert_manifest_file_identity(file_identities, file.identity(), path.clone())?;
+    insert_manifest_file_identity(file_identities, artifact, file.identity(), path.clone())?;
     let raw = file.into_raw();
     let actual = ReadArtifactIdentity {
         size_bytes: u64::try_from(raw.len()).map_err(|_| ManifestError::ArtifactSizeMismatch {
@@ -1158,11 +1252,13 @@ fn read_manifest_artifact(
 
 fn insert_manifest_file_identity(
     identities: &mut BTreeMap<FileIdentity, PathBuf>,
+    artifact: ManifestArtifactToken,
     identity: FileIdentity,
     path: PathBuf,
 ) -> Result<(), ManifestError> {
     if let Some(first) = identities.insert(identity, path.clone()) {
         return Err(ManifestError::ArtifactFileAlias {
+            artifact,
             first,
             second: path,
         });
@@ -1187,10 +1283,7 @@ impl From<ReadArtifactIdentity> for SealedArtifact {
 
 fn parse_trace_snapshot(snapshot: TraceDirSnapshot) -> Result<TraceDir, ManifestError> {
     TraceDir::from_snapshot(snapshot).map_err(|source| match source {
-        TraceError::TraceContractUnsupported { .. }
-        | TraceError::MemoryPayloadCapabilitiesInvalid { .. } => {
-            ManifestError::CapabilityMissing { source }
-        }
+        TraceError::TraceContractUnsupported { .. } => ManifestError::CapabilityMissing { source },
         other => ManifestError::Trace(other),
     })
 }
@@ -1201,51 +1294,83 @@ fn map_trace_snapshot_error(source: TraceError) -> ManifestError {
             artifact,
             expected,
             actual,
-        } => ManifestError::ArtifactPresenceMismatch {
-            artifact,
-            expected,
-            actual,
+        } => match ManifestArtifactToken::from_trace_snapshot_token(artifact) {
+            Some(artifact) => ManifestError::ArtifactPresenceMismatch {
+                artifact,
+                expected,
+                actual,
+            },
+            None => ManifestError::Trace(TraceError::SnapshotArtifactPresenceMismatch {
+                artifact,
+                expected,
+                actual,
+            }),
         },
         TraceError::SnapshotArtifactSizeMismatch {
             artifact,
             expected,
             actual,
-        } => ManifestError::ArtifactSizeMismatch {
-            artifact,
-            expected,
-            actual,
+        } => match ManifestArtifactToken::from_trace_snapshot_token(artifact) {
+            Some(artifact) => ManifestError::ArtifactSizeMismatch {
+                artifact,
+                expected,
+                actual,
+            },
+            None => ManifestError::Trace(TraceError::SnapshotArtifactSizeMismatch {
+                artifact,
+                expected,
+                actual,
+            }),
         },
         TraceError::SnapshotArtifactCardinalityMismatch {
             artifact,
             expected,
             actual,
-        } => ManifestError::ArtifactCardinalityMismatch {
-            artifact,
-            expected,
-            actual,
+        } => match ManifestArtifactToken::from_trace_snapshot_token(artifact) {
+            Some(artifact) => ManifestError::ArtifactCardinalityMismatch {
+                artifact,
+                expected,
+                actual,
+            },
+            None => ManifestError::Trace(TraceError::SnapshotArtifactCardinalityMismatch {
+                artifact,
+                expected,
+                actual,
+            }),
         },
         TraceError::AnchoredSnapshot(sim_trace::AnchoredReadError::HardlinkAlias {
             first,
             second,
-        }) => ManifestError::ArtifactFileAlias { first, second },
+        }) => ManifestError::ArtifactFileAlias {
+            artifact: ManifestArtifactToken::DynamicTracePb,
+            first,
+            second,
+        },
         other => ManifestError::Trace(other),
     }
 }
 
 fn identity_mismatch(
+    artifact: ManifestArtifactToken,
     edge: &'static str,
     expected: impl ToString,
     actual: impl ToString,
 ) -> ManifestError {
     ManifestError::IdentityMismatch {
+        artifact,
         edge,
         expected: expected.to_string(),
         actual: actual.to_string(),
     }
 }
 
-fn parse_required_sha256(field: &'static str, value: &str) -> Result<Sha256Digest, ManifestError> {
+fn parse_required_sha256(
+    artifact: ManifestArtifactToken,
+    field: &'static str,
+    value: &str,
+) -> Result<Sha256Digest, ManifestError> {
     Sha256Digest::parse(value).map_err(|_| ManifestError::IdentityMismatch {
+        artifact,
         edge: field,
         expected: "canonical lowercase SHA-256".to_owned(),
         actual: value.to_owned(),
@@ -1294,6 +1419,7 @@ pub fn admit_launch_evidence(
     let mut file_identities = BTreeMap::new();
     insert_manifest_file_identity(
         &mut file_identities,
+        ManifestArtifactToken::DynamicTracePb,
         manifest_file_identity,
         manifest_path.to_path_buf(),
     )?;
@@ -1303,9 +1429,13 @@ pub fn admit_launch_evidence(
     // size reaches a reserve/read path.
     validate_manifest_resource_limits(artifacts)?;
 
-    let dynamic_path =
-        resolve_manifest_path(&base, "dynamic_trace_pb", &artifacts.dynamic_trace_pb.path)?;
+    let dynamic_path = resolve_manifest_path(
+        &base,
+        ManifestArtifactToken::DynamicTracePb,
+        &artifacts.dynamic_trace_pb.path,
+    )?;
     require_path(
+        ManifestArtifactToken::DynamicTracePb,
         "dynamic_trace_pb.filename",
         dynamic_path
             .parent()
@@ -1321,42 +1451,59 @@ pub fn admit_launch_evidence(
         .to_path_buf();
     let payload_path = resolve_manifest_path(
         &base,
-        "threadblock_payload",
+        ManifestArtifactToken::ThreadblockPayload,
         &artifacts.threadblock_payload.path,
     )?;
     require_path(
+        ManifestArtifactToken::ThreadblockPayload,
         "threadblock_payload.trace_root",
         trace_root.join("threadblocks"),
         &payload_path,
     )?;
     let exec_path = resolve_manifest_path(
         &base,
-        "enhanced_execution_info_json",
+        ManifestArtifactToken::EnhancedExecutionInfoJson,
         &artifacts.enhanced_execution_info_json.path,
     )?;
     require_path(
+        ManifestArtifactToken::EnhancedExecutionInfoJson,
         "enhanced_execution_info_json.trace_root",
         trace_root.join("extra_info/enhanced_execution_info.json"),
         &exec_path,
     )?;
     if let Some(artifact) = artifacts.allocations_json.artifact() {
-        let path = resolve_manifest_path(&base, "allocations_json", &artifact.path)?;
+        let path = resolve_manifest_path(
+            &base,
+            ManifestArtifactToken::AllocationsJson,
+            &artifact.path,
+        )?;
         require_path(
+            ManifestArtifactToken::AllocationsJson,
             "allocations_json.trace_root",
             trace_root.join("extra_info/allocations.json"),
             &path,
         )?;
     }
     if let Some(artifact) = artifacts.trace_sampling_json.artifact() {
-        let path = resolve_manifest_path(&base, "trace_sampling_json", &artifact.path)?;
+        let path = resolve_manifest_path(
+            &base,
+            ManifestArtifactToken::TraceSamplingJson,
+            &artifact.path,
+        )?;
         require_path(
+            ManifestArtifactToken::TraceSamplingJson,
             "trace_sampling_json.trace_root",
             trace_root.join("trace_sampling.json"),
             &path,
         )?;
     }
-    let stats_path = resolve_manifest_path(&base, "stats_csv", &artifacts.stats_csv.path)?;
+    let stats_path = resolve_manifest_path(
+        &base,
+        ManifestArtifactToken::StatsCsv,
+        &artifacts.stats_csv.path,
+    )?;
     require_path(
+        ManifestArtifactToken::StatsCsv,
         "stats_csv.trace_root",
         trace_root.join("stats.csv"),
         &stats_path,
@@ -1364,35 +1511,57 @@ pub fn admit_launch_evidence(
 
     let control_path = resolve_manifest_path(
         &base,
-        "control_bits_sidecar",
+        ManifestArtifactToken::ControlBitsSidecar,
         &artifacts.control_bits_sidecar.path,
     )?;
-    let arch_card_path = resolve_manifest_path(&base, "arch_card", &artifacts.arch_card.path)?;
-    let pchase_card_path =
-        resolve_manifest_path(&base, "pchase_card", &artifacts.pchase_card.path)?;
+    let arch_card_path = resolve_manifest_path(
+        &base,
+        ManifestArtifactToken::ArchCard,
+        &artifacts.arch_card.path,
+    )?;
+    let pchase_card_path = resolve_manifest_path(
+        &base,
+        ManifestArtifactToken::PchaseCard,
+        &artifacts.pchase_card.path,
+    )?;
     let mut distinct_paths = BTreeSet::new();
-    for path in [
-        dynamic_path.clone(),
-        stats_path.clone(),
-        exec_path.clone(),
-        control_path.clone(),
-        arch_card_path.clone(),
-        pchase_card_path.clone(),
+    for (artifact, path) in [
+        (ManifestArtifactToken::DynamicTracePb, dynamic_path.clone()),
+        (ManifestArtifactToken::StatsCsv, stats_path.clone()),
+        (
+            ManifestArtifactToken::EnhancedExecutionInfoJson,
+            exec_path.clone(),
+        ),
+        (
+            ManifestArtifactToken::ControlBitsSidecar,
+            control_path.clone(),
+        ),
+        (ManifestArtifactToken::ArchCard, arch_card_path.clone()),
+        (ManifestArtifactToken::PchaseCard, pchase_card_path.clone()),
     ] {
         if !distinct_paths.insert(path.clone()) {
-            return Err(ManifestError::ArtifactPathDuplicate { path });
+            return Err(ManifestError::ArtifactPathDuplicate { artifact, path });
         }
     }
-    for optional in [
-        artifacts.allocations_json.artifact(),
-        artifacts.trace_sampling_json.artifact(),
+    for (token, optional) in [
+        (
+            ManifestArtifactToken::AllocationsJson,
+            artifacts.allocations_json.artifact(),
+        ),
+        (
+            ManifestArtifactToken::TraceSamplingJson,
+            artifacts.trace_sampling_json.artifact(),
+        ),
     ]
     .into_iter()
-    .flatten()
+    .filter_map(|(token, artifact)| artifact.map(|artifact| (token, artifact)))
     {
-        let path = resolve_manifest_path(&base, "optional_artifact", &optional.path)?;
+        let path = resolve_manifest_path(&base, token, &optional.path)?;
         if !distinct_paths.insert(path.clone()) {
-            return Err(ManifestError::ArtifactPathDuplicate { path });
+            return Err(ManifestError::ArtifactPathDuplicate {
+                artifact: token,
+                path,
+            });
         }
     }
 
@@ -1425,21 +1594,26 @@ pub fn admit_launch_evidence(
         TraceDirSnapshot::capture_anchored(&reader, trace_root_relative, snapshot_limits)
             .map_err(map_trace_snapshot_error)?;
     for (identity, path) in snapshot.file_identities() {
-        insert_manifest_file_identity(&mut file_identities, identity, path.to_path_buf())?;
+        insert_manifest_file_identity(
+            &mut file_identities,
+            ManifestArtifactToken::DynamicTracePb,
+            identity,
+            path.to_path_buf(),
+        )?;
     }
     let trace_artifacts = snapshot.artifact_identity();
     verify_artifact(
-        "dynamic_trace_pb",
+        ManifestArtifactToken::DynamicTracePb,
         &artifacts.dynamic_trace_pb,
         trace_artifacts.dynamic_trace_pb(),
     )?;
     verify_optional_artifact(
-        "allocations_json",
+        ManifestArtifactToken::AllocationsJson,
         &artifacts.allocations_json,
         trace_artifacts.allocations_json(),
     )?;
     verify_optional_artifact(
-        "trace_sampling_json",
+        ManifestArtifactToken::TraceSamplingJson,
         &artifacts.trace_sampling_json,
         trace_artifacts.trace_sampling_json(),
     )?;
@@ -1447,23 +1621,27 @@ pub fn admit_launch_evidence(
         trace_artifacts
             .stats_csv()
             .ok_or(ManifestError::ArtifactPresenceMismatch {
-                artifact: "stats_csv",
+                artifact: ManifestArtifactToken::StatsCsv,
                 expected: true,
                 actual: false,
             })?;
-    verify_artifact("stats_csv", &artifacts.stats_csv, stats_identity)?;
+    verify_artifact(
+        ManifestArtifactToken::StatsCsv,
+        &artifacts.stats_csv,
+        stats_identity,
+    )?;
     let expected_payload = &artifacts.threadblock_payload;
     let actual_payload = trace_artifacts.threadblock_payload();
     if expected_payload.file_count != actual_payload.file_count() {
         return Err(ManifestError::ArtifactCardinalityMismatch {
-            artifact: "threadblock_payload",
+            artifact: ManifestArtifactToken::ThreadblockPayload,
             expected: expected_payload.file_count,
             actual: actual_payload.file_count(),
         });
     }
     if expected_payload.raw_bytes != actual_payload.raw_bytes() {
         return Err(ManifestError::ArtifactSizeMismatch {
-            artifact: "threadblock_payload",
+            artifact: ManifestArtifactToken::ThreadblockPayload,
             expected: expected_payload.raw_bytes,
             actual: actual_payload.raw_bytes(),
         });
@@ -1471,14 +1649,14 @@ pub fn admit_launch_evidence(
     if expected_payload.sorted_path_manifest_sha256 != actual_payload.sorted_path_manifest_sha256()
     {
         return Err(ManifestError::ArtifactDigestMismatch {
-            artifact: "threadblock_payload.sorted_path_manifest",
+            artifact: ManifestArtifactToken::ThreadblockPayloadSortedPathManifest,
             expected: expected_payload.sorted_path_manifest_sha256,
             actual: actual_payload.sorted_path_manifest_sha256(),
         });
     }
     if expected_payload.sorted_path_stream_sha256 != actual_payload.sorted_path_stream_sha256() {
         return Err(ManifestError::ArtifactDigestMismatch {
-            artifact: "threadblock_payload.sorted_path_stream",
+            artifact: ManifestArtifactToken::ThreadblockPayloadSortedPathStream,
             expected: expected_payload.sorted_path_stream_sha256,
             actual: actual_payload.sorted_path_stream_sha256(),
         });
@@ -1501,7 +1679,7 @@ pub fn admit_launch_evidence(
         &reader,
         &base,
         &mut file_identities,
-        "enhanced_execution_info_json",
+        ManifestArtifactToken::EnhancedExecutionInfoJson,
         &artifacts.enhanced_execution_info_json,
     )?;
     let exec = ExecInfo::parse(&exec_path, &exec_raw)?;
@@ -1517,6 +1695,7 @@ pub fn admit_launch_evidence(
     let expected_control_name = format!("{expected_control_stem}.control_bits.json");
     if control_path.file_name().and_then(|name| name.to_str()) != Some(&expected_control_name) {
         return Err(identity_mismatch(
+            ManifestArtifactToken::ControlBitsSidecar,
             "benchmark_name->control_bits_sidecar_stem",
             expected_control_name,
             control_path
@@ -1530,6 +1709,7 @@ pub fn admit_launch_evidence(
     let expected_sku = Sku::parse(&manifest.architecture.sku)?;
     if expected_sku.arch() != expected_arch {
         return Err(identity_mismatch(
+            ManifestArtifactToken::DynamicTracePb,
             "manifest sku->arch",
             expected_arch,
             expected_sku.arch(),
@@ -1539,7 +1719,7 @@ pub fn admit_launch_evidence(
         &reader,
         &base,
         &mut file_identities,
-        "control_bits_sidecar",
+        ManifestArtifactToken::ControlBitsSidecar,
         &artifacts.control_bits_sidecar,
     )?;
     let control = ControlSidecar::parse_for_arch(&control_path, &control_raw, expected_arch)?;
@@ -1554,7 +1734,7 @@ pub fn admit_launch_evidence(
         &reader,
         &base,
         &mut file_identities,
-        "arch_card",
+        ManifestArtifactToken::ArchCard,
         &artifacts.arch_card,
     )?;
     let arch_card = ArchCard::parse(&arch_card_path, &arch_card_raw)?;
@@ -1562,6 +1742,7 @@ pub fn admit_launch_evidence(
     let card_sku = arch_card.sku_id()?;
     if card_arch != expected_arch {
         return Err(identity_mismatch(
+            ManifestArtifactToken::ArchCard,
             "manifest arch->architecture card",
             expected_arch,
             card_arch,
@@ -1569,6 +1750,7 @@ pub fn admit_launch_evidence(
     }
     if card_sku != expected_sku {
         return Err(identity_mismatch(
+            ManifestArtifactToken::ArchCard,
             "manifest sku->architecture card",
             expected_sku.token(),
             card_sku.token(),
@@ -1578,12 +1760,13 @@ pub fn admit_launch_evidence(
         &reader,
         &base,
         &mut file_identities,
-        "pchase_card",
+        ManifestArtifactToken::PchaseCard,
         &artifacts.pchase_card,
     )?;
     let pchase_card = PchaseCard::parse(&pchase_card_path, &pchase_card_raw)?;
     if pchase_card.arch() != expected_arch {
         return Err(identity_mismatch(
+            ManifestArtifactToken::PchaseCard,
             "manifest arch->P-chase card",
             expected_arch,
             pchase_card.arch(),
@@ -1591,6 +1774,7 @@ pub fn admit_launch_evidence(
     }
     let trace_arch_version = u32::try_from(trace_dir.trace().binary_version).map_err(|_| {
         ManifestError::IdentityMismatch {
+            artifact: ManifestArtifactToken::DynamicTracePb,
             edge: "trace binary_version->architecture",
             expected: expected_arch.numeric().to_string(),
             actual: trace_dir.trace().binary_version.to_string(),
@@ -1599,6 +1783,7 @@ pub fn admit_launch_evidence(
     let trace_arch = ArchId::from_numeric(trace_arch_version)?;
     if trace_arch != expected_arch {
         return Err(identity_mismatch(
+            ManifestArtifactToken::DynamicTracePb,
             "trace binary_version->manifest arch",
             expected_arch,
             trace_arch,
@@ -1631,6 +1816,7 @@ pub fn admit_launch_evidence(
     let loc = matching.pop().expect("nonempty launch match was checked");
     if loc.kernel().function_unique_id != selector.function_unique_id {
         return Err(identity_mismatch(
+            ManifestArtifactToken::DynamicTracePb,
             "manifest function_unique_id->root launch",
             selector.function_unique_id,
             loc.kernel().function_unique_id,
@@ -1648,6 +1834,7 @@ pub fn admit_launch_evidence(
     )?;
     if exec_kernel.kernel_name != loc.kernel().name {
         return Err(identity_mismatch(
+            ManifestArtifactToken::EnhancedExecutionInfoJson,
             "root kernel name->exec-info kernel name",
             &loc.kernel().name,
             &exec_kernel.kernel_name,
@@ -1661,6 +1848,7 @@ pub fn admit_launch_evidence(
             })?;
     if schedule.arch != expected_arch {
         return Err(identity_mismatch(
+            ManifestArtifactToken::ControlBitsSidecar,
             "schedule arch->manifest arch",
             expected_arch,
             schedule.arch,
@@ -1687,6 +1875,7 @@ pub fn admit_launch_evidence(
                 CoverageIdentity::LosslessStored {
                     blocks_observed: full.blocks_observed(),
                     sidecar_sha256: parse_required_sha256(
+                        ManifestArtifactToken::TraceSamplingJson,
                         "trace_sampling_json.sidecar_sha256",
                         provenance.sidecar_sha256(),
                     )?,
@@ -1703,10 +1892,12 @@ pub fn admit_launch_evidence(
                 .copied()
                 .collect(),
             selected_block_ids_sha256: parse_required_sha256(
+                ManifestArtifactToken::TraceSamplingJson,
                 "trace_sampling_json.selected_block_ids_sha256",
                 sampled.provenance().selected_block_ids_sha256(),
             )?,
             sidecar_sha256: parse_required_sha256(
+                ManifestArtifactToken::TraceSamplingJson,
                 "trace_sampling_json.sidecar_sha256",
                 sampled.provenance().sidecar_sha256(),
             )?,
@@ -1738,6 +1929,7 @@ pub fn admit_launch_evidence(
                 Some(sidecar.cell_id().to_owned()),
                 Some(sidecar.kernel_args_hash().to_owned()),
                 Some(parse_required_sha256(
+                    ManifestArtifactToken::TraceSamplingJson,
                     "trace_sampling_json.sidecar_sha256",
                     seal,
                 )?),

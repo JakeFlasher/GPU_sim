@@ -38,9 +38,9 @@ pub use control_bits::{
 };
 pub use evidence::{
     AdmittedLaunchEvidence, BinaryDigestGap, CanonicalTraceBundlePath, LaunchEvidenceIdentity,
-    ManifestError, ReplayAuthenticatedLaunchIdentity, ThreadblockPayloadSetIdentity,
-    TraceBundleComponentIdentity, TraceBundleComponents, TraceBundleIdentity,
-    admit_launch_evidence,
+    ManifestArtifactToken, ManifestError, ReplayAuthenticatedLaunchIdentity,
+    ThreadblockPayloadSetIdentity, TraceBundleComponentIdentity, TraceBundleComponents,
+    TraceBundleIdentity, admit_launch_evidence,
 };
 pub use issue::{
     AccessKind, IssueError, IssueModelParams, IssueResourceLane, MemoryOperation, ReplyTo,

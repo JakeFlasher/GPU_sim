@@ -1,0 +1,40 @@
+{
+  "schema_version": 2,
+  "scope": "fixture-only/addr-carry-canary:v2",
+  "architecture": {
+    "arch_id": "sm_86",
+    "sku": "rtx_3090_ti"
+  },
+  "configuration_evidence": {
+    "arch_card_sha256": "12c72f8b16ac369fe8ab877f39850bfc1e5cbb3b16d0b2d45a43b14c66ffe1da",
+    "pchase_card_sha256": "e87d2e208f5326a8083d1a54799864953a62ed1fece1b628583cf8d5cafc581d"
+  },
+  "launches": [
+    {
+      "launch_evidence_manifest_path": "launch_evidence.json",
+      "expected_identity_sha256": "39ef24ba06dfba4025c8912813fff8155dd22a5a05c8676b9c7041eb8ee2937d",
+      "launch_key": {
+        "workload_id": "fixture-only.addr-carry-canary",
+        "matched_execution_id": "fixture-only.execution.addr-carry-canary",
+        "process_launch_ordinal": 0,
+        "kernel_mangled_name": "_Z17addr_carry_canaryPKiPiS1_S1_i___0",
+        "grid": {
+          "x": 1,
+          "y": 1,
+          "z": 1
+        },
+        "block": {
+          "x": 32,
+          "y": 1,
+          "z": 1
+        },
+        "device_id": 0,
+        "stream_id": 0,
+        "binary_architecture": "sm_86"
+      }
+    }
+  ],
+  "replay_mode": {
+    "mode": "flat"
+  }
+}

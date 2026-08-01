@@ -6,8 +6,8 @@ use prost::Message;
 use serde_json::{Value, json};
 use sim_sm::{
     BinaryDigestGap, FullLaunchSetDeclaration, IssueModelParams, KernelReplayOutcome,
-    ManifestError, ReplayError, ReplayMemMode, admit_launch_evidence, aggregate_full_launch_set,
-    replay_kernel,
+    ManifestArtifactToken, ManifestError, ReplayError, ReplayMemMode, admit_launch_evidence,
+    aggregate_full_launch_set, replay_kernel,
 };
 use sim_trace::{Sha256Digest, TraceDirSnapshot, canonical_json};
 use tempfile::TempDir;
@@ -719,7 +719,7 @@ fn lossless_sampling_sidecar_is_admitted_and_raw_digest_bound() {
     assert!(matches!(
         admit_launch_evidence(&fixture.manifest_path),
         Err(ManifestError::ArtifactDigestMismatch {
-            artifact: "trace_sampling_json",
+            artifact: ManifestArtifactToken::TraceSamplingJson,
             ..
         })
     ));
@@ -889,7 +889,10 @@ fn symlinked_and_hardlinked_bundle_artifacts_fail_closed() {
     symlink(&outside_card, &card_path).expect("symlink card outside bundle");
     assert!(matches!(
         admit_launch_evidence(&symlink_fixture.manifest_path),
-        Err(ManifestError::Anchored(_))
+        Err(ManifestError::ArtifactRead {
+            artifact: ManifestArtifactToken::ArchCard,
+            ..
+        })
     ));
 
     let parent_symlink_fixture = fixture();
@@ -898,7 +901,10 @@ fn symlinked_and_hardlinked_bundle_artifacts_fail_closed() {
     symlink(outside.path(), &cards_path).expect("symlink card directory outside bundle");
     assert!(matches!(
         admit_launch_evidence(&parent_symlink_fixture.manifest_path),
-        Err(ManifestError::Anchored(_))
+        Err(ManifestError::ArtifactRead {
+            artifact: ManifestArtifactToken::ArchCard,
+            ..
+        })
     ));
 
     let payload_fixture = fixture();
@@ -932,7 +938,91 @@ fn symlinked_and_hardlinked_bundle_artifacts_fail_closed() {
     write_json(&hardlink_fixture.manifest_path, &hardlink_fixture.manifest);
     assert!(matches!(
         admit_launch_evidence(&hardlink_fixture.manifest_path),
-        Err(ManifestError::ArtifactFileAlias { .. })
+        Err(ManifestError::ArtifactFileAlias {
+            artifact: ManifestArtifactToken::DynamicTracePb,
+            ..
+        })
+    ));
+}
+
+#[test]
+fn card_artifact_path_alias_and_identity_errors_retain_roles() {
+    let arch_path_duplicate = fixture();
+    let mut manifest = arch_path_duplicate.manifest.clone();
+    manifest["artifacts"]["arch_card"]["path"] =
+        manifest["artifacts"]["control_bits_sidecar"]["path"].clone();
+    write_json(&arch_path_duplicate.manifest_path, &manifest);
+    assert!(matches!(
+        admit_launch_evidence(&arch_path_duplicate.manifest_path),
+        Err(ManifestError::ArtifactPathDuplicate {
+            artifact: ManifestArtifactToken::ArchCard,
+            ..
+        })
+    ));
+
+    let pchase_path_duplicate = fixture();
+    let mut manifest = pchase_path_duplicate.manifest.clone();
+    manifest["artifacts"]["pchase_card"]["path"] =
+        manifest["artifacts"]["arch_card"]["path"].clone();
+    write_json(&pchase_path_duplicate.manifest_path, &manifest);
+    assert!(matches!(
+        admit_launch_evidence(&pchase_path_duplicate.manifest_path),
+        Err(ManifestError::ArtifactPathDuplicate {
+            artifact: ManifestArtifactToken::PchaseCard,
+            ..
+        })
+    ));
+
+    let mut arch_alias = fixture();
+    let control_path = arch_alias
+        .root
+        .join("control/canary_sm86.control_bits.json");
+    let arch_path = arch_alias.root.join("cards/sm_86.json");
+    fs::remove_file(&arch_path).expect("remove architecture card");
+    fs::hard_link(&control_path, &arch_path).expect("alias architecture card to control sidecar");
+    arch_alias.manifest["artifacts"]["arch_card"] = artifact(&arch_alias.root, "cards/sm_86.json");
+    write_json(&arch_alias.manifest_path, &arch_alias.manifest);
+    assert!(matches!(
+        admit_launch_evidence(&arch_alias.manifest_path),
+        Err(ManifestError::ArtifactFileAlias {
+            artifact: ManifestArtifactToken::ArchCard,
+            ..
+        })
+    ));
+
+    let mut pchase_alias = fixture();
+    let arch_path = pchase_alias.root.join("cards/sm_86.json");
+    let pchase_path = pchase_alias.root.join("cards/sm_86_static_card.json");
+    fs::remove_file(&pchase_path).expect("remove P-chase card");
+    fs::hard_link(&arch_path, &pchase_path).expect("alias P-chase card to architecture card");
+    pchase_alias.manifest["artifacts"]["pchase_card"] =
+        artifact(&pchase_alias.root, "cards/sm_86_static_card.json");
+    write_json(&pchase_alias.manifest_path, &pchase_alias.manifest);
+    assert!(matches!(
+        admit_launch_evidence(&pchase_alias.manifest_path),
+        Err(ManifestError::ArtifactFileAlias {
+            artifact: ManifestArtifactToken::PchaseCard,
+            ..
+        })
+    ));
+
+    let mut pchase_identity = fixture();
+    let pchase_path = pchase_identity.root.join("cards/sm_86_static_card.json");
+    let mut card: Value =
+        serde_json::from_slice(&fs::read(&pchase_path).expect("read P-chase card"))
+            .expect("parse P-chase card");
+    card["arch"] = json!("sm_120");
+    write_json(&pchase_path, &card);
+    pchase_identity.manifest["artifacts"]["pchase_card"] =
+        artifact(&pchase_identity.root, "cards/sm_86_static_card.json");
+    write_json(&pchase_identity.manifest_path, &pchase_identity.manifest);
+    assert!(matches!(
+        admit_launch_evidence(&pchase_identity.manifest_path),
+        Err(ManifestError::IdentityMismatch {
+            artifact: ManifestArtifactToken::PchaseCard,
+            edge: "manifest arch->P-chase card",
+            ..
+        })
     ));
 }
 
@@ -947,7 +1037,7 @@ fn absent_sampling_declaration_and_binary_gap_fail_closed() {
     assert!(matches!(
         admit_launch_evidence(&sampling_fixture.manifest_path),
         Err(ManifestError::ArtifactPresenceMismatch {
-            artifact: "trace_sampling_json",
+            artifact: ManifestArtifactToken::TraceSamplingJson,
             expected: false,
             actual: true,
         })
@@ -987,7 +1077,7 @@ fn unknown_fields_noncanonical_paths_and_digest_spelling_are_rejected() {
     assert!(matches!(
         admit_launch_evidence(&path_fixture.manifest_path),
         Err(ManifestError::ArtifactPathInvalid {
-            artifact: "arch_card",
+            artifact: ManifestArtifactToken::ArchCard,
             ..
         })
     ));
@@ -999,7 +1089,7 @@ fn unknown_fields_noncanonical_paths_and_digest_spelling_are_rejected() {
     assert!(matches!(
         admit_launch_evidence(&dot_path_fixture.manifest_path),
         Err(ManifestError::ArtifactPathInvalid {
-            artifact: "arch_card",
+            artifact: ManifestArtifactToken::ArchCard,
             ..
         })
     ));
@@ -1055,7 +1145,7 @@ fn declared_resource_costs_are_bounded_before_artifact_reads() {
     assert!(matches!(
         admit_launch_evidence(&artifact_fixture.manifest_path),
         Err(ManifestError::ArtifactResourceLimitExceeded {
-            artifact: "dynamic_trace_pb",
+            artifact: ManifestArtifactToken::DynamicTracePb,
             resource: "bytes",
             ..
         })
@@ -1068,7 +1158,7 @@ fn declared_resource_costs_are_bounded_before_artifact_reads() {
     assert!(matches!(
         admit_launch_evidence(&file_fixture.manifest_path),
         Err(ManifestError::ArtifactResourceLimitExceeded {
-            artifact: "threadblock_payload",
+            artifact: ManifestArtifactToken::ThreadblockPayload,
             resource: "files",
             ..
         })

@@ -12,13 +12,13 @@ use sim_run::emit::{
     EMITTED_METRIC_COUNT, EmitOutcome, EmittedMetricKey, MemUnit, MetricValue,
     RequiredUnimplementedBlocker, Unavailable, emit_all, emit_launch, index_by_key,
 };
-use sim_run::{RunError, run_manifest};
+use sim_run::run_manifest;
 use sim_sm::{
     AdmittedLaunchEvidence, DramBw, FullKernelReplayResult, FullLaunchSetDeclaration,
     IssueModelParams, KernelReplayOutcome, ReplayMemMode, admit_launch_evidence,
     aggregate_full_launch_set, replay_kernel,
 };
-use sim_trace::{Sha256Digest, TraceDirSnapshot, canonical_json};
+use sim_trace::{Sha256Digest, TraceDirSnapshot, canonical_json, canonical_json_utf8};
 use tempfile::TempDir;
 
 fn fixture_root() -> PathBuf {
@@ -48,7 +48,7 @@ fn copied_fixture() -> (TempDir, PathBuf) {
     let temp = TempDir::new().unwrap();
     let root = temp.path().join("bundle");
     copy_tree(&fixture_root(), &root);
-    let manifest = root.join("run_manifest.json");
+    let manifest = root.join("run_manifest.v2.json");
     (temp, manifest)
 }
 
@@ -85,6 +85,25 @@ fn refresh_trace_artifact_claims(root: &Path, launch_manifest: &mut Value) {
 }
 
 const CANARY_KERNEL_NAME: &str = "_Z17addr_carry_canaryPKiPiS1_S1_i___0";
+
+fn fixture_launch_key_for_stream(process_launch_ordinal: u64, stream_id: u64) -> Value {
+    json!({
+        "workload_id": "fixture-only.addr-carry-canary",
+        "matched_execution_id": "fixture-only.execution.addr-carry-canary",
+        "process_launch_ordinal": process_launch_ordinal,
+        "kernel_mangled_name": CANARY_KERNEL_NAME,
+        "grid": {"x": 1, "y": 1, "z": 1},
+        "block": {"x": 32, "y": 1, "z": 1},
+        "device_id": 0,
+        "stream_id": stream_id,
+        "binary_architecture": "sm_86"
+    })
+}
+
+fn fixture_launch_key(process_launch_ordinal: u64) -> Value {
+    fixture_launch_key_for_stream(process_launch_ordinal, 0)
+}
+
 const SAMPLED_BLOCKS: [i32; 12] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 57, 58, 59];
 const CYCLE_STUDY_SECTIONS: [&str; 4] = [
     "D1 — NCU observable contract",
@@ -674,10 +693,10 @@ fn p8_cycle_study_and_real_runner_guard_are_nonvacuous() {
     assert!(d4.contains("`RequiredUnimplemented(AggregationSemanticsStudy)`"));
     assert!(d4.contains("Completion of this target-free study does not itself promote emission"));
 
-    let output = run_manifest(fixture_root().join("run_manifest.json"))
-        .expect("run existing nonempty canary through real consumer");
+    let output = run_manifest(fixture_root().join("run_manifest.v2.json"))
+        .expect("run existing nonempty canary through real v2 consumer");
     let result: Value = serde_json::from_str(output.canonical_json()).unwrap();
-    assert_eq!(result["schema_version"], "sim_result.v1");
+    assert_eq!(result["schema_version"], "sim_result.v2");
 
     let launches = result["launches"]
         .as_array()
@@ -694,7 +713,7 @@ fn p8_cycle_study_and_real_runner_guard_are_nonvacuous() {
         launches.len()
     );
     assert!(
-        aggregate["counters"]["instructions_issued"]
+        aggregate["metrics"]["smsp_inst_executed_sum"]["value"]["value"]
             .as_u64()
             .is_some_and(|count| count > 0),
         "canary replay must be nonempty"
@@ -702,74 +721,56 @@ fn p8_cycle_study_and_real_runner_guard_are_nonvacuous() {
 
     for launch in launches {
         assert!(
-            launch["counters"]["instructions_issued"]
+            launch["metrics"]["smsp_inst_executed_sum"]["value"]["value"]
                 .as_u64()
                 .is_some_and(|count| count > 0)
         );
-        let diagnostics = launch["timing_diagnostics"]
-            .as_object()
-            .expect("timing diagnostics stay attached to each launch");
-        assert_eq!(
-            diagnostics["binding_cycles_role"],
-            "diagnostic_only_not_binding_prediction"
-        );
+    }
+    let diagnostics = result["diagnostics"]["per_launch"]
+        .as_array()
+        .expect("v2 diagnostics remain per-launch");
+    assert_eq!(diagnostics.len(), launches.len());
+    for diagnostic in diagnostics {
         assert!(
-            diagnostics["diagnostic_last_issue_cycles"]
+            diagnostic["diagnostic_last_issue_cycles"]
                 .as_u64()
                 .is_some_and(|cycles| cycles > 0)
         );
         assert_eq!(
-            diagnostics["terminal_modeled_event_time"]["status"],
+            diagnostic["terminal_modeled_event_time"]["status"],
             "modeled"
         );
         assert!(
-            diagnostics["terminal_modeled_event_time"]["value"]
+            diagnostic["terminal_modeled_event_time"]["value"]
                 .as_u64()
                 .is_some_and(|time| time > 0)
         );
     }
-
-    assert!(result.get("timing_diagnostics").is_none());
-    assert!(aggregate.get("timing_diagnostics").is_none());
-    assert!(aggregate.get("cycles").is_none());
-    assert_eq!(
-        aggregate["timing_composition"],
-        "required_unimplemented_pending_aggregation_semantics_study"
-    );
-
-    let emissions = result["emissions"]
-        .as_array()
-        .expect("runner emissions are an array");
     assert!(
-        !emissions.is_empty(),
-        "real emitter output must be nonempty"
+        result["diagnostics"]
+            .get("internal_phase_timings_ns")
+            .is_none()
     );
-    let cycle_rows = emissions
-        .iter()
-        .filter(|row| row["unit"] == "cycles")
-        .collect::<Vec<_>>();
+
+    let cycle_metric = &aggregate["metrics"]["exec_cycles_gpc_max"];
     assert_eq!(
-        cycle_rows.len(),
-        1,
-        "aggregate emissions must contain exactly one cycle row"
-    );
-    let cycle_row = cycle_rows[0];
-    assert_eq!(cycle_row["key"], "exec_cycles_gpc_max");
-    assert_eq!(cycle_row["ncu_metric"], "gpc__cycles_elapsed.max");
-    assert_eq!(
-        cycle_row["outcome"],
-        json!({
+        cycle_metric,
+        &json!({
             "status": "required_unimplemented",
             "blocking": "aggregation_semantics_study",
         })
     );
-    assert!(cycle_row.get("value").is_none());
-    assert!(cycle_row["outcome"].get("value").is_none());
-
-    for row in emissions {
-        assert_ne!(row["key"], "diagnostic_last_issue_cycles");
-        assert_ne!(row["key"], "terminal_modeled_event_time");
-    }
+    assert!(cycle_metric.get("value").is_none());
+    assert!(
+        aggregate["metrics"]
+            .get("diagnostic_last_issue_cycles")
+            .is_none()
+    );
+    assert!(
+        aggregate["metrics"]
+            .get("terminal_modeled_event_time")
+            .is_none()
+    );
 }
 
 #[test]
@@ -818,53 +819,50 @@ fn full_launch_rates_keep_zero_denominator_nulls_on_real_consumer_path() {
 }
 
 #[test]
-fn canary_result_is_byte_stable_canonical_and_golden() {
+fn committed_v2_canary_is_deterministic_canonical_and_sealed() {
     let root = fixture_root();
-    let manifest = root.join("run_manifest.json");
-    let first = run_manifest(&manifest).expect("run admitted canary");
-    let second = run_manifest(&manifest).expect("repeat admitted canary");
+    let manifest = root.join("run_manifest.v2.json");
+    let first = run_manifest(&manifest).expect("run admitted v2 canary");
+    let second = run_manifest(&manifest).expect("repeat admitted v2 canary");
     assert_eq!(first.canonical_json(), second.canonical_json());
     assert_eq!(first.result_sha256(), second.result_sha256());
-    assert_eq!(
-        first.canonical_json(),
-        include_str!("fixtures/addr_carry_canary_bundle/result.golden.json")
-    );
 
     let mut result: Value = serde_json::from_str(first.canonical_json()).unwrap();
-    assert_eq!(result["schema_version"], "sim_result.v1");
-    assert_eq!(result["scientific_authority"], "not_conferred");
-    assert_eq!(result["hardware_readiness"], "not_asserted");
-    assert_eq!(result["launches"].as_array().unwrap().len(), 1);
-    assert_eq!(result["aggregate"]["counters"]["instructions_issued"], 54);
-    assert_eq!(result["aggregate"]["counters"]["l1"]["status"], "unmodeled");
+    assert_eq!(result["schema_version"], "sim_result.v2");
     assert_eq!(
-        result["aggregate"]["unmodeled_tails"]["ldgsts_dst_shared_timing"],
-        true
+        result["exit_status"],
+        json!({"status": "success", "exit_code": 0})
+    );
+    assert_eq!(result["launches"].as_array().unwrap().len(), 1);
+    assert_eq!(result["launches"][0]["launch_key"], fixture_launch_key(0));
+    assert_eq!(
+        result["aggregate"]["metrics"]["smsp_inst_executed_sum"]["value"]["value"],
+        54
     );
     assert_eq!(
-        result["launches"][0]["timing_diagnostics"]["terminal_modeled_event_time"],
+        result["launches"][0]["metrics"]["exec_cycles_gpc_max"]["status"],
+        "required_unimplemented"
+    );
+    assert_eq!(
+        result["aggregate"]["metrics"]["exec_cycles_gpc_max"]["blocking"],
+        "aggregation_semantics_study"
+    );
+    assert_eq!(
+        result["diagnostics"]["per_launch"][0]["terminal_modeled_event_time"],
         json!({"status": "modeled", "value": 54})
     );
-    assert_eq!(
-        result["launches"][0]["unmodeled_tails"]["ldgsts_dst_shared_timing"],
-        true
+    assert!(
+        result["diagnostics"]
+            .get("internal_phase_timings_ns")
+            .is_none()
     );
-    assert!(result["aggregate"].get("cycles").is_none());
-    let cycles = result["emissions"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|row| row["key"] == "exec_cycles_gpc_max")
-        .unwrap();
-    assert_eq!(cycles["outcome"]["status"], "required_unimplemented");
-    assert_eq!(cycles["outcome"]["blocking"], "aggregation_semantics_study");
 
     let seal = result
         .as_object_mut()
         .unwrap()
         .remove("result_sha256")
         .unwrap();
-    let unsigned = canonical_json(&result).unwrap();
+    let unsigned = canonical_json_utf8(&result).unwrap();
     assert_eq!(seal, first.result_sha256().to_string());
     assert_eq!(Sha256Digest::of(unsigned.as_bytes()), first.result_sha256());
 }
@@ -905,12 +903,7 @@ fn manifest_selects_every_typed_memory_mode() {
             expected_l2
         );
         assert_eq!(
-            result["emissions"]
-                .as_array()
-                .unwrap()
-                .iter()
-                .find(|row| row["key"] == "exec_cycles_gpc_max")
-                .unwrap()["outcome"]["status"],
+            result["aggregate"]["metrics"]["exec_cycles_gpc_max"]["status"],
             "required_unimplemented"
         );
     }
@@ -936,25 +929,22 @@ fn sampled_launch_is_rejected_before_exact_aggregation_and_emission() {
     let mut run_document = read_json(&manifest_path);
     run_document["launches"][0]["expected_identity_sha256"] =
         json!(admitted.identity().seal_sha256());
+    run_document["launches"][0]["launch_key"]["grid"] = json!({
+        "x": identity["geometry"]["grid_dim"][0],
+        "y": identity["geometry"]["grid_dim"][1],
+        "z": identity["geometry"]["grid_dim"][2],
+    });
     write_json(&manifest_path, &run_document);
 
     let error = run_manifest(&manifest_path).unwrap_err();
-    match &error {
-        RunError::CoverageNotAggregatable {
-            identity_sha256,
-            population_blocks,
-            blocks_observed,
-        } => {
-            assert_eq!(*identity_sha256, admitted.identity().seal_sha256());
-            assert_eq!((*population_blocks, *blocks_observed), (60, 12));
-        }
-        other => panic!("unexpected sampled-run error: {other:?}"),
-    }
-    assert_eq!(error.code(), "coverage_not_aggregatable");
+    assert_eq!(error.failure_type(), "REPLAY_FAILED");
+    assert_eq!(error.stage(), "replay");
     assert_eq!(error.exit_code(), 1);
+    assert!(error.to_string().contains("sampled (12/60)"));
     let document: Value = serde_json::from_str(&error.canonical_json().unwrap()).unwrap();
-    assert_eq!(document["category"], "failure");
-    assert_eq!(document["exit_code"], 1);
+    assert_eq!(document["error"]["failure_type"], "REPLAY_FAILED");
+    assert_eq!(document["error"]["stage"], "replay");
+    assert_eq!(document["exit_status"]["exit_code"], 1);
 }
 
 #[test]
@@ -964,22 +954,16 @@ fn two_launches_aggregate_in_canonical_roster_order() {
     let dynamic_path = root.join("trace/dynamic_trace.pb");
     let mut trace =
         sim_trace::pb::Trace::decode(fs::read(&dynamic_path).unwrap().as_slice()).unwrap();
-    let stream = trace
-        .gpu_device
-        .get_mut(&0)
-        .unwrap()
-        .streams
-        .get_mut(&0)
-        .unwrap();
-    let mut second_kernel = stream.kernels.first().unwrap().clone();
-    second_kernel.id = 2;
-    stream.kernels.push(second_kernel);
+    let device = trace.gpu_device.get_mut(&0).unwrap();
+    let mut second_stream = device.streams.get(&0).unwrap().clone();
+    second_stream.id = 1;
+    device.streams.insert(1, second_stream);
     fs::write(&dynamic_path, trace.encode_to_vec()).unwrap();
 
     let first_payload_relative =
         "trace/threadblocks/device_0/stream_0/kernel_1/d_0_s_0_k_1_0,0,0.pb";
     let second_payload_relative =
-        "trace/threadblocks/device_0/stream_0/kernel_2/d_0_s_0_k_2_0,0,0.pb";
+        "trace/threadblocks/device_0/stream_1/kernel_1/d_0_s_1_k_1_0,0,0.pb";
     let second_payload_path = root.join(second_payload_relative);
     fs::create_dir_all(second_payload_path.parent().unwrap()).unwrap();
     fs::copy(root.join(first_payload_relative), &second_payload_path).unwrap();
@@ -996,21 +980,23 @@ fn two_launches_aggregate_in_canonical_roster_order() {
 
     let second_launch_path = root.join("launch_evidence_2.json");
     let mut second_launch = first_launch.clone();
-    second_launch["launch_selector"]["kernel_id"] = json!(2);
+    second_launch["launch_selector"]["stream_id"] = json!(1);
     write_json(&second_launch_path, &second_launch);
 
     let first_admitted = admit_launch_evidence(&first_launch_path).unwrap();
     let second_admitted = admit_launch_evidence(&second_launch_path).unwrap();
     let mut run_document = read_json(&manifest_path);
-    run_document["scope"] = json!("fixture/addr-carry-canary-two-launch:v1");
+    run_document["scope"] = json!("fixture-only/addr-carry-canary-two-launch:v2");
     run_document["launches"] = json!([
         {
             "launch_evidence_manifest_path": "launch_evidence_2.json",
             "expected_identity_sha256": second_admitted.identity().seal_sha256(),
+            "launch_key": fixture_launch_key_for_stream(1, 1),
         },
         {
             "launch_evidence_manifest_path": "launch_evidence.json",
             "expected_identity_sha256": first_admitted.identity().seal_sha256(),
+            "launch_key": fixture_launch_key(0),
         }
     ]);
     write_json(&manifest_path, &run_document);
@@ -1018,26 +1004,19 @@ fn two_launches_aggregate_in_canonical_roster_order() {
     let output = run_manifest(&manifest_path).expect("two admitted launches aggregate");
     let result: Value = serde_json::from_str(output.canonical_json()).unwrap();
     assert_eq!(result["aggregate"]["launch_count"], 2);
-    assert_eq!(result["aggregate"]["counters"]["instructions_issued"], 108);
-    assert_eq!(result["aggregate"]["counters"]["records_seen"], 108);
-    assert_eq!(result["launches"][0]["launch"]["kernel_id"], 1);
-    assert_eq!(result["launches"][1]["launch"]["kernel_id"], 2);
     assert_eq!(
-        result["launches"][0]["launch_evidence_manifest_path"],
-        "launch_evidence.json"
+        result["aggregate"]["metrics"]["smsp_inst_executed_sum"]["value"]["value"],
+        108
+    );
+    assert_eq!(result["launches"][0]["launch_key"], fixture_launch_key(0));
+    assert_eq!(
+        result["launches"][1]["launch_key"],
+        fixture_launch_key_for_stream(1, 1)
     );
     assert_eq!(
-        result["launches"][1]["launch_evidence_manifest_path"],
-        "launch_evidence_2.json"
+        result["aggregate"]["metrics"]["exec_cycles_gpc_max"]["status"],
+        "required_unimplemented"
     );
-    assert!(result["aggregate"].get("cycles").is_none());
-    let cycles = result["emissions"]
-        .as_array()
-        .unwrap()
-        .iter()
-        .find(|row| row["key"] == "exec_cycles_gpc_max")
-        .unwrap();
-    assert_eq!(cycles["outcome"]["status"], "required_unimplemented");
 }
 
 #[test]
@@ -1065,12 +1044,64 @@ fn invalid_supplied_card_value_is_a_failure_not_a_missing_prerequisite() {
     write_json(&manifest_path, &run_document);
 
     let error = run_manifest(&manifest_path).unwrap_err();
-    assert!(matches!(error, RunError::ConfigurationRejected { .. }));
-    assert_eq!(error.code(), "configuration_rejected");
+    assert_eq!(error.failure_type(), "ARCH_CARD_ADMISSION_FAILED");
+    assert_eq!(error.stage(), "arch_card_admission");
     assert_eq!(error.exit_code(), 1);
     let document: Value = serde_json::from_str(&error.canonical_json().unwrap()).unwrap();
-    assert_eq!(document["category"], "failure");
-    assert_eq!(document["exit_code"], 1);
+    assert_eq!(
+        document["error"]["failure_type"],
+        "ARCH_CARD_ADMISSION_FAILED"
+    );
+    assert_eq!(document["exit_status"]["exit_code"], 1);
+}
+
+#[test]
+fn architecture_card_l2_policy_failures_keep_stage_and_availability() {
+    for (policy, expected_exit) in [(None, 2), (Some("unsupported_policy"), 1)] {
+        let (_temp, manifest_path) = copied_fixture();
+        let root = manifest_path.parent().unwrap();
+        let arch_card_path = root.join("cards/sm_86.json");
+        let mut arch_card = read_json(&arch_card_path);
+        let l2_geometry = arch_card["l2_geometry"].as_object_mut().unwrap();
+        match policy {
+            Some(value) => {
+                l2_geometry.insert("policy".to_owned(), json!(value));
+            }
+            None => {
+                assert!(l2_geometry.remove("policy").is_some());
+            }
+        }
+        write_json(&arch_card_path, &arch_card);
+
+        let launch_manifest_path = root.join("launch_evidence.json");
+        let mut launch_manifest = read_json(&launch_manifest_path);
+        let arch_card_claim = artifact_claim(root, "cards/sm_86.json");
+        let arch_card_sha256 = arch_card_claim["sha256"].clone();
+        launch_manifest["artifacts"]["arch_card"] = arch_card_claim;
+        write_json(&launch_manifest_path, &launch_manifest);
+
+        let admitted = admit_launch_evidence(&launch_manifest_path)
+            .expect("L2 policy remains identity-bound architecture evidence");
+        let mut run_document = read_json(&manifest_path);
+        run_document["configuration_evidence"]["arch_card_sha256"] = arch_card_sha256;
+        run_document["launches"][0]["expected_identity_sha256"] =
+            json!(admitted.identity().seal_sha256());
+        run_document["replay_mode"] =
+            json!({"mode": "l1_shared_l2", "dram_bandwidth": "unmodeled"});
+        write_json(&manifest_path, &run_document);
+
+        let error = run_manifest(&manifest_path).unwrap_err();
+        assert_eq!(error.failure_type(), "ARCH_CARD_ADMISSION_FAILED");
+        assert_eq!(error.stage(), "arch_card_admission");
+        assert_eq!(error.exit_code(), expected_exit);
+        let document: Value = serde_json::from_str(&error.canonical_json().unwrap()).unwrap();
+        assert_eq!(
+            document["error"]["failure_type"],
+            "ARCH_CARD_ADMISSION_FAILED"
+        );
+        assert_eq!(document["error"]["stage"], "arch_card_admission");
+        assert_eq!(document["exit_status"]["exit_code"], expected_exit);
+    }
 }
 
 #[test]
@@ -1105,46 +1136,28 @@ fn malformed_supplied_pchase_value_is_a_failure_not_a_missing_prerequisite() {
     write_json(&manifest_path, &run_document);
 
     let error = run_manifest(&manifest_path).unwrap_err();
-    assert!(matches!(error, RunError::ConfigurationRejected { .. }));
-    assert_eq!(error.code(), "configuration_rejected");
+    assert_eq!(error.failure_type(), "CONFIGURATION_RESOLUTION_FAILED");
+    assert_eq!(error.stage(), "configuration_resolution");
     assert_eq!(error.exit_code(), 1);
     let document: Value = serde_json::from_str(&error.canonical_json().unwrap()).unwrap();
-    assert_eq!(document["category"], "failure");
-    assert_eq!(document["exit_code"], 1);
+    assert_eq!(
+        document["error"]["failure_type"],
+        "CONFIGURATION_RESOLUTION_FAILED"
+    );
+    assert_eq!(document["exit_status"]["exit_code"], 1);
 }
 
 #[test]
-fn unknown_target_like_input_is_rejected_before_admission() {
-    let temp = TempDir::new().unwrap();
-    let manifest = temp.path().join("run_manifest.json");
-    fs::write(
-        &manifest,
-        serde_json::to_vec_pretty(&json!({
-            "schema_version": 1,
-            "scope": "negative/unknown-input:v1",
-            "architecture": {"arch_id": "sm_86", "sku": "rtx_3090_ti"},
-            "configuration_evidence": {
-                "arch_card_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                "pchase_card_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-            },
-            "launches": [{
-                "launch_evidence_manifest_path": "missing.json",
-                "expected_identity_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
-            }],
-            "replay_mode": {"mode": "flat"},
-            "labels": {"forbidden_target_value": 1}
-        }))
-        .unwrap(),
-    )
-    .unwrap();
-    let error = run_manifest(&manifest).unwrap_err();
-    assert!(matches!(error, RunError::RunManifestRejected { .. }));
-    assert_eq!(error.code(), "run_manifest_rejected");
+fn production_consumer_rejects_historical_v1_manifest_without_fallback() {
+    let error = run_manifest(fixture_root().join("run_manifest.json")).unwrap_err();
+    assert_eq!(error.failure_type(), "MANIFEST_ADMISSION_FAILED");
+    assert_eq!(error.stage(), "manifest_admission");
     assert_eq!(error.exit_code(), 1);
+    assert!(error.to_string().contains("run manifest"));
 }
 
 #[test]
-fn launch_identity_substitution_is_typed() {
+fn launch_identity_substitution_is_trace_admission() {
     let (_temp, manifest_path) = copied_fixture();
     let mut manifest: Value = serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
     manifest["launches"][0]["expected_identity_sha256"] =
@@ -1156,50 +1169,171 @@ fn launch_identity_substitution_is_typed() {
     .unwrap();
 
     let error = run_manifest(&manifest_path).unwrap_err();
-    assert!(matches!(error, RunError::IdentityMismatch { .. }));
-    assert_eq!(error.code(), "identity_mismatch");
+    assert_eq!(error.failure_type(), "TRACE_ADMISSION_FAILED");
+    assert_eq!(error.stage(), "trace_admission");
+    assert_eq!(error.exit_code(), 1);
+    assert!(
+        error
+            .to_string()
+            .contains("launch expected_identity_sha256")
+    );
+}
+
+#[test]
+fn schema_fixed_sm120_input_is_manifest_admission_failure() {
+    let (_temp, manifest_path) = copied_fixture();
+    let mut manifest = read_json(&manifest_path);
+    manifest["architecture"] = json!({
+        "arch_id": "sm_120",
+        "sku": "rtx_5060_laptop"
+    });
+    write_json(&manifest_path, &manifest);
+
+    let error = run_manifest(&manifest_path).unwrap_err();
+    assert_eq!(error.failure_type(), "MANIFEST_ADMISSION_FAILED");
+    assert_eq!(error.stage(), "manifest_admission");
     assert_eq!(error.exit_code(), 1);
 }
 
 #[test]
-fn sm120_is_typed_disabled_before_artifact_admission() {
-    let temp = TempDir::new().unwrap();
-    let manifest = temp.path().join("run_manifest.json");
-    fs::write(
-        &manifest,
-        serde_json::to_vec_pretty(&json!({
-            "schema_version": 1,
-            "scope": "negative/sm120-disabled:v1",
-            "architecture": {"arch_id": "sm_120", "sku": "rtx_5060_laptop"},
-            "configuration_evidence": {
-                "arch_card_sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-                "pchase_card_sha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
-            },
-            "launches": [{
-                "launch_evidence_manifest_path": "missing.json",
-                "expected_identity_sha256": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
-            }],
-            "replay_mode": {"mode": "flat"}
-        }))
-        .unwrap(),
-    )
-    .unwrap();
-    let error = run_manifest(&manifest).unwrap_err();
-    assert!(matches!(
-        error,
-        RunError::ArchitectureNotEnabled {
-            arch: sim_arch::ArchId::Sm120
-        }
-    ));
+fn missing_artifacts_preserve_typed_admission_boundaries() {
+    for (relative, failure_type, stage) in [
+        (
+            "cards/sm_86.json",
+            "ARCH_CARD_ADMISSION_FAILED",
+            "arch_card_admission",
+        ),
+        (
+            "cards/sm_86_static_card.json",
+            "CONFIGURATION_RESOLUTION_FAILED",
+            "configuration_resolution",
+        ),
+        (
+            "trace/dynamic_trace.pb",
+            "TRACE_ADMISSION_FAILED",
+            "trace_admission",
+        ),
+        (
+            "launch_evidence.json",
+            "TRACE_ADMISSION_FAILED",
+            "trace_admission",
+        ),
+    ] {
+        let (_temp, manifest_path) = copied_fixture();
+        fs::remove_file(manifest_path.parent().unwrap().join(relative)).unwrap();
+        let error = run_manifest(&manifest_path).unwrap_err();
+        assert_eq!(error.failure_type(), failure_type, "artifact {relative}");
+        assert_eq!(error.stage(), stage, "artifact {relative}");
+        assert_eq!(error.exit_code(), 2, "artifact {relative}");
+    }
+}
+
+#[test]
+fn malformed_trace_artifact_is_trace_admission() {
+    let (_temp, manifest_path) = copied_fixture();
+    let root = manifest_path.parent().unwrap();
+    let dynamic_path = root.join("trace/dynamic_trace.pb");
+    fs::write(&dynamic_path, b"not-a-protobuf-trace").unwrap();
+    let launch_manifest_path = root.join("launch_evidence.json");
+    let mut launch_manifest = read_json(&launch_manifest_path);
+    launch_manifest["artifacts"]["dynamic_trace_pb"] =
+        artifact_claim(root, "trace/dynamic_trace.pb");
+    write_json(&launch_manifest_path, &launch_manifest);
+
+    let error = run_manifest(&manifest_path).unwrap_err();
+    assert_eq!(error.failure_type(), "TRACE_ADMISSION_FAILED");
+    assert_eq!(error.stage(), "trace_admission");
+    assert_eq!(error.exit_code(), 1);
+}
+
+#[test]
+fn malformed_memory_capability_vector_is_not_a_missing_prerequisite() {
+    let (_temp, manifest_path) = copied_fixture();
+    let root = manifest_path.parent().unwrap();
+    let dynamic_path = root.join("trace/dynamic_trace.pb");
+    let mut trace =
+        sim_trace::pb::Trace::decode(fs::read(&dynamic_path).unwrap().as_slice()).unwrap();
+    trace
+        .memory_payload_classes
+        .push(*trace.memory_payload_classes.first().unwrap());
+    fs::write(&dynamic_path, trace.encode_to_vec()).unwrap();
+
+    let launch_manifest_path = root.join("launch_evidence.json");
+    let mut launch_manifest = read_json(&launch_manifest_path);
+    refresh_trace_artifact_claims(root, &mut launch_manifest);
+    write_json(&launch_manifest_path, &launch_manifest);
+
+    let error = run_manifest(&manifest_path).unwrap_err();
+    assert_eq!(error.failure_type(), "TRACE_ADMISSION_FAILED");
+    assert_eq!(error.stage(), "trace_admission");
+    assert_eq!(error.exit_code(), 1);
+    assert!(error.to_string().contains("invalid memory_payload_classes"));
+}
+
+#[test]
+fn referenced_allocations_with_absent_sidecar_are_a_missing_prerequisite() {
+    let (_temp, manifest_path) = copied_fixture();
+    let root = manifest_path.parent().unwrap();
+    fs::remove_file(root.join("trace/extra_info/allocations.json")).unwrap();
+
+    let launch_manifest_path = root.join("launch_evidence.json");
+    let mut launch_manifest = read_json(&launch_manifest_path);
+    launch_manifest["artifacts"]["allocations_json"] = json!({"status": "absent"});
+    write_json(&launch_manifest_path, &launch_manifest);
+
+    let error = run_manifest(&manifest_path).unwrap_err();
+    assert_eq!(error.failure_type(), "TRACE_ADMISSION_FAILED");
+    assert_eq!(error.stage(), "trace_admission");
     assert_eq!(error.exit_code(), 2);
+    assert!(error.to_string().contains("allocations_sidecar_missing"));
+}
+
+#[test]
+fn oversized_finite_card_latency_stays_an_arch_card_value_failure() {
+    let (_temp, manifest_path) = copied_fixture();
+    let root = manifest_path.parent().unwrap();
+    let arch_card_path = root.join("cards/sm_86.json");
+    let mut arch_card = read_json(&arch_card_path);
+    arch_card["latencies_cycles"]["l1_hit"]["value"] = json!(1.0e20);
+    write_json(&arch_card_path, &arch_card);
+
+    let launch_manifest_path = root.join("launch_evidence.json");
+    let mut launch_manifest = read_json(&launch_manifest_path);
+    let arch_card_claim = artifact_claim(root, "cards/sm_86.json");
+    let arch_card_sha256 = arch_card_claim["sha256"].clone();
+    launch_manifest["artifacts"]["arch_card"] = arch_card_claim;
+    write_json(&launch_manifest_path, &launch_manifest);
+
+    let admitted = admit_launch_evidence(&launch_manifest_path)
+        .expect("oversized finite latency remains identity-bound architecture evidence");
+    let mut run_document = read_json(&manifest_path);
+    run_document["configuration_evidence"]["arch_card_sha256"] = arch_card_sha256;
+    run_document["launches"][0]["expected_identity_sha256"] =
+        json!(admitted.identity().seal_sha256());
+    write_json(&manifest_path, &run_document);
+
+    let error = run_manifest(&manifest_path).unwrap_err();
+    assert_eq!(error.failure_type(), "ARCH_CARD_ADMISSION_FAILED");
+    assert_eq!(error.stage(), "arch_card_admission");
+    assert_eq!(error.exit_code(), 1);
+    assert!(
+        error
+            .to_string()
+            .contains("latency must be finite, positive")
+    );
 }
 
 #[test]
 fn missing_manifest_is_a_prerequisite_exit() {
     let temp = TempDir::new().unwrap();
     let error = run_manifest(temp.path().join("absent.json")).unwrap_err();
-    assert!(matches!(error, RunError::RunManifestRead { .. }));
+    assert_eq!(error.failure_type(), "MANIFEST_ADMISSION_FAILED");
+    assert_eq!(error.stage(), "manifest_admission");
     assert_eq!(error.exit_code(), 2);
     let document: Value = serde_json::from_str(&error.canonical_json().unwrap()).unwrap();
-    assert_eq!(document["category"], "prerequisite_missing");
+    assert_eq!(
+        document["error"]["failure_type"],
+        "MANIFEST_ADMISSION_FAILED"
+    );
+    assert_eq!(document["exit_status"]["exit_code"], 2);
 }
