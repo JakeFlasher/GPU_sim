@@ -12,7 +12,7 @@ phases A→E (engine → memory → trace → modern features → accuracy tunin
 | `sim-sm` | Generic 4-sub-core issue/replay algorithms. Static control decoding is capability-gated: the checked-in Ampere sidecar path is active for `sm_86`; no unproven Blackwell decoder is implied. |
 | `sim-mem` | Generic sectored L1/L2 state machines and warp-pool interleave. Geometry, cache-op defaults, MSHR approximations, and latency ladders enter through typed architecture/card resolvers; an `sm_120` gap cannot inherit an `sm_86` hypothesis. |
 | `sim-trace` | NVBit protobuf trace ingestion through the committed Rust/prost bindings for the existing `traces_enhanced` wire format. Wire decoding remains architecture-neutral. |
-| `sim-run` | Manifest-only production composition, `sim_run::emit` metric boundary, and one-argument `sim-run` binary: sealed launch admission, architecture-local configuration resolution, full-coverage replay, checked launch-set aggregation, seven implemented secondary descriptors plus blocked `exec_cycles_gpc_max`, and sealed canonical `sim_result.v1` output. Stdout is result-only, stderr is typed canonical error-only, and no replay setting comes from flags or environment variables. |
+| `sim-run` | Manifest-only production composition, `sim_run::emit` metric boundary, and one-argument `sim-run` binary: strict `sim_run_manifest.v2` admission, architecture-local configuration resolution, full-coverage replay, checked launch-set aggregation, seven implemented secondary descriptors plus blocked `exec_cycles_gpc_max`, and sealed canonical `sim_result.v2` output. Stdout is success-result-only, stderr is one sealed `sim_error.v2` document on failure, and no replay setting comes from flags or environment variables. |
 
 ## Architecture scope
 
@@ -40,12 +40,15 @@ Build: `cargo build` from this directory (workspace).
 Run the self-contained offline canary from the repository root:
 
 ```bash
-cargo run --manifest-path sim/Cargo.toml -p sim-run -- \
-  sim/run/tests/fixtures/addr_carry_canary_bundle/run_manifest.json
+cargo run --quiet --manifest-path sim/Cargo.toml -p sim-run -- \
+  sim/run/tests/fixtures/addr_carry_canary_bundle/run_manifest.v2.json
 ```
 
-`sim_run_manifest.v1` is strict and versioned. It names one admitted v2
-launch-evidence manifest per launch, expected launch/card digests, architecture
-and SKU, scope, and one typed memory mode. It has no numeric configuration
-overrides or target-value fields. `sm_120` remains a typed disabled prerequisite
-at this boundary. The fixture result confers no hardware or scientific credit.
+`sim_run_manifest.v2` is the only production manifest version. It carries a
+closed nine-field launch key for each launch, expected launch/card/P-chase
+digests, architecture and SKU, scope, and one typed memory mode. It has no
+numeric configuration overrides or target-value fields. A successful invocation
+emits one sealed canonical `sim_result.v2` document plus a line feed on stdout;
+each failure emits one of the nine sealed `sim_error.v2` arms on stderr while
+stdout remains empty. `sm_120` remains a typed disabled prerequisite at this
+boundary. The fixture result confers no hardware or scientific credit.

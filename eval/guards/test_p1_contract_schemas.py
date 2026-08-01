@@ -1251,14 +1251,31 @@ def test_result_seal_success_only_cycles_and_dirty_claimability() -> None:
     validate_result(result)
 
 
-def test_sim_error_has_explicit_cli_replay_emission_arms_and_no_catchall() -> None:
+def test_sim_error_has_exactly_nine_typed_stage_arms_and_no_catchall() -> None:
     schema = schema_document("sim_error")
-    failure_types = {
-        branch["properties"]["failure_type"]["const"]
-        for branch in schema["$defs"]["typedError"]["oneOf"]
+    arms = schema["$defs"]["typedError"]["oneOf"]
+    assert len(arms) == 9
+    failure_code_stage_pairs = {
+        (
+            branch["properties"]["failure_type"]["const"],
+            branch["properties"]["stage"]["const"],
+        )
+        for branch in arms
     }
-    assert {"CLI_USAGE_FAILED", "REPLAY_FAILED", "EMISSION_FAILED"} <= failure_types
-    assert "INTERNAL_ERROR" not in failure_types
+    assert failure_code_stage_pairs == {
+        ("CLI_USAGE_FAILED", "cli_usage"),
+        ("MANIFEST_ADMISSION_FAILED", "manifest_admission"),
+        ("TRACE_ADMISSION_FAILED", "trace_admission"),
+        ("ARCH_CARD_ADMISSION_FAILED", "arch_card_admission"),
+        ("CONFIGURATION_RESOLUTION_FAILED", "configuration_resolution"),
+        ("REPLAY_FAILED", "replay"),
+        ("EMISSION_FAILED", "emission"),
+        ("RESULT_SERIALIZATION_FAILED", "result_serialization"),
+        ("OUTPUT_WRITE_FAILED", "output_write"),
+    }
+    assert "INTERNAL_ERROR" not in {
+        failure_type for failure_type, _ in failure_code_stage_pairs
+    }
     validate_sim_error(_valid_error())
 
     cli_error = _valid_error()

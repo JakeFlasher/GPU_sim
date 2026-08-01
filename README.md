@@ -41,9 +41,10 @@ Markdown rows.
 The repository has working Rust libraries for deterministic event scheduling,
 NVBit trace decoding, SM replay, L1/L2/DRAM modeling, architecture-card
 loading, checked launch-set aggregation, and NCU-shaped emission. `sim-run`
-provides the strict manifest-only production composition path, the
-`sim_run::emit` boundary, and canonical sealed JSON output. The current offline
-Rust workspace gate passes with three explicitly ignored machine-local evidence
+provides the strict manifest-only production composition path and owns the
+in-crate `sim_run::emit` descriptor boundary plus canonical sealed JSON output;
+there is no separate public emitter command. The current offline Rust workspace
+gate passes with three explicitly ignored machine-local evidence
 tests.
 
 This is an offline simulator application boundary, not publication closure:
@@ -92,12 +93,12 @@ The checked-in offline canary exercises the manifest-only CLI without GPU or
 hardware authority:
 
 ```bash
-cargo run --manifest-path sim/Cargo.toml -p sim-run -- \
-  sim/run/tests/fixtures/addr_carry_canary_bundle/run_manifest.json
+cargo run --quiet --manifest-path sim/Cargo.toml -p sim-run -- \
+  sim/run/tests/fixtures/addr_carry_canary_bundle/run_manifest.v2.json
 ```
 
-The command writes one canonical `sim_result.v1` document to stdout. Typed input
-or replay failures write one canonical `sim_error.v1` document to stderr; exit 2
+The command writes one canonical `sim_result.v2` document to stdout. Typed input
+or replay failures write one canonical `sim_error.v2` document to stderr; exit 2
 means a prerequisite is absent, while exit 1 means the supplied run failed
 validation or execution. A blocked binding-cycle metric remains a successful
 per-metric `required_unimplemented` outcome and does not change process success.

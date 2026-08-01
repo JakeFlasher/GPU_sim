@@ -84,14 +84,15 @@ explicit architecture hypotheses or typed gaps. NCU labels are not used to
 fill them per scored cell.
 
 `sim-run` is the production composition boundary. A strict
-`sim_run_manifest.v1` selects only a scope, architecture/SKU, sealed v2 launch
+`sim_run_manifest.v2` selects only a scope, architecture/SKU, sealed v2 launch
 evidence, expected card digests, and a typed memory mode. It admits every launch
 before constructing one shared card-derived configuration, rejects sampled
 launches from exact aggregation, calls only the admitted `replay_kernel` path,
-and passes the complete roster through `aggregate_full_launch_set` and
-`sim_run::emit`. Configuration values cannot be supplied as manifest scalars or
-environment overrides. The `sim-run` binary accepts exactly one manifest path and
-emits a sealed canonical result or typed canonical error.
+and passes the complete roster through `aggregate_full_launch_set` and the
+in-crate `sim_run::emit` boundary. Configuration values cannot be supplied as
+manifest scalars or environment overrides. The `sim-run` binary accepts exactly
+one manifest path and emits a sealed canonical `sim_result.v2` or typed canonical
+`sim_error.v2` document.
 
 The result preserves per-launch last-issue and terminal-event diagnostics without
 composing them into a launch-set timing scalar. Counter availability and
@@ -100,10 +101,11 @@ explicitly confer no hardware or scientific authority.
 
 ## Output contracts
 
-`sim_run::emit` converts raw replay counters into typed NCU-shaped predictions. Raw
-counts remain in the simulator; rate numerators and denominators are composed
-at the output boundary. A real zero, an NCU-style not-applicable rate, and a
-metric unavailable from the selected replay mode are distinct states.
+`sim_run::emit`, owned inside the `sim-run` crate, converts raw replay counters
+into typed NCU-shaped predictions. Raw counts remain in the simulator; rate
+numerators and denominators are composed at the output boundary. A real zero, an
+NCU-style not-applicable rate, and a metric unavailable from the selected replay
+mode are distinct states.
 
 Seven descriptors are implemented:
 
