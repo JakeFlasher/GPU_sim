@@ -20,16 +20,19 @@ import errno
 import hashlib
 import importlib.machinery
 import importlib.util
+import io
 import json
 import marshal
 import os
+import py_compile
 import re
 import stat
+import struct
 import sys
 import zipimport
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
-from types import FunctionType, MethodType, ModuleType
+from types import CodeType, FunctionType, MethodType, ModuleType
 from typing import Any, NoReturn
 
 import jsonschema
@@ -38,7 +41,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 REGISTRY_RELATIVE = "eval/guards/evaluator_import_surface_registry.v1.json"
 SCHEMA_RELATIVE = "eval/guards/evaluator_import_surface_registry.v1.schema.json"
-REGISTRY_SHA256 = "f2654f530393482ce2c6fb93f96b4b3ae35a82a40eee6bfbc345465688f793e9"
+REGISTRY_SHA256 = "65a8af36fa5c7f941595a1e0803bdb8bc6f4142986704551791a39b29b69e097"
 ENTRYPOINT = "eval/production_evaluator/__init__.py"
 ENTRYPOINT_MODULE = "eval.production_evaluator"
 SCHEMA_ID = (
@@ -54,7 +57,11 @@ AUTHORITY_SNAPSHOT_MAX_SIZE_BYTES = 1024 * 1024
 MAX_CLASSIFICATION_ROWS = 128
 MAX_CLASSIFIED_SOURCE_BYTES = 8 * 1024 * 1024
 MAX_EVAL_RUNTIME_FILES = 64
+MAX_EVAL_RUNTIME_ENTRIES = 128
 MAX_EVAL_RUNTIME_BYTES = 4 * 1024 * 1024
+MAX_RUNTIME_CODE_GRAPH_NODES = 1_000_000
+MARSHAL_STRING_TAGS = frozenset(map(ord, "tuazAZ"))
+MARSHAL_INTERNED_STRING_TAGS = frozenset(map(ord, "tAZ"))
 MAX_SIM_SOURCE_FILES = 4096
 MAX_SIM_SOURCE_BYTES = 64 * 1024 * 1024
 PRODUCTION_CLASSIFICATIONS = {"production_boundary", "production_dependency"}
@@ -80,6 +87,7 @@ EXPECTED_PROHIBITED_EVALUATORS = {
     "workloads/simbench_bw/timing_cycle_predictor.py",
 }
 EXPECTED_NON_EVALUATORS = {
+    "eval/bench.py",
     "sim/run/src/emit.rs",
     "sim/mem/src/l2.rs",
     "sim/sm/src/issue.rs",
@@ -115,6 +123,7 @@ EXPECTED_SYNTHETIC_OFFLINE_PROTOTYPE_EVALUATORS = {
 }
 EXPECTED_EVAL_RUNTIME_SOURCES = {
     ENTRYPOINT,
+    "eval/bench.py",
     *EXPECTED_EVALUATOR_CONTRACTS,
     *EXPECTED_SYNTHETIC_OFFLINE_PROTOTYPE_EVALUATORS,
 }
@@ -228,6 +237,7 @@ class FileSnapshot:
     relative_path: str
     data: bytes
     sha256: str
+    identity: tuple[int, int, int, int, int, int, int, int, int]
 
     def utf8(self, context: str) -> str:
         try:
@@ -358,7 +368,15 @@ def _open_directory(
         raise
 
 
-def _snapshot_file(repo_root: Path, relative: str, context: str) -> FileSnapshot:
+def _snapshot_file(
+    repo_root: Path,
+    relative: str,
+    context: str,
+    *,
+    max_size_bytes: int = AUTHORITY_SNAPSHOT_MAX_SIZE_BYTES,
+) -> FileSnapshot:
+    if type(max_size_bytes) is not int or max_size_bytes < 0:
+        _fail(f"{context} snapshot bound must be an exact nonnegative integer")
     relative = _safe_relative_path(relative, f"{context} path")
     path = PurePosixPath(relative)
     parent_relative = PurePosixPath(*path.parts[:-1]).as_posix()
@@ -381,11 +399,11 @@ def _snapshot_file(repo_root: Path, relative: str, context: str) -> FileSnapshot
         before = os.fstat(descriptor)
         if not stat.S_ISREG(before.st_mode):
             _fail(f"{context} is not a regular file: {relative}")
-        if before.st_size > AUTHORITY_SNAPSHOT_MAX_SIZE_BYTES:
+        if before.st_size > max_size_bytes:
             _fail(
                 "authority_snapshot_size_limit_exceeded: "
                 f"{context} file {relative} is {before.st_size} bytes; "
-                f"ceiling={AUTHORITY_SNAPSHOT_MAX_SIZE_BYTES}"
+                f"ceiling={max_size_bytes}"
             )
         chunks: list[bytes] = []
         remaining = before.st_size
@@ -403,6 +421,10 @@ def _snapshot_file(repo_root: Path, relative: str, context: str) -> FileSnapshot
         identity_before = (
             before.st_dev,
             before.st_ino,
+            before.st_mode,
+            before.st_nlink,
+            before.st_uid,
+            before.st_gid,
             before.st_size,
             before.st_mtime_ns,
             before.st_ctime_ns,
@@ -410,6 +432,10 @@ def _snapshot_file(repo_root: Path, relative: str, context: str) -> FileSnapshot
         identity_after = (
             after.st_dev,
             after.st_ino,
+            after.st_mode,
+            after.st_nlink,
+            after.st_uid,
+            after.st_gid,
             after.st_size,
             after.st_mtime_ns,
             after.st_ctime_ns,
@@ -421,7 +447,12 @@ def _snapshot_file(repo_root: Path, relative: str, context: str) -> FileSnapshot
             or len(data) != before.st_size
         ):
             _fail(f"{context} changed while its retained bytes were read: {relative}")
-        return FileSnapshot(relative, data, hashlib.sha256(data).hexdigest())
+        return FileSnapshot(
+            relative,
+            data,
+            hashlib.sha256(data).hexdigest(),
+            identity_before,
+        )
     finally:
         if descriptor is not None:
             os.close(descriptor)
@@ -455,19 +486,34 @@ def _path_mode(repo_root: Path, relative: str, context: str) -> int | None:
 
 
 def _directory_entries(
-    repo_root: Path, relative: str, context: str
+    repo_root: Path,
+    relative: str,
+    context: str,
+    *,
+    max_entries: int = MAX_EVAL_RUNTIME_ENTRIES,
 ) -> dict[str, int]:
+    if type(max_entries) is not int or max_entries < 0:
+        _fail(f"{context} directory bound must be an exact nonnegative integer")
     descriptor = _open_directory(repo_root, relative, context)
     assert descriptor is not None
     try:
         result: dict[str, int] = {}
-        for name in sorted(os.listdir(descriptor)):
-            metadata = os.stat(name, dir_fd=descriptor, follow_symlinks=False)
-            if stat.S_ISLNK(metadata.st_mode):
-                joined = f"{relative}/{name}" if relative else name
-                _fail(f"{context} contains a symlink: {joined}")
-            result[name] = metadata.st_mode
-        return result
+        with os.scandir(descriptor) as entries:
+            for entry in entries:
+                if len(result) >= max_entries:
+                    _fail(
+                        f"{context}_directory_entry_limit_exceeded: "
+                        f"ceiling={max_entries}"
+                    )
+                name = entry.name
+                if type(name) is not str or SAFE_COMPONENT.fullmatch(name) is None:
+                    _fail(f"{context} contains an unsafe entry name: {name!r}")
+                metadata = entry.stat(follow_symlinks=False)
+                if stat.S_ISLNK(metadata.st_mode):
+                    joined = f"{relative}/{name}" if relative else name
+                    _fail(f"{context} contains a symlink: {joined}")
+                result[name] = metadata.st_mode
+        return dict(sorted(result.items()))
     finally:
         os.close(descriptor)
 
@@ -552,10 +598,23 @@ def _eval_runtime_source_inventory(repo_root: Path) -> EvalRuntimeInventory:
     bytecode_caches: list[str] = []
     compiled: list[str] = []
     excluded = {"eval/guards", "eval/tests"}
+    observed_entries = 0
+
+    def inventory_entries(relative: str, context: str) -> dict[str, int]:
+        nonlocal observed_entries
+        remaining = MAX_EVAL_RUNTIME_ENTRIES - observed_entries
+        entries = _directory_entries(
+            repo_root,
+            relative,
+            context,
+            max_entries=max(0, remaining),
+        )
+        observed_entries += len(entries)
+        return entries
 
     def inspect_bytecode_cache(relative: str) -> None:
-        entries = _directory_entries(
-            repo_root, relative, "evaluator runtime bytecode cache"
+        entries = inventory_entries(
+            relative, "evaluator runtime bytecode cache"
         )
         for name, mode in entries.items():
             joined = f"{relative}/{name}"
@@ -567,7 +626,9 @@ def _eval_runtime_source_inventory(repo_root: Path) -> EvalRuntimeInventory:
             bytecode_caches.append(joined)
 
     def walk(relative: str) -> None:
-        entries = _directory_entries(repo_root, relative, "evaluator runtime inventory")
+        entries = inventory_entries(
+            relative, "evaluator runtime inventory"
+        )
         for name, mode in entries.items():
             joined = f"{relative}/{name}"
             if joined in excluded:
@@ -659,12 +720,801 @@ def _compiled_runtime_source_payload(
     return marshal.dumps(expected_code)
 
 
+def _preflight_runtime_marshal_payload(payload: bytes) -> None:
+    """Reject allocation-amplifying marshal counts before CPython decodes them."""
+    if type(payload) is not bytes:
+        raise TypeError("runtime marshal payload must be exact bytes")
+    position = 0
+    object_count = 0
+    reference_count = 0
+    tasks: list[tuple[str, int]] = [("object", 0)]
+
+    def read_byte() -> int:
+        nonlocal position
+        if position >= len(payload):
+            raise EOFError("runtime marshal payload is truncated")
+        value = payload[position]
+        position += 1
+        return value
+
+    def read_i32() -> int:
+        nonlocal position
+        end = position + 4
+        if end > len(payload):
+            raise EOFError("runtime marshal payload is truncated")
+        value = int.from_bytes(
+            payload[position:end], byteorder="little", signed=True
+        )
+        position = end
+        return value
+
+    def skip_bytes(length: int) -> None:
+        nonlocal position
+        if length < 0:
+            raise ValueError("runtime marshal payload has a negative byte length")
+        end = position + length
+        if end > len(payload):
+            raise EOFError("runtime marshal payload is truncated")
+        position = end
+
+    def bounded_count(count: int) -> int:
+        if count < 0:
+            raise ValueError("runtime marshal payload has a negative object count")
+        if count > MAX_RUNTIME_CODE_GRAPH_NODES - object_count:
+            raise MemoryError(
+                "runtime marshal object count exceeds bounded graph limit"
+            )
+        if count > len(payload) - position:
+            raise EOFError(
+                "runtime marshal object count exceeds remaining payload bytes"
+            )
+        return count
+
+    def schedule_sequence(count: int) -> None:
+        if bounded_count(count):
+            tasks.append(("sequence", count))
+
+    def read_object(*, allow_null: bool) -> bool:
+        nonlocal object_count, reference_count
+        raw_tag = read_byte()
+        has_reference = bool(raw_tag & 0x80)
+        tag = raw_tag & 0x7F
+        if tag == ord("0"):
+            if has_reference or not allow_null:
+                raise ValueError("runtime marshal payload has an unexpected NULL")
+            return False
+
+        if object_count >= MAX_RUNTIME_CODE_GRAPH_NODES:
+            raise MemoryError(
+                "runtime marshal object graph exceeds bounded node limit"
+            )
+        object_count += 1
+        if has_reference:
+            if tag == ord("r"):
+                raise ValueError("runtime marshal reference cannot carry FLAG_REF")
+            reference_count += 1
+
+        if tag in map(ord, "NFTS."):
+            return True
+        if tag == ord("i"):
+            skip_bytes(4)
+            return True
+        if tag == ord("I"):
+            skip_bytes(8)
+            return True
+        if tag == ord("l"):
+            digit_count = read_i32()
+            skip_bytes(abs(digit_count) * 2)
+            return True
+        if tag == ord("f"):
+            skip_bytes(read_byte())
+            return True
+        if tag == ord("g"):
+            skip_bytes(8)
+            return True
+        if tag == ord("x"):
+            skip_bytes(read_byte())
+            skip_bytes(read_byte())
+            return True
+        if tag == ord("y"):
+            skip_bytes(16)
+            return True
+        if tag in map(ord, "stuaA"):
+            length = read_i32()
+            skip_bytes(length)
+            return True
+        if tag in map(ord, "zZ"):
+            skip_bytes(read_byte())
+            return True
+        if tag == ord("r"):
+            reference_index = read_i32()
+            if not 0 <= reference_index < reference_count:
+                raise ValueError(
+                    "runtime marshal payload has an invalid reference index"
+                )
+            return True
+        if tag == ord(")"):
+            schedule_sequence(read_byte())
+            return True
+        if tag in map(ord, "([<>"):
+            schedule_sequence(read_i32())
+            return True
+        if tag == ord("{"):
+            tasks.append(("dict_key", 0))
+            return True
+        if tag == ord("c"):
+            skip_bytes(5 * 4)
+            code_tasks = (
+                *(("object", 0) for _ in range(8)),
+                ("i32", 0),
+                ("object", 0),
+                ("object", 0),
+            )
+            tasks.extend(reversed(code_tasks))
+            return True
+        raise ValueError(f"runtime marshal payload has unknown tag: {tag}")
+
+    while tasks:
+        kind, remaining = tasks.pop()
+        if kind == "object":
+            read_object(allow_null=False)
+        elif kind == "sequence":
+            if remaining > 1:
+                tasks.append(("sequence", remaining - 1))
+            tasks.append(("object", 0))
+        elif kind == "dict_key":
+            if read_object(allow_null=True):
+                tasks.append(("dict_value", 0))
+        elif kind == "dict_value":
+            tasks.append(("dict_key", 0))
+            tasks.append(("object", 0))
+        elif kind == "i32":
+            read_i32()
+        else:  # pragma: no cover - the task grammar above is closed
+            raise AssertionError(f"unknown runtime marshal preflight task: {kind}")
+
+    if position != len(payload):
+        raise ValueError("runtime marshal payload has trailing bytes")
+
+
+def _runtime_marshaled_string_interned(value: str) -> bool:
+    """Read CPython's observable interned-string state without mutating it."""
+    payload = marshal.dumps(value)
+    if not payload:
+        raise ValueError("marshal emitted no string tag")
+    tag = payload[0] & 0x7F
+    if tag not in MARSHAL_STRING_TAGS:
+        raise ValueError(f"marshal emitted unexpected string tag: {tag}")
+    return tag in MARSHAL_INTERNED_STRING_TAGS
+
+
+def _runtime_marshaled_localsplus_payload_projections(
+    payload: bytes,
+) -> tuple[
+    tuple[int, tuple[tuple[str, bool, int], ...], int, bytes], ...
+] | None:
+    """Project marshal-only locals-plus values and raw alias topology."""
+    try:
+        if type(payload) is not bytes:
+            return None
+        position = 0
+        object_count = 0
+        references: list[object] = []
+        projections: list[
+            tuple[int, tuple[tuple[str, bool, int], ...], int, bytes]
+            | None
+        ] = []
+        opaque = object()
+        unresolved = object()
+        null = object()
+        bytes_marker = object()
+        string_marker = object()
+        tuple_marker = object()
+
+        def read_byte() -> int:
+            nonlocal position
+            if position >= len(payload):
+                raise EOFError("runtime marshal projection is truncated")
+            value = payload[position]
+            position += 1
+            return value
+
+        def read_i32() -> int:
+            nonlocal position
+            end = position + 4
+            if end > len(payload):
+                raise EOFError("runtime marshal projection is truncated")
+            value = int.from_bytes(
+                payload[position:end], byteorder="little", signed=True
+            )
+            position = end
+            return value
+
+        def read_bytes(length: int) -> bytes:
+            nonlocal position
+            if length < 0:
+                raise ValueError(
+                    "runtime marshal projection has a negative byte length"
+                )
+            end = position + length
+            if end > len(payload):
+                raise EOFError("runtime marshal projection is truncated")
+            value = payload[position:end]
+            position = end
+            return value
+
+        def bounded_count(count: int) -> int:
+            if count < 0:
+                raise ValueError(
+                    "runtime marshal projection has a negative object count"
+                )
+            if count > MAX_RUNTIME_CODE_GRAPH_NODES - object_count:
+                raise MemoryError(
+                    "runtime marshal projection exceeds bounded graph limit"
+                )
+            if count > len(payload) - position:
+                raise EOFError(
+                    "runtime marshal projection count exceeds remaining bytes"
+                )
+            return count
+
+        def read_object(*, allow_null: bool = False) -> object:
+            nonlocal object_count
+            raw_tag = read_byte()
+            has_reference = bool(raw_tag & 0x80)
+            tag = raw_tag & 0x7F
+            if tag == ord("0"):
+                if has_reference or not allow_null:
+                    raise ValueError(
+                        "runtime marshal projection has an unexpected NULL"
+                    )
+                return null
+
+            if object_count >= MAX_RUNTIME_CODE_GRAPH_NODES:
+                raise MemoryError(
+                    "runtime marshal projection exceeds bounded graph limit"
+                )
+            object_count += 1
+            object_serial = object_count
+            reference_slot: int | None = None
+            if has_reference:
+                if tag == ord("r"):
+                    raise ValueError(
+                        "runtime marshal projection reference carries FLAG_REF"
+                    )
+                reference_slot = len(references)
+                references.append(unresolved)
+
+            if tag in map(ord, "NFTS."):
+                value: object = opaque
+            elif tag == ord("i"):
+                read_bytes(4)
+                value = opaque
+            elif tag == ord("I"):
+                read_bytes(8)
+                value = opaque
+            elif tag == ord("l"):
+                read_bytes(abs(read_i32()) * 2)
+                value = opaque
+            elif tag == ord("f"):
+                read_bytes(read_byte())
+                value = opaque
+            elif tag == ord("g"):
+                read_bytes(8)
+                value = opaque
+            elif tag == ord("x"):
+                read_bytes(read_byte())
+                read_bytes(read_byte())
+                value = opaque
+            elif tag == ord("y"):
+                read_bytes(16)
+                value = opaque
+            elif tag == ord("s"):
+                value = (bytes_marker, read_bytes(read_i32()), object_serial)
+            elif tag in map(ord, "tuaA"):
+                encoded = read_bytes(read_i32())
+                value = (
+                    string_marker,
+                    encoded.decode(
+                        "ascii" if tag in map(ord, "aA") else "utf-8",
+                        errors=(
+                            "strict"
+                            if tag in map(ord, "aA")
+                            else "surrogatepass"
+                        ),
+                    ),
+                    tag in MARSHAL_INTERNED_STRING_TAGS,
+                    object_serial,
+                )
+            elif tag in map(ord, "zZ"):
+                encoded = read_bytes(read_byte())
+                value = (
+                    string_marker,
+                    encoded.decode("ascii", errors="strict"),
+                    tag in MARSHAL_INTERNED_STRING_TAGS,
+                    object_serial,
+                )
+            elif tag == ord("r"):
+                reference_index = read_i32()
+                if not 0 <= reference_index < len(references):
+                    raise ValueError(
+                        "runtime marshal projection has an invalid reference"
+                    )
+                value = references[reference_index]
+                if value is unresolved:
+                    value = opaque
+            elif tag in map(ord, "()"):
+                count = read_byte() if tag == ord(")") else read_i32()
+                items = [read_object() for _ in range(bounded_count(count))]
+                value = (tuple_marker, tuple(items), object_serial)
+            elif tag in map(ord, "[<>"):
+                count = bounded_count(read_i32())
+                for _ in range(count):
+                    read_object()
+                value = opaque
+            elif tag == ord("{"):
+                while read_object(allow_null=True) is not null:
+                    read_object()
+                value = opaque
+            elif tag == ord("c"):
+                projection_index = len(projections)
+                projections.append(None)
+                read_bytes(5 * 4)
+                fields = [read_object() for _ in range(8)]
+                read_i32()
+                read_object()
+                read_object()
+                names = fields[3]
+                kinds = fields[4]
+                if (
+                    type(names) is tuple
+                    and len(names) == 3
+                    and names[0] is tuple_marker
+                    and type(names[1]) is tuple
+                    and type(names[2]) is int
+                    and type(kinds) is tuple
+                    and len(kinds) == 3
+                    and kinds[0] is bytes_marker
+                    and type(kinds[1]) is bytes
+                    and type(kinds[2]) is int
+                ):
+                    name_items = names[1]
+                    if all(
+                        type(item) is tuple
+                        and len(item) == 4
+                        and item[0] is string_marker
+                        and type(item[1]) is str
+                        and type(item[2]) is bool
+                        and type(item[3]) is int
+                        for item in name_items
+                    ):
+                        projections[projection_index] = (
+                            names[2],
+                            tuple(
+                                (item[1], item[2], item[3])
+                                for item in name_items
+                            ),
+                            kinds[2],
+                            kinds[1],
+                        )
+                value = opaque
+            else:
+                raise ValueError(
+                    f"runtime marshal projection has unknown tag: {tag}"
+                )
+
+            if reference_slot is not None:
+                references[reference_slot] = value
+            return value
+
+        read_object()
+        if position != len(payload) or any(item is None for item in projections):
+            return None
+        return tuple(item for item in projections if item is not None)
+    except (
+        EOFError,
+        MemoryError,
+        OverflowError,
+        RecursionError,
+        TypeError,
+        UnicodeDecodeError,
+        ValueError,
+    ):
+        return None
+
+
+def _runtime_marshaled_localsplus_projections(
+    code: CodeType,
+) -> tuple[
+    tuple[int, tuple[tuple[str, bool, int], ...], int, bytes], ...
+] | None:
+    try:
+        payload = marshal.dumps(code)
+    except (MemoryError, OverflowError, RecursionError, TypeError, ValueError):
+        return None
+    return _runtime_marshaled_localsplus_payload_projections(payload)
+
+
+def _runtime_scalar_fingerprint(
+    value: object,
+) -> tuple[bytes, bool] | None:
+    digest = hashlib.sha256()
+    if value is None:
+        digest.update(b"none")
+    elif value is Ellipsis:
+        digest.update(b"ellipsis")
+    elif type(value) is bool:
+        digest.update(b"bool\x01" if value else b"bool\x00")
+    elif type(value) is int:
+        magnitude = abs(value)
+        encoded = magnitude.to_bytes(
+            max(1, (magnitude.bit_length() + 7) // 8), "big"
+        )
+        digest.update(b"int-")
+        digest.update(b"-" if value < 0 else b"+")
+        digest.update(len(encoded).to_bytes(8, "big"))
+        digest.update(encoded)
+    elif type(value) is bytes:
+        digest.update(b"bytes-")
+        digest.update(len(value).to_bytes(8, "big"))
+        digest.update(value)
+    elif type(value) is str:
+        encoded = value.encode("utf-8", errors="surrogatepass")
+        digest.update(b"str-")
+        digest.update(
+            b"interned-" if _runtime_marshaled_string_interned(value) else b"plain-"
+        )
+        digest.update(len(encoded).to_bytes(8, "big"))
+        digest.update(encoded)
+    elif type(value) is float:
+        digest.update(b"float-")
+        digest.update(struct.pack("!d", value))
+        return digest.digest(), value != value
+    elif type(value) is complex:
+        digest.update(b"complex-")
+        digest.update(struct.pack("!d", value.real))
+        digest.update(struct.pack("!d", value.imag))
+        return digest.digest(), value != value
+    elif not isinstance(value, (tuple, frozenset)):
+        value_type = type(value)
+        digest.update(b"unsupported-")
+        digest.update(value_type.__module__.encode("utf-8", errors="strict"))
+        digest.update(b".")
+        digest.update(value_type.__qualname__.encode("utf-8", errors="strict"))
+        return digest.digest(), True
+    else:
+        return None
+    return digest.digest(), False
+
+
+def _runtime_constant_fingerprints(
+    values: list[object],
+    *,
+    max_nodes: int,
+) -> tuple[list[tuple[bytes, bool]], int]:
+    """Fingerprint immutable constants without trusting container iteration."""
+    memo: dict[int, tuple[bytes, bool]] = {}
+    visiting: set[int] = set()
+    pending = [(value, False) for value in reversed(values)]
+    visited_count = 0
+
+    while pending:
+        value, expanded = pending.pop()
+        identity = id(value)
+        if identity in memo:
+            continue
+        scalar = _runtime_scalar_fingerprint(value)
+        if scalar is not None:
+            if visited_count >= max_nodes:
+                raise ValueError("runtime constant fingerprint bound exceeded")
+            visited_count += 1
+            memo[identity] = scalar
+            continue
+        assert isinstance(value, (tuple, frozenset))
+        if expanded:
+            child_results = [memo[id(child)] for child in value]
+            if isinstance(value, frozenset):
+                child_results.sort(key=lambda item: item[0])
+                tag = b"frozenset-"
+            else:
+                tag = b"tuple-"
+            digest = hashlib.sha256()
+            digest.update(tag)
+            digest.update(len(child_results).to_bytes(8, "big"))
+            for fingerprint, _identity_dependent in child_results:
+                digest.update(fingerprint)
+            memo[identity] = (
+                digest.digest(),
+                any(result[1] for result in child_results),
+            )
+            visiting.remove(identity)
+            continue
+        if identity in visiting:
+            raise ValueError("runtime constant graph is cyclic")
+        if visited_count >= max_nodes:
+            raise ValueError("runtime constant fingerprint bound exceeded")
+        visited_count += 1
+        visiting.add(identity)
+        pending.append((value, True))
+        pending.extend(
+            (child, False)
+            for child in reversed(tuple(value))
+            if id(child) not in memo
+        )
+
+    return [memo[id(value)] for value in values], visited_count
+
+
+def _runtime_code_matches_source(
+    observed: object,
+    expected: CodeType,
+) -> bool:
+    """Compare the observable code-object graph with deterministic bounds."""
+    if isinstance(observed, CodeType):
+        observed_localsplus = _runtime_marshaled_localsplus_projections(
+            observed
+        )
+        expected_localsplus = _runtime_marshaled_localsplus_projections(
+            expected
+        )
+        if (
+            observed_localsplus is None
+            or expected_localsplus is None
+            or observed_localsplus != expected_localsplus
+        ):
+            return False
+    integer_attributes = (
+        "co_argcount",
+        "co_posonlyargcount",
+        "co_kwonlyargcount",
+        "co_nlocals",
+        "co_stacksize",
+        "co_flags",
+        "co_firstlineno",
+    )
+    graph_attributes = (
+        "co_code",
+        "co_consts",
+        "co_names",
+        "co_varnames",
+        "co_filename",
+        "co_name",
+        "co_qualname",
+        "co_linetable",
+        "co_exceptiontable",
+        "co_freevars",
+        "co_cellvars",
+    )
+    pending = [(observed, expected)]
+    scheduled_pairs = 1
+    fingerprint_work = 0
+    observed_to_expected: dict[int, int] = {}
+    expected_to_observed: dict[int, int] = {}
+    compared_pairs: set[tuple[int, int]] = set()
+
+    while pending:
+        left, right = pending.pop()
+        if type(left) is not type(right):
+            return False
+
+        left_id = id(left)
+        right_id = id(right)
+        if (
+            left_id in observed_to_expected
+            and observed_to_expected[left_id] != right_id
+        ):
+            return False
+        if (
+            right_id in expected_to_observed
+            and expected_to_observed[right_id] != left_id
+        ):
+            return False
+        observed_to_expected[left_id] = right_id
+        expected_to_observed[right_id] = left_id
+
+        pair = (left_id, right_id)
+        if pair in compared_pairs:
+            continue
+        compared_pairs.add(pair)
+
+        if isinstance(left, CodeType):
+            assert isinstance(right, CodeType)
+            if any(
+                getattr(left, attribute) != getattr(right, attribute)
+                for attribute in integer_attributes
+            ):
+                return False
+            child_count = len(graph_attributes)
+            if scheduled_pairs > MAX_RUNTIME_CODE_GRAPH_NODES - child_count:
+                return False
+            scheduled_pairs += child_count
+            pending.extend(
+                (getattr(left, attribute), getattr(right, attribute))
+                for attribute in reversed(graph_attributes)
+            )
+            continue
+        if isinstance(left, tuple):
+            assert isinstance(right, tuple)
+            if len(left) != len(right):
+                return False
+            child_count = len(left)
+            if scheduled_pairs > MAX_RUNTIME_CODE_GRAPH_NODES - child_count:
+                return False
+            scheduled_pairs += child_count
+            pending.extend(zip(reversed(left), reversed(right), strict=True))
+            continue
+        if isinstance(left, frozenset):
+            assert isinstance(right, frozenset)
+            if len(left) != len(right):
+                return False
+            child_count = len(left)
+            if scheduled_pairs > MAX_RUNTIME_CODE_GRAPH_NODES - child_count:
+                return False
+            scheduled_pairs += child_count
+            left_items = list(left)
+            right_items = list(right)
+            remaining_fingerprint_work = (
+                MAX_RUNTIME_CODE_GRAPH_NODES
+                - scheduled_pairs
+                - fingerprint_work
+            )
+            if remaining_fingerprint_work < 0:
+                return False
+            try:
+                left_fingerprints, left_work = _runtime_constant_fingerprints(
+                    left_items,
+                    max_nodes=remaining_fingerprint_work,
+                )
+                fingerprint_work += left_work
+                remaining_fingerprint_work = (
+                    MAX_RUNTIME_CODE_GRAPH_NODES
+                    - scheduled_pairs
+                    - fingerprint_work
+                )
+                right_fingerprints, right_work = _runtime_constant_fingerprints(
+                    right_items,
+                    max_nodes=remaining_fingerprint_work,
+                )
+                fingerprint_work += right_work
+            except ValueError:
+                return False
+
+            left_identity_dependent = any(
+                identity_dependent
+                for _fingerprint, identity_dependent in left_fingerprints
+            )
+            right_identity_dependent = any(
+                identity_dependent
+                for _fingerprint, identity_dependent in right_fingerprints
+            )
+            if left_identity_dependent != right_identity_dependent:
+                return False
+            if not left_identity_dependent:
+                child_pairs = list(
+                    zip(left_items, right_items, strict=True)
+                )
+            else:
+                left_groups: dict[bytes, list[object]] = {}
+                right_groups: dict[bytes, list[object]] = {}
+                for item, (fingerprint, _identity_dependent) in zip(
+                    left_items, left_fingerprints, strict=True
+                ):
+                    left_groups.setdefault(fingerprint, []).append(item)
+                for item, (fingerprint, _identity_dependent) in zip(
+                    right_items, right_fingerprints, strict=True
+                ):
+                    right_groups.setdefault(fingerprint, []).append(item)
+                if set(left_groups) != set(right_groups):
+                    return False
+
+                child_pairs = []
+                for fingerprint in sorted(left_groups):
+                    left_group = left_groups[fingerprint]
+                    right_group = right_groups[fingerprint]
+                    if len(left_group) != len(right_group):
+                        return False
+                    left_by_identity = {id(item): item for item in left_group}
+                    right_by_identity = {id(item): item for item in right_group}
+                    paired_left_to_right: dict[int, int] = {}
+                    paired_right: set[int] = set()
+                    group_pairs: list[tuple[object, object]] = []
+
+                    for left_item in left_group:
+                        left_identity = id(left_item)
+                        mapped_right = observed_to_expected.get(left_identity)
+                        if mapped_right is None:
+                            continue
+                        right_item = right_by_identity.get(mapped_right)
+                        if right_item is None or mapped_right in paired_right:
+                            return False
+                        paired_left_to_right[left_identity] = mapped_right
+                        paired_right.add(mapped_right)
+                        group_pairs.append((left_item, right_item))
+
+                    for right_item in right_group:
+                        right_identity = id(right_item)
+                        mapped_left = expected_to_observed.get(right_identity)
+                        if mapped_left is None:
+                            continue
+                        left_item = left_by_identity.get(mapped_left)
+                        if left_item is None:
+                            return False
+                        existing_right = paired_left_to_right.get(mapped_left)
+                        if existing_right is not None:
+                            if existing_right != right_identity:
+                                return False
+                            continue
+                        if right_identity in paired_right:
+                            return False
+                        paired_left_to_right[mapped_left] = right_identity
+                        paired_right.add(right_identity)
+                        group_pairs.append((left_item, right_item))
+
+                    remaining_left = [
+                        item
+                        for item in left_group
+                        if id(item) not in paired_left_to_right
+                    ]
+                    remaining_right = [
+                        item
+                        for item in right_group
+                        if id(item) not in paired_right
+                    ]
+                    group_pairs.extend(
+                        zip(remaining_left, remaining_right, strict=True)
+                    )
+                    child_pairs.extend(group_pairs)
+            pending.extend(reversed(child_pairs))
+            continue
+        if isinstance(left, float):
+            assert isinstance(right, float)
+            if struct.pack("!d", left) != struct.pack("!d", right):
+                return False
+            continue
+        if isinstance(left, complex):
+            assert isinstance(right, complex)
+            if (
+                struct.pack("!d", left.real) != struct.pack("!d", right.real)
+                or struct.pack("!d", left.imag) != struct.pack("!d", right.imag)
+            ):
+                return False
+            continue
+        if type(left) is str:
+            assert type(right) is str
+            if left != right or (
+                _runtime_marshaled_string_interned(left)
+                != _runtime_marshaled_string_interned(right)
+            ):
+                return False
+            continue
+        if type(left) in {type(None), bool, int, bytes, type(Ellipsis)}:
+            if left != right:
+                return False
+            continue
+        return False
+
+    return True
+
+
 def _verify_runtime_bytecode_caches(
     repo_root: Path,
     inventory: EvalRuntimeInventory,
     source_snapshots: dict[str, FileSnapshot],
+    *,
+    max_cache_bytes: int = MAX_EVAL_RUNTIME_BYTES,
+    retained_cache_snapshots: dict[str, FileSnapshot] | None = None,
 ) -> int:
+    if type(max_cache_bytes) is not int or max_cache_bytes < 0:
+        _fail(
+            "evaluator runtime cache budget must be an exact nonnegative integer"
+        )
+    if retained_cache_snapshots is not None and (
+        type(retained_cache_snapshots) is not dict
+        or retained_cache_snapshots
+    ):
+        _fail("retained evaluator cache snapshot map must be an empty built-in dict")
     total_bytes = 0
+    prepared: list[tuple[str, bytes, bytes]] = []
     for cache_path in inventory.bytecode_caches:
         source_path, optimization = _runtime_cache_source_and_optimization(cache_path)
         source_snapshot = source_snapshots.get(source_path)
@@ -673,9 +1523,18 @@ def _verify_runtime_bytecode_caches(
                 "evaluator runtime bytecode cache lacks its retained source: "
                 f"{cache_path}"
             )
+        remaining_cache_bytes = max_cache_bytes - total_bytes
         cache_snapshot = _snapshot_file(
-            repo_root, cache_path, "evaluator runtime bytecode cache"
+            repo_root,
+            cache_path,
+            "evaluator runtime bytecode cache",
+            max_size_bytes=min(
+                AUTHORITY_SNAPSHOT_MAX_SIZE_BYTES,
+                remaining_cache_bytes,
+            ),
         )
+        if retained_cache_snapshots is not None:
+            retained_cache_snapshots[cache_path] = cache_snapshot
         total_bytes += len(cache_snapshot.data)
         data = cache_snapshot.data
         if len(data) < 16 or data[:4] != importlib.util.MAGIC_NUMBER:
@@ -689,15 +1548,121 @@ def _verify_runtime_bytecode_caches(
                 "evaluator runtime bytecode cache flags are invalid: "
                 f"{cache_path}"
             )
-        expected_payload = _compiled_runtime_source_payload(
-            repo_root, source_path, source_snapshot, optimization
+        try:
+            expected_payload = _compiled_runtime_source_payload(
+                repo_root, source_path, source_snapshot, optimization
+            )
+            observed_payload = data[16:]
+            _preflight_runtime_marshal_payload(observed_payload)
+        except MemoryError as exc:
+            _fail(
+                "evaluator_runtime_bytecode_resource_unavailable: "
+                f"{cache_path}: {type(exc).__name__}: {exc}"
+            )
+        except (EOFError, OverflowError, TypeError, ValueError) as exc:
+            _fail(
+                "evaluator runtime bytecode payload is invalid: "
+                f"{cache_path}: {type(exc).__name__}: {exc}"
+            )
+        observed_localsplus = (
+            _runtime_marshaled_localsplus_payload_projections(observed_payload)
         )
-        if data[16:] != expected_payload:
+        expected_localsplus = (
+            _runtime_marshaled_localsplus_payload_projections(expected_payload)
+        )
+        if (
+            observed_localsplus is None
+            or expected_localsplus is None
+            or observed_localsplus != expected_localsplus
+        ):
+            _fail(
+                "evaluator runtime bytecode differs from its retained source: "
+                f"{cache_path}"
+            )
+        prepared.append((cache_path, observed_payload, expected_payload))
+
+    # Compile every expected graph before decoding any observed cache. CPython's
+    # marshal loader retains process-global interning/reference state, so mixing
+    # observed decoding with later compilation makes equivalent optimization
+    # caches compare against different runtime states.
+    for cache_path, observed_payload, expected_payload in prepared:
+        try:
+            observed_stream = io.BytesIO(observed_payload)
+            observed_code = marshal.load(observed_stream)
+            if observed_stream.read(1) != b"":
+                _fail(
+                    "evaluator runtime bytecode payload has trailing bytes: "
+                    f"{cache_path}"
+                )
+            expected_code = marshal.loads(expected_payload)
+        except MemoryError as exc:
+            _fail(
+                "evaluator_runtime_bytecode_resource_unavailable: "
+                f"{cache_path}: {type(exc).__name__}: {exc}"
+            )
+        except (EOFError, OverflowError, TypeError, ValueError) as exc:
+            _fail(
+                "evaluator runtime bytecode payload is invalid: "
+                f"{cache_path}: {type(exc).__name__}: {exc}"
+            )
+        if not isinstance(expected_code, CodeType):
+            _fail("trusted evaluator runtime compilation did not produce code")
+        try:
+            code_matches = _runtime_code_matches_source(observed_code, expected_code)
+        except MemoryError as exc:
+            _fail(
+                "evaluator_runtime_bytecode_resource_unavailable: "
+                f"{cache_path}: {type(exc).__name__}: {exc}"
+            )
+        if not code_matches:
             _fail(
                 "evaluator runtime bytecode differs from its retained source: "
                 f"{cache_path}"
             )
     return total_bytes
+
+
+def _verify_runtime_snapshots_unchanged(
+    repo_root: Path,
+    inventory: EvalRuntimeInventory,
+    source_snapshots: dict[str, FileSnapshot],
+    cache_snapshots: dict[str, FileSnapshot],
+) -> None:
+    expected_sources = set(inventory.sources)
+    expected_caches = set(inventory.bytecode_caches)
+    if not expected_sources.issubset(source_snapshots):
+        _fail("retained evaluator runtime source snapshot set is incomplete")
+    if set(cache_snapshots) != expected_caches:
+        _fail("retained evaluator runtime cache snapshot set is incomplete")
+
+    retained = {
+        path: source_snapshots[path] for path in expected_sources
+    }
+    retained.update(cache_snapshots)
+    for path in sorted(retained):
+        before = retained[path]
+        try:
+            after = _snapshot_file(
+                repo_root,
+                path,
+                "terminal evaluator runtime authentication",
+                max_size_bytes=len(before.data),
+            )
+        except RegistryViolation as exc:
+            _fail(
+                "evaluator runtime source/cache changed during bytecode "
+                f"authentication: {path}: {exc}"
+            )
+        if (
+            after.relative_path != before.relative_path
+            or after.identity != before.identity
+            or after.sha256 != before.sha256
+            or after.data != before.data
+        ):
+            _fail(
+                "evaluator runtime source/cache changed during bytecode "
+                f"authentication: {path}"
+            )
 
 
 def _load_registry_document(
@@ -872,12 +1837,25 @@ def _validate_registry(repo_root: Path = REPO_ROOT) -> ValidatedRegistry:
                 f"{path}; expected {expected}, got {snapshot.sha256}"
             )
         snapshots[path] = snapshot
+    runtime_source_bytes = sum(
+        len(snapshots[path].data) for path in runtime_sources
+    )
+    _require_inventory_bounds(
+        "eval_runtime_inventory",
+        file_count=len(runtime_sources) + len(runtime_inventory.bytecode_caches),
+        total_bytes=runtime_source_bytes,
+        max_files=MAX_EVAL_RUNTIME_FILES,
+        max_bytes=MAX_EVAL_RUNTIME_BYTES,
+    )
+    retained_cache_snapshots: dict[str, FileSnapshot] = {}
     cache_bytes = _verify_runtime_bytecode_caches(
-        repo_root, runtime_inventory, snapshots
+        repo_root,
+        runtime_inventory,
+        snapshots,
+        max_cache_bytes=MAX_EVAL_RUNTIME_BYTES - runtime_source_bytes,
+        retained_cache_snapshots=retained_cache_snapshots,
     )
-    runtime_bytes = (
-        sum(len(snapshots[path].data) for path in runtime_sources) + cache_bytes
-    )
+    runtime_bytes = runtime_source_bytes + cache_bytes
     _require_inventory_bounds(
         "eval_runtime_inventory",
         file_count=len(runtime_sources) + len(runtime_inventory.bytecode_caches),
@@ -886,6 +1864,18 @@ def _validate_registry(repo_root: Path = REPO_ROOT) -> ValidatedRegistry:
         max_bytes=MAX_EVAL_RUNTIME_BYTES,
     )
     _verify_blocked_package_inventory(repo_root)
+    final_runtime_inventory = _eval_runtime_source_inventory(repo_root)
+    if final_runtime_inventory != runtime_inventory:
+        _fail(
+            "evaluator runtime inventory changed during bytecode authentication: "
+            f"before={runtime_inventory!r}; after={final_runtime_inventory!r}"
+        )
+    _verify_runtime_snapshots_unchanged(
+        repo_root,
+        runtime_inventory,
+        snapshots,
+        retained_cache_snapshots,
+    )
     return ValidatedRegistry(
         document,
         rows,
@@ -2420,6 +3410,98 @@ def test_registry_schema_hashes_and_classifications_are_closed() -> None:
     }
 
 
+def test_registry_rewalk_rejects_terminal_runtime_cache_inventory_drift(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    real_inventory = _eval_runtime_source_inventory
+    inventory_calls = 0
+    cache_tag = sys.implementation.cache_tag
+    assert type(cache_tag) is str
+    planted = f"eval/__pycache__/late.{cache_tag}.pyc"
+
+    def inventory_with_terminal_drift(repo_root: Path) -> EvalRuntimeInventory:
+        nonlocal inventory_calls
+        inventory_calls += 1
+        inventory = real_inventory(repo_root)
+        if inventory_calls == 1:
+            return inventory
+        return EvalRuntimeInventory(
+            inventory.sources,
+            tuple(sorted((*inventory.bytecode_caches, planted))),
+        )
+
+    monkeypatch.setattr(
+        sys.modules[__name__],
+        "_eval_runtime_source_inventory",
+        inventory_with_terminal_drift,
+    )
+
+    with pytest.raises(
+        RegistryViolation,
+        match="runtime inventory changed during bytecode authentication",
+    ):
+        _validate_registry()
+
+    assert inventory_calls == 2
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ("same_bytes_replacement", "same_inode_content_drift"),
+)
+def test_terminal_runtime_snapshot_rejects_same_path_cache_drift(
+    tmp_path: Path,
+    mutation: str,
+) -> None:
+    source_relative = "eval/benign.py"
+    cache_tag = sys.implementation.cache_tag
+    assert type(cache_tag) is str
+    cache_relative = f"eval/__pycache__/benign.{cache_tag}.pyc"
+    source_path = tmp_path / source_relative
+    cache_path = tmp_path / cache_relative
+    source_path.parent.mkdir(parents=True)
+    cache_path.parent.mkdir(parents=True)
+    source_path.write_bytes(b"value = 1\n")
+    cache_bytes = b"authenticated-cache-bytes"
+    cache_path.write_bytes(cache_bytes)
+    source_snapshot = _snapshot_file(
+        tmp_path,
+        source_relative,
+        "terminal source fixture",
+    )
+    cache_snapshot = _snapshot_file(
+        tmp_path,
+        cache_relative,
+        "terminal cache fixture",
+    )
+    inventory = EvalRuntimeInventory(
+        frozenset({source_relative}),
+        (cache_relative,),
+    )
+
+    if mutation == "same_bytes_replacement":
+        replacement = cache_path.with_name(".cache-replacement")
+        replacement.write_bytes(cache_bytes)
+        os.replace(replacement, cache_path)
+        assert cache_path.stat().st_ino != cache_snapshot.identity[1]
+    else:
+        before_inode = cache_path.stat().st_ino
+        cache_path.write_bytes(b"X" * len(cache_bytes))
+        assert len(cache_path.read_bytes()) == len(cache_bytes)
+        assert cache_path.stat().st_ino == before_inode
+
+    with pytest.raises(
+        RegistryViolation,
+        match="runtime source/cache changed during bytecode authentication",
+    ):
+        _verify_runtime_snapshots_unchanged(
+            tmp_path,
+            inventory,
+            {source_relative: source_snapshot},
+            {cache_relative: cache_snapshot},
+        )
+
+
 def test_production_evaluator_transitive_import_graph_is_closed() -> None:
     validated = _validate_registry()
     visited, edges = _build_import_graph(
@@ -3556,7 +4638,10 @@ def test_classification_registry_rejects_container_subclasses_without_callbacks(
 def test_strict_registry_json_rejects_nonfinite_number() -> None:
     data = b'{"value":NaN}\n'
     snapshot = FileSnapshot(
-        "fixture.json", data, hashlib.sha256(data).hexdigest()
+        "fixture.json",
+        data,
+        hashlib.sha256(data).hexdigest(),
+        (0, 0, 0, 0, 0, 0, len(data), 0, 0),
     )
 
     with pytest.raises(RegistryViolation, match="non-finite JSON constant"):
@@ -3937,6 +5022,23 @@ def test_eval_runtime_inventory_authenticates_bytecode_cache(
         tmp_path, inventory, {"eval/benign.py": source_snapshot}
     ) == cache_size
 
+    expected_code = marshal.loads(benign_payload)
+    assert isinstance(expected_code, CodeType)
+    round_tripped_code = marshal.loads(marshal.dumps(expected_code))
+    assert _runtime_code_matches_source(round_tripped_code, expected_code)
+    wrong_filename_code = _TRUSTED_COMPILE(
+        source_text,
+        str(tmp_path / "elsewhere.py"),
+        "exec",
+        flags=0,
+        dont_inherit=True,
+        optimize=0,
+    )
+    assert not _runtime_code_matches_source(
+        wrong_filename_code,
+        expected_code,
+    )
+
     malicious_code = _TRUSTED_COMPILE(
         "PLANTED = True\n",
         str(source_path),
@@ -3956,6 +5058,552 @@ def test_eval_runtime_inventory_authenticates_bytecode_cache(
         )
 
 
+def test_runtime_cache_rejects_hidden_localsplus_alias_topology(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    eval_root = tmp_path / "eval"
+    cache_root = eval_root / "__pycache__"
+    cache_root.mkdir(parents=True)
+    source_path = eval_root / "alias.py"
+    source_path.write_text("pass\n", encoding="utf-8")
+    source_snapshot = _snapshot_file(
+        tmp_path, "eval/alias.py", "retained runtime source"
+    )
+
+    root = _TRUSTED_COMPILE(
+        "def f(x, y):\n    return x, y\n",
+        "<runtime-hidden-alias>",
+        "exec",
+        flags=0,
+        dont_inherit=True,
+        optimize=0,
+    )
+    function = next(
+        value for value in root.co_consts if isinstance(value, CodeType)
+    )
+    expected = function.replace(co_code=bytes(bytearray(b"  ")))
+    expected_payload = marshal.dumps(expected)
+    altered_payload = bytearray(expected_payload)
+    direct_kinds = b"s\x02\x00\x00\x00  "
+    assert altered_payload.count(direct_kinds) == 1
+    kinds_offset = altered_payload.index(direct_kinds)
+    altered_payload[kinds_offset : kinds_offset + len(direct_kinds)] = (
+        b"r" + (1).to_bytes(4, "little")
+    )
+    altered_payload_bytes = bytes(altered_payload)
+
+    expected_projection = _runtime_marshaled_localsplus_payload_projections(
+        expected_payload
+    )
+    altered_projection = _runtime_marshaled_localsplus_payload_projections(
+        altered_payload_bytes
+    )
+    assert expected_projection is not None
+    assert altered_projection is not None
+    assert expected_projection != altered_projection
+    altered_code = marshal.loads(altered_payload_bytes)
+    assert isinstance(altered_code, CodeType)
+    assert _runtime_code_matches_source(altered_code, expected)
+
+    cache_tag = sys.implementation.cache_tag
+    assert type(cache_tag) is str
+    cache_path = cache_root / f"alias.{cache_tag}.pyc"
+    header = importlib.util.MAGIC_NUMBER + (0).to_bytes(4, "little") + b"\0" * 8
+    cache_path.write_bytes(header + altered_payload_bytes)
+    inventory = _eval_runtime_source_inventory(tmp_path)
+    monkeypatch.setattr(
+        sys.modules[__name__],
+        "_compiled_runtime_source_payload",
+        lambda *_args, **_kwargs: expected_payload,
+    )
+
+    with pytest.raises(
+        RegistryViolation,
+        match="differs from its retained source",
+    ):
+        _verify_runtime_bytecode_caches(
+            tmp_path,
+            inventory,
+            {"eval/alias.py": source_snapshot},
+        )
+
+
+def test_runtime_code_authentication_rejects_split_local_cell_slots(
+    tmp_path: Path,
+) -> None:
+    eval_root = tmp_path / "eval"
+    cache_root = eval_root / "__pycache__"
+    cache_root.mkdir(parents=True)
+    source_path = eval_root / "closure.py"
+    source_text = (
+        "def outer(x):\n"
+        "    def inner():\n"
+        "        return x\n"
+        "    return inner\n"
+    )
+    source_path.write_text(source_text, encoding="utf-8")
+    source_snapshot = _snapshot_file(
+        tmp_path, "eval/closure.py", "retained runtime source"
+    )
+    expected_payload = _compiled_runtime_source_payload(
+        tmp_path,
+        "eval/closure.py",
+        source_snapshot,
+        0,
+    )
+    expected_root = marshal.loads(expected_payload)
+    assert isinstance(expected_root, CodeType)
+    expected_outer = next(
+        item
+        for item in expected_root.co_consts
+        if isinstance(item, CodeType) and item.co_name == "outer"
+    )
+
+    outer_payload = bytearray(marshal.dumps(expected_outer))
+    kinds_marker = b"s" + (2).to_bytes(4, "little", signed=True) + b"\x60\x20"
+    kinds_offset = outer_payload.index(kinds_marker)
+    names_offset = kinds_offset - 12
+    assert outer_payload[names_offset : names_offset + 2] == b")\x02"
+    first_name_reference = bytes(
+        outer_payload[names_offset + 2 : names_offset + 7]
+    )
+    assert first_name_reference[0] & 0x7F == ord("r")
+    outer_payload[names_offset + 1] = 3
+    outer_payload[kinds_offset:kinds_offset] = first_name_reference
+    kinds_offset += len(first_name_reference)
+    outer_payload[kinds_offset : kinds_offset + len(kinds_marker)] = (
+        b"s"
+        + (3).to_bytes(4, "little", signed=True)
+        + b"\x20\x20\x40"
+    )
+    altered_outer = marshal.loads(outer_payload)
+    assert isinstance(altered_outer, CodeType)
+    assert altered_outer.co_code == expected_outer.co_code
+    assert altered_outer.co_nlocals == expected_outer.co_nlocals
+    assert altered_outer.co_varnames == expected_outer.co_varnames
+    assert altered_outer.co_cellvars == expected_outer.co_cellvars
+    assert altered_outer.co_freevars == expected_outer.co_freevars
+    assert not _runtime_code_matches_source(altered_outer, expected_outer)
+
+    altered_root = expected_root.replace(
+        co_consts=tuple(
+            altered_outer if item is expected_outer else item
+            for item in expected_root.co_consts
+        )
+    )
+    cache_tag = sys.implementation.cache_tag
+    assert type(cache_tag) is str
+    cache_path = cache_root / f"closure.{cache_tag}.pyc"
+    header = importlib.util.MAGIC_NUMBER + (0).to_bytes(4, "little") + b"\0" * 8
+    cache_path.write_bytes(header + marshal.dumps(altered_root))
+    inventory = _eval_runtime_source_inventory(tmp_path)
+
+    with pytest.raises(
+        RegistryViolation,
+        match="differs from its retained source",
+    ):
+        _verify_runtime_bytecode_caches(
+            tmp_path,
+            inventory,
+            {"eval/closure.py": source_snapshot},
+        )
+
+
+def test_eval_runtime_inventory_accepts_coexisting_optimization_caches(
+    tmp_path: Path,
+) -> None:
+    eval_root = tmp_path / "eval"
+    cache_root = eval_root / "__pycache__"
+    cache_root.mkdir(parents=True)
+    source_path = eval_root / "bench.py"
+    source_path.write_bytes((REPO_ROOT / "eval/bench.py").read_bytes())
+    cache_tag = sys.implementation.cache_tag
+    assert type(cache_tag) is str
+    cache_paths = [
+        cache_root / f"bench.{cache_tag}.opt-{optimization}.pyc"
+        for optimization in (1, 2)
+    ]
+    for optimization, cache_path in zip((1, 2), cache_paths, strict=True):
+        py_compile.compile(
+            str(source_path),
+            cfile=str(cache_path),
+            dfile=str(source_path),
+            doraise=True,
+            optimize=optimization,
+        )
+
+    source_snapshot = _snapshot_file(
+        tmp_path, "eval/bench.py", "retained runtime source"
+    )
+    inventory = _eval_runtime_source_inventory(tmp_path)
+
+    assert _verify_runtime_bytecode_caches(
+        tmp_path,
+        inventory,
+        {"eval/bench.py": source_snapshot},
+    ) == sum(path.stat().st_size for path in cache_paths)
+
+
+def test_runtime_code_authentication_preserves_reference_topology() -> None:
+    base = _TRUSTED_COMPILE(
+        "pass\n",
+        "<runtime-code-topology>",
+        "exec",
+        flags=0,
+        dont_inherit=True,
+        optimize=0,
+    )
+    expected_shared = tuple(["shared"])
+    observed_left = tuple(["shared"])
+    observed_right = tuple(["shared"])
+    assert observed_left is not observed_right
+    expected = base.replace(co_consts=(expected_shared, expected_shared))
+    round_tripped = marshal.loads(marshal.dumps(expected))
+    assert isinstance(round_tripped, CodeType)
+    assert _runtime_code_matches_source(round_tripped, expected)
+    observed = base.replace(co_consts=(observed_left, observed_right))
+
+    assert not _runtime_code_matches_source(observed, expected)
+
+    expected_left = tuple(["shared"])
+    expected_right = tuple(["shared"])
+    assert expected_left is not expected_right
+    expected = base.replace(co_consts=(expected_left, expected_right))
+    observed_shared = tuple(["shared"])
+    observed = base.replace(co_consts=(observed_shared, observed_shared))
+
+    assert not _runtime_code_matches_source(observed, expected)
+
+
+def test_runtime_code_authentication_preserves_frozenset_iteration_layout() -> None:
+    base = _TRUSTED_COMPILE(
+        "pass\n",
+        "<runtime-code-frozenset>",
+        "exec",
+        flags=0,
+        dont_inherit=True,
+        optimize=0,
+    )
+    expected_constant = frozenset((0, 8, 16, 24, 32, 40))
+    observed_constant = frozenset((0, 16, 8, 24, 40, 32))
+    assert expected_constant == observed_constant
+    assert tuple(expected_constant) != tuple(observed_constant)
+    expected = base.replace(co_consts=(expected_constant,))
+    round_tripped = marshal.loads(marshal.dumps(expected))
+    assert isinstance(round_tripped, CodeType)
+    assert _runtime_code_matches_source(round_tripped, expected)
+    observed = base.replace(co_consts=(observed_constant,))
+
+    assert not _runtime_code_matches_source(observed, expected)
+
+
+def test_runtime_code_authentication_accepts_exact_nan_frozensets() -> None:
+    base = _TRUSTED_COMPILE(
+        "pass\n",
+        "<runtime-code-nan-frozenset>",
+        "exec",
+        flags=0,
+        dont_inherit=True,
+        optimize=0,
+    )
+    nan_values = tuple(
+        struct.unpack("!d", bytes.fromhex(bits))[0]
+        for bits in (
+            "7ff8000000000001",
+            "7ff8000000000002",
+            "fff8000000000001",
+            "7ff8000000000001",
+        )
+    )
+    expected = base.replace(
+        co_consts=(frozenset((0, 8, 16, *nan_values)),)
+    )
+    payload = marshal.dumps(expected)
+    loaded = [marshal.loads(payload) for _ in range(64)]
+    assert all(isinstance(item, CodeType) for item in loaded)
+
+    def layout(code: CodeType) -> tuple[object, ...]:
+        constant = code.co_consts[0]
+        assert isinstance(constant, frozenset)
+        return tuple(
+            ("float", struct.pack("!d", item))
+            if isinstance(item, float)
+            else item
+            for item in constant
+        )
+
+    pair = next(
+        (
+            (left, right)
+            for left in loaded
+            for right in loaded
+            if layout(left) != layout(right)
+        ),
+        None,
+    )
+    assert pair is not None
+    assert _runtime_code_matches_source(*pair)
+
+    changed_nan = struct.unpack(
+        "!d", bytes.fromhex("7ff8000000000003")
+    )[0]
+    changed = base.replace(
+        co_consts=(frozenset((0, 8, 16, *nan_values[:-1], changed_nan)),)
+    )
+    assert not _runtime_code_matches_source(changed, pair[1])
+
+
+@pytest.mark.parametrize(
+    "source_text",
+    (
+        "X = y in {1e1000 - 1e1000, 0, 1, 2}\n",
+        "X = y in {(1e1000 - 1e1000,), (1,), (2,), (3,)}\n",
+    ),
+)
+def test_runtime_code_authentication_accepts_recursive_nan_hash_layouts(
+    source_text: str,
+) -> None:
+    payload = marshal.dumps(
+        _TRUSTED_COMPILE(
+            source_text,
+            "<runtime-code-recursive-nan-frozenset>",
+            "exec",
+            flags=0,
+            dont_inherit=True,
+            optimize=0,
+        )
+    )
+    loaded = [marshal.loads(payload) for _ in range(64)]
+    assert all(isinstance(item, CodeType) for item in loaded)
+
+    def layout(code: CodeType) -> tuple[str, ...]:
+        constant = next(
+            value for value in code.co_consts if isinstance(value, frozenset)
+        )
+        return tuple(repr(item) for item in constant)
+
+    pair = next(
+        (
+            (left, right)
+            for left in loaded
+            for right in loaded
+            if layout(left) != layout(right)
+        ),
+        None,
+    )
+    assert pair is not None
+    assert _runtime_code_matches_source(*pair)
+
+
+def test_runtime_code_authentication_accepts_lone_surrogate_constant() -> None:
+    expected = _TRUSTED_COMPILE(
+        "X = y in {'\\ud800', 'a'}\n",
+        "<runtime-code-surrogate-frozenset>",
+        "exec",
+        flags=0,
+        dont_inherit=True,
+        optimize=0,
+    )
+    observed = marshal.loads(marshal.dumps(expected))
+    assert isinstance(observed, CodeType)
+    assert any(
+        isinstance(value, frozenset) and "\ud800" in value
+        for value in expected.co_consts
+    )
+
+    assert _runtime_code_matches_source(observed, expected)
+
+
+def test_runtime_code_authentication_preserves_string_interning() -> None:
+    base = _TRUSTED_COMPILE(
+        "pass\n",
+        "<runtime-code-string-interning>",
+        "exec",
+        flags=0,
+        dont_inherit=True,
+        optimize=0,
+    )
+    value = "runtime bytecode interning fixture value"
+    noninterned = (" " + value)[1:]
+    interned = sys.intern(value)
+    assert noninterned == interned
+    assert noninterned is not interned
+    assert not _runtime_marshaled_string_interned(noninterned)
+    assert _runtime_marshaled_string_interned(interned)
+    expected = base.replace(co_consts=(noninterned,))
+    round_tripped = marshal.loads(marshal.dumps(expected))
+    assert isinstance(round_tripped, CodeType)
+
+    assert _runtime_code_matches_source(round_tripped, expected)
+    assert not _runtime_code_matches_source(
+        base.replace(co_consts=(interned,)),
+        expected,
+    )
+
+
+def test_eval_runtime_inventory_rejects_marshaled_string_interning_change(
+    tmp_path: Path,
+) -> None:
+    eval_root = tmp_path / "eval"
+    cache_root = eval_root / "__pycache__"
+    cache_root.mkdir(parents=True)
+    value = "runtime bytecode interning fixture value"
+    source_path = eval_root / "benign.py"
+    source_path.write_text(f"VALUE = {value!r}\n", encoding="utf-8")
+    source_snapshot = _snapshot_file(
+        tmp_path, "eval/benign.py", "retained runtime source"
+    )
+    payload = _compiled_runtime_source_payload(
+        tmp_path,
+        "eval/benign.py",
+        source_snapshot,
+        0,
+    )
+    encoded = value.encode("ascii")
+    value_offset = payload.index(encoded)
+    tag_offset = value_offset - 2
+    assert payload[tag_offset] & 0x7F == ord("z")
+    assert payload[tag_offset + 1] == len(encoded)
+    changed_payload = bytearray(payload)
+    changed_payload[tag_offset] = (
+        changed_payload[tag_offset] & 0x80
+    ) | ord("Z")
+    expected_code = marshal.loads(payload)
+    observed_code = marshal.loads(changed_payload)
+    assert isinstance(expected_code, CodeType)
+    assert isinstance(observed_code, CodeType)
+    assert expected_code.co_consts == observed_code.co_consts
+    assert not _runtime_code_matches_source(observed_code, expected_code)
+
+    cache_tag = sys.implementation.cache_tag
+    assert type(cache_tag) is str
+    cache_path = cache_root / f"benign.{cache_tag}.pyc"
+    header = importlib.util.MAGIC_NUMBER + (0).to_bytes(4, "little") + b"\0" * 8
+    cache_path.write_bytes(header + changed_payload)
+    inventory = _eval_runtime_source_inventory(tmp_path)
+
+    with pytest.raises(
+        RegistryViolation,
+        match="differs from its retained source",
+    ):
+        _verify_runtime_bytecode_caches(
+            tmp_path,
+            inventory,
+            {"eval/benign.py": source_snapshot},
+        )
+
+
+def test_runtime_code_authentication_accepts_deep_exact_graph() -> None:
+    base = _TRUSTED_COMPILE(
+        "pass\n",
+        "<runtime-code-depth>",
+        "exec",
+        flags=0,
+        dont_inherit=True,
+        optimize=0,
+    )
+    expected_constant: object = None
+    observed_constant: object = None
+    for _ in range(512):
+        expected_constant = (expected_constant,)
+        observed_constant = (observed_constant,)
+    expected = base.replace(co_consts=(expected_constant,))
+    observed = base.replace(co_consts=(observed_constant,))
+
+    assert _runtime_code_matches_source(observed, expected)
+
+
+def test_runtime_code_authentication_enforces_graph_bound(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    base = _TRUSTED_COMPILE(
+        "pass\n",
+        "<runtime-code-bound>",
+        "exec",
+        flags=0,
+        dont_inherit=True,
+        optimize=0,
+    )
+    monkeypatch.setattr(sys.modules[__name__], "MAX_RUNTIME_CODE_GRAPH_NODES", 1)
+
+    assert not _runtime_code_matches_source(base, base)
+
+
+def test_eval_runtime_inventory_types_marshal_allocation_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    eval_root = tmp_path / "eval"
+    cache_root = eval_root / "__pycache__"
+    cache_root.mkdir(parents=True)
+    source_path = eval_root / "benign.py"
+    source_path.write_text("VALUE = 1\n", encoding="utf-8")
+    cache_tag = sys.implementation.cache_tag
+    assert type(cache_tag) is str
+    cache_path = cache_root / f"benign.{cache_tag}.pyc"
+    source_snapshot = _snapshot_file(
+        tmp_path, "eval/benign.py", "retained runtime source"
+    )
+    payload = _compiled_runtime_source_payload(
+        tmp_path, "eval/benign.py", source_snapshot, 0
+    )
+    header = importlib.util.MAGIC_NUMBER + (0).to_bytes(4, "little") + b"\0" * 8
+    cache_path.write_bytes(header + payload)
+    inventory = _eval_runtime_source_inventory(tmp_path)
+
+    def fail_load(_stream: object) -> NoReturn:
+        raise MemoryError("fixture allocation refusal")
+
+    monkeypatch.setattr(marshal, "load", fail_load)
+
+    with pytest.raises(
+        RegistryViolation,
+        match="evaluator_runtime_bytecode_resource_unavailable.*MemoryError",
+    ):
+        _verify_runtime_bytecode_caches(
+            tmp_path, inventory, {"eval/benign.py": source_snapshot}
+        )
+
+
+def test_eval_runtime_inventory_preflights_marshal_container_allocation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    eval_root = tmp_path / "eval"
+    cache_root = eval_root / "__pycache__"
+    cache_root.mkdir(parents=True)
+    source_path = eval_root / "benign.py"
+    source_path.write_text("VALUE = 1\n", encoding="utf-8")
+    cache_tag = sys.implementation.cache_tag
+    assert type(cache_tag) is str
+    cache_path = cache_root / f"benign.{cache_tag}.pyc"
+    source_snapshot = _snapshot_file(
+        tmp_path, "eval/benign.py", "retained runtime source"
+    )
+    header = importlib.util.MAGIC_NUMBER + (0).to_bytes(4, "little") + b"\0" * 8
+    cache_path.write_bytes(
+        header + b"(" + struct.pack("<i", 0x7FFFFFFF)
+    )
+    inventory = _eval_runtime_source_inventory(tmp_path)
+
+    def reject_load(_stream: object) -> NoReturn:
+        raise AssertionError("marshal.load ran before bounded preflight")
+
+    monkeypatch.setattr(marshal, "load", reject_load)
+
+    with pytest.raises(
+        RegistryViolation,
+        match=(
+            "evaluator_runtime_bytecode_resource_unavailable.*"
+            "bounded graph limit"
+        ),
+    ):
+        _verify_runtime_bytecode_caches(
+            tmp_path, inventory, {"eval/benign.py": source_snapshot}
+        )
+
+
 def test_eval_runtime_inventory_enforces_aggregate_file_bound(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -3966,6 +5614,73 @@ def test_eval_runtime_inventory_enforces_aggregate_file_bound(
 
     with pytest.raises(RegistryViolation, match="eval_runtime_inventory_file_limit"):
         _eval_runtime_source_inventory(tmp_path)
+
+
+def test_eval_runtime_inventory_bounds_directory_entries_while_scanning(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    eval_root = tmp_path / "eval"
+    eval_root.mkdir()
+    (eval_root / "one.data").write_bytes(b"one")
+    (eval_root / "two.data").write_bytes(b"two")
+    monkeypatch.setattr(
+        sys.modules[__name__], "MAX_EVAL_RUNTIME_ENTRIES", 1
+    )
+
+    with pytest.raises(
+        RegistryViolation,
+        match="directory_entry_limit_exceeded",
+    ):
+        _eval_runtime_source_inventory(tmp_path)
+
+
+def test_runtime_cache_aggregate_budget_precedes_payload_preflight(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    eval_root = tmp_path / "eval"
+    cache_root = eval_root / "__pycache__"
+    cache_root.mkdir(parents=True)
+    source_path = eval_root / "benign.py"
+    source_path.write_text("VALUE = 1\n", encoding="utf-8")
+    source_snapshot = _snapshot_file(
+        tmp_path, "eval/benign.py", "retained runtime source"
+    )
+    payload = _compiled_runtime_source_payload(
+        tmp_path, "eval/benign.py", source_snapshot, 0
+    )
+    cache_tag = sys.implementation.cache_tag
+    assert type(cache_tag) is str
+    cache_path = cache_root / f"benign.{cache_tag}.pyc"
+    header = importlib.util.MAGIC_NUMBER + (0).to_bytes(4, "little") + b"\0" * 8
+    cache_path.write_bytes(header + payload)
+    inventory = _eval_runtime_source_inventory(tmp_path)
+    preflight_calls = 0
+
+    def reject_preflight(_payload: bytes) -> NoReturn:
+        nonlocal preflight_calls
+        preflight_calls += 1
+        raise AssertionError("over-budget cache reached marshal preflight")
+
+    monkeypatch.setattr(
+        sys.modules[__name__],
+        "_preflight_runtime_marshal_payload",
+        reject_preflight,
+    )
+
+    with pytest.raises(
+        RegistryViolation,
+        match="authority_snapshot_size_limit_exceeded",
+    ):
+        _verify_runtime_bytecode_caches(
+            tmp_path,
+            inventory,
+            {"eval/benign.py": source_snapshot},
+            max_cache_bytes=cache_path.stat().st_size - 1,
+        )
+
+    assert preflight_calls == 0
 
 
 def test_sim_inventory_enforces_aggregate_byte_bound(

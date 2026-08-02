@@ -35,6 +35,13 @@
   },
   "classifications": [
     {
+      "classification": "non_evaluator",
+      "import_policy": "deny",
+      "path": "eval/bench.py",
+      "review_status": "reviewed",
+      "sha256": "2e3513cc48e9b08095be241afcc9f8af41267ec6244d072c30a3886b97e18ba6"
+    },
+    {
       "classification": "evaluator_contract",
       "import_policy": "deny",
       "path": "eval/contracts/__init__.py",
