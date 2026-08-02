@@ -1396,8 +1396,28 @@ pub fn admit_launch_evidence(
         })
     })?;
     let reader = AnchoredDir::open(&base)?;
-    let manifest_file =
-        reader.read_bounded_regular(Path::new(manifest_name), MAX_MANIFEST_BYTES)?;
+    admit_launch_evidence_anchored(&reader, Path::new(manifest_name))
+}
+
+/// Admit launch evidence relative to an already retained manifest-parent anchor.
+pub fn admit_launch_evidence_anchored(
+    reader: &AnchoredDir,
+    manifest_name: &Path,
+) -> Result<AdmittedLaunchEvidence, ManifestError> {
+    let mut components = manifest_name.components();
+    if !matches!(components.next(), Some(Component::Normal(_)))
+        || components.next().is_some()
+        || manifest_name.file_name() != Some(manifest_name.as_os_str())
+    {
+        return Err(ManifestError::Anchored(
+            sim_trace::AnchoredReadError::PathInvalid {
+                path: manifest_name.to_path_buf(),
+            },
+        ));
+    }
+    let base = reader.root().to_path_buf();
+    let manifest_path = base.join(manifest_name);
+    let manifest_file = reader.read_bounded_regular(manifest_name, MAX_MANIFEST_BYTES)?;
     let manifest_file_identity = manifest_file.identity();
     let manifest_raw = manifest_file.into_raw();
     let envelope: ManifestVersionEnvelope =

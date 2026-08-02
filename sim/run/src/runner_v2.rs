@@ -1,6 +1,7 @@
 //! Private strict-v2 production runner behind the public `run_manifest` entry point.
 
 use std::collections::BTreeSet;
+use std::ffi::OsStr;
 use std::fs::File;
 use std::io::Read;
 use std::os::unix::fs::MetadataExt;
@@ -8,12 +9,16 @@ use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 use sim_arch::{ArchId, Sku};
+#[cfg(test)]
+use sim_sm::admit_launch_evidence;
 use sim_sm::{
     AdmittedLaunchEvidence, FullLaunchSetDeclaration, KernelReplayOutcome,
-    ReplayLaunchCoverageBinding, TraceBundleIdentity, admit_launch_evidence,
+    ReplayLaunchCoverageBinding, TraceBundleIdentity, admit_launch_evidence_anchored,
     aggregate_full_launch_set, replay_kernel,
 };
-use sim_trace::{AnchoredDir, Sha256Digest, canonical_json_utf8};
+use sim_trace::{
+    AnchoredDir, AnchoredFile, FileIdentity, RetainedFile, Sha256Digest, canonical_json_utf8,
+};
 
 use crate::build_provenance;
 use crate::emit::{emit_all, emit_launch};
@@ -67,6 +72,164 @@ impl BuildContextV2 {
     }
 }
 
+/// The one retained run-manifest parent, leaf identity, and exact admitted bytes.
+struct RunManifestTransport {
+    display_path: PathBuf,
+    base: AnchoredDir,
+    manifest_name: PathBuf,
+    initial: AnchoredFile,
+    retained: Option<RetainedFile>,
+}
+
+impl RunManifestTransport {
+    fn from_path(path: &Path) -> Result<Self, RunError> {
+        require_canonical_manifest_path(path)?;
+        let base_path = manifest_base(path);
+        let manifest_name = path
+            .file_name()
+            .ok_or_else(|| manifest_rejected(path, "manifest path has no file name"))?;
+        let base = AnchoredDir::open(base_path.to_path_buf())
+            .map_err(|source| manifest_read_error(path, source))?;
+        let initial = base
+            .read_bounded_regular(Path::new(manifest_name), MAX_RUN_MANIFEST_BYTES)
+            .map_err(|source| manifest_read_error(path, source))?;
+        Ok(Self {
+            display_path: path.to_path_buf(),
+            base,
+            manifest_name: PathBuf::from(manifest_name),
+            initial,
+            retained: None,
+        })
+    }
+
+    fn from_retained(
+        manifest_fd: u32,
+        evidence_base_fd: u32,
+        manifest_name: &OsStr,
+    ) -> Result<Self, RunError> {
+        let manifest_name = PathBuf::from(manifest_name);
+        require_canonical_manifest_path(&manifest_name)?;
+        if manifest_name
+            .parent()
+            .is_some_and(|parent| !parent.as_os_str().is_empty())
+            || manifest_name.file_name() != Some(manifest_name.as_os_str())
+        {
+            return Err(manifest_rejected(
+                &manifest_name,
+                "retained MANIFEST_NAME must contain exactly one normal file-name component",
+            ));
+        }
+
+        let base_descriptor_path = PathBuf::from(format!("inherited-fd:{evidence_base_fd}"));
+        let display_path = base_descriptor_path.join(&manifest_name);
+        RetainedFile::validate_inherited(manifest_fd)
+            .map_err(|source| manifest_read_error(&display_path, source))?;
+        AnchoredDir::validate_inherited(evidence_base_fd)
+            .map_err(|source| manifest_read_error(&display_path, source))?;
+        let retained = RetainedFile::open(manifest_fd)
+            .map_err(|source| manifest_read_error(&display_path, source))?;
+        let base = AnchoredDir::open_retained(evidence_base_fd)
+            .map_err(|source| manifest_read_error(&display_path, source))?;
+        let initial = retained
+            .read_bounded_regular(MAX_RUN_MANIFEST_BYTES)
+            .map_err(|source| manifest_read_error(&display_path, source))?;
+        let named_identity = base
+            .inspect_regular_identity(&manifest_name)
+            .map_err(|source| manifest_read_error(&display_path, source))?;
+        Self::require_same_identity(
+            &display_path,
+            &initial,
+            named_identity,
+            "MANIFEST_FD and MANIFEST_NAME",
+        )?;
+        Ok(Self {
+            display_path,
+            base,
+            manifest_name,
+            initial,
+            retained: Some(retained),
+        })
+    }
+
+    fn require_same_snapshot(
+        path: &Path,
+        expected: &AnchoredFile,
+        actual: &AnchoredFile,
+        edge: &'static str,
+    ) -> Result<(), RunError> {
+        if actual.identity() != expected.identity() {
+            return Err(manifest_rejected(
+                path,
+                format!("{edge} device/inode identity mismatch"),
+            ));
+        }
+        if actual.raw() != expected.raw() {
+            return Err(manifest_rejected(
+                path,
+                format!("{edge} exact-byte mismatch"),
+            ));
+        }
+        Ok(())
+    }
+
+    fn require_same_identity(
+        path: &Path,
+        expected: &AnchoredFile,
+        actual: FileIdentity,
+        edge: &'static str,
+    ) -> Result<(), RunError> {
+        if actual != expected.identity() {
+            return Err(manifest_rejected(
+                path,
+                format!("{edge} device/inode identity mismatch"),
+            ));
+        }
+        Ok(())
+    }
+
+    fn recheck(&self) -> Result<(), RunError> {
+        if let Some(retained) = &self.retained {
+            let current = retained
+                .read_bounded_regular(MAX_RUN_MANIFEST_BYTES)
+                .map_err(|source| manifest_read_error(&self.display_path, source))?;
+            Self::require_same_snapshot(
+                &self.display_path,
+                &self.initial,
+                &current,
+                "retained MANIFEST_FD final recheck",
+            )?;
+            let named_identity = self
+                .base
+                .inspect_regular_identity(&self.manifest_name)
+                .map_err(|source| manifest_read_error(&self.display_path, source))?;
+            return Self::require_same_identity(
+                &self.display_path,
+                &self.initial,
+                named_identity,
+                "MANIFEST_NAME final recheck",
+            );
+        }
+        let named = self
+            .base
+            .read_bounded_regular(&self.manifest_name, MAX_RUN_MANIFEST_BYTES)
+            .map_err(|source| manifest_read_error(&self.display_path, source))?;
+        Self::require_same_snapshot(
+            &self.display_path,
+            &self.initial,
+            &named,
+            "MANIFEST_NAME final recheck",
+        )
+    }
+
+    fn path(&self) -> &Path {
+        &self.display_path
+    }
+
+    fn raw(&self) -> &[u8] {
+        self.initial.raw()
+    }
+}
+
 struct AdmittedEntryV2 {
     launch_key: LaunchKeyV1,
     binding: ReplayLaunchCoverageBinding,
@@ -97,21 +260,42 @@ struct ConfigurationIdPreimage {
     pchase_card_sha256: Sha256Digest,
 }
 
-/// Sole private strict-v2 integration entry used by the public consumer.
+/// Sole private strict-v2 integration entry used by the public path consumer.
 pub(super) fn run_manifest_v2(path: impl AsRef<Path>) -> Result<SimRunOutput, RunError> {
     let build_context = BuildContextV2::runtime()?;
     run_manifest_v2_with_context(path.as_ref(), &build_context)
+}
+
+/// Strict-v2 integration entry for the retained-descriptor transport.
+pub(super) fn run_manifest_v2_retained(
+    manifest_fd: u32,
+    evidence_base_fd: u32,
+    manifest_name: &OsStr,
+) -> Result<SimRunOutput, RunError> {
+    let build_context = BuildContextV2::runtime()?;
+    let transport =
+        RunManifestTransport::from_retained(manifest_fd, evidence_base_fd, manifest_name)?;
+    run_manifest_v2_with_transport(&transport, &build_context)
 }
 
 fn run_manifest_v2_with_context(
     path: &Path,
     build_context: &BuildContextV2,
 ) -> Result<SimRunOutput, RunError> {
+    let transport = RunManifestTransport::from_path(path)?;
+    run_manifest_v2_with_transport(&transport, build_context)
+}
+
+fn run_manifest_v2_with_transport(
+    transport: &RunManifestTransport,
+    build_context: &BuildContextV2,
+) -> Result<SimRunOutput, RunError> {
+    let path = transport.path();
     let build_identity = build_context.checked_wire()?;
-    let (manifest, run_manifest_sha256) = read_manifest_v2(path)?;
+    let (manifest, run_manifest_sha256) = read_manifest_v2(transport)?;
     let arch = ArchId::Sm86;
     let sku = Sku::Rtx3090Ti;
-    let (mut admitted, trace_identity) = admit_all_v2(path, &manifest, arch, sku)?;
+    let (mut admitted, trace_identity) = admit_all_v2(path, &transport.base, &manifest, arch, sku)?;
     let first = admitted
         .first()
         .ok_or_else(|| manifest_rejected(path, "launches must be nonempty"))?;
@@ -258,7 +442,7 @@ fn run_manifest_v2_with_context(
     let diagnostics =
         DiagnosticsV2::checked(per_launch_diagnostics, None).map_err(wire_serialization_error)?;
 
-    seal_result_v2(
+    let output = seal_result_v2(
         build_identity,
         trace_identity,
         arch_card_identity,
@@ -267,22 +451,17 @@ fn run_manifest_v2_with_context(
         per_launch_results,
         aggregate,
         diagnostics,
-    )
+    )?;
+    transport.recheck()?;
+    Ok(output)
 }
 
-fn read_manifest_v2(path: &Path) -> Result<(SimRunManifestV2, Sha256Digest), RunError> {
-    require_canonical_manifest_path(path)?;
-    let base = manifest_base(path);
-    let name = path
-        .file_name()
-        .ok_or_else(|| manifest_rejected(path, "manifest path has no file name"))?;
-    let reader = AnchoredDir::open(base.to_path_buf())
-        .map_err(|source| manifest_read_error(path, source))?;
-    let file = reader
-        .read_bounded_regular(Path::new(name), MAX_RUN_MANIFEST_BYTES)
-        .map_err(|source| manifest_read_error(path, source))?;
-    let manifest =
-        parse_sim_run_manifest_v2(file.raw()).map_err(|source| manifest_rejected(path, source))?;
+fn read_manifest_v2(
+    transport: &RunManifestTransport,
+) -> Result<(SimRunManifestV2, Sha256Digest), RunError> {
+    let path = transport.path();
+    let manifest = parse_sim_run_manifest_v2(transport.raw())
+        .map_err(|source| manifest_rejected(path, source))?;
     let manifest_value = serde_json::to_value(&manifest)
         .map_err(|source| manifest_serialization_error(path, source))?;
     let canonical = canonical_json_utf8(&manifest_value)
@@ -293,11 +472,11 @@ fn read_manifest_v2(path: &Path) -> Result<(SimRunManifestV2, Sha256Digest), Run
 
 fn admit_all_v2(
     manifest_path: &Path,
+    base: &AnchoredDir,
     manifest: &SimRunManifestV2,
     arch: ArchId,
     sku: Sku,
 ) -> Result<(Vec<AdmittedEntryV2>, TraceBundleIdentity), RunError> {
-    let base = manifest_base(manifest_path);
     let mut evidence_identities = BTreeSet::new();
     let mut shared_trace_identity: Option<TraceBundleIdentity> = None;
     let mut admitted = Vec::new();
@@ -306,9 +485,23 @@ fn admit_all_v2(
         .map_err(result_serialization_error)?;
 
     for launch in manifest.launches() {
-        let path = base.join(Path::new(launch.launch_evidence_manifest_path()));
-        let evidence =
-            admit_launch_evidence(&path).map_err(|source| launch_evidence_error(&path, source))?;
+        let relative = Path::new(launch.launch_evidence_manifest_path());
+        let path = base.root().join(relative);
+        let parent = relative.parent().unwrap_or_else(|| Path::new(""));
+        let manifest_name = relative.file_name().ok_or_else(|| {
+            manifest_rejected(
+                manifest_path,
+                format!(
+                    "launch evidence path {:?} has no file name",
+                    launch.launch_evidence_manifest_path()
+                ),
+            )
+        })?;
+        let launch_base = base.descendant(parent).map_err(|source| {
+            launch_evidence_error(&path, sim_sm::ManifestError::Anchored(source))
+        })?;
+        let evidence = admit_launch_evidence_anchored(&launch_base, Path::new(manifest_name))
+            .map_err(|source| launch_evidence_error(&path, source))?;
         let identity = evidence.identity();
         let actual_identity_sha256 = identity.seal_sha256();
         if actual_identity_sha256 != launch.expected_identity_sha256() {
@@ -722,6 +915,9 @@ impl ProcessImageObservation {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use std::fs;
+    use std::io::{Seek, SeekFrom};
+    use std::os::fd::AsRawFd;
+    use std::os::unix::fs::PermissionsExt;
 
     use prost::Message;
     use serde_json::{Value, json};
@@ -1021,6 +1217,78 @@ mod tests {
         let second = run_manifest_v2_with_context(&manifest_path, &fixed_build_context()).unwrap();
         assert_eq!(first.result_sha256(), second.result_sha256());
         assert_eq!(first.canonical_json(), second.canonical_json());
+    }
+
+    #[test]
+    fn retained_transport_reads_positionally_and_preserves_shared_offset() {
+        let (_temp, manifest_path) = copied_v2_fixture(json!({"mode": "flat"}));
+        let mut manifest_file = File::open(&manifest_path).unwrap();
+        let end = manifest_file.seek(SeekFrom::End(0)).unwrap();
+        let base_file = File::open(manifest_path.parent().unwrap()).unwrap();
+        let transport = RunManifestTransport::from_retained(
+            u32::try_from(manifest_file.as_raw_fd()).unwrap(),
+            u32::try_from(base_file.as_raw_fd()).unwrap(),
+            manifest_path.file_name().unwrap(),
+        )
+        .unwrap();
+        assert!(!transport.raw().is_empty());
+        assert_eq!(manifest_file.stream_position().unwrap(), end);
+        transport.recheck().unwrap();
+        assert_eq!(manifest_file.stream_position().unwrap(), end);
+    }
+
+    #[test]
+    fn retained_transport_needs_no_named_manifest_read_permission() {
+        let (_temp, manifest_path) = copied_v2_fixture(json!({"mode": "flat"}));
+        let manifest_file = File::open(&manifest_path).unwrap();
+        let base_file = File::open(manifest_path.parent().unwrap()).unwrap();
+        fs::set_permissions(&manifest_path, fs::Permissions::from_mode(0o000)).unwrap();
+
+        let result = (|| {
+            let transport = RunManifestTransport::from_retained(
+                u32::try_from(manifest_file.as_raw_fd()).unwrap(),
+                u32::try_from(base_file.as_raw_fd()).unwrap(),
+                manifest_path.file_name().unwrap(),
+            )?;
+            transport.recheck()
+        })();
+        fs::set_permissions(&manifest_path, fs::Permissions::from_mode(0o600)).unwrap();
+
+        result.unwrap();
+    }
+
+    #[test]
+    fn retained_transport_final_recheck_binds_exact_bytes_and_named_inode() {
+        let (_temp, manifest_path) = copied_v2_fixture(json!({"mode": "flat"}));
+        let manifest_file = File::open(&manifest_path).unwrap();
+        let base_file = File::open(manifest_path.parent().unwrap()).unwrap();
+        let transport = RunManifestTransport::from_retained(
+            u32::try_from(manifest_file.as_raw_fd()).unwrap(),
+            u32::try_from(base_file.as_raw_fd()).unwrap(),
+            manifest_path.file_name().unwrap(),
+        )
+        .unwrap();
+        fs::write(&manifest_path, b"{}").unwrap();
+        let error = transport.recheck().unwrap_err();
+        assert!(error.to_string().contains("exact-byte mismatch"));
+
+        let (_temp, manifest_path) = copied_v2_fixture(json!({"mode": "flat"}));
+        let manifest_file = File::open(&manifest_path).unwrap();
+        let base_file = File::open(manifest_path.parent().unwrap()).unwrap();
+        let transport = RunManifestTransport::from_retained(
+            u32::try_from(manifest_file.as_raw_fd()).unwrap(),
+            u32::try_from(base_file.as_raw_fd()).unwrap(),
+            manifest_path.file_name().unwrap(),
+        )
+        .unwrap();
+        let original = manifest_path
+            .parent()
+            .unwrap()
+            .join("original-retained.json");
+        fs::rename(&manifest_path, &original).unwrap();
+        fs::copy(&original, &manifest_path).unwrap();
+        let error = transport.recheck().unwrap_err();
+        assert!(error.to_string().contains("device/inode identity mismatch"));
     }
 
     #[test]

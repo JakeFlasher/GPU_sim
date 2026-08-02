@@ -290,6 +290,7 @@ name = "sim-trace"
 version = "0.0.1"
 dependencies = [
  "csv",
+ "libc",
  "prost",
  "rustix",
  "serde",

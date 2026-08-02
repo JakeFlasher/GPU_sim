@@ -40,7 +40,7 @@ pub use evidence::{
     AdmittedLaunchEvidence, BinaryDigestGap, CanonicalTraceBundlePath, LaunchEvidenceIdentity,
     ManifestArtifactToken, ManifestError, ReplayAuthenticatedLaunchIdentity,
     ThreadblockPayloadSetIdentity, TraceBundleComponentIdentity, TraceBundleComponents,
-    TraceBundleIdentity, admit_launch_evidence,
+    TraceBundleIdentity, admit_launch_evidence, admit_launch_evidence_anchored,
 };
 pub use issue::{
     AccessKind, IssueError, IssueModelParams, IssueResourceLane, MemoryOperation, ReplyTo,

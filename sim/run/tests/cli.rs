@@ -48,6 +48,50 @@ fn copied_fixture() -> (TempDir, PathBuf) {
     (temp, manifest)
 }
 
+fn retained_token(manifest_fd: &str, evidence_base_fd: &str, manifest_name: &str) -> String {
+    let name_hex = manifest_name
+        .as_bytes()
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect::<String>();
+    format!("--retained-manifest-fds-v1:{manifest_fd}:{evidence_base_fd}:{name_hex}")
+}
+
+fn retained_output_token(manifest: &Path, evidence_base: &Path, token: &str) -> Output {
+    Command::new("sh")
+        .arg("-c")
+        .arg(
+            r#"
+exec 7<"$1" || exit 90
+exec 8<"$2" || exit 91
+exec 9<"$1" || exit 92
+exec 10<"$2" || exit 93
+exec "$3" "$4"
+"#,
+        )
+        .arg("sim-run-retained-test")
+        .arg(manifest)
+        .arg(evidence_base)
+        .arg(binary())
+        .arg(token)
+        .output()
+        .unwrap()
+}
+
+fn retained_output(
+    manifest: &Path,
+    evidence_base: &Path,
+    manifest_fd: &str,
+    evidence_base_fd: &str,
+    manifest_name: &str,
+) -> Output {
+    retained_output_token(
+        manifest,
+        evidence_base,
+        &retained_token(manifest_fd, evidence_base_fd, manifest_name),
+    )
+}
+
 fn unframe_one_document(raw: &[u8]) -> &[u8] {
     assert_eq!(raw.last(), Some(&b'\n'));
     let document = &raw[..raw.len() - 1];
@@ -118,6 +162,329 @@ fn cli_emits_only_one_canonical_v2_result_on_success() {
         parsed["aggregate"]["metrics"]["exec_cycles_gpc_max"]["status"],
         "required_unimplemented"
     );
+}
+
+#[test]
+fn retained_descriptor_mode_matches_the_compatibility_path_result() {
+    let (_temp, manifest_path) = copied_fixture();
+    let base = manifest_path.parent().unwrap();
+    let path_output = Command::new(binary()).arg(&manifest_path).output().unwrap();
+    let retained = retained_output(
+        &manifest_path,
+        base,
+        "7",
+        "8",
+        manifest_path.file_name().unwrap().to_str().unwrap(),
+    );
+
+    assert!(path_output.status.success());
+    assert!(retained.status.success());
+    assert!(retained.stderr.is_empty());
+    assert_eq!(retained.stdout, path_output.stdout);
+    assert_success_document(&retained.stdout);
+}
+
+#[test]
+fn retained_mode_survives_named_manifest_permission_removal() {
+    let (_temp, manifest_path) = copied_fixture();
+    let root = manifest_path.parent().unwrap();
+    let token = retained_token(
+        "7",
+        "8",
+        manifest_path.file_name().unwrap().to_str().unwrap(),
+    );
+    let output = Command::new("sh")
+        .arg("-c")
+        .arg(
+            r#"
+exec 7<"$1" || exit 90
+exec 8<"$2" || exit 91
+chmod 000 "$1" || exit 92
+"$3" "$4"
+status=$?
+chmod 600 "$1" || exit 93
+exit "$status"
+"#,
+        )
+        .arg("sim-run-retained-permission-test")
+        .arg(&manifest_path)
+        .arg(root)
+        .arg(binary())
+        .arg(&token)
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "{:?}", output.stderr);
+    assert!(output.stderr.is_empty());
+    assert_success_document(&output.stdout);
+}
+
+#[test]
+fn retained_mode_preserves_closed_low_base_descriptor_failure() {
+    let (_temp, manifest_path) = copied_fixture();
+    let token = retained_token(
+        "7",
+        "3",
+        manifest_path.file_name().unwrap().to_str().unwrap(),
+    );
+    let output = Command::new("sh")
+        .arg("-c")
+        .arg(
+            r#"
+exec 7<"$1" || exit 90
+exec 3<&-
+exec "$2" "$3"
+"#,
+        )
+        .arg("sim-run-retained-closed-base-test")
+        .arg(&manifest_path)
+        .arg(binary())
+        .arg(&token)
+        .output()
+        .unwrap();
+
+    let error = assert_cli_error(
+        &output,
+        "MANIFEST_ADMISSION_FAILED",
+        "manifest_admission",
+        2,
+    );
+    assert!(
+        error["error"]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("retained descriptor is unavailable")
+    );
+}
+
+#[test]
+fn retained_mode_accepts_valid_descriptors_at_soft_limit() {
+    let (_temp, manifest_path) = copied_fixture();
+    let root = manifest_path.parent().unwrap();
+    let token = retained_token(
+        "62",
+        "63",
+        manifest_path.file_name().unwrap().to_str().unwrap(),
+    );
+    let output = Command::new("sh")
+        .arg("-c")
+        .arg(
+            r#"
+ulimit -n 64 || exit 90
+exec 62<"$1" || exit 91
+exec 63<"$2" || exit 92
+exec "$3" "$4"
+"#,
+        )
+        .arg("sim-run-retained-high-fd-test")
+        .arg(&manifest_path)
+        .arg(root)
+        .arg(binary())
+        .arg(&token)
+        .output()
+        .unwrap();
+
+    assert!(output.status.success(), "{:?}", output.stderr);
+    assert!(output.stderr.is_empty());
+    assert_success_document(&output.stdout);
+}
+
+#[test]
+fn retained_mode_derives_nested_launch_parent_from_the_anchor() {
+    let (_temp, manifest_path) = copied_fixture();
+    let root = manifest_path.parent().unwrap();
+    let nested = root.join("nested/deeper");
+    fs::create_dir_all(&nested).unwrap();
+    for entry in ["launch_evidence.json", "trace", "control", "cards"] {
+        fs::rename(root.join(entry), nested.join(entry)).unwrap();
+    }
+    let mut manifest: Value = serde_json::from_slice(&fs::read(&manifest_path).unwrap()).unwrap();
+    manifest["launches"][0]["launch_evidence_manifest_path"] =
+        json!("nested/deeper/launch_evidence.json");
+    fs::write(
+        &manifest_path,
+        serde_json::to_vec_pretty(&manifest).unwrap(),
+    )
+    .unwrap();
+
+    let path_output = Command::new(binary()).arg(&manifest_path).output().unwrap();
+    let retained = retained_output(
+        &manifest_path,
+        root,
+        "7",
+        "8",
+        manifest_path.file_name().unwrap().to_str().unwrap(),
+    );
+    assert!(path_output.status.success(), "{:?}", path_output.stderr);
+    assert!(retained.status.success(), "{:?}", retained.stderr);
+    assert_eq!(retained.stdout, path_output.stdout);
+    assert_success_document(&retained.stdout);
+}
+
+#[test]
+fn retained_mode_rejects_wrong_types_closed_fds_and_named_inode_mismatch() {
+    let (_temp, manifest_path) = copied_fixture();
+    let root = manifest_path.parent().unwrap();
+    let name = manifest_path.file_name().unwrap().to_str().unwrap();
+
+    for (output, exit_code) in [
+        (retained_output(&manifest_path, root, "8", "10", name), 1),
+        (retained_output(&manifest_path, root, "7", "9", name), 1),
+        (
+            retained_output(&manifest_path, root, "1048575", "8", name),
+            2,
+        ),
+    ] {
+        let error = assert_cli_error(
+            &output,
+            "MANIFEST_ADMISSION_FAILED",
+            "manifest_admission",
+            exit_code,
+        );
+        assert!(error["error"].get("evidence").is_none());
+    }
+
+    let duplicate = retained_output(&manifest_path, root, "7", "7", name);
+    assert_cli_error(&duplicate, "CLI_USAGE_FAILED", "cli_usage", 2);
+
+    let alias_name = "same-bytes-different-inode.json";
+    fs::copy(&manifest_path, root.join(alias_name)).unwrap();
+    let mismatch = retained_output(&manifest_path, root, "7", "8", alias_name);
+    let error = assert_cli_error(
+        &mismatch,
+        "MANIFEST_ADMISSION_FAILED",
+        "manifest_admission",
+        1,
+    );
+    assert!(
+        error["error"]["detail"]
+            .as_str()
+            .unwrap()
+            .contains("device/inode identity mismatch")
+    );
+}
+
+#[test]
+fn retained_mode_rejects_non_readonly_manifest_descriptors() {
+    let (_temp, manifest_path) = copied_fixture();
+    let root = manifest_path.parent().unwrap();
+    let token = retained_token(
+        "7",
+        "8",
+        manifest_path.file_name().unwrap().to_str().unwrap(),
+    );
+
+    for script in [
+        r#"
+exec 7>>"$1" || exit 90
+exec 8<"$2" || exit 91
+exec "$3" "$4"
+"#,
+        r#"
+exec 7<>"$1" || exit 90
+exec 8<"$2" || exit 91
+exec "$3" "$4"
+"#,
+    ] {
+        let output = Command::new("sh")
+            .arg("-c")
+            .arg(script)
+            .arg("sim-run-retained-access-mode-test")
+            .arg(&manifest_path)
+            .arg(root)
+            .arg(binary())
+            .arg(&token)
+            .output()
+            .unwrap();
+        let error = assert_cli_error(
+            &output,
+            "MANIFEST_ADMISSION_FAILED",
+            "manifest_admission",
+            1,
+        );
+        assert!(
+            error["error"]["detail"]
+                .as_str()
+                .unwrap()
+                .contains("not an ordinary read-only descriptor")
+        );
+    }
+}
+
+#[test]
+fn retained_token_rejects_noncanonical_fd_hex_and_name_forms() {
+    let (_temp, manifest_path) = copied_fixture();
+    let root = manifest_path.parent().unwrap();
+    let cases = [
+        "--retained-manifest-fds-v1:0:8:72756e5f6d616e69666573742e76322e6a736f6e",
+        "--retained-manifest-fds-v1:7:2:72756e5f6d616e69666573742e76322e6a736f6e",
+        "--retained-manifest-fds-v1:07:8:72756e5f6d616e69666573742e76322e6a736f6e",
+        "--retained-manifest-fds-v1:+7:8:72756e5f6d616e69666573742e76322e6a736f6e",
+        "--retained-manifest-fds-v1:7:8:72756E",
+        "--retained-manifest-fds-v1:7:8:0",
+        "--retained-manifest-fds-v1:7:8:ff",
+        "--retained-manifest-fds-v1:7:8:6e65737465642f72756e2e6a736f6e",
+        "--retained-manifest-fds-v1:7:8:2e2e",
+        "--retained-manifest-fds-v1:7:8:72756e:00",
+    ];
+    for token in cases {
+        let output = retained_output_token(&manifest_path, root, token);
+        let error = assert_cli_error(&output, "CLI_USAGE_FAILED", "cli_usage", 2);
+        assert_eq!(
+            error["error"]["evidence"]["provided_positional_argument_count"],
+            1
+        );
+        assert_eq!(
+            error["error"]["evidence"]["expected_positional_argument_count"],
+            1
+        );
+    }
+
+    for args in [
+        vec!["--retained-manifest-fds", "7", "8", "run_manifest.v2.json"],
+        vec!["--retained-manifest-fds-v1"],
+        vec!["manifest.json", "--retained-manifest-fds-v1:7:8:6e616d65"],
+    ] {
+        let output = Command::new(binary()).args(args).output().unwrap();
+        assert_cli_error(&output, "CLI_USAGE_FAILED", "cli_usage", 2);
+    }
+}
+
+#[test]
+fn retained_manifest_reads_ignore_shared_inherited_offset_and_repeat() {
+    let (_temp, manifest_path) = copied_fixture();
+    let root = manifest_path.parent().unwrap();
+    let token = retained_token(
+        "7",
+        "8",
+        manifest_path.file_name().unwrap().to_str().unwrap(),
+    );
+    let repeated = Command::new("sh")
+        .arg("-c")
+        .arg(
+            r#"
+exec 7<"$1" || exit 90
+exec 8<"$2" || exit 91
+while IFS= read -r ignored <&7; do :; done
+"$3" "$4" || exit $?
+"$3" "$4"
+"#,
+        )
+        .arg("sim-run-retained-repeat-test")
+        .arg(&manifest_path)
+        .arg(root)
+        .arg(binary())
+        .arg(token)
+        .output()
+        .unwrap();
+    assert!(repeated.status.success(), "{:?}", repeated.stderr);
+    assert!(repeated.stderr.is_empty());
+
+    let baseline = Command::new(binary()).arg(&manifest_path).output().unwrap();
+    assert!(baseline.status.success());
+    let mut expected = baseline.stdout.clone();
+    expected.extend_from_slice(&baseline.stdout);
+    assert_eq!(repeated.stdout, expected);
 }
 
 #[test]

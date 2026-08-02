@@ -16,7 +16,7 @@ pub mod pb;
 pub mod reader;
 mod wire_preflight;
 
-pub use anchored::{AnchoredDir, AnchoredFile, AnchoredReadError, FileIdentity};
+pub use anchored::{AnchoredDir, AnchoredFile, AnchoredReadError, FileIdentity, RetainedFile};
 pub use digest::{
     CanonicalJsonError, Sha256Digest, Sha256DigestError, canonical_json, canonical_json_utf8,
 };

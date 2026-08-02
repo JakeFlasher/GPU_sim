@@ -14,6 +14,7 @@ pub(crate) mod wire;
 
 #[cfg(test)]
 use std::collections::BTreeSet;
+use std::ffi::OsStr;
 use std::path::{Component, Path};
 
 #[cfg(test)]
@@ -438,10 +439,11 @@ fn error_value_without_seal(
 }
 
 fn anchored_error_is_missing(error: &AnchoredReadError) -> bool {
-    matches!(
-        error,
-        AnchoredReadError::Io { source, .. } if source.kind() == std::io::ErrorKind::NotFound
-    )
+    match error {
+        AnchoredReadError::RetainedDescriptorUnavailable { .. } => true,
+        AnchoredReadError::Io { source, .. } => source.kind() == std::io::ErrorKind::NotFound,
+        _ => false,
+    }
 }
 
 fn trace_error_is_missing(error: &TraceError) -> bool {
@@ -1283,6 +1285,18 @@ enum DramConfigurationWire {
 /// This public consumer has no v1 fallback or version dispatch.
 pub fn run_manifest(path: impl AsRef<Path>) -> Result<SimRunOutput, RunError> {
     runner_v2::run_manifest_v2(path)
+}
+
+/// Run a strict v2 manifest from inherited manifest/evidence-base descriptors.
+///
+/// `manifest_name` must be one literal file-name component naming the same
+/// device/inode as `manifest_fd` beneath `evidence_base_fd`.
+pub fn run_manifest_retained_fds(
+    manifest_fd: u32,
+    evidence_base_fd: u32,
+    manifest_name: impl AsRef<OsStr>,
+) -> Result<SimRunOutput, RunError> {
+    runner_v2::run_manifest_v2_retained(manifest_fd, evidence_base_fd, manifest_name.as_ref())
 }
 
 #[cfg(test)]

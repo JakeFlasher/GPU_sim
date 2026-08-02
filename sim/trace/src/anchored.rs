@@ -7,13 +7,13 @@
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
 use std::fs::File;
-use std::io::Read;
-use std::os::fd::OwnedFd;
+use std::mem::MaybeUninit;
+use std::os::fd::{FromRawFd, OwnedFd};
 use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::MetadataExt;
+use std::os::unix::fs::{FileExt, MetadataExt};
 use std::path::{Component, Path, PathBuf};
 
-use rustix::fs::{AtFlags, Dir, FileType, Mode, OFlags, open, openat, statat};
+use rustix::fs::{AtFlags, Dir, FileType, Mode, OFlags, fcntl_getfl, fstat, open, openat, statat};
 
 const DIRECTORY_FLAGS: OFlags = OFlags::RDONLY
     .union(OFlags::CLOEXEC)
@@ -58,6 +58,40 @@ impl AnchoredFile {
     }
 }
 
+/// One duplicated inherited regular-file descriptor.
+///
+/// Duplication preserves the inherited open file description and its access
+/// mode. Positional reads keep the shared open-file-description offset unchanged.
+pub struct RetainedFile {
+    path: PathBuf,
+    fd: OwnedFd,
+}
+
+impl RetainedFile {
+    /// Validate an inherited manifest descriptor without allocating another slot.
+    pub fn validate_inherited(raw_fd: u32) -> Result<(), AnchoredReadError> {
+        validate_retained_descriptor(raw_fd, RetainedDescriptorKind::Regular)
+    }
+
+    pub fn open(raw_fd: u32) -> Result<Self, AnchoredReadError> {
+        Self::validate_inherited(raw_fd)?;
+        let path = retained_descriptor_label(raw_fd);
+        let fd = duplicate_readonly_descriptor(raw_fd, &path)?;
+        Ok(Self { path, fd })
+    }
+
+    pub fn read_bounded_regular(
+        &self,
+        maximum_size: u64,
+    ) -> Result<AnchoredFile, AnchoredReadError> {
+        let fd = rustix::io::dup(&self.fd).map_err(|source| AnchoredReadError::Io {
+            path: self.path.clone(),
+            source: source.into(),
+        })?;
+        read_opened_regular(fd, self.path.clone(), None, maximum_size)
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum AnchoredReadError {
     #[error("descriptor-anchored path is not a nonempty canonical relative path: {path:?}")]
@@ -68,6 +102,14 @@ pub enum AnchoredReadError {
         #[source]
         source: std::io::Error,
     },
+    #[error("retained descriptor is unavailable: {path}: {source}")]
+    RetainedDescriptorUnavailable {
+        path: PathBuf,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("retained descriptor is not an ordinary read-only descriptor: {path}")]
+    RetainedDescriptorModeInvalid { path: PathBuf },
     #[error("descriptor-anchored artifact is not a regular file: {path}")]
     NotRegular { path: PathBuf },
     #[error("descriptor-anchored artifact {path} has size {actual}, expected {expected}")]
@@ -116,8 +158,42 @@ impl AnchoredDir {
         Ok(Self { root, fd })
     }
 
+    /// Validate an inherited directory descriptor without allocating another slot.
+    pub fn validate_inherited(raw_fd: u32) -> Result<(), AnchoredReadError> {
+        validate_retained_descriptor(raw_fd, RetainedDescriptorKind::Directory)
+    }
+
+    /// Duplicate one inherited read-only directory descriptor as an owned anchor.
+    pub fn open_retained(raw_fd: u32) -> Result<Self, AnchoredReadError> {
+        Self::validate_inherited(raw_fd)?;
+        let root = retained_descriptor_label(raw_fd);
+        let fd = duplicate_readonly_descriptor(raw_fd, &root)?;
+        let stat = fstat(&fd).map_err(|source| AnchoredReadError::Io {
+            path: root.clone(),
+            source: source.into(),
+        })?;
+        if FileType::from_raw_mode(stat.st_mode) != FileType::Directory {
+            return Err(AnchoredReadError::Io {
+                path: root,
+                source: std::io::Error::from(std::io::ErrorKind::NotADirectory),
+            });
+        }
+        Ok(Self { root, fd })
+    }
+
     pub fn root(&self) -> &Path {
         &self.root
+    }
+
+    /// Derive a child anchor solely through this retained directory descriptor.
+    pub fn descendant(&self, relative: &Path) -> Result<Self, AnchoredReadError> {
+        let fd = self
+            .open_directory(relative, false)?
+            .expect("required directory opens never return absence");
+        Ok(Self {
+            root: self.root.join(relative),
+            fd,
+        })
     }
 
     pub fn read_exact_regular(
@@ -181,6 +257,36 @@ impl AnchoredDir {
         self.open_regular(relative, true)?
             .map(|fd| regular_identity(fd, self.root.join(relative)))
             .transpose()
+    }
+
+    /// Inspect a no-follow regular-file name without reopening its contents.
+    ///
+    /// This binds a retained file descriptor to a name beneath the anchored
+    /// directory even after read permission on that name has been removed.
+    pub fn inspect_regular_identity(
+        &self,
+        relative: &Path,
+    ) -> Result<FileIdentity, AnchoredReadError> {
+        let mut components = relative_components(relative, false)?;
+        let leaf = components.pop().expect("nonempty path checked");
+        let parent = components.iter().collect::<PathBuf>();
+        let directory = self
+            .open_directory(&parent, false)?
+            .expect("required directory opens never return absence");
+        let path = self.root.join(relative);
+        let stat = statat(&directory, &leaf, AtFlags::SYMLINK_NOFOLLOW).map_err(|source| {
+            AnchoredReadError::Io {
+                path: path.clone(),
+                source: source.into(),
+            }
+        })?;
+        if FileType::from_raw_mode(stat.st_mode) != FileType::RegularFile {
+            return Err(AnchoredReadError::NotRegular { path });
+        }
+        Ok(FileIdentity {
+            device: stat.st_dev,
+            inode: stat.st_ino,
+        })
     }
 
     pub(crate) fn read_pb_tree(
@@ -415,6 +521,123 @@ struct TreeState {
     bytes_seen: u64,
 }
 
+fn retained_descriptor_label(raw_fd: u32) -> PathBuf {
+    PathBuf::from(format!("inherited-fd:{raw_fd}"))
+}
+
+#[derive(Clone, Copy)]
+enum RetainedDescriptorKind {
+    Regular,
+    Directory,
+}
+
+fn retained_descriptor_error(path: &Path, source: std::io::Error) -> AnchoredReadError {
+    if source.raw_os_error() == Some(libc::EBADF) {
+        AnchoredReadError::RetainedDescriptorUnavailable {
+            path: path.to_path_buf(),
+            source,
+        }
+    } else {
+        AnchoredReadError::Io {
+            path: path.to_path_buf(),
+            source,
+        }
+    }
+}
+
+#[allow(unsafe_code)]
+fn validate_retained_descriptor(
+    raw_fd: u32,
+    kind: RetainedDescriptorKind,
+) -> Result<(), AnchoredReadError> {
+    let path = retained_descriptor_label(raw_fd);
+    let raw_fd = libc::c_int::try_from(raw_fd).map_err(|_| AnchoredReadError::Io {
+        path: path.clone(),
+        source: std::io::Error::from(std::io::ErrorKind::InvalidInput),
+    })?;
+    let flags = loop {
+        // SAFETY: F_GETFL accepts an untrusted integer descriptor and reports
+        // EBADF without taking ownership of it.
+        let flags = unsafe { libc::fcntl(raw_fd, libc::F_GETFL) };
+        if flags >= 0 {
+            break flags;
+        }
+        let source = std::io::Error::last_os_error();
+        if source.kind() == std::io::ErrorKind::Interrupted {
+            continue;
+        }
+        return Err(retained_descriptor_error(&path, source));
+    };
+    if flags & libc::O_ACCMODE != libc::O_RDONLY || flags & libc::O_PATH != 0 {
+        return Err(AnchoredReadError::RetainedDescriptorModeInvalid { path });
+    }
+
+    let metadata = loop {
+        let mut metadata = MaybeUninit::<libc::stat>::uninit();
+        // SAFETY: `metadata` points to writable storage for one libc::stat and is
+        // only assumed initialized after fstat succeeds. The raw descriptor is
+        // borrowed, not owned or closed.
+        if unsafe { libc::fstat(raw_fd, metadata.as_mut_ptr()) } == 0 {
+            // SAFETY: the successful fstat initialized the complete structure.
+            break unsafe { metadata.assume_init() };
+        }
+        let source = std::io::Error::last_os_error();
+        if source.kind() == std::io::ErrorKind::Interrupted {
+            continue;
+        }
+        return Err(retained_descriptor_error(&path, source));
+    };
+    let file_type = metadata.st_mode & libc::S_IFMT;
+    match kind {
+        RetainedDescriptorKind::Regular if file_type != libc::S_IFREG => {
+            Err(AnchoredReadError::NotRegular { path })
+        }
+        RetainedDescriptorKind::Directory if file_type != libc::S_IFDIR => {
+            Err(AnchoredReadError::Io {
+                path,
+                source: std::io::Error::from(std::io::ErrorKind::NotADirectory),
+            })
+        }
+        _ => Ok(()),
+    }
+}
+
+#[allow(unsafe_code)]
+fn duplicate_readonly_descriptor(raw_fd: u32, path: &Path) -> Result<OwnedFd, AnchoredReadError> {
+    let raw_fd = libc::c_int::try_from(raw_fd).map_err(|_| AnchoredReadError::Io {
+        path: path.to_path_buf(),
+        source: std::io::Error::from(std::io::ErrorKind::InvalidInput),
+    })?;
+    // SAFETY: `fcntl(F_DUPFD_CLOEXEC)` accepts an untrusted integer descriptor,
+    // reports EBADF for a closed value, and returns a fresh owned descriptor on
+    // success. It neither takes ownership of nor closes the supplied descriptor.
+    let duplicated = loop {
+        // SAFETY: see the immediately preceding safety rationale.
+        let duplicated = unsafe { libc::fcntl(raw_fd, libc::F_DUPFD_CLOEXEC, 3) };
+        if duplicated >= 0 {
+            break duplicated;
+        }
+        let source = std::io::Error::last_os_error();
+        if source.kind() == std::io::ErrorKind::Interrupted {
+            continue;
+        }
+        return Err(retained_descriptor_error(path, source));
+    };
+    // SAFETY: a successful F_DUPFD_CLOEXEC call returns a new descriptor owned by
+    // this process, and no other Rust owner has been constructed for that value.
+    let fd = unsafe { OwnedFd::from_raw_fd(duplicated) };
+    let flags = fcntl_getfl(&fd).map_err(|source| AnchoredReadError::Io {
+        path: path.to_path_buf(),
+        source: source.into(),
+    })?;
+    if flags.intersects(OFlags::WRONLY | OFlags::RDWR | OFlags::PATH) {
+        return Err(AnchoredReadError::RetainedDescriptorModeInvalid {
+            path: path.to_path_buf(),
+        });
+    }
+    Ok(fd)
+}
+
 fn relative_components(path: &Path, allow_empty: bool) -> Result<Vec<PathBuf>, AnchoredReadError> {
     let components = path
         .components()
@@ -479,24 +702,44 @@ fn read_opened_regular(
             actual: size,
         });
     }
-    let capacity = usize::try_from(size).map_err(|_| AnchoredReadError::AllocationFailed {
-        path: path.clone(),
-        bytes: size,
-    })?;
+    let read_limit = size.checked_add(1).unwrap_or(size);
+    let capacity =
+        usize::try_from(read_limit).map_err(|_| AnchoredReadError::AllocationFailed {
+            path: path.clone(),
+            bytes: read_limit,
+        })?;
     let mut raw = Vec::new();
     raw.try_reserve_exact(capacity)
         .map_err(|_| AnchoredReadError::AllocationFailed {
             path: path.clone(),
-            bytes: size,
+            bytes: read_limit,
         })?;
-    let read_limit = size.checked_add(1).unwrap_or(size);
-    (&file)
-        .take(read_limit)
-        .read_to_end(&mut raw)
-        .map_err(|source| AnchoredReadError::Io {
-            path: path.clone(),
-            source,
-        })?;
+    let mut offset = 0_u64;
+    let mut buffer = [0_u8; 64 * 1024];
+    while offset < read_limit {
+        let remaining = read_limit - offset;
+        let requested = usize::try_from(remaining.min(buffer.len() as u64))
+            .expect("bounded read chunk fits usize");
+        let count = loop {
+            match file.read_at(&mut buffer[..requested], offset) {
+                Ok(count) => break count,
+                Err(source) if source.kind() == std::io::ErrorKind::Interrupted => continue,
+                Err(source) => {
+                    return Err(AnchoredReadError::Io {
+                        path: path.clone(),
+                        source,
+                    });
+                }
+            }
+        };
+        if count == 0 {
+            break;
+        }
+        raw.extend_from_slice(&buffer[..count]);
+        offset = offset
+            .checked_add(u64::try_from(count).expect("read count fits u64"))
+            .expect("read offset is bounded by file size plus one");
+    }
     let after = file.metadata().map_err(|source| AnchoredReadError::Io {
         path: path.clone(),
         source,
@@ -542,7 +785,9 @@ impl FileObservation {
 #[allow(clippy::unwrap_used)]
 mod tests {
     use super::*;
-    use std::os::unix::fs::symlink;
+    use std::fs::{File, OpenOptions};
+    use std::os::fd::AsRawFd;
+    use std::os::unix::fs::{PermissionsExt, symlink};
 
     #[test]
     fn anchored_reads_reject_symlinks_and_hardlink_aliases() {
@@ -562,5 +807,96 @@ mod tests {
             reader.read_pb_tree(Path::new("tree"), 2, 14),
             Err(AnchoredReadError::HardlinkAlias { .. })
         ));
+    }
+
+    #[test]
+    fn retained_file_duplicates_exact_read_authority_after_permission_removal() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("manifest.json");
+        std::fs::write(&path, b"retained bytes").unwrap();
+        let original = File::open(&path).unwrap();
+        let original_fd = u32::try_from(original.as_raw_fd()).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+        let observed = RetainedFile::open(original_fd)
+            .and_then(|retained| retained.read_bounded_regular(64))
+            .map(AnchoredFile::into_raw);
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+
+        assert_eq!(observed.unwrap(), b"retained bytes");
+    }
+
+    #[test]
+    fn anchored_name_identity_survives_leaf_permission_removal() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("manifest.json");
+        std::fs::write(&path, b"retained bytes").unwrap();
+        let base = AnchoredDir::open(temp.path()).unwrap();
+        let original = File::open(&path).unwrap();
+        let retained = RetainedFile::open(u32::try_from(original.as_raw_fd()).unwrap()).unwrap();
+        let expected = retained.read_bounded_regular(64).unwrap();
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o000)).unwrap();
+
+        let observed = base.inspect_regular_identity(Path::new("manifest.json"));
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).unwrap();
+
+        assert_eq!(observed.unwrap(), expected.identity());
+    }
+
+    #[test]
+    fn retained_descriptors_reject_write_and_path_only_modes() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("manifest.json");
+        std::fs::write(&path, b"payload").unwrap();
+
+        let write_only = OpenOptions::new().write(true).open(&path).unwrap();
+        assert!(matches!(
+            RetainedFile::open(u32::try_from(write_only.as_raw_fd()).unwrap()),
+            Err(AnchoredReadError::RetainedDescriptorModeInvalid { .. })
+        ));
+
+        let read_write = OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&path)
+            .unwrap();
+        assert!(matches!(
+            RetainedFile::open(u32::try_from(read_write.as_raw_fd()).unwrap()),
+            Err(AnchoredReadError::RetainedDescriptorModeInvalid { .. })
+        ));
+
+        let path_only = open(&path, OFlags::PATH | OFlags::CLOEXEC, Mode::empty()).unwrap();
+        assert!(matches!(
+            RetainedFile::open(u32::try_from(path_only.as_raw_fd()).unwrap()),
+            Err(AnchoredReadError::RetainedDescriptorModeInvalid { .. })
+        ));
+
+        let directory_path_only = open(
+            temp.path(),
+            OFlags::PATH | OFlags::CLOEXEC | OFlags::DIRECTORY,
+            Mode::empty(),
+        )
+        .unwrap();
+        assert!(matches!(
+            AnchoredDir::open_retained(u32::try_from(directory_path_only.as_raw_fd()).unwrap()),
+            Err(AnchoredReadError::RetainedDescriptorModeInvalid { .. })
+        ));
+    }
+
+    #[test]
+    fn invalid_retained_descriptor_is_a_typed_io_error() {
+        assert!(matches!(
+            RetainedFile::open(i32::MAX as u32),
+            Err(AnchoredReadError::RetainedDescriptorUnavailable { source, .. })
+                if source.raw_os_error() == Some(libc::EBADF)
+        ));
+    }
+
+    #[test]
+    fn retained_descriptor_implementation_has_no_procfs_path_dependency() {
+        assert!(
+            !include_str!("anchored.rs").contains(concat!("/proc", "/self/fd")),
+            "retained descriptors must be duplicated rather than reopened through procfs"
+        );
     }
 }
