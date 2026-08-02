@@ -124,6 +124,23 @@ def _assert_sidecar_admission_identities(
     )
 
 
+def test_activation_trace_generation_limits_bind_heterogeneous_files() -> None:
+    limits = activation.DEFAULT_TRACE_ADMISSION_LIMITS
+    commit_limits = activation._trace_generation_commit_limits()
+
+    assert commit_limits["max_file_bytes"] == max(
+        limits.trace_root_bytes,
+        limits.threadblock_bytes,
+    )
+    assert commit_limits["max_file_bytes_by_path"] == {
+        "stats.csv": limits.stats_bytes,
+        "extra_info/allocations.json": limits.allocations_sidecar_bytes,
+    }
+    assert commit_limits["max_file_bytes"] < commit_limits[
+        "max_total_file_bytes"
+    ]
+
+
 def _write_executable(path: Path, payload: bytes) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_bytes(payload)

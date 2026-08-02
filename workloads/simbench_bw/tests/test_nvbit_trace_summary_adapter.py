@@ -10,8 +10,9 @@ import os
 import shutil
 import stat
 import sys
+from contextlib import ExitStack
 from dataclasses import replace
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from types import SimpleNamespace
 
 import pytest
@@ -31,6 +32,7 @@ import verify_artifacts  # noqa: E402
 from tools.local_labels import immutable_artifact as immutable  # noqa: E402
 from tools.local_labels.immutable_artifact import (  # noqa: E402
     ImmutableArtifactError,
+    ImmutableArtifactLimitError,
     ImmutableArtifactResourceError,
 )
 from tools.nvbit_tracer.proto_binding_loader import (  # noqa: E402
@@ -283,6 +285,12 @@ def _publish_active_summary_fixture(
         binary_sha256="a" * 64,
         tracer_build_sha256="b" * 64,
     )
+    active = json.loads(record_path.read_text(encoding="utf-8"))
+    _add_minimal_manifest_authority(
+        artifact_dir=artifact_dir,
+        active=active,
+    )
+    _replace_active_record_for_hostile_fixture(record_path, active)
     return admitted, result, record_path
 
 
@@ -344,7 +352,16 @@ def _configure_successful_trace_handle(
         "seed_policy": {"seed": 42},
         "arch_gate": ["sm_86"],
     }
-    return row, run_suite.DeviceProps()
+    props = run_suite.DeviceProps()
+    props.device_name = "fixture RTX 3090 Ti"
+    props.compute_capability_major = 8
+    props.compute_capability_minor = 6
+    props.uuid = "GPU-fixture"
+    props.sm_count = 84
+    props.total_global_mem_bytes = 1
+    props.cuda_runtime_version = "fixture-cuda"
+    props.driver_version = "fixture-driver"
+    return row, props
 
 
 def _write_active_trace_record(
@@ -399,6 +416,7 @@ def _write_active_trace_record(
         "nvbit_trace_summary_emit_status": "ok",
         "nvbit_trace_summary_paths": list(paths),
         "nvbit_trace_summary_generation": {
+            "schema_version": 1,
             "path": generation_relative.as_posix(),
             "content_manifest_sha256": generation.content_manifest_sha256,
             "filesystem_generation_sha256": (
@@ -456,20 +474,70 @@ def _add_minimal_manifest_authority(
     active: dict[str, object],
 ) -> None:
     shape_point = str(active["shape_point"])
+    manifest = {
+        "schema_version": 2,
+        "slug": active["slug"],
+        "mode": "trace",
+        "warm_up_iters": 0,
+        "repeat_iters": 1,
+        "cv_pct": 0.0,
+        "cuda_version": "fixture-cuda",
+        "driver_version": "fixture-driver",
+        "gpu_sku": "rtx_3090_ti",
+        "gpu_uuid": "GPU-fixture",
+        "sm_count": 1,
+        "total_global_mem_bytes": 1,
+        "device_name": "fixture device",
+        "compute_capability_major": 1,
+        "compute_capability_minor": 0,
+        "binary_sha256": active["binary_sha256"],
+        "compiler_flags": [],
+        "kb_capability_card": (
+            "references/NVIDIA_Manuals/blackwell_compatibility/"
+            "01_blackwell-architecture-compatibility.md"
+        ),
+        "timestamp_utc": "2026-01-01T00:00:00Z",
+        "shape_point": shape_point,
+    }
     manifest_payload = (
-        json.dumps({"shape_point": shape_point}, sort_keys=True) + "\n"
+        json.dumps(manifest, sort_keys=True) + "\n"
     ).encode("utf-8")
     manifest_name = f"measurement_manifest_{shape_point}.json"
-    immutable.publish_regular_file(
-        artifact_dir,
-        manifest_name,
-        manifest_payload,
-    )
+    manifest_path = artifact_dir / manifest_name
+    if manifest_path.exists():
+        manifest_payload = manifest_path.read_bytes()
+    else:
+        immutable.publish_regular_file(
+            artifact_dir,
+            manifest_name,
+            manifest_payload,
+        )
     active["measurement_manifest"] = {
         "path": manifest_name,
         "sha256": hashlib.sha256(manifest_payload).hexdigest(),
         "size_bytes": len(manifest_payload),
     }
+
+
+def _replace_measurement_manifest_for_hostile_fixture(
+    *,
+    artifact_dir: Path,
+    active_path: Path,
+    active: dict[str, object],
+    payload: bytes,
+) -> None:
+    descriptor = active["measurement_manifest"]
+    assert isinstance(descriptor, dict)
+    manifest_path = artifact_dir / str(descriptor["path"])
+    immutable.retire_regular_file(manifest_path)
+    immutable.publish_regular_file(
+        artifact_dir,
+        manifest_path.name,
+        payload,
+    )
+    descriptor["sha256"] = hashlib.sha256(payload).hexdigest()
+    descriptor["size_bytes"] = len(payload)
+    _replace_active_record_for_hostile_fixture(active_path, active)
 
 
 def _bind_manifest_and_phase_generation(
@@ -619,6 +687,347 @@ def _prepare_legacy_join_fixture(
         strict=False,
     )
     return cupti_dir, nvbit_dir, output_dir, args
+
+
+@pytest.mark.parametrize(
+    ("limit_name", "expected_token"),
+    (
+        (
+            "_JOIN_WORKING_SET_MAX_TOTAL_BYTES",
+            "joined_evidence_input_limit_exceeded",
+        ),
+        ("_JOIN_OUTPUT_MAX_TOTAL_BYTES", "joined_evidence_output_limit_exceeded"),
+    ),
+)
+def test_join_bounds_decoded_and_serialized_materialization(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    limit_name: str,
+    expected_token: str,
+) -> None:
+    _cupti_dir, _nvbit_dir, output_dir, args = _prepare_legacy_join_fixture(
+        tmp_path
+    )
+    monkeypatch.setattr(merge_evidence, limit_name, 1)
+
+    rc = merge_evidence._run_join_cupti_nvbit(args)
+
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert expected_token in captured.err
+    assert "joined_evidence_input_resource_unavailable" not in captured.err
+    assert not (output_dir / args.platform).exists()
+
+
+def test_join_materialization_budget_isolates_decoded_bytes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    value = {"decoded": ["x" * 64]}
+    retained_input_bytes = 17
+    probe = merge_evidence._JoinMaterializationBudget()
+    probe.reserve(
+        value,
+        retained_input_bytes=retained_input_bytes,
+        role="decoded probe",
+    )
+    monkeypatch.setattr(
+        merge_evidence,
+        "_JOIN_WORKING_SET_MAX_TOTAL_BYTES",
+        retained_input_bytes + probe.total_bytes - 1,
+    )
+
+    with pytest.raises(
+        ImmutableArtifactLimitError,
+        match="retained input plus decoded/output material",
+    ):
+        merge_evidence._JoinMaterializationBudget().reserve(
+            value,
+            retained_input_bytes=retained_input_bytes,
+            role="decoded fixture",
+        )
+
+
+def test_join_materialization_budget_isolates_object_count(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        merge_evidence,
+        "_JOIN_WORKING_SET_MAX_TOTAL_BYTES",
+        1 << 30,
+    )
+    monkeypatch.setattr(
+        merge_evidence,
+        "_JOIN_MATERIALIZED_MAX_OBJECTS",
+        1,
+    )
+
+    with pytest.raises(
+        ImmutableArtifactLimitError,
+        match="decoded objects",
+    ):
+        merge_evidence._JoinMaterializationBudget().reserve(
+            [None],
+            retained_input_bytes=0,
+            role="object-count fixture",
+        )
+
+
+def test_join_materialization_budget_retains_identity_owners() -> None:
+    budget = merge_evidence._JoinMaterializationBudget()
+    first = {"decoded": ["first reservation"]}
+    first_identity = id(first)
+    budget.reserve(
+        first,
+        retained_input_bytes=0,
+        role="first decoded fixture",
+    )
+    del first
+
+    retained_first = budget.seen_objects[first_identity]
+    assert id(retained_first) == first_identity
+    prior_count = budget.object_count
+    second = {"decoded": ["second reservation"]}
+    budget.reserve(
+        second,
+        retained_input_bytes=0,
+        role="second decoded fixture",
+    )
+
+    assert budget.object_count > prior_count
+    assert budget.seen_objects[id(second)] is second
+
+
+@pytest.mark.parametrize(
+    "budget_factory",
+    (
+        merge_evidence._JoinMaterializationBudget,
+        verify_artifacts._CanonicalAuthorityMaterializationBudget,
+    ),
+)
+def test_materialization_budget_revisits_lazy_path_storage(
+    budget_factory,
+) -> None:
+    path = Path("authority/raw/trace.json")
+    budget = budget_factory()
+    budget.reserve(
+        path,
+        retained_input_bytes=0,
+        role="fresh path fixture",
+    )
+    prior_count = budget.object_count
+
+    _ = path.parts
+    _ = str(path)
+    _ = hash(path)
+    initialized_references: list[object] = []
+    for path_type in type(path).__mro__:
+        slots = path_type.__dict__.get("__slots__", ())
+        if type(slots) is str:
+            slots = (slots,)
+        for slot in slots:
+            if slot == "__weakref__":
+                continue
+            descriptor = path_type.__dict__.get(slot)
+            assert descriptor is not None
+            try:
+                initialized_references.append(
+                    descriptor.__get__(path, type(path))
+                )
+            except AttributeError:
+                pass
+
+    budget.reserve(
+        path,
+        retained_input_bytes=0,
+        role="path with initialized lazy caches",
+    )
+
+    assert budget.object_count > prior_count
+    assert any(type(value) is list for value in initialized_references)
+    for retained in initialized_references:
+        assert budget.seen_objects[id(retained)] is retained
+        if type(retained) in {list, tuple}:
+            for member in retained:
+                assert budget.seen_objects[id(member)] is member
+
+
+@pytest.mark.parametrize(
+    "budget_factory",
+    (
+        merge_evidence._JoinMaterializationBudget,
+        verify_artifacts._CanonicalAuthorityMaterializationBudget,
+    ),
+)
+def test_materialization_budget_revisits_seen_queue_references(
+    budget_factory,
+) -> None:
+    path = Path("authority/raw/queued.json")
+    queued_path = (path,)
+    queue = [queued_path]
+    budget = budget_factory()
+    budget.reserve(
+        queue,
+        retained_input_bytes=0,
+        role="fresh path queue fixture",
+    )
+    prior_count = budget.object_count
+
+    _ = path.parts
+    _ = str(path)
+    _ = hash(path)
+    budget.reserve(
+        queue,
+        retained_input_bytes=0,
+        role="terminal path queue fixture",
+    )
+
+    assert budget.object_count > prior_count
+    for slot in (
+        "_tail_cached",
+        "_str",
+        "_str_normcase_cached",
+        "_parts_normcase_cached",
+        "_hash",
+    ):
+        try:
+            retained = object.__getattribute__(path, slot)
+        except AttributeError:
+            continue
+        assert budget.seen_objects[id(retained)] is retained
+
+
+def test_join_materialization_budget_isolates_serialized_output(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    budget = merge_evidence._JoinMaterializationBudget()
+    decoded = {"decoded": "fixture"}
+    budget.reserve(
+        decoded,
+        retained_input_bytes=0,
+        role="decoded fixture",
+    )
+    payload = b"serialized fixture payload"
+    monkeypatch.setattr(
+        merge_evidence,
+        "_JOIN_WORKING_SET_MAX_TOTAL_BYTES",
+        budget.total_bytes + sys.getsizeof(payload) - 1,
+    )
+
+    with pytest.raises(
+        ImmutableArtifactLimitError,
+        match="retained input plus decoded/output material",
+    ):
+        budget.reserve(
+            payload,
+            retained_input_bytes=0,
+            role="serialized joined output fixture",
+        )
+
+
+@pytest.mark.parametrize("check", (False, True), ids=("write", "check"))
+@pytest.mark.parametrize(
+    ("limit_kind", "expected_detail"),
+    (
+        ("per_file", "joined output "),
+        ("aggregate", "joined output aggregate"),
+    ),
+)
+def test_join_enforces_isolated_output_budgets(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    check: bool,
+    limit_kind: str,
+    expected_detail: str,
+) -> None:
+    _cupti_dir, _nvbit_dir, output_dir, args = _prepare_legacy_join_fixture(
+        tmp_path
+    )
+    args.check = check
+    if limit_kind == "per_file":
+        monkeypatch.setattr(merge_evidence, "_JOIN_OUTPUT_MAX_FILE_BYTES", 1)
+        monkeypatch.setattr(
+            merge_evidence,
+            "_JOIN_OUTPUT_MAX_TOTAL_BYTES",
+            1 << 30,
+        )
+    else:
+        monkeypatch.setattr(
+            merge_evidence,
+            "_JOIN_OUTPUT_MAX_FILE_BYTES",
+            1 << 30,
+        )
+        monkeypatch.setattr(merge_evidence, "_JOIN_OUTPUT_MAX_TOTAL_BYTES", 1)
+
+    rc = merge_evidence._run_join_cupti_nvbit(args)
+
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "joined_evidence_output_limit_exceeded" in captured.err
+    assert expected_detail in captured.err
+    if limit_kind == "per_file":
+        assert "joined output aggregate" not in captured.err
+    assert not (output_dir / args.platform).exists()
+
+
+@pytest.mark.parametrize("check", (False, True), ids=("write", "check"))
+def test_join_rejects_output_path_escape_before_check_or_publication(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+    check: bool,
+) -> None:
+    _cupti_dir, _nvbit_dir, output_dir, args = _prepare_legacy_join_fixture(
+        tmp_path
+    )
+    args.check = check
+    escaped = tmp_path / "escaped" / "joined_0_0.json"
+    monkeypatch.setattr(
+        merge_evidence,
+        "_joined_output_path",
+        lambda *_args, **_kwargs: escaped,
+    )
+
+    rc = merge_evidence._run_join_cupti_nvbit(args)
+
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "joined_evidence_output_path_escape" in captured.err
+    assert not escaped.exists()
+    assert not (output_dir / args.platform).exists()
+
+
+def test_join_classifies_output_allocation_failure_as_output_resource(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    _cupti_dir, _nvbit_dir, output_dir, args = _prepare_legacy_join_fixture(
+        tmp_path
+    )
+
+    def fail_output_materialization(
+        _cls: type[ImmutableFile],
+        _relative_path: str,
+        _payload: bytes,
+    ) -> ImmutableFile:
+        raise MemoryError("synthetic output materialization exhaustion")
+
+    monkeypatch.setattr(
+        merge_evidence.ImmutableFile,
+        "from_bytes",
+        classmethod(fail_output_materialization),
+    )
+
+    rc = merge_evidence._run_join_cupti_nvbit(args)
+
+    captured = capsys.readouterr()
+    assert rc == 1
+    assert "joined_evidence_output_resource_unavailable" in captured.err
+    assert "synthetic output materialization exhaustion" in captured.err
+    assert "joined_evidence_input_resource_unavailable" not in captured.err
+    assert not (output_dir / args.platform).exists()
 
 
 def test_kernel_signature_matches_every_committed_golden_fixture() -> None:
@@ -1015,12 +1424,16 @@ def test_merge_rejects_byte_identical_summary_generation_replacement(
         trace_record: dict[str, object],
         *,
         trace_admission,
+        preload_budget,
+        materialization_budget,
     ) -> str | None:
         nonlocal replaced
         error = original_check(
             trace_record_path,
             trace_record,
             trace_admission=trace_admission,
+            preload_budget=preload_budget,
+            materialization_budget=materialization_budget,
         )
         if error is None and not replaced:
             replaced = True
@@ -1097,6 +1510,7 @@ def test_merge_join_preserves_standalone_legacy_fixture(
     assert captured.err == ""
 
 
+@pytest.mark.parametrize("check", (False, True), ids=("write", "check"))
 @pytest.mark.parametrize(
     "destination_kind",
     ("regular", "directory", "symlink", "hardlink", "fifo"),
@@ -1105,10 +1519,12 @@ def test_merge_rejects_every_preexisting_platform_destination_class(
     tmp_path: Path,
     capsys: pytest.CaptureFixture[str],
     destination_kind: str,
+    check: bool,
 ) -> None:
     _cupti, _nvbit, output_dir, args = _prepare_legacy_join_fixture(
         tmp_path
     )
+    args.check = check
     output_dir.mkdir()
     destination = output_dir / args.platform
     retained = tmp_path / "retained"
@@ -1571,7 +1987,7 @@ def test_generation_identity_includes_local_filesystem_generation(
     assert (artifact_dir / second["paths"][0]).is_file()
 
 
-def test_merge_refuses_legacy_fallback_when_generation_namespace_exists(
+def test_merge_refuses_legacy_fallback_beneath_summary_generation_namespace(
     tmp_path: Path,
 ) -> None:
     legacy = tmp_path / "nvbit_trace_summary_0_0.json"
@@ -1605,17 +2021,26 @@ def test_merge_refuses_legacy_fallback_when_generation_namespace_exists(
     )
     assert descendant_paths == []
     assert len(descendant_errors) == 1
-    assert "generation_authority_missing" in descendant_errors[0]
+    assert "hidden or reserved evidence namespace" in descendant_errors[0]
 
 
-def test_merge_refuses_legacy_fallback_when_raw_generation_namespace_exists(
+@pytest.mark.parametrize(
+    "namespace_name",
+    (
+        run_suite.RAW_TRACE_GENERATION_NAMESPACE,
+        run_suite.TRACE_DERIVED_GENERATION_NAMESPACE,
+        run_suite.TRACE_CAPTURE_ATTEMPT_NAMESPACE,
+    ),
+)
+def test_merge_refuses_legacy_fallback_when_generation_namespace_exists(
     tmp_path: Path,
+    namespace_name: str,
 ) -> None:
     legacy = tmp_path / "nvbit_trace_summary_0_0.json"
     legacy.write_text('{"legacy": true}\n', encoding="utf-8")
     immutable.ensure_directory(
         tmp_path
-        / run_suite.RAW_TRACE_GENERATION_NAMESPACE
+        / namespace_name
         / "trace_shape"
         / "attempt-preserved-failure"
     )
@@ -1627,7 +2052,7 @@ def test_merge_refuses_legacy_fallback_when_raw_generation_namespace_exists(
     assert discovered == []
     assert len(errors) == 1
     assert "generation_authority_missing" in errors[0]
-    assert "raw generation namespace" in errors[0]
+    assert "generation namespace" in errors[0]
 
 
 def test_merge_preserves_flat_standalone_legacy_discovery(
@@ -1642,6 +2067,416 @@ def test_merge_preserves_flat_standalone_legacy_discovery(
     )
     assert errors == []
     assert discovered == [legacy]
+
+
+@pytest.mark.parametrize(
+    ("node_name", "node_kind"),
+    (
+        ("trace_fixture.json", "directory"),
+        ("nvbit_trace_summary_1_0.json", "directory"),
+        (run_suite.NVBIT_TRACE_SUMMARY_GENERATION_NAMESPACE, "file"),
+        (run_suite.RAW_TRACE_GENERATION_NAMESPACE, "file"),
+        (run_suite.TRACE_DERIVED_GENERATION_NAMESPACE, "file"),
+        (run_suite.PHASE_LEDGER_GENERATION_NAMESPACE, "file"),
+        (run_suite.TRACE_CAPTURE_ATTEMPT_NAMESPACE, "file"),
+    ),
+)
+def test_merge_wrong_authority_node_type_blocks_legacy_fallback(
+    tmp_path: Path,
+    node_name: str,
+    node_kind: str,
+) -> None:
+    legacy = tmp_path / "nvbit_trace_summary_0_0.json"
+    legacy.write_text('{"schema_version": 1}\n', encoding="utf-8")
+    candidate = tmp_path / node_name
+    if node_kind == "directory":
+        candidate.mkdir()
+    else:
+        candidate.write_bytes(b"wrong authority node type\n")
+
+    discovered, errors = merge_evidence._discover_nvbit_summary_inputs(
+        tmp_path
+    )
+
+    assert discovered == []
+    assert any(
+        "authority_node_invalid" in error and str(candidate) in error
+        for error in errors
+    )
+
+
+@pytest.mark.parametrize("limit_kind", ("per_file", "aggregate"))
+def test_join_preload_limits_fire_before_the_first_payload_read(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    limit_kind: str,
+) -> None:
+    paths = [
+        tmp_path / "cupti_activity_0_0.json",
+        tmp_path / "cupti_activity_0_1.json",
+    ]
+    for path in paths:
+        path.write_bytes(b"{}\n")
+
+    with merge_evidence.PinnedDirectoryReader(tmp_path) as reader:
+        snapshot = merge_evidence._snapshot_join_input_tree(
+            tmp_path,
+            reader=reader,
+        )
+        if limit_kind == "per_file":
+            monkeypatch.setattr(
+                merge_evidence,
+                "_JOIN_PRELOAD_MAX_FILE_BYTES",
+                2,
+            )
+            monkeypatch.setattr(
+                merge_evidence,
+                "_JOIN_PRELOAD_MAX_TOTAL_BYTES",
+                100,
+            )
+        else:
+            monkeypatch.setattr(
+                merge_evidence,
+                "_JOIN_PRELOAD_MAX_FILE_BYTES",
+                10,
+            )
+            monkeypatch.setattr(
+                merge_evidence,
+                "_JOIN_PRELOAD_MAX_TOTAL_BYTES",
+                5,
+            )
+        read_count = 0
+        original_read_snapshot = (
+            merge_evidence.PinnedDirectoryReader.read_snapshot
+        )
+
+        def track_read(*args: object, **kwargs: object):
+            nonlocal read_count
+            read_count += 1
+            return original_read_snapshot(*args, **kwargs)
+
+        monkeypatch.setattr(
+            merge_evidence.PinnedDirectoryReader,
+            "read_snapshot",
+            track_read,
+        )
+
+        with pytest.raises(ImmutableArtifactLimitError):
+            merge_evidence._preload_join_input_bytes(
+                tmp_path,
+                reader,
+                snapshot,
+                paths,
+                preload_budget=merge_evidence._JoinPreloadBudget(),
+            )
+
+        assert read_count == 0
+
+
+def test_join_schema_read_is_bounded_before_json_decode(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    schema_path = tmp_path / "schema.json"
+    schema_path.write_bytes(b"{}\n")
+    monkeypatch.setattr(
+        merge_evidence,
+        "_JOIN_PRELOAD_MAX_FILE_BYTES",
+        2,
+    )
+    decoded = False
+
+    def reject_decode(*_args: object, **_kwargs: object) -> object:
+        nonlocal decoded
+        decoded = True
+        raise AssertionError("oversized schema reached JSON decode")
+
+    monkeypatch.setattr(merge_evidence, "strict_json_loads", reject_decode)
+    with pytest.raises(ImmutableArtifactLimitError):
+        merge_evidence._load_join_schema(schema_path, role="fixture schema")
+    assert decoded is False
+
+
+def test_canonical_candidate_replacement_is_rejected_before_unbounded_hash(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    legacy = tmp_path / "nvbit_trace_summary_0_0.json"
+    legacy.write_text('{"schema_version": 1}\n', encoding="utf-8")
+    candidate = tmp_path / "trace_fixture.json"
+    candidate.write_text("[]\n", encoding="utf-8")
+    original_discover = merge_evidence._discover_json_files
+    original_hash_fd = immutable._hash_fd
+    replaced = False
+
+    def replace_after_inventory(*args: object, **kwargs: object) -> list[Path]:
+        nonlocal replaced
+        paths = original_discover(*args, **kwargs)
+        if kwargs.get("tree_snapshot") is not None and "trace_*.json" in args:
+            replacement = tmp_path / ".large-replacement"
+            with replacement.open("wb") as stream:
+                stream.truncate(
+                    merge_evidence._JOIN_PRELOAD_MAX_FILE_BYTES + 1
+                )
+            os.replace(replacement, candidate)
+            replaced = True
+        return paths
+
+    def reject_large_hash(descriptor: int):
+        if os.fstat(descriptor).st_size > (
+            merge_evidence._JOIN_PRELOAD_MAX_FILE_BYTES
+        ):
+            raise AssertionError("replacement was hashed before bounded admission")
+        return original_hash_fd(descriptor)
+
+    monkeypatch.setattr(
+        merge_evidence,
+        "_discover_json_files",
+        replace_after_inventory,
+    )
+    monkeypatch.setattr(immutable, "_hash_fd", reject_large_hash)
+
+    discovered, errors = merge_evidence._discover_nvbit_summary_inputs(
+        tmp_path
+    )
+
+    assert replaced is True
+    assert discovered == []
+    assert errors
+
+
+def test_rejected_manifest_does_not_retain_raw_source_watches(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    artifact_dir = tmp_path / "artifact"
+    _admission, _result, active_path = _publish_active_summary_fixture(
+        artifact_dir=artifact_dir,
+        source_root=_write_trace(tmp_path / "trace"),
+        shape_point="fixture_shape",
+    )
+    active = json.loads(active_path.read_text(encoding="utf-8"))
+    active["measurement_manifest"]["sha256"] = "0" * 64
+    _replace_active_record_for_hostile_fixture(active_path, active)
+    retained_open_count = 0
+
+    def reject_retained_open(*_args: object, **_kwargs: object):
+        nonlocal retained_open_count
+        retained_open_count += 1
+        raise AssertionError("rejected candidate retained raw source authority")
+
+    monkeypatch.setattr(
+        merge_evidence,
+        "open_admitted_trace_sources",
+        reject_retained_open,
+    )
+
+    discovered, errors = merge_evidence._discover_nvbit_summary_inputs(
+        artifact_dir
+    )
+
+    assert discovered == []
+    assert any("measurement_manifest_invalid" in error for error in errors)
+    assert retained_open_count == 0
+
+
+@pytest.mark.parametrize("generation_kind", ("summary", "phase"))
+def test_generation_budget_preflight_precedes_content_hashing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    generation_kind: str,
+) -> None:
+    artifact_dir = tmp_path / "artifact"
+    admission, _result, active_path = _publish_active_summary_fixture(
+        artifact_dir=artifact_dir,
+        source_root=_write_trace(tmp_path / "trace"),
+        shape_point="fixture_shape",
+    )
+    active = json.loads(active_path.read_text(encoding="utf-8"))
+    budget = merge_evidence._JoinPreloadBudget(
+        total_bytes=merge_evidence._JOIN_PRELOAD_MAX_TOTAL_BYTES,
+    )
+
+    def reject_generation_hash(*_args: object, **_kwargs: object):
+        raise AssertionError("generation hashing preceded preload admission")
+
+    monkeypatch.setattr(
+        merge_evidence,
+        "inspect_immutable_directory_generation",
+        reject_generation_hash,
+    )
+    if generation_kind == "summary":
+        with pytest.raises(ImmutableArtifactLimitError):
+            merge_evidence._active_summary_generation_descriptor_error(
+                active_path,
+                active,
+                trace_admission=admission,
+                preload_budget=budget,
+                materialization_budget=merge_evidence._JoinMaterializationBudget(),
+            )
+        return
+
+    attempt_id = active["trace_capture_attempt_id"]
+    relative = Path(
+        run_suite.PHASE_LEDGER_GENERATION_NAMESPACE,
+        "fixture_shape",
+        attempt_id,
+    )
+    active["phase_inject_ab"] = {
+        "requested": True,
+        "repeat_count": 1,
+        "generation": {
+            "schema_version": 1,
+            "path": relative.as_posix(),
+            "attempt_id": attempt_id,
+            "content_manifest_sha256": "0" * 64,
+            "filesystem_generation_sha256": "0" * 64,
+            "file_count": 1,
+            "directory_count": 1,
+            "total_file_bytes": 1,
+        },
+        "evidence": [
+            {
+                "path": (
+                    relative / "phase_cycle_ledger_0_0.json"
+                ).as_posix(),
+                "sha256": "0" * 64,
+                "size_bytes": 1,
+            }
+        ],
+    }
+    with pytest.raises(ImmutableArtifactLimitError):
+        merge_evidence._active_phase_generation_binding_error(
+            active_path,
+            active,
+            phase_namespace_entries=[],
+            trace_admission=admission,
+            preload_budget=budget,
+            materialization_budget=merge_evidence._JoinMaterializationBudget(),
+        )
+
+
+@pytest.mark.parametrize("consumer", ("merge", "verifier"))
+def test_generation_actual_per_file_limit_precedes_content_hashing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    consumer: str,
+) -> None:
+    artifact_dir = tmp_path / "artifact"
+    admission, _result, active_path = _publish_active_summary_fixture(
+        artifact_dir=artifact_dir,
+        source_root=_write_trace_with_launch_count(tmp_path / "trace", 2),
+        shape_point="fixture_shape",
+    )
+    active = json.loads(active_path.read_text(encoding="utf-8"))
+    descriptor = active["nvbit_trace_summary_generation"]
+    assert isinstance(descriptor, dict)
+    files = descriptor["files"]
+    assert isinstance(files, list) and len(files) == 2
+    padded_path = artifact_dir / str(files[0]["path"])
+    generation_path = padded_path.parent
+    generation_path.chmod(0o755)
+    padded_path.chmod(0o644)
+    try:
+        padded_path.write_bytes(padded_path.read_bytes() + b" " * 4096)
+        padded_path.chmod(0o444)
+    finally:
+        generation_path.chmod(0o555)
+    _reseal_summary_generation_authority(
+        artifact_dir=artifact_dir,
+        active_path=active_path,
+        active=active,
+    )
+    descriptor = active["nvbit_trace_summary_generation"]
+    assert isinstance(descriptor, dict)
+    files = descriptor["files"]
+    assert isinstance(files, list) and len(files) == 2
+    actual_sizes = [int(item["size_bytes"]) for item in files]
+    per_file_limit = max(actual_sizes) - 1
+    total_file_bytes = int(descriptor["total_file_bytes"])
+    assert total_file_bytes <= per_file_limit * len(files)
+    files[0]["size_bytes"] = per_file_limit
+    files[1]["size_bytes"] = total_file_bytes - per_file_limit
+    assert all(int(item["size_bytes"]) <= per_file_limit for item in files)
+
+    original_hash_fd = immutable._hash_fd
+
+    def reject_summary_hash(descriptor_fd: int):
+        target = os.readlink(f"/proc/self/fd/{descriptor_fd}")
+        if run_suite.NVBIT_TRACE_SUMMARY_GENERATION_NAMESPACE in target:
+            raise AssertionError("summary content hashing preceded actual-size limit")
+        return original_hash_fd(descriptor_fd)
+
+    monkeypatch.setattr(immutable, "_hash_fd", reject_summary_hash)
+    if consumer == "merge":
+        monkeypatch.setattr(
+            merge_evidence,
+            "_JOIN_PRELOAD_MAX_FILE_BYTES",
+            per_file_limit,
+        )
+        error = merge_evidence._active_summary_generation_descriptor_error(
+            active_path,
+            active,
+            trace_admission=admission,
+            preload_budget=merge_evidence._JoinPreloadBudget(),
+            materialization_budget=merge_evidence._JoinMaterializationBudget(),
+        )
+        assert error is not None
+        errors = [error]
+    else:
+        monkeypatch.setattr(
+            verify_artifacts,
+            "_CANONICAL_AUTHORITY_JSON_MAX_BYTES",
+            per_file_limit,
+        )
+        errors = verify_artifacts._verify_active_summary_generation(
+            active_path,
+            active,
+            trace_admission=admission,
+        )
+
+    assert any("bounded per-file byte limit" in error for error in errors)
+
+
+
+def test_merge_preserves_malformed_retained_legacy_bytes(
+    tmp_path: Path,
+) -> None:
+    legacy = tmp_path / "nvbit_trace_summary_0_0.json"
+    legacy.write_text(
+        '{"schema_version":1,"schema_version":1}\n',
+        encoding="utf-8",
+    )
+    with ExitStack() as source_stack:
+        retained_authorities: list[object] = []
+        paths, errors, payloads = (
+            merge_evidence._discover_nvbit_summary_inputs_with_records(
+                tmp_path,
+                source_stack=source_stack,
+                retained_authorities=retained_authorities,
+            )
+        )
+        assert errors == []
+        assert paths == [legacy]
+        for authority in retained_authorities:
+            authority.verify_unchanged()
+
+    legacy.write_text("{}\n", encoding="utf-8")
+    _cupti_schema, nvbit_schema, _manifest_schema = (
+        merge_evidence._load_join_schemas()
+    )
+    records, schema_errors = (
+        merge_evidence._index_records_by_natural_key_with_counts(
+            paths,
+            nvbit_schema,
+            "nvbit",
+            preloaded_payloads=payloads,
+        )
+    )
+
+    assert records == {}
+    assert len(schema_errors) == 1
+    assert "duplicate JSON key" in schema_errors[0]
 
 
 def test_merge_discovery_fails_closed_at_bounded_inventory_limit(
@@ -1772,7 +2607,63 @@ def test_merge_binds_committed_summary_body_to_active_trace_record(
     assert "slug" in errors[0]
 
 
-def test_merge_typed_unavailable_trace_record_suppresses_stale_flat_summary(
+@pytest.mark.parametrize(
+    ("mutation", "expected"),
+    (
+        ("duplicate", "duplicate JSON key"),
+        ("nonfinite", "non-finite JSON number"),
+        ("deep", "invalid active NVBit summary"),
+    ),
+)
+def test_merge_strictly_decodes_active_summary_payload(
+    tmp_path: Path,
+    mutation: str,
+    expected: str,
+) -> None:
+    artifact_dir = tmp_path / "artifact"
+    _admission, result, active_path = _publish_active_summary_fixture(
+        artifact_dir=artifact_dir,
+        source_root=_write_trace(tmp_path / "trace"),
+        shape_point="fixture_shape",
+    )
+    active = json.loads(active_path.read_text(encoding="utf-8"))
+    summary_path = artifact_dir / str(result["paths"][0])
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    if mutation == "duplicate":
+        body = json.dumps(summary, separators=(",", ":"), sort_keys=True)
+        payload = ("{\"schema_version\":2," + body[1:] + "\n").encode(
+            "utf-8"
+        )
+    elif mutation == "nonfinite":
+        summary["inst_count"] = float("nan")
+        payload = (json.dumps(summary, sort_keys=True) + "\n").encode("utf-8")
+    else:
+        payload = ("[" * 10_000 + "0" + "]" * 10_000).encode("utf-8")
+    generation_path = summary_path.parent
+    generation_path.chmod(0o755)
+    try:
+        summary_path.chmod(0o644)
+        summary_path.write_bytes(payload)
+        summary_path.chmod(0o444)
+    finally:
+        generation_path.chmod(0o555)
+    _reseal_summary_generation_authority(
+        artifact_dir=artifact_dir,
+        active_path=active_path,
+        active=active,
+    )
+
+    discovered, errors = merge_evidence._discover_nvbit_summary_inputs(
+        artifact_dir
+    )
+
+    assert discovered == []
+    assert len(errors) == 1
+    assert "generation_binding_invalid" in errors[0]
+    assert expected in errors[0]
+
+
+def test_merge_rejects_legacy_typed_unavailable_as_active_authority(
     tmp_path: Path,
 ) -> None:
     stale = tmp_path / "nvbit_trace_summary_0_0.json"
@@ -1787,9 +2678,10 @@ def test_merge_typed_unavailable_trace_record_suppresses_stale_flat_summary(
         "nvbit_trace_summary_emit_status": "typed_unavailable",
         "nvbit_trace_summary_paths": [],
     }
-    (tmp_path / "trace_fixture_shape.json").write_text(
-        json.dumps(active, indent=2) + "\n",
-        encoding="utf-8",
+    immutable.publish_regular_file(
+        tmp_path,
+        "trace_fixture_shape.json",
+        (json.dumps(active, indent=2) + "\n").encode("utf-8"),
     )
 
     discovered, errors = merge_evidence._discover_nvbit_summary_inputs(
@@ -1797,7 +2689,396 @@ def test_merge_typed_unavailable_trace_record_suppresses_stale_flat_summary(
     )
     assert discovered == []
     assert len(errors) == 1
-    assert "does not carry summary status 'ok'" in errors[0]
+    assert "explicitly active canonical trace record" in errors[0]
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected"),
+    (
+        ("missing_file", "absent from retained authority inventory"),
+        ("path_substitution", "does not name the exact active shape"),
+        ("sha256_drift", "descriptor is stale"),
+        ("size_drift", "descriptor is stale"),
+    ),
+)
+def test_merge_requires_exact_measurement_manifest_identity(
+    tmp_path: Path,
+    mutation: str,
+    expected: str,
+) -> None:
+    artifact_dir = tmp_path / "artifact"
+    _admission, _result, active_path = _publish_active_summary_fixture(
+        artifact_dir=artifact_dir,
+        source_root=_write_trace(tmp_path / "trace"),
+        shape_point="fixture_shape",
+    )
+    active = json.loads(active_path.read_text(encoding="utf-8"))
+    descriptor = active["measurement_manifest"]
+    assert isinstance(descriptor, dict)
+    manifest_path = artifact_dir / str(descriptor["path"])
+    if mutation == "missing_file":
+        immutable.retire_regular_file(manifest_path)
+    elif mutation == "path_substitution":
+        substitute = "measurement_manifest_other_shape.json"
+        immutable.publish_regular_file(
+            artifact_dir,
+            substitute,
+            manifest_path.read_bytes(),
+        )
+        descriptor["path"] = substitute
+    elif mutation == "sha256_drift":
+        descriptor["sha256"] = "c" * 64
+    else:
+        descriptor["size_bytes"] = int(descriptor["size_bytes"]) + 1
+    _replace_active_record_for_hostile_fixture(active_path, active)
+
+    discovered, errors = merge_evidence._discover_nvbit_summary_inputs(
+        artifact_dir
+    )
+
+    assert discovered == []
+    assert len(errors) == 1
+    assert "measurement_manifest_invalid" in errors[0]
+    assert expected in errors[0]
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected"),
+    (
+        ("schema_version", "fails closed v2 schema"),
+        ("integral_float_schema_version", "fails closed v2 schema"),
+        ("extra_property", "fails closed v2 schema"),
+        ("mode", "field 'mode' disagrees"),
+        ("slug", "field 'slug' disagrees"),
+        ("shape_point", "field 'shape_point' disagrees"),
+        ("binary_sha256", "field 'binary_sha256' disagrees"),
+        (
+            "kernel_signature_sha256",
+            "field 'kernel_signature_sha256' disagrees",
+        ),
+        ("timestamp_utc", "fails closed v2 schema"),
+    ),
+)
+def test_merge_schema_and_identity_bind_measurement_manifest(
+    tmp_path: Path,
+    mutation: str,
+    expected: str,
+) -> None:
+    artifact_dir = tmp_path / "artifact"
+    _admission, _result, active_path = _publish_active_summary_fixture(
+        artifact_dir=artifact_dir,
+        source_root=_write_trace(tmp_path / "trace"),
+        shape_point="fixture_shape",
+    )
+    active = json.loads(active_path.read_text(encoding="utf-8"))
+    descriptor = active["measurement_manifest"]
+    assert isinstance(descriptor, dict)
+    manifest = json.loads(
+        (artifact_dir / str(descriptor["path"])).read_text(encoding="utf-8")
+    )
+    if mutation == "schema_version":
+        manifest[mutation] = 1
+    elif mutation == "integral_float_schema_version":
+        manifest["schema_version"] = 2.0
+    elif mutation == "extra_property":
+        manifest[mutation] = "forbidden"
+    elif mutation == "mode":
+        manifest[mutation] = "timing"
+    elif mutation in {"slug", "shape_point"}:
+        manifest[mutation] = "other"
+    else:
+        manifest[mutation] = "c" * 64
+    payload = (json.dumps(manifest, sort_keys=True) + "\n").encode("utf-8")
+    _replace_measurement_manifest_for_hostile_fixture(
+        artifact_dir=artifact_dir,
+        active_path=active_path,
+        active=active,
+        payload=payload,
+    )
+
+    discovered, errors = merge_evidence._discover_nvbit_summary_inputs(
+        artifact_dir
+    )
+
+    assert discovered == []
+    assert len(errors) == 1
+    assert "measurement_manifest_invalid" in errors[0]
+    assert expected in errors[0]
+    verifier_errors = verify_artifacts._verify_canonical_trace_pb_admission(
+        artifact_dir
+    )
+    assert any(
+        "measurement manifest" in error and expected in error
+        for error in verifier_errors
+    )
+
+
+def test_merge_binds_measurement_manifest_gpu_sku_to_requested_platform(
+    tmp_path: Path,
+) -> None:
+    artifact_dir = tmp_path / "artifact"
+    _admission, _result, active_path = _publish_active_summary_fixture(
+        artifact_dir=artifact_dir,
+        source_root=_write_trace(tmp_path / "trace"),
+        shape_point="fixture_shape",
+    )
+    active = json.loads(active_path.read_text(encoding="utf-8"))
+    descriptor = active["measurement_manifest"]
+    assert isinstance(descriptor, dict)
+    manifest = json.loads(
+        (artifact_dir / str(descriptor["path"])).read_text(encoding="utf-8")
+    )
+    manifest["gpu_sku"] = "rtx_pro_6000_blackwell"
+    payload = (json.dumps(manifest, sort_keys=True) + "\n").encode("utf-8")
+    _replace_measurement_manifest_for_hostile_fixture(
+        artifact_dir=artifact_dir,
+        active_path=active_path,
+        active=active,
+        payload=payload,
+    )
+
+    discovered, errors = merge_evidence._discover_nvbit_summary_inputs(
+        artifact_dir,
+        expected_platform="rtx_3090_ti",
+    )
+
+    assert discovered == []
+    assert len(errors) == 1
+    assert "measurement_manifest_invalid" in errors[0]
+    assert "field 'gpu_sku' disagrees" in errors[0]
+
+
+def test_verifier_binds_measurement_manifest_gpu_sku_to_canonical_path(
+    tmp_path: Path,
+) -> None:
+    artifact_dir = tmp_path / "rtx_3090_ti" / "sm_86" / "artifact"
+    _admission, _result, active_path = _publish_active_summary_fixture(
+        artifact_dir=artifact_dir,
+        source_root=_write_trace(tmp_path / "trace"),
+        shape_point="fixture_shape",
+    )
+    active = json.loads(active_path.read_text(encoding="utf-8"))
+    descriptor = active["measurement_manifest"]
+    assert isinstance(descriptor, dict)
+    manifest = json.loads(
+        (artifact_dir / str(descriptor["path"])).read_text(encoding="utf-8")
+    )
+    manifest["gpu_sku"] = "rtx_pro_6000_blackwell"
+    payload = (json.dumps(manifest, sort_keys=True) + "\n").encode("utf-8")
+    _replace_measurement_manifest_for_hostile_fixture(
+        artifact_dir=artifact_dir,
+        active_path=active_path,
+        active=active,
+        payload=payload,
+    )
+
+    errors = verify_artifacts._verify_canonical_trace_pb_admission(artifact_dir)
+
+    assert any(
+        "measurement manifest field 'gpu_sku' disagrees" in error
+        for error in errors
+    )
+
+
+def test_verifier_rejects_multiple_canonical_platform_path_authorities(
+    tmp_path: Path,
+) -> None:
+    artifact_dir = (
+        tmp_path
+        / "rtx_3090_ti"
+        / "rtx_pro_6000_blackwell"
+        / "sm_86"
+        / "artifact"
+    )
+    _publish_active_summary_fixture(
+        artifact_dir=artifact_dir,
+        source_root=_write_trace(tmp_path / "trace"),
+        shape_point="fixture_shape",
+    )
+
+    errors = verify_artifacts._verify_canonical_trace_pb_admission(artifact_dir)
+
+    assert any(
+        "multiple canonical platform authorities" in error for error in errors
+    )
+
+
+@pytest.mark.parametrize(
+    ("mutation", "expected"),
+    (
+        ("duplicate", "duplicate JSON key"),
+        ("nonfinite", "non-finite JSON number"),
+        ("deep", "invalid measurement manifest"),
+    ),
+)
+def test_merge_strictly_decodes_measurement_manifest(
+    tmp_path: Path,
+    mutation: str,
+    expected: str,
+) -> None:
+    artifact_dir = tmp_path / "artifact"
+    _admission, _result, active_path = _publish_active_summary_fixture(
+        artifact_dir=artifact_dir,
+        source_root=_write_trace(tmp_path / "trace"),
+        shape_point="fixture_shape",
+    )
+    active = json.loads(active_path.read_text(encoding="utf-8"))
+    descriptor = active["measurement_manifest"]
+    assert isinstance(descriptor, dict)
+    manifest = json.loads(
+        (artifact_dir / str(descriptor["path"])).read_text(encoding="utf-8")
+    )
+    if mutation == "duplicate":
+        body = json.dumps(manifest, separators=(",", ":"), sort_keys=True)
+        payload = ("{\"schema_version\":2," + body[1:] + "\n").encode(
+            "utf-8"
+        )
+    elif mutation == "nonfinite":
+        manifest["cv_pct"] = float("nan")
+        payload = (json.dumps(manifest, sort_keys=True) + "\n").encode(
+            "utf-8"
+        )
+    else:
+        payload = ("[" * 10_000 + "0" + "]" * 10_000).encode("utf-8")
+    _replace_measurement_manifest_for_hostile_fixture(
+        artifact_dir=artifact_dir,
+        active_path=active_path,
+        active=active,
+        payload=payload,
+    )
+
+    discovered, errors = merge_evidence._discover_nvbit_summary_inputs(
+        artifact_dir
+    )
+
+    assert discovered == []
+    assert len(errors) == 1
+    assert "measurement_manifest_invalid" in errors[0]
+    assert expected in errors[0]
+    verifier_errors = verify_artifacts._verify_canonical_trace_pb_admission(
+        artifact_dir
+    )
+    assert any("measurement manifest" in error for error in verifier_errors)
+    if mutation != "deep":
+        assert any(expected in error for error in verifier_errors)
+
+
+def test_merge_types_measurement_manifest_memory_exhaustion(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    artifact_dir = tmp_path / "artifact"
+    _publish_active_summary_fixture(
+        artifact_dir=artifact_dir,
+        source_root=_write_trace(tmp_path / "trace"),
+        shape_point="fixture_shape",
+    )
+    original = merge_evidence.strict_json_loads
+
+    def fail_manifest_decode(payload: bytes, *, label: str = "JSON") -> object:
+        if label == "measurement manifest":
+            raise MemoryError("synthetic manifest allocation exhaustion")
+        return original(payload, label=label)
+
+    monkeypatch.setattr(
+        merge_evidence,
+        "strict_json_loads",
+        fail_manifest_decode,
+    )
+
+    discovered, errors = merge_evidence._discover_nvbit_summary_inputs(
+        artifact_dir
+    )
+
+    assert discovered == []
+    assert len(errors) == 1
+    assert "measurement_manifest_resource_unavailable" in errors[0]
+    assert "synthetic manifest allocation exhaustion" in errors[0]
+
+
+@pytest.mark.parametrize("error_number", (errno.EMFILE, errno.ENFILE))
+def test_merge_types_measurement_manifest_descriptor_exhaustion(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    error_number: int,
+) -> None:
+    artifact_dir = tmp_path / "artifact"
+    _publish_active_summary_fixture(
+        artifact_dir=artifact_dir,
+        source_root=_write_trace(tmp_path / "trace"),
+        shape_point="fixture_shape",
+    )
+    original = merge_evidence.PinnedDirectoryReader.read_snapshot
+
+    def fail_manifest_read(
+        reader,
+        relative_path: str,
+        **kwargs,
+    ):
+        if PurePosixPath(relative_path).name.startswith("measurement_manifest_"):
+            raise OSError(error_number, "synthetic descriptor exhaustion")
+        return original(reader, relative_path, **kwargs)
+
+    monkeypatch.setattr(
+        merge_evidence.PinnedDirectoryReader,
+        "read_snapshot",
+        fail_manifest_read,
+    )
+
+    discovered, errors = merge_evidence._discover_nvbit_summary_inputs(
+        artifact_dir
+    )
+
+    assert discovered == []
+    assert len(errors) == 1
+    assert "measurement_manifest_resource_unavailable" in errors[0]
+    assert "synthetic descriptor exhaustion" in errors[0]
+
+
+@pytest.mark.parametrize("consumer", ("merge", "verifier"))
+@pytest.mark.parametrize("error_number", (errno.EMFILE, errno.ENFILE))
+def test_consumers_type_wrapped_manifest_open_exhaustion_as_resource_unavailable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    consumer: str,
+    error_number: int,
+) -> None:
+    artifact_dir = tmp_path / "artifact"
+    _admission, _result, active_path = _publish_active_summary_fixture(
+        artifact_dir=artifact_dir,
+        source_root=_write_trace(tmp_path / "trace"),
+        shape_point="fixture_shape",
+    )
+    active = json.loads(active_path.read_text(encoding="utf-8"))
+    descriptor = active["measurement_manifest"]
+    assert isinstance(descriptor, dict)
+    manifest_name = str(descriptor["path"])
+    real_open = immutable.os.open
+
+    def fail_manifest_open(path, flags, *args, **kwargs):
+        if PurePosixPath(os.fspath(path)).name == manifest_name:
+            raise OSError(error_number, "synthetic wrapped descriptor exhaustion")
+        return real_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(immutable.os, "open", fail_manifest_open)
+
+    if consumer == "merge":
+        discovered, errors = merge_evidence._discover_nvbit_summary_inputs(
+            artifact_dir
+        )
+        assert discovered == []
+    else:
+        errors = verify_artifacts._verify_canonical_trace_pb_admission(
+            artifact_dir
+        )
+
+    assert any(
+        "ResourceUnavailable" in error or "resource_unavailable" in error
+        for error in errors
+    ), errors
+    assert any(
+        "synthetic wrapped descriptor exhaustion" in error for error in errors
+    )
 
 
 def test_handle_trace_typed_unavailable_record_is_non_active_authority(
@@ -1928,16 +3209,32 @@ def test_run_suite_summary_batch_failure_leaves_no_active_generation(
     assert not tuple(artifact_dir.glob(".*.retired"))
 
 
+@pytest.mark.parametrize(
+    ("resource_error", "expected_detail"),
+    (
+        (
+            ImmutableArtifactResourceError(
+                "VERIFY_RESOURCE_BOUND: inotify event queue overflowed"
+            ),
+            "inotify event queue overflowed",
+        ),
+        (
+            MemoryError("synthetic summary allocation exhaustion"),
+            "synthetic summary allocation exhaustion",
+        ),
+    ),
+    ids=("immutable-resource", "memory-error"),
+)
 def test_run_suite_summary_resource_failure_is_typed_result(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    resource_error: BaseException,
+    expected_detail: str,
 ) -> None:
     admission = require_trace_admission(_write_trace(tmp_path / "trace"))
 
     def fail_with_resource_error(**_kwargs) -> None:
-        raise ImmutableArtifactResourceError(
-            "VERIFY_RESOURCE_BOUND: inotify event queue overflowed"
-        )
+        raise resource_error
 
     monkeypatch.setattr(
         adapter,
@@ -1957,7 +3254,7 @@ def test_run_suite_summary_resource_failure_is_typed_result(
     assert result["failed_hard"] is True
     assert result["paths"] == []
     assert "trace_summary_resource_unavailable" in result["failure_reason"]
-    assert "inotify event queue overflowed" in result["failure_reason"]
+    assert expected_detail in result["failure_reason"]
 
 
 def test_run_suite_summary_generation_refuses_exact_destination_reuse(
@@ -2174,7 +3471,7 @@ def test_merge_refuses_active_reference_that_omits_generation_launch(
         artifact_dir=artifact_dir,
     )
     assert result["status"] == "ok"
-    _write_active_trace_record(
+    active_path = _write_active_trace_record(
         artifact_dir,
         admission=admission,
         shape_point="fixture_shape",
@@ -2182,6 +3479,12 @@ def test_merge_refuses_active_reference_that_omits_generation_launch(
         raw_trace_generation=raw_descriptor,
         attempt_id=attempt_id,
     )
+    active = json.loads(active_path.read_text(encoding="utf-8"))
+    _add_minimal_manifest_authority(
+        artifact_dir=artifact_dir,
+        active=active,
+    )
+    _replace_active_record_for_hostile_fixture(active_path, active)
 
     discovered, errors = merge_evidence._discover_nvbit_summary_inputs(
         artifact_dir
@@ -2591,6 +3894,604 @@ def test_verify_artifacts_accepts_valid_attempt_scoped_generation_authority(
     ) == []
 
 
+@pytest.mark.parametrize(
+    "ancestor",
+    (".hidden-stage", run_suite.RAW_TRACE_GENERATION_NAMESPACE),
+    ids=("hidden", "reserved"),
+)
+def test_consumers_reject_scan_root_below_nonauthority_namespace(
+    tmp_path: Path,
+    ancestor: str,
+) -> None:
+    artifact_dir = tmp_path / ancestor / "artifact"
+    artifact_dir.mkdir(parents=True)
+
+    discovered, merge_errors = merge_evidence._discover_nvbit_summary_inputs(
+        artifact_dir,
+        expected_platform="rtx_3090_ti",
+    )
+    verifier_errors = verify_artifacts._verify_canonical_trace_pb_admission(
+        artifact_dir
+    )
+
+    assert discovered == []
+    assert any("hidden or reserved evidence namespace" in error for error in merge_errors)
+    assert any("inside hidden or reserved namespace" in error for error in verifier_errors)
+
+
+def test_merge_accounts_decoded_active_record_graph(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    artifact_dir, _active_path, _active = _prepare_generation_authority_fixture(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+    )
+
+    class RejectDecodedActiveRecord:
+        def reserve(
+            self,
+            _value: object,
+            *,
+            retained_input_bytes: int,
+            role: str,
+        ) -> None:
+            assert retained_input_bytes >= 0
+            if role.startswith("decoded canonical trace record "):
+                raise ImmutableArtifactLimitError(
+                    "synthetic decoded active-record graph limit"
+                )
+
+        def reserve_bytes(
+            self,
+            _size: int,
+            *,
+            retained_input_bytes: int,
+            role: str,
+        ) -> None:
+            assert retained_input_bytes >= 0
+            assert role
+
+    monkeypatch.setattr(
+        merge_evidence,
+        "_JoinMaterializationBudget",
+        RejectDecodedActiveRecord,
+    )
+
+    discovered, errors = merge_evidence._discover_nvbit_summary_inputs(
+        artifact_dir,
+        expected_platform="rtx_3090_ti",
+    )
+
+    assert discovered == []
+    assert any(
+        "joined_evidence_nvbit_trace_authority_limit_exceeded" in error
+        and "synthetic decoded active-record graph limit" in error
+        for error in errors
+    )
+
+
+@pytest.mark.parametrize(
+    ("field", "value", "expected_verifier"),
+    (
+        ("shape_set", None, "shape_set must equal 'trace_shapes'"),
+        ("shape_set", "other_shapes", "shape_set must equal 'trace_shapes'"),
+        (
+            "nvbit_trace_summary_emit_status",
+            None,
+            "summary status must equal 'ok'",
+        ),
+        (
+            "nvbit_trace_summary_emit_status",
+            "typed_unavailable",
+            "summary status must equal 'ok'",
+        ),
+    ),
+    ids=("missing-shape-set", "wrong-shape-set", "missing-status", "wrong-status"),
+)
+def test_verifier_rejects_missing_or_wrong_active_discriminators(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    field: str,
+    value: object,
+    expected_verifier: str,
+) -> None:
+    artifact_dir, active_path, active = _prepare_generation_authority_fixture(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+    )
+    if value is None:
+        active.pop(field)
+    else:
+        active[field] = value
+    _replace_active_record_for_hostile_fixture(active_path, active)
+
+    errors = verify_artifacts._verify_canonical_trace_pb_admission(artifact_dir)
+
+    assert any(expected_verifier in error for error in errors)
+
+
+@pytest.mark.parametrize(
+    "authority",
+    (
+        "active_record",
+        "raw_generation",
+        "derived_generation",
+        "summary_generation",
+    ),
+)
+@pytest.mark.parametrize(
+    "schema_version",
+    (2, True, 1.0),
+    ids=("unknown-int", "boolean", "integral-float"),
+)
+def test_consumers_reject_nonexact_generation_authority_versions(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    authority: str,
+    schema_version: object,
+) -> None:
+    artifact_dir, active_path, active = _prepare_generation_authority_fixture(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+    )
+    if authority == "active_record":
+        active["schema_version"] = schema_version
+        expected_merge = "explicitly active canonical trace record"
+    elif authority == "raw_generation":
+        descriptor = active["raw_trace_generation"]
+        assert isinstance(descriptor, dict)
+        descriptor["schema_version"] = schema_version
+        expected_merge = "raw_trace_generation schema_version must equal one"
+    elif authority == "derived_generation":
+        descriptor = active["trace_derived_generation"]
+        assert isinstance(descriptor, dict)
+        descriptor["schema_version"] = schema_version
+        expected_merge = (
+            "trace_derived_generation.path is not the exact active attempt path"
+        )
+    else:
+        descriptor = active["nvbit_trace_summary_generation"]
+        assert isinstance(descriptor, dict)
+        descriptor["schema_version"] = schema_version
+        expected_merge = "summary generation schema_version must equal one"
+    _replace_active_record_for_hostile_fixture(active_path, active)
+
+    discovered, merge_errors = merge_evidence._discover_nvbit_summary_inputs(
+        artifact_dir,
+        expected_platform="rtx_3090_ti",
+    )
+    verifier_errors = verify_artifacts._verify_canonical_trace_pb_admission(
+        artifact_dir
+    )
+
+    assert discovered == []
+    assert any(expected_merge in error for error in merge_errors)
+    assert any("schema_version must equal one" in error for error in verifier_errors)
+
+
+def test_consumers_reject_writable_active_trace_record(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    artifact_dir, active_path, _active = _prepare_generation_authority_fixture(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+    )
+    active_path.chmod(0o644)
+
+    discovered, merge_errors = merge_evidence._discover_nvbit_summary_inputs(
+        artifact_dir,
+        expected_platform="rtx_3090_ti",
+    )
+    verifier_errors = verify_artifacts._verify_canonical_trace_pb_admission(
+        artifact_dir
+    )
+
+    assert discovered == []
+    assert any("single-link 0444 regular file" in error for error in merge_errors)
+    assert any(
+        "single-link 0444 regular file" in error for error in verifier_errors
+    )
+
+
+@pytest.mark.parametrize("consumer", ("merge", "verifier"))
+@pytest.mark.parametrize("error_number", (errno.EMFILE, errno.ENFILE))
+def test_consumers_type_tree_snapshot_exhaustion_as_resource_unavailable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    consumer: str,
+    error_number: int,
+) -> None:
+    artifact_dir, _active_path, _active = _prepare_generation_authority_fixture(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+    )
+    original_snapshot_tree = immutable.PinnedDirectoryReader.snapshot_tree
+
+    def exhaust_during_snapshot(reader, *args, **kwargs):
+        with monkeypatch.context() as scoped:
+            scoped.setattr(
+                immutable.os,
+                "dup",
+                lambda _descriptor: (_ for _ in ()).throw(
+                    OSError(error_number, "synthetic tree snapshot exhaustion")
+                ),
+            )
+            return original_snapshot_tree(reader, *args, **kwargs)
+
+    monkeypatch.setattr(
+        immutable.PinnedDirectoryReader,
+        "snapshot_tree",
+        exhaust_during_snapshot,
+    )
+
+    if consumer == "merge":
+        discovered, errors = merge_evidence._discover_nvbit_summary_inputs(
+            artifact_dir,
+            expected_platform="rtx_3090_ti",
+        )
+        assert discovered == []
+    else:
+        errors = verify_artifacts._verify_canonical_trace_pb_admission(
+            artifact_dir
+        )
+
+    assert any(
+        "ResourceUnavailable" in error or "resource_unavailable" in error
+        for error in errors
+    ), errors
+    assert any("synthetic tree snapshot exhaustion" in error for error in errors)
+
+
+def test_verifier_loads_summary_schema_through_bounded_retained_bytes(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    artifact_dir, _active_path, _active = _prepare_generation_authority_fixture(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+    )
+    original = immutable.PinnedDirectoryReader.read_snapshot
+    observed_limits: list[int | None] = []
+    summary_limits: list[int | None] = []
+
+    def track_schema_read(reader, relative_path: str, **kwargs):
+        name = PurePosixPath(relative_path).name
+        if name == "nvbit_trace_summary.schema.json":
+            observed_limits.append(kwargs.get("max_bytes"))
+        elif name.startswith("nvbit_trace_summary_"):
+            summary_limits.append(kwargs.get("max_bytes"))
+        return original(reader, relative_path, **kwargs)
+
+    monkeypatch.setattr(
+        immutable.PinnedDirectoryReader,
+        "read_snapshot",
+        track_schema_read,
+    )
+
+    assert verify_artifacts._verify_canonical_trace_pb_admission(
+        artifact_dir
+    ) == []
+    assert observed_limits == [
+        verify_artifacts._CANONICAL_AUTHORITY_JSON_MAX_BYTES
+    ]
+    assert summary_limits
+    assert set(summary_limits) == {
+        verify_artifacts._CANONICAL_AUTHORITY_JSON_MAX_BYTES
+    }
+
+
+def test_verifier_types_summary_schema_resource_exhaustion(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    artifact_dir, _active_path, _active = _prepare_generation_authority_fixture(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+    )
+    original = immutable.PinnedDirectoryReader.read_snapshot
+
+    def fail_schema_read(reader, relative_path: str, **kwargs):
+        if PurePosixPath(relative_path).name == "nvbit_trace_summary.schema.json":
+            raise ImmutableArtifactResourceError(
+                "synthetic summary schema exhaustion"
+            )
+        return original(reader, relative_path, **kwargs)
+
+    monkeypatch.setattr(
+        immutable.PinnedDirectoryReader,
+        "read_snapshot",
+        fail_schema_read,
+    )
+
+    errors = verify_artifacts._verify_canonical_trace_pb_admission(artifact_dir)
+
+    assert any("ResourceUnavailable" in error for error in errors), errors
+    assert any("synthetic summary schema exhaustion" in error for error in errors)
+
+
+def test_verifier_rejects_same_byte_schema_inode_replacement(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    schema_path = tmp_path / "schema.json"
+    payload = b'{"type":"object"}\n'
+    schema_path.write_bytes(payload)
+    original = immutable.PinnedDirectoryReader.read_snapshot
+    replaced = False
+
+    def replace_after_schema_read(reader, relative_path: str, **kwargs):
+        nonlocal replaced
+        result = original(reader, relative_path, **kwargs)
+        if relative_path == schema_path.name and not replaced:
+            replacement = tmp_path / ".schema-replacement.json"
+            replacement.write_bytes(payload)
+            os.replace(replacement, schema_path)
+            replaced = True
+        return result
+
+    monkeypatch.setattr(
+        immutable.PinnedDirectoryReader,
+        "read_snapshot",
+        replace_after_schema_read,
+    )
+
+    with pytest.raises(ImmutableArtifactError):
+        with verify_artifacts._load_canonical_schema_validator(
+            schema_path,
+            label="fixture schema",
+        ):
+            pass
+    assert replaced is True
+
+
+def test_verifier_retains_schema_monitor_through_validation(
+    tmp_path: Path,
+) -> None:
+    schema_path = tmp_path / "schema.json"
+    payload = b'{"type":"object"}\n'
+    schema_path.write_bytes(payload)
+
+    with pytest.raises(ImmutableArtifactError):
+        with verify_artifacts._load_canonical_schema_validator(
+            schema_path,
+            label="fixture schema",
+        ) as validator:
+            replacement = tmp_path / ".schema-replacement.json"
+            replacement.write_bytes(payload)
+            os.replace(replacement, schema_path)
+            assert list(validator.iter_errors({})) == []
+
+
+def test_verifier_preflights_aggregate_json_before_summary_hashing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    artifact_dir, active_path, _active = _prepare_generation_authority_fixture(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+    )
+    monkeypatch.setattr(
+        verify_artifacts,
+        "_CANONICAL_AUTHORITY_JSON_MAX_TOTAL_BYTES",
+        active_path.stat().st_size,
+    )
+    original_inspect = verify_artifacts.inspect_immutable_directory_generation
+
+    def reject_summary_hash(path: Path, *args, **kwargs):
+        if verify_artifacts._SUMMARY_GENERATION_NAMESPACE in Path(path).parts:
+            raise AssertionError("summary hashing preceded aggregate preflight")
+        return original_inspect(path, *args, **kwargs)
+
+    monkeypatch.setattr(
+        verify_artifacts,
+        "inspect_immutable_directory_generation",
+        reject_summary_hash,
+    )
+
+    errors = verify_artifacts._verify_canonical_trace_pb_admission(artifact_dir)
+
+    assert any("aggregate retained JSON authority" in error for error in errors)
+
+
+def test_verifier_preserves_raw_admission_resource_taxonomy(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    artifact_dir, _active_path, _active = _prepare_generation_authority_fixture(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+    )
+
+    def fail_raw_admission(_path: Path):
+        raise TraceAdmissionError(
+            "trace_snapshot_resource_unavailable",
+            "synthetic raw admission exhaustion",
+        )
+
+    monkeypatch.setattr(
+        verify_artifacts,
+        "require_trace_admission",
+        fail_raw_admission,
+    )
+
+    errors = verify_artifacts._verify_canonical_trace_pb_admission(artifact_dir)
+
+    assert any("ResourceUnavailable" in error for error in errors), errors
+    assert any("synthetic raw admission exhaustion" in error for error in errors)
+
+
+def test_merge_accepts_valid_attempt_scoped_generation_authority(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    artifact_dir, _active_path, active = (
+        _prepare_generation_authority_fixture(
+            tmp_path=tmp_path,
+            monkeypatch=monkeypatch,
+        )
+    )
+
+    discovered, errors = merge_evidence._discover_nvbit_summary_inputs(
+        artifact_dir,
+        expected_platform="rtx_3090_ti",
+    )
+
+    assert errors == []
+    assert discovered == [
+        artifact_dir / path for path in active["nvbit_trace_summary_paths"]
+    ]
+
+
+def test_merge_relative_root_keeps_artifact_local_namespace_authority(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    artifact_dir, active_path, active = _prepare_generation_authority_fixture(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+    )
+    active.pop("trace_derived_generation")
+    active.pop("trace_capture_attempt_event")
+    _replace_active_record_for_hostile_fixture(active_path, active)
+    monkeypatch.chdir(tmp_path)
+
+    discovered, errors = merge_evidence._discover_nvbit_summary_inputs(
+        Path(artifact_dir.name),
+        expected_platform="rtx_3090_ti",
+    )
+
+    assert discovered == []
+    assert any(
+        "derived generation authority exists" in error
+        or "trace-attempt authority exists" in error
+        for error in errors
+    )
+
+
+def test_merge_relative_root_checks_attempt_namespace_after_valid_derived_authority(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    artifact_dir, active_path, active = _prepare_generation_authority_fixture(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+    )
+    active.pop("trace_capture_attempt_event")
+    _replace_active_record_for_hostile_fixture(active_path, active)
+    monkeypatch.chdir(tmp_path)
+
+    discovered, errors = merge_evidence._discover_nvbit_summary_inputs(
+        Path(artifact_dir.name),
+        expected_platform="rtx_3090_ti",
+    )
+
+    assert discovered == []
+    assert any("trace-attempt authority exists" in error for error in errors)
+    assert not any(
+        "derived generation authority exists" in error for error in errors
+    )
+
+
+def test_merge_scopes_optional_namespaces_to_each_artifact_root(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    modern_tmp = tmp_path / "modern"
+    modern_tmp.mkdir()
+    modern_dir, _active_path, modern = _prepare_generation_authority_fixture(
+        tmp_path=modern_tmp,
+        monkeypatch=monkeypatch,
+    )
+    legacy_dir = tmp_path / "legacy" / "artifact"
+    _admission, _result, legacy_path = _publish_active_summary_fixture(
+        artifact_dir=legacy_dir,
+        source_root=_write_trace(tmp_path / "legacy-trace"),
+        shape_point="fixture_shape",
+    )
+    legacy = json.loads(legacy_path.read_text(encoding="utf-8"))
+
+    discovered, errors = merge_evidence._discover_nvbit_summary_inputs(tmp_path)
+
+    assert errors == []
+    assert set(discovered) == {
+        modern_dir / path for path in modern["nvbit_trace_summary_paths"]
+    } | {
+        legacy_dir / path for path in legacy["nvbit_trace_summary_paths"]
+    }
+
+
+@pytest.mark.parametrize("consumer", ("merge", "verifier"))
+@pytest.mark.parametrize(
+    ("mutation", "expected_terms"),
+    (
+        ("stale_derived_seal", ("derived", "stale")),
+        ("missing_derived_generation", ("derived", "absent")),
+        ("stale_attempt_event", ("attempt", "stale")),
+        ("mismatched_attempt_event", ("body", "disagrees")),
+    ),
+)
+def test_consumers_reject_stale_derived_and_attempt_authority(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    consumer: str,
+    mutation: str,
+    expected_terms: tuple[str, ...],
+) -> None:
+    artifact_dir, active_path, active = _prepare_generation_authority_fixture(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+    )
+    if mutation == "stale_derived_seal":
+        derived = active["trace_derived_generation"]
+        assert isinstance(derived, dict)
+        derived["content_manifest_sha256"] = "0" * 64
+    elif mutation == "missing_derived_generation":
+        derived = active["trace_derived_generation"]
+        assert isinstance(derived, dict)
+        generation_path = artifact_dir / str(derived["path"])
+        generation_path.rename(
+            generation_path.with_name(f".{generation_path.name}.missing")
+        )
+    elif mutation == "stale_attempt_event":
+        event_descriptor = active["trace_capture_attempt_event"]
+        assert isinstance(event_descriptor, dict)
+        event_descriptor["sha256"] = "0" * 64
+    else:
+        event_descriptor = active["trace_capture_attempt_event"]
+        assert isinstance(event_descriptor, dict)
+        event_path = artifact_dir / str(event_descriptor["path"])
+        event = json.loads(event_path.read_text(encoding="utf-8"))
+        event["slug"] = "mismatched-fixture"
+        payload = (json.dumps(event, sort_keys=True) + "\n").encode("utf-8")
+        immutable.retire_regular_file(event_path)
+        immutable.publish_regular_file(
+            event_path.parent,
+            event_path.name,
+            payload,
+        )
+        event_descriptor["sha256"] = hashlib.sha256(payload).hexdigest()
+        event_descriptor["size_bytes"] = len(payload)
+    _replace_active_record_for_hostile_fixture(active_path, active)
+
+    if consumer == "merge":
+        discovered, errors = merge_evidence._discover_nvbit_summary_inputs(
+            artifact_dir,
+            expected_platform="rtx_3090_ti",
+        )
+        assert discovered == []
+    else:
+        errors = verify_artifacts._verify_canonical_trace_pb_admission(
+            artifact_dir
+        )
+
+    assert any(
+        all(term in error.lower() for term in expected_terms)
+        for error in errors
+    )
+
+
 def test_verify_artifacts_discovers_valid_nested_generation_authority(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -2601,6 +4502,245 @@ def test_verify_artifacts_discovers_valid_nested_generation_authority(
     )
 
     assert verify_artifacts._verify_canonical_trace_pb_admission(tmp_path) == []
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    ("extra_descriptor_key", "writable_manifest"),
+)
+def test_manifest_descriptor_and_file_integrity_match_across_consumers(
+    tmp_path: Path,
+    mutation: str,
+) -> None:
+    artifact_dir = tmp_path / "artifact"
+    _admission, _result, active_path = _publish_active_summary_fixture(
+        artifact_dir=artifact_dir,
+        source_root=_write_trace(tmp_path / "trace"),
+        shape_point="fixture_shape",
+    )
+    active = json.loads(active_path.read_text(encoding="utf-8"))
+    descriptor = active["measurement_manifest"]
+    assert isinstance(descriptor, dict)
+    manifest_path = artifact_dir / str(descriptor["path"])
+    if mutation == "extra_descriptor_key":
+        descriptor["extra"] = "forbidden"
+        _replace_active_record_for_hostile_fixture(active_path, active)
+    else:
+        manifest_path.chmod(0o644)
+
+    discovered, merge_errors = (
+        merge_evidence._discover_nvbit_summary_inputs(artifact_dir)
+    )
+    verifier_errors = verify_artifacts._verify_canonical_trace_pb_admission(
+        artifact_dir
+    )
+
+    assert discovered == []
+    assert any("measurement_manifest_invalid" in error for error in merge_errors)
+    assert any("measurement manifest" in error for error in verifier_errors)
+
+
+
+def test_verify_artifacts_bounds_active_measurement_manifest(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    artifact_dir, active_path, active = _prepare_generation_authority_fixture(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+    )
+    descriptor = active["measurement_manifest"]
+    assert isinstance(descriptor, dict)
+    manifest_path = artifact_dir / str(descriptor["path"])
+    immutable.retire_regular_file(manifest_path)
+    payload = (
+        json.dumps(
+            {
+                "padding": "x"
+                * verify_artifacts._CANONICAL_AUTHORITY_JSON_MAX_BYTES,
+                "shape_point": active["shape_point"],
+            },
+            sort_keys=True,
+        )
+        + "\n"
+    ).encode("utf-8")
+    assert len(payload) > verify_artifacts._CANONICAL_AUTHORITY_JSON_MAX_BYTES
+    immutable.publish_regular_file(
+        artifact_dir,
+        manifest_path.name,
+        payload,
+    )
+    descriptor["sha256"] = hashlib.sha256(payload).hexdigest()
+    descriptor["size_bytes"] = len(payload)
+    _replace_active_record_for_hostile_fixture(active_path, active)
+
+    errors = verify_artifacts._verify_canonical_trace_pb_admission(artifact_dir)
+
+    assert any(
+        "measurement manifest exceeds the bounded authority JSON limit" in error
+        for error in errors
+    )
+
+
+def test_verify_artifacts_rejects_measurement_manifest_descriptor_substitution(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    artifact_dir, active_path, active = _prepare_generation_authority_fixture(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+    )
+    payload = (
+        json.dumps(
+            {
+                "shape_point": active["shape_point"],
+                "substitute": True,
+            },
+            sort_keys=True,
+        )
+        + "\n"
+    ).encode("utf-8")
+    substitute_name = "measurement_manifest_substitute.json"
+    immutable.publish_regular_file(artifact_dir, substitute_name, payload)
+    active["measurement_manifest"] = {
+        "path": substitute_name,
+        "sha256": hashlib.sha256(payload).hexdigest(),
+        "size_bytes": len(payload),
+    }
+    _replace_active_record_for_hostile_fixture(active_path, active)
+
+    errors = verify_artifacts._verify_canonical_trace_pb_admission(artifact_dir)
+
+    assert any(
+        "measurement manifest path does not name the exact active shape authority"
+        in error
+        for error in errors
+    )
+
+
+@pytest.mark.parametrize(
+    ("decode_error", "expected_prefix", "expected_detail"),
+    (
+        (
+            ValueError("synthetic large-number decode refusal"),
+            "CanonicalGenerationAuthorityInvalid:",
+            "measurement manifest is absent or invalid: ValueError",
+        ),
+        (
+            MemoryError("synthetic manifest decode exhaustion"),
+            "CanonicalGenerationAuthorityResourceUnavailable:",
+            "measurement manifest resource unavailable: MemoryError",
+        ),
+    ),
+    ids=("value-error", "memory-error"),
+)
+def test_verify_artifacts_classifies_measurement_manifest_decode_failures(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    decode_error: BaseException,
+    expected_prefix: str,
+    expected_detail: str,
+) -> None:
+    artifact_dir, _active_path, active = _prepare_generation_authority_fixture(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+    )
+    descriptor = active["measurement_manifest"]
+    assert isinstance(descriptor, dict)
+    manifest_payload = (artifact_dir / str(descriptor["path"])).read_bytes()
+    real_strict_json_loads = verify_artifacts.strict_json_loads
+
+    def decode_with_manifest_failure(
+        payload: bytes,
+        *,
+        label: str = "JSON",
+    ) -> object:
+        if payload == manifest_payload and label == "measurement manifest":
+            raise decode_error
+        return real_strict_json_loads(payload, label=label)
+
+    monkeypatch.setattr(
+        verify_artifacts,
+        "strict_json_loads",
+        decode_with_manifest_failure,
+    )
+
+    errors = verify_artifacts._verify_canonical_trace_pb_admission(artifact_dir)
+
+    assert any(
+        error.startswith(expected_prefix) and expected_detail in error
+        for error in errors
+    )
+
+
+def test_verify_artifacts_classifies_large_integer_json_as_invalid(
+    tmp_path: Path,
+) -> None:
+    digit_limit = sys.get_int_max_str_digits()
+    if digit_limit == 0:
+        pytest.skip("Python integer string conversion limit is disabled")
+    candidate = immutable.publish_regular_file(
+        tmp_path,
+        "trace_fixture.json",
+        (
+            '{"activation_state":"active","shape_point":"fixture","value":'
+            + "9" * (digit_limit + 1)
+            + "}\n"
+        ).encode("utf-8"),
+    )
+
+    errors = verify_artifacts._verify_canonical_trace_pb_admission(tmp_path)
+
+    assert any(
+        error.startswith("CanonicalGenerationAuthorityInvalid:")
+        and str(candidate) in error
+        and "ValueError" in error
+        for error in errors
+    )
+
+
+def test_verify_artifacts_classifies_deeply_nested_json_as_invalid(
+    tmp_path: Path,
+) -> None:
+    candidate = immutable.publish_regular_file(
+        tmp_path,
+        "trace_fixture.json",
+        ("[" * 10_000 + "0" + "]" * 10_000).encode("utf-8"),
+    )
+
+    errors = verify_artifacts._verify_canonical_trace_pb_admission(tmp_path)
+
+    assert any(
+        error.startswith("CanonicalGenerationAuthorityInvalid:")
+        and str(candidate) in error
+        and "maximum recursion depth" in error
+        for error in errors
+    )
+
+
+def test_verify_artifacts_classifies_json_decode_memory_error_as_resource_unavailable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    candidate = immutable.publish_regular_file(
+        tmp_path,
+        "trace_fixture.json",
+        b"{}\n",
+    )
+
+    def fail_decode(*_args: object, **_kwargs: object) -> object:
+        raise MemoryError("synthetic decode exhaustion")
+
+    monkeypatch.setattr(verify_artifacts, "_read_snapshot_json", fail_decode)
+
+    errors = verify_artifacts._verify_canonical_trace_pb_admission(tmp_path)
+
+    assert any(
+        error.startswith("CanonicalGenerationAuthorityResourceUnavailable:")
+        and str(candidate) in error
+        and "MemoryError" in error
+        for error in errors
+    )
 
 
 def test_verify_artifacts_preserves_per_artifact_legacy_fallback(
@@ -2666,7 +4806,7 @@ def test_verify_artifacts_discovers_nested_active_leaf_fail_closed(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    artifact_dir, _active_path, _active = (
+    artifact_dir, _active_path, active = (
         _prepare_generation_authority_fixture(
             tmp_path=tmp_path,
             monkeypatch=monkeypatch,
@@ -2674,18 +4814,14 @@ def test_verify_artifacts_discovers_nested_active_leaf_fail_closed(
     )
     nested = artifact_dir / "nested"
     nested.mkdir()
-    nested_record = nested / "trace_spoof.json"
-    nested_record.write_text(
-        json.dumps(
-            {
-                "activation_state": "active",
-                "shape_point": "spoof",
-                "trace_capture_attempt_id": "attempt-spoof",
-                "raw_trace_generation": {"path": "outside-authority"},
-            }
-        )
-        + "\n",
-        encoding="utf-8",
+    nested_active = json.loads(json.dumps(active))
+    nested_active["shape_point"] = "spoof"
+    nested_active["trace_capture_attempt_id"] = "attempt-spoof"
+    nested_active["raw_trace_generation"]["path"] = "outside-authority"
+    nested_record = immutable.publish_regular_file(
+        nested,
+        "trace_spoof.json",
+        (json.dumps(nested_active) + "\n").encode("utf-8"),
     )
 
     errors = verify_artifacts._verify_canonical_trace_pb_admission(
@@ -2797,12 +4933,21 @@ def test_verify_artifacts_rejects_generation_namespace_symlink(
     assert any("without symlink indirection" in error for error in errors)
 
 
+@pytest.mark.parametrize(
+    "namespace_name",
+    (
+        run_suite.RAW_TRACE_GENERATION_NAMESPACE,
+        run_suite.TRACE_DERIVED_GENERATION_NAMESPACE,
+        run_suite.TRACE_CAPTURE_ATTEMPT_NAMESPACE,
+    ),
+)
 def test_verify_artifacts_rejects_regular_file_generation_namespace(
     tmp_path: Path,
+    namespace_name: str,
 ) -> None:
     cell = tmp_path / "nested" / "cell"
     cell.mkdir(parents=True)
-    namespace = cell / run_suite.RAW_TRACE_GENERATION_NAMESPACE
+    namespace = cell / namespace_name
     namespace.write_bytes(b"not a directory")
     shape_dir = cell / "trace_fixture"
     shape_dir.mkdir()
@@ -2820,6 +4965,43 @@ def test_verify_artifacts_rejects_regular_file_generation_namespace(
     assert any(
         error.startswith("LegacyTraceWithGenerationAuthority:")
         and str(trace_pb) in error
+        for error in errors
+    )
+
+
+@pytest.mark.parametrize(
+    "namespace_name",
+    (
+        run_suite.TRACE_DERIVED_GENERATION_NAMESPACE,
+        run_suite.TRACE_CAPTURE_ATTEMPT_NAMESPACE,
+    ),
+)
+def test_verify_artifacts_reserved_directory_namespace_blocks_legacy_fallback(
+    tmp_path: Path,
+    namespace_name: str,
+) -> None:
+    cell = tmp_path / "nested" / "cell"
+    namespace = cell / namespace_name
+    namespace.mkdir(parents=True)
+    shape_dir = cell / "trace_fixture"
+    shape_dir.mkdir()
+    trace_pb = shape_dir / "dynamic_trace.pb"
+    trace_pb.write_bytes(b"legacy raw bytes")
+
+    errors = verify_artifacts._verify_canonical_trace_pb_admission(tmp_path)
+
+    assert any(
+        error.startswith("CanonicalGenerationAuthorityMissing:")
+        and str(cell) in error
+        for error in errors
+    )
+    assert any(
+        error.startswith("LegacyTraceWithGenerationAuthority:")
+        and str(trace_pb) in error
+        for error in errors
+    )
+    assert not any(
+        error.startswith("RawOnlyTraceTree:") and str(trace_pb) in error
         for error in errors
     )
 
@@ -3432,6 +5614,1046 @@ def test_merge_ignores_unreferenced_prior_phase_generation(
             artifact_dir
         )
     )
+
+
+def test_merge_allows_unrelated_sibling_events_during_terminal_monitor_close(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    cupti_dir, _nvbit_dir, output_dir, args = _prepare_legacy_join_fixture(
+        tmp_path
+    )
+    original_retain = merge_evidence._retain_join_input_tree
+    sibling = cupti_dir.with_name("unrelated-terminal-sibling")
+    mutation_armed = False
+    mutated = False
+
+    def retain_with_terminal_sibling_event(
+        root: Path,
+        *,
+        source_stack: ExitStack,
+        retained_authorities: list[object],
+    ):
+        nonlocal mutation_armed
+        result = original_retain(
+            root,
+            source_stack=source_stack,
+            retained_authorities=retained_authorities,
+        )
+        if Path(root).absolute() != cupti_dir.absolute():
+            return result
+        monitor = retained_authorities[-1]
+        assert isinstance(monitor, immutable.PinnedPathSetMonitor)
+        low_level_monitor = monitor._monitor
+        assert low_level_monitor is not None
+        original_close = low_level_monitor.close
+
+        def mutate_then_close() -> None:
+            nonlocal mutated
+            sibling.write_bytes(b"unrelated\n")
+            sibling.unlink()
+            mutated = True
+            original_close()
+
+        monkeypatch.setattr(low_level_monitor, "close", mutate_then_close)
+        mutation_armed = True
+        return result
+
+    monkeypatch.setattr(
+        merge_evidence,
+        "_retain_join_input_tree",
+        retain_with_terminal_sibling_event,
+    )
+
+    rc = merge_evidence._run_join_cupti_nvbit(args)
+
+    captured = capsys.readouterr()
+    assert mutation_armed is True
+    assert mutated is True
+    assert rc == 0
+    assert captured.err == ""
+    assert (output_dir / args.platform).is_dir()
+    assert not sibling.exists()
+
+
+def test_merge_retires_join_when_source_mutates_during_terminal_monitor_close(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    cupti_dir, _nvbit_dir, output_dir, args = _prepare_legacy_join_fixture(
+        tmp_path
+    )
+    source = cupti_dir / "cupti_activity_0_0.json"
+    source_payload = source.read_bytes()
+    original_retain = merge_evidence._retain_join_input_tree
+    mutation_armed = False
+    mutated = False
+
+    def retain_with_terminal_mutation(
+        root: Path,
+        *,
+        source_stack: ExitStack,
+        retained_authorities: list[object],
+    ):
+        nonlocal mutation_armed
+        result = original_retain(
+            root,
+            source_stack=source_stack,
+            retained_authorities=retained_authorities,
+        )
+        if Path(root).absolute() != cupti_dir.absolute():
+            return result
+        monitor = retained_authorities[-1]
+        assert isinstance(monitor, immutable.PinnedPathSetMonitor)
+        low_level_monitor = monitor._monitor
+        assert low_level_monitor is not None
+        original_close = low_level_monitor.close
+
+        def mutate_then_close() -> None:
+            nonlocal mutated
+            replacement = source.with_name(".terminal-replacement.json")
+            replacement.write_bytes(source_payload)
+            os.replace(replacement, source)
+            mutated = True
+            original_close()
+
+        monkeypatch.setattr(low_level_monitor, "close", mutate_then_close)
+        mutation_armed = True
+        return result
+
+    monkeypatch.setattr(
+        merge_evidence,
+        "_retain_join_input_tree",
+        retain_with_terminal_mutation,
+    )
+
+    rc = merge_evidence._run_join_cupti_nvbit(args)
+
+    captured = capsys.readouterr()
+    assert mutation_armed is True
+    assert mutated is True
+    assert rc == 1
+    assert "publication_invalid" in captured.err
+    assert not (output_dir / args.platform).exists()
+    retired = sorted(
+        path
+        for path in output_dir.iterdir()
+        if path.name.startswith(".failed-directory-")
+    )
+    assert len(retired) == 1
+    assert any(path.is_file() for path in retired[0].rglob("joined_*.json"))
+
+
+def _plant_oversized_raw_member(
+    *,
+    artifact_dir: Path,
+    active_path: Path,
+    active: dict[str, object],
+    member: str,
+) -> tuple[str, int, dict[str, int | dict[str, int]]]:
+    raw_descriptor = active["raw_trace_generation"]
+    assert isinstance(raw_descriptor, dict)
+    raw_root = artifact_dir / str(raw_descriptor["path"])
+    existing_sizes = [
+        path.stat().st_size for path in raw_root.rglob("*") if path.is_file()
+    ]
+    assert existing_sizes
+
+    if member == "unknown":
+        relative = "oversized-unknown.bin"
+        payload = b"x" * (max(existing_sizes) + 1)
+    elif member == "stats":
+        relative = "stats.csv"
+        payload = (raw_root / relative).read_bytes() + b"x"
+    else:
+        relative = "extra_info/allocations.json"
+        payload = b"[{}]\n"
+
+    target = raw_root.joinpath(*PurePosixPath(relative).parts)
+    old_size = target.stat().st_size if target.exists() else 0
+    old_directory_count = sum(1 for path in raw_root.rglob("*") if path.is_dir())
+    raw_root.chmod(0o755)
+    try:
+        target.parent.mkdir(parents=True, exist_ok=True)
+        for parent in target.parents:
+            if parent == raw_root:
+                break
+            parent.chmod(0o755)
+        if target.exists():
+            target.chmod(0o644)
+        target.write_bytes(payload)
+        target.chmod(0o444)
+        for parent in target.parents:
+            if parent == raw_root:
+                break
+            parent.chmod(0o555)
+    finally:
+        raw_root.chmod(0o555)
+
+    if old_size == 0:
+        raw_descriptor["file_count"] = int(raw_descriptor["file_count"]) + 1
+    new_directory_count = sum(
+        1 for path in raw_root.rglob("*") if path.is_dir()
+    )
+    raw_descriptor["directory_count"] = (
+        int(raw_descriptor["directory_count"])
+        + new_directory_count
+        - old_directory_count
+    )
+    raw_descriptor["total_file_bytes"] = (
+        int(raw_descriptor["total_file_bytes"])
+        + len(payload)
+        - old_size
+    )
+    _replace_active_record_for_hostile_fixture(active_path, active)
+
+    policy = dict(
+        merge_evidence.raw_trace_generation_limits(
+            merge_evidence.DEFAULT_TRACE_ADMISSION_LIMITS
+        )
+    )
+    path_limits = dict(policy["max_file_bytes_by_path"])
+    if member == "unknown":
+        policy["max_file_bytes"] = len(payload) - 1
+    else:
+        policy["max_file_bytes"] = max(
+            int(policy["max_file_bytes"]), len(payload)
+        )
+        path_limits[relative] = len(payload) - 1
+    policy["max_file_bytes_by_path"] = path_limits
+    return relative, len(payload), policy
+
+
+@pytest.mark.parametrize("consumer", ("merge", "verifier"))
+@pytest.mark.parametrize("member", ("unknown", "stats", "allocations"))
+def test_consumers_reject_oversized_raw_members_before_hash_or_admission(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    consumer: str,
+    member: str,
+) -> None:
+    artifact_dir, active_path, active = _prepare_generation_authority_fixture(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+    )
+    relative, _size, policy = _plant_oversized_raw_member(
+        artifact_dir=artifact_dir,
+        active_path=active_path,
+        active=active,
+        member=member,
+    )
+    module = merge_evidence if consumer == "merge" else verify_artifacts
+    monkeypatch.setattr(
+        module,
+        "raw_trace_generation_limits",
+        lambda _limits: policy,
+    )
+
+    def reject_hash(_descriptor: int):
+        raise AssertionError("oversized raw member reached content hashing")
+
+    def reject_admission(_path: Path):
+        raise AssertionError("oversized raw member reached trace admission")
+
+    monkeypatch.setattr(immutable, "_hash_fd", reject_hash)
+    monkeypatch.setattr(module, "require_trace_admission", reject_admission)
+
+    if consumer == "merge":
+        discovered, errors = merge_evidence._discover_nvbit_summary_inputs(
+            artifact_dir,
+            expected_platform="rtx_3090_ti",
+        )
+        assert discovered == []
+    else:
+        errors = verify_artifacts._verify_canonical_trace_pb_admission(
+            artifact_dir
+        )
+
+    assert any(
+        "bounded per-file byte limit" in error and relative in error
+        for error in errors
+    ), errors
+
+
+def test_verifier_budgets_decoded_active_graph_before_recursive_validation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    artifact_dir, _active_path, _active = _prepare_generation_authority_fixture(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+    )
+    validator_calls = 0
+
+    class RejectDecodedActiveGraph:
+        def reserve_bytes(
+            self,
+            _size: int,
+            *,
+            retained_input_bytes: int,
+            role: str,
+        ) -> None:
+            assert retained_input_bytes >= 0
+            assert role
+
+        def reserve(
+            self,
+            _value: object,
+            *,
+            retained_input_bytes: int,
+            role: str,
+        ) -> None:
+            assert retained_input_bytes >= 0
+            if role == "decoded canonical trace-record JSON authority":
+                raise ImmutableArtifactLimitError(
+                    "synthetic decoded active graph limit"
+                )
+
+    def reject_recursive_validation(*_args: object, **_kwargs: object) -> list[str]:
+        nonlocal validator_calls
+        validator_calls += 1
+        raise AssertionError("unbounded active graph reached recursive validation")
+
+    monkeypatch.setattr(
+        verify_artifacts,
+        "_CanonicalAuthorityMaterializationBudget",
+        RejectDecodedActiveGraph,
+    )
+    monkeypatch.setattr(
+        verify_artifacts,
+        "_verify_active_generation_record",
+        reject_recursive_validation,
+    )
+
+    errors = verify_artifacts._verify_canonical_trace_pb_admission(artifact_dir)
+
+    assert validator_calls == 0
+    assert any(
+        "bounded authority JSON limit" in error
+        and "synthetic decoded active graph limit" in error
+        for error in errors
+    ), errors
+
+
+def test_consumers_reject_integral_float_generated_summary_version(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    artifact_dir, active_path, active = _prepare_generation_authority_fixture(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+    )
+    descriptor = active["nvbit_trace_summary_generation"]
+    assert isinstance(descriptor, dict)
+    files = descriptor["files"]
+    assert isinstance(files, list) and files
+    summary_path = artifact_dir / str(files[0]["path"])
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    summary["schema_version"] = 2.0
+    payload = (json.dumps(summary, sort_keys=True) + "\n").encode("utf-8")
+    generation_path = summary_path.parent
+    generation_path.chmod(0o755)
+    summary_path.chmod(0o644)
+    try:
+        summary_path.write_bytes(payload)
+        summary_path.chmod(0o444)
+    finally:
+        generation_path.chmod(0o555)
+    _reseal_summary_generation_authority(
+        artifact_dir=artifact_dir,
+        active_path=active_path,
+        active=active,
+    )
+    event_descriptor = active["trace_capture_attempt_event"]
+    assert isinstance(event_descriptor, dict)
+    event_path = artifact_dir / str(event_descriptor["path"])
+    event = json.loads(event_path.read_text(encoding="utf-8"))
+    event["nvbit_trace_summary_generation"] = active[
+        "nvbit_trace_summary_generation"
+    ]
+    event_payload = (json.dumps(event, sort_keys=True) + "\n").encode("utf-8")
+    immutable.retire_regular_file(event_path)
+    immutable.publish_regular_file(
+        event_path.parent,
+        event_path.name,
+        event_payload,
+    )
+    event_descriptor["sha256"] = hashlib.sha256(event_payload).hexdigest()
+    event_descriptor["size_bytes"] = len(event_payload)
+    _replace_active_record_for_hostile_fixture(active_path, active)
+
+    discovered, merge_errors = merge_evidence._discover_nvbit_summary_inputs(
+        artifact_dir,
+        expected_platform="rtx_3090_ti",
+    )
+    verifier_errors = verify_artifacts._verify_canonical_trace_pb_admission(
+        artifact_dir
+    )
+
+    assert discovered == []
+    assert any(
+        "exact integer schema_version 2" in error for error in merge_errors
+    ), merge_errors
+    assert any(
+        "summary generation file" in error
+        and "disagrees with admitted raw launch" in error
+        for error in verifier_errors
+    ), verifier_errors
+
+
+def test_merge_materialization_preflight_precedes_schema_validation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    path = tmp_path / "retained.json"
+    payload = b'{"schema_version":1}\n'
+    validator_calls = 0
+    reserve_calls = 0
+
+    class RejectPreflight:
+        def preflight(self, _value: object, **_kwargs: object) -> None:
+            raise ImmutableArtifactLimitError("synthetic pre-schema graph limit")
+
+        def reserve(self, _value: object, **_kwargs: object) -> None:
+            nonlocal reserve_calls
+            reserve_calls += 1
+
+    def reject_schema(*_args: object, **_kwargs: object) -> str | None:
+        nonlocal validator_calls
+        validator_calls += 1
+        raise AssertionError("preflight-rejected graph reached schema validation")
+
+    monkeypatch.setattr(merge_evidence, "_validate_against_schema", reject_schema)
+    indexed, errors = merge_evidence._index_records_by_natural_key_with_counts(
+        [path],
+        {},
+        "fixture",
+        preloaded_payloads={path: payload},
+        materialization_budget=RejectPreflight(),
+        retained_input_bytes=len(payload),
+    )
+
+    assert indexed == {}
+    assert validator_calls == 0
+    assert reserve_calls == 0
+    assert len(errors) == 1
+    assert "joined_evidence_materialization_limit" in errors[0]
+    assert "synthetic pre-schema graph limit" in errors[0]
+
+
+def test_merge_manifest_preflight_precedes_jsonschema_validation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import jsonschema
+
+    artifact_dir, active_path, active = _prepare_generation_authority_fixture(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+    )
+    validator_calls = 0
+
+    class RejectManifestGraph:
+        def preflight(
+            self,
+            _value: object,
+            *,
+            retained_input_bytes: int,
+            role: str,
+        ) -> None:
+            assert retained_input_bytes > 0
+            assert role == "decoded measurement-manifest authority"
+            raise ImmutableArtifactLimitError("synthetic manifest graph limit")
+
+    def reject_validation(*_args: object, **_kwargs: object) -> None:
+        nonlocal validator_calls
+        validator_calls += 1
+        raise AssertionError("preflight-rejected manifest reached jsonschema")
+
+    monkeypatch.setattr(jsonschema, "validate", reject_validation)
+    preload_budget = merge_evidence._JoinPreloadBudget()
+    with immutable.PinnedDirectoryReader(artifact_dir) as reader:
+        inventory = dict(reader.snapshot_tree().files)
+        with pytest.raises(
+            ImmutableArtifactLimitError,
+            match="synthetic manifest graph limit",
+        ):
+            merge_evidence._active_measurement_manifest_binding_error(
+                active_path,
+                active,
+                authority_root=artifact_dir,
+                authority_reader=reader,
+                authority_file_inventory=inventory,
+                measurement_manifest_schema={},
+                preload_budget=preload_budget,
+                materialization_budget=RejectManifestGraph(),
+                expected_platform="rtx_3090_ti",
+            )
+
+    assert validator_calls == 0
+
+
+def test_merge_attempt_event_uses_materialization_preflight(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    artifact_dir, active_path, active = _prepare_generation_authority_fixture(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+    )
+
+    class RejectAttemptGraph:
+        def preflight(
+            self,
+            _value: object,
+            *,
+            retained_input_bytes: int,
+            role: str,
+        ) -> None:
+            assert retained_input_bytes > 0
+            assert role == "decoded trace capture attempt-event authority"
+            raise ImmutableArtifactLimitError("synthetic attempt graph limit")
+
+    preload_budget = merge_evidence._JoinPreloadBudget()
+    with immutable.PinnedDirectoryReader(artifact_dir) as reader:
+        inventory = dict(reader.snapshot_tree().files)
+        with pytest.raises(
+            ImmutableArtifactLimitError,
+            match="synthetic attempt graph limit",
+        ):
+            merge_evidence._active_attempt_event_binding_error(
+                active_path,
+                active,
+                authority_root=artifact_dir,
+                authority_reader=reader,
+                authority_file_inventory=inventory,
+                attempt_namespace_entries=[],
+                preload_budget=preload_budget,
+                materialization_budget=RejectAttemptGraph(),
+            )
+
+
+@pytest.mark.parametrize("consumer", ("merge", "verifier"))
+@pytest.mark.parametrize("schema_version", (True, 1.0), ids=("boolean", "float"))
+@pytest.mark.parametrize("location", ("top", "nested-raw"))
+def test_consumers_reject_nonexact_attempt_event_version_types(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    consumer: str,
+    schema_version: object,
+    location: str,
+) -> None:
+    artifact_dir, active_path, active = _prepare_generation_authority_fixture(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+    )
+    descriptor = active["trace_capture_attempt_event"]
+    assert isinstance(descriptor, dict)
+    event_path = artifact_dir / str(descriptor["path"])
+    event = json.loads(event_path.read_text(encoding="utf-8"))
+    if location == "top":
+        event["schema_version"] = schema_version
+    else:
+        nested = event["raw_trace_generation"]
+        assert isinstance(nested, dict)
+        nested["schema_version"] = schema_version
+    payload = (json.dumps(event, sort_keys=True) + "\n").encode("utf-8")
+    immutable.retire_regular_file(event_path)
+    immutable.publish_regular_file(
+        event_path.parent,
+        event_path.name,
+        payload,
+    )
+    descriptor["sha256"] = hashlib.sha256(payload).hexdigest()
+    descriptor["size_bytes"] = len(payload)
+    _replace_active_record_for_hostile_fixture(active_path, active)
+
+    if consumer == "merge":
+        discovered, errors = merge_evidence._discover_nvbit_summary_inputs(
+            artifact_dir,
+            expected_platform="rtx_3090_ti",
+        )
+        assert discovered == []
+    else:
+        errors = verify_artifacts._verify_canonical_trace_pb_admission(
+            artifact_dir
+        )
+
+    assert any(
+        "attempt" in error.lower()
+        and "body disagrees" in error.lower()
+        for error in errors
+    ), errors
+
+
+@pytest.mark.parametrize("consumer", ("merge", "verifier"))
+@pytest.mark.parametrize("node_kind", ("directory", "file"))
+@pytest.mark.parametrize(
+    "namespace",
+    (
+        run_suite.NVBIT_TRACE_SUMMARY_GENERATION_NAMESPACE,
+        run_suite.RAW_TRACE_GENERATION_NAMESPACE,
+        run_suite.TRACE_DERIVED_GENERATION_NAMESPACE,
+        run_suite.PHASE_LEDGER_GENERATION_NAMESPACE,
+        run_suite.TRACE_CAPTURE_ATTEMPT_NAMESPACE,
+    ),
+)
+def test_hidden_staged_reserved_nodes_do_not_suppress_legacy_fallback(
+    tmp_path: Path,
+    consumer: str,
+    node_kind: str,
+    namespace: str,
+) -> None:
+    if consumer == "merge":
+        _cupti, authority_root, _output, _args = _prepare_legacy_join_fixture(
+            tmp_path
+        )
+        expected = authority_root / "nvbit_trace_summary_0_0.json"
+    else:
+        authority_root = tmp_path / "verifier"
+        trace_shape = authority_root / "trace_fixture"
+        trace_shape.mkdir(parents=True)
+        expected = trace_shape / "dynamic_trace.pb"
+        expected.write_bytes(b"legacy raw trace bytes")
+
+    staged_node = authority_root / ".attempt.staging" / namespace
+    staged_node.parent.mkdir(parents=True, exist_ok=True)
+    if node_kind == "directory":
+        staged_node.mkdir()
+    else:
+        staged_node.write_bytes(b"staged nonauthority")
+
+    if consumer == "merge":
+        discovered, errors = merge_evidence._discover_nvbit_summary_inputs(
+            authority_root
+        )
+        assert discovered == [expected]
+        assert errors == []
+    else:
+        errors = verify_artifacts._verify_canonical_trace_pb_admission(
+            authority_root
+        )
+        assert any(
+            error.startswith("RawOnlyTraceTree:") and str(expected) in error
+            for error in errors
+        ), errors
+        assert not any(str(staged_node) in error for error in errors)
+
+
+def test_verifier_ignores_legacy_looking_trace_inside_hidden_stage(
+    tmp_path: Path,
+) -> None:
+    authority_root = tmp_path / "artifact"
+    legitimate_shape = authority_root / "trace_fixture"
+    legitimate_shape.mkdir(parents=True)
+    legitimate_trace = legitimate_shape / "dynamic_trace.pb"
+    legitimate_trace.write_bytes(b"legitimate legacy bytes")
+    hidden_shape = authority_root / ".attempt.staging" / "trace_hidden"
+    hidden_shape.mkdir(parents=True)
+    hidden_trace = hidden_shape / "dynamic_trace.pb"
+    hidden_trace.write_bytes(b"hidden staged bytes")
+
+    errors = verify_artifacts._verify_canonical_trace_pb_admission(authority_root)
+
+    assert any(
+        error.startswith("RawOnlyTraceTree:")
+        and str(legitimate_trace) in error
+        for error in errors
+    ), errors
+    assert not any(str(hidden_trace) in error for error in errors)
+
+
+def test_run_suite_types_adapter_import_memory_exhaustion(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    trace_dir = _write_trace(tmp_path / "trace")
+    admission = require_trace_admission(trace_dir)
+    artifact_dir = tmp_path / "artifact"
+    original_import = builtins.__import__
+
+    def exhaust_adapter_import(name: str, *args: object, **kwargs: object):
+        if name == "nvbit_trace_summary_adapter":
+            raise MemoryError("synthetic adapter import exhaustion")
+        return original_import(name, *args, **kwargs)
+
+    monkeypatch.setattr(builtins, "__import__", exhaust_adapter_import)
+    result = run_suite._emit_nvbit_trace_summaries_for_trace_artifact(
+        trace_admission=admission,
+        slug="fixture",
+        shape_point="fixture_shape",
+        binary_sha256="a" * 64,
+        tracer_build_sha256="b" * 64,
+        artifact_dir=artifact_dir,
+    )
+
+    assert result["status"] == "resource_unavailable"
+    assert result["failed_hard"] is True
+    assert result["paths"] == []
+    assert "trace_summary_resource_unavailable" in result["failure_reason"]
+    assert "synthetic adapter import exhaustion" in result["failure_reason"]
+    assert not (
+        artifact_dir / run_suite.NVBIT_TRACE_SUMMARY_GENERATION_NAMESPACE
+    ).exists()
+
+
+def test_join_materialization_budget_accounts_actual_retained_roots() -> None:
+    active_record = {"schema_version": 1, "shape_point": "fixture"}
+    active_path = Path("artifact/trace_fixture.json")
+    active_tuple = (active_path, active_record)
+    active_queue = [active_tuple]
+    payload = b"joined payload\n"
+    immutable_file = immutable.ImmutableFile.from_bytes(
+        "fixture/joined_0_0.json",
+        payload,
+    )
+    material = [immutable_file]
+    budget = merge_evidence._JoinMaterializationBudget()
+
+    budget.reserve(
+        active_queue,
+        retained_input_bytes=0,
+        role="actual active queue fixture",
+    )
+    budget.reserve(
+        material,
+        retained_input_bytes=0,
+        role="actual immutable material fixture",
+    )
+
+    for retained in (
+        active_queue,
+        active_tuple,
+        active_path,
+        active_record,
+        material,
+        immutable_file,
+        immutable_file.sha256,
+        immutable_file.size_bytes,
+        payload,
+    ):
+        assert budget.seen_objects[id(retained)] is retained
+
+
+def test_join_accounts_production_immutable_output_objects(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _cupti, _nvbit, output_dir, args = _prepare_legacy_join_fixture(tmp_path)
+    instances: list[merge_evidence._JoinMaterializationBudget] = []
+
+    class TrackingBudget(merge_evidence._JoinMaterializationBudget):
+        def __init__(self) -> None:
+            super().__init__()
+            instances.append(self)
+
+    monkeypatch.setattr(merge_evidence, "_JoinMaterializationBudget", TrackingBudget)
+
+    assert merge_evidence._run_join_cupti_nvbit(args) == 0
+    assert (output_dir / args.platform).is_dir()
+    assert len(instances) == 1
+    retained = list(instances[0].seen_objects.values())
+    immutable_files = [
+        value for value in retained if type(value) is immutable.ImmutableFile
+    ]
+    assert len(immutable_files) == 1
+    immutable_file = immutable_files[0]
+    assert instances[0].seen_objects[id(immutable_file.sha256)] is (
+        immutable_file.sha256
+    )
+    assert instances[0].seen_objects[id(immutable_file.size_bytes)] is (
+        immutable_file.size_bytes
+    )
+    assert any(
+        type(value) is list
+        and value
+        and value[0] is immutable_file
+        for value in retained
+    )
+
+
+def test_merge_accounts_returned_legacy_input_paths(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _cupti, nvbit_dir, _output_dir, _args = _prepare_legacy_join_fixture(tmp_path)
+    instances: list[merge_evidence._JoinMaterializationBudget] = []
+
+    class TrackingBudget(merge_evidence._JoinMaterializationBudget):
+        def __init__(self) -> None:
+            super().__init__()
+            instances.append(self)
+
+    monkeypatch.setattr(merge_evidence, "_JoinMaterializationBudget", TrackingBudget)
+
+    discovered, errors = merge_evidence._discover_nvbit_summary_inputs(nvbit_dir)
+
+    assert errors == []
+    assert len(discovered) == 1
+    assert len(instances) == 1
+    retained = instances[0].seen_objects
+    assert retained[id(discovered)] is discovered
+    assert retained[id(discovered[0])] is discovered[0]
+    assert any(
+        type(value) is immutable.PinnedTreeSnapshot
+        for value in retained.values()
+    )
+
+
+def test_merge_uses_one_explicit_raw_admission_and_rejects_pre_retention_mutation(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    artifact_dir, _active_path, active = _prepare_generation_authority_fixture(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+    )
+    raw_descriptor = active["raw_trace_generation"]
+    assert isinstance(raw_descriptor, dict)
+    raw_root = artifact_dir / str(raw_descriptor["path"])
+    stats_path = raw_root / "stats.csv"
+    stats_payload = stats_path.read_bytes()
+    real_require = merge_evidence.require_trace_admission
+    real_open = merge_evidence.open_admitted_trace_sources
+    require_calls = 0
+    retained_open_calls = 0
+
+    def count_require(path: Path):
+        nonlocal require_calls
+        require_calls += 1
+        return real_require(path)
+
+    def mutate_before_retained_open(*args: object, **kwargs: object):
+        nonlocal retained_open_calls
+        retained_open_calls += 1
+        raw_root.chmod(0o755)
+        try:
+            replacement = raw_root / ".stats-replacement"
+            replacement.write_bytes(stats_payload)
+            replacement.chmod(0o444)
+            os.replace(replacement, stats_path)
+        finally:
+            raw_root.chmod(0o555)
+        return real_open(*args, **kwargs)
+
+    monkeypatch.setattr(merge_evidence, "require_trace_admission", count_require)
+    monkeypatch.setattr(
+        merge_evidence,
+        "open_admitted_trace_sources",
+        mutate_before_retained_open,
+    )
+
+    discovered, errors = merge_evidence._discover_nvbit_summary_inputs(
+        artifact_dir,
+        expected_platform="rtx_3090_ti",
+    )
+
+    assert discovered == []
+    assert require_calls == 1
+    assert retained_open_calls == 1
+    assert any(
+        "changed before summary retention" in error
+        or "authority_changed" in error
+        for error in errors
+    ), errors
+
+
+def test_merge_accounts_production_active_path_record_tuples(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    artifact_dir, active_path, active = _prepare_generation_authority_fixture(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+    )
+    instances: list[merge_evidence._JoinMaterializationBudget] = []
+    reserve_roles: list[str] = []
+
+    class TrackingBudget(merge_evidence._JoinMaterializationBudget):
+        def __init__(self) -> None:
+            super().__init__()
+            instances.append(self)
+
+        def reserve(
+            self,
+            value: object,
+            *,
+            retained_input_bytes: int,
+            role: str,
+        ) -> None:
+            reserve_roles.append(role)
+            super().reserve(
+                value,
+                retained_input_bytes=retained_input_bytes,
+                role=role,
+            )
+
+    monkeypatch.setattr(merge_evidence, "_JoinMaterializationBudget", TrackingBudget)
+
+    discovered, errors = merge_evidence._discover_nvbit_summary_inputs(
+        artifact_dir,
+        expected_platform="rtx_3090_ti",
+    )
+
+    assert errors == []
+    assert discovered == [
+        artifact_dir / path for path in active["nvbit_trace_summary_paths"]
+    ]
+    assert len(instances) == 1
+    retained = list(instances[0].seen_objects.values())
+    active_tuples = [
+        value
+        for value in retained
+        if type(value) is tuple
+        and len(value) == 3
+        and isinstance(value[0], Path)
+        and type(value[1]) is dict
+        and value[1].get("activation_state") == "active"
+        and type(value[2]) is merge_evidence.AdmittedTraceSources
+    ]
+    assert len(active_tuples) == 2
+    for retained_tuple in active_tuples:
+        initialized_path_references: list[object] = []
+        for path_type in type(retained_tuple[0]).__mro__:
+            slots = path_type.__dict__.get("__slots__", ())
+            if type(slots) is str:
+                slots = (slots,)
+            for slot in slots:
+                if slot == "__weakref__":
+                    continue
+                descriptor = path_type.__dict__.get(slot)
+                assert descriptor is not None
+                try:
+                    initialized_path_references.append(
+                        descriptor.__get__(
+                            retained_tuple[0], type(retained_tuple[0])
+                        )
+                    )
+                except AttributeError:
+                    pass
+        for retained_path_reference in initialized_path_references:
+            assert (
+                instances[0].seen_objects[id(retained_path_reference)]
+                is retained_path_reference
+            )
+    matching_active_tuples = [
+        value for value in active_tuples if value[0] == active_path
+    ]
+    assert len(matching_active_tuples) == 1
+    active_tuple = matching_active_tuples[0]
+    assert instances[0].seen_objects[id(active_tuple[0])] is active_tuple[0]
+    assert instances[0].seen_objects[id(active_tuple[1])] is active_tuple[1]
+    assert any(
+        type(value) is list and active_tuple in value for value in retained
+    )
+    for path in discovered:
+        assert instances[0].seen_objects[id(path)] is path
+    assert any(type(value) is immutable.PinnedTreeSnapshot for value in retained)
+    assert any(
+        type(value) is immutable.ImmutableDirectoryGeneration
+        for value in retained
+    )
+    assert any(
+        type(value) is immutable.DirectoryGenerationFile for value in retained
+    )
+    assert "decoded measurement manifest schema" in reserve_roles
+
+
+def test_verifier_accounts_production_discovery_and_generation_graphs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    artifact_dir, active_path, _active = _prepare_generation_authority_fixture(
+        tmp_path=tmp_path,
+        monkeypatch=monkeypatch,
+    )
+    instances: list[
+        verify_artifacts._CanonicalAuthorityMaterializationBudget
+    ] = []
+    reserve_roles: list[str] = []
+
+    class TrackingBudget(
+        verify_artifacts._CanonicalAuthorityMaterializationBudget
+    ):
+        def __init__(self) -> None:
+            super().__init__()
+            instances.append(self)
+
+        def reserve(
+            self,
+            value: object,
+            *,
+            retained_input_bytes: int,
+            role: str,
+        ) -> None:
+            reserve_roles.append(role)
+            super().reserve(
+                value,
+                retained_input_bytes=retained_input_bytes,
+                role=role,
+            )
+
+    monkeypatch.setattr(
+        verify_artifacts,
+        "_CanonicalAuthorityMaterializationBudget",
+        TrackingBudget,
+    )
+
+    errors = verify_artifacts._verify_canonical_trace_pb_admission(artifact_dir)
+
+    assert errors == []
+    assert len(instances) == 1
+    retained = list(instances[0].seen_objects.values())
+    assert any(type(value) is immutable.PinnedTreeSnapshot for value in retained)
+    assert any(
+        type(value) is immutable.ImmutableDirectoryGeneration
+        for value in retained
+    )
+    assert any(
+        type(value) is immutable.DirectoryGenerationFile for value in retained
+    )
+    queued_records = [
+        value
+        for value in retained
+        if type(value) is tuple
+        and len(value) == 2
+        and isinstance(value[0], Path)
+        and type(value[1]) is dict
+        and value[1].get("activation_state") == "active"
+    ]
+    assert len(queued_records) == 1
+    queued_path = queued_records[0][0]
+    initialized_path_references: list[object] = []
+    for path_type in type(queued_path).__mro__:
+        slots = path_type.__dict__.get("__slots__", ())
+        if type(slots) is str:
+            slots = (slots,)
+        for slot in slots:
+            if slot == "__weakref__":
+                continue
+            descriptor = path_type.__dict__.get(slot)
+            assert descriptor is not None
+            try:
+                initialized_path_references.append(
+                    descriptor.__get__(queued_path, type(queued_path))
+                )
+            except AttributeError:
+                pass
+    for retained_path_reference in initialized_path_references:
+        assert (
+            instances[0].seen_objects[id(retained_path_reference)]
+            is retained_path_reference
+        )
+    assert queued_path == active_path
+    assert instances[0].seen_objects[id(queued_records[0])] is queued_records[0]
+    assert instances[0].seen_objects[id(queued_path)] is queued_path
+    assert "retained canonical authority discovery inventories" in reserve_roles
+    assert "decoded NVBit trace summary schema" in reserve_roles
+    assert "decoded measurement manifest schema" in reserve_roles
+    assert "retained summary generation inventory" in reserve_roles
+    assert "retained phase generation inventory" not in reserve_roles
 
 
 @pytest.mark.parametrize(
@@ -4906,6 +8128,46 @@ def test_handle_trace_retirement_refuses_special_or_linked_active_leaf(
     )
 
 
+def test_raw_generation_policy_rejects_heterogeneous_generic_limits() -> None:
+    limits = replace(
+        run_suite.DEFAULT_TRACE_ADMISSION_LIMITS,
+        threadblock_bytes=(
+            run_suite.DEFAULT_TRACE_ADMISSION_LIMITS.threadblock_bytes - 1
+        ),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match="requires equal trace-root and threadblock per-file limits",
+    ):
+        merge_evidence.raw_trace_generation_limits(limits)
+
+
+def test_trace_generation_commit_limits_bind_actual_per_file_ceiling() -> None:
+    limits = run_suite.DEFAULT_TRACE_ADMISSION_LIMITS
+    commit_limits = run_suite._trace_generation_commit_limits()
+
+    assert commit_limits["max_file_bytes"] == max(
+        limits.trace_root_bytes,
+        limits.threadblock_bytes,
+    )
+    assert commit_limits["max_file_bytes_by_path"] == {
+        "stats.csv": limits.stats_bytes,
+        "extra_info/allocations.json": limits.allocations_sidecar_bytes,
+    }
+    assert commit_limits["max_file_bytes"] < commit_limits[
+        "max_total_file_bytes"
+    ]
+
+    derived_limits = run_suite._derived_generation_commit_limits()
+    assert "max_file_bytes" not in derived_limits
+    assert "max_file_bytes_by_path" not in derived_limits
+    assert (
+        derived_limits["max_total_file_bytes"]
+        == commit_limits["max_total_file_bytes"]
+    )
+
+
 def test_run_suite_executes_and_injects_retained_descriptors(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
@@ -5452,6 +8714,7 @@ def test_verifier_retains_active_record_through_generation_checks(
     def replace_active_then_verify(
         record_path: Path,
         record: dict[str, object],
+        **kwargs: object,
     ) -> list[str]:
         nonlocal replaced
         if not replaced:
@@ -5460,7 +8723,7 @@ def test_verifier_retains_active_record_through_generation_checks(
             replacement.write_bytes(record_path.read_bytes())
             replacement.chmod(0o444)
             os.replace(replacement, record_path)
-        return original(record_path, record)
+        return original(record_path, record, **kwargs)
 
     monkeypatch.setattr(
         verify_artifacts,
@@ -5473,6 +8736,125 @@ def test_verifier_retains_active_record_through_generation_checks(
 
     assert replaced is True
     assert any("trace authority changed" in error for error in errors)
+
+
+@pytest.mark.parametrize(
+    "schema_version",
+    (2, True, 1.0),
+    ids=("unknown-int", "boolean", "integral-float"),
+)
+def test_consumers_reject_nonexact_phase_generation_version(
+    tmp_path: Path,
+    schema_version: object,
+) -> None:
+    artifact_dir = tmp_path / "artifact"
+    _admission, _summaries, active_path = _publish_active_summary_fixture(
+        artifact_dir=artifact_dir,
+        source_root=_write_trace(tmp_path / "trace"),
+        shape_point="fixture_shape",
+    )
+    base_active = json.loads(active_path.read_text(encoding="utf-8"))
+    active = _bind_manifest_and_phase_generation(
+        artifact_dir=artifact_dir,
+        active_path=active_path,
+        repeat_count=1,
+        payloads={
+            "phase_cycle_ledger_0_0.json": _valid_phase_ledger_payload(
+                slug=str(base_active["slug"]),
+                shape_point="fixture_shape",
+                repeat_index=0,
+                launch_index=0,
+                binary_sha256=str(base_active["binary_sha256"]),
+                kernel_signature_sha256=str(
+                    base_active["kernel_signature_sha256"]
+                ),
+                tracer_build_sha256=str(
+                    base_active["nvbit_tracer_build_hash"]
+                ),
+            )
+        },
+    )
+    phase = active["phase_inject_ab"]
+    assert isinstance(phase, dict)
+    descriptor = phase["generation"]
+    assert isinstance(descriptor, dict)
+    descriptor["schema_version"] = schema_version
+    _replace_active_record_for_hostile_fixture(active_path, active)
+
+    discovered, merge_errors = merge_evidence._discover_nvbit_summary_inputs(
+        artifact_dir
+    )
+    verifier_errors = verify_artifacts._verify_canonical_trace_pb_admission(
+        artifact_dir
+    )
+
+    assert discovered == []
+    assert any(
+        "phase generation schema_version must equal one" in error
+        for error in merge_errors
+    )
+    assert any(
+        "phase generation schema_version must equal one" in error
+        for error in verifier_errors
+    )
+
+
+def test_verifier_bounds_phase_payload_reads(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    artifact_dir = tmp_path / "artifact"
+    admission, _summaries, active_path = _publish_active_summary_fixture(
+        artifact_dir=artifact_dir,
+        source_root=_write_trace(tmp_path / "trace"),
+        shape_point="fixture_shape",
+    )
+    base_active = json.loads(active_path.read_text(encoding="utf-8"))
+    active = _bind_manifest_and_phase_generation(
+        artifact_dir=artifact_dir,
+        active_path=active_path,
+        repeat_count=1,
+        payloads={
+            "phase_cycle_ledger_0_0.json": _valid_phase_ledger_payload(
+                slug=str(base_active["slug"]),
+                shape_point="fixture_shape",
+                repeat_index=0,
+                launch_index=0,
+                binary_sha256=str(base_active["binary_sha256"]),
+                kernel_signature_sha256=str(
+                    base_active["kernel_signature_sha256"]
+                ),
+                tracer_build_sha256=str(
+                    base_active["nvbit_tracer_build_hash"]
+                ),
+            )
+        },
+    )
+    original = immutable.PinnedDirectoryReader.read_snapshot
+    observed_limits: list[int | None] = []
+
+    def track_phase_read(reader, relative_path: str, **kwargs):
+        if PurePosixPath(relative_path).name.startswith("phase_cycle_ledger_"):
+            observed_limits.append(kwargs.get("max_bytes"))
+        return original(reader, relative_path, **kwargs)
+
+    monkeypatch.setattr(
+        immutable.PinnedDirectoryReader,
+        "read_snapshot",
+        track_phase_read,
+    )
+
+    errors = verify_artifacts._verify_active_phase_generation(
+        active_path,
+        active,
+        trace_admission=admission,
+    )
+
+    assert errors == []
+    assert observed_limits
+    assert set(observed_limits) == {
+        verify_artifacts._CANONICAL_AUTHORITY_JSON_MAX_BYTES
+    }
 
 
 def test_verifier_rejects_unbounded_phase_repeat_without_expansion(
@@ -5703,13 +9085,16 @@ def test_merge_malformed_authority_blocks_legacy_fallback(
 ) -> None:
     legacy = tmp_path / "nvbit_trace_summary_0_0.json"
     legacy.write_text('{"schema_version": 1}\n', encoding="utf-8")
-    (tmp_path / "trace_fixture.json").write_text(
-        json.dumps({
-            "activation_state": "active",
-            "nvbit_trace_summary_emit_status": "ok",
-        })
-        + "\n",
-        encoding="utf-8",
+    immutable.publish_regular_file(
+        tmp_path,
+        "trace_fixture.json",
+        (
+            json.dumps({
+                "activation_state": "active",
+                "nvbit_trace_summary_emit_status": "ok",
+            })
+            + "\n"
+        ).encode("utf-8"),
     )
 
     discovered, errors = merge_evidence._discover_nvbit_summary_inputs(tmp_path)
@@ -5724,9 +9109,19 @@ def test_verifier_returns_error_for_unhashable_active_shape(
     (artifact_dir / run_suite.RAW_TRACE_GENERATION_NAMESPACE).mkdir(
         parents=True
     )
-    (artifact_dir / "trace_bad.json").write_text(
-        json.dumps({"activation_state": "active", "shape_point": []}) + "\n",
-        encoding="utf-8",
+    immutable.publish_regular_file(
+        artifact_dir,
+        "trace_bad.json",
+        (
+            json.dumps({
+                "schema_version": 1,
+                "activation_state": "active",
+                "shape_set": "trace_shapes",
+                "nvbit_trace_summary_emit_status": "ok",
+                "shape_point": [],
+            })
+            + "\n"
+        ).encode("utf-8"),
     )
 
     errors = verify_artifacts._verify_canonical_trace_pb_admission(tmp_path)

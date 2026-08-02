@@ -59,6 +59,7 @@ from tools.nvbit_tracer.trace_admission import (  # noqa: E402
     TraceAdmissionError,
     TraceLaunchSummary,
     open_admitted_trace_sources,
+    raw_trace_generation_limits,
     require_trace_admission,
 )
 from tools.local_labels.immutable_artifact import (  # noqa: E402
@@ -421,19 +422,10 @@ def _new_capture_attempt_id() -> str:
     return f"{time.time_ns():020d}-{os.urandom(8).hex()}"
 
 
-def _trace_generation_commit_limits() -> dict[str, int]:
-    limits = DEFAULT_TRACE_ADMISSION_LIMITS
-    return {
-        "max_files": limits.tree_files,
-        "max_directories": limits.tree_directories,
-        "max_total_file_bytes": (
-            limits.trace_root_bytes
-            + limits.stats_bytes
-            + limits.total_threadblock_bytes
-            + limits.allocations_sidecar_bytes
-        ),
-        "max_total_relative_path_bytes": limits.tree_relative_path_bytes,
-    }
+def _trace_generation_commit_limits() -> dict[
+    str, int | dict[str, int]
+]:
+    return raw_trace_generation_limits(DEFAULT_TRACE_ADMISSION_LIMITS)
 
 
 def _verify_committed_trace_generation(

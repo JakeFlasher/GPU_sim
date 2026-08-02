@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+import contextlib
 import ctypes
 import dataclasses
 import errno
@@ -441,11 +442,17 @@ def _read_fd(descriptor: int, *, allow_hardlinks: bool = False) -> bytes:
 
 
 def _hash_fd(
-    descriptor: int, *, allow_hardlinks: bool = False
+    descriptor: int,
+    *,
+    allow_hardlinks: bool = False,
+    max_bytes: int | None = None,
 ) -> tuple[str, int, int]:
     digest = hashlib.sha256()
     size, mode, _snapshot = _consume_stable_regular(
-        descriptor, digest.update, allow_hardlinks=allow_hardlinks
+        descriptor,
+        digest.update,
+        allow_hardlinks=allow_hardlinks,
+        max_bytes=max_bytes,
     )
     return digest.hexdigest(), size, mode
 
@@ -470,6 +477,39 @@ def _directory_flags() -> int:
 
 def _open_dir_at(parent_descriptor: int, name: str) -> int:
     return os.open(name, _directory_flags(), dir_fd=parent_descriptor)
+
+
+def _open_independent_directory(descriptor: int) -> int:
+    independent = _open_dir_at(descriptor, ".")
+    try:
+        if _node_identity(os.fstat(independent)) != _node_identity(
+            os.fstat(descriptor)
+        ):
+            raise ImmutableArtifactError(
+                "independent directory descriptor changed during open"
+            )
+        return independent
+    except BaseException:
+        _close_descriptors(
+            (independent,),
+            active_error=sys.exc_info()[1],
+            label="independent directory descriptor close",
+        )
+        raise
+
+
+@contextlib.contextmanager
+def _scandir_independent(descriptor: int):
+    independent = _open_independent_directory(descriptor)
+    try:
+        with os.scandir(independent) as entries:
+            yield entries
+    finally:
+        _close_descriptors(
+            (independent,),
+            active_error=sys.exc_info()[1],
+            label="independent directory scan close",
+        )
 
 
 def _node_identity(metadata: os.stat_result) -> tuple[int, int, int]:
@@ -1721,6 +1761,7 @@ class PinnedDirectoryReader:
                 "retained directory root changed after mode seal"
             )
 
+    @_translate_descriptor_resource_errors("pinned regular-file snapshot read")
     def read_snapshot(
         self,
         relative_path: str,
@@ -1767,6 +1808,7 @@ class PinnedDirectoryReader:
     ) -> bytes:
         return self.read_snapshot(relative_path, max_bytes=max_bytes).payload
 
+    @_translate_descriptor_resource_errors("pinned regular-file verification")
     def verify_regular(
         self, relative_path: str, expected: MetadataSnapshot,
     ) -> None:
@@ -1786,6 +1828,7 @@ class PinnedDirectoryReader:
         finally:
             pinned.close()
 
+    @_translate_descriptor_resource_errors("pinned directory tree snapshot")
     def snapshot_tree(
         self,
         *,
@@ -2885,6 +2928,16 @@ def preserve_retained_regular_file(
             "failed regular preservation payload disagrees with capability"
         )
 
+    def preserved(path: Path) -> Path:
+        state = retained._monitor_state
+        if state is not None:
+            # Preservation deliberately removes or supersedes the authenticated
+            # path. The retained descriptor remains cleanup-only after that
+            # terminal transition, so its close must not reinterpret the
+            # preservation syscalls as a new integrity failure.
+            state.monitor.cancel_close_verification()
+        return path
+
     exact_error: BaseException | None = None
     try:
         retired = retire_regular_file(
@@ -2896,7 +2949,7 @@ def preserve_retained_regular_file(
         exact_error = exc
     else:
         if retired is not None:
-            return retired
+            return preserved(retired)
 
     try:
         descriptor = retained.descriptor
@@ -2923,15 +2976,15 @@ def preserve_retained_regular_file(
             current_error = exc
         else:
             if retired is not None:
-                return retired
+                return preserved(retired)
 
     try:
-        return salvage_retained_regular_descriptor(
+        return preserved(salvage_retained_regular_descriptor(
             retained.path,
             descriptor,
             expected_payload=expected_payload,
             expected_snapshot=retained.snapshot,
-        )
+        ))
     except BaseException as initial_salvage_error:
         try:
             retained_name = _salvage_failed_regular_publication_at(
@@ -2951,7 +3004,7 @@ def preserve_retained_regular_file(
                 if detail is not None:
                     failure.add_note(str(detail))
             raise failure from current_salvage_error
-        return retained.path.with_name(retained_name)
+        return preserved(retained.path.with_name(retained_name))
 
 
 def _preserve_failed_regular_publication_at(
@@ -3967,7 +4020,7 @@ def _tree_inventory_descriptor(
         parts = pending.pop()
         pinned = _open_pinned_relative_directory(root_descriptor, parts)
         try:
-            with os.scandir(pinned.descriptor) as entries:
+            with _scandir_independent(pinned.descriptor) as entries:
                 for entry in entries:
                     metadata = entry.stat(follow_symlinks=False)
                     child_parts = (*parts, entry.name)
@@ -4119,6 +4172,20 @@ class _DirectoryMutationMonitor:
             )
         self.descriptor = descriptor
         self._add_watch = add_watch
+        self._close_verifier: Callable[[], None] | None = None
+        self._close_verification_cancelled = False
+
+    def set_close_verifier(self, verifier: Callable[[], None]) -> None:
+        if self.descriptor < 0:
+            raise ImmutableArtifactError("inotify mutation monitor is closed")
+        if self._close_verifier is not None:
+            raise ImmutableArtifactError(
+                "inotify mutation monitor close verifier is already configured"
+            )
+        self._close_verifier = verifier
+
+    def cancel_close_verification(self) -> None:
+        self._close_verification_cancelled = True
 
     def _watch_inode(
         self, descriptor: int, *, directory: bool,
@@ -4248,6 +4315,7 @@ class _DirectoryMutationMonitor:
     def require_quiet(self) -> None:
         result = self.read_events()
         if result.events:
+            self.cancel_close_verification()
             error = ImmutableArtifactError(
                 "immutable tree changed during bounded verification"
             )
@@ -4255,15 +4323,38 @@ class _DirectoryMutationMonitor:
                 error.add_note(str(result.resource_error))
             raise error
         if result.resource_error is not None:
+            self.cancel_close_verification()
             raise result.resource_error
 
     def close(self) -> None:
         descriptor = self.descriptor
+        if descriptor < 0:
+            return
+        verification_error: BaseException | None = None
+        verifier = self._close_verifier
+        self._close_verifier = None
+        try:
+            # A caller may mutate protected state in the final Python-level close
+            # callback after its preceding verification. Drain once more while the
+            # inotify descriptor and every watch are still live so teardown cannot
+            # create an unobserved terminal race window. Filtered monitors install
+            # their own verifier so unrelated sibling activity remains admissible.
+            if self._close_verification_cancelled:
+                pass
+            elif verifier is None:
+                self.require_quiet()
+            else:
+                verifier()
+        except BaseException as exc:
+            verification_error = exc
         self.descriptor = -1
-        if descriptor >= 0:
-            _close_descriptors(
-                (descriptor,), label="inotify mutation monitor close",
-            )
+        _close_descriptors(
+            (descriptor,),
+            active_error=verification_error,
+            label="inotify mutation monitor close",
+        )
+        if verification_error is not None:
+            raise verification_error
 
 
 def _raise_monitored_mutation(
@@ -4297,29 +4388,33 @@ def _require_retained_directory_path_monitor_quiet(
 ) -> None:
     if state is None:
         return
-    result = state.monitor.read_events()
-    for watch_descriptor, _mask, name in result.events:
-        if watch_descriptor not in state.directory_watches:
-            _raise_monitored_mutation(
-                "retained directory monitor observed an unknown watch",
-                result,
-            )
-        if not name:
-            _raise_monitored_mutation(
-                "retained directory ancestor changed during use",
-                result,
-            )
-        if any(
-            watch_descriptor == protected_watch
-            and name == protected_name
-            for protected_watch, protected_name in state.protected_names
-        ):
-            _raise_monitored_mutation(
-                "retained directory ancestor changed during use",
-                result,
-            )
-    if result.resource_error is not None:
-        raise result.resource_error
+    try:
+        result = state.monitor.read_events()
+        for watch_descriptor, _mask, name in result.events:
+            if watch_descriptor not in state.directory_watches:
+                _raise_monitored_mutation(
+                    "retained directory monitor observed an unknown watch",
+                    result,
+                )
+            if not name:
+                _raise_monitored_mutation(
+                    "retained directory ancestor changed during use",
+                    result,
+                )
+            if any(
+                watch_descriptor == protected_watch
+                and name == protected_name
+                for protected_watch, protected_name in state.protected_names
+            ):
+                _raise_monitored_mutation(
+                    "retained directory ancestor changed during use",
+                    result,
+                )
+        if result.resource_error is not None:
+            raise result.resource_error
+    except BaseException:
+        state.monitor.cancel_close_verification()
+        raise
 
 
 def _require_retained_directory_root_mode_change(
@@ -4327,45 +4422,49 @@ def _require_retained_directory_root_mode_change(
 ) -> None:
     if state is None:
         raise ImmutableArtifactError("retained directory monitor is closed")
-    if (
-        state.root_watch not in state.directory_watches
-        or not state.protected_names
-    ):
-        raise ImmutableArtifactError(
-            "retained directory monitor lacks a protected root"
-        )
-    parent_watch, root_name = state.protected_names[-1]
-    expected = {
-        (state.root_watch, _INOTIFY_ROOT_DIRECTORY_ATTRIB, b""),
-        (parent_watch, _INOTIFY_ROOT_DIRECTORY_ATTRIB, root_name),
-    }
-    result = state.monitor.read_events()
-    observed: set[tuple[int, int, bytes]] = set()
-    for event in result.events:
-        watch_descriptor, _mask, _name = event
-        if watch_descriptor not in state.directory_watches:
-            _raise_monitored_mutation(
-                "retained directory monitor observed an unknown watch",
-                result,
+    try:
+        if (
+            state.root_watch not in state.directory_watches
+            or not state.protected_names
+        ):
+            raise ImmutableArtifactError(
+                "retained directory monitor lacks a protected root"
             )
-        if event in expected:
-            if event in observed:
+        parent_watch, root_name = state.protected_names[-1]
+        expected = {
+            (state.root_watch, _INOTIFY_ROOT_DIRECTORY_ATTRIB, b""),
+            (parent_watch, _INOTIFY_ROOT_DIRECTORY_ATTRIB, root_name),
+        }
+        result = state.monitor.read_events()
+        observed: set[tuple[int, int, bytes]] = set()
+        for event in result.events:
+            watch_descriptor, _mask, _name = event
+            if watch_descriptor not in state.directory_watches:
                 _raise_monitored_mutation(
-                    "retained directory mode seal emitted a duplicate event",
+                    "retained directory monitor observed an unknown watch",
                     result,
                 )
-            observed.add(event)
-            continue
-        _raise_monitored_mutation(
-            "retained directory changed outside authorized root mode seal",
-            result,
-        )
-    if result.resource_error is not None:
-        raise result.resource_error
-    if observed != expected:
-        raise ImmutableArtifactError(
-            "authorized retained directory root mode seal was not fully observed"
-        )
+            if event in expected:
+                if event in observed:
+                    _raise_monitored_mutation(
+                        "retained directory mode seal emitted a duplicate event",
+                        result,
+                    )
+                observed.add(event)
+                continue
+            _raise_monitored_mutation(
+                "retained directory changed outside authorized root mode seal",
+                result,
+            )
+        if result.resource_error is not None:
+            raise result.resource_error
+        if observed != expected:
+            raise ImmutableArtifactError(
+                "authorized retained directory root mode seal was not fully observed"
+            )
+    except BaseException:
+        state.monitor.cancel_close_verification()
+        raise
 
 
 def _open_directory_with_early_path_monitor(
@@ -4429,10 +4528,14 @@ def _open_directory_with_early_path_monitor(
         pinned.verify_path()
         _require_retained_directory_path_monitor_quiet(state)
         pinned.verify_path()
+        monitor.set_close_verifier(
+            lambda: _require_retained_directory_path_monitor_quiet(state)
+        )
         transferred = True
         return pinned, state
     finally:
         if not transferred:
+            monitor.cancel_close_verification()
             closers: list[Callable[[], None]] = [monitor.close]
             if pinned is not None:
                 closers.append(pinned.close)
@@ -4487,8 +4590,12 @@ def _arm_retained_path_monitor(
                 "retained regular-file path changed while arming monitor"
             )
         _require_retained_path_monitor_quiet(state)
+        monitor.set_close_verifier(
+            lambda: _require_retained_path_monitor_quiet(state)
+        )
         return state
     except BaseException:
+        monitor.cancel_close_verification()
         monitor.close()
         raise
 
@@ -4599,10 +4706,14 @@ def _open_regular_with_early_path_monitor(
                 "retained regular-file path changed while arming monitor"
             )
         _require_retained_path_monitor_quiet(state)
+        monitor.set_close_verifier(
+            lambda: _require_retained_path_monitor_quiet(state)
+        )
         transferred = True
         return pinned, state
     finally:
         if not transferred:
+            monitor.cancel_close_verification()
             closers: list[Callable[[], None]] = [monitor.close]
             if pinned is not None:
                 closers.append(pinned.close)
@@ -4630,47 +4741,51 @@ def _require_retained_path_monitor_quiet(
 ) -> None:
     if state is None:
         return
-    result = state.monitor.read_events()
-    for watch_descriptor, mask, name in result.events:
-        if watch_descriptor == state.regular_watch:
-            _raise_monitored_mutation(
-                "retained regular-file generation changed during use",
-                result,
-            )
-        if watch_descriptor not in state.directory_watches:
-            _raise_monitored_mutation(
-                "retained regular-file monitor observed an unknown watch",
-                result,
-            )
-        if not name:
-            _raise_monitored_mutation(
-                "retained regular-file ancestor changed during use",
-                result,
-            )
-        if any(
-            watch_descriptor == protected_watch
-            and name == protected_name
-            for protected_watch, protected_name in state.protected_names
-        ):
-            if mask & _INOTIFY_NAMESPACE_EVENTS:
-                if (
-                    watch_descriptor,
-                    name,
-                ) == state.protected_names[-1]:
-                    _raise_monitored_mutation(
-                        "named regular-file path changed",
-                        result,
-                    )
+    try:
+        result = state.monitor.read_events()
+        for watch_descriptor, mask, name in result.events:
+            if watch_descriptor == state.regular_watch:
+                _raise_monitored_mutation(
+                    "retained regular-file generation changed during use",
+                    result,
+                )
+            if watch_descriptor not in state.directory_watches:
+                _raise_monitored_mutation(
+                    "retained regular-file monitor observed an unknown watch",
+                    result,
+                )
+            if not name:
                 _raise_monitored_mutation(
                     "retained regular-file ancestor changed during use",
                     result,
                 )
-            _raise_monitored_mutation(
-                "retained regular-file generation changed during use",
-                result,
-            )
-    if result.resource_error is not None:
-        raise result.resource_error
+            if any(
+                watch_descriptor == protected_watch
+                and name == protected_name
+                for protected_watch, protected_name in state.protected_names
+            ):
+                if mask & _INOTIFY_NAMESPACE_EVENTS:
+                    if (
+                        watch_descriptor,
+                        name,
+                    ) == state.protected_names[-1]:
+                        _raise_monitored_mutation(
+                            "named regular-file path changed",
+                            result,
+                        )
+                    _raise_monitored_mutation(
+                        "retained regular-file ancestor changed during use",
+                        result,
+                    )
+                _raise_monitored_mutation(
+                    "retained regular-file generation changed during use",
+                    result,
+                )
+        if result.resource_error is not None:
+            raise result.resource_error
+    except BaseException:
+        state.monitor.cancel_close_verification()
+        raise
 
 
 def _walk_tree_descriptor(
@@ -4716,7 +4831,7 @@ def _walk_tree_descriptor(
                 _snapshot_fields(os.fstat(directory.descriptor))
             )
             children: list[tuple[str, os.stat_result]] = []
-            with os.scandir(directory.descriptor) as entries:
+            with _scandir_independent(directory.descriptor) as entries:
                 for entry in entries:
                     metadata = entry.stat(follow_symlinks=False)
                     child = (*parts, entry.name)
@@ -4783,6 +4898,47 @@ def _walk_tree_descriptor(
     return files, directories
 
 
+def _require_pinned_path_set_events_quiet(
+    monitor: _DirectoryMutationMonitor,
+    *,
+    any_watches: frozenset[int] | set[int],
+    named_watches: Mapping[int, frozenset[bytes] | set[bytes]],
+    self_watches: frozenset[int] | set[int],
+) -> None:
+    try:
+        result = monitor.read_events()
+        for watch_descriptor, _mask, name in result.events:
+            if watch_descriptor in any_watches:
+                _raise_monitored_mutation(
+                    "protected input tree changed during downstream use",
+                    result,
+                )
+            protected_names = named_watches.get(watch_descriptor)
+            if protected_names is not None:
+                if not name or name in protected_names:
+                    _raise_monitored_mutation(
+                        "protected input path changed during downstream use",
+                        result,
+                    )
+                continue
+            if watch_descriptor in self_watches:
+                if not name:
+                    _raise_monitored_mutation(
+                        "protected input ancestor changed during downstream use",
+                        result,
+                    )
+                continue
+            _raise_monitored_mutation(
+                "protected input monitor observed an unknown watch",
+                result,
+            )
+        if result.resource_error is not None:
+            raise result.resource_error
+    except BaseException:
+        monitor.cancel_close_verification()
+        raise
+
+
 class PinnedPathSetMonitor:
     """Continuously guard selected regular files and recursive input trees.
 
@@ -4793,6 +4949,7 @@ class PinnedPathSetMonitor:
     descriptor-anchored absence at the nearest existing parent.
     """
 
+    @_translate_descriptor_resource_errors("pinned path-set monitor open")
     def __init__(
         self,
         root: Path,
@@ -4822,10 +4979,14 @@ class PinnedPathSetMonitor:
                 max_total_relative_path_bytes=max_total_relative_path_bytes,
             )
         except BaseException:
+            monitor = self._monitor
+            if monitor is not None:
+                monitor.cancel_close_verification()
             self.close()
             raise
 
     @classmethod
+    @_translate_descriptor_resource_errors("pinned path-set monitor retention")
     def from_reader(
         cls,
         reader: PinnedDirectoryReader,
@@ -4860,6 +5021,9 @@ class PinnedPathSetMonitor:
                 max_total_relative_path_bytes=max_total_relative_path_bytes,
             )
         except BaseException:
+            low_level_monitor = monitor._monitor
+            if low_level_monitor is not None:
+                low_level_monitor.cancel_close_verification()
             monitor.close()
             raise
         return monitor
@@ -4915,6 +5079,23 @@ class PinnedPathSetMonitor:
             self._watch_filtered_directory(relative_path, names)
         self._verify_root_path()
         self.verify_unchanged()
+        monitor = self._monitor
+        if monitor is None:
+            raise ImmutableArtifactError("protected input monitor is closed")
+        any_watches = frozenset(self._any_watches)
+        named_watches = {
+            watch: frozenset(names)
+            for watch, names in self._named_watches.items()
+        }
+        self_watches = frozenset(self._self_watches)
+        monitor.set_close_verifier(
+            lambda: _require_pinned_path_set_events_quiet(
+                monitor,
+                any_watches=any_watches,
+                named_watches=named_watches,
+                self_watches=self_watches,
+            )
+        )
 
     def _remember_nested_directory(
         self, parts: tuple[str, ...], descriptor: int,
@@ -5123,37 +5304,19 @@ class PinnedPathSetMonitor:
         finally:
             directory.close()
 
+    @_translate_descriptor_resource_errors("pinned path-set monitor verification")
     def verify_unchanged(self) -> None:
         self._verify_root_path()
         self._verify_nested_directory_identities()
-        result = self._monitor.read_events()
-        for watch_descriptor, _mask, name in result.events:
-            if watch_descriptor in self._any_watches:
-                _raise_monitored_mutation(
-                    "protected input tree changed during downstream use",
-                    result,
-                )
-            protected_names = self._named_watches.get(watch_descriptor)
-            if protected_names is not None:
-                if not name or name in protected_names:
-                    _raise_monitored_mutation(
-                        "protected input path changed during downstream use",
-                        result,
-                    )
-                continue
-            if watch_descriptor in self._self_watches:
-                if not name:
-                    _raise_monitored_mutation(
-                        "protected input ancestor changed during downstream use",
-                        result,
-                    )
-                continue
-            _raise_monitored_mutation(
-                "protected input monitor observed an unknown watch",
-                result,
-            )
-        if result.resource_error is not None:
-            raise result.resource_error
+        monitor = self._monitor
+        if monitor is None:
+            raise ImmutableArtifactError("protected input monitor is closed")
+        _require_pinned_path_set_events_quiet(
+            monitor,
+            any_watches=self._any_watches,
+            named_watches=self._named_watches,
+            self_watches=self._self_watches,
+        )
         self._verify_nested_directory_identities()
         self._verify_root_path()
 
@@ -5276,6 +5439,7 @@ def _arm_directory_mutation_monitor(
         monitor.require_quiet()
         return monitor
     except BaseException:
+        monitor.cancel_close_verification()
         monitor.close()
         raise
 
@@ -5546,6 +5710,9 @@ def _verify_snapshot_closure_at(
         # linearization point for local write and namespace syscalls.
         monitor.require_quiet()
         return snapshot
+    except BaseException:
+        monitor.cancel_close_verification()
+        raise
     finally:
         monitor.close()
 
@@ -5926,6 +6093,7 @@ def publish_directory(
     files: Iterable[ImmutableFile],
     *,
     before_commit: Callable[[Path, int], None] | None = None,
+    after_commit: Callable[[Path, int], None] | None = None,
     pinned_root: PinnedDirectoryReader | None = None,
     accept_existing: bool = True,
 ) -> Path:
@@ -5934,8 +6102,16 @@ def publish_directory(
     ``accept_existing`` preserves the historical idempotent exact-winner mode by
     default.  Attempt-scoped and merge publications set it to ``False`` so a
     pre-existing or racing destination generation is always a hard failure.
+    ``after_commit`` runs after durable committed-tree closure while rollback
+    guards can still retire this invocation's failed generation.
     """
     _validate_publication_name(final_name)
+    for callback_name, callback in (
+        ("before_commit", before_commit),
+        ("after_commit", after_commit),
+    ):
+        if callback is not None and not callable(callback):
+            raise ImmutableArtifactError(f"{callback_name} must be callable")
     if type(accept_existing) is not bool:
         raise ImmutableArtifactError("accept_existing must be boolean")
     material = tuple(files)
@@ -6196,6 +6372,19 @@ def publish_directory(
             root_descriptor, final_name, pinned_stage.descriptor
         )
         pinned_root.verify_path()
+        if after_commit is not None:
+            after_commit(root, pinned_root.descriptor)
+            _verify_snapshot_against_at(
+                pinned_stage.descriptor, committed_snapshot
+            )
+            if _entry_mode(root_descriptor, stage_name) is not None:
+                raise ImmutableArtifactError(
+                    "deterministic stage reappeared after post-commit finalization"
+                )
+            _verify_named_directory(
+                root_descriptor, final_name, pinned_stage.descriptor
+            )
+            pinned_root.verify_path()
 
         cleanup_error: BaseException | None = None
         try:
@@ -6389,6 +6578,73 @@ def _generation_limits(
     }
 
 
+def _generation_file_byte_limits(
+    *,
+    max_file_bytes: int | None,
+    max_file_bytes_by_path: Mapping[str, int] | None,
+) -> tuple[int | None, dict[str, int]]:
+    if max_file_bytes is not None and (
+        isinstance(max_file_bytes, bool)
+        or not isinstance(max_file_bytes, int)
+        or max_file_bytes < 0
+    ):
+        raise ImmutableArtifactError(
+            "immutable generation per-file byte limit is invalid"
+        )
+    if max_file_bytes_by_path is None:
+        return max_file_bytes, {}
+    if not isinstance(max_file_bytes_by_path, Mapping):
+        raise ImmutableArtifactError(
+            "immutable generation path-specific byte limits are invalid"
+        )
+    normalized: dict[str, int] = {}
+    for relative_path, limit in max_file_bytes_by_path.items():
+        safe_relative_path(relative_path)
+        if isinstance(limit, bool) or not isinstance(limit, int) or limit < 0:
+            raise ImmutableArtifactError(
+                "immutable generation path-specific byte limit is invalid: "
+                f"{relative_path!r}"
+            )
+        normalized[relative_path] = limit
+    return max_file_bytes, normalized
+
+
+def _generation_file_byte_limit(
+    relative_path: str,
+    *,
+    max_file_bytes: int | None,
+    max_file_bytes_by_path: Mapping[str, int],
+) -> int | None:
+    limit = max_file_bytes_by_path.get(relative_path, max_file_bytes)
+    if max_file_bytes is not None and limit is not None:
+        return min(max_file_bytes, limit)
+    return limit
+
+
+def _enforce_generation_file_byte_limits(
+    files: Mapping[str, _Snapshot],
+    *,
+    label: str,
+    max_file_bytes: int | None,
+    max_file_bytes_by_path: Mapping[str, int] | None,
+) -> None:
+    global_limit, path_limits = _generation_file_byte_limits(
+        max_file_bytes=max_file_bytes,
+        max_file_bytes_by_path=max_file_bytes_by_path,
+    )
+    for relative_path, metadata in files.items():
+        limit = _generation_file_byte_limit(
+            relative_path,
+            max_file_bytes=global_limit,
+            max_file_bytes_by_path=path_limits,
+        )
+        if limit is not None and metadata[4] > limit:
+            raise ImmutableArtifactLimitError(
+                f"{label} file exceeds bounded per-file byte limit: "
+                f"{relative_path}: {metadata[4]} > {limit}"
+            )
+
+
 def _filesystem_generation_sha256(
     files: Mapping[str, _Snapshot],
     directories: Mapping[str, _Snapshot],
@@ -6449,10 +6705,16 @@ def _inspect_immutable_directory_generation_at(
     max_directories: int | None,
     max_total_file_bytes: int | None,
     max_total_relative_path_bytes: int | None,
+    max_file_bytes: int | None = None,
+    max_file_bytes_by_path: Mapping[str, int] | None = None,
 ) -> ImmutableDirectoryGeneration:
     """Hash one finalized tree through a pinned root and close every race."""
     if type(require_nonempty) is not bool:
         raise ImmutableArtifactError("require_nonempty must be boolean")
+    max_file_bytes, max_file_bytes_by_path = _generation_file_byte_limits(
+        max_file_bytes=max_file_bytes,
+        max_file_bytes_by_path=max_file_bytes_by_path,
+    )
     limits = _generation_limits(
         max_files=max_files,
         max_directories=max_directories,
@@ -6473,6 +6735,12 @@ def _inspect_immutable_directory_generation_at(
             raise ImmutableArtifactError(
                 "immutable directory generation contains no regular files"
             )
+        _enforce_generation_file_byte_limits(
+            files,
+            label="immutable generation",
+            max_file_bytes=max_file_bytes,
+            max_file_bytes_by_path=max_file_bytes_by_path,
+        )
         for relative_path, metadata in files.items():
             if stat.S_IMODE(metadata[2]) != 0o444 or metadata[3] != 1:
                 raise ImmutableArtifactError(
@@ -6489,6 +6757,18 @@ def _inspect_immutable_directory_generation_at(
         identities: list[DirectoryGenerationFile] = []
         total_file_bytes = 0
         for relative_path, expected_metadata in sorted(files.items()):
+            file_byte_limit = _generation_file_byte_limit(
+                relative_path,
+                max_file_bytes=max_file_bytes,
+                max_file_bytes_by_path=max_file_bytes_by_path,
+            )
+            if max_total_file_bytes is not None:
+                remaining_total_bytes = max_total_file_bytes - total_file_bytes
+                file_byte_limit = (
+                    remaining_total_bytes
+                    if file_byte_limit is None
+                    else min(file_byte_limit, remaining_total_bytes)
+                )
             pinned = _open_relative_regular_at(root_descriptor, relative_path)
             try:
                 if _snapshot_fields(os.fstat(pinned.descriptor)) != expected_metadata:
@@ -6496,7 +6776,10 @@ def _inspect_immutable_directory_generation_at(
                         "immutable generation file changed before hash: "
                         f"{relative_path}"
                     )
-                digest, size_bytes, _mode = _hash_fd(pinned.descriptor)
+                digest, size_bytes, _mode = _hash_fd(
+                    pinned.descriptor,
+                    max_bytes=file_byte_limit,
+                )
                 pinned.verify_path()
                 if _snapshot_fields(os.fstat(pinned.descriptor)) != expected_metadata:
                     raise ImmutableArtifactError(
@@ -6559,6 +6842,8 @@ def inspect_immutable_directory_generation(
     max_directories: int | None = None,
     max_total_file_bytes: int | None = None,
     max_total_relative_path_bytes: int | None = None,
+    max_file_bytes: int | None = None,
+    max_file_bytes_by_path: Mapping[str, int] | None = None,
 ) -> ImmutableDirectoryGeneration:
     """Recompute one committed generation's descriptor-anchored content seal."""
     absolute = Path(os.path.abspath(os.fspath(path)))
@@ -6577,6 +6862,8 @@ def inspect_immutable_directory_generation(
             max_directories=max_directories,
             max_total_file_bytes=max_total_file_bytes,
             max_total_relative_path_bytes=max_total_relative_path_bytes,
+            max_file_bytes=max_file_bytes,
+            max_file_bytes_by_path=max_file_bytes_by_path,
         )
         root.verify_path()
         return generation
@@ -6596,8 +6883,14 @@ def _freeze_external_directory_generation_at(
     max_directories: int | None,
     max_total_file_bytes: int | None,
     max_total_relative_path_bytes: int | None,
+    max_file_bytes: int | None = None,
+    max_file_bytes_by_path: Mapping[str, int] | None = None,
 ) -> ImmutableDirectoryGeneration:
     """Validate an externally written stage, make it read-only, and seal it."""
+    max_file_bytes, max_file_bytes_by_path = _generation_file_byte_limits(
+        max_file_bytes=max_file_bytes,
+        max_file_bytes_by_path=max_file_bytes_by_path,
+    )
     limits = _generation_limits(
         max_files=max_files,
         max_directories=max_directories,
@@ -6616,6 +6909,12 @@ def _freeze_external_directory_generation_at(
         raise ImmutableArtifactError(
             "external directory generation contains no regular files"
         )
+    _enforce_generation_file_byte_limits(
+        files,
+        label="external generation",
+        max_file_bytes=max_file_bytes,
+        max_file_bytes_by_path=max_file_bytes_by_path,
+    )
 
     for relative_path, expected_metadata in sorted(files.items()):
         pinned = _open_relative_regular_at(root_descriptor, relative_path)
@@ -6656,6 +6955,8 @@ def _freeze_external_directory_generation_at(
         root_descriptor,
         path=path,
         require_nonempty=require_nonempty,
+        max_file_bytes=max_file_bytes,
+        max_file_bytes_by_path=max_file_bytes_by_path,
         **limits,
     )
 
@@ -6746,6 +7047,8 @@ class ExclusiveDirectoryStage:
         max_directories: int | None = None,
         max_total_file_bytes: int | None = None,
         max_total_relative_path_bytes: int | None = None,
+        max_file_bytes: int | None = None,
+        max_file_bytes_by_path: Mapping[str, int] | None = None,
         expected_files: tuple[DirectoryGenerationFile, ...] | None = None,
     ) -> ImmutableDirectoryGeneration:
         """Freeze and atomically commit this exact externally written tree.
@@ -6785,6 +7088,8 @@ class ExclusiveDirectoryStage:
             self._stage.descriptor,
             path=self.staging_path,
             require_nonempty=require_nonempty,
+            max_file_bytes=max_file_bytes,
+            max_file_bytes_by_path=max_file_bytes_by_path,
             **limits,
         )
         if expected_files is not None and staged.files != expected_files:
@@ -6868,6 +7173,8 @@ class ExclusiveDirectoryStage:
             self._stage.descriptor,
             path=self.final_path,
             require_nonempty=require_nonempty,
+            max_file_bytes=max_file_bytes,
+            max_file_bytes_by_path=max_file_bytes_by_path,
             **limits,
         )
         # The root directory's host-local ctime may advance during rename, so

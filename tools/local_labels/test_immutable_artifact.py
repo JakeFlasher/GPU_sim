@@ -740,10 +740,14 @@ def test_root_mode_gate_accepts_complete_exact_event_signature(
     reader = immutable.PinnedDirectoryReader(root)
     try:
         events = _authorized_root_mode_events(reader)
+        drains = iter((
+            immutable._MutationDrainResult(events),
+            immutable._MutationDrainResult(()),
+        ))
         monkeypatch.setattr(
             reader._path_monitor.monitor,
             "read_events",
-            lambda: immutable._MutationDrainResult(events),
+            lambda: next(drains, immutable._MutationDrainResult(())),
         )
         immutable._require_retained_directory_root_mode_change(
             reader._path_monitor
@@ -1902,6 +1906,34 @@ def test_expected_inventory_stops_at_first_unexpected_entry(
     assert len(str(failure.value)) < 256
 
 
+def test_tree_inventory_uses_an_independent_directory_offset(
+    tmp_path: Path,
+) -> None:
+    root = tmp_path / "independent-directory-offset"
+    root.mkdir()
+    _regular(root / "value", b"payload")
+
+    with immutable.PinnedDirectoryReader(root) as reader:
+        shared_offset = os.dup(reader.descriptor)
+        try:
+            with os.scandir(shared_offset) as entries:
+                assert {entry.name for entry in entries} == {"value"}
+        finally:
+            os.close(shared_offset)
+
+        observed_files, observed_directories = (
+            immutable._tree_inventory_descriptor(
+                reader.descriptor,
+                expected_files={"value"},
+                expected_directories=set(),
+                mismatch_label="immutable tree inventory mismatch",
+            )
+        )
+
+    assert observed_files == {"value"}
+    assert observed_directories == set()
+
+
 def test_existing_descriptor_pressure_selects_snapshot_closure(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -2002,6 +2034,45 @@ def test_verifier_types_descriptor_allocation_races_as_resource_failures(
 
 
 @pytest.mark.parametrize("resource_errno", [errno.EMFILE, errno.ENFILE])
+@pytest.mark.parametrize(
+    ("operation", "label"),
+    (
+        ("snapshot_tree", "pinned directory tree snapshot"),
+        ("verify_regular", "pinned regular-file verification"),
+    ),
+)
+def test_pinned_reader_translates_descriptor_exhaustion(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    resource_errno: int,
+    operation: str,
+    label: str,
+) -> None:
+    root = tmp_path / "pinned-reader-resource"
+    root.mkdir()
+    (root / "value").write_bytes(b"payload")
+
+    with immutable.PinnedDirectoryReader(root) as reader:
+        expected = dict(reader.snapshot_tree().files)["value"]
+        with monkeypatch.context() as scoped:
+            scoped.setattr(
+                immutable.os,
+                "dup",
+                lambda _descriptor: (_ for _ in ()).throw(
+                    OSError(resource_errno, "planted reader exhaustion")
+                ),
+            )
+            with pytest.raises(
+                immutable.ImmutableArtifactResourceError,
+                match=label,
+            ):
+                if operation == "snapshot_tree":
+                    reader.snapshot_tree()
+                else:
+                    reader.verify_regular("value", expected)
+
+
+@pytest.mark.parametrize("resource_errno", [errno.EMFILE, errno.ENFILE])
 def test_explicit_authority_error_precedes_suppressed_resource_context(
     resource_errno: int,
 ) -> None:
@@ -2030,6 +2101,40 @@ def test_explicit_authority_error_precedes_suppressed_resource_context(
     assert failure.value.__suppress_context__ is True
     assert isinstance(failure.value.__context__, OSError)
     assert failure.value.__context__.errno == resource_errno
+
+
+@pytest.mark.parametrize("resource_errno", [errno.EMFILE, errno.ENFILE])
+@pytest.mark.parametrize("chain_kind", ("cause", "context"))
+def test_wrapped_descriptor_exhaustion_is_typed_through_exception_chains(
+    resource_errno: int,
+    chain_kind: str,
+) -> None:
+    @immutable._translate_descriptor_resource_errors(
+        "wrapped descriptor exhaustion regression"
+    )
+    def exhaust() -> None:
+        try:
+            raise OSError(resource_errno, "wrapped descriptor exhaustion")
+        except OSError as exc:
+            if chain_kind == "cause":
+                raise RuntimeError("explicit wrapper") from exc
+            raise RuntimeError("implicit wrapper")
+
+    with pytest.raises(
+        immutable.ImmutableArtifactResourceError,
+        match="wrapped descriptor exhaustion regression",
+    ) as failure:
+        exhaust()
+
+    wrapper = failure.value.__cause__
+    assert isinstance(wrapper, RuntimeError)
+    if chain_kind == "cause":
+        resource_error = wrapper.__cause__
+    else:
+        assert wrapper.__suppress_context__ is False
+        resource_error = wrapper.__context__
+    assert isinstance(resource_error, OSError)
+    assert resource_error.errno == resource_errno
 
 
 def test_snapshot_closure_rejects_depth_above_bound_without_fd_leak(
@@ -4160,6 +4265,148 @@ def test_external_generation_has_no_partial_final_visibility_and_seals_commit(
         assert observed == generation
     finally:
         stage.close()
+
+
+def test_generation_per_file_limit_precedes_initial_content_hashing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "generations"
+    stage = immutable.create_exclusive_directory_stage(root, "attempt-fixed")
+    payload = b"bounded generation payload"
+    (stage.staging_path / "value").write_bytes(payload)
+
+    def reject_hash(_descriptor: int):
+        raise AssertionError("content hashing preceded per-file size admission")
+
+    monkeypatch.setattr(immutable, "_hash_fd", reject_hash)
+    try:
+        with pytest.raises(
+            immutable.ImmutableArtifactLimitError,
+            match="bounded per-file byte limit",
+        ):
+            stage.commit(
+                max_files=2,
+                max_directories=2,
+                max_total_file_bytes=len(payload),
+                max_total_relative_path_bytes=1024,
+                max_file_bytes=len(payload) - 1,
+            )
+        assert stage.staging_path.is_dir()
+        assert not stage.final_path.exists()
+    finally:
+        stage.close()
+        if stage.staging_path.exists():
+            stage.staging_path.chmod(0o755)
+
+
+def test_generation_path_specific_limit_precedes_initial_content_hashing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root = tmp_path / "generations"
+    stage = immutable.create_exclusive_directory_stage(root, "attempt-fixed")
+    payload = b"bounded stats payload"
+    (stage.staging_path / "stats.csv").write_bytes(payload)
+
+    def reject_hash(_descriptor: int):
+        raise AssertionError(
+            "content hashing preceded path-specific size admission"
+        )
+
+    monkeypatch.setattr(immutable, "_hash_fd", reject_hash)
+    try:
+        with pytest.raises(
+            immutable.ImmutableArtifactLimitError,
+            match="bounded per-file byte limit: stats.csv",
+        ):
+            stage.commit(
+                max_files=2,
+                max_directories=2,
+                max_total_file_bytes=len(payload),
+                max_total_relative_path_bytes=1024,
+                max_file_bytes=len(payload),
+                max_file_bytes_by_path={"stats.csv": len(payload) - 1},
+            )
+        assert stage.staging_path.is_dir()
+        assert not stage.final_path.exists()
+    finally:
+        stage.close()
+        if stage.staging_path.exists():
+            stage.staging_path.chmod(0o755)
+
+
+@pytest.mark.parametrize("limit_kind", ("per_file", "aggregate"))
+def test_generation_hash_rechecks_growth_against_byte_limits(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    limit_kind: str,
+) -> None:
+    root = tmp_path / "generations"
+    stage = immutable.create_exclusive_directory_stage(root, "attempt-fixed")
+    payload = b"bounded generation payload"
+    growth = b"x" * (1024 * 1024)
+    value = stage.staging_path / "value"
+    value.write_bytes(payload)
+    writer = os.open(value, os.O_WRONLY)
+    target_inode = os.fstat(writer).st_ino
+    original_hash_fd = immutable._hash_fd
+    grew = False
+    hash_completed = False
+    observed_limit: int | None = None
+
+    def grow_immediately_before_hash(
+        descriptor: int,
+        *,
+        allow_hardlinks: bool = False,
+        max_bytes: int | None = None,
+    ) -> tuple[str, int, int]:
+        nonlocal grew, hash_completed, observed_limit
+        if os.fstat(descriptor).st_ino == target_inode and not grew:
+            observed_limit = max_bytes
+            os.pwrite(writer, growth, len(payload))
+            os.fsync(writer)
+            grew = True
+        result = original_hash_fd(
+            descriptor,
+            allow_hardlinks=allow_hardlinks,
+            max_bytes=max_bytes,
+        )
+        if os.fstat(descriptor).st_ino == target_inode:
+            hash_completed = True
+        return result
+
+    monkeypatch.setattr(
+        immutable,
+        "_hash_fd",
+        grow_immediately_before_hash,
+    )
+    limits = {
+        "max_total_file_bytes": (
+            len(payload) if limit_kind == "aggregate" else len(payload) + len(growth)
+        ),
+        "max_file_bytes": (
+            len(payload) if limit_kind == "per_file" else len(payload) + len(growth)
+        ),
+    }
+    try:
+        with pytest.raises(immutable.ImmutableArtifactError):
+            stage.commit(
+                max_files=2,
+                max_directories=2,
+                max_total_relative_path_bytes=1024,
+                **limits,
+            )
+        assert grew is True
+        assert observed_limit == len(payload)
+        assert hash_completed is False
+        assert stage.staging_path.is_dir()
+        assert not stage.final_path.exists()
+    finally:
+        os.close(writer)
+        stage.close()
+        if stage.staging_path.exists():
+            stage.staging_path.chmod(0o755)
 
 
 def test_external_generation_rejects_same_byte_replacement_before_postcommit_baseline(

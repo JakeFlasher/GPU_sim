@@ -37,15 +37,19 @@ Exit codes:
 from __future__ import annotations
 
 import argparse
+import errno
 import hashlib
 import json
 import os
 import re
+import stat
 import sys
 import tomllib
-from contextlib import ExitStack
+from contextlib import ExitStack, contextmanager
+from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, Iterator
 
 import jsonschema
 
@@ -61,19 +65,22 @@ if str(_TOOLS_CLOUD_DIR) not in sys.path:
     sys.path.insert(0, str(_TOOLS_CLOUD_DIR))
 import trace_budgets as _trace_budgets  # type: ignore[import-not-found]  # noqa: E402
 from tools.local_labels.immutable_artifact import (  # noqa: E402
+    DirectoryGenerationFile,
     ImmutableArtifactError,
     ImmutableArtifactLimitError,
     ImmutableArtifactResourceError,
+    ImmutableDirectoryGeneration,
     PinnedDirectoryReader,
     PinnedPathSetMonitor,
     PinnedTreeSnapshot,
     inspect_immutable_directory_generation,
-    open_retained_regular,
+    strict_json_loads,
 )
 from tools.nvbit_tracer.trace_admission import (  # noqa: E402
     DEFAULT_TRACE_ADMISSION_LIMITS,
     TraceAdmission,
     TraceAdmissionError,
+    raw_trace_generation_limits,
     require_trace_admission,
 )
 from workloads.simbench_bw.nvbit_trace_summary_adapter import (  # noqa: E402
@@ -93,9 +100,28 @@ from workloads.simbench_bw.phase_cycle_ledger_aggregator import (  # noqa: E402
 # cached field cannot have been derived from the raw evidence.
 _RATIO_CONSISTENCY_TOL: float = 1e-6
 _RAW_TRACE_GENERATION_NAMESPACE = "raw_trace_generations"
+_DERIVED_TRACE_GENERATION_NAMESPACE = "trace_derived_generations"
 _SUMMARY_GENERATION_NAMESPACE = "nvbit_trace_summary_generations"
 _PHASE_LEDGER_GENERATION_NAMESPACE = "phase_cycle_ledger_generations"
+_TRACE_CAPTURE_ATTEMPT_NAMESPACE = "trace_capture_attempts"
+_CANONICAL_RESERVED_NAMESPACE_COMPONENTS = frozenset({
+    _RAW_TRACE_GENERATION_NAMESPACE,
+    _DERIVED_TRACE_GENERATION_NAMESPACE,
+    _SUMMARY_GENERATION_NAMESPACE,
+    _PHASE_LEDGER_GENERATION_NAMESPACE,
+    _TRACE_CAPTURE_ATTEMPT_NAMESPACE,
+})
+_CANONICAL_PLATFORM_KEYS = frozenset({
+    "h100",
+    "rtx_pro_6000_blackwell",
+    "rtx_5060_laptop",
+    "rtx_3090_ti",
+})
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+_RFC3339_DATETIME_RE = re.compile(
+    r"^[0-9]{4}-[0-9]{2}-[0-9]{2}[Tt][0-9]{2}:[0-9]{2}:[0-9]{2}"
+    r"(?:\.[0-9]+)?(?:[Zz]|[+-][0-9]{2}:[0-9]{2})$"
+)
 _SUMMARY_FILENAME_RE = re.compile(
     r"^nvbit_trace_summary_([0-9]+)_([0-9]+)\.json$"
 )
@@ -107,9 +133,271 @@ _CANONICAL_DISCOVERY_MAX_DIRECTORIES = 100_000
 _CANONICAL_DISCOVERY_MAX_TOTAL_FILE_BYTES = 4 * 1024**4
 _CANONICAL_DISCOVERY_MAX_RELATIVE_PATH_BYTES = 64 * 1024 * 1024
 _CANONICAL_AUTHORITY_JSON_MAX_BYTES = 16 * 1024 * 1024
+_CANONICAL_AUTHORITY_JSON_MAX_TOTAL_BYTES = 512 * 1024 * 1024
+_CANONICAL_WORKING_SET_MAX_TOTAL_BYTES = 1024 * 1024 * 1024
+_CANONICAL_MATERIALIZED_MAX_OBJECTS = 4_000_000
+_CANONICAL_MATERIALIZATION_TRACKER_ENTRY_BYTES = sys.getsizeof({0: None})
+_DIRECTORY_GENERATION_DESCRIPTOR_FIELDS = frozenset({
+    "schema_version",
+    "attempt_id",
+    "path",
+    "content_manifest_sha256",
+    "filesystem_generation_sha256",
+    "file_count",
+    "directory_count",
+    "total_file_bytes",
+})
+_RAW_GENERATION_DESCRIPTOR_FIELDS = _DIRECTORY_GENERATION_DESCRIPTOR_FIELDS | {
+    "trace_admission_sha256",
+    "trace_filesystem_generation_sha256",
+    "dynamic_trace_sha256",
+}
+_SUMMARY_GENERATION_DESCRIPTOR_FIELDS = frozenset({
+    "schema_version",
+    "path",
+    "content_manifest_sha256",
+    "filesystem_generation_sha256",
+    "file_count",
+    "directory_count",
+    "total_file_bytes",
+    "files",
+    "manifest_sha256",
+})
+_MEASUREMENT_MANIFEST_SCHEMA_PATH = (
+    SCHEMAS_DIR / "measurement_manifest.schema.json"
+)
+
+
+class _CanonicalAuthorityReadBudget:
+    """Bound retained JSON authority before each payload allocation."""
+
+    def __init__(self) -> None:
+        self.total_bytes = 0
+        self.reserved: dict[str, int] = {}
+
+    def reserve_total(self, path: Path, size: int, *, role: str) -> None:
+        if type(size) is not int or size < 0:
+            raise ImmutableArtifactError(
+                f"{role} has an invalid inventoried size: {path}"
+            )
+        key = str(path.absolute())
+        prior = self.reserved.get(key)
+        if prior is not None:
+            if prior != size:
+                raise ImmutableArtifactError(
+                    f"{role} retained size changed for {path}"
+                )
+            return
+        attempted = self.total_bytes + size
+        if attempted > _CANONICAL_AUTHORITY_JSON_MAX_TOTAL_BYTES:
+            raise ImmutableArtifactLimitError(
+                f"{role} aggregate retained JSON authority is {attempted} "
+                "bytes; maximum is "
+                f"{_CANONICAL_AUTHORITY_JSON_MAX_TOTAL_BYTES}"
+            )
+        self.reserved[key] = size
+        self.total_bytes = attempted
+
+    def reserve_file(self, path: Path, size: int, *, role: str) -> None:
+        if type(size) is not int or size < 0:
+            raise ImmutableArtifactError(
+                f"{role} has an invalid inventoried size: {path}"
+            )
+        if size > _CANONICAL_AUTHORITY_JSON_MAX_BYTES:
+            raise ImmutableArtifactLimitError(
+                f"{role} file {path} is {size} bytes; maximum is "
+                f"{_CANONICAL_AUTHORITY_JSON_MAX_BYTES}"
+            )
+        self.reserve_total(path, size, role=role)
+
+
+def _retained_path_references(
+    path: PurePosixPath,
+    *,
+    role: str,
+) -> list[object]:
+    references: list[object] = []
+    has_component_storage = False
+    for path_type in type(path).__mro__:
+        slots = path_type.__dict__.get("__slots__", ())
+        if type(slots) is str:
+            slots = (slots,)
+        for slot in slots:
+            if slot == "__weakref__":
+                continue
+            descriptor = path_type.__dict__.get(slot)
+            if descriptor is None:
+                raise ImmutableArtifactError(
+                    f"{role} cannot inspect pathlib retained storage"
+                )
+            try:
+                retained = descriptor.__get__(path, type(path))
+            except AttributeError:
+                continue
+            if slot in {"_raw_paths", "_parts"}:
+                if type(retained) not in {list, tuple}:
+                    raise ImmutableArtifactError(
+                        f"{role} cannot account pathlib retained storage"
+                    )
+                has_component_storage = True
+            references.append(retained)
+    if not has_component_storage:
+        raise ImmutableArtifactError(
+            f"{role} cannot account pathlib retained storage"
+        )
+    return references
+
+
+@dataclass(slots=True)
+class _CanonicalAuthorityMaterializationBudget:
+    """Bound decoded authority graphs retained beside their source bytes."""
+
+    total_bytes: int = 0
+    object_count: int = 0
+    seen_objects: dict[int, object] = field(default_factory=dict)
+
+    def reserve(
+        self,
+        value: object,
+        *,
+        retained_input_bytes: int,
+        role: str,
+    ) -> None:
+        pending = [value]
+        added_objects_by_id: dict[int, object] = {}
+        expanded_references: set[int] = set()
+        added_bytes = 0
+        added_objects = 0
+        while pending:
+            current = pending.pop()
+            identity = id(current)
+            if (
+                identity not in self.seen_objects
+                and identity not in added_objects_by_id
+            ):
+                added_objects_by_id[identity] = current
+                added_objects += 1
+                if (
+                    self.object_count + added_objects
+                    > _CANONICAL_MATERIALIZED_MAX_OBJECTS
+                ):
+                    raise ImmutableArtifactLimitError(
+                        f"{role} retains more than "
+                        f"{_CANONICAL_MATERIALIZED_MAX_OBJECTS} decoded objects"
+                    )
+                added_bytes += (
+                    sys.getsizeof(current)
+                    + _CANONICAL_MATERIALIZATION_TRACKER_ENTRY_BYTES
+                )
+                attempted = retained_input_bytes + self.total_bytes + added_bytes
+                if attempted > _CANONICAL_WORKING_SET_MAX_TOTAL_BYTES:
+                    raise ImmutableArtifactLimitError(
+                        f"{role} retained input plus decoded authority material is "
+                        f"{attempted} bytes; maximum is "
+                        f"{_CANONICAL_WORKING_SET_MAX_TOTAL_BYTES}"
+                    )
+            if identity in expanded_references:
+                continue
+            expanded_references.add(identity)
+            if type(current) is dict:
+                for key, item in current.items():
+                    pending.append(key)
+                    pending.append(item)
+            elif type(current) in {list, tuple, set, frozenset}:
+                pending.extend(current)
+            elif isinstance(current, PurePosixPath):
+                pending.extend(
+                    _retained_path_references(current, role=role)
+                )
+            elif type(current) is PinnedTreeSnapshot:
+                pending.extend((current.files, current.directories))
+            elif type(current) is ImmutableDirectoryGeneration:
+                pending.extend((
+                    current.path,
+                    current.content_manifest_sha256,
+                    current.filesystem_generation_sha256,
+                    current.file_count,
+                    current.directory_count,
+                    current.total_file_bytes,
+                    current.files,
+                ))
+            elif type(current) is DirectoryGenerationFile:
+                pending.extend((
+                    current.relative_path,
+                    current.sha256,
+                    current.size_bytes,
+                ))
+            elif type(current) not in {
+                type(None),
+                bool,
+                int,
+                float,
+                str,
+                bytes,
+            }:
+                raise ImmutableArtifactError(
+                    f"{role} contains unsupported authority material type "
+                    f"{type(current).__name__}"
+                )
+        self.seen_objects.update(added_objects_by_id)
+        self.object_count += added_objects
+        self.total_bytes += added_bytes
+
+    def reserve_bytes(
+        self,
+        size: int,
+        *,
+        retained_input_bytes: int,
+        role: str,
+    ) -> None:
+        if type(size) is not int or size < 0:
+            raise ImmutableArtifactError(
+                f"{role} has an invalid retained byte charge"
+            )
+        attempted = retained_input_bytes + self.total_bytes + size
+        if attempted > _CANONICAL_WORKING_SET_MAX_TOTAL_BYTES:
+            raise ImmutableArtifactLimitError(
+                f"{role} retained input plus decoded authority material is "
+                f"{attempted} bytes; maximum is "
+                f"{_CANONICAL_WORKING_SET_MAX_TOTAL_BYTES}"
+            )
+        self.total_bytes += size
+
+
 _KNOWN_NONAUTHORITY_TRACE_FILENAMES = frozenset({
     "trace_volume_exceeded.json",
 })
+
+
+def _is_rfc3339_datetime(value: object) -> bool:
+    if type(value) is not str or _RFC3339_DATETIME_RE.fullmatch(value) is None:
+        return False
+    normalized = value[:-1] + "+00:00" if value[-1] in "Zz" else value
+    try:
+        parsed = datetime.fromisoformat(normalized)
+    except ValueError:
+        return False
+    return parsed.tzinfo is not None
+
+
+def _exact_json_equal(observed: object, expected: object) -> bool:
+    """Compare decoded JSON without Python bool/int/float coercion."""
+    pending = [(observed, expected)]
+    while pending:
+        left, right = pending.pop()
+        if type(left) is not type(right):
+            return False
+        if type(left) is dict:
+            if set(left) != set(right):
+                return False
+            pending.extend((left[key], right[key]) for key in left)
+        elif type(left) is list:
+            if len(left) != len(right):
+                return False
+            pending.extend(zip(left, right, strict=True))
+        elif left != right:
+            return False
+    return True
 
 
 # Cache-predictor verifier defect-token frozenset. Every typed
@@ -256,10 +544,20 @@ def _inspect_recorded_attempt_generation(
     max_directories: int,
     max_total_file_bytes: int,
     max_total_relative_path_bytes: int,
+    read_budget: _CanonicalAuthorityReadBudget | None = None,
+    materialization_budget: (
+        _CanonicalAuthorityMaterializationBudget | None
+    ) = None,
+    retained_input_bytes: int = 0,
+    max_file_bytes: int | None = None,
+    max_file_bytes_by_path: dict[str, int] | None = None,
 ) -> tuple[Any | None, str | None]:
     """Inspect one exact attempt-scoped generation named by an active record."""
     if type(descriptor) is not dict:
         return None, f"{label} descriptor is absent or not an object"
+    schema_version = descriptor.get("schema_version")
+    if type(schema_version) is not int or schema_version != 1:
+        return None, f"{label} schema_version must equal one"
     shape_point = trace_record.get("shape_point")
     attempt_id = trace_record.get("trace_capture_attempt_id")
     relative_value = descriptor.get("path")
@@ -288,11 +586,22 @@ def _inspect_recorded_attempt_generation(
     }
     for field, maximum in bounds.items():
         value = descriptor.get(field)
-        minimum = 1 if field != "total_file_bytes" else 0
+        minimum = (
+            1
+            if field == "directory_count"
+            or (field == "file_count" and require_nonempty)
+            else 0
+        )
         if type(value) is not int or not minimum <= value <= maximum:
             return None, f"{label} {field} is invalid or exceeds its hard bound"
     generation_path = trace_record_path.parent.joinpath(*relative.parts)
     try:
+        if read_budget is not None:
+            read_budget.reserve_total(
+                generation_path,
+                descriptor["total_file_bytes"],
+                role=f"{label} JSON authority",
+            )
         observed = inspect_immutable_directory_generation(
             generation_path,
             require_nonempty=require_nonempty,
@@ -300,7 +609,18 @@ def _inspect_recorded_attempt_generation(
             max_directories=descriptor["directory_count"],
             max_total_file_bytes=descriptor["total_file_bytes"],
             max_total_relative_path_bytes=max_total_relative_path_bytes,
+            max_file_bytes=max_file_bytes,
+            max_file_bytes_by_path=max_file_bytes_by_path,
         )
+        if materialization_budget is not None:
+            materialization_budget.reserve(
+                observed,
+                retained_input_bytes=max(
+                    retained_input_bytes,
+                    read_budget.total_bytes if read_budget is not None else 0,
+                ),
+                role=f"inspected {label} identity",
+            )
     except ImmutableArtifactResourceError as exc:
         return None, (
             f"{label} resource unavailable: {type(exc).__name__}: {exc}"
@@ -375,14 +695,28 @@ def _verify_active_summary_generation(
     trace_record: dict[str, Any],
     *,
     trace_admission: TraceAdmission,
+    read_budget: _CanonicalAuthorityReadBudget | None = None,
+    materialization_budget: (
+        _CanonicalAuthorityMaterializationBudget | None
+    ) = None,
 ) -> list[str]:
     errors: list[str] = []
+    budget = read_budget or _CanonicalAuthorityReadBudget()
+    material_budget = (
+        materialization_budget
+        or _CanonicalAuthorityMaterializationBudget()
+    )
     admitted_launch_indices = _admitted_launch_indices(trace_admission)
     if admitted_launch_indices is None:
         return ["admitted raw launch authority is malformed"]
     descriptor = trace_record.get("nvbit_trace_summary_generation")
     if type(descriptor) is not dict:
         return ["summary generation descriptor is absent or not an object"]
+    if set(descriptor) != _SUMMARY_GENERATION_DESCRIPTOR_FIELDS:
+        return ["summary generation descriptor is not exact and closed"]
+    schema_version = descriptor.get("schema_version")
+    if type(schema_version) is not int or schema_version != 1:
+        return ["summary generation schema_version must equal one"]
     shape_point = trace_record.get("shape_point")
     admission_sha256 = trace_record.get("trace_admission_sha256")
     filesystem_sha256 = trace_record.get(
@@ -422,6 +756,11 @@ def _verify_active_summary_generation(
 
     generation_path = trace_record_path.parent.joinpath(*expected.parts)
     try:
+        budget.reserve_total(
+            generation_path,
+            total_file_bytes,
+            role="summary generation JSON authority",
+        )
         observed = inspect_immutable_directory_generation(
             generation_path,
             require_nonempty=True,
@@ -429,6 +768,12 @@ def _verify_active_summary_generation(
             max_directories=directory_count,
             max_total_file_bytes=total_file_bytes,
             max_total_relative_path_bytes=4 * 1024 * 1024,
+            max_file_bytes=_CANONICAL_AUTHORITY_JSON_MAX_BYTES,
+        )
+        material_budget.reserve(
+            observed,
+            retained_input_bytes=budget.total_bytes,
+            role="inspected summary generation identity",
         )
     except ImmutableArtifactResourceError as exc:
         return [
@@ -509,11 +854,21 @@ def _verify_active_summary_generation(
         errors.append("active summary path list is stale or incomplete")
 
     identities = {identity.relative_path: identity for identity in observed.files}
-    summary_validator = _load_schema_validator(
-        "nvbit_trace_summary.schema.json"
+    material_budget.reserve(
+        (observed_pairs, expected_pairs, expected_identities, identities),
+        retained_input_bytes=budget.total_bytes,
+        role="retained summary generation projections",
     )
     try:
-        with PinnedDirectoryReader(generation_path) as reader:
+        with (
+            _load_canonical_schema_validator(
+                SCHEMAS_DIR / "nvbit_trace_summary.schema.json",
+                label="NVBit trace summary schema",
+                read_budget=budget,
+                materialization_budget=material_budget,
+            ) as summary_validator,
+            PinnedDirectoryReader(generation_path) as reader,
+        ):
             snapshot = reader.snapshot_tree(
                 require_readonly_files=True,
                 require_readonly_directories=True,
@@ -522,7 +877,18 @@ def _verify_active_summary_generation(
                 max_total_file_bytes=total_file_bytes,
                 max_total_relative_path_bytes=4 * 1024 * 1024,
             )
-            for relative_path, metadata in sorted(dict(snapshot.files).items()):
+            files = dict(snapshot.files)
+            directories = dict(snapshot.directories)
+            material_budget.reserve(
+                (snapshot, files, directories),
+                retained_input_bytes=budget.total_bytes,
+                role="retained summary generation inventory",
+            )
+            if set(files) != set(identities) or set(directories) != {"."}:
+                errors.append(
+                    "summary generation inventory changed before read"
+                )
+            for relative_path, metadata in sorted(files.items()):
                 match = _SUMMARY_FILENAME_RE.fullmatch(relative_path)
                 if match is None:
                     errors.append(
@@ -531,7 +897,9 @@ def _verify_active_summary_generation(
                     )
                     continue
                 payload = reader.read_snapshot(
-                    relative_path, expected_metadata=metadata
+                    relative_path,
+                    max_bytes=_CANONICAL_AUTHORITY_JSON_MAX_BYTES,
+                    expected_metadata=metadata,
                 ).payload
                 identity = identities.get(relative_path)
                 if identity is None or (
@@ -544,8 +912,19 @@ def _verify_active_summary_generation(
                     )
                     continue
                 try:
-                    summary = json.loads(payload)
-                except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                    summary = _decode_authority_json(
+                        payload,
+                        materialization_budget=material_budget,
+                        retained_input_bytes=budget.total_bytes,
+                        role="NVBit trace summary JSON authority",
+                    )
+                except MemoryError as exc:
+                    errors.append(
+                        "summary generation resource unavailable during JSON "
+                        f"decode for {relative_path}: {type(exc).__name__}: {exc}"
+                    )
+                    continue
+                except (UnicodeDecodeError, ValueError) as exc:
                     errors.append(
                         "summary generation file "
                         f"{relative_path} is invalid JSON: {exc}"
@@ -574,7 +953,10 @@ def _verify_active_summary_generation(
                     repeat_index=repeat_index,
                     launch_index=launch_index,
                 )
-                if type(summary) is not dict or summary != expected_summary:
+                if (
+                    type(summary) is not dict
+                    or not _exact_json_equal(summary, expected_summary)
+                ):
                     errors.append(
                         f"summary generation file {relative_path} "
                         "disagrees with admitted raw launch and execution authority"
@@ -598,8 +980,17 @@ def _verify_active_phase_generation(
     trace_record: dict[str, Any],
     *,
     trace_admission: TraceAdmission,
+    read_budget: _CanonicalAuthorityReadBudget | None = None,
+    materialization_budget: (
+        _CanonicalAuthorityMaterializationBudget | None
+    ) = None,
 ) -> list[str]:
     errors: list[str] = []
+    budget = read_budget or _CanonicalAuthorityReadBudget()
+    material_budget = (
+        materialization_budget
+        or _CanonicalAuthorityMaterializationBudget()
+    )
     phase = trace_record.get("phase_inject_ab")
     if phase is None:
         phase_namespace = (
@@ -639,6 +1030,13 @@ def _verify_active_phase_generation(
 
     if type(repeat_count) is not int or repeat_count <= 0:
         return ["requested phase evidence has no positive repeat_count"]
+    if type(descriptor) is not dict:
+        return ["requested phase evidence has no generation descriptor"]
+    if set(descriptor) != _DIRECTORY_GENERATION_DESCRIPTOR_FIELDS:
+        return ["phase generation descriptor is not exact and closed"]
+    schema_version = descriptor.get("schema_version")
+    if type(schema_version) is not int or schema_version != 1:
+        return ["phase generation schema_version must equal one"]
     admitted_launch_indices = _admitted_launch_indices(trace_admission)
     if admitted_launch_indices is None:
         return ["admitted raw launch authority is malformed"]
@@ -659,6 +1057,10 @@ def _verify_active_phase_generation(
         max_directories=1,
         max_total_file_bytes=256 * 1024 * 1024,
         max_total_relative_path_bytes=4 * 1024 * 1024,
+        read_budget=budget,
+        materialization_budget=material_budget,
+        retained_input_bytes=budget.total_bytes,
+        max_file_bytes=_CANONICAL_AUTHORITY_JSON_MAX_BYTES,
     )
     if phase_error is not None:
         return [phase_error]
@@ -689,6 +1091,11 @@ def _verify_active_phase_generation(
         identity.relative_path: identity for identity in phase_observed.files
     }
     observed_pairs: set[tuple[int, int]] = set()
+    material_budget.reserve(
+        (expected_phase, identities),
+        retained_input_bytes=budget.total_bytes,
+        role="retained phase generation projections",
+    )
     try:
         with PinnedDirectoryReader(generation_path) as reader:
             snapshot = reader.snapshot_tree(
@@ -701,6 +1108,11 @@ def _verify_active_phase_generation(
             )
             files = dict(snapshot.files)
             directories = dict(snapshot.directories)
+            material_budget.reserve(
+                (snapshot, files, directories),
+                retained_input_bytes=budget.total_bytes,
+                role="retained phase generation inventory",
+            )
             if set(files) != set(identities) or set(directories) != {"."}:
                 errors.append(
                     "phase ledger generation inventory changed before read"
@@ -728,6 +1140,7 @@ def _verify_active_phase_generation(
                         continue
                     payload = reader.read_snapshot(
                         relative_path,
+                        max_bytes=_CANONICAL_AUTHORITY_JSON_MAX_BYTES,
                         expected_metadata=files[relative_path],
                     ).payload
                     if (
@@ -740,8 +1153,20 @@ def _verify_active_phase_generation(
                         )
                         continue
                     try:
-                        ledger = json.loads(payload)
-                    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+                        ledger = _decode_authority_json(
+                            payload,
+                            materialization_budget=material_budget,
+                            retained_input_bytes=budget.total_bytes,
+                            role="phase ledger JSON authority",
+                        )
+                    except MemoryError as exc:
+                        errors.append(
+                            "phase ledger generation resource unavailable during "
+                            f"JSON decode for {relative_path}: "
+                            f"{type(exc).__name__}: {exc}"
+                        )
+                        continue
+                    except (UnicodeDecodeError, ValueError) as exc:
                         errors.append(
                             "phase ledger generation file "
                             f"{relative_path} is invalid JSON: {exc}"
@@ -806,6 +1231,11 @@ def _verify_active_phase_generation(
         for repeat_index in range(repeat_count)
         for launch_index in admitted_launch_indices
     }
+    material_budget.reserve(
+        (observed_pairs, expected_pairs),
+        retained_input_bytes=budget.total_bytes,
+        role="retained phase repeat-by-launch projections",
+    )
     if observed_pairs != expected_pairs:
         errors.append(
             "phase ledger generation does not equal the admitted "
@@ -814,11 +1244,419 @@ def _verify_active_phase_generation(
     return errors
 
 
+@contextmanager
+def _load_canonical_schema_validator(
+    path: Path,
+    *,
+    label: str,
+    read_budget: _CanonicalAuthorityReadBudget | None = None,
+    materialization_budget: (
+        _CanonicalAuthorityMaterializationBudget | None
+    ) = None,
+) -> Iterator[jsonschema.Draft202012Validator]:
+    """Retain one bounded schema capability through every validator use."""
+    if (read_budget is None) != (materialization_budget is None):
+        raise TypeError("schema read and materialization budgets must be paired")
+    if read_budget is None:
+        read_budget = _CanonicalAuthorityReadBudget()
+        materialization_budget = _CanonicalAuthorityMaterializationBudget()
+    assert materialization_budget is not None
+    with ExitStack() as retained_schema:
+        reader = retained_schema.enter_context(PinnedDirectoryReader(path.parent))
+        monitor = retained_schema.enter_context(
+            PinnedPathSetMonitor.from_reader(
+                reader,
+                regular_paths=(path.name,),
+                recursive_directories=(),
+            )
+        )
+        monitor.verify_unchanged()
+        snapshot = reader.read_snapshot(
+            path.name,
+            max_bytes=_CANONICAL_AUTHORITY_JSON_MAX_BYTES,
+        )
+        read_budget.reserve_file(
+            path,
+            snapshot.metadata[4],
+            role=label,
+        )
+        monitor.verify_unchanged()
+        schema = _decode_authority_json(
+            snapshot.payload,
+            materialization_budget=materialization_budget,
+            retained_input_bytes=read_budget.total_bytes,
+            role=label,
+            label=label,
+        )
+        if type(schema) is not dict:
+            raise ImmutableArtifactError(f"{label} root is not an object")
+        try:
+            jsonschema.Draft202012Validator.check_schema(schema)
+        except jsonschema.SchemaError as exc:
+            raise ImmutableArtifactError(
+                f"{label} authority is invalid: {exc.message}"
+            ) from exc
+        validator = jsonschema.Draft202012Validator(
+            schema,
+            format_checker=jsonschema.FormatChecker(),
+        )
+        monitor.verify_unchanged()
+        try:
+            yield validator
+        finally:
+            monitor.verify_unchanged()
+
+
+@contextmanager
+def _load_measurement_manifest_validator(
+    *,
+    read_budget: _CanonicalAuthorityReadBudget | None = None,
+    materialization_budget: (
+        _CanonicalAuthorityMaterializationBudget | None
+    ) = None,
+) -> Iterator[jsonschema.Draft202012Validator]:
+    with _load_canonical_schema_validator(
+        _MEASUREMENT_MANIFEST_SCHEMA_PATH,
+        label="measurement manifest schema",
+        read_budget=read_budget,
+        materialization_budget=materialization_budget,
+    ) as validator:
+        yield validator
+
+
+def _verify_active_measurement_manifest(
+    trace_record_path: Path,
+    trace_record: dict[str, Any],
+    *,
+    authority_root: Path,
+    authority_reader: PinnedDirectoryReader,
+    authority_file_inventory: dict[
+        str, tuple[int, int, int, int, int, int, int]
+    ],
+    expected_platform: str | None,
+    read_budget: _CanonicalAuthorityReadBudget,
+    materialization_budget: _CanonicalAuthorityMaterializationBudget,
+) -> list[str]:
+    """Apply the same closed v2 execution-manifest contract as merge."""
+    descriptor = trace_record.get("measurement_manifest")
+    if type(descriptor) is not dict or set(descriptor) != {
+        "path",
+        "sha256",
+        "size_bytes",
+    }:
+        return ["measurement manifest descriptor is not exact and closed"]
+    shape_point = trace_record.get("shape_point")
+    expected_name = f"measurement_manifest_{shape_point}.json"
+    if descriptor.get("path") != expected_name:
+        return [
+            "measurement manifest path does not name the exact active shape authority"
+        ]
+    sha256 = descriptor.get("sha256")
+    size_bytes = descriptor.get("size_bytes")
+    if (
+        type(sha256) is not str
+        or _SHA256_RE.fullmatch(sha256) is None
+        or type(size_bytes) is not int
+        or size_bytes < 0
+    ):
+        return ["measurement manifest descriptor identity is invalid"]
+
+    try:
+        record_relative = trace_record_path.relative_to(authority_root)
+        manifest_relative = (
+            PurePosixPath(record_relative.as_posix()).parent / expected_name
+        ).as_posix()
+        metadata = authority_file_inventory.get(manifest_relative)
+        if metadata is None:
+            raise ImmutableArtifactError(
+                "measurement manifest is absent from the retained authority inventory"
+            )
+        if stat.S_IMODE(metadata[2]) != 0o444 or metadata[3] != 1:
+            return [
+                "measurement manifest is not a single-link 0444 committed file"
+            ]
+        read_budget.reserve_file(
+            authority_root.joinpath(*PurePosixPath(manifest_relative).parts),
+            metadata[4],
+            role="measurement manifest JSON authority",
+        )
+        payload = authority_reader.read_snapshot(
+            manifest_relative,
+            max_bytes=_CANONICAL_AUTHORITY_JSON_MAX_BYTES,
+            expected_metadata=metadata,
+        ).payload
+        if len(payload) != size_bytes or hashlib.sha256(payload).hexdigest() != sha256:
+            return ["measurement manifest descriptor is stale"]
+        body = _decode_authority_json(
+            payload,
+            materialization_budget=materialization_budget,
+            retained_input_bytes=read_budget.total_bytes,
+            role="measurement manifest JSON authority",
+            label="measurement manifest",
+        )
+        if type(body) is not dict:
+            return ["measurement manifest root is not an object"]
+        if (
+            type(body.get("schema_version")) is not int
+            or body["schema_version"] != 2
+        ):
+            return [
+                "measurement manifest fails closed v2 schema: schema_version "
+                "must be the exact integer 2"
+            ]
+        if not _is_rfc3339_datetime(body.get("timestamp_utc")):
+            return [
+                "measurement manifest fails closed v2 schema: timestamp_utc "
+                "is not an RFC-3339 date-time"
+            ]
+        with _load_measurement_manifest_validator(
+            read_budget=read_budget,
+            materialization_budget=materialization_budget,
+        ) as validator:
+            validation_error = next(validator.iter_errors(body), None)
+        if validation_error is not None:
+            return [
+                "measurement manifest fails closed v2 schema: "
+                f"{validation_error.message}"
+            ]
+        expected = {
+            "schema_version": 2,
+            "mode": "trace",
+            "slug": trace_record.get("slug"),
+            "shape_point": shape_point,
+            "binary_sha256": trace_record.get("binary_sha256"),
+        }
+        if expected_platform is not None:
+            expected["gpu_sku"] = expected_platform
+        for field, expected_value in expected.items():
+            if body.get(field) != expected_value:
+                return [
+                    f"measurement manifest field {field!r} disagrees with "
+                    "active trace execution authority"
+                ]
+        manifest_signature = body.get("kernel_signature_sha256")
+        if (
+            manifest_signature is not None
+            and manifest_signature != trace_record.get("kernel_signature_sha256")
+        ):
+            return [
+                "measurement manifest field 'kernel_signature_sha256' "
+                "disagrees with active trace execution authority"
+            ]
+    except (ImmutableArtifactResourceError, MemoryError) as exc:
+        return [
+            "measurement manifest resource unavailable: "
+            f"{type(exc).__name__}: {exc}"
+        ]
+    except ImmutableArtifactLimitError as exc:
+        return [
+            "measurement manifest exceeds the bounded authority JSON limit: "
+            f"{type(exc).__name__}: {exc}"
+        ]
+    except OSError as exc:
+        if exc.errno in {errno.EMFILE, errno.ENFILE}:
+            return [
+                "measurement manifest resource unavailable: "
+                f"{type(exc).__name__}: {exc}"
+            ]
+        return [
+            "measurement manifest is absent or invalid: "
+            f"{type(exc).__name__}: {exc}"
+        ]
+    except (
+        ImmutableArtifactError,
+        UnicodeDecodeError,
+        ValueError,
+    ) as exc:
+        return [
+            "measurement manifest is absent or invalid: "
+            f"{type(exc).__name__}: {exc}"
+        ]
+    return []
+
+
+def _platform_authority_from_record_path(
+    trace_record_path: Path,
+) -> tuple[str | None, str | None]:
+    """Derive one canonical platform key from the active record's path."""
+    matches = sorted({
+        part
+        for part in trace_record_path.parent.parts
+        if part in _CANONICAL_PLATFORM_KEYS
+    })
+    if len(matches) > 1:
+        return None, (
+            "active trace record path contains multiple canonical platform "
+            f"authorities: {matches}"
+        )
+    return (matches[0], None) if matches else (None, None)
+
+
+def _verify_active_attempt_event(
+    trace_record_path: Path,
+    trace_record: dict[str, Any],
+    *,
+    authority_root: Path,
+    authority_reader: PinnedDirectoryReader,
+    authority_file_inventory: dict[
+        str, tuple[int, int, int, int, int, int, int]
+    ],
+    attempt_namespace_present: bool,
+    read_budget: _CanonicalAuthorityReadBudget,
+    materialization_budget: _CanonicalAuthorityMaterializationBudget,
+) -> list[str]:
+    """Authenticate the exact activation-ready event named by the record."""
+    descriptor = trace_record.get("trace_capture_attempt_event")
+    if descriptor is None:
+        if attempt_namespace_present or trace_record.get(
+            "trace_derived_generation"
+        ) is not None:
+            return [
+                "trace-attempt authority exists but the active trace record has "
+                "no trace_capture_attempt_event reference"
+            ]
+        return []
+    if type(descriptor) is not dict or set(descriptor) != {
+        "path",
+        "sha256",
+        "size_bytes",
+    }:
+        return ["trace capture attempt event descriptor is not exact and closed"]
+    shape_point = trace_record.get("shape_point")
+    attempt_id = trace_record.get("trace_capture_attempt_id")
+    expected_relative = PurePosixPath(
+        _TRACE_CAPTURE_ATTEMPT_NAMESPACE,
+        str(shape_point),
+        str(attempt_id),
+        "activation_ready.json",
+    )
+    relative_value = descriptor.get("path")
+    sha256 = descriptor.get("sha256")
+    size_bytes = descriptor.get("size_bytes")
+    if (
+        type(relative_value) is not str
+        or PurePosixPath(relative_value) != expected_relative
+        or expected_relative.as_posix() != relative_value
+    ):
+        return ["trace capture attempt event path is not activation_ready"]
+    if (
+        type(sha256) is not str
+        or _SHA256_RE.fullmatch(sha256) is None
+        or type(size_bytes) is not int
+        or not 0 <= size_bytes <= _CANONICAL_AUTHORITY_JSON_MAX_BYTES
+    ):
+        return ["trace capture attempt event descriptor identity is invalid"]
+    try:
+        record_relative = trace_record_path.relative_to(authority_root)
+        event_relative = (
+            PurePosixPath(record_relative.as_posix()).parent / expected_relative
+        ).as_posix()
+        metadata = authority_file_inventory.get(event_relative)
+        if metadata is None:
+            raise ImmutableArtifactError(
+                "trace capture attempt event is absent from retained inventory"
+            )
+        if stat.S_IMODE(metadata[2]) != 0o444 or metadata[3] != 1:
+            return [
+                "trace capture attempt event is not a single-link 0444 file"
+            ]
+        read_budget.reserve_file(
+            authority_root.joinpath(*PurePosixPath(event_relative).parts),
+            metadata[4],
+            role="trace capture attempt event JSON authority",
+        )
+        payload = authority_reader.read_snapshot(
+            event_relative,
+            max_bytes=_CANONICAL_AUTHORITY_JSON_MAX_BYTES,
+            expected_metadata=metadata,
+        ).payload
+        if (
+            len(payload) != size_bytes
+            or hashlib.sha256(payload).hexdigest() != sha256
+        ):
+            return ["trace capture attempt event descriptor is stale"]
+        event = _decode_authority_json(
+            payload,
+            materialization_budget=materialization_budget,
+            retained_input_bytes=read_budget.total_bytes,
+            role="trace capture attempt event JSON authority",
+            label="trace capture attempt event",
+        )
+        phase = trace_record.get("phase_inject_ab")
+        phase_generation = (
+            phase.get("generation") if type(phase) is dict else None
+        )
+        expected_event = {
+            "schema_version": 1,
+            "slug": trace_record.get("slug"),
+            "shape_point": shape_point,
+            "attempt_id": attempt_id,
+            "status": "activation_ready",
+            "typed_reason": None,
+            "activation_state": "non_active",
+            "raw_trace_generation": trace_record.get(
+                "raw_trace_generation"
+            ),
+            "raw_staging_path": None,
+            "raw_unresolved_committed_path": None,
+            "trace_derived_generation": trace_record.get(
+                "trace_derived_generation"
+            ),
+            "derived_staging_path": None,
+            "phase_cycle_ledger_generation": phase_generation,
+            "phase_ledger_staging_path": None,
+            "nvbit_trace_summary_generation": trace_record.get(
+                "nvbit_trace_summary_generation"
+            ),
+            "measurement_manifest": trace_record.get(
+                "measurement_manifest"
+            ),
+        }
+        if not _exact_json_equal(event, expected_event):
+            return [
+                "trace capture attempt event body disagrees with active "
+                "generation authority"
+            ]
+        authority_reader.verify_path()
+    except (ImmutableArtifactResourceError, MemoryError) as exc:
+        return [
+            "trace capture attempt event resource unavailable: "
+            f"{type(exc).__name__}: {exc}"
+        ]
+    except ImmutableArtifactLimitError as exc:
+        return [
+            "trace capture attempt event exceeds the bounded authority JSON "
+            f"limit: {type(exc).__name__}: {exc}"
+        ]
+    except (
+        ImmutableArtifactError,
+        OSError,
+        UnicodeDecodeError,
+        ValueError,
+    ) as exc:
+        return [
+            "trace capture attempt event is absent or invalid: "
+            f"{type(exc).__name__}: {exc}"
+        ]
+    return []
+
+
 def _verify_active_generation_record(
     trace_record_path: Path,
     trace_record: dict[str, Any],
+    *,
+    authority_root: Path,
+    authority_reader: PinnedDirectoryReader,
+    authority_file_inventory: dict[
+        str, tuple[int, int, int, int, int, int, int]
+    ],
+    authority_directory_inventory: dict[
+        str, tuple[int, int, int, int, int, int, int]
+    ],
+    read_budget: _CanonicalAuthorityReadBudget,
+    materialization_budget: _CanonicalAuthorityMaterializationBudget,
 ) -> list[str]:
-    """Freshly authenticate one active raw, summary, manifest, and phase set."""
+    """Freshly authenticate one active raw, derived, summary, and phase set."""
     errors: list[str] = []
     shape_point = trace_record.get("shape_point")
     attempt_id = trace_record.get("trace_capture_attempt_id")
@@ -831,14 +1669,35 @@ def _verify_active_generation_record(
     ):
         return ["canonical trace record lacks active shape/attempt authority"]
 
-    limits = DEFAULT_TRACE_ADMISSION_LIMITS
-    raw_max_bytes = (
-        limits.trace_root_bytes
-        + limits.allocations_sidecar_bytes
-        + limits.stats_bytes
-        + limits.total_threadblock_bytes
+    try:
+        record_relative = trace_record_path.relative_to(authority_root)
+    except ValueError:
+        return ["canonical trace record escapes retained authority root"]
+    artifact_relative = PurePosixPath(record_relative.as_posix()).parent
+
+    def namespace_present(namespace: str) -> bool:
+        relative = (artifact_relative / namespace).as_posix()
+        return (
+            relative in authority_file_inventory
+            or relative in authority_directory_inventory
+        )
+
+    expected_platform, platform_error = _platform_authority_from_record_path(
+        trace_record_path
     )
+    if platform_error is not None:
+        return [platform_error]
+
+    limits = DEFAULT_TRACE_ADMISSION_LIMITS
+    raw_limits = raw_trace_generation_limits(limits)
     raw_descriptor = trace_record.get("raw_trace_generation")
+    if type(raw_descriptor) is not dict:
+        return ["raw trace generation descriptor is absent or not an object"]
+    if set(raw_descriptor) != _RAW_GENERATION_DESCRIPTOR_FIELDS:
+        return ["raw trace generation descriptor is not exact and closed"]
+    raw_schema_version = raw_descriptor.get("schema_version")
+    if type(raw_schema_version) is not int or raw_schema_version != 1:
+        return ["raw trace generation schema_version must equal one"]
     raw_observed, raw_error = _inspect_recorded_attempt_generation(
         trace_record_path=trace_record_path,
         trace_record=trace_record,
@@ -846,10 +1705,16 @@ def _verify_active_generation_record(
         namespace=_RAW_TRACE_GENERATION_NAMESPACE,
         label="raw trace generation",
         require_nonempty=True,
-        max_files=limits.tree_files,
-        max_directories=limits.tree_directories,
-        max_total_file_bytes=raw_max_bytes,
-        max_total_relative_path_bytes=limits.tree_relative_path_bytes,
+        max_files=raw_limits["max_files"],
+        max_directories=raw_limits["max_directories"],
+        max_total_file_bytes=raw_limits["max_total_file_bytes"],
+        max_total_relative_path_bytes=raw_limits[
+            "max_total_relative_path_bytes"
+        ],
+        materialization_budget=materialization_budget,
+        retained_input_bytes=read_budget.total_bytes,
+        max_file_bytes=raw_limits["max_file_bytes"],
+        max_file_bytes_by_path=raw_limits["max_file_bytes_by_path"],
     )
     if raw_error is not None:
         errors.append(raw_error)
@@ -877,10 +1742,16 @@ def _verify_active_generation_record(
     try:
         admitted = require_trace_admission(raw_path)
     except TraceAdmissionError as exc:
-        errors.append(
-            "raw trace generation fresh admission failed: "
-            f"{exc.typed_reason}: {exc.detail}"
-        )
+        if exc.typed_reason == "trace_snapshot_resource_unavailable":
+            errors.append(
+                "raw trace generation admission resource unavailable: "
+                f"{exc.typed_reason}: {exc.detail}"
+            )
+        else:
+            errors.append(
+                "raw trace generation fresh admission failed: "
+                f"{exc.typed_reason}: {exc.detail}"
+            )
     except ImmutableArtifactResourceError as exc:
         errors.append(
             "raw trace generation admission resource unavailable: "
@@ -904,70 +1775,97 @@ def _verify_active_generation_record(
     if errors or admitted is None:
         return errors
 
+    derived_descriptor = trace_record.get("trace_derived_generation")
+    if derived_descriptor is None:
+        if namespace_present(
+            _DERIVED_TRACE_GENERATION_NAMESPACE
+        ) or trace_record.get("trace_capture_attempt_event") is not None:
+            errors.append(
+                "derived generation authority exists but the active trace record "
+                "has no trace_derived_generation reference"
+            )
+    elif type(derived_descriptor) is not dict or set(derived_descriptor) != {
+        "schema_version",
+        "attempt_id",
+        "path",
+        "content_manifest_sha256",
+        "filesystem_generation_sha256",
+        "file_count",
+        "directory_count",
+        "total_file_bytes",
+    }:
+        errors.append(
+            "trace_derived_generation descriptor is not exact and closed"
+        )
+    elif (
+        type(derived_descriptor.get("schema_version")) is not int
+        or derived_descriptor.get("schema_version") != 1
+    ):
+        errors.append("trace_derived_generation schema_version must equal one")
+    else:
+        _derived_observed, derived_error = _inspect_recorded_attempt_generation(
+            trace_record_path=trace_record_path,
+            trace_record=trace_record,
+            descriptor=derived_descriptor,
+            namespace=_DERIVED_TRACE_GENERATION_NAMESPACE,
+            label="derived trace generation",
+            require_nonempty=False,
+            max_files=limits.tree_files,
+            max_directories=limits.tree_directories,
+            max_total_file_bytes=raw_limits["max_total_file_bytes"],
+            max_total_relative_path_bytes=limits.tree_relative_path_bytes,
+            materialization_budget=materialization_budget,
+            retained_input_bytes=read_budget.total_bytes,
+        )
+        if derived_error is not None:
+            errors.append(derived_error)
+    if errors:
+        return errors
+
     errors.extend(
         _verify_active_summary_generation(
             trace_record_path,
             trace_record,
             trace_admission=admitted,
+            read_budget=read_budget,
+            materialization_budget=materialization_budget,
         )
     )
 
-    manifest = trace_record.get("measurement_manifest")
-    if type(manifest) is not dict:
-        errors.append("measurement manifest descriptor is absent")
-    else:
-        manifest_value = manifest.get("path")
-        if type(manifest_value) is not str:
-            errors.append("measurement manifest path is invalid")
-        else:
-            relative = PurePosixPath(manifest_value)
-            if (
-                relative.is_absolute()
-                or relative.as_posix() != manifest_value
-                or any(part in {"", ".", ".."} for part in relative.parts)
-            ):
-                errors.append("measurement manifest path escapes authority")
-            else:
-                try:
-                    with open_retained_regular(
-                        trace_record_path.parent.joinpath(*relative.parts)
-                    ) as retained:
-                        payload = retained.read_bytes()
-                        if (
-                            retained.sha256 != manifest.get("sha256")
-                            or retained.size_bytes != manifest.get("size_bytes")
-                        ):
-                            errors.append("measurement manifest descriptor is stale")
-                        else:
-                            body = json.loads(payload)
-                            if (
-                                type(body) is not dict
-                                or body.get("shape_point") != shape_point
-                            ):
-                                errors.append(
-                                    "measurement manifest shape identity is stale"
-                                )
-                except ImmutableArtifactResourceError as exc:
-                    errors.append(
-                        "measurement manifest resource unavailable: "
-                        f"{type(exc).__name__}: {exc}"
-                    )
-                except (
-                    ImmutableArtifactError,
-                    OSError,
-                    UnicodeDecodeError,
-                    json.JSONDecodeError,
-                ) as exc:
-                    errors.append(
-                        "measurement manifest is absent or invalid: "
-                        f"{type(exc).__name__}: {exc}"
-                    )
+    errors.extend(
+        _verify_active_measurement_manifest(
+            trace_record_path,
+            trace_record,
+            authority_root=authority_root,
+            authority_reader=authority_reader,
+            authority_file_inventory=authority_file_inventory,
+            expected_platform=expected_platform,
+            read_budget=read_budget,
+            materialization_budget=materialization_budget,
+        )
+    )
 
     errors.extend(
         _verify_active_phase_generation(
             trace_record_path,
             trace_record,
             trace_admission=admitted,
+            read_budget=read_budget,
+            materialization_budget=materialization_budget,
+        )
+    )
+    errors.extend(
+        _verify_active_attempt_event(
+            trace_record_path,
+            trace_record,
+            authority_root=authority_root,
+            authority_reader=authority_reader,
+            authority_file_inventory=authority_file_inventory,
+            attempt_namespace_present=namespace_present(
+                _TRACE_CAPTURE_ATTEMPT_NAMESPACE
+            ),
+            read_budget=read_budget,
+            materialization_budget=materialization_budget,
         )
     )
     return errors
@@ -999,23 +1897,70 @@ def _snapshot_direct_child_names(
     return names
 
 
+def _decode_authority_json(
+    payload: bytes,
+    *,
+    materialization_budget: (
+        _CanonicalAuthorityMaterializationBudget | None
+    ) = None,
+    retained_input_bytes: int = 0,
+    role: str = "canonical authority JSON",
+    label: str = "canonical authority JSON",
+) -> Any:
+    """Strictly decode and immediately budget one authority JSON graph."""
+    value = strict_json_loads(payload, label=label)
+    if materialization_budget is not None:
+        materialization_budget.reserve(
+            value,
+            retained_input_bytes=retained_input_bytes,
+            role=f"decoded {role}",
+        )
+    return value
+
+
 def _read_snapshot_json(
     reader: PinnedDirectoryReader,
     file_inventory: dict[str, tuple[int, int, int, int, int, int, int]],
     relative_path: str,
+    *,
+    authority_root: Path | None = None,
+    read_budget: _CanonicalAuthorityReadBudget | None = None,
+    materialization_budget: (
+        _CanonicalAuthorityMaterializationBudget | None
+    ) = None,
+    role: str = "canonical JSON authority",
 ) -> Any:
     """Parse one bounded JSON leaf from the retained discovery inventory."""
     metadata = file_inventory[relative_path]
+    if read_budget is not None:
+        if authority_root is None:
+            raise ImmutableArtifactError(
+                "canonical JSON budget requires an authority root"
+            )
+        read_budget.reserve_file(
+            authority_root.joinpath(*PurePosixPath(relative_path).parts),
+            metadata[4],
+            role=role,
+        )
     payload = reader.read_snapshot(
         relative_path,
         max_bytes=_CANONICAL_AUTHORITY_JSON_MAX_BYTES,
         expected_metadata=metadata,
     ).payload
-    return json.loads(payload)
+    return _decode_authority_json(
+        payload,
+        materialization_budget=materialization_budget,
+        retained_input_bytes=(
+            read_budget.total_bytes
+            if read_budget is not None
+            else len(payload)
+        ),
+        role=role,
+    )
 
 
 def _canonical_discovery_failure(trace_dir: Path, exc: BaseException) -> str:
-    if isinstance(exc, ImmutableArtifactResourceError):
+    if isinstance(exc, (ImmutableArtifactResourceError, MemoryError)):
         return (
             "CanonicalGenerationAuthorityResourceUnavailable: "
             f"{trace_dir} bounded retained authority traversal failed: "
@@ -1041,10 +1986,32 @@ def _verify_canonical_trace_pb_admission(trace_dir: Path) -> list[str]:
     root = Path(trace_dir).absolute()
     namespaces = (
         _RAW_TRACE_GENERATION_NAMESPACE,
+        _DERIVED_TRACE_GENERATION_NAMESPACE,
         _SUMMARY_GENERATION_NAMESPACE,
         _PHASE_LEDGER_GENERATION_NAMESPACE,
+        _TRACE_CAPTURE_ATTEMPT_NAMESPACE,
     )
     namespace_set = frozenset(namespaces)
+    invalid_ancestor = next(
+        (
+            component
+            for component in root.parts
+            if component not in {root.anchor, "/"}
+            and (
+                component.startswith(".")
+                or component in _CANONICAL_RESERVED_NAMESPACE_COMPONENTS
+            )
+        ),
+        None,
+    )
+    if invalid_ancestor is not None:
+        return [
+            "CanonicalGenerationAuthorityInvalid: "
+            f"{root} scan root is inside hidden or reserved namespace "
+            f"component {invalid_ancestor!r}"
+        ]
+    read_budget = _CanonicalAuthorityReadBudget()
+    materialization_budget = _CanonicalAuthorityMaterializationBudget()
 
     try:
         with ExitStack() as retained_tree:
@@ -1083,16 +2050,21 @@ def _verify_canonical_trace_pb_admission(trace_dir: Path) -> list[str]:
             invalid_record_entries: dict[Path, list[Path]] = {}
             record_candidates: dict[Path, list[str]] = {}
 
+            def has_hidden_or_reserved_ancestor(
+                relative: PurePosixPath,
+            ) -> bool:
+                return any(
+                    part.startswith(".") or part in namespace_set
+                    for part in relative.parts[:-1]
+                )
+
             def is_trace_record_candidate(relative: PurePosixPath) -> bool:
                 return (
                     relative.name.startswith("trace_")
                     and relative.name.endswith(".json")
                     and relative.name
                     not in _KNOWN_NONAUTHORITY_TRACE_FILENAMES
-                    and not any(
-                        part.startswith(".") or part in namespace_set
-                        for part in relative.parts[:-1]
-                    )
+                    and not has_hidden_or_reserved_ancestor(relative)
                 )
             for relative_path in directory_inventory:
                 if relative_path == ".":
@@ -1101,7 +2073,10 @@ def _verify_canonical_trace_pb_admission(trace_dir: Path) -> list[str]:
                 artifact_dir = _snapshot_relative_path(
                     root, relative.parent.as_posix()
                 )
-                if relative.name in namespace_set:
+                if (
+                    relative.name in namespace_set
+                    and not has_hidden_or_reserved_ancestor(relative)
+                ):
                     authority_dirs.add(artifact_dir)
                 if is_trace_record_candidate(relative):
                     authority_dirs.add(artifact_dir)
@@ -1110,7 +2085,10 @@ def _verify_canonical_trace_pb_admission(trace_dir: Path) -> list[str]:
                     ).append(_snapshot_relative_path(root, relative_path))
             for relative_path in file_inventory:
                 relative = PurePosixPath(relative_path)
-                if relative.name in namespace_set:
+                if (
+                    relative.name in namespace_set
+                    and not has_hidden_or_reserved_ancestor(relative)
+                ):
                     artifact_dir = _snapshot_relative_path(
                         root, relative.parent.as_posix()
                     )
@@ -1134,6 +2112,20 @@ def _verify_canonical_trace_pb_admission(trace_dir: Path) -> list[str]:
                 record_candidates.setdefault(artifact_dir, []).append(
                     relative_path
                 )
+
+            materialization_budget.reserve(
+                (
+                    snapshot,
+                    file_inventory,
+                    directory_inventory,
+                    authority_dirs,
+                    invalid_namespace_entries,
+                    invalid_record_entries,
+                    record_candidates,
+                ),
+                retained_input_bytes=read_budget.total_bytes,
+                role="retained canonical authority discovery inventories",
+            )
 
             for artifact_dir in sorted(authority_dirs):
                 try:
@@ -1164,20 +2156,41 @@ def _verify_canonical_trace_pb_admission(trace_dir: Path) -> list[str]:
                     )
 
                 active_records: list[tuple[Path, dict[str, Any]]] = []
+                materialization_budget.reserve(
+                    active_records,
+                    retained_input_bytes=read_budget.total_bytes,
+                    role="active canonical trace-record queue",
+                )
                 for relative_path in sorted(
                     record_candidates.get(artifact_dir, ())
                 ):
                     candidate = _snapshot_relative_path(root, relative_path)
+                    candidate_metadata = file_inventory[relative_path]
+                    if (
+                        not stat.S_ISREG(candidate_metadata[2])
+                        or stat.S_IMODE(candidate_metadata[2]) != 0o444
+                        or candidate_metadata[3] != 1
+                    ):
+                        errors.append(
+                            "CanonicalGenerationAuthorityInvalid: "
+                            f"{candidate} canonical trace-record candidate is not "
+                            "a single-link 0444 regular file"
+                        )
+                        continue
                     try:
                         record = _read_snapshot_json(
                             reader,
                             file_inventory,
                             relative_path,
+                            authority_root=root,
+                            read_budget=read_budget,
+                            materialization_budget=materialization_budget,
+                            role="canonical trace-record JSON authority",
                         )
-                    except ImmutableArtifactResourceError as exc:
+                    except (ImmutableArtifactResourceError, MemoryError) as exc:
                         errors.append(
                             "CanonicalGenerationAuthorityResourceUnavailable: "
-                            f"{candidate} cannot be retained: "
+                            f"{candidate} cannot be retained or decoded: "
                             f"{type(exc).__name__}: {exc}"
                         )
                         continue
@@ -1192,7 +2205,7 @@ def _verify_canonical_trace_pb_admission(trace_dir: Path) -> list[str]:
                         ImmutableArtifactError,
                         OSError,
                         UnicodeDecodeError,
-                        json.JSONDecodeError,
+                        ValueError,
                     ) as exc:
                         errors.append(
                             "CanonicalGenerationAuthorityInvalid: "
@@ -1202,12 +2215,39 @@ def _verify_canonical_trace_pb_admission(trace_dir: Path) -> list[str]:
                         continue
                     if type(record) is not dict:
                         continue
-                    has_generation_reference = (
-                        record.get("raw_trace_generation") is not None
-                        or record.get("nvbit_trace_summary_generation") is not None
+                    has_generation_reference = any(
+                        record.get(field) is not None
+                        for field in (
+                            "raw_trace_generation",
+                            "trace_derived_generation",
+                            "nvbit_trace_summary_generation",
+                            "trace_capture_attempt_event",
+                        )
                     )
                     if record.get("activation_state") == "active":
                         shape_point = record.get("shape_point")
+                        schema_version = record.get("schema_version")
+                        if (
+                            type(schema_version) is not int
+                            or schema_version != 1
+                        ):
+                            errors.append(
+                                "CanonicalGenerationAuthorityInvalid: "
+                                f"{candidate} schema_version must equal one"
+                            )
+                            continue
+                        if record.get("shape_set") != "trace_shapes":
+                            errors.append(
+                                "CanonicalGenerationAuthorityInvalid: "
+                                f"{candidate} shape_set must equal 'trace_shapes'"
+                            )
+                            continue
+                        if record.get("nvbit_trace_summary_emit_status") != "ok":
+                            errors.append(
+                                "CanonicalGenerationAuthorityInvalid: "
+                                f"{candidate} summary status must equal 'ok'"
+                            )
+                            continue
                         if (
                             type(shape_point) is not str
                             or not shape_point
@@ -1218,7 +2258,25 @@ def _verify_canonical_trace_pb_admission(trace_dir: Path) -> list[str]:
                                 f"{candidate} has malformed active shape authority"
                             )
                             continue
-                        active_records.append((candidate, record))
+                        queued_record = (candidate, record)
+                        materialization_budget.reserve(
+                            queued_record,
+                            retained_input_bytes=read_budget.total_bytes,
+                            role=(
+                                "retained active canonical trace-record tuple "
+                                f"{candidate}"
+                            ),
+                        )
+                        prior_list_bytes = sys.getsizeof(active_records)
+                        active_records.append(queued_record)
+                        materialization_budget.reserve_bytes(
+                            sys.getsizeof(active_records) - prior_list_bytes,
+                            retained_input_bytes=read_budget.total_bytes,
+                            role=(
+                                "active canonical trace-record queue growth "
+                                f"{candidate}"
+                            ),
+                        )
                     elif has_generation_reference:
                         errors.append(
                             "CanonicalGenerationAuthorityInvalid: "
@@ -1237,6 +2295,11 @@ def _verify_canonical_trace_pb_admission(trace_dir: Path) -> list[str]:
                 active_shapes = {
                     record["shape_point"] for _path, record in active_records
                 }
+                materialization_budget.reserve(
+                    active_shapes,
+                    retained_input_bytes=read_budget.total_bytes,
+                    role="retained active shape authority",
+                )
                 for namespace in namespaces:
                     namespace_relative = _snapshot_join_relative(
                         artifact_relative,
@@ -1247,12 +2310,16 @@ def _verify_canonical_trace_pb_admission(trace_dir: Path) -> list[str]:
                     namespace_path = _snapshot_relative_path(
                         root, namespace_relative
                     )
-                    for child_name in sorted(
-                        _snapshot_direct_child_names(
-                            snapshot,
-                            namespace_relative,
-                        )
-                    ):
+                    child_names = _snapshot_direct_child_names(
+                        snapshot,
+                        namespace_relative,
+                    )
+                    materialization_budget.reserve(
+                        (namespace_path, child_names),
+                        retained_input_bytes=read_budget.total_bytes,
+                        role="retained generation namespace children",
+                    )
+                    for child_name in sorted(child_names):
                         if child_name.startswith("."):
                             continue
                         if child_name not in active_shapes:
@@ -1263,14 +2330,29 @@ def _verify_canonical_trace_pb_admission(trace_dir: Path) -> list[str]:
                             )
                 for record_path, record in active_records:
                     for detail in _verify_active_generation_record(
-                        record_path, record
+                        record_path,
+                        record,
+                        authority_root=root,
+                        authority_reader=reader,
+                        authority_file_inventory=file_inventory,
+                        authority_directory_inventory=directory_inventory,
+                        read_budget=read_budget,
+                        materialization_budget=materialization_budget,
                     ):
                         token = (
                             "CanonicalGenerationAuthorityResourceUnavailable"
-                            if "resource unavailable" in detail
+                            if (
+                                "resource unavailable" in detail
+                                or "resource_unavailable" in detail
+                            )
                             else "CanonicalGenerationAuthorityInvalid"
                         )
                         errors.append(f"{token}: {record_path}: {detail}")
+                materialization_budget.reserve(
+                    active_records,
+                    retained_input_bytes=read_budget.total_bytes,
+                    role="terminal active canonical trace-record queue",
+                )
 
             monitor.verify_unchanged()
             reader.verify_path()
@@ -1280,6 +2362,8 @@ def _verify_canonical_trace_pb_admission(trace_dir: Path) -> list[str]:
                     generation_authority_dirs=authority_dirs,
                     reader=reader,
                     tree_snapshot=snapshot,
+                    read_budget=read_budget,
+                    materialization_budget=materialization_budget,
                 )
             )
             monitor.verify_unchanged()
@@ -1288,7 +2372,24 @@ def _verify_canonical_trace_pb_admission(trace_dir: Path) -> list[str]:
         ImmutableArtifactLimitError,
         ImmutableArtifactResourceError,
         ImmutableArtifactError,
+        MemoryError,
         OSError,
+        ValueError,
+    ) as exc:
+        errors.append(_canonical_discovery_failure(root, exc))
+    try:
+        materialization_budget.reserve(
+            errors,
+            retained_input_bytes=read_budget.total_bytes,
+            role="retained canonical verification diagnostics",
+        )
+    except (
+        ImmutableArtifactLimitError,
+        ImmutableArtifactResourceError,
+        ImmutableArtifactError,
+        MemoryError,
+        OSError,
+        ValueError,
     ) as exc:
         errors.append(_canonical_discovery_failure(root, exc))
     return errors
@@ -1300,6 +2401,10 @@ def _verify_legacy_canonical_trace_pb_admission(
     generation_authority_dirs: set[Path],
     reader: PinnedDirectoryReader | None = None,
     tree_snapshot: PinnedTreeSnapshot | None = None,
+    read_budget: _CanonicalAuthorityReadBudget | None = None,
+    materialization_budget: (
+        _CanonicalAuthorityMaterializationBudget | None
+    ) = None,
 ) -> list[str]:
     """Verify legacy raw trees from the same bounded retained inventory.
 
@@ -1308,6 +2413,11 @@ def _verify_legacy_canonical_trace_pb_admission(
     hard canonical-authority error and never falls through to lexical probing.
     """
     root = Path(trace_dir).absolute()
+    budget = read_budget or _CanonicalAuthorityReadBudget()
+    material_budget = (
+        materialization_budget
+        or _CanonicalAuthorityMaterializationBudget()
+    )
     if (reader is None) != (tree_snapshot is None):
         raise TypeError("reader and tree_snapshot must be supplied together")
     if reader is None:
@@ -1347,6 +2457,8 @@ def _verify_legacy_canonical_trace_pb_admission(
                     generation_authority_dirs=generation_authority_dirs,
                     reader=owned_reader,
                     tree_snapshot=owned_snapshot,
+                    read_budget=budget,
+                    materialization_budget=material_budget,
                 )
                 monitor.verify_unchanged()
                 owned_reader.verify_path()
@@ -1355,7 +2467,9 @@ def _verify_legacy_canonical_trace_pb_admission(
             ImmutableArtifactLimitError,
             ImmutableArtifactResourceError,
             ImmutableArtifactError,
+            MemoryError,
             OSError,
+            ValueError,
         ) as exc:
             return [_canonical_discovery_failure(root, exc)]
 
@@ -1364,9 +2478,20 @@ def _verify_legacy_canonical_trace_pb_admission(
     file_inventory = dict(tree_snapshot.files)
     directory_inventory = dict(tree_snapshot.directories)
     authority_dirs = {Path(path).absolute() for path in generation_authority_dirs}
+    material_budget.reserve(
+        (tree_snapshot, file_inventory, directory_inventory, authority_dirs),
+        retained_input_bytes=budget.total_bytes,
+        role="retained legacy canonical authority inventories",
+    )
 
     for trace_relative in sorted(file_inventory):
         relative = PurePosixPath(trace_relative)
+        if any(
+            part.startswith(".")
+            or part in _CANONICAL_RESERVED_NAMESPACE_COMPONENTS
+            for part in relative.parts[:-1]
+        ):
+            continue
         if relative.name != "dynamic_trace.pb":
             continue
         shape_relative = relative.parent
@@ -1407,14 +2532,24 @@ def _verify_legacy_canonical_trace_pb_admission(
                 reader,
                 file_inventory,
                 summary_relative,
+                authority_root=root,
+                read_budget=budget,
+                materialization_budget=material_budget,
+                role="legacy trace summary JSON authority",
             )
+        except (ImmutableArtifactResourceError, MemoryError) as exc:
+            errors.append(
+                "CanonicalGenerationAuthorityResourceUnavailable: "
+                f"{summary_path} cannot be retained or decoded: "
+                f"{type(exc).__name__}: {exc}"
+            )
+            continue
         except (
             ImmutableArtifactLimitError,
-            ImmutableArtifactResourceError,
             ImmutableArtifactError,
             OSError,
             UnicodeDecodeError,
-            json.JSONDecodeError,
+            ValueError,
         ) as exc:
             errors.append(
                 f"RawOnlyTraceTree: {summary_path} is unparseable "
@@ -1442,6 +2577,11 @@ def _verify_legacy_canonical_trace_pb_admission(
             and PurePosixPath(path).parent.as_posix() == artifact_relative
             and PurePosixPath(path).name.startswith("trace_")
         ]
+        material_budget.reserve(
+            sibling_shape_dirs,
+            retained_input_bytes=budget.total_bytes,
+            role="retained legacy sibling shape inventory",
+        )
         is_multi_shape = len(sibling_shape_dirs) > 1
         if per_shape_manifest_relative in file_inventory:
             pass
@@ -1459,19 +2599,30 @@ def _verify_legacy_canonical_trace_pb_admission(
                     reader,
                     file_inventory,
                     cell_level_manifest_relative,
+                    authority_root=root,
+                    read_budget=budget,
+                    materialization_budget=material_budget,
+                    role="legacy measurement manifest JSON authority",
                 )
                 manifest_shape = (
                     cell_manifest.get("shape_point")
                     if type(cell_manifest) is dict
                     else None
                 )
+            except (ImmutableArtifactResourceError, MemoryError) as exc:
+                errors.append(
+                    "CanonicalGenerationAuthorityResourceUnavailable: "
+                    f"{_snapshot_relative_path(root, cell_level_manifest_relative)} "
+                    "cannot be retained or decoded: "
+                    f"{type(exc).__name__}: {exc}"
+                )
+                continue
             except (
                 ImmutableArtifactLimitError,
-                ImmutableArtifactResourceError,
                 ImmutableArtifactError,
                 OSError,
                 UnicodeDecodeError,
-                json.JSONDecodeError,
+                ValueError,
             ):
                 manifest_shape = None
             if manifest_shape != shape_point:
@@ -1565,6 +2716,11 @@ def _verify_legacy_canonical_trace_pb_admission(
                 "emission and is not admissible."
             )
     reader.verify_path()
+    material_budget.reserve(
+        errors,
+        retained_input_bytes=budget.total_bytes,
+        role="retained legacy canonical verification diagnostics",
+    )
     return errors
 
 

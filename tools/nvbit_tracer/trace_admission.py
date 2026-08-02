@@ -100,6 +100,38 @@ class TraceAdmissionLimits:
 DEFAULT_TRACE_ADMISSION_LIMITS = TraceAdmissionLimits()
 
 
+def raw_trace_generation_limits(
+    limits: TraceAdmissionLimits,
+) -> dict[str, int | dict[str, int]]:
+    """Return the shared immutable raw-generation inspection policy."""
+    if not isinstance(limits, TraceAdmissionLimits):
+        raise TypeError("limits must be a TraceAdmissionLimits value")
+    if limits.trace_root_bytes != limits.threadblock_bytes:
+        raise ValueError(
+            "raw generation inspection requires equal trace-root and "
+            "threadblock per-file limits"
+        )
+    return {
+        "max_files": limits.tree_files,
+        "max_directories": limits.tree_directories,
+        "max_total_file_bytes": (
+            limits.trace_root_bytes
+            + limits.allocations_sidecar_bytes
+            + limits.stats_bytes
+            + limits.total_threadblock_bytes
+        ),
+        "max_total_relative_path_bytes": limits.tree_relative_path_bytes,
+        "max_file_bytes": max(
+            limits.trace_root_bytes,
+            limits.threadblock_bytes,
+        ),
+        "max_file_bytes_by_path": {
+            "stats.csv": limits.stats_bytes,
+            "extra_info/allocations.json": limits.allocations_sidecar_bytes,
+        },
+    }
+
+
 def _parse_ascii_signed_decimal(token: str) -> int:
     digits = token[1:] if token.startswith("-") else token
     if (

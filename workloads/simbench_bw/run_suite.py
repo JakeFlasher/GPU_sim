@@ -97,6 +97,7 @@ from tools.nvbit_tracer.trace_admission import (  # noqa: E402
     TraceAdmission,
     TraceAdmissionError,
     open_admitted_trace_sources,
+    raw_trace_generation_limits,
     require_trace_admission,
 )
 
@@ -3535,7 +3536,13 @@ def _new_trace_attempt_id() -> str:
     return f"attempt-{os.urandom(16).hex()}"
 
 
-def _trace_generation_commit_limits() -> dict[str, int]:
+def _trace_generation_commit_limits() -> dict[
+    str, int | dict[str, int]
+]:
+    return raw_trace_generation_limits(DEFAULT_TRACE_ADMISSION_LIMITS)
+
+
+def _derived_generation_commit_limits() -> dict[str, int]:
     limits = DEFAULT_TRACE_ADMISSION_LIMITS
     return {
         "max_files": limits.tree_files,
@@ -3812,6 +3819,12 @@ def _emit_nvbit_trace_summaries_for_trace_artifact(
 
     try:
         import nvbit_trace_summary_adapter as _nvbit_adapter  # pyright: ignore[reportMissingImports]
+    except MemoryError as exc:
+        return fail(
+            "resource_unavailable",
+            "trace_summary_resource_unavailable: NVBit summary adapter import "
+            f"exhausted memory: {type(exc).__name__}: {exc}",
+        )
     except ImportError as exc:
         return fail(
             "adapter_import_failed",
@@ -3880,7 +3893,7 @@ def _emit_nvbit_trace_summaries_for_trace_artifact(
         generation_relative = published_directory.relative_to(
             artifact_root
         )
-    except ImmutableArtifactResourceError as exc:
+    except (ImmutableArtifactResourceError, MemoryError) as exc:
         return fail(
             "resource_unavailable",
             "trace_summary_resource_unavailable: transactional NVBit summary "
@@ -5815,7 +5828,7 @@ def _handle_trace_with_sources(
             preactivation_stage = "derived_commit"
             derived_generation = derived_stage.commit(
                 require_nonempty=False,
-                **_trace_generation_commit_limits(),
+                **_derived_generation_commit_limits(),
             )
             derived_generation_record = _directory_generation_record(
                 generation=derived_generation,
@@ -5951,7 +5964,7 @@ def _handle_trace_with_sources(
                 inspect_immutable_directory_generation(
                     derived_generation.path,
                     require_nonempty=False,
-                    **_trace_generation_commit_limits(),
+                    **_derived_generation_commit_limits(),
                 )
             )
             if observed_derived_generation != derived_generation:
