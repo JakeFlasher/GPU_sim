@@ -333,7 +333,7 @@
       "import_policy": "deny",
       "path": "tools/local_labels/sm86_capture_chunk.py",
       "review_status": "reviewed",
-      "sha256": "b756073306e889f47e14517c76f309653431bf80401be81f837fbcc4cc60b3d0"
+      "sha256": "826fca6d3ae857cb3a7a04c7da7bb109045265a19a272cd0216a74e012559357"
     },
     {
       "classification": "unreviewed",
@@ -396,7 +396,7 @@
       "import_policy": "deny",
       "path": "tools/local_labels/test_sm86_capture_chunk.py",
       "review_status": "provisional",
-      "sha256": "658c4ce122caf06540c230d485b3938d7a91c46b2c2d3ef1da2ce22abe18caed"
+      "sha256": "edbf6ea6c91015761429aacd7d2e909e72c30678d8a931493ce9afffd574ee86"
     },
     {
       "classification": "unreviewed",

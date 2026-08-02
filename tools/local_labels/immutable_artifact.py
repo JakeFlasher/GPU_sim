@@ -33,6 +33,9 @@ _MAX_REGULAR_LEAF_BYTES = 243
 _SNAPSHOT_CLOSURE_THRESHOLD = 512
 _INOTIFY_Q_OVERFLOW = 0x00004000
 _INOTIFY_ROOT_DIRECTORY_ATTRIB = 0x40000004  # IN_ISDIR | IN_ATTRIB
+_INOTIFY_ROOT_DIRECTORY_MOVED_FROM = 0x40000040  # IN_ISDIR | IN_MOVED_FROM
+_INOTIFY_ROOT_DIRECTORY_MOVED_TO = 0x40000080  # IN_ISDIR | IN_MOVED_TO
+_INOTIFY_ROOT_MOVE_SELF = 0x00000800  # IN_MOVE_SELF
 _INOTIFY_MUTATION_EVENTS = (
     0x00000002  # IN_MODIFY
     | 0x00000004  # IN_ATTRIB
@@ -88,6 +91,34 @@ class ImmutableArtifactLimitError(ImmutableArtifactError):
 
 class ImmutableArtifactResourceError(ImmutableArtifactError):
     """The host cannot provide a required bounded verification resource."""
+
+
+class RenameOutcomeUnproven(ImmutableArtifactError):
+    """An attempted atomic rename cannot be classified without guessing."""
+
+    def __init__(self, error: BaseException) -> None:
+        if not isinstance(error, BaseException):
+            raise TypeError("unproven rename outcome must retain BaseException")
+        self.error = error
+        super().__init__(f"RENAME_OUTCOME_UNPROVEN: {error}")
+
+
+class CommittedRenameInterruption(BaseException):
+    """A caller interruption observed after an authenticated rename commit."""
+
+    def __init__(
+        self,
+        interruption: BaseException,
+        *,
+        handoff_complete: bool,
+    ) -> None:
+        if not isinstance(interruption, BaseException):
+            raise TypeError("committed rename interruption must be BaseException")
+        if type(handoff_complete) is not bool:
+            raise TypeError("committed rename handoff state must be boolean")
+        self.interruption = interruption
+        self.handoff_complete = handoff_complete
+        super().__init__(str(interruption))
 
 
 def _descriptor_resource_cause(
@@ -1689,14 +1720,36 @@ def read_relative(root: Path, relative_path: str) -> bytes:
         pinned.close()
 
 
+@dataclasses.dataclass(frozen=True)
+class _PinnedDirectoryReaderBinding:
+    root: _PinnedDirectory
+    path_monitor: _RetainedDirectoryPathMonitorState
+
+
 class PinnedDirectoryReader:
     """Read one tree through a single pinned, continuously revalidated root."""
 
     @_translate_descriptor_resource_errors("pinned directory reader open")
     def __init__(self, root: Path) -> None:
-        self._root, self._path_monitor = (
-            _open_directory_with_early_path_monitor(Path(root))
+        pinned, monitor = _open_directory_with_early_path_monitor(Path(root))
+        self._binding: _PinnedDirectoryReaderBinding | None = (
+            _PinnedDirectoryReaderBinding(pinned, monitor)
         )
+
+    def _require_binding(self) -> _PinnedDirectoryReaderBinding:
+        binding = self._binding
+        if binding is None:
+            raise ImmutableArtifactError("pinned directory reader is closed")
+        return binding
+
+    @property
+    def _root(self) -> _PinnedDirectory:
+        return self._require_binding().root
+
+    @property
+    def _path_monitor(self) -> _RetainedDirectoryPathMonitorState | None:
+        binding = self._binding
+        return None if binding is None else binding.path_monitor
 
     @property
     def descriptor(self) -> int:
@@ -1760,6 +1813,299 @@ class PinnedDirectoryReader:
             raise ImmutableArtifactError(
                 "retained directory root changed after mode seal"
             )
+
+    @_translate_descriptor_resource_errors(
+        "pinned directory reader rename transition"
+    )
+    def relocate_noreplace(
+        self,
+        *,
+        source_parent: PinnedDirectoryReader,
+        source_name: str,
+        destination_parent: PinnedDirectoryReader,
+        destination_name: str,
+    ) -> None:
+        """Atomically move and rebind this retained directory exactly once."""
+        for role, name in (
+            ("source", source_name),
+            ("destination", destination_name),
+        ):
+            if type(name) is not str:
+                raise ImmutableArtifactError(
+                    f"retained directory rename {role} name must be a string"
+                )
+            relative = safe_relative_path(name)
+            if len(relative.parts) != 1:
+                raise ImmutableArtifactError(
+                    f"retained directory rename {role} name is not one component"
+                )
+        if (
+            source_parent is destination_parent
+            and source_name == destination_name
+        ):
+            raise ImmutableArtifactError(
+                "retained directory rename destination is unchanged"
+            )
+
+        old_binding = self._require_binding()
+        old_root = old_binding.root
+        old_state = old_binding.path_monitor
+        if not old_root.names:
+            raise ImmutableArtifactError(
+                "retained directory reader cannot accept a root rename"
+            )
+        self.verify_path()
+        source_parent.verify_path()
+        destination_parent.verify_path()
+        retained_identity = _node_identity(os.fstat(old_root.descriptor))
+        source_before = os.stat(
+            source_name,
+            dir_fd=source_parent.descriptor,
+            follow_symlinks=False,
+        )
+        if _node_identity(source_before) != retained_identity:
+            raise ImmutableArtifactError(
+                "retained directory rename source identity changed"
+            )
+        if (
+            os.fstat(source_parent.descriptor).st_dev
+            != os.fstat(destination_parent.descriptor).st_dev
+        ):
+            raise ImmutableArtifactError(
+                "CROSS_DEVICE_RENAME: retained directory parents differ"
+            )
+
+        rename_state = _arm_directory_rename_monitor(
+            source_parent.descriptor,
+            source_name,
+            destination_parent.descriptor,
+            destination_name,
+            old_root.descriptor,
+        )
+        replacement_root: _PinnedDirectory | None = None
+        replacement_state: _RetainedDirectoryPathMonitorState | None = None
+        replacement_binding: _PinnedDirectoryReaderBinding | None = None
+        old_closed = False
+        rename_attempted = False
+        outcome_not_committed = False
+        commit_authenticated = False
+        rename_error: BaseException | None = None
+        try:
+            self.verify_path()
+            source_parent.verify_path()
+            destination_parent.verify_path()
+            source_armed = os.stat(
+                source_name,
+                dir_fd=source_parent.descriptor,
+                follow_symlinks=False,
+            )
+            if _node_identity(source_armed) != retained_identity:
+                raise ImmutableArtifactError(
+                    "retained directory rename source changed while arming"
+                )
+            _require_directory_rename_monitor_quiet(rename_state)
+
+            rename_attempted = True
+            try:
+                _rename_noreplace_at(
+                    source_parent.descriptor,
+                    source_name,
+                    destination_parent.descriptor,
+                    destination_name,
+                )
+            except BaseException as exc:
+                rename_error = exc
+
+            try:
+                source_after = _entry_metadata(
+                    source_parent.descriptor, source_name,
+                )
+                destination_after = _entry_metadata(
+                    destination_parent.descriptor, destination_name,
+                )
+            except BaseException as exc:
+                raise RenameOutcomeUnproven(exc) from None
+            source_matches = (
+                source_after is not None
+                and _node_identity(source_after) == retained_identity
+            )
+            destination_matches = (
+                destination_after is not None
+                and _node_identity(destination_after) == retained_identity
+            )
+            if source_matches and not destination_matches:
+                try:
+                    _require_directory_rename_monitor_quiet(rename_state)
+                    self.verify_path()
+                    source_parent.verify_path()
+                    destination_parent.verify_path()
+                    source_final = _entry_metadata(
+                        source_parent.descriptor, source_name,
+                    )
+                    destination_final = _entry_metadata(
+                        destination_parent.descriptor, destination_name,
+                    )
+                    if (
+                        source_final is None
+                        or _node_identity(source_final) != retained_identity
+                        or (
+                            destination_final is not None
+                            and _node_identity(destination_final)
+                            == retained_identity
+                        )
+                    ):
+                        raise ImmutableArtifactError(
+                            "retained directory rename noncommit outcome changed"
+                        )
+                    rename_state.monitor.set_close_verifier(
+                        lambda: _require_directory_rename_monitor_quiet(
+                            rename_state
+                        )
+                    )
+                    rename_state.monitor.close()
+                except BaseException as exc:
+                    raise RenameOutcomeUnproven(exc) from None
+                outcome_not_committed = True
+                if rename_error is not None:
+                    raise rename_error
+                raise ImmutableArtifactError(
+                    "retained directory rename reported success without committing"
+                )
+            if not destination_matches or source_after is not None:
+                error = (
+                    rename_error
+                    if rename_error is not None
+                    else ImmutableArtifactError(
+                        "retained directory rename outcome is inconsistent"
+                    )
+                )
+                raise RenameOutcomeUnproven(error) from None
+
+            destination_parent_identity = _node_identity(
+                os.fstat(destination_parent.descriptor)
+            )
+            destination_watches = []
+            for index, descriptor in enumerate(old_root.descriptors):
+                if _node_identity(os.fstat(descriptor)) != destination_parent_identity:
+                    continue
+                watch = (
+                    old_state.protected_names[index][0]
+                    if index < len(old_state.protected_names)
+                    else old_state.root_watch
+                )
+                destination_watches.append(watch)
+            if len(set(destination_watches)) > 1:
+                raise RenameOutcomeUnproven(
+                    ImmutableArtifactError(
+                        "renamed retained directory destination parent is ambiguous"
+                    )
+                ) from None
+            destination_entry = (
+                (destination_watches[0], os.fsencode(destination_name))
+                if destination_watches
+                else None
+            )
+
+            try:
+                _require_directory_rename_monitor_complete(rename_state)
+            except BaseException as exc:
+                raise RenameOutcomeUnproven(exc) from None
+            commit_authenticated = True
+            _require_retained_directory_root_rename(
+                old_state,
+                destination_entry=destination_entry,
+            )
+
+            destination_path = Path(os.path.sep).joinpath(
+                *destination_parent._root.names,
+                destination_name,
+            )
+            replacement_root, replacement_state = (
+                _open_directory_with_early_path_monitor(destination_path)
+            )
+            if (
+                _node_identity(os.fstat(replacement_root.descriptor))
+                != retained_identity
+            ):
+                raise ImmutableArtifactError(
+                    "renamed retained directory destination identity changed"
+                )
+            replacement_binding = _PinnedDirectoryReaderBinding(
+                replacement_root,
+                replacement_state,
+            )
+            replacement_root.verify_path()
+            _require_retained_directory_path_monitor_quiet(replacement_state)
+            replacement_root.verify_path()
+            source_parent.verify_path()
+            destination_parent.verify_path()
+
+            rename_state.monitor.set_close_verifier(
+                lambda: _require_directory_rename_monitor_quiet(rename_state)
+            )
+            self._binding = replacement_binding
+            old_state.monitor.cancel_close_verification()
+            _close_callables(
+                (old_state.monitor.close, old_root.close),
+                label="renamed pinned directory reader transition",
+            )
+            old_closed = True
+            rename_state.monitor.close()
+            self.verify_path()
+            if rename_error is not None and not isinstance(rename_error, Exception):
+                raise CommittedRenameInterruption(
+                    rename_error,
+                    handoff_complete=True,
+                ) from rename_error
+        except RenameOutcomeUnproven:
+            raise
+        except CommittedRenameInterruption:
+            raise
+        except BaseException as exc:
+            binding_transferred = (
+                replacement_binding is not None
+                and self._binding is replacement_binding
+            )
+            if commit_authenticated:
+                if not isinstance(exc, Exception):
+                    raise CommittedRenameInterruption(
+                        exc,
+                        handoff_complete=binding_transferred,
+                    ) from exc
+                raise ImmutableArtifactError(
+                    f"RENAME_HANDOFF_FAILED: {exc}"
+                ) from exc
+            if rename_attempted and not outcome_not_committed:
+                raise RenameOutcomeUnproven(exc) from None
+            raise
+        finally:
+            binding_transferred = (
+                replacement_binding is not None
+                and self._binding is replacement_binding
+            )
+            if rename_state.monitor.descriptor >= 0:
+                if not binding_transferred:
+                    rename_state.monitor.cancel_close_verification()
+                _close_callables(
+                    (rename_state.monitor.close,),
+                    label="retained directory rename monitor cleanup",
+                )
+            if binding_transferred and not old_closed:
+                old_state.monitor.cancel_close_verification()
+                _close_callables(
+                    (old_state.monitor.close, old_root.close),
+                    label="interrupted pinned directory reader transition",
+                )
+            if not binding_transferred and replacement_root is not None:
+                closers: list[Callable[[], None]] = []
+                if replacement_state is not None:
+                    replacement_state.monitor.cancel_close_verification()
+                    closers.append(replacement_state.monitor.close)
+                closers.append(replacement_root.close)
+                _close_callables(
+                    closers,
+                    label="renamed pinned directory replacement cleanup",
+                )
 
     @_translate_descriptor_resource_errors("pinned regular-file snapshot read")
     def read_snapshot(
@@ -1853,13 +2199,14 @@ class PinnedDirectoryReader:
         return snapshot
 
     def close(self) -> None:
-        path_monitor = self._path_monitor
-        self._path_monitor = None
-        closers: list[Callable[[], None]] = []
-        if path_monitor is not None:
-            closers.append(path_monitor.monitor.close)
-        closers.append(self._root.close)
-        _close_callables(closers, label="pinned directory reader close")
+        binding = self._binding
+        self._binding = None
+        if binding is None:
+            return
+        _close_callables(
+            (binding.path_monitor.monitor.close, binding.root.close),
+            label="pinned directory reader close",
+        )
 
     def __enter__(self) -> "PinnedDirectoryReader":
         self.verify_path()
@@ -4145,6 +4492,7 @@ def _material_map(files: Iterable[ImmutableFile]) -> dict[str, ImmutableFile]:
 class _MutationDrainResult:
     events: tuple[tuple[int, int, bytes], ...]
     resource_error: ImmutableArtifactResourceError | None = None
+    event_cookies: tuple[int, ...] = ()
 
 
 class _DirectoryMutationMonitor:
@@ -4214,6 +4562,7 @@ class _DirectoryMutationMonitor:
 
     def read_events(self) -> _MutationDrainResult:
         parsed: list[tuple[int, int, bytes]] = []
+        cookies: list[int] = []
         attempts = batches = total_bytes = 0
         deferred_resource_error: ImmutableArtifactResourceError | None = None
 
@@ -4238,12 +4587,12 @@ class _DirectoryMutationMonitor:
         ) -> _MutationDrainResult:
             remember_resource_failure(detail, cause)
             return _MutationDrainResult(
-                tuple(parsed), deferred_resource_error,
+                tuple(parsed), deferred_resource_error, tuple(cookies),
             )
 
         def completed() -> _MutationDrainResult:
             return _MutationDrainResult(
-                tuple(parsed), deferred_resource_error,
+                tuple(parsed), deferred_resource_error, tuple(cookies),
             )
 
         while True:
@@ -4286,6 +4635,9 @@ class _DirectoryMutationMonitor:
                 mask = int.from_bytes(
                     events[offset + 4 : offset + 8], sys.byteorder,
                 )
+                cookie = int.from_bytes(
+                    events[offset + 8 : offset + 12], sys.byteorder,
+                )
                 name_length = int.from_bytes(
                     events[offset + 12 : offset + 16], sys.byteorder,
                 )
@@ -4308,6 +4660,7 @@ class _DirectoryMutationMonitor:
                     )
                 name = events[offset + 16 : event_end].rstrip(b"\0")
                 parsed.append((watch_descriptor, mask, name))
+                cookies.append(cookie)
                 offset = event_end
             if overflow_in_batch:
                 return completed()
@@ -4381,6 +4734,152 @@ class _RetainedPathMonitorState:
     directory_watches: frozenset[int]
     protected_names: tuple[tuple[int, bytes], ...]
     regular_watch: int
+
+
+@dataclasses.dataclass(frozen=True)
+class _DirectoryRenameMonitorState:
+    monitor: _DirectoryMutationMonitor
+    source_watch: int
+    destination_watch: int
+    root_watch: int
+    source_name: bytes
+    destination_name: bytes
+
+    @property
+    def watches(self) -> frozenset[int]:
+        return frozenset((
+            self.source_watch,
+            self.destination_watch,
+            self.root_watch,
+        ))
+
+
+def _arm_directory_rename_monitor(
+    source_descriptor: int,
+    source_name: str,
+    destination_descriptor: int,
+    destination_name: str,
+    root_descriptor: int,
+) -> _DirectoryRenameMonitorState:
+    monitor = _DirectoryMutationMonitor()
+    try:
+        return _DirectoryRenameMonitorState(
+            monitor=monitor,
+            source_watch=monitor.watch_directory(source_descriptor),
+            destination_watch=monitor.watch_directory(destination_descriptor),
+            root_watch=monitor.watch_directory(root_descriptor),
+            source_name=os.fsencode(source_name),
+            destination_name=os.fsencode(destination_name),
+        )
+    except BaseException:
+        monitor.cancel_close_verification()
+        monitor.close()
+        raise
+
+
+def _require_directory_rename_monitor_quiet(
+    state: _DirectoryRenameMonitorState,
+) -> None:
+    try:
+        result = state.monitor.read_events()
+        protected_names = {
+            (state.source_watch, state.source_name),
+            (state.destination_watch, state.destination_name),
+        }
+        for watch_descriptor, _mask, name in result.events:
+            if watch_descriptor not in state.watches:
+                _raise_monitored_mutation(
+                    "retained directory rename observed an unknown watch",
+                    result,
+                )
+            if (
+                watch_descriptor == state.root_watch
+                or not name
+                or (watch_descriptor, name) in protected_names
+            ):
+                _raise_monitored_mutation(
+                    "retained directory changed outside authorized rename",
+                    result,
+                )
+        if result.resource_error is not None:
+            raise result.resource_error
+    except BaseException:
+        state.monitor.cancel_close_verification()
+        raise
+
+
+def _require_directory_rename_monitor_complete(
+    state: _DirectoryRenameMonitorState,
+) -> None:
+    try:
+        result = state.monitor.read_events()
+        if len(result.event_cookies) != len(result.events):
+            raise ImmutableArtifactError(
+                "retained directory rename monitor lacks event cookies"
+            )
+        source_event = (
+            state.source_watch,
+            _INOTIFY_ROOT_DIRECTORY_MOVED_FROM,
+            state.source_name,
+        )
+        destination_event = (
+            state.destination_watch,
+            _INOTIFY_ROOT_DIRECTORY_MOVED_TO,
+            state.destination_name,
+        )
+        root_event = (state.root_watch, _INOTIFY_ROOT_MOVE_SELF, b"")
+        expected = {source_event, destination_event, root_event}
+        protected_names = {
+            (state.source_watch, state.source_name),
+            (state.destination_watch, state.destination_name),
+        }
+        observed: dict[tuple[int, int, bytes], int] = {}
+        for event, cookie in zip(
+            result.events, result.event_cookies, strict=True,
+        ):
+            watch_descriptor, _mask, name = event
+            if watch_descriptor not in state.watches:
+                _raise_monitored_mutation(
+                    "retained directory rename observed an unknown watch",
+                    result,
+                )
+            if event in expected:
+                if event in observed:
+                    _raise_monitored_mutation(
+                        "retained directory rename emitted a duplicate event",
+                        result,
+                    )
+                observed[event] = cookie
+                continue
+            if (
+                watch_descriptor == state.root_watch
+                or not name
+                or (watch_descriptor, name) in protected_names
+            ):
+                _raise_monitored_mutation(
+                    "retained directory changed outside authorized rename",
+                    result,
+                )
+        if result.resource_error is not None:
+            raise result.resource_error
+        if set(observed) != expected:
+            raise ImmutableArtifactError(
+                "authorized retained directory rename was not fully observed"
+            )
+        source_cookie = observed[source_event]
+        destination_cookie = observed[destination_event]
+        if (
+            source_cookie == 0
+            or destination_cookie == 0
+            or source_cookie != destination_cookie
+            or observed[root_event] != 0
+        ):
+            raise ImmutableArtifactError(
+                "authorized retained directory rename cookie mismatch"
+            )
+    except BaseException:
+        state.monitor.cancel_close_verification()
+        raise
 
 
 def _require_retained_directory_path_monitor_quiet(
@@ -4465,6 +4964,95 @@ def _require_retained_directory_root_mode_change(
     except BaseException:
         state.monitor.cancel_close_verification()
         raise
+
+
+def _require_retained_directory_root_rename(
+    state: _RetainedDirectoryPathMonitorState | None,
+    *,
+    destination_entry: tuple[int, bytes] | None,
+) -> None:
+    if state is None:
+        raise ImmutableArtifactError("retained directory monitor is closed")
+    try:
+        if (
+            state.root_watch not in state.directory_watches
+            or not state.protected_names
+        ):
+            raise ImmutableArtifactError(
+                "retained directory monitor lacks a protected root"
+            )
+        parent_watch, root_name = state.protected_names[-1]
+        expected = {
+            (
+                parent_watch,
+                _INOTIFY_ROOT_DIRECTORY_MOVED_FROM,
+                root_name,
+            ),
+            (state.root_watch, _INOTIFY_ROOT_MOVE_SELF, b""),
+        }
+        if destination_entry is not None:
+            destination_watch, destination_name = destination_entry
+            if destination_watch not in state.directory_watches:
+                raise ImmutableArtifactError(
+                    "retained directory rename destination watch is unknown"
+                )
+            if (destination_watch, destination_name) == (
+                parent_watch,
+                root_name,
+            ):
+                raise ImmutableArtifactError(
+                    "retained directory rename destination is unchanged"
+                )
+            expected.add((
+                destination_watch,
+                _INOTIFY_ROOT_DIRECTORY_MOVED_TO,
+                destination_name,
+            ))
+
+        result = state.monitor.read_events()
+        observed: set[tuple[int, int, bytes]] = set()
+        for event in result.events:
+            watch_descriptor, _mask, name = event
+            if watch_descriptor not in state.directory_watches:
+                _raise_monitored_mutation(
+                    "retained directory monitor observed an unknown watch",
+                    result,
+                )
+            if event in expected:
+                if event in observed:
+                    _raise_monitored_mutation(
+                        "retained directory root rename emitted a duplicate event",
+                        result,
+                    )
+                observed.add(event)
+                continue
+            destination_name_changed = (
+                destination_entry is not None
+                and (watch_descriptor, name) == destination_entry
+            )
+            if (
+                not name
+                or destination_name_changed
+                or any(
+                    watch_descriptor == protected_watch
+                    and name == protected_name
+                    for protected_watch, protected_name in state.protected_names
+                )
+            ):
+                _raise_monitored_mutation(
+                    "retained directory changed outside authorized root rename",
+                    result,
+                )
+        if result.resource_error is not None:
+            raise result.resource_error
+        if observed != expected:
+            raise ImmutableArtifactError(
+                "authorized retained directory root rename was not fully observed"
+            )
+    except BaseException:
+        state.monitor.cancel_close_verification()
+        raise
+
 
 
 def _open_directory_with_early_path_monitor(

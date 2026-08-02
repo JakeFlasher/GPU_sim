@@ -11009,6 +11009,10 @@ def _publish_finalized_tree(publication_root: Path, final_dir: Path) -> None:
     """
     destination_parent = final_dir.parent
     destination_grandparent = destination_parent.parent
+    deferred_interruption: BaseException | None = None
+    deferred_handoff_refusal: ChunkRefusal | None = None
+    deferred_handoff_cause: BaseException | None = None
+    tree_handoff_complete = False
 
     try:
         with contextlib.ExitStack() as stack:
@@ -11042,8 +11046,9 @@ def _publish_finalized_tree(publication_root: Path, final_dir: Path) -> None:
             destination_reader = stack.enter_context(
                 immutable.PinnedDirectoryReader(destination_parent)
             )
-            tree_reader = immutable.PinnedDirectoryReader(publication_root)
-            stack.callback(tree_reader.close)
+            tree_reader = stack.enter_context(
+                immutable.PinnedDirectoryReader(publication_root)
+            )
             source_reader.verify_path()
             destination_reader.verify_path()
             tree_reader.verify_path()
@@ -11096,35 +11101,90 @@ def _publish_finalized_tree(publication_root: Path, final_dir: Path) -> None:
                     f"unable to durably sync publication tree "
                     f"{publication_root}: {exc}",
                 ) from exc
+            durability_descriptors = (
+                source_reader.descriptor,
+                destination_reader.descriptor,
+                grandparent_reader.descriptor,
+            )
             try:
-                immutable._rename_noreplace_at(
-                    source_reader.descriptor,
-                    publication_root.name,
-                    destination_reader.descriptor,
-                    final_dir.name,
-                )
-            except FileExistsError as exc:
-                raise ChunkRefusal(
-                    "finalization_destination_exists",
-                    str(final_dir),
-                ) from exc
-            except immutable.ImmutableArtifactError as exc:
-                if str(exc).startswith("CROSS_DEVICE_RENAME:"):
+                try:
+                    tree_reader.relocate_noreplace(
+                        source_parent=source_reader,
+                        source_name=publication_root.name,
+                        destination_parent=destination_reader,
+                        destination_name=final_dir.name,
+                    )
+                except immutable.CommittedRenameInterruption as exc:
+                    deferred_interruption = exc.interruption
+                    tree_handoff_complete = exc.handoff_complete
+                except FileExistsError as exc:
                     raise ChunkRefusal(
-                        "finalization_cross_device_refused",
-                        f"source={publication_root}; destination={final_dir}",
+                        "finalization_destination_exists",
+                        str(final_dir),
                     ) from exc
-                if "RENAME_NOREPLACE is unavailable" in str(exc):
-                    code = "finalization_atomic_noreplace_unavailable"
+                except immutable.RenameOutcomeUnproven as exc:
+                    deferred_handoff_refusal = ChunkRefusal(
+                        "finalization_rename_outcome_unproven",
+                        f"source={publication_root}; destination={final_dir}: {exc}",
+                    )
+                    deferred_handoff_cause = exc.error
+                except immutable.ImmutableArtifactError as exc:
+                    message = str(exc)
+                    if message.startswith("CROSS_DEVICE_RENAME:"):
+                        raise ChunkRefusal(
+                            "finalization_cross_device_refused",
+                            f"source={publication_root}; destination={final_dir}",
+                        ) from exc
+                    if "RENAME_NOREPLACE is unavailable" in message:
+                        code = "finalization_atomic_noreplace_unavailable"
+                    elif message.startswith("atomic no-replace rename failed:"):
+                        code = "finalization_atomic_noreplace_failed"
+                    elif message.startswith("RENAME_HANDOFF_FAILED:"):
+                        deferred_handoff_refusal = ChunkRefusal(
+                            "finalization_destination_identity_changed",
+                            f"unable to bind renamed publication tree "
+                            f"{final_dir}: {exc}",
+                        )
+                        deferred_handoff_cause = exc
+                        code = None
+                    else:
+                        raise
+                    if code is not None:
+                        raise ChunkRefusal(
+                            code,
+                            f"source={publication_root}; destination={final_dir}: "
+                            f"{exc}",
+                        ) from exc
                 else:
-                    code = "finalization_atomic_noreplace_failed"
-                raise ChunkRefusal(
-                    code,
-                    f"source={publication_root}; destination={final_dir}: {exc}",
-                ) from exc
+                    tree_handoff_complete = True
+            finally:
+                durability_errors: list[BaseException] = []
+                for descriptor in durability_descriptors:
+                    try:
+                        os.fsync(descriptor)
+                    except BaseException as exc:
+                        durability_errors.append(exc)
+                if durability_errors:
+                    detail = "; ".join(
+                        f"{type(error).__name__}: {error}"
+                        for error in durability_errors
+                    )
+                    raise ChunkRefusal(
+                        "finalization_durability_unproven",
+                        f"unable to fsync renamed publication {final_dir}: {detail}",
+                    ) from durability_errors[0]
             source_reader.verify_path()
             destination_reader.verify_path()
             grandparent_reader.verify_path()
+            if not tree_handoff_complete:
+                if deferred_interruption is not None:
+                    raise deferred_interruption
+                if deferred_handoff_refusal is None:
+                    raise ChunkRefusal(
+                        "finalization_rename_outcome_unproven",
+                        f"source={publication_root}; destination={final_dir}",
+                    )
+                raise deferred_handoff_refusal from deferred_handoff_cause
             published_stat = os.stat(
                 final_dir.name,
                 dir_fd=destination_reader.descriptor,
@@ -11139,18 +11199,6 @@ def _publish_finalized_tree(publication_root: Path, final_dir: Path) -> None:
                     "finalization_destination_identity_changed",
                     str(final_dir),
                 )
-            try:
-                os.fsync(source_reader.descriptor)
-                os.fsync(destination_reader.descriptor)
-                os.fsync(grandparent_reader.descriptor)
-            except OSError as exc:
-                raise ChunkRefusal(
-                    "finalization_durability_unproven",
-                    f"unable to fsync renamed publication {final_dir}: {exc}",
-                ) from exc
-            source_reader.verify_path()
-            destination_reader.verify_path()
-            grandparent_reader.verify_path()
             retained_tree_snapshot = _descriptor_tree_snapshot(
                 tree_reader.descriptor
             )
@@ -11193,6 +11241,8 @@ def _publish_finalized_tree(publication_root: Path, final_dir: Path) -> None:
             "finalization_path_refused",
             f"source={publication_root}; destination={final_dir}: {exc}",
         ) from exc
+    if deferred_interruption is not None:
+        raise deferred_interruption
 
 
 def _write_json_exclusive_fsync(path: Path, payload: dict) -> None:

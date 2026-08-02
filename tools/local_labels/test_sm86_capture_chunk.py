@@ -5788,7 +5788,7 @@ def test_finalization_publish_never_replaces_concurrent_destination(tmp_path):
         with pytest.raises(cc.ChunkRefusal) as caught:
             cc._publish_finalized_tree(publication_root, final_dir)
 
-    assert caught.value.code == "finalization_destination_exists"
+    assert caught.value.code == "finalization_rename_outcome_unproven"
     assert (publication_root / "source.txt").read_text() == "source\n"
     assert (final_dir / "winner.txt").read_text() == "winner\n"
 
@@ -5988,6 +5988,349 @@ def test_finalization_publish_rejects_post_check_destination_swap(
     assert swapped is True
     assert caught.value.code == "finalization_destination_identity_changed"
     assert (displaced / "DONE.json").read_text() == "{}\n"
+    assert (final_dir / "DONE.json").read_text() == "{}\n"
+
+
+@pytest.mark.parametrize("restore", (False, True))
+def test_finalization_publish_rejects_destination_move_during_rebind(
+        tmp_path, monkeypatch, restore):
+    publication_root = tmp_path / "stage" / "publication"
+    publication_root.mkdir(parents=True)
+    (publication_root / "DONE.json").write_text("{}\n")
+    final_dir = tmp_path / "output" / "chunks" / "chunk"
+    final_dir.parent.parent.mkdir(parents=True)
+    displaced = final_dir.parent / "displaced"
+    real_open = cc.immutable._open_directory_with_early_path_monitor
+    moved = False
+
+    def move_away_back_before_rebind(path):
+        nonlocal moved
+        if Path(path) == final_dir and final_dir.exists() and not moved:
+            final_dir.rename(displaced)
+            if restore:
+                displaced.rename(final_dir)
+            moved = True
+        return real_open(path)
+
+    monkeypatch.setattr(
+        cc.immutable,
+        "_open_directory_with_early_path_monitor",
+        move_away_back_before_rebind,
+    )
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        cc._publish_finalized_tree(publication_root, final_dir)
+
+    assert moved is True
+    assert caught.value.code == "finalization_destination_identity_changed"
+    assert not publication_root.exists()
+    retained = final_dir if restore else displaced
+    assert (retained / "DONE.json").read_text() == "{}\n"
+
+
+def test_finalization_publish_types_precommit_monitor_refusal(
+        tmp_path, monkeypatch):
+    publication_root = tmp_path / "stage" / "publication"
+    publication_root.mkdir(parents=True)
+    final_dir = tmp_path / "output" / "chunks" / "chunk"
+    final_dir.parent.parent.mkdir(parents=True)
+
+    monkeypatch.setattr(
+        cc.immutable,
+        "_require_directory_rename_monitor_quiet",
+        lambda _state: (_ for _ in ()).throw(
+            cc.immutable.ImmutableArtifactError("injected precommit mutation")
+        ),
+    )
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        cc._publish_finalized_tree(publication_root, final_dir)
+
+    assert caught.value.code == "finalization_path_refused"
+    assert publication_root.is_dir()
+    assert not final_dir.exists()
+
+
+def test_finalization_publish_closes_durability_after_wrapper_raises(
+        tmp_path, monkeypatch):
+    publication_root = tmp_path / "stage" / "publication"
+    publication_root.mkdir(parents=True)
+    (publication_root / "DONE.json").write_text("{}\n")
+    final_dir = tmp_path / "output" / "chunks" / "chunk"
+    final_dir.parent.parent.mkdir(parents=True)
+    real_rename = cc.immutable._rename_noreplace_at
+
+    def rename_then_raise(*args):
+        real_rename(*args)
+        raise cc.immutable.ImmutableArtifactError(
+            "injected error after committed rename"
+        )
+
+    monkeypatch.setattr(
+        cc.immutable,
+        "_rename_noreplace_at",
+        rename_then_raise,
+    )
+    cc._publish_finalized_tree(publication_root, final_dir)
+
+    assert not publication_root.exists()
+    assert (final_dir / "DONE.json").read_text() == "{}\n"
+
+
+@pytest.mark.parametrize("exception_type", (KeyboardInterrupt, SystemExit))
+def test_finalization_publish_defers_committed_rename_interruption(
+        tmp_path, monkeypatch, exception_type):
+    publication_root = tmp_path / "stage" / "publication"
+    publication_root.mkdir(parents=True)
+    (publication_root / "DONE.json").write_text("{}\n")
+    final_dir = tmp_path / "output" / "chunks" / "chunk"
+    final_dir.parent.parent.mkdir(parents=True)
+    real_fsync = cc.os.fsync
+    real_rename = cc.immutable._rename_noreplace_at
+    interruption = exception_type("injected committed rename interruption")
+    renamed = False
+    postcommit_fsync_paths = []
+
+    def rename_then_interrupt(*args):
+        nonlocal renamed
+        real_rename(*args)
+        renamed = True
+        raise interruption
+
+    def observe_fsync(descriptor):
+        if renamed:
+            postcommit_fsync_paths.append(
+                Path(os.readlink(f"/proc/self/fd/{descriptor}"))
+            )
+        real_fsync(descriptor)
+
+    monkeypatch.setattr(
+        cc.immutable,
+        "_rename_noreplace_at",
+        rename_then_interrupt,
+    )
+    monkeypatch.setattr(cc.os, "fsync", observe_fsync)
+    with pytest.raises(exception_type) as caught:
+        cc._publish_finalized_tree(publication_root, final_dir)
+
+    assert caught.value is interruption
+    assert {
+        publication_root.parent,
+        final_dir.parent,
+        final_dir.parent.parent,
+    }.issubset(postcommit_fsync_paths)
+    assert not publication_root.exists()
+    assert (final_dir / "DONE.json").read_text() == "{}\n"
+
+
+def test_finalization_publish_fsyncs_after_posthandoff_interruption(
+        tmp_path, monkeypatch):
+    publication_root = tmp_path / "stage" / "publication"
+    publication_root.mkdir(parents=True)
+    (publication_root / "DONE.json").write_text("{}\n")
+    final_dir = tmp_path / "output" / "chunks" / "chunk"
+    final_dir.parent.parent.mkdir(parents=True)
+    real_fsync = cc.os.fsync
+    real_relocate = cc.immutable.PinnedDirectoryReader.relocate_noreplace
+    interruption = KeyboardInterrupt("injected post-handoff interruption")
+    handed_off = False
+    posthandoff_fsync_paths = []
+
+    def relocate_then_interrupt(self, **kwargs):
+        nonlocal handed_off
+        real_relocate(self, **kwargs)
+        handed_off = True
+        raise interruption
+
+    def observe_fsync(descriptor):
+        if handed_off:
+            posthandoff_fsync_paths.append(
+                Path(os.readlink(f"/proc/self/fd/{descriptor}"))
+            )
+        real_fsync(descriptor)
+
+    monkeypatch.setattr(
+        cc.immutable.PinnedDirectoryReader,
+        "relocate_noreplace",
+        relocate_then_interrupt,
+    )
+    monkeypatch.setattr(cc.os, "fsync", observe_fsync)
+    with pytest.raises(KeyboardInterrupt) as caught:
+        cc._publish_finalized_tree(publication_root, final_dir)
+
+    assert caught.value is interruption
+    assert {
+        publication_root.parent,
+        final_dir.parent,
+        final_dir.parent.parent,
+    }.issubset(posthandoff_fsync_paths)
+    assert handed_off is True
+    assert not publication_root.exists()
+    assert (final_dir / "DONE.json").read_text() == "{}\n"
+
+
+@pytest.mark.parametrize(
+    "exception_type",
+    (KeyboardInterrupt, SystemExit, OSError),
+)
+def test_finalization_publish_types_unproven_postsyscall_outcome(
+        tmp_path, monkeypatch, exception_type):
+    publication_root = tmp_path / "stage" / "publication"
+    publication_root.mkdir(parents=True)
+    (publication_root / "DONE.json").write_text("{}\n")
+    final_dir = tmp_path / "output" / "chunks" / "chunk"
+    final_dir.parent.parent.mkdir(parents=True)
+    real_entry_metadata = cc.immutable._entry_metadata
+    real_fsync = cc.os.fsync
+    real_rename = cc.immutable._rename_noreplace_at
+    failure = exception_type("injected post-syscall outcome failure")
+    renamed = False
+    failed = False
+    postcommit_fsync_paths = []
+
+    def observe_rename(*args):
+        nonlocal renamed
+        real_rename(*args)
+        renamed = True
+
+    def fail_first_outcome_probe(parent_descriptor, name):
+        nonlocal failed
+        if renamed and not failed:
+            failed = True
+            raise failure
+        return real_entry_metadata(parent_descriptor, name)
+
+    def observe_fsync(descriptor):
+        if renamed:
+            postcommit_fsync_paths.append(
+                Path(os.readlink(f"/proc/self/fd/{descriptor}"))
+            )
+        real_fsync(descriptor)
+
+    monkeypatch.setattr(cc.immutable, "_rename_noreplace_at", observe_rename)
+    monkeypatch.setattr(
+        cc.immutable,
+        "_entry_metadata",
+        fail_first_outcome_probe,
+    )
+    monkeypatch.setattr(cc.os, "fsync", observe_fsync)
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        cc._publish_finalized_tree(publication_root, final_dir)
+
+    assert caught.value.code == "finalization_rename_outcome_unproven"
+    assert caught.value.__cause__ is failure
+    assert {
+        publication_root.parent,
+        final_dir.parent,
+        final_dir.parent.parent,
+    }.issubset(postcommit_fsync_paths)
+    assert renamed is True
+    assert failed is True
+    assert not publication_root.exists()
+    assert (final_dir / "DONE.json").read_text() == "{}\n"
+
+
+def test_finalization_publish_rejects_transient_source_only_rename(
+        tmp_path, monkeypatch):
+    publication_root = tmp_path / "stage" / "publication"
+    publication_root.mkdir(parents=True)
+    (publication_root / "DONE.json").write_text("{}\n")
+    final_dir = tmp_path / "output" / "chunks" / "chunk"
+    final_dir.parent.parent.mkdir(parents=True)
+    real_fsync = cc.os.fsync
+    real_rename = cc.immutable._rename_noreplace_at
+    moved = False
+    postattempt_fsync_paths = []
+
+    def move_to_destination_and_back(
+            source_descriptor, source_name,
+            destination_descriptor, destination_name):
+        nonlocal moved
+        real_rename(
+            source_descriptor,
+            source_name,
+            destination_descriptor,
+            destination_name,
+        )
+        moved = True
+        real_rename(
+            destination_descriptor,
+            destination_name,
+            source_descriptor,
+            source_name,
+        )
+        raise cc.immutable.ImmutableArtifactError(
+            "injected error after transient committed rename"
+        )
+
+    def observe_fsync(descriptor):
+        if moved:
+            postattempt_fsync_paths.append(
+                Path(os.readlink(f"/proc/self/fd/{descriptor}"))
+            )
+        real_fsync(descriptor)
+
+    monkeypatch.setattr(
+        cc.immutable,
+        "_rename_noreplace_at",
+        move_to_destination_and_back,
+    )
+    monkeypatch.setattr(cc.os, "fsync", observe_fsync)
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        cc._publish_finalized_tree(publication_root, final_dir)
+
+    assert caught.value.code == "finalization_rename_outcome_unproven"
+    assert {
+        publication_root.parent,
+        final_dir.parent,
+        final_dir.parent.parent,
+    }.issubset(postattempt_fsync_paths)
+    assert moved is True
+    assert (publication_root / "DONE.json").read_text() == "{}\n"
+    assert not final_dir.exists()
+
+
+def test_finalization_publish_attempts_all_barriers_after_interruption(
+        tmp_path, monkeypatch):
+    publication_root = tmp_path / "stage" / "publication"
+    publication_root.mkdir(parents=True)
+    (publication_root / "DONE.json").write_text("{}\n")
+    final_dir = tmp_path / "output" / "chunks" / "chunk"
+    final_dir.parent.parent.mkdir(parents=True)
+    real_fsync = cc.os.fsync
+    real_rename = cc.immutable._rename_noreplace_at
+    interruption = KeyboardInterrupt("injected parent fsync interruption")
+    renamed = False
+    interrupted = False
+    postcommit_fsync_paths = []
+
+    def observe_rename(*args):
+        nonlocal renamed
+        real_rename(*args)
+        renamed = True
+
+    def interrupt_first_fsync(descriptor):
+        nonlocal interrupted
+        path = Path(os.readlink(f"/proc/self/fd/{descriptor}"))
+        if renamed:
+            postcommit_fsync_paths.append(path)
+            if not interrupted:
+                interrupted = True
+                raise interruption
+        real_fsync(descriptor)
+
+    monkeypatch.setattr(cc.immutable, "_rename_noreplace_at", observe_rename)
+    monkeypatch.setattr(cc.os, "fsync", interrupt_first_fsync)
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        cc._publish_finalized_tree(publication_root, final_dir)
+
+    assert caught.value.code == "finalization_durability_unproven"
+    assert caught.value.__cause__ is interruption
+    assert {
+        publication_root.parent,
+        final_dir.parent,
+        final_dir.parent.parent,
+    }.issubset(postcommit_fsync_paths)
+    assert interrupted is True
+    assert not publication_root.exists()
     assert (final_dir / "DONE.json").read_text() == "{}\n"
 
 

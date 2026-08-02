@@ -919,6 +919,504 @@ def test_root_mode_gate_preserves_monitor_resource_failure(
         reader.close()
 
 
+def _complete_rename_events(
+    state: immutable._DirectoryRenameMonitorState,
+) -> tuple[tuple[int, int, bytes], ...]:
+    return (
+        (
+            state.source_watch,
+            immutable._INOTIFY_ROOT_DIRECTORY_MOVED_FROM,
+            state.source_name,
+        ),
+        (
+            state.destination_watch,
+            immutable._INOTIFY_ROOT_DIRECTORY_MOVED_TO,
+            state.destination_name,
+        ),
+        (state.root_watch, immutable._INOTIFY_ROOT_MOVE_SELF, b""),
+    )
+
+
+def _synthetic_rename_monitor() -> immutable._DirectoryRenameMonitorState:
+    return immutable._DirectoryRenameMonitorState(
+        monitor=immutable._DirectoryMutationMonitor(),
+        source_watch=101,
+        destination_watch=102,
+        root_watch=103,
+        source_name=b"source",
+        destination_name=b"destination",
+    )
+
+
+def test_directory_rename_gate_accepts_exact_matching_cookie(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = _synthetic_rename_monitor()
+    try:
+        monkeypatch.setattr(
+            state.monitor,
+            "read_events",
+            lambda: immutable._MutationDrainResult(
+                _complete_rename_events(state),
+                event_cookies=(17, 17, 0),
+            ),
+        )
+        immutable._require_directory_rename_monitor_complete(state)
+    finally:
+        state.monitor.cancel_close_verification()
+        state.monitor.close()
+
+
+@pytest.mark.parametrize(
+    ("mutation", "cookies"),
+    (
+        ("missing_source", (17, 0)),
+        ("duplicate_source", (17, 17, 17, 0)),
+        ("wrong_source_mask", (17, 17, 0)),
+        ("wrong_destination_name", (17, 17, 0)),
+        ("unknown_watch", (17, 17, 0, 0)),
+        ("zero_cookie", (0, 0, 0)),
+        ("mismatched_cookie", (17, 18, 0)),
+        ("root_cookie", (17, 17, 9)),
+    ),
+)
+def test_directory_rename_gate_rejects_inexact_event_topology(
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+    cookies: tuple[int, ...],
+) -> None:
+    state = _synthetic_rename_monitor()
+    source, destination, root = _complete_rename_events(state)
+    events = {
+        "missing_source": (destination, root),
+        "duplicate_source": (source, source, destination, root),
+        "wrong_source_mask": (
+            (source[0], immutable._INOTIFY_ROOT_DIRECTORY_ATTRIB, source[2]),
+            destination,
+            root,
+        ),
+        "wrong_destination_name": (
+            source,
+            (destination[0], destination[1], b"other"),
+            root,
+        ),
+        "unknown_watch": (
+            source,
+            destination,
+            root,
+            (999, immutable._INOTIFY_ROOT_MOVE_SELF, b""),
+        ),
+        "zero_cookie": (source, destination, root),
+        "mismatched_cookie": (source, destination, root),
+        "root_cookie": (source, destination, root),
+    }[mutation]
+    try:
+        monkeypatch.setattr(
+            state.monitor,
+            "read_events",
+            lambda: immutable._MutationDrainResult(
+                events,
+                event_cookies=cookies,
+            ),
+        )
+        with pytest.raises(immutable.ImmutableArtifactError):
+            immutable._require_directory_rename_monitor_complete(state)
+    finally:
+        state.monitor.cancel_close_verification()
+        state.monitor.close()
+
+
+def test_directory_rename_gate_preserves_resource_failure(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    state = _synthetic_rename_monitor()
+    resource_error = immutable.ImmutableArtifactResourceError(
+        f"{immutable.VERIFY_RESOURCE_BOUND}: inotify queue overflow"
+    )
+    try:
+        monkeypatch.setattr(
+            state.monitor,
+            "read_events",
+            lambda: immutable._MutationDrainResult(
+                _complete_rename_events(state),
+                resource_error=resource_error,
+                event_cookies=(17, 17, 0),
+            ),
+        )
+        with pytest.raises(
+            immutable.ImmutableArtifactResourceError,
+            match="inotify queue overflow",
+        ):
+            immutable._require_directory_rename_monitor_complete(state)
+    finally:
+        state.monitor.cancel_close_verification()
+        state.monitor.close()
+
+
+@pytest.mark.parametrize("same_parent", (False, True))
+def test_pinned_directory_reader_relocates_exact_noreplace_directory(
+    tmp_path: Path,
+    same_parent: bool,
+) -> None:
+    source_parent = tmp_path / "source-parent"
+    source_parent.mkdir()
+    destination_parent = (
+        source_parent if same_parent else tmp_path / "destination-parent"
+    )
+    destination_parent.mkdir(exist_ok=True)
+    source = source_parent / "source"
+    source.mkdir()
+    _regular(source / "payload", b"identity")
+    destination = destination_parent / "destination"
+
+    with immutable.PinnedDirectoryReader(source_parent) as source_reader:
+        if same_parent:
+            destination_reader = source_reader
+            with immutable.PinnedDirectoryReader(source) as tree_reader:
+                tree_reader.relocate_noreplace(
+                    source_parent=source_reader,
+                    source_name=source.name,
+                    destination_parent=destination_reader,
+                    destination_name=destination.name,
+                )
+                tree_reader.verify_path()
+                assert tree_reader.read("payload") == b"identity"
+        else:
+            with immutable.PinnedDirectoryReader(
+                destination_parent
+            ) as destination_reader, immutable.PinnedDirectoryReader(
+                source
+            ) as tree_reader:
+                tree_reader.relocate_noreplace(
+                    source_parent=source_reader,
+                    source_name=source.name,
+                    destination_parent=destination_reader,
+                    destination_name=destination.name,
+                )
+                tree_reader.verify_path()
+                assert tree_reader.read("payload") == b"identity"
+
+    assert not source.exists()
+    assert (destination / "payload").read_bytes() == b"identity"
+
+
+@pytest.mark.parametrize("exception_type", (KeyboardInterrupt, SystemExit))
+def test_pinned_directory_reader_defers_committed_rename_interruption(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    exception_type: type[BaseException],
+) -> None:
+    source_parent = tmp_path / "source-parent"
+    destination_parent = tmp_path / "destination-parent"
+    source_parent.mkdir()
+    destination_parent.mkdir()
+    source = source_parent / "source"
+    source.mkdir()
+    _regular(source / "payload", b"identity")
+    destination = destination_parent / "destination"
+    real_rename = immutable._rename_noreplace_at
+    interruption = exception_type("injected committed rename interruption")
+
+    def rename_then_interrupt(*args) -> None:
+        real_rename(*args)
+        raise interruption
+
+    monkeypatch.setattr(
+        immutable,
+        "_rename_noreplace_at",
+        rename_then_interrupt,
+    )
+    with immutable.PinnedDirectoryReader(
+        source_parent
+    ) as source_reader, immutable.PinnedDirectoryReader(
+        destination_parent
+    ) as destination_reader, immutable.PinnedDirectoryReader(
+        source
+    ) as tree_reader:
+        with pytest.raises(immutable.CommittedRenameInterruption) as caught:
+            tree_reader.relocate_noreplace(
+                source_parent=source_reader,
+                source_name=source.name,
+                destination_parent=destination_reader,
+                destination_name=destination.name,
+            )
+        assert caught.value.interruption is interruption
+        assert caught.value.handoff_complete is True
+        tree_reader.verify_path()
+        assert tree_reader.read("payload") == b"identity"
+
+    assert not source.exists()
+    assert (destination / "payload").read_bytes() == b"identity"
+
+
+@pytest.mark.parametrize(
+    "exception_type",
+    (KeyboardInterrupt, SystemExit, OSError),
+)
+def test_pinned_directory_reader_types_unproven_postsyscall_outcome(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    exception_type: type[BaseException],
+) -> None:
+    source_parent = tmp_path / "source-parent"
+    destination_parent = tmp_path / "destination-parent"
+    source_parent.mkdir()
+    destination_parent.mkdir()
+    source = source_parent / "source"
+    source.mkdir()
+    _regular(source / "payload", b"identity")
+    destination = destination_parent / "destination"
+    real_entry_metadata = immutable._entry_metadata
+    real_rename = immutable._rename_noreplace_at
+    failure = exception_type("injected post-syscall outcome failure")
+    renamed = False
+    failed = False
+
+    def observe_rename(*args) -> None:
+        nonlocal renamed
+        real_rename(*args)
+        renamed = True
+
+    def fail_first_outcome_probe(parent_descriptor: int, name: str):
+        nonlocal failed
+        if renamed and not failed:
+            failed = True
+            raise failure
+        return real_entry_metadata(parent_descriptor, name)
+
+    monkeypatch.setattr(immutable, "_rename_noreplace_at", observe_rename)
+    monkeypatch.setattr(
+        immutable,
+        "_entry_metadata",
+        fail_first_outcome_probe,
+    )
+    with pytest.raises(immutable.RenameOutcomeUnproven) as caught:
+        with immutable.PinnedDirectoryReader(
+            source_parent
+        ) as source_reader, immutable.PinnedDirectoryReader(
+            destination_parent
+        ) as destination_reader, immutable.PinnedDirectoryReader(
+            source
+        ) as tree_reader:
+            tree_reader.relocate_noreplace(
+                source_parent=source_reader,
+                source_name=source.name,
+                destination_parent=destination_reader,
+                destination_name=destination.name,
+            )
+
+    assert caught.value.error is failure
+    assert renamed is True
+    assert failed is True
+    assert not source.exists()
+    assert (destination / "payload").read_bytes() == b"identity"
+
+
+def test_pinned_directory_reader_rejects_transient_source_only_rename(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_parent = tmp_path / "source-parent"
+    destination_parent = tmp_path / "destination-parent"
+    source_parent.mkdir()
+    destination_parent.mkdir()
+    source = source_parent / "source"
+    source.mkdir()
+    _regular(source / "payload", b"identity")
+    destination = destination_parent / "destination"
+    real_rename = immutable._rename_noreplace_at
+
+    def move_to_destination_and_back(
+        source_descriptor: int,
+        source_name: str,
+        destination_descriptor: int,
+        destination_name: str,
+    ) -> None:
+        real_rename(
+            source_descriptor,
+            source_name,
+            destination_descriptor,
+            destination_name,
+        )
+        real_rename(
+            destination_descriptor,
+            destination_name,
+            source_descriptor,
+            source_name,
+        )
+        raise immutable.ImmutableArtifactError(
+            "injected error after transient committed rename"
+        )
+
+    monkeypatch.setattr(
+        immutable,
+        "_rename_noreplace_at",
+        move_to_destination_and_back,
+    )
+    with pytest.raises(immutable.RenameOutcomeUnproven):
+        with immutable.PinnedDirectoryReader(
+            source_parent
+        ) as source_reader, immutable.PinnedDirectoryReader(
+            destination_parent
+        ) as destination_reader, immutable.PinnedDirectoryReader(
+            source
+        ) as tree_reader:
+            tree_reader.relocate_noreplace(
+                source_parent=source_reader,
+                source_name=source.name,
+                destination_parent=destination_reader,
+                destination_name=destination.name,
+            )
+
+    assert (source / "payload").read_bytes() == b"identity"
+    assert not destination.exists()
+
+
+def test_pinned_directory_reader_relocation_allows_unrelated_sibling_churn(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_parent = tmp_path / "source-parent"
+    destination_parent = tmp_path / "destination-parent"
+    source_parent.mkdir()
+    destination_parent.mkdir()
+    source = source_parent / "source"
+    source.mkdir()
+    destination = destination_parent / "destination"
+    real_rename = immutable._rename_noreplace_at
+
+    def churn_then_rename(*args) -> None:
+        sibling = source_parent / "unrelated"
+        sibling.mkdir()
+        sibling.rmdir()
+        real_rename(*args)
+
+    monkeypatch.setattr(immutable, "_rename_noreplace_at", churn_then_rename)
+    with immutable.PinnedDirectoryReader(
+        source_parent
+    ) as source_reader, immutable.PinnedDirectoryReader(
+        destination_parent
+    ) as destination_reader, immutable.PinnedDirectoryReader(
+        source
+    ) as tree_reader:
+        tree_reader.relocate_noreplace(
+            source_parent=source_reader,
+            source_name=source.name,
+            destination_parent=destination_reader,
+            destination_name=destination.name,
+        )
+        tree_reader.verify_path()
+
+    assert destination.is_dir()
+
+
+def test_pinned_directory_reader_handoff_survives_interruption(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source_parent = tmp_path / "source-parent"
+    destination_parent = tmp_path / "destination-parent"
+    source_parent.mkdir()
+    destination_parent.mkdir()
+    source = source_parent / "source"
+    source.mkdir()
+    _regular(source / "payload", b"identity")
+    destination = destination_parent / "destination"
+    real_close_callables = immutable._close_callables
+    interruption = KeyboardInterrupt("injected handoff interruption")
+    interrupted = False
+
+    def interrupt_old_binding_close(closers, *, label: str) -> None:
+        nonlocal interrupted
+        if label == "renamed pinned directory reader transition" and not interrupted:
+            interrupted = True
+            raise interruption
+        real_close_callables(closers, label=label)
+
+    monkeypatch.setattr(
+        immutable,
+        "_close_callables",
+        interrupt_old_binding_close,
+    )
+    with immutable.PinnedDirectoryReader(
+        source_parent
+    ) as source_reader, immutable.PinnedDirectoryReader(
+        destination_parent
+    ) as destination_reader, immutable.PinnedDirectoryReader(
+        source
+    ) as tree_reader:
+        with pytest.raises(immutable.CommittedRenameInterruption) as caught:
+            tree_reader.relocate_noreplace(
+                source_parent=source_reader,
+                source_name=source.name,
+                destination_parent=destination_reader,
+                destination_name=destination.name,
+            )
+        assert caught.value.interruption is interruption
+        assert caught.value.handoff_complete is True
+        tree_reader.verify_path()
+        assert tree_reader.read("payload") == b"identity"
+
+    assert interrupted is True
+    assert not source.exists()
+    assert (destination / "payload").read_bytes() == b"identity"
+
+
+@pytest.mark.parametrize("mutation", ("move_away_back", "substitute"))
+def test_pinned_directory_reader_relocation_rejects_postrename_substitution(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    mutation: str,
+) -> None:
+    source_parent = tmp_path / "source-parent"
+    destination_parent = tmp_path / "destination-parent"
+    source_parent.mkdir()
+    destination_parent.mkdir()
+    source = source_parent / "source"
+    source.mkdir()
+    _regular(source / "payload", b"identity")
+    destination = destination_parent / "destination"
+    displaced = destination_parent / "displaced"
+    original_open = immutable._open_directory_with_early_path_monitor
+    mutated = False
+
+    source_reader = immutable.PinnedDirectoryReader(source_parent)
+    destination_reader = immutable.PinnedDirectoryReader(destination_parent)
+    tree_reader = immutable.PinnedDirectoryReader(source)
+
+    def mutate_before_rebind(path: Path):
+        nonlocal mutated
+        if Path(path) == destination and not mutated:
+            destination.rename(displaced)
+            if mutation == "move_away_back":
+                displaced.rename(destination)
+            else:
+                destination.mkdir()
+                _regular(destination / "payload", b"identity")
+            mutated = True
+        return original_open(path)
+
+    monkeypatch.setattr(
+        immutable,
+        "_open_directory_with_early_path_monitor",
+        mutate_before_rebind,
+    )
+    try:
+        with pytest.raises(immutable.ImmutableArtifactError):
+            tree_reader.relocate_noreplace(
+                source_parent=source_reader,
+                source_name=source.name,
+                destination_parent=destination_reader,
+                destination_name=destination.name,
+            )
+        assert mutated is True
+    finally:
+        tree_reader._path_monitor.monitor.cancel_close_verification()
+        tree_reader.close()
+        destination_reader.close()
+        source_reader.close()
+
+
 @pytest.mark.parametrize(
     "mutation",
     ["root_before", "root_after", "ancestor_after", "leaf_after"],
