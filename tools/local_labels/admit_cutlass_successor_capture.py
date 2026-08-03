@@ -70,7 +70,7 @@ CGROUP_CONTAINMENT_SUPERVISOR_SHA256 = (
     "7a938d2f7f07fbb1477351a195616f9a7478db5c28b81fa29a3d226d11eadbff"
 )
 CAPTURE_PRODUCER_SELF_SHA256_AUTHORITY = (
-    "89e23e8cdc27fee62f65a5222f06db3ced76c9f355af07f4665739adf7f235ee"
+    "816eb26f885e91ef76b8ce0db45b2b95f4a53518c9793095817cc5e51aa57ef2"
 )
 NCU_LAUNCHER_PATH = (
     "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu"
@@ -436,6 +436,7 @@ def _receipt_ref(
 def _expected_rows(matrix: dict[str, Any]) -> dict[tuple[str, str], dict[str, Any]]:
     rows: dict[tuple[str, str], dict[str, Any]] = {}
     for row in matrix["rows"]:
+        _require_declared_only_launch_contract(row)
         key = (row["matrix_key"], row["variant_id"])
         if key in rows:
             raise AdmissionError(f"duplicate matrix row identity: {key}")
@@ -475,17 +476,55 @@ def _verify_process(process: dict[str, Any], label: str) -> None:
     _check_dt(process["started_at_utc"], f"{label} process started_at_utc")
 
 
-def _verify_launch(launch: dict[str, Any], identity: dict[str, Any], row: dict[str, Any], label: str) -> None:
+def _require_declared_only_launch_contract(row: dict[str, Any]) -> None:
+    inventory = row.get("launch_inventory")
+    shape = row["shape"]
+    command = [
+        f"./{Path(row['static_launch_inventory']['binary_path']).name}",
+        *(str(value) for value in shape["actual_args"]),
+    ]
+    expected = {
+        "status": "declared_only",
+        "expected_process_runs": cohort.RUNTIME_REPEAT_COUNT,
+        "observed_process_runs": cohort.RUNTIME_REPEAT_COUNT,
+        "expected_candidate_launch_count": 1,
+        "observed_candidate_launch_count": None,
+        "candidate_selection_status": "not_run",
+        "dynamic_launch_status": "not_run",
+        "nvbit_trace_status": "not_run",
+        "static_launch_contract": shape["trace_shape"]["launch_config"],
+        "typed_reason": "dynamic_launch_inventory_requires_nvbit_capture",
+        "command": command,
+        "command_sha256": canonical_sha(command),
+    }
+    if type(inventory) is not dict or inventory != expected:
+        raise AdmissionError(
+            "successor launch geometry is not a declared-only contract"
+        )
+
+
+def _verify_launch(
+    launch: dict[str, Any], identity: dict[str, Any], label: str,
+) -> None:
     expected = canonical_sha({k: v for k, v in launch.items() if k != "launch_identity_sha256"})
     if launch["launch_identity_sha256"] != expected:
         raise AdmissionError(f"{label} launch identity seal mismatch")
     if launch["kernel_signature_sha256"] != identity["kernel_signature_sha256"]:
         raise AdmissionError(f"{label} launch/kernel signature mismatch")
-    if launch["kernel_name"] != identity["slug"]:
-        raise AdmissionError(f"{label} kernel_name does not match successor identity")
-    shape = row["shape"]["trace_shape"]
-    if launch["grid_dim"] != shape["launch_config"]["grid"] or launch["block_dim"] != shape["launch_config"]["block"]:
-        raise AdmissionError(f"{label} launch geometry does not match successor matrix")
+    if (
+        launch["launch_index"] != 0
+        or type(launch["kernel_name"]) is not str
+        or not launch["kernel_name"]
+    ):
+        raise AdmissionError(f"{label} observed launch identity is invalid")
+    for field in ("grid_dim", "block_dim"):
+        dimensions = launch[field]
+        if (
+            type(dimensions) is not list
+            or len(dimensions) != 3
+            or any(type(value) is not int or value <= 0 for value in dimensions)
+        ):
+            raise AdmissionError(f"{label} observed launch geometry is invalid")
 
 
 def _import_ncu_report_csv(
@@ -871,12 +910,13 @@ def _verify_ncu_artifacts(
         raise AdmissionError(
             f"NCU launch observation contract is invalid: {exc}"
         ) from exc
-    launch_config = row["shape"]["trace_shape"]["launch_config"]
+    launch = receipt["launch_identity"]
     expected_launch_identity = {
         "ID": "0",
         "Device": GPU_NAME,
-        "Block Size": list(launch_config["block"]),
-        "Grid Size": list(launch_config["grid"]),
+        "Kernel Name": launch["kernel_name"],
+        "Block Size": launch["block_dim"],
+        "Grid Size": launch["grid_dim"],
     }
     return _verify_ncu_report(
         expected_ncu_identity,
@@ -1056,12 +1096,8 @@ def _verify_nvbit_artifacts(
         "grid_dim": [launch.grid_x, launch.grid_y, launch.grid_z],
         "block_dim": [launch.block_x, launch.block_y, launch.block_z],
     }
-    launch_config = row["shape"]["trace_shape"]["launch_config"]
-    if (
-        observed["grid_dim"] != launch_config["grid"]
-        or observed["block_dim"] != launch_config["block"]
-    ):
-        raise AdmissionError("NVBit admitted launch geometry differs from successor row")
+    if observed["kernel_name"] not in _sass_kernel_names(row):
+        raise AdmissionError("NVBit admitted kernel is absent from pinned SASS authority")
     return observed
 
 
@@ -1473,7 +1509,8 @@ def _verify_receipt(
     }
     if identity != expected_identity:
         raise AdmissionError(f"receipt identity does not match matrix: {rel}")
-    _verify_launch(receipt["launch_identity"], identity, row, rel)
+    _require_declared_only_launch_contract(row)
+    _verify_launch(receipt["launch_identity"], identity, rel)
     _verify_process(receipt["process"], rel)
     if receipt["command_sha256"] != canonical_sha(receipt["command"]):
         raise AdmissionError(f"{rel} command digest does not match receipt command")
@@ -1598,6 +1635,15 @@ def _verify_receipt(
     else:
         observed_launch = _verify_nvbit_artifacts(
             generation, root, receipt, row, artifact_by_role
+        )
+    declared_observation = {
+        "kernel_name": receipt["launch_identity"]["kernel_name"],
+        "grid_dim": receipt["launch_identity"]["grid_dim"],
+        "block_dim": receipt["launch_identity"]["block_dim"],
+    }
+    if declared_observation != observed_launch:
+        raise AdmissionError(
+            f"receipt launch identity differs from independently observed launch: {rel}"
         )
     return (
         pair_key,

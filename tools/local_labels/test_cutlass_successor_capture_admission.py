@@ -46,19 +46,29 @@ _REPORT_IDENTITY = {
 }
 
 
-def _row_report_identity(row: dict) -> dict[str, str]:
+def _row_report_identity(
+    row: dict,
+    *,
+    block: list[int] | None = None,
+    grid: list[int] | None = None,
+) -> dict[str, str]:
     launch = row["shape"]["trace_shape"]["launch_config"]
     return {
         "ID": "0",
         "Device": admit.GPU_NAME,
         "Kernel Name": _REPORT_IDENTITY["Kernel Name"],
-        "Block Size": ",".join(str(value) for value in launch["block"]),
-        "Grid Size": ",".join(str(value) for value in launch["grid"]),
+        "Block Size": ",".join(str(value) for value in (block or launch["block"])),
+        "Grid Size": ",".join(str(value) for value in (grid or launch["grid"])),
     }
 
 
-def _row_report_csv(row: dict) -> str:
-    identity = _row_report_identity(row)
+def _row_report_csv(
+    row: dict,
+    *,
+    block: list[int] | None = None,
+    grid: list[int] | None = None,
+) -> str:
+    identity = _row_report_identity(row, block=block, grid=grid)
     prefix = (
         f'{identity["ID"]},{identity["Kernel Name"]},'
         f'"{identity["Block Size"]}","{identity["Grid Size"]}",'
@@ -710,7 +720,7 @@ def _receipt(root: Path, row: dict, kind: str, index: int) -> Path:
     }
     launch = {
         "launch_index": 0,
-        "kernel_name": slug,
+        "kernel_name": _REPORT_IDENTITY["Kernel Name"],
         "kernel_signature_sha256": identity["kernel_signature_sha256"],
         "grid_dim": row["shape"]["trace_shape"]["launch_config"]["grid"],
         "block_dim": row["shape"]["trace_shape"]["launch_config"]["block"],
@@ -1745,8 +1755,135 @@ def test_admission_rechecks_immutable_nvbit_trace_byte_budget(
         )
 
 
-def test_ncu_nvbit_observed_kernel_mismatch_is_rejected(tmp_path: Path):
+def test_observed_geometry_supersedes_declared_only_matrix_geometry(
+    tmp_path: Path,
+    monkeypatch,
+):
     row = MATRIX["rows"][0]
+    ncu_target = _receipt(tmp_path, row, "ncu", 0)
+    nvbit_target = _receipt(tmp_path, row, "nvbit", 0)
+    observed_grid = [1, 1, 1]
+    observed_block = [256, 1, 1]
+    launch_config = row["shape"]["trace_shape"]["launch_config"]
+    assert observed_grid != launch_config["grid"]
+    assert observed_block != launch_config["block"]
+
+    for target in (ncu_target, nvbit_target):
+        document = json.loads(target.read_text())
+        launch = document["receipt"]["launch_identity"]
+        launch["grid_dim"] = observed_grid
+        launch["block_dim"] = observed_block
+        launch["launch_identity_sha256"] = admit.canonical_sha({
+            key: value
+            for key, value in launch.items()
+            if key != "launch_identity_sha256"
+        })
+        _rewrite(target, document)
+
+    def mutate_observation(value: dict) -> None:
+        value["identity"]["Grid Size"] = "1,1,1"
+        value["identity"]["Block Size"] = "256,1,1"
+        value.pop("observation_sha256")
+        value["observation_sha256"] = admit.canonical_sha(value)
+
+    _mutate_json_artifact(
+        tmp_path,
+        ncu_target,
+        "ncu_launch_observation",
+        mutate_observation,
+    )
+    report_sha256 = next(
+        artifact["sha256"]
+        for artifact in json.loads(ncu_target.read_text())["receipt"]["artifacts"]
+        if artifact["role"] == "ncu_report"
+    )
+    monkeypatch.setattr(
+        admit,
+        "_import_ncu_report_csv",
+        lambda _identity, _path: (
+            _row_report_csv(
+                row,
+                block=observed_block,
+                grid=observed_grid,
+            ),
+            report_sha256,
+            None,
+        ),
+    )
+
+    def mutate_trace(trace) -> None:
+        kernel = trace.gpu_device[0].streams[0].kernels[0]
+        kernel.grid_dim.x, kernel.grid_dim.y, kernel.grid_dim.z = observed_grid
+        kernel.block_dim.x, kernel.block_dim.y, kernel.block_dim.z = observed_block
+
+    _mutate_dynamic_trace_artifact(tmp_path, nvbit_target, mutate_trace)
+
+    overlay = admit.build_overlay(
+        tmp_path,
+        generated_at_utc="2026-07-23T01:00:00Z",
+    )
+
+    assert overlay["rows"][0]["status"] == "capture_ready"
+    assert overlay["rows"][0]["launch_identity"]["grid_dim"] == observed_grid
+    assert overlay["rows"][0]["launch_identity"]["block_dim"] == observed_block
+
+
+def test_observed_geometry_requires_declared_only_matrix_authority(
+    tmp_path: Path,
+    monkeypatch,
+):
+    row = MATRIX["rows"][0]
+    _receipt(tmp_path, row, "ncu", 0)
+    matrix = copy.deepcopy(MATRIX)
+    matrix["rows"][0]["launch_inventory"]["status"] = "pass"
+    monkeypatch.setattr(
+        admit,
+        "validate_immutable_bundle",
+        lambda: (None, None, copy.deepcopy(ROSTER), matrix),
+    )
+
+    with pytest.raises(admit.AdmissionError, match="declared-only"):
+        admit.build_overlay(
+            tmp_path,
+            generated_at_utc="2026-07-23T01:00:00Z",
+        )
+
+
+@pytest.mark.parametrize("mutation", ["missing_none_field", "unknown_field"])
+def test_every_matrix_row_requires_exact_declared_only_contract_without_receipts(
+    tmp_path: Path,
+    monkeypatch,
+    mutation: str,
+):
+    matrix = copy.deepcopy(MATRIX)
+    inventory = matrix["rows"][1]["launch_inventory"]
+    if mutation == "missing_none_field":
+        del inventory["observed_candidate_launch_count"]
+    else:
+        inventory["future_launch_status"] = "unknown"
+    monkeypatch.setattr(
+        admit,
+        "validate_immutable_bundle",
+        lambda: (None, None, copy.deepcopy(ROSTER), matrix),
+    )
+
+    with pytest.raises(admit.AdmissionError, match="declared-only"):
+        admit.build_overlay(
+            tmp_path,
+            generated_at_utc="2026-07-23T01:00:00Z",
+        )
+
+
+def test_ncu_nvbit_observed_kernel_mismatch_is_rejected(
+    tmp_path: Path,
+    monkeypatch,
+):
+    row = MATRIX["rows"][0]
+    monkeypatch.setattr(
+        admit,
+        "_sass_kernel_names",
+        lambda _row: {"_Zsynthetic_kernel", "_Zdifferent_kernel"},
+    )
     _receipt(tmp_path, row, "ncu", 0)
     target = _receipt(tmp_path, row, "nvbit", 0)
     document = json.loads(target.read_text())
@@ -1770,9 +1907,16 @@ def test_ncu_nvbit_observed_kernel_mismatch_is_rejected(tmp_path: Path):
     trace_path.write_bytes(payload)
     artifact["sha256"] = admit.sha256_bytes(payload)
     artifact["size_bytes"] = len(payload)
+    launch = document["receipt"]["launch_identity"]
+    launch["kernel_name"] = "_Zdifferent_kernel"
+    launch["launch_identity_sha256"] = admit.canonical_sha({
+        key: value
+        for key, value in launch.items()
+        if key != "launch_identity_sha256"
+    })
     _rewrite(target, document)
 
-    with pytest.raises(admit.AdmissionError, match="observed launch join"):
+    with pytest.raises(admit.AdmissionError, match="identity or launch join"):
         admit.build_overlay(
             tmp_path,
             generated_at_utc="2026-07-23T01:00:00Z",
@@ -1963,7 +2107,7 @@ def test_process_command_hash_must_bind_receipt_command(tmp_path: Path):
         admit.build_overlay(tmp_path, generated_at_utc="2026-07-23T01:00:00Z")
 
 
-def test_kernel_name_must_bind_successor_identity(tmp_path: Path):
+def test_kernel_name_must_bind_independently_observed_launch(tmp_path: Path):
     _receipt(tmp_path, MATRIX["rows"][0], "ncu", 0)
     target = tmp_path / f"00_ncu{admit.RECEIPT_SUFFIX}"
     document = json.loads(target.read_text())
@@ -1973,7 +2117,7 @@ def test_kernel_name_must_bind_successor_identity(tmp_path: Path):
         {key: value for key, value in launch.items() if key != "launch_identity_sha256"}
     )
     _rewrite(target, document)
-    with pytest.raises(admit.AdmissionError, match="kernel_name"):
+    with pytest.raises(admit.AdmissionError, match="independently observed launch"):
         admit.build_overlay(tmp_path, generated_at_utc="2026-07-23T01:00:00Z")
 
 

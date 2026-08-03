@@ -72,7 +72,7 @@ CAPTURE_STREAM_READ_BYTES = 64 * 1024
 CAPTURE_PROCESS_POLL_S = 0.05
 CAPTURE_CLEANUP_TIMEOUT_S = 5.0
 CAPTURE_PRODUCER_SELF_SHA256 = (
-    "89e23e8cdc27fee62f65a5222f06db3ced76c9f355af07f4665739adf7f235ee"
+    "816eb26f885e91ef76b8ce0db45b2b95f4a53518c9793095817cc5e51aa57ef2"
 )
 EXPECTED_TRACE_CONTRACT_ID = admission.TRACE_CONTRACT_ID
 EXPECTED_MEMORY_PAYLOAD_CLASSES = admission.TRACE_MEMORY_PAYLOAD_CLASSES
@@ -1387,6 +1387,76 @@ def _validate_ncu_handoff_manifest(
         raise CaptureError("NCU handoff run manifest differs from successor authority")
 
 
+def _ncu_observed_launch(
+    row: dict[str, Any], observation: dict[str, Any],
+) -> dict[str, Any]:
+    try:
+        admission._require_declared_only_launch_contract(row)
+    except admission.AdmissionError as exc:
+        raise CaptureError(f"NCU launch authority validation failed: {exc}") from exc
+    identity = observation["identity"]
+    try:
+        device = admission._ncu_device_name(identity.get("Device"))
+        block_dim = admission._ncu_dimension(
+            identity.get("Block Size"), "Block Size"
+        )
+        grid_dim = admission._ncu_dimension(
+            identity.get("Grid Size"), "Grid Size"
+        )
+        allowed_kernel_names = admission._sass_kernel_names(row)
+    except admission.AdmissionError as exc:
+        raise CaptureError(f"NCU launch identity validation failed: {exc}") from exc
+    kernel_name = identity.get("Kernel Name")
+    if (
+        identity.get("ID") != "0"
+        or device != GPU_NAME
+        or kernel_name not in allowed_kernel_names
+    ):
+        raise CaptureError("NCU launch identity differs from successor authority")
+    return {
+        "kernel_name": kernel_name,
+        "grid_dim": grid_dim,
+        "block_dim": block_dim,
+    }
+
+
+def _nvbit_observed_launch(
+    row: dict[str, Any], admission_result: Any,
+) -> dict[str, Any]:
+    try:
+        admission._require_declared_only_launch_contract(row)
+    except admission.AdmissionError as exc:
+        raise CaptureError(f"NVBit launch authority validation failed: {exc}") from exc
+    if len(admission_result.launches) != 1:
+        raise CaptureError("NVBit trace must contain exactly one admitted launch")
+    launch = admission_result.launches[0]
+    try:
+        kernel_name = admission._nvbit_kernel_base(launch.kernel_name)
+        allowed_kernel_names = admission._sass_kernel_names(row)
+    except admission.AdmissionError as exc:
+        raise CaptureError(f"NVBit launch identity validation failed: {exc}") from exc
+    dimensions = (
+        launch.grid_x,
+        launch.grid_y,
+        launch.grid_z,
+        launch.block_x,
+        launch.block_y,
+        launch.block_z,
+    )
+    if (
+        launch.launch_index != 0
+        or launch.device_id != 0
+        or kernel_name not in allowed_kernel_names
+        or any(type(value) is not int or value <= 0 for value in dimensions)
+    ):
+        raise CaptureError("NVBit launch identity differs from successor authority")
+    return {
+        "kernel_name": kernel_name,
+        "grid_dim": [launch.grid_x, launch.grid_y, launch.grid_z],
+        "block_dim": [launch.block_x, launch.block_y, launch.block_z],
+    }
+
+
 def _build_ncu_sidecar(
     *,
     row: dict[str, Any],
@@ -1425,27 +1495,7 @@ def _build_ncu_sidecar(
         requested_launch_count=1,
         report_sha256=imported.report_sha256,
     )
-    identity = observation["identity"]
-    launch_config = row["shape"]["trace_shape"]["launch_config"]
-    try:
-        device = admission._ncu_device_name(identity.get("Device"))
-        block_dim = admission._ncu_dimension(
-            identity.get("Block Size"), "Block Size"
-        )
-        grid_dim = admission._ncu_dimension(
-            identity.get("Grid Size"), "Grid Size"
-        )
-        allowed_kernel_names = admission._sass_kernel_names(row)
-    except admission.AdmissionError as exc:
-        raise CaptureError(f"NCU launch identity validation failed: {exc}") from exc
-    if (
-        identity.get("ID") != "0"
-        or device != GPU_NAME
-        or block_dim != launch_config["block"]
-        or grid_dim != launch_config["grid"]
-        or identity.get("Kernel Name") not in allowed_kernel_names
-    ):
-        raise CaptureError("NCU launch identity differs from successor authority")
+    _ncu_observed_launch(row, observation)
 
     sidecar_environment = {
         "SIDECAR_DEVICE": ARCH,
@@ -1856,7 +1906,7 @@ def _receipt(
     *, root: Path, phase: str, row: dict[str, Any], preflight_path: Path,
     preflight_payload: bytes, environment_path: Path, environment_payload: bytes,
     command: list[str], process: dict[str, Any], artifacts: list[dict[str, Any]],
-    semantic: dict[str, Any], captured_at: str,
+    semantic: dict[str, Any], observed_launch: dict[str, Any], captured_at: str,
     capture_producer_sha256: str,
     containment_supervisor_sha256: str,
     phase_tool_sha256: str,
@@ -1896,12 +1946,12 @@ def _receipt(
             },
             "launch_identity": {
                 "launch_index": 0,
-                "kernel_name": row["successor_slug"],
+                "kernel_name": observed_launch["kernel_name"],
                 "kernel_signature_sha256": hashlib.sha256(
                     f"{row['successor_slug']}|{row['static_launch_inventory']['binary_path']}".encode()
                 ).hexdigest(),
-                "grid_dim": row["shape"]["trace_shape"]["launch_config"]["grid"],
-                "block_dim": row["shape"]["trace_shape"]["launch_config"]["block"],
+                "grid_dim": list(observed_launch["grid_dim"]),
+                "block_dim": list(observed_launch["block_dim"]),
             },
             "process": process,
             "provenance": provenance,
@@ -1957,6 +2007,7 @@ def _finalize_capture_in_generation(
     }
     process["process_identity_sha256"] = canonical_sha(process)
     artifacts: list[dict[str, Any]] = []
+    observed_launch: dict[str, Any]
     if phase == "ncu":
         cell = root / ARCH / row["successor_slug"] / "trace_00"
         cell_reader = generation_stack.enter_context(
@@ -2004,6 +2055,7 @@ def _finalize_capture_in_generation(
             raise CaptureError(
                 f"NCU launch observation validation failed: {exc}"
             ) from exc
+        observed_launch = _ncu_observed_launch(row, observation)
         metrics = {
             item.get("ncu_metric")
             for item in sidecar.get("unit_tagged_metrics", [])
@@ -2076,6 +2128,7 @@ def _finalize_capture_in_generation(
             raise CaptureError(
                 f"NVBit trace contract failed: {contract.typed_reason}"
             )
+        observed_launch = _nvbit_observed_launch(row, admission_result)
         artifacts.append(
             _artifact(root, trace_root / "dynamic_trace.pb", "dynamic_trace")
         )
@@ -2136,6 +2189,7 @@ def _finalize_capture_in_generation(
         process=process,
         artifacts=artifacts,
         semantic=semantic,
+        observed_launch=observed_launch,
         captured_at=captured,
         capture_producer_sha256=capture_producer_sha256,
         containment_supervisor_sha256=containment_supervisor_sha256,

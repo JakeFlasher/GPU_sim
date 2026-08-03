@@ -740,6 +740,11 @@ def test_receipt_publication_rejects_artifact_generation_mutation(
             ],
         }))
 
+    monkeypatch.setattr(
+        capture.admission,
+        "_sass_kernel_names",
+        lambda _row: {"fixture"},
+    )
     monkeypatch.setattr(capture.admission, "_validate_schema", mutate_after_validation)
 
     with pytest.raises(
@@ -1416,12 +1421,18 @@ def _ncu_handoff_manifest(row: dict) -> dict:
     }
 
 
-def _ncu_details_csv(row: dict, kernel_name: str = "_Zfixture_kernel") -> str:
+def _ncu_details_csv(
+    row: dict,
+    kernel_name: str = "_Zfixture_kernel",
+    *,
+    block: list[int] | None = None,
+    grid: list[int] | None = None,
+) -> str:
     launch = row["shape"]["trace_shape"]["launch_config"]
-    block = ",".join(str(value) for value in launch["block"])
-    grid = ",".join(str(value) for value in launch["grid"])
+    block_text = ",".join(str(value) for value in (block or launch["block"]))
+    grid_text = ",".join(str(value) for value in (grid or launch["grid"]))
     prefix = (
-        f'0,{capture.GPU_NAME},{kernel_name},"{block}","{grid}"'
+        f'0,{capture.GPU_NAME},{kernel_name},"{block_text}","{grid_text}"'
     )
     return (
         "ID,Device,Kernel Name,Block Size,Grid Size,Metric Name,Metric Value\n"
@@ -1732,6 +1743,57 @@ def test_ncu_handoff_is_imported_and_published_as_singleton(
     )
     assert observation["report_sha256"] == capture.sha256_bytes(report_payload)
     assert observation["identity"]["Kernel Name"] == "_Zfixture_kernel"
+
+
+def test_ncu_handoff_retains_observed_geometry_over_declared_geometry(
+    tmp_path: Path,
+    monkeypatch,
+):
+    row, _roster = capture._row_for(MATRIX_KEY, VARIANT_ID)
+    root = tmp_path / "capture"
+    cell, report_payload = _write_ncu_handoff(root, row)
+    identity = capture._ncu_identity_from_authority(_ncu_authority())
+    observed_block = [256, 1, 1]
+    observed_grid = [1, 1, 1]
+    assert observed_block != row["shape"]["trace_shape"]["launch_config"]["block"]
+    assert observed_grid != row["shape"]["trace_shape"]["launch_config"]["grid"]
+    monkeypatch.setattr(
+        capture.parse_ncu_metrics,
+        "_import_report_csv",
+        lambda *_args, **_kwargs: (
+            capture.parse_ncu_metrics.ImportedReportCsv(
+                text=_ncu_details_csv(
+                    row,
+                    block=observed_block,
+                    grid=observed_grid,
+                ),
+                report_sha256=capture.sha256_bytes(report_payload),
+                report_size_bytes=len(report_payload),
+            ),
+            None,
+        ),
+    )
+    monkeypatch.setattr(
+        capture.admission,
+        "_sass_kernel_names",
+        lambda _row: {"_Zfixture_kernel"},
+    )
+
+    capture._postprocess_ncu_handoff(
+        root=root,
+        row=row,
+        live=_nvbit_live(),
+        expected_ncu_identity=identity,
+    )
+
+    observation = json.loads(
+        (cell / "run_0_launch_set.launch_observation.json").read_text()
+    )
+    assert capture._ncu_observed_launch(row, observation) == {
+        "kernel_name": "_Zfixture_kernel",
+        "grid_dim": observed_grid,
+        "block_dim": observed_block,
+    }
 
 
 def test_ncu_handoff_generation_stays_retained_until_receipt_commit(
