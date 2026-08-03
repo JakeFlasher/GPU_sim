@@ -34,7 +34,10 @@ from tools.local_labels import admit_cutlass_successor_capture as admission  # n
 from tools.local_labels import campaign_preflight  # noqa: E402
 from tools.local_labels import delegated_cgroup  # noqa: E402
 from tools.local_labels import immutable_artifact as immutable  # noqa: E402
+from tools.local_labels import metric_registry  # noqa: E402
 from tools.local_labels import ncu_action_executor as ncu_executor  # noqa: E402
+from tools.local_labels import parse_ncu_metrics  # noqa: E402
+from tools.local_labels import sidecar_emitter  # noqa: E402
 from tools.local_labels.capture_toolchain_contract import (  # noqa: E402
     parse_nvcc_release_banner,
     require_sol_cuda_release,
@@ -55,6 +58,7 @@ CUDA_RELEASE = {"major": 13, "minor": 2}
 NVBIT_VERSION = admission.NVBIT_VERSION
 NCU_VERSION = "2026.1.0"
 GPU_NAME = "NVIDIA GeForce RTX 3090 Ti"
+DRIVER_VERSION = "610.43.02"
 SM_CLOCK_MHZ = 1350
 MEM_CLOCK_MHZ = 10501
 TRACER_SO = ROOT / admission.NVBIT_TRACER_REL
@@ -68,13 +72,34 @@ CAPTURE_STREAM_READ_BYTES = 64 * 1024
 CAPTURE_PROCESS_POLL_S = 0.05
 CAPTURE_CLEANUP_TIMEOUT_S = 5.0
 CAPTURE_PRODUCER_SELF_SHA256 = (
-    "aa677745c38573ea331ec9af287f0b4d616de22d2570e7c0fd50b657acb5ee6e"
+    "27a340df7a65beeeb3d5c8f2a83d174667fc8bf04088ad1042c589cc81a08a79"
 )
 EXPECTED_TRACE_CONTRACT_ID = admission.TRACE_CONTRACT_ID
 EXPECTED_MEMORY_PAYLOAD_CLASSES = admission.TRACE_MEMORY_PAYLOAD_CLASSES
 _LABEL_COLLECTION_PATH = "/usr/local/cuda-13.2/bin:/usr/bin:/bin"
 _LABEL_COLLECTION_ENVIRONMENT_NAMES = (
     admission.NCU_COLLECTION_OPTIONAL_ENVIRONMENT_NAMES
+)
+_NCU_HANDOFF_STDERR = (
+    b"label_driver: NCU_LAUNCH_SET_POSTPROCESSING_UNIMPLEMENTED: "
+    b"explicit launch-set report retained without a sidecar\n"
+)
+_NCU_INITIAL_ARTIFACT_NAMES = frozenset({
+    "label_run_manifest_0_launch_set.json",
+    "run_0_launch_set.ncu-rep",
+})
+_NCU_COMPLETE_ARTIFACT_NAMES = frozenset({
+    *_NCU_INITIAL_ARTIFACT_NAMES,
+    "label_0_0.json",
+    "run_0_launch_set.launch_observation.json",
+})
+_NCU_PERCENTAGE_METRICS = (
+    "lts__t_sector_hit_rate.pct",
+    "l1tex__t_sector_hit_rate.pct",
+)
+_NCU_UNIT_METRICS = (
+    "gpc__cycles_elapsed.max",
+    "gpu__time_duration.sum",
 )
 
 
@@ -110,6 +135,16 @@ def canonical_sha(value: Any) -> str:
 
 def sha256_bytes(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
+
+
+def _host_identity_sha256(live: dict[str, Any]) -> str:
+    return canonical_sha({
+        "gpu": live["gpu_name"],
+        "smi": live["smi_stdout_sha256"],
+        "gpu_uuid_sha256": live["gpu_uuid_sha256"],
+        "driver_version": live["driver_version"],
+        "identity_stdout_sha256": live["identity_stdout_sha256"],
+    })
 
 
 def _regular(path: Path, label: str) -> None:
@@ -175,8 +210,8 @@ def _load_object(path: Path, label: str) -> tuple[dict[str, Any], bytes]:
     _regular(path, label)
     payload = path.read_bytes()
     try:
-        value = json.loads(payload)
-    except (UnicodeError, json.JSONDecodeError) as exc:
+        value = immutable.strict_json_loads(payload, label=label)
+    except immutable.ImmutableArtifactError as exc:
         raise CaptureError(f"{label} is not valid JSON: {exc}") from exc
     if not isinstance(value, dict):
         raise CaptureError(f"{label} is not an object")
@@ -1127,6 +1162,28 @@ def validate_live_capture_preflight(*, phase: str) -> dict[str, Any]:
     apps_stdout, _ = _query(apps_command, "nvidia-smi competing-process")
     if apps_stdout.strip() and "no running processes" not in apps_stdout.lower():
         raise CaptureError(f"competing GPU processes are present: {apps_stdout.strip()!r}")
+    identity_command = [
+        "nvidia-smi", "--query-gpu=uuid,driver_version",
+        "--format=csv,noheader,nounits",
+    ]
+    identity_stdout, _ = _query(identity_command, "nvidia-smi device identity")
+    identity_lines = [
+        line.strip() for line in identity_stdout.splitlines() if line.strip()
+    ]
+    if len(identity_lines) != 1:
+        raise CaptureError(
+            f"expected one selected GPU identity, observed={identity_lines!r}"
+        )
+    identity_fields = [part.strip() for part in identity_lines[0].split(",")]
+    if (
+        len(identity_fields) != 2
+        or re.fullmatch(admission.GPU_UUID_PATTERN, identity_fields[0]) is None
+        or identity_fields[1] != DRIVER_VERSION
+    ):
+        raise CaptureError(
+            f"live GPU identity is not pinned: {identity_fields!r}"
+        )
+    gpu_uuid_sha256 = sha256_bytes(identity_fields[0].encode("utf-8"))
     nvcc_command = [str(CUDA_NVCC), "--version"]
     nvcc_stdout, _ = _query(nvcc_command, "CUDA 13.2 nvcc")
     try:
@@ -1142,6 +1199,11 @@ def validate_live_capture_preflight(*, phase: str) -> dict[str, Any]:
         "competing_process_command": apps_command,
         "competing_process_stdout": apps_stdout,
         "competing_process_stdout_sha256": sha256_bytes(apps_stdout.encode()),
+        "identity_command": identity_command,
+        "identity_stdout": identity_stdout,
+        "identity_stdout_sha256": sha256_bytes(identity_stdout.encode()),
+        "gpu_uuid_sha256": gpu_uuid_sha256,
+        "driver_version": DRIVER_VERSION,
         "nvcc_command": nvcc_command,
         "nvcc_stdout": nvcc_stdout,
         "nvcc_stdout_sha256": sha256_bytes(nvcc_stdout.encode()),
@@ -1206,7 +1268,8 @@ def _environment_document(
     else:
         raise CaptureError("environment document capture kind is invalid")
     output_keys = [
-        "smi_stdout", "competing_process_stdout", "nvcc_stdout",
+        "smi_stdout", "competing_process_stdout", "identity_stdout",
+        "nvcc_stdout",
     ]
     if capture_kind == "ncu":
         output_keys.append("ncu_stdout")
@@ -1267,9 +1330,394 @@ def _artifact(root: Path, path: Path, role: str) -> dict[str, Any]:
     return {"role": role, "path": relative, "sha256": sha256_bytes(payload), "size_bytes": len(payload)}
 
 
+def _require_directory_namespace(
+    parent: immutable.PinnedDirectoryReader,
+    *,
+    expected_names: frozenset[str],
+    label: str,
+) -> None:
+    try:
+        observed = os.listdir(parent.descriptor)
+    except OSError as exc:
+        raise CaptureError(f"cannot inspect {label} namespace: {exc}") from exc
+    if len(observed) != len(set(observed)) or set(observed) != expected_names:
+        raise CaptureError(
+            f"{label} namespace differs: "
+            f"expected={sorted(expected_names)!r} observed={sorted(observed)!r}"
+        )
+    parent.verify_path()
+
+
+def _require_ncu_cell_namespace(
+    parent: immutable.PinnedDirectoryReader,
+    *,
+    expected_names: frozenset[str],
+) -> None:
+    _require_directory_namespace(
+        parent,
+        expected_names=expected_names,
+        label="NCU handoff",
+    )
+
+
+def _validate_ncu_handoff_manifest(
+    document: Any,
+    *,
+    row: dict[str, Any],
+) -> None:
+    kernel_signature = hashlib.sha256(
+        (
+            f"{row['successor_slug']}|"
+            f"{row['static_launch_inventory']['binary_path']}"
+        ).encode("utf-8")
+    ).hexdigest()
+    expected = {
+        "schema_version": 1,
+        "source_commit": PINNED_COMMIT,
+        "binary_sha256": row["static_launch_inventory"]["binary_sha256"],
+        "kernel_signature_sha256": kernel_signature,
+        "kernel_signature_source": "fallback_legacy",
+        "arch": ARCH,
+        "slug": row["successor_slug"],
+        "shape_point": row["shape"]["shape_point"],
+        "repeat_index": 0,
+        "launch_index": 0,
+    }
+    if type(document) is not dict or document != expected:
+        raise CaptureError("NCU handoff run manifest differs from successor authority")
+
+
+def _build_ncu_sidecar(
+    *,
+    row: dict[str, Any],
+    live: dict[str, Any],
+    expected_ncu_identity: ncu_executor.ExpectedNcuIdentity,
+    imported: parse_ncu_metrics.ImportedReportCsv,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    percentage = parse_ncu_metrics.parse_raw_page_csv(
+        imported.text,
+        _NCU_PERCENTAGE_METRICS,
+    )
+    if not percentage.ok:
+        raise CaptureError(
+            "NCU percentage metric extraction failed: "
+            f"{percentage.typed_reason}: {percentage.detail}"
+        )
+    unit_tagged = parse_ncu_metrics.extract_unit_tagged_metrics(
+        imported.text,
+        metric_registry.load_registry(),
+        _NCU_UNIT_METRICS,
+    )
+    if not unit_tagged.ok:
+        raise CaptureError(
+            "NCU unit-tagged metric extraction failed: "
+            f"{unit_tagged.typed_reason}: {unit_tagged.detail}"
+        )
+    observation = parse_ncu_metrics.build_launch_observation_document(
+        csv_text=imported.text,
+        report_sha256=imported.report_sha256,
+        requested_launch_skip=0,
+        requested_launch_count=1,
+    )
+    parse_ncu_metrics.validate_launch_observation_document(
+        observation,
+        requested_launch_skip=0,
+        requested_launch_count=1,
+        report_sha256=imported.report_sha256,
+    )
+    identity = observation["identity"]
+    launch_config = row["shape"]["trace_shape"]["launch_config"]
+    try:
+        device = admission._ncu_device_name(identity.get("Device"))
+        block_dim = admission._ncu_dimension(
+            identity.get("Block Size"), "Block Size"
+        )
+        grid_dim = admission._ncu_dimension(
+            identity.get("Grid Size"), "Grid Size"
+        )
+        allowed_kernel_names = admission._sass_kernel_names(row)
+    except admission.AdmissionError as exc:
+        raise CaptureError(f"NCU launch identity validation failed: {exc}") from exc
+    if (
+        identity.get("ID") != "0"
+        or device != GPU_NAME
+        or block_dim != launch_config["block"]
+        or grid_dim != launch_config["grid"]
+        or identity.get("Kernel Name") not in allowed_kernel_names
+    ):
+        raise CaptureError("NCU launch identity differs from successor authority")
+
+    sidecar_environment = {
+        "SIDECAR_DEVICE": ARCH,
+        "SIDECAR_SLUG": row["successor_slug"],
+        "SIDECAR_SHAPE_POINT": row["shape"]["shape_point"],
+        "SIDECAR_REPEAT_INDEX": "0",
+        "SIDECAR_LAUNCH_INDEX": "0",
+        "SIDECAR_BINARY_SHA256": row["static_launch_inventory"]["binary_sha256"],
+        "SIDECAR_PROFILER_VERSION": expected_ncu_identity.version_line,
+        "SIDECAR_CUDA_VERSION": "13.2",
+        "SIDECAR_DRIVER_VERSION": live["driver_version"],
+        "SIDECAR_GPU_UUID_SHA256": live["gpu_uuid_sha256"],
+        "SIDECAR_AGGREGATION": "kernel",
+        "SIDECAR_UNITS": "sector_hit_rate_fraction",
+        "SIDECAR_CONFIDENCE_LEVEL": "0.95",
+        "SIDECAR_WARMUP_COUNT": "0",
+        "SIDECAR_HIT_RATE_L2": str(
+            percentage.fraction_values["lts__t_sector_hit_rate.pct"]
+        ),
+        "SIDECAR_HIT_RATE_L1TEX": str(
+            percentage.fraction_values["l1tex__t_sector_hit_rate.pct"]
+        ),
+        "SIDECAR_EVIDENCE_CLASS": "campaign",
+        "SIDECAR_NCU_CLOCK_CONTROL": "none",
+        "SIDECAR_NCU_CACHE_CONTROL": "all",
+        "SIDECAR_NCU_REPLAY_MODE": "kernel",
+        "SIDECAR_NCU_TARGET_PROCESSES": "all",
+        "SIDECAR_NCU_FILTER_MODE": "global",
+        "SIDECAR_NCU_PROFILE_FROM_START": "off",
+        "SIDECAR_NCU_LAUNCH_SKIP": "0",
+        "SIDECAR_NCU_LAUNCH_COUNT": "1",
+        "SIDECAR_HOST_GPU_INDEX": "0",
+        "SIDECAR_HOST_PERSISTENCE_MODE": live["persistence_mode"],
+        "SIDECAR_HOST_SM_CLOCK_MHZ": str(live["sm_clock_mhz"]),
+        "SIDECAR_HOST_MEM_CLOCK_MHZ": str(live["mem_clock_mhz"]),
+    }
+    sidecar = sidecar_emitter.build_sidecar(sidecar_environment)
+    diagnostics = parse_ncu_metrics.diagnostics_to_json_shape(
+        parse_ncu_metrics._merged_parser_diagnostics_result(
+            percentage,
+            unit_tagged,
+        )
+    )
+    if diagnostics:
+        sidecar["parser_diagnostics"] = diagnostics
+    sidecar["unit_tagged_metrics"] = [
+        {
+            "ncu_metric": name,
+            "unit": unit_tagged.metrics[name]["unit"],
+            "value": unit_tagged.metrics[name]["value"],
+        }
+        for name in _NCU_UNIT_METRICS
+    ]
+    try:
+        admission._validate_schema(
+            ROOT / admission.LOCAL_LABEL_SIDECAR_SCHEMA_REL,
+            sidecar,
+            "NCU label sidecar",
+        )
+        from tools.local_labels import import_label
+
+        result = import_label.validate(sidecar)
+    except Exception as exc:
+        raise CaptureError(f"NCU label sidecar validation failed: {exc}") from exc
+    if not result.ok:
+        raise CaptureError(
+            "NCU label sidecar semantic validation failed: "
+            f"{result.typed_reason}"
+        )
+    return sidecar, observation
+
+
+def _postprocess_ncu_handoff(
+    *,
+    root: Path,
+    row: dict[str, Any],
+    live: dict[str, Any],
+    expected_ncu_identity: ncu_executor.ExpectedNcuIdentity,
+    generation_stack: contextlib.ExitStack | None = None,
+) -> None:
+    cell = root / ARCH / row["successor_slug"] / "trace_00"
+    report_path = cell / "run_0_launch_set.ncu-rep"
+    manifest_path = cell / "label_run_manifest_0_launch_set.json"
+    observation_path = cell / "run_0_launch_set.launch_observation.json"
+    sidecar_path = cell / "label_0_0.json"
+    try:
+        with contextlib.ExitStack() as retained_stack:
+            parent = retained_stack.enter_context(
+                immutable.PinnedDirectoryReader(cell)
+            )
+            _require_ncu_cell_namespace(
+                parent,
+                expected_names=_NCU_INITIAL_ARTIFACT_NAMES,
+            )
+            retained_report = retained_stack.enter_context(
+                immutable.open_retained_regular(report_path)
+            )
+            retained_manifest = retained_stack.enter_context(
+                immutable.open_retained_regular(manifest_path)
+            )
+            if retained_report.size_bytes <= 0 or retained_manifest.size_bytes <= 0:
+                raise CaptureError("NCU handoff artifact is empty")
+            active_stack = retained_stack
+            if generation_stack is not None:
+                generation_stack.enter_context(retained_stack.pop_all())
+                active_stack = generation_stack
+            try:
+                manifest = immutable.strict_json_loads(
+                    retained_manifest.read_bytes(),
+                    label="NCU handoff run manifest",
+                )
+            except immutable.ImmutableArtifactError as exc:
+                raise CaptureError(
+                    f"NCU handoff run manifest is not valid JSON: {exc}"
+                ) from exc
+            _validate_ncu_handoff_manifest(manifest, row=row)
+            imported, import_error = parse_ncu_metrics._import_report_csv(
+                expected_ncu_identity,
+                report_path,
+                require_cgroup_containment=True,
+            )
+            if import_error is not None or imported is None:
+                detail = getattr(import_error, "detail", repr(import_error))
+                raise CaptureError(f"NCU handoff report import failed: {detail}")
+            if (
+                imported.report_sha256 != retained_report.sha256
+                or imported.report_size_bytes != retained_report.size_bytes
+            ):
+                raise CaptureError(
+                    "NCU imported report identity differs from retained handoff"
+                )
+            sidecar, observation = _build_ncu_sidecar(
+                row=row,
+                live=live,
+                expected_ncu_identity=expected_ncu_identity,
+                imported=imported,
+            )
+            sidecar_payload = immutable.pretty_json_bytes(sidecar)
+            observation_payload = immutable.pretty_json_bytes(observation)
+
+            def verify_handoff() -> None:
+                retained_report.verify_unchanged()
+                retained_manifest.verify_unchanged()
+                parent.verify_path()
+
+            retained_observation: immutable.RetainedRegular | None = None
+
+            def retain_observation() -> None:
+                nonlocal retained_observation
+                verify_handoff()
+                retained_observation = active_stack.enter_context(
+                    immutable.open_retained_regular(observation_path)
+                )
+                if retained_observation.read_bytes() != observation_payload:
+                    raise CaptureError(
+                        "committed NCU launch observation differs from generated bytes"
+                    )
+                _require_ncu_cell_namespace(
+                    parent,
+                    expected_names=frozenset({
+                        *_NCU_INITIAL_ARTIFACT_NAMES,
+                        observation_path.name,
+                    }),
+                )
+                retained_observation.verify_unchanged()
+
+            immutable.publish_regular_file(
+                cell,
+                observation_path.name,
+                observation_payload,
+                pinned_parent=parent,
+                after_commit=retain_observation,
+            )
+            if retained_observation is None:
+                raise CaptureError("NCU launch observation was not retained")
+
+            def verify_observation() -> None:
+                verify_handoff()
+                assert retained_observation is not None
+                retained_observation.verify_unchanged()
+
+            retained_sidecar: immutable.RetainedRegular | None = None
+
+            def retain_sidecar() -> None:
+                nonlocal retained_sidecar
+                verify_observation()
+                retained_sidecar = active_stack.enter_context(
+                    immutable.open_retained_regular(sidecar_path)
+                )
+                if retained_sidecar.read_bytes() != sidecar_payload:
+                    raise CaptureError(
+                        "committed NCU sidecar differs from generated bytes"
+                    )
+                _require_ncu_cell_namespace(
+                    parent,
+                    expected_names=_NCU_COMPLETE_ARTIFACT_NAMES,
+                )
+                retained_sidecar.verify_unchanged()
+
+            immutable.publish_regular_file(
+                cell,
+                sidecar_path.name,
+                sidecar_payload,
+                pinned_parent=parent,
+                after_commit=retain_sidecar,
+            )
+            if retained_sidecar is None:
+                raise CaptureError("NCU sidecar was not retained")
+            verify_observation()
+            retained_sidecar.verify_unchanged()
+    except CaptureError:
+        raise
+    except (
+        OSError,
+        TypeError,
+        ValueError,
+        KeyError,
+        RecursionError,
+        immutable.ImmutableArtifactError,
+    ) as exc:
+        raise CaptureError(f"NCU handoff postprocessing failed: {exc}") from exc
+
+
+def _retain_failed_ncu_handoff(
+    root: Path,
+    row: dict[str, Any],
+    generation_stack: contextlib.ExitStack,
+) -> list[dict[str, Any]]:
+    cell = root / ARCH / row["successor_slug"] / "trace_00"
+    try:
+        metadata = cell.lstat()
+    except FileNotFoundError:
+        return []
+    except OSError as exc:
+        raise CaptureError(f"cannot inspect failed NCU handoff root: {exc}") from exc
+    if cell.is_symlink() or not stat.S_ISDIR(metadata.st_mode):
+        raise CaptureError("failed NCU handoff root is not a pinned directory")
+    reader = generation_stack.enter_context(
+        immutable.PinnedDirectoryReader(cell)
+    )
+    snapshot = generation_stack.enter_context(reader.retain_tree_generation(
+        max_files=64,
+        max_directories=16,
+        max_total_file_bytes=8 * 1024 * 1024 * 1024,
+        max_total_relative_path_bytes=64 * 1024,
+    ))
+    roles = {
+        "run_0_launch_set.ncu-rep": "ncu_report",
+        "label_run_manifest_0_launch_set.json": "label_run_manifest",
+        "run_0_launch_set.launch_observation.json": "ncu_launch_observation",
+        "label_0_0.json": "label_sidecar",
+    }
+    artifacts: list[dict[str, Any]] = []
+    for relative, expected_metadata in snapshot.files:
+        retained = reader.read_snapshot(
+            relative,
+            expected_metadata=expected_metadata,
+        )
+        path = cell / relative
+        artifacts.append({
+            "role": roles.get(relative, "retained_failed_handoff_artifact"),
+            "path": path.relative_to(root).as_posix(),
+            "sha256": sha256_bytes(retained.payload),
+            "size_bytes": len(retained.payload),
+        })
+    return artifacts
+
+
 def _write_failure_provenance(
     failure_root: Path,
     *,
+    root: Path,
     phase: str,
     row: dict[str, Any],
     command: list[str],
@@ -1281,61 +1729,127 @@ def _write_failure_provenance(
     phase_tool_sha256: str,
     action_executor_sha256: str | None,
     error: CaptureError,
+    generation_stack: contextlib.ExitStack | None = None,
 ) -> None:
-    failure_root.mkdir(parents=True, exist_ok=True)
-    streams = []
-    for path in sorted(failure_root.glob("*.bin")):
-        _regular(path, "failed capture stream")
-        payload = path.read_bytes()
-        streams.append({
-            "path": path.name,
-            "sha256": sha256_bytes(payload),
-            "size_bytes": len(payload),
-        })
-    failed_command = error.process_command or command
-    failed_environment = error.process_environment or default_environment
-    failed_tool_sha256 = error.process_tool_sha256 or phase_tool_sha256
-    process = {
-        "role": error.process_role or f"{phase}_capture",
-        "boot_id_sha256": _boot_id_sha256(),
-        "command": failed_command,
-        "command_sha256": canonical_sha(failed_command),
-        "environment": failed_environment,
-        "environment_sha256": canonical_sha(failed_environment),
-        "host_identity_sha256": canonical_sha({
-            "gpu": live["gpu_name"],
-            "smi": live["smi_stdout_sha256"],
-        }),
-        "pid": error.process_id,
-        "started_at_utc": error.started_at_utc,
-    }
-    if error.containment is not None:
-        process["containment"] = error.containment.as_dict()
-    provenance = {
-        "capture_producer_sha256": capture_producer_sha256,
-        "containment_supervisor_sha256": containment_supervisor_sha256,
-        "phase_tool_sha256": failed_tool_sha256,
-    }
-    if action_executor_sha256 is not None:
-        provenance["action_executor_sha256"] = action_executor_sha256
-    document = {
-        "schema_version": 1,
-        "artifact_kind": "cutlass_successor_capture_failure",
-        "status": "failed_unadmitted",
-        "capture_kind": phase,
-        "matrix_key": row["matrix_key"],
-        "variant_id": row["variant_id"],
-        "detail": error.detail,
-        "capture_environment_document_sha256": sha256_bytes(environment_payload),
-        "process": process,
-        "provenance": provenance,
-        "streams": streams,
-    }
-    document["failure_seal_sha256"] = canonical_sha(document)
-    _write_new(
-        failure_root / "failure_provenance.json",
-        (json.dumps(document, sort_keys=True, indent=2) + "\n").encode(),
-    )
+    if generation_stack is None:
+        generation_stack = contextlib.ExitStack()
+    try:
+        failure_root.mkdir(parents=True, exist_ok=True)
+        parent = generation_stack.enter_context(
+            immutable.PinnedDirectoryReader(failure_root)
+        )
+        try:
+            observed_names = os.listdir(parent.descriptor)
+        except OSError as exc:
+            raise CaptureError(
+                f"cannot inspect capture failure namespace: {exc}"
+            ) from exc
+        stream_names = frozenset(observed_names)
+        if (
+            len(observed_names) != len(stream_names)
+            or any(not name.endswith(".bin") for name in stream_names)
+        ):
+            raise CaptureError(
+                "capture failure namespace contains non-stream evidence"
+            )
+        _require_directory_namespace(
+            parent,
+            expected_names=stream_names,
+            label="capture failure",
+        )
+        streams = []
+        for name in sorted(stream_names):
+            path = failure_root / name
+            retained_stream = generation_stack.enter_context(
+                immutable.open_retained_regular(path)
+            )
+            streams.append({
+                "path": name,
+                "sha256": retained_stream.sha256,
+                "size_bytes": retained_stream.size_bytes,
+            })
+        handoff_artifacts = (
+            _retain_failed_ncu_handoff(root, row, generation_stack)
+            if phase == "ncu"
+            else []
+        )
+        failed_command = error.process_command or command
+        failed_environment = error.process_environment or default_environment
+        failed_tool_sha256 = error.process_tool_sha256 or phase_tool_sha256
+        process = {
+            "role": error.process_role or f"{phase}_capture",
+            "boot_id_sha256": _boot_id_sha256(),
+            "command": failed_command,
+            "command_sha256": canonical_sha(failed_command),
+            "environment": failed_environment,
+            "environment_sha256": canonical_sha(failed_environment),
+            "host_identity_sha256": _host_identity_sha256(live),
+            "pid": error.process_id,
+            "started_at_utc": error.started_at_utc,
+        }
+        if error.containment is not None:
+            process["containment"] = error.containment.as_dict()
+        provenance = {
+            "capture_producer_sha256": capture_producer_sha256,
+            "containment_supervisor_sha256": containment_supervisor_sha256,
+            "phase_tool_sha256": failed_tool_sha256,
+        }
+        if action_executor_sha256 is not None:
+            provenance["action_executor_sha256"] = action_executor_sha256
+        document = {
+            "schema_version": 1,
+            "artifact_kind": "cutlass_successor_capture_failure",
+            "status": "failed_unadmitted",
+            "capture_kind": phase,
+            "matrix_key": row["matrix_key"],
+            "variant_id": row["variant_id"],
+            "detail": error.detail,
+            "capture_environment_document_sha256": sha256_bytes(
+                environment_payload
+            ),
+            "process": process,
+            "provenance": provenance,
+            "streams": streams,
+            "handoff_artifacts": handoff_artifacts,
+        }
+        document["failure_seal_sha256"] = canonical_sha(document)
+        output = failure_root / "failure_provenance.json"
+        payload = immutable.pretty_json_bytes(document)
+
+        def close_failure_generation() -> None:
+            expected_names = frozenset({*stream_names, output.name})
+            max_total_file_bytes = sum(
+                stream["size_bytes"] for stream in streams
+            ) + len(payload)
+            with immutable.PinnedDirectoryReader(failure_root) as final_parent:
+                with final_parent.retain_tree_generation(
+                    max_files=len(expected_names),
+                    max_directories=1,
+                    max_total_file_bytes=max_total_file_bytes,
+                    max_total_relative_path_bytes=64 * 1024,
+                ):
+                    _require_directory_namespace(
+                        final_parent,
+                        expected_names=expected_names,
+                        label="capture failure",
+                    )
+                    generation_stack.close()
+
+        immutable.publish_regular_file(
+            failure_root,
+            output.name,
+            payload,
+            pinned_parent=parent,
+            after_commit=close_failure_generation,
+        )
+    except CaptureError:
+        raise
+    except (OSError, immutable.ImmutableArtifactError) as exc:
+        raise CaptureError(
+            f"cannot transactionally publish failure provenance: {exc}"
+        ) from exc
+    finally:
+        generation_stack.close()
 
 
 def _receipt(
@@ -1434,10 +1948,7 @@ def _finalize_capture_in_generation(
     receipt_path: Path,
 ) -> tuple[Path, bytes]:
     process = {
-        "host_identity_sha256": canonical_sha({
-            "gpu": live["gpu_name"],
-            "smi": live["smi_stdout_sha256"],
-        }),
+        "host_identity_sha256": _host_identity_sha256(live),
         "boot_id_sha256": _boot_id_sha256(),
         "pid": pid,
         "started_at_utc": started,
@@ -1451,6 +1962,10 @@ def _finalize_capture_in_generation(
         cell_reader = generation_stack.enter_context(
             immutable.PinnedDirectoryReader(cell)
         )
+        _require_ncu_cell_namespace(
+            cell_reader,
+            expected_names=_NCU_COMPLETE_ARTIFACT_NAMES,
+        )
         generation_stack.enter_context(cell_reader.retain_tree_generation(
             max_files=64,
             max_directories=16,
@@ -1458,14 +1973,37 @@ def _finalize_capture_in_generation(
             max_total_relative_path_bytes=64 * 1024,
         ))
         required = {
-            "ncu_report": cell / "run_0_0.ncu-rep",
+            "ncu_report": cell / "run_0_launch_set.ncu-rep",
             "label_sidecar": cell / "label_0_0.json",
-            "label_run_manifest": cell / "label_run_manifest_0_0.json",
-            "ncu_launch_observation": cell / "run_0_0.launch_observation.json",
+            "label_run_manifest": cell / "label_run_manifest_0_launch_set.json",
+            "ncu_launch_observation": (
+                cell / "run_0_launch_set.launch_observation.json"
+            ),
         }
         for role, path in required.items():
             artifacts.append(_artifact(root, path, role))
         sidecar, _ = _load_object(required["label_sidecar"], "NCU label sidecar")
+        run_manifest, _ = _load_object(
+            required["label_run_manifest"], "NCU label run manifest"
+        )
+        _validate_ncu_handoff_manifest(run_manifest, row=row)
+        observation, _ = _load_object(
+            required["ncu_launch_observation"], "NCU launch observation"
+        )
+        report_artifact = next(
+            artifact for artifact in artifacts if artifact["role"] == "ncu_report"
+        )
+        try:
+            parse_ncu_metrics.validate_launch_observation_document(
+                observation,
+                requested_launch_skip=0,
+                requested_launch_count=1,
+                report_sha256=report_artifact["sha256"],
+            )
+        except (KeyError, TypeError, ValueError) as exc:
+            raise CaptureError(
+                f"NCU launch observation validation failed: {exc}"
+            ) from exc
         metrics = {
             item.get("ncu_metric")
             for item in sidecar.get("unit_tagged_metrics", [])
@@ -1618,6 +2156,7 @@ def _finalize_capture_in_generation(
 
 def _finalize_capture(
     *,
+    generation_stack: contextlib.ExitStack | None = None,
     root: Path,
     phase: str,
     row: dict[str, Any],
@@ -1637,7 +2176,10 @@ def _finalize_capture(
     environment_payload: bytes,
     receipt_path: Path,
 ) -> Path:
-    with contextlib.ExitStack() as generation_stack:
+    owns_generation_stack = generation_stack is None
+    if generation_stack is None:
+        generation_stack = contextlib.ExitStack()
+    try:
         output, payload = _finalize_capture_in_generation(
             generation_stack=generation_stack,
             root=root,
@@ -1675,6 +2217,27 @@ def _finalize_capture(
                 f"cannot transactionally publish capture receipt {output}: {exc}"
             ) from exc
         return output
+    finally:
+        if owns_generation_stack:
+            generation_stack.close()
+
+
+def _capture_protocol_succeeded(
+    phase: str,
+    *,
+    returncode: int,
+    stdout: bytes,
+    stderr: bytes,
+) -> bool:
+    if phase == "ncu":
+        return (
+            returncode == 3
+            and stdout == b""
+            and stderr == _NCU_HANDOFF_STDERR
+        )
+    if phase == "nvbit":
+        return returncode == 0 and stderr == b""
+    raise CaptureError("capture result phase is invalid")
 
 
 def capture_phase(*, matrix_key: str, variant_id: str, phase: str, preflight_path: Path, output_root: Path) -> Path:
@@ -1844,6 +2407,7 @@ def capture_phase(*, matrix_key: str, variant_id: str, phase: str, preflight_pat
         )
         _write_failure_provenance(
             failure_root,
+            root=root,
             phase=phase,
             row=row,
             command=command,
@@ -1867,6 +2431,7 @@ def capture_phase(*, matrix_key: str, variant_id: str, phase: str, preflight_pat
             exc.containment = containment
         _write_failure_provenance(
             failure_root,
+            root=root,
             phase=phase,
             row=row,
             command=command,
@@ -1880,12 +2445,18 @@ def capture_phase(*, matrix_key: str, variant_id: str, phase: str, preflight_pat
             error=exc,
         )
         raise
-    if returncode != 0 or stderr:
+    capture_protocol_ok = _capture_protocol_succeeded(
+        phase,
+        returncode=returncode,
+        stdout=stdout,
+        stderr=stderr,
+    )
+    if not capture_protocol_ok:
         _write_new(failure_root / "capture_failure.stdout.bin", stdout)
         _write_new(failure_root / "capture_failure.stderr.bin", stderr)
         failure = CaptureError(
             f"{phase} capture failed returncode={returncode} "
-            f"stderr={stderr[-400:]!r}",
+            f"stdout={stdout[-400:]!r} stderr={stderr[-400:]!r}",
             process_id=pid,
             started_at_utc=started,
             process_role=f"{phase}_capture",
@@ -1896,6 +2467,7 @@ def capture_phase(*, matrix_key: str, variant_id: str, phase: str, preflight_pat
         )
         _write_failure_provenance(
             failure_root,
+            root=root,
             phase=phase,
             row=row,
             command=command,
@@ -1913,8 +2485,22 @@ def capture_phase(*, matrix_key: str, variant_id: str, phase: str, preflight_pat
         raise CaptureError(
             "successful capture has incomplete process or containment provenance"
         )
+    generation_stack = contextlib.ExitStack()
     try:
+        if phase == "ncu":
+            if expected_ncu_identity is None:
+                raise CaptureError(
+                    "successful NCU handoff has no executable authority"
+                )
+            _postprocess_ncu_handoff(
+                root=root,
+                row=row,
+                live=live,
+                expected_ncu_identity=expected_ncu_identity,
+                generation_stack=generation_stack,
+            )
         return _finalize_capture(
+            generation_stack=generation_stack,
             root=root,
             phase=phase,
             row=row,
@@ -1934,7 +2520,7 @@ def capture_phase(*, matrix_key: str, variant_id: str, phase: str, preflight_pat
             environment_payload=environment_payload,
             receipt_path=receipt_path,
         )
-    except Exception as raw_error:
+    except BaseException as raw_error:
         exc = (
             raw_error
             if isinstance(raw_error, CaptureError)
@@ -1942,29 +2528,50 @@ def capture_phase(*, matrix_key: str, variant_id: str, phase: str, preflight_pat
                 f"post-capture validation failed: {raw_error}",
             )
         )
-        _write_new(failure_root / "post_validation.stdout.bin", stdout)
-        _write_new(failure_root / "post_validation.stderr.bin", stderr)
-        exc.process_id = pid
-        exc.started_at_utc = started
-        exc.process_role = f"{phase}_postprocess_validation"
-        exc.process_command = list(command)
-        exc.process_environment = dict(recorded_environment)
-        exc.process_tool_sha256 = phase_tool_sha256
-        exc.containment = containment
-        _write_failure_provenance(
-            failure_root,
-            phase=phase,
-            row=row,
-            command=command,
-            live=live,
-            environment_payload=environment_payload,
-            default_environment=recorded_environment,
-            capture_producer_sha256=capture_producer_sha256,
-            containment_supervisor_sha256=containment_supervisor_sha256,
-            phase_tool_sha256=phase_tool_sha256,
-            action_executor_sha256=action_executor_sha256,
-            error=exc,
-        )
+        try:
+            diagnostic_failures = []
+            for path, payload in (
+                (failure_root / "post_validation.stdout.bin", stdout),
+                (failure_root / "post_validation.stderr.bin", stderr),
+            ):
+                try:
+                    _write_new(path, payload)
+                except Exception as diagnostic_error:
+                    diagnostic_failures.append(
+                        f"{path.name}: {diagnostic_error}"
+                    )
+            if diagnostic_failures:
+                exc.detail += (
+                    "; post-validation stream retention failed: "
+                    + "; ".join(diagnostic_failures)
+                )
+            exc.process_id = pid
+            exc.started_at_utc = started
+            exc.process_role = f"{phase}_postprocess_validation"
+            exc.process_command = list(command)
+            exc.process_environment = dict(recorded_environment)
+            exc.process_tool_sha256 = phase_tool_sha256
+            exc.containment = containment
+            _write_failure_provenance(
+                failure_root,
+                root=root,
+                phase=phase,
+                row=row,
+                command=command,
+                live=live,
+                environment_payload=environment_payload,
+                default_environment=recorded_environment,
+                capture_producer_sha256=capture_producer_sha256,
+                containment_supervisor_sha256=containment_supervisor_sha256,
+                phase_tool_sha256=phase_tool_sha256,
+                action_executor_sha256=action_executor_sha256,
+                error=exc,
+                generation_stack=generation_stack,
+            )
+        finally:
+            generation_stack.close()
+        if not isinstance(raw_error, Exception):
+            raise
         if exc is raw_error:
             raise
         raise exc from raw_error

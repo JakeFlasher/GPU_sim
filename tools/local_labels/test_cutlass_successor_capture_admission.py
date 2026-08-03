@@ -24,11 +24,15 @@ ROSTER = json.loads((ROOT / cohort.ROSTER_REL).read_text())
 ROSTER_ROWS = {
     (row["matrix_key"], row["variant_id"]): row for row in ROSTER["rows"]
 }
+GPU_UUID = "GPU-11111111-1111-1111-1111-111111111111"
+OTHER_GPU_UUID = "GPU-22222222-2222-2222-2222-222222222222"
 
 
 _REPORT_CSV = '''ID,Kernel Name,Block Size,Grid Size,Device,Metric Name,Metric Value
 0,_Zsynthetic_kernel,"32,1,1","1,1,1",NVIDIA GeForce RTX 3090 Ti,gpc__cycles_elapsed.max,1
 0,_Zsynthetic_kernel,"32,1,1","1,1,1",NVIDIA GeForce RTX 3090 Ti,gpu__time_duration.sum,1
+0,_Zsynthetic_kernel,"32,1,1","1,1,1",NVIDIA GeForce RTX 3090 Ti,lts__t_sector_hit_rate.pct,50
+0,_Zsynthetic_kernel,"32,1,1","1,1,1",NVIDIA GeForce RTX 3090 Ti,l1tex__t_sector_hit_rate.pct,50
 '''
 _REPORT_IDENTITY_COLUMNS = [
     "ID", "Device", "Kernel Name", "Block Size", "Grid Size",
@@ -64,13 +68,21 @@ def _row_report_csv(row: dict) -> str:
         "ID,Kernel Name,Block Size,Grid Size,Device,Metric Name,Metric Value\n"
         f"{prefix},gpc__cycles_elapsed.max,1\n"
         f"{prefix},gpu__time_duration.sum,1\n"
+        f"{prefix},lts__t_sector_hit_rate.pct,50\n"
+        f"{prefix},l1tex__t_sector_hit_rate.pct,50\n"
     )
 
 
 def _row_for_report_path(path: Path) -> dict:
     match = re.fullmatch(r"(\d{2})_ncu_0\.bin", path.name)
-    assert match is not None
-    return MATRIX["rows"][int(match.group(1))]
+    if match is not None:
+        return MATRIX["rows"][int(match.group(1))]
+    if path.name == "run_0_launch_set.ncu-rep":
+        slug = path.parent.parent.name
+        return next(
+            row for row in MATRIX["rows"] if row["successor_slug"] == slug
+        )
+    raise AssertionError(f"unexpected synthetic NCU report path: {path}")
 
 
 _REAL_IMPORT_NCU_REPORT_CSV = admit._import_ncu_report_csv
@@ -154,6 +166,22 @@ def test_successor_reimport_uses_descriptor_bound_ncu_authority(
 
 def _report_sidecar() -> dict:
     return {
+        "cache_hit_rate_l2_sector": 0.5,
+        "cache_hit_rate_l1tex_sector": 0.5,
+        "confidence_interval_l2_sector": {
+            "lower": 0.5,
+            "upper": 0.5,
+            "confidence_level": 0.95,
+            "units": "sector_hit_rate_fraction",
+            "aggregation": "kernel",
+        },
+        "confidence_interval_l1tex_sector": {
+            "lower": 0.5,
+            "upper": 0.5,
+            "confidence_level": 0.95,
+            "units": "sector_hit_rate_fraction",
+            "aggregation": "kernel",
+        },
         "unit_tagged_metrics": [
             {"ncu_metric": "gpc__cycles_elapsed.max", "unit": "cycles", "value": 1.0},
             {"ncu_metric": "gpu__time_duration.sum", "unit": "ns", "value": 1.0},
@@ -245,6 +273,130 @@ def test_ncu_report_metric_disagreement_is_rejected(tmp_path: Path, monkeypatch)
         )
 
 
+@pytest.mark.parametrize(
+    ("sidecar_field", "metric"),
+    [
+        ("cache_hit_rate_l2_sector", "lts__t_sector_hit_rate.pct"),
+        ("cache_hit_rate_l1tex_sector", "l1tex__t_sector_hit_rate.pct"),
+    ],
+)
+def test_ncu_report_percentage_disagreement_is_rejected(
+    tmp_path: Path,
+    monkeypatch,
+    sidecar_field: str,
+    metric: str,
+):
+    report = tmp_path / "run.ncu-rep"
+    report.write_bytes(b"report")
+    report_sha256 = admit.sha256_bytes(report.read_bytes())
+    monkeypatch.setattr(
+        admit,
+        "_import_ncu_report_csv",
+        lambda _identity, _path: (_REPORT_CSV, report_sha256, None),
+    )
+    sidecar = _report_sidecar()
+    sidecar[sidecar_field] = 0.25
+
+    with pytest.raises(
+        admit.AdmissionError,
+        match=rf"percentage disagreement: {re.escape(metric)}",
+    ):
+        admit._verify_ncu_report(
+            _expected_ncu_identity(),
+            report,
+            report_sha256,
+            sidecar,
+            _report_observation(),
+            *_report_launch_authority(),
+        )
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    [
+        "extra_metric",
+        "confidence_interval",
+        "unexpected_diagnostics",
+    ],
+)
+def test_ncu_report_closes_all_sidecar_derived_fields(
+    tmp_path: Path,
+    monkeypatch,
+    mutation: str,
+):
+    report = tmp_path / "run.ncu-rep"
+    report.write_bytes(b"report")
+    report_sha256 = admit.sha256_bytes(report.read_bytes())
+    monkeypatch.setattr(
+        admit,
+        "_import_ncu_report_csv",
+        lambda _identity, _path: (_REPORT_CSV, report_sha256, None),
+    )
+    sidecar = _report_sidecar()
+    if mutation == "extra_metric":
+        sidecar["unit_tagged_metrics"].append({
+            "ncu_metric": "sm__cycles_elapsed.avg",
+            "unit": "cycles",
+            "value": 1.0,
+        })
+        expected = "metric disagreement"
+    elif mutation == "confidence_interval":
+        sidecar["confidence_interval_l2_sector"]["lower"] = 0.25
+        expected = "percentage disagreement"
+    else:
+        sidecar["parser_diagnostics"] = {
+            "ncu_sector_hit_rate_clamped_to_100": [
+                {
+                    "metric_label": "lts__t_sector_hit_rate.pct",
+                    "raw_value": 101.0,
+                }
+            ]
+        }
+        expected = "unreported parser diagnostics"
+
+    with pytest.raises(admit.AdmissionError, match=expected):
+        admit._verify_ncu_report(
+            _expected_ncu_identity(),
+            report,
+            report_sha256,
+            sidecar,
+            _report_observation(),
+            *_report_launch_authority(),
+        )
+
+
+def test_ncu_report_requires_all_parser_diagnostics(
+    tmp_path: Path,
+    monkeypatch,
+):
+    report = tmp_path / "run.ncu-rep"
+    report.write_bytes(b"report")
+    report_sha256 = admit.sha256_bytes(report.read_bytes())
+    csv_text = _REPORT_CSV.replace(
+        "lts__t_sector_hit_rate.pct,50",
+        "lts__t_sector_hit_rate.pct,101",
+    )
+    monkeypatch.setattr(
+        admit,
+        "_import_ncu_report_csv",
+        lambda _identity, _path: (csv_text, report_sha256, None),
+    )
+    sidecar = _report_sidecar()
+    sidecar["cache_hit_rate_l2_sector"] = 1.0
+    sidecar["confidence_interval_l2_sector"]["lower"] = 1.0
+    sidecar["confidence_interval_l2_sector"]["upper"] = 1.0
+
+    with pytest.raises(admit.AdmissionError, match="parser diagnostics"):
+        admit._verify_ncu_report(
+            _expected_ncu_identity(),
+            report,
+            report_sha256,
+            sidecar,
+            _report_observation(),
+            *_report_launch_authority(),
+        )
+
+
 def test_ncu_report_multiple_launches_are_rejected(tmp_path: Path, monkeypatch):
     report = tmp_path / "run.ncu-rep"
     report.write_bytes(b"report")
@@ -287,6 +439,8 @@ def test_ncu_report_launch_identity_must_match_successor_authority(
         "ID,Kernel Name,Block Size,Grid Size,Device,Metric Name,Metric Value\n"
         f"{prefix},gpc__cycles_elapsed.max,1\n"
         f"{prefix},gpu__time_duration.sum,1\n"
+        f"{prefix},lts__t_sector_hit_rate.pct,50\n"
+        f"{prefix},l1tex__t_sector_hit_rate.pct,50\n"
     )
     report_sha256 = admit.sha256_bytes(report.read_bytes())
     observation = _report_observation()
@@ -354,6 +508,8 @@ def test_ncu_report_normalizes_supported_device_and_dimension_forms(
         "ID,Kernel Name,Block Size,Grid Size,Device,Metric Name,Metric Value\n"
         f"{prefix},gpc__cycles_elapsed.max,1\n"
         f"{prefix},gpu__time_duration.sum,1\n"
+        f"{prefix},lts__t_sector_hit_rate.pct,50\n"
+        f"{prefix},l1tex__t_sector_hit_rate.pct,50\n"
     )
     report_sha256 = admit.sha256_bytes(report.read_bytes())
     observation = _report_observation()
@@ -400,10 +556,16 @@ def _seal(document: dict) -> dict:
 
 def _process(pid: int, command: list[str]) -> dict:
     smi_stdout = "NVIDIA GeForce RTX 3090 Ti, 8.6, Enabled, 1350, 10501\n"
+    identity_stdout = f"{GPU_UUID}, 610.43.02\n"
     process = {
         "host_identity_sha256": admit.canonical_sha({
             "gpu": "NVIDIA GeForce RTX 3090 Ti",
             "smi": admit.sha256_bytes(smi_stdout.encode()),
+            "gpu_uuid_sha256": admit.sha256_bytes(GPU_UUID.encode()),
+            "driver_version": "610.43.02",
+            "identity_stdout_sha256": admit.sha256_bytes(
+                identity_stdout.encode()
+            ),
         }),
         "boot_id_sha256": "b" * 64,
         "pid": pid,
@@ -448,6 +610,7 @@ def _environment_payload(
     live_outputs = {
         "smi_stdout": "NVIDIA GeForce RTX 3090 Ti, 8.6, Enabled, 1350, 10501\n",
         "competing_process_stdout": "",
+        "identity_stdout": f"{GPU_UUID}, 610.43.02\n",
         "nvcc_stdout": "Cuda compilation tools, release 13.2, V13.2.0\n",
     }
     live = {
@@ -455,6 +618,10 @@ def _environment_payload(
         "smi_stdout_sha256": admit.sha256_bytes(live_outputs["smi_stdout"].encode()),
         "competing_process_command": ["nvidia-smi", "--query-compute-apps=pid,process_name", "--format=csv,noheader,nounits"],
         "competing_process_stdout_sha256": admit.sha256_bytes(live_outputs["competing_process_stdout"].encode()),
+        "identity_command": ["nvidia-smi", "--query-gpu=uuid,driver_version", "--format=csv,noheader,nounits"],
+        "identity_stdout_sha256": admit.sha256_bytes(live_outputs["identity_stdout"].encode()),
+        "gpu_uuid_sha256": admit.sha256_bytes(GPU_UUID.encode()),
+        "driver_version": "610.43.02",
         "nvcc_command": ["/usr/local/cuda-13.2/bin/nvcc", "--version"],
         "nvcc_stdout_sha256": admit.sha256_bytes(live_outputs["nvcc_stdout"].encode()),
         "cuda_release": {"major": 13, "minor": 2},
@@ -576,15 +743,25 @@ def _receipt(root: Path, row: dict, kind: str, index: int) -> Path:
     preflight_path = None
     preflight_sha = None
     environment_sha = None
+    ncu_artifact_names = {
+        "ncu_report": "run_0_launch_set.ncu-rep",
+        "label_sidecar": "label_0_0.json",
+        "label_run_manifest": "label_run_manifest_0_launch_set.json",
+        "ncu_launch_observation": "run_0_launch_set.launch_observation.json",
+    }
     for role_index, role in enumerate(roles):
         relative = (
-            f"artifacts/{index:02d}_{kind}_{role_index}.bin"
-            if kind == "ncu"
+            f"{row['arch']}/{slug}/trace_00/{ncu_artifact_names[role]}"
+            if kind == "ncu" and role in ncu_artifact_names
             else (
-                f"nvbit/{slug}/threadblocks/device_0/stream_0/kernel_0/0.pb"
-                if role == "threadblock"
+                f"artifacts/{index:02d}_{kind}_{role_index}.bin"
+                if kind == "ncu"
                 else (
-                    f"nvbit/{slug}/{'dynamic_trace.pb' if role == 'dynamic_trace' else 'stats.csv' if role == 'stats' else 'trace_summary.json' if role == 'trace_summary' else f'{role_index}_{role}.bin'}"
+                    f"nvbit/{slug}/threadblocks/device_0/stream_0/kernel_0/0.pb"
+                    if role == "threadblock"
+                    else (
+                        f"nvbit/{slug}/{'dynamic_trace.pb' if role == 'dynamic_trace' else 'stats.csv' if role == 'stats' else 'trace_summary.json' if role == 'trace_summary' else f'{role_index}_{role}.bin'}"
+                    )
                 )
             )
         )
@@ -605,21 +782,37 @@ def _receipt(root: Path, row: dict, kind: str, index: int) -> Path:
                 "launch_index": 0,
                 "binary_sha256": identity["binary_sha256"],
                 "profiler_family": "nsight_compute",
-                "profiler_version": "2026.1.0",
+                "profiler_version": admit.NCU_VERSION_LINE,
                 "cuda_version": "13.2",
                 "driver_version": "610.43.02",
-                "gpu_uuid_sha256": "c" * 64,
+                "gpu_uuid_sha256": admit.sha256_bytes(GPU_UUID.encode()),
                 "replay_mode": "kernel",
                 "aggregation": "kernel",
                 "warmup_count": 0,
+                "evidence_class": "campaign",
                 "cache_hit_rate_l2_sector": 0.5,
+                "cache_hit_rate_l1tex_sector": 0.5,
                 "confidence_interval_l2_sector": {
                     "lower": 0.5, "upper": 0.5, "confidence_level": 0.95,
                     "units": "sector_hit_rate_fraction", "aggregation": "kernel",
                 },
+                "confidence_interval_l1tex_sector": {
+                    "lower": 0.5, "upper": 0.5, "confidence_level": 0.95,
+                    "units": "sector_hit_rate_fraction", "aggregation": "kernel",
+                },
                 "measurement_protocol": {
-                    "ncu_clock_control": "none", "ncu_cache_control": "all",
+                    "ncu_clock_control": "none",
+                    "ncu_cache_control": "all",
                     "ncu_replay_mode": "kernel",
+                    "ncu_target_processes": "all",
+                    "ncu_filter_mode": "global",
+                    "ncu_profile_from_start": False,
+                    "ncu_launch_skip": 0,
+                    "ncu_launch_count": 1,
+                    "host_gpu_index": 0,
+                    "host_persistence_mode": "Enabled",
+                    "host_sm_clock_mhz": 1350,
+                    "host_mem_clock_mhz": 10501,
                 },
                 "unit_tagged_metrics": [
                     {"ncu_metric": "gpc__cycles_elapsed.max", "unit": "cycles", "value": 1},
@@ -629,7 +822,7 @@ def _receipt(root: Path, row: dict, kind: str, index: int) -> Path:
         elif kind == "ncu" and role == "label_run_manifest":
             payload = json.dumps({
                 "schema_version": 1, "source_commit": admit.PINNED_BUNDLE_COMMIT,
-                "binary_sha256": identity["binary_sha256"], "kernel_signature_sha256": identity["kernel_signature_sha256"], "arch": row["arch"],
+                "binary_sha256": identity["binary_sha256"], "kernel_signature_sha256": identity["kernel_signature_sha256"], "kernel_signature_source": "fallback_legacy", "arch": row["arch"],
                 "slug": slug, "shape_point": row["shape"]["shape_point"],
                 "repeat_index": 0, "launch_index": 0,
             }, sort_keys=True).encode()
@@ -802,6 +995,114 @@ def test_preflight_content_tamper_is_rejected(tmp_path: Path):
     _mutate_json_artifact(tmp_path, target, "preflight", lambda value: value.update({"unexpected": True}))
     with pytest.raises(admit.AdmissionError, match="preflight content"):
         admit.build_overlay(tmp_path, generated_at_utc="2026-07-23T01:00:00Z")
+
+
+def test_ncu_manifest_must_equal_closed_handoff_contract(tmp_path: Path):
+    target = _receipt(tmp_path, MATRIX["rows"][0], "ncu", 0)
+    _mutate_json_artifact(
+        tmp_path,
+        target,
+        "label_run_manifest",
+        lambda value: value.pop("kernel_signature_source"),
+    )
+    with pytest.raises(admit.AdmissionError, match="closed successor contract"):
+        admit.build_overlay(
+            tmp_path,
+            generated_at_utc="2026-07-23T01:00:00Z",
+        )
+
+
+def test_ncu_manifest_duplicate_keys_are_rejected(tmp_path: Path):
+    target = _receipt(tmp_path, MATRIX["rows"][0], "ncu", 0)
+    document = json.loads(target.read_text())
+    artifact = next(
+        item for item in document["receipt"]["artifacts"]
+        if item["role"] == "label_run_manifest"
+    )
+    manifest = tmp_path / artifact["path"]
+    payload = manifest.read_text().replace(
+        '"source_commit":',
+        f'"source_commit": "{admit.PINNED_BUNDLE_COMMIT}",\n  "source_commit":',
+        1,
+    ).encode()
+    manifest.write_bytes(payload)
+    artifact["sha256"] = admit.sha256_bytes(payload)
+    artifact["size_bytes"] = len(payload)
+    _rewrite(target, document)
+
+    with pytest.raises(admit.AdmissionError, match="duplicate JSON key"):
+        admit.build_overlay(
+            tmp_path,
+            generated_at_utc="2026-07-23T01:00:00Z",
+        )
+
+
+@pytest.mark.parametrize(
+    ("field", "replacement"),
+    (
+        ("profiler_family", "other_profiler"),
+        ("replay_mode", "application"),
+        ("warmup_count", 7),
+        ("evidence_class", "calibration"),
+    ),
+)
+def test_ncu_sidecar_producer_pins_are_rederived(
+    tmp_path: Path,
+    field: str,
+    replacement: object,
+):
+    target = _receipt(tmp_path, MATRIX["rows"][0], "ncu", 0)
+    _mutate_json_artifact(
+        tmp_path,
+        target,
+        "label_sidecar",
+        lambda value: value.update({field: replacement}),
+    )
+
+    with pytest.raises(admit.AdmissionError, match="sidecar identity"):
+        admit.build_overlay(
+            tmp_path,
+            generated_at_utc="2026-07-23T01:00:00Z",
+        )
+
+
+def test_ncu_sidecar_variant_axis_is_rejected(tmp_path: Path):
+    target = _receipt(tmp_path, MATRIX["rows"][0], "ncu", 0)
+    _mutate_json_artifact(
+        tmp_path,
+        target,
+        "label_sidecar",
+        lambda value: value.update({
+            "register_cap": 64,
+            "variant_id": "register_cap_64",
+        }),
+    )
+
+    with pytest.raises(admit.AdmissionError, match="capture producer"):
+        admit.build_overlay(
+            tmp_path,
+            generated_at_utc="2026-07-23T01:00:00Z",
+        )
+
+
+def test_ncu_artifacts_require_canonical_launch_set_paths(tmp_path: Path):
+    target = _receipt(tmp_path, MATRIX["rows"][0], "ncu", 0)
+    document = json.loads(target.read_text())
+    artifact = next(
+        item for item in document["receipt"]["artifacts"]
+        if item["role"] == "ncu_report"
+    )
+    source = tmp_path / artifact["path"]
+    relocated = tmp_path / "relocated.ncu-rep"
+    source.replace(relocated)
+    artifact["path"] = relocated.relative_to(tmp_path).as_posix()
+    _rewrite(target, document)
+
+    with pytest.raises(admit.AdmissionError, match="canonical launch-set namespace"):
+        admit.build_overlay(
+            tmp_path,
+            generated_at_utc="2026-07-23T01:00:00Z",
+        )
 
 
 def test_environment_preflight_binding_tamper_is_rejected(tmp_path: Path):
@@ -1465,7 +1766,11 @@ def test_receipt_validation_rejects_negative_cases(tmp_path: Path, case: str):
     target = tmp_path / f"00_ncu{admit.RECEIPT_SUFFIX}"
     document = json.loads(target.read_text())
     if case == "hash":
-        (tmp_path / "artifacts/00_ncu_0.bin").write_bytes(b"drift")
+        report = next(
+            artifact for artifact in document["receipt"]["artifacts"]
+            if artifact["role"] == "ncu_report"
+        )
+        (tmp_path / report["path"]).write_bytes(b"drift")
     elif case == "identity":
         document["receipt"]["identity"]["arch"] = "sm_120"
         _rewrite(target, document)
@@ -1495,8 +1800,15 @@ def test_receipt_path_escape_is_rejected_by_schema(tmp_path: Path):
 
 def test_symlink_in_external_receipt_inventory_is_rejected(tmp_path: Path):
     _all_pairs(tmp_path)
+    receipt = json.loads(
+        (tmp_path / f"00_ncu{admit.RECEIPT_SUFFIX}").read_text()
+    )["receipt"]
+    report = next(
+        artifact for artifact in receipt["artifacts"]
+        if artifact["role"] == "ncu_report"
+    )
     link = tmp_path / "symlink.bin"
-    link.symlink_to(tmp_path / "artifacts/00_ncu_0.bin")
+    link.symlink_to(tmp_path / report["path"])
     with pytest.raises(admit.AdmissionError, match="symlink"):
         admit.build_overlay(tmp_path, generated_at_utc="2026-07-23T01:00:00Z")
 
@@ -1514,6 +1826,84 @@ def test_same_process_receipts_cannot_promote(tmp_path: Path):
     _rewrite(nvbit, document)
     with pytest.raises(admit.AdmissionError, match="separate processes"):
         admit.build_overlay(tmp_path, generated_at_utc="2026-07-23T01:00:00Z")
+
+
+def _replace_receipt_gpu_uuid(
+    root: Path,
+    receipt_path: Path,
+    gpu_uuid: str,
+) -> None:
+    document = json.loads(receipt_path.read_text())
+    receipt = document["receipt"]
+    environment_artifact = next(
+        artifact for artifact in receipt["artifacts"]
+        if artifact["role"] == "environment"
+    )
+    environment_path = root / environment_artifact["path"]
+    environment = json.loads(environment_path.read_text())
+    identity_stdout = f"{gpu_uuid}, 610.43.02\n"
+    environment["live_outputs"]["identity_stdout"] = identity_stdout
+    environment["live_checks"]["identity_stdout_sha256"] = admit.sha256_bytes(
+        identity_stdout.encode()
+    )
+    environment["live_checks"]["gpu_uuid_sha256"] = admit.sha256_bytes(
+        gpu_uuid.encode()
+    )
+    encoded = json.dumps(environment, sort_keys=True).encode()
+    environment_path.write_bytes(encoded)
+    environment_artifact["sha256"] = admit.sha256_bytes(encoded)
+    environment_artifact["size_bytes"] = len(encoded)
+    receipt["environment_sha256"] = environment_artifact["sha256"]
+    process = receipt["process"]
+    process["host_identity_sha256"] = admit.canonical_sha({
+        "gpu": environment["live_checks"]["gpu_name"],
+        "smi": environment["live_checks"]["smi_stdout_sha256"],
+        "gpu_uuid_sha256": environment["live_checks"]["gpu_uuid_sha256"],
+        "driver_version": environment["live_checks"]["driver_version"],
+        "identity_stdout_sha256": environment["live_checks"][
+            "identity_stdout_sha256"
+        ],
+    })
+    process.pop("process_identity_sha256")
+    process["process_identity_sha256"] = admit.canonical_sha(process)
+    _rewrite(receipt_path, document)
+
+
+def test_different_gpu_uuid_receipts_cannot_join(tmp_path: Path):
+    _receipt(tmp_path, MATRIX["rows"][0], "ncu", 0)
+    nvbit = _receipt(tmp_path, MATRIX["rows"][0], "nvbit", 0)
+    _replace_receipt_gpu_uuid(tmp_path, nvbit, OTHER_GPU_UUID)
+
+    with pytest.raises(admit.AdmissionError, match="same host boot"):
+        admit.build_overlay(
+            tmp_path,
+            generated_at_utc="2026-07-23T01:00:00Z",
+        )
+
+
+@pytest.mark.parametrize(
+    "malformed_uuid",
+    (
+        "GPU-11111111111111111111111111111111",
+        "GPU-11111111-1111-1111-1111-11111111111",
+        "GPU-11111111-1111-1111-1111-111111111111-",
+    ),
+)
+def test_malformed_gpu_uuid_is_rejected(
+    tmp_path: Path,
+    malformed_uuid: str,
+):
+    ncu = _receipt(tmp_path, MATRIX["rows"][0], "ncu", 0)
+    _replace_receipt_gpu_uuid(tmp_path, ncu, malformed_uuid)
+
+    with pytest.raises(
+        admit.AdmissionError,
+        match="selected-GPU identity output is not pinned",
+    ):
+        admit.build_overlay(
+            tmp_path,
+            generated_at_utc="2026-07-23T01:00:00Z",
+        )
 
 
 def test_extra_receipt_kind_is_rejected(tmp_path: Path):

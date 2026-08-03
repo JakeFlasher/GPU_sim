@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import hashlib
 import json
 import time
@@ -13,6 +14,7 @@ from tools.local_labels import capture_cutlass_successor_receipts as capture
 
 MATRIX_KEY = "cutlass_successor:vendor_gemm_cublas:vendor_gemm_cutlass"
 VARIANT_ID = "vendor_gemm_cutlass_bf16_simt_trace00_v1"
+GPU_UUID = "GPU-11111111-1111-1111-1111-111111111111"
 
 
 def _containment() -> capture.delegated_cgroup.CgroupContainmentEvidence:
@@ -148,6 +150,8 @@ def test_nvbit_live_preflight_never_discovers_or_invokes_ncu(monkeypatch):
             )
         if label == "nvidia-smi competing-process":
             return "", []
+        if label == "nvidia-smi device identity":
+            return f"{GPU_UUID}, {capture.DRIVER_VERSION}\n", []
         if label == "CUDA 13.2 nvcc":
             return "synthetic nvcc", []
         pytest.fail(f"unexpected live query: {label}")
@@ -171,9 +175,41 @@ def test_nvbit_live_preflight_never_discovers_or_invokes_ncu(monkeypatch):
     assert observed_queries == [
         "nvidia-smi device",
         "nvidia-smi competing-process",
+        "nvidia-smi device identity",
         "CUDA 13.2 nvcc",
     ]
     assert not any(key.startswith("ncu_") for key in live)
+
+
+@pytest.mark.parametrize(
+    "malformed_uuid",
+    (
+        "GPU-11111111111111111111111111111111",
+        "GPU-11111111-1111-1111-1111-11111111111",
+        "GPU-11111111-1111-1111-1111-111111111111-",
+    ),
+)
+def test_live_preflight_rejects_malformed_gpu_uuid(
+    monkeypatch,
+    malformed_uuid: str,
+):
+    def query(_command, label):
+        if label == "nvidia-smi device":
+            return (
+                f"{capture.GPU_NAME}, 8.6, Enabled, "
+                f"{capture.SM_CLOCK_MHZ}, {capture.MEM_CLOCK_MHZ}\n",
+                [],
+            )
+        if label == "nvidia-smi competing-process":
+            return "", []
+        if label == "nvidia-smi device identity":
+            return f"{malformed_uuid}, {capture.DRIVER_VERSION}\n", []
+        pytest.fail(f"unexpected live query: {label}")
+
+    monkeypatch.setattr(capture, "_query", query)
+
+    with pytest.raises(capture.CaptureError, match="live GPU identity is not pinned"):
+        capture.validate_live_capture_preflight(phase="nvbit")
 
 
 def test_capture_metadata_is_namespaced_by_variant_and_phase(tmp_path: Path):
@@ -232,12 +268,16 @@ def test_failure_provenance_seals_process_tool_and_stream_identity(
 
     capture._write_failure_provenance(
         failure_root,
+        root=tmp_path,
         phase="ncu",
         row=row,
         command=command,
         live={
             "gpu_name": capture.GPU_NAME,
             "smi_stdout_sha256": "c" * 64,
+            "gpu_uuid_sha256": "u" * 64,
+            "driver_version": capture.DRIVER_VERSION,
+            "identity_stdout_sha256": "i" * 64,
         },
         environment_payload=environment_payload,
         default_environment={"LANG": "C"},
@@ -256,15 +296,20 @@ def test_failure_provenance_seals_process_tool_and_stream_identity(
         "command_sha256": capture.canonical_sha(command),
         "environment": {"LANG": "C"},
         "environment_sha256": capture.canonical_sha({"LANG": "C"}),
-        "host_identity_sha256": capture.canonical_sha(
-            {"gpu": capture.GPU_NAME, "smi": "c" * 64}
-        ),
+        "host_identity_sha256": capture.canonical_sha({
+            "gpu": capture.GPU_NAME,
+            "smi": "c" * 64,
+            "gpu_uuid_sha256": "u" * 64,
+            "driver_version": capture.DRIVER_VERSION,
+            "identity_stdout_sha256": "i" * 64,
+        }),
         "pid": 4321,
         "started_at_utc": "2026-08-02T00:00:00Z",
     }
     assert document["capture_environment_document_sha256"] == (
         capture.sha256_bytes(environment_payload)
     )
+    assert document["handoff_artifacts"] == []
     assert document["provenance"] == {
         "action_executor_sha256": "f" * 64,
         "capture_producer_sha256": "d" * 64,
@@ -294,6 +339,13 @@ def _nvbit_live() -> dict:
         "competing_process_command": ["nvidia-smi", "--compute-apps"],
         "competing_process_stdout": "",
         "competing_process_stdout_sha256": capture.sha256_bytes(b""),
+        "identity_command": ["nvidia-smi", "--identity"],
+        "identity_stdout": f"{GPU_UUID}, {capture.DRIVER_VERSION}\n",
+        "identity_stdout_sha256": capture.sha256_bytes(
+            f"{GPU_UUID}, {capture.DRIVER_VERSION}\n".encode()
+        ),
+        "gpu_uuid_sha256": capture.sha256_bytes(GPU_UUID.encode()),
+        "driver_version": capture.DRIVER_VERSION,
         "nvcc_command": [str(capture.CUDA_NVCC), "--version"],
         "nvcc_stdout": "synthetic nvcc",
         "nvcc_stdout_sha256": capture.sha256_bytes(b"synthetic nvcc"),
@@ -306,9 +358,20 @@ def _nvbit_live() -> dict:
     }
 
 
-@pytest.mark.parametrize("failure_type", [OSError, TypeError])
+@pytest.mark.parametrize(
+    ("failure_type", "stream_write_failure"),
+    (
+        (OSError, False),
+        (TypeError, False),
+        (KeyboardInterrupt, False),
+        (TypeError, True),
+    ),
+)
 def test_nvbit_descriptor_execution_and_post_validation_failure_provenance(
-    tmp_path: Path, monkeypatch, failure_type: type[Exception],
+    tmp_path: Path,
+    monkeypatch,
+    failure_type: type[BaseException],
+    stream_write_failure: bool,
 ):
     preflight = _pinned_preflight(tmp_path)
     output_root = tmp_path / "capture-output"
@@ -347,16 +410,42 @@ def test_nvbit_descriptor_execution_and_post_validation_failure_provenance(
         lambda _path, *, base_env, **_kwargs: dict(base_env),
     )
     monkeypatch.setattr(capture, "_run_capture_command", run)
-    monkeypatch.setattr(
-        capture,
-        "_finalize_capture",
-        lambda **_kwargs: (_ for _ in ()).throw(
-            failure_type("synthetic post-validation failure")
-        ),
-    )
+
+    class GenerationGuard:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            observed["generation_closed"] = True
+            return False
+
+    def finalize(**kwargs):
+        kwargs["generation_stack"].enter_context(GenerationGuard())
+        raise failure_type("synthetic post-validation failure")
+
+    monkeypatch.setattr(capture, "_finalize_capture", finalize)
+    if stream_write_failure:
+        real_write_new = capture._write_new
+
+        def write_with_diagnostic_failure(path: Path, payload: bytes) -> None:
+            if path.name == "post_validation.stdout.bin":
+                raise capture.CaptureError("synthetic diagnostic write failure")
+            real_write_new(path, payload)
+
+        monkeypatch.setattr(capture, "_write_new", write_with_diagnostic_failure)
     monkeypatch.setattr(capture, "_boot_id_sha256", lambda: "b" * 64)
 
-    with pytest.raises(capture.CaptureError, match="post-capture validation"):
+    expected_error = (
+        KeyboardInterrupt
+        if failure_type is KeyboardInterrupt
+        else capture.CaptureError
+    )
+    expected_message = (
+        "synthetic post-validation failure"
+        if failure_type is KeyboardInterrupt
+        else "post-capture validation"
+    )
+    with pytest.raises(expected_error, match=expected_message):
         capture.capture_phase(
             matrix_key=MATRIX_KEY,
             variant_id=VARIANT_ID,
@@ -366,11 +455,16 @@ def test_nvbit_descriptor_execution_and_post_validation_failure_provenance(
         )
 
     assert len(observed["descriptors"]) == 2
+    assert observed["generation_closed"] is True
     failure_root = output_root / "failures" / VARIANT_ID / "nvbit"
-    assert (failure_root / "post_validation.stdout.bin").read_bytes() == (
-        b"validated stdout"
-    )
+    stdout_path = failure_root / "post_validation.stdout.bin"
+    if stream_write_failure:
+        assert not stdout_path.exists()
+    else:
+        assert stdout_path.read_bytes() == b"validated stdout"
     document = json.loads((failure_root / "failure_provenance.json").read_text())
+    if stream_write_failure:
+        assert "post-validation stream retention failed" in document["detail"]
     assert document["process"]["pid"] == 4321
     assert document["process"]["role"] == "nvbit_postprocess_validation"
     assert document["process"]["command"][0] != observed["command"][0]
@@ -559,9 +653,56 @@ def test_receipt_publication_rejects_artifact_generation_mutation(
             {"ncu_metric": "gpu__time_duration.sum"},
         ],
     }))
-    (cell / "run_0_0.ncu-rep").write_bytes(b"report")
-    (cell / "label_run_manifest_0_0.json").write_text("{}\n")
-    (cell / "run_0_0.launch_observation.json").write_text("{}\n")
+    (cell / "run_0_launch_set.ncu-rep").write_bytes(b"report")
+    run_manifest = {
+        "schema_version": 1,
+        "source_commit": capture.PINNED_COMMIT,
+        "binary_sha256": row["static_launch_inventory"]["binary_sha256"],
+        "kernel_signature_sha256": hashlib.sha256(
+            (
+                f"{row['successor_slug']}|"
+                f"{row['static_launch_inventory']['binary_path']}"
+            ).encode()
+        ).hexdigest(),
+        "kernel_signature_source": "fallback_legacy",
+        "arch": capture.ARCH,
+        "slug": row["successor_slug"],
+        "shape_point": row["shape"]["shape_point"],
+        "repeat_index": 0,
+        "launch_index": 0,
+    }
+    (cell / "label_run_manifest_0_launch_set.json").write_text(
+        json.dumps(run_manifest, sort_keys=True, indent=2) + "\n"
+    )
+    observation = {
+        "schema_version": 1,
+        "kind": "ncu_details_csv_launch_observation",
+        "kernel_name_base": "mangled",
+        "requested_launch_skip": 0,
+        "requested_launch_count": 1,
+        "report_sha256": capture.sha256_bytes(b"report"),
+        "identity_columns": [
+            "ID", "Device", "Kernel Name", "Block Size", "Grid Size",
+        ],
+        "identity": {
+            "ID": "0",
+            "Device": capture.GPU_NAME,
+            "Kernel Name": "fixture",
+            "Block Size": "(1, 1, 1)",
+            "Grid Size": "(1, 1, 1)",
+        },
+    }
+    observation["observation_sha256"] = capture.sha256_bytes(
+        json.dumps(
+            observation,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        ).encode()
+    )
+    (cell / "run_0_launch_set.launch_observation.json").write_text(
+        json.dumps(observation, sort_keys=True, indent=2) + "\n"
+    )
     preflight_payload = b"{\"preflight\":true}\n"
     environment_payload = b"{\"environment\":true}\n"
     preflight = root / f"{VARIANT_ID}.preflight_ncu.json"
@@ -589,7 +730,13 @@ def test_receipt_publication_rejects_artifact_generation_mutation(
             root=root,
             phase="ncu",
             row=row,
-            live={"gpu_name": capture.GPU_NAME, "smi_stdout_sha256": "a" * 64},
+            live={
+                "gpu_name": capture.GPU_NAME,
+                "smi_stdout_sha256": "a" * 64,
+                "gpu_uuid_sha256": "b" * 64,
+                "driver_version": capture.DRIVER_VERSION,
+                "identity_stdout_sha256": "c" * 64,
+            },
             pid=1234,
             started="2026-08-02T00:00:00Z",
             containment=_containment(),
@@ -1229,6 +1376,525 @@ def _retained_target():
     )
 
 
+def _ncu_handoff_manifest(row: dict) -> dict:
+    return {
+        "schema_version": 1,
+        "source_commit": capture.PINNED_COMMIT,
+        "binary_sha256": row["static_launch_inventory"]["binary_sha256"],
+        "kernel_signature_sha256": hashlib.sha256(
+            (
+                f"{row['successor_slug']}|"
+                f"{row['static_launch_inventory']['binary_path']}"
+            ).encode()
+        ).hexdigest(),
+        "kernel_signature_source": "fallback_legacy",
+        "arch": capture.ARCH,
+        "slug": row["successor_slug"],
+        "shape_point": row["shape"]["shape_point"],
+        "repeat_index": 0,
+        "launch_index": 0,
+    }
+
+
+def _ncu_details_csv(row: dict, kernel_name: str = "_Zfixture_kernel") -> str:
+    launch = row["shape"]["trace_shape"]["launch_config"]
+    block = ",".join(str(value) for value in launch["block"])
+    grid = ",".join(str(value) for value in launch["grid"])
+    prefix = (
+        f'0,{capture.GPU_NAME},{kernel_name},"{block}","{grid}"'
+    )
+    return (
+        "ID,Device,Kernel Name,Block Size,Grid Size,Metric Name,Metric Value\n"
+        f"{prefix},lts__t_sector_hit_rate.pct,50\n"
+        f"{prefix},l1tex__t_sector_hit_rate.pct,25\n"
+        f"{prefix},gpc__cycles_elapsed.max,123\n"
+        f"{prefix},gpu__time_duration.sum,456\n"
+    )
+
+
+def _write_ncu_handoff(root: Path, row: dict) -> tuple[Path, bytes]:
+    cell = root / capture.ARCH / row["successor_slug"] / "trace_00"
+    cell.mkdir(parents=True)
+    report_payload = b"synthetic retained NCU report"
+    (cell / "run_0_launch_set.ncu-rep").write_bytes(report_payload)
+    (cell / "label_run_manifest_0_launch_set.json").write_text(
+        json.dumps(_ncu_handoff_manifest(row), sort_keys=True, indent=2) + "\n"
+    )
+    return cell, report_payload
+
+
+def test_ncu_handoff_rejects_duplicate_manifest_keys(
+    tmp_path: Path,
+    monkeypatch,
+):
+    row, _roster = capture._row_for(MATRIX_KEY, VARIANT_ID)
+    root = tmp_path / "capture"
+    cell, _report_payload = _write_ncu_handoff(root, row)
+    manifest = cell / "label_run_manifest_0_launch_set.json"
+    payload = manifest.read_text()
+    manifest.write_text(
+        payload.replace(
+            '"source_commit":',
+            f'"source_commit": "{capture.PINNED_COMMIT}",\n  "source_commit":',
+            1,
+        )
+    )
+    monkeypatch.setattr(
+        capture.parse_ncu_metrics,
+        "_import_report_csv",
+        lambda *_args, **_kwargs: pytest.fail(
+            "duplicate manifest must fail before report import"
+        ),
+    )
+
+    with pytest.raises(capture.CaptureError, match="duplicate JSON key"):
+        capture._postprocess_ncu_handoff(
+            root=root,
+            row=row,
+            live=_nvbit_live(),
+            expected_ncu_identity=capture._ncu_identity_from_authority(
+                _ncu_authority()
+            ),
+        )
+
+
+def test_failed_ncu_handoff_inventory_binds_retained_artifacts(
+    tmp_path: Path,
+    monkeypatch,
+):
+    row, _roster = capture._row_for(MATRIX_KEY, VARIANT_ID)
+    root = tmp_path / "capture"
+    cell, report_payload = _write_ncu_handoff(root, row)
+    failure_root = root / "failure"
+    failure_root.mkdir()
+    monkeypatch.setattr(capture, "_boot_id_sha256", lambda: "b" * 64)
+
+    capture._write_failure_provenance(
+        failure_root,
+        root=root,
+        phase="ncu",
+        row=row,
+        command=["/fixture/target"],
+        live=_nvbit_live(),
+        environment_payload=b"{}\n",
+        default_environment={"LANG": "C"},
+        capture_producer_sha256="c" * 64,
+        containment_supervisor_sha256="d" * 64,
+        phase_tool_sha256="e" * 64,
+        action_executor_sha256="f" * 64,
+        error=capture.CaptureError("synthetic postprocess failure"),
+    )
+
+    document = json.loads((failure_root / "failure_provenance.json").read_text())
+    artifacts = {
+        artifact["role"]: artifact
+        for artifact in document["handoff_artifacts"]
+    }
+    assert artifacts == {
+        "label_run_manifest": {
+            "role": "label_run_manifest",
+            "path": (
+                cell / "label_run_manifest_0_launch_set.json"
+            ).relative_to(root).as_posix(),
+            "sha256": capture.sha256_bytes(
+                (cell / "label_run_manifest_0_launch_set.json").read_bytes()
+            ),
+            "size_bytes": (
+                cell / "label_run_manifest_0_launch_set.json"
+            ).stat().st_size,
+        },
+        "ncu_report": {
+            "role": "ncu_report",
+            "path": (
+                cell / "run_0_launch_set.ncu-rep"
+            ).relative_to(root).as_posix(),
+            "sha256": capture.sha256_bytes(report_payload),
+            "size_bytes": len(report_payload),
+        },
+    }
+
+
+def test_failed_ncu_handoff_mutation_retires_failure_provenance(
+    tmp_path: Path,
+    monkeypatch,
+):
+    row, _roster = capture._row_for(MATRIX_KEY, VARIANT_ID)
+    root = tmp_path / "capture"
+    cell, _report_payload = _write_ncu_handoff(root, row)
+    failure_root = root / "failure"
+    failure_root.mkdir()
+    report = cell / "run_0_launch_set.ncu-rep"
+    real_publish = capture.immutable.publish_regular_file
+
+    def publish_with_handoff_mutation(*args, **kwargs):
+        after_commit = kwargs["after_commit"]
+
+        def mutate_then_close():
+            replacement = report.with_name("replacement.ncu-rep")
+            replacement.write_bytes(report.read_bytes())
+            replacement.replace(report)
+            after_commit()
+
+        kwargs["after_commit"] = mutate_then_close
+        return real_publish(*args, **kwargs)
+
+    monkeypatch.setattr(
+        capture.immutable,
+        "publish_regular_file",
+        publish_with_handoff_mutation,
+    )
+    monkeypatch.setattr(capture, "_boot_id_sha256", lambda: "b" * 64)
+
+    with pytest.raises(
+        capture.CaptureError,
+        match="transactionally publish failure provenance",
+    ):
+        capture._write_failure_provenance(
+            failure_root,
+            root=root,
+            phase="ncu",
+            row=row,
+            command=["/fixture/target"],
+            live=_nvbit_live(),
+            environment_payload=b"{}\n",
+            default_environment={"LANG": "C"},
+            capture_producer_sha256="c" * 64,
+            containment_supervisor_sha256="d" * 64,
+            phase_tool_sha256="e" * 64,
+            action_executor_sha256="f" * 64,
+            error=capture.CaptureError("synthetic postprocess failure"),
+        )
+
+    assert not (failure_root / "failure_provenance.json").exists()
+    retired = [
+        path for path in failure_root.iterdir()
+        if path.name.startswith(".failed-regular-")
+    ]
+    assert len(retired) == 1
+
+
+def test_late_failure_stream_retires_failure_provenance(
+    tmp_path: Path,
+    monkeypatch,
+):
+    row, _roster = capture._row_for(MATRIX_KEY, VARIANT_ID)
+    root = tmp_path / "capture"
+    failure_root = root / "failure"
+    failure_root.mkdir(parents=True)
+    initial_stream = failure_root / "initial.stdout.bin"
+    initial_stream.write_bytes(b"initial")
+    provenance = failure_root / "failure_provenance.json"
+    real_verify = capture.immutable.RetainedRegular.verify_unchanged
+
+    def verify_with_late_stream(retained):
+        if retained.path == initial_stream and provenance.exists():
+            late_stream = failure_root / "late.stderr.bin"
+            if not late_stream.exists():
+                late_stream.write_bytes(b"late")
+        real_verify(retained)
+
+    monkeypatch.setattr(
+        capture.immutable.RetainedRegular,
+        "verify_unchanged",
+        verify_with_late_stream,
+    )
+    monkeypatch.setattr(capture, "_boot_id_sha256", lambda: "b" * 64)
+
+    with pytest.raises(
+        capture.CaptureError,
+        match="transactionally publish failure provenance",
+    ):
+        capture._write_failure_provenance(
+            failure_root,
+            root=root,
+            phase="ncu",
+            row=row,
+            command=["/fixture/target"],
+            live=_nvbit_live(),
+            environment_payload=b"{}\n",
+            default_environment={"LANG": "C"},
+            capture_producer_sha256="c" * 64,
+            containment_supervisor_sha256="d" * 64,
+            phase_tool_sha256="e" * 64,
+            action_executor_sha256="f" * 64,
+            error=capture.CaptureError("synthetic capture failure"),
+        )
+
+    assert not (failure_root / "failure_provenance.json").exists()
+    retired = [
+        path for path in failure_root.iterdir()
+        if path.name.startswith(".failed-regular-")
+    ]
+    assert len(retired) == 1
+
+
+def test_ncu_handoff_is_imported_and_published_as_singleton(
+    tmp_path: Path,
+    monkeypatch,
+):
+    row, _roster = capture._row_for(MATRIX_KEY, VARIANT_ID)
+    root = tmp_path / "capture"
+    cell, report_payload = _write_ncu_handoff(root, row)
+    identity = capture._ncu_identity_from_authority(_ncu_authority())
+    csv_text = _ncu_details_csv(row)
+    observed = {}
+
+    def imported(expected, report_path, **kwargs):
+        observed["expected"] = expected
+        observed["report_path"] = report_path
+        observed["containment"] = kwargs["require_cgroup_containment"]
+        return (
+            capture.parse_ncu_metrics.ImportedReportCsv(
+                text=csv_text,
+                report_sha256=capture.sha256_bytes(report_payload),
+                report_size_bytes=len(report_payload),
+            ),
+            None,
+        )
+
+    monkeypatch.setattr(
+        capture.parse_ncu_metrics,
+        "_import_report_csv",
+        imported,
+    )
+    monkeypatch.setattr(
+        capture.admission,
+        "_sass_kernel_names",
+        lambda _row: {"_Zfixture_kernel"},
+    )
+
+    capture._postprocess_ncu_handoff(
+        root=root,
+        row=row,
+        live=_nvbit_live(),
+        expected_ncu_identity=identity,
+    )
+
+    assert observed == {
+        "expected": identity,
+        "report_path": cell / "run_0_launch_set.ncu-rep",
+        "containment": True,
+    }
+    assert {path.name for path in cell.iterdir()} == set(
+        capture._NCU_COMPLETE_ARTIFACT_NAMES
+    )
+    sidecar = json.loads((cell / "label_0_0.json").read_text())
+    assert sidecar["cache_hit_rate_l2_sector"] == 0.5
+    assert sidecar["cache_hit_rate_l1tex_sector"] == 0.25
+    assert sidecar["measurement_protocol"] == {
+        "ncu_clock_control": "none",
+        "ncu_cache_control": "all",
+        "ncu_replay_mode": "kernel",
+        "ncu_target_processes": "all",
+        "ncu_filter_mode": "global",
+        "ncu_profile_from_start": False,
+        "ncu_launch_skip": 0,
+        "ncu_launch_count": 1,
+        "host_gpu_index": 0,
+        "host_persistence_mode": "Enabled",
+        "host_sm_clock_mhz": capture.SM_CLOCK_MHZ,
+        "host_mem_clock_mhz": capture.MEM_CLOCK_MHZ,
+    }
+    assert sidecar["unit_tagged_metrics"] == [
+        {
+            "ncu_metric": "gpc__cycles_elapsed.max",
+            "unit": "cycles",
+            "value": 123.0,
+        },
+        {
+            "ncu_metric": "gpu__time_duration.sum",
+            "unit": "ns",
+            "value": 456.0,
+        },
+    ]
+    observation = json.loads(
+        (cell / "run_0_launch_set.launch_observation.json").read_text()
+    )
+    assert observation["report_sha256"] == capture.sha256_bytes(report_payload)
+    assert observation["identity"]["Kernel Name"] == "_Zfixture_kernel"
+
+
+def test_ncu_handoff_generation_stays_retained_until_receipt_commit(
+    tmp_path: Path,
+    monkeypatch,
+):
+    row, _roster = capture._row_for(MATRIX_KEY, VARIANT_ID)
+    root = tmp_path / "capture"
+    cell, report_payload = _write_ncu_handoff(root, row)
+    identity = capture._ncu_identity_from_authority(_ncu_authority())
+    monkeypatch.setattr(
+        capture.parse_ncu_metrics,
+        "_import_report_csv",
+        lambda *_args, **_kwargs: (
+            capture.parse_ncu_metrics.ImportedReportCsv(
+                text=_ncu_details_csv(row),
+                report_sha256=capture.sha256_bytes(report_payload),
+                report_size_bytes=len(report_payload),
+            ),
+            None,
+        ),
+    )
+    monkeypatch.setattr(
+        capture.admission,
+        "_sass_kernel_names",
+        lambda _row: {"_Zfixture_kernel"},
+    )
+    report = cell / "run_0_launch_set.ncu-rep"
+
+    with pytest.raises(
+        capture.immutable.ImmutableArtifactError,
+        match="changed|replaced|identity|generation",
+    ):
+        with contextlib.ExitStack() as generation_stack:
+            capture._postprocess_ncu_handoff(
+                root=root,
+                row=row,
+                live=_nvbit_live(),
+                expected_ncu_identity=identity,
+                generation_stack=generation_stack,
+            )
+            replacement = report.with_name("replacement.ncu-rep")
+            replacement.write_bytes(report_payload)
+            replacement.replace(report)
+
+
+@pytest.mark.parametrize(
+    "artifact_name",
+    (
+        "run_0_launch_set.launch_observation.json",
+        "label_0_0.json",
+    ),
+)
+def test_ncu_generated_artifact_stays_retained_until_receipt_commit(
+    tmp_path: Path,
+    monkeypatch,
+    artifact_name: str,
+):
+    row, _roster = capture._row_for(MATRIX_KEY, VARIANT_ID)
+    root = tmp_path / "capture"
+    cell, report_payload = _write_ncu_handoff(root, row)
+    identity = capture._ncu_identity_from_authority(_ncu_authority())
+    monkeypatch.setattr(
+        capture.parse_ncu_metrics,
+        "_import_report_csv",
+        lambda *_args, **_kwargs: (
+            capture.parse_ncu_metrics.ImportedReportCsv(
+                text=_ncu_details_csv(row),
+                report_sha256=capture.sha256_bytes(report_payload),
+                report_size_bytes=len(report_payload),
+            ),
+            None,
+        ),
+    )
+    monkeypatch.setattr(
+        capture.admission,
+        "_sass_kernel_names",
+        lambda _row: {"_Zfixture_kernel"},
+    )
+
+    with pytest.raises(
+        capture.immutable.ImmutableArtifactError,
+        match="changed|replaced|identity|generation",
+    ):
+        with contextlib.ExitStack() as generation_stack:
+            capture._postprocess_ncu_handoff(
+                root=root,
+                row=row,
+                live=_nvbit_live(),
+                expected_ncu_identity=identity,
+                generation_stack=generation_stack,
+            )
+            artifact = cell / artifact_name
+            replacement = artifact.with_name(f"replacement-{artifact.name}")
+            replacement.write_bytes(artifact.read_bytes())
+            replacement.replace(artifact)
+
+
+def test_ncu_handoff_rejects_unexpected_namespace_before_import(
+    tmp_path: Path,
+    monkeypatch,
+):
+    row, _roster = capture._row_for(MATRIX_KEY, VARIANT_ID)
+    root = tmp_path / "capture"
+    cell, _report_payload = _write_ncu_handoff(root, row)
+    (cell / "unexpected.sidecar.json").write_text("{}\n")
+    monkeypatch.setattr(
+        capture.parse_ncu_metrics,
+        "_import_report_csv",
+        lambda *_args, **_kwargs: pytest.fail(
+            "unexpected namespace must fail before report import"
+        ),
+    )
+
+    with pytest.raises(capture.CaptureError, match="namespace differs"):
+        capture._postprocess_ncu_handoff(
+            root=root,
+            row=row,
+            live=_nvbit_live(),
+            expected_ncu_identity=capture._ncu_identity_from_authority(
+                _ncu_authority()
+            ),
+        )
+
+
+def test_ncu_handoff_rejects_imported_report_identity_drift(
+    tmp_path: Path,
+    monkeypatch,
+):
+    row, _roster = capture._row_for(MATRIX_KEY, VARIANT_ID)
+    root = tmp_path / "capture"
+    _cell, report_payload = _write_ncu_handoff(root, row)
+    imported = capture.parse_ncu_metrics.ImportedReportCsv(
+        text=_ncu_details_csv(row),
+        report_sha256="0" * 64,
+        report_size_bytes=len(report_payload),
+    )
+    monkeypatch.setattr(
+        capture.parse_ncu_metrics,
+        "_import_report_csv",
+        lambda *_args, **_kwargs: (imported, None),
+    )
+
+    with pytest.raises(capture.CaptureError, match="identity differs"):
+        capture._postprocess_ncu_handoff(
+            root=root,
+            row=row,
+            live=_nvbit_live(),
+            expected_ncu_identity=capture._ncu_identity_from_authority(
+                _ncu_authority()
+            ),
+        )
+
+
+@pytest.mark.parametrize(
+    ("returncode", "stdout", "stderr"),
+    [
+        (0, b"", capture._NCU_HANDOFF_STDERR),
+        (3, b"unexpected", capture._NCU_HANDOFF_STDERR),
+        (3, b"", capture._NCU_HANDOFF_STDERR.rstrip(b"\n")),
+        (3, b"", capture._NCU_HANDOFF_STDERR + b"extra\n"),
+        (4, b"", capture._NCU_HANDOFF_STDERR),
+    ],
+)
+def test_ncu_handoff_accepts_only_exact_driver_result(
+    returncode: int,
+    stdout: bytes,
+    stderr: bytes,
+):
+    assert not capture._capture_protocol_succeeded(
+        "ncu",
+        returncode=returncode,
+        stdout=stdout,
+        stderr=stderr,
+    )
+    assert capture._capture_protocol_succeeded(
+        "ncu",
+        returncode=3,
+        stdout=b"",
+        stderr=capture._NCU_HANDOFF_STDERR,
+    )
+
+
 def test_ncu_authority_requires_launcher_inner_path_binding():
     authority = _ncu_authority()
     authority["resolved_path"] = str(
@@ -1620,6 +2286,7 @@ def test_environment_provenance_names_trace_folder_controls():
             "check": "live",
             "smi_stdout": "smi",
             "competing_process_stdout": "",
+            "identity_stdout": "identity",
             "nvcc_stdout": "nvcc",
             "ncu_stdout": "ncu",
         },

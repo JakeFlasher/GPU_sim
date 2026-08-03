@@ -13,7 +13,6 @@ import contextlib
 import datetime as dt
 import hashlib
 import json
-import math
 import os
 import re
 import subprocess
@@ -57,6 +56,10 @@ NVBIT_TRACE_BINARY_VERSION = 86
 NVBIT_VERSION = "1.8"
 NVBIT_TRACE_SUMMARY_PRODUCER = "nvbit_tracer"
 GPU_NAME = "NVIDIA GeForce RTX 3090 Ti"
+GPU_UUID_PATTERN = (
+    r"GPU-[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-"
+    r"[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}"
+)
 LABEL_DRIVER_REL = label_driver_authority.LABEL_DRIVER_REL
 LABEL_DRIVER_SHA256 = label_driver_authority.LABEL_DRIVER_SHA256
 LABEL_DRIVER_MODE = label_driver_authority.LABEL_DRIVER_MODE
@@ -67,7 +70,7 @@ CGROUP_CONTAINMENT_SUPERVISOR_SHA256 = (
     "7a938d2f7f07fbb1477351a195616f9a7478db5c28b81fa29a3d226d11eadbff"
 )
 CAPTURE_PRODUCER_SELF_SHA256_AUTHORITY = (
-    "aa677745c38573ea331ec9af287f0b4d616de22d2570e7c0fd50b657acb5ee6e"
+    "27a340df7a65beeeb3d5c8f2a83d174667fc8bf04088ad1042c589cc81a08a79"
 )
 NCU_LAUNCHER_PATH = (
     "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu"
@@ -202,6 +205,43 @@ def sha256_bytes(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
 
+def _normalized_parser_diagnostics(
+    value: Any,
+    label: str,
+) -> dict[str, list[dict[str, Any]]]:
+    if type(value) is not dict:
+        raise AdmissionError(f"{label} parser diagnostics are not an object")
+    normalized: dict[str, list[dict[str, Any]]] = {}
+    for name, records in value.items():
+        if type(name) is not str or not isinstance(records, list):
+            raise AdmissionError(f"{label} parser diagnostics are malformed")
+        normalized_records: list[dict[str, Any]] = []
+        for record in records:
+            if (
+                type(record) is not dict
+                or set(record) != {"metric_label", "raw_value"}
+                or type(record["metric_label"]) is not str
+                or isinstance(record["raw_value"], bool)
+                or not isinstance(record["raw_value"], (int, float))
+            ):
+                raise AdmissionError(f"{label} parser diagnostics are malformed")
+            try:
+                json.dumps(record, allow_nan=False)
+            except (TypeError, ValueError) as exc:
+                raise AdmissionError(
+                    f"{label} parser diagnostics are non-finite"
+                ) from exc
+            normalized_records.append(dict(record))
+        normalized[name] = sorted(
+            normalized_records,
+            key=lambda record: (
+                record["metric_label"],
+                record["raw_value"],
+            ),
+        )
+    return normalized
+
+
 _CAPTURE_PRODUCER_SELF_SEAL = re.compile(
     rb'CAPTURE_PRODUCER_SELF_SHA256 = \(\n    "([0-9a-f]{64})"\n\)'
 )
@@ -262,8 +302,8 @@ def _load_json(
             if generation is not None
             else path.read_bytes()
         )
-        value = json.loads(payload.decode("utf-8"))
-    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        value = immutable.strict_json_loads(payload, label=label)
+    except (OSError, immutable.ImmutableArtifactError) as exc:
         raise AdmissionError(f"invalid JSON {label}: {exc}") from exc
     if not isinstance(value, dict):
         raise AdmissionError(f"JSON document is not an object: {label}")
@@ -517,22 +557,85 @@ def _verify_ncu_report(
         raise AdmissionError(
             f"NCU report metric extraction failed: {extraction.typed_reason}: {extraction.detail}"
         )
-    sidecar_records = [
-        item for item in sidecar.get("unit_tagged_metrics", []) if isinstance(item, dict)
+    expected_unit_records = [
+        {
+            "ncu_metric": metric,
+            "unit": extraction.metrics[metric]["unit"],
+            "value": extraction.metrics[metric]["value"],
+        }
+        for metric in (
+            "gpc__cycles_elapsed.max",
+            "gpu__time_duration.sum",
+        )
     ]
-    metric_names = [item.get("ncu_metric") for item in sidecar_records]
-    if len(metric_names) != len(set(metric_names)):
-        raise AdmissionError("NCU sidecar has duplicate unit-tagged metrics")
-    sidecar_metrics = {item.get("ncu_metric"): item for item in sidecar_records}
-    for metric, parsed in extraction.metrics.items():
-        if not isinstance(parsed.get("value"), (int, float)) or not math.isfinite(parsed["value"]):
-            raise AdmissionError(f"NCU report metric is non-finite: {metric}")
-        declared = sidecar_metrics.get(metric)
-        if not isinstance(declared, dict) or (
-            declared.get("unit") != parsed["unit"]
-            or declared.get("value") != parsed["value"]
+    declared_unit_records = sidecar.get("unit_tagged_metrics")
+    if isinstance(declared_unit_records, list):
+        declared_metric_names = [
+            record.get("ncu_metric")
+            for record in declared_unit_records
+            if isinstance(record, dict)
+        ]
+        if len(declared_metric_names) != len(set(declared_metric_names)):
+            raise AdmissionError("NCU sidecar has duplicate unit-tagged metrics")
+    if declared_unit_records != expected_unit_records:
+        raise AdmissionError(
+            "NCU sidecar/report metric disagreement: unit-tagged metric set"
+        )
+    percentages = parse_ncu_metrics.parse_raw_page_csv(
+        csv_text,
+        [
+            "lts__t_sector_hit_rate.pct",
+            "l1tex__t_sector_hit_rate.pct",
+        ],
+    )
+    if not percentages.ok:
+        raise AdmissionError(
+            "NCU report percentage extraction failed: "
+            f"{percentages.typed_reason}: {percentages.detail}"
+        )
+    percentage_fields = {
+        "lts__t_sector_hit_rate.pct": (
+            "cache_hit_rate_l2_sector",
+            "confidence_interval_l2_sector",
+        ),
+        "l1tex__t_sector_hit_rate.pct": (
+            "cache_hit_rate_l1tex_sector",
+            "confidence_interval_l1tex_sector",
+        ),
+    }
+    for metric, (field, interval_field) in percentage_fields.items():
+        value = percentages.fraction_values[metric]
+        expected_interval = {
+            "lower": value,
+            "upper": value,
+            "confidence_level": 0.95,
+            "units": "sector_hit_rate_fraction",
+            "aggregation": "kernel",
+        }
+        if (
+            sidecar.get(field) != value
+            or sidecar.get(interval_field) != expected_interval
         ):
-            raise AdmissionError(f"NCU sidecar/report metric disagreement: {metric}")
+            raise AdmissionError(
+                f"NCU sidecar/report percentage disagreement: {metric}"
+            )
+    expected_diagnostics = parse_ncu_metrics.diagnostics_to_json_shape(
+        parse_ncu_metrics._merged_parser_diagnostics_result(
+            percentages,
+            extraction,
+        )
+    )
+    if expected_diagnostics:
+        if _normalized_parser_diagnostics(
+            sidecar.get("parser_diagnostics"),
+            "NCU sidecar",
+        ) != _normalized_parser_diagnostics(
+            expected_diagnostics,
+            "NCU report",
+        ):
+            raise AdmissionError("NCU sidecar/report parser diagnostics disagree")
+    elif "parser_diagnostics" in sidecar:
+        raise AdmissionError("NCU sidecar has unreported parser diagnostics")
     parsed_observation = parse_ncu_metrics.extract_launch_observation(csv_text)
     if (
         "ID" not in parsed_observation["identity_columns"]
@@ -595,6 +698,20 @@ def _verify_ncu_artifacts(
     artifact_by_role: dict[str, list[dict[str, Any]]],
 ) -> dict[str, Any]:
     """Re-derive NCU identity and target-only metric semantics from payloads."""
+    cell = Path(row["arch"]) / row["successor_slug"] / "trace_00"
+    expected_paths = {
+        "ncu_report": cell / "run_0_launch_set.ncu-rep",
+        "label_sidecar": cell / "label_0_0.json",
+        "label_run_manifest": cell / "label_run_manifest_0_launch_set.json",
+        "ncu_launch_observation": (
+            cell / "run_0_launch_set.launch_observation.json"
+        ),
+    }
+    for role, expected_path in expected_paths.items():
+        if artifact_by_role[role][0]["path"] != expected_path.as_posix():
+            raise AdmissionError(
+                f"NCU {role} path differs from canonical launch-set namespace"
+            )
     try:
         from tools.local_labels import import_label
 
@@ -612,7 +729,52 @@ def _verify_ncu_artifacts(
     except Exception as exc:
         raise AdmissionError(f"NCU label sidecar semantic validation failed: {exc}") from exc
 
+    producer_sidecar_fields = {
+        "schema_version",
+        "device",
+        "slug",
+        "shape_point",
+        "repeat_index",
+        "launch_index",
+        "binary_sha256",
+        "profiler_family",
+        "profiler_version",
+        "cuda_version",
+        "driver_version",
+        "gpu_uuid_sha256",
+        "replay_mode",
+        "aggregation",
+        "warmup_count",
+        "cache_hit_rate_l2_sector",
+        "cache_hit_rate_l1tex_sector",
+        "confidence_interval_l2_sector",
+        "confidence_interval_l1tex_sector",
+        "measurement_protocol",
+        "evidence_class",
+        "unit_tagged_metrics",
+    }
+    observed_sidecar_fields = frozenset(sidecar)
+    if observed_sidecar_fields not in {
+        frozenset(producer_sidecar_fields),
+        frozenset({*producer_sidecar_fields, "parser_diagnostics"}),
+    }:
+        raise AdmissionError(
+            "NCU label sidecar fields differ from the capture producer"
+        )
     expected = receipt["identity"]
+    environment_path = _safe_receipt_path(
+        root,
+        artifact_by_role["environment"][0]["path"],
+        "capture environment",
+    )
+    environment = _load_json(
+        environment_path,
+        "capture environment",
+        generation,
+    )
+    live = environment.get("live_checks")
+    if not isinstance(live, dict):
+        raise AdmissionError("NCU capture environment has no live-check authority")
     binary_path = ROOT / row["static_launch_inventory"]["binary_path"]
     _regular(binary_path, "successor executable")
     if sha256_bytes(binary_path.read_bytes()) != expected["binary_sha256"]:
@@ -624,18 +786,34 @@ def _verify_ncu_artifacts(
         "repeat_index": 0,
         "launch_index": 0,
         "binary_sha256": expected["binary_sha256"],
+        "profiler_family": "nsight_compute",
+        "profiler_version": expected_ncu_identity.version_line,
+        "cuda_version": "13.2",
+        "driver_version": live.get("driver_version"),
+        "gpu_uuid_sha256": live.get("gpu_uuid_sha256"),
+        "replay_mode": "kernel",
+        "aggregation": "kernel",
+        "warmup_count": 0,
+        "evidence_class": "campaign",
     }
     if any(sidecar.get(key) != value for key, value in expected_fields.items()):
         raise AdmissionError("NCU label sidecar identity does not match successor row")
     protocol = sidecar.get("measurement_protocol")
-    if not isinstance(protocol, dict) or any(
-        protocol.get(key) != value
-        for key, value in {
-            "ncu_clock_control": "none",
-            "ncu_cache_control": "all",
-            "ncu_replay_mode": "kernel",
-        }.items()
-    ):
+    expected_protocol = {
+        "ncu_clock_control": "none",
+        "ncu_cache_control": "all",
+        "ncu_replay_mode": "kernel",
+        "ncu_target_processes": "all",
+        "ncu_filter_mode": "global",
+        "ncu_profile_from_start": False,
+        "ncu_launch_skip": 0,
+        "ncu_launch_count": 1,
+        "host_gpu_index": 0,
+        "host_persistence_mode": "Enabled",
+        "host_sm_clock_mhz": 1350,
+        "host_mem_clock_mhz": 10501,
+    }
+    if not isinstance(protocol, dict) or protocol != expected_protocol:
         raise AdmissionError("NCU label sidecar controls are not pinned")
     metrics = {
         item.get("ncu_metric"): item
@@ -656,31 +834,21 @@ def _verify_ncu_artifacts(
     )
     run = _load_json(run_path, "label run manifest", generation)
     run_expected = {
+        "schema_version": 1,
         "source_commit": PINNED_BUNDLE_COMMIT,
         "binary_sha256": expected["binary_sha256"],
+        "kernel_signature_sha256": expected["kernel_signature_sha256"],
+        "kernel_signature_source": "fallback_legacy",
         "arch": expected["arch"],
         "slug": expected["slug"],
         "shape_point": expected["shape_point"],
         "repeat_index": 0,
         "launch_index": 0,
     }
-    if any(run.get(key) != value for key, value in run_expected.items()):
-        raise AdmissionError("NCU label run manifest identity does not match successor row")
-    if run.get("kernel_signature_sha256") != expected["kernel_signature_sha256"]:
-        raise AdmissionError("NCU label run manifest kernel signature does not match successor")
-    controls = run.get("ncu_controls")
-    if controls is not None and (
-        not isinstance(controls, dict)
-        or any(
-            controls.get(key) != value
-            for key, value in {
-                "ncu_clock_control": "none",
-                "ncu_cache_control": "all",
-                "ncu_replay_mode": "kernel",
-            }.items()
+    if run != run_expected:
+        raise AdmissionError(
+            "NCU label run manifest differs from the closed successor contract"
         )
-    ):
-        raise AdmissionError("NCU label run manifest controls are not pinned")
 
     report_artifact = artifact_by_role["ncu_report"][0]
     observation_path = _safe_receipt_path(
@@ -1150,9 +1318,11 @@ def _verify_capture_documents(
     live = environment["live_checks"]
     base_live_keys = {
         "smi_command", "smi_stdout_sha256", "competing_process_command",
-        "competing_process_stdout_sha256", "nvcc_command", "nvcc_stdout_sha256",
-        "cuda_release", "nvbit_version", "gpu_name", "persistence_mode",
-        "sm_clock_mhz", "mem_clock_mhz",
+        "competing_process_stdout_sha256", "identity_command",
+        "identity_stdout_sha256", "gpu_uuid_sha256", "driver_version",
+        "nvcc_command", "nvcc_stdout_sha256", "cuda_release",
+        "nvbit_version", "gpu_name", "persistence_mode", "sm_clock_mhz",
+        "mem_clock_mhz",
     }
     ncu_live_keys = {
         "ncu_command", "ncu_stdout_sha256", "ncu_authority", "ncu_version",
@@ -1165,6 +1335,8 @@ def _verify_capture_documents(
     if (
         live["smi_command"] != ["nvidia-smi", "--query-gpu=name,compute_cap,persistence_mode,clocks.sm,clocks.mem", "--format=csv,noheader,nounits"]
         or live["competing_process_command"] != ["nvidia-smi", "--query-compute-apps=pid,process_name", "--format=csv,noheader,nounits"]
+        or live["identity_command"] != ["nvidia-smi", "--query-gpu=uuid,driver_version", "--format=csv,noheader,nounits"]
+        or live["driver_version"] != "610.43.02"
         or live["nvcc_command"] != ["/usr/local/cuda-13.2/bin/nvcc", "--version"]
         or live["cuda_release"] != {"major": 13, "minor": 2}
         or live["nvbit_version"] != "1.8"
@@ -1176,7 +1348,8 @@ def _verify_capture_documents(
         raise AdmissionError("successor live-check pins are invalid")
     outputs = environment["live_outputs"]
     output_keys = {
-        "smi_stdout", "competing_process_stdout", "nvcc_stdout",
+        "smi_stdout", "competing_process_stdout", "identity_stdout",
+        "nvcc_stdout",
     }
     if receipt["capture_kind"] == "ncu":
         output_keys.add("ncu_stdout")
@@ -1191,6 +1364,22 @@ def _verify_capture_documents(
     smi_lines = [line.strip() for line in outputs["smi_stdout"].splitlines() if line.strip()]
     if smi_lines != ["NVIDIA GeForce RTX 3090 Ti, 8.6, Enabled, 1350, 10501"]:
         raise AdmissionError("successor nvidia-smi output is not pinned")
+    identity_lines = [
+        line.strip()
+        for line in outputs["identity_stdout"].splitlines()
+        if line.strip()
+    ]
+    if len(identity_lines) != 1:
+        raise AdmissionError("successor selected-GPU identity output is not singular")
+    identity_fields = [part.strip() for part in identity_lines[0].split(",")]
+    if (
+        len(identity_fields) != 2
+        or re.fullmatch(GPU_UUID_PATTERN, identity_fields[0]) is None
+        or identity_fields[1] != live["driver_version"]
+        or sha256_bytes(identity_fields[0].encode("utf-8"))
+        != live["gpu_uuid_sha256"]
+    ):
+        raise AdmissionError("successor selected-GPU identity output is not pinned")
     competing = outputs["competing_process_stdout"].strip().lower()
     if competing and "no running processes" not in competing:
         raise AdmissionError("successor competing-process output is not empty")
@@ -1220,7 +1409,13 @@ def _verify_capture_documents(
         raise AdmissionError(
             "successor NVBit command authority differs from the exact row"
         )
-    expected_host = canonical_sha({"gpu": live["gpu_name"], "smi": live["smi_stdout_sha256"]})
+    expected_host = canonical_sha({
+        "gpu": live["gpu_name"],
+        "smi": live["smi_stdout_sha256"],
+        "gpu_uuid_sha256": live["gpu_uuid_sha256"],
+        "driver_version": live["driver_version"],
+        "identity_stdout_sha256": live["identity_stdout_sha256"],
+    })
     if receipt["process"]["host_identity_sha256"] != expected_host:
         raise AdmissionError("successor process host identity does not match live output")
     for key in live_keys:
