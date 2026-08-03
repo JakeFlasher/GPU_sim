@@ -70,7 +70,7 @@ CGROUP_CONTAINMENT_SUPERVISOR_SHA256 = (
     "7a938d2f7f07fbb1477351a195616f9a7478db5c28b81fa29a3d226d11eadbff"
 )
 CAPTURE_PRODUCER_SELF_SHA256_AUTHORITY = (
-    "acb60dcf400603f548094f8d8a2a90bb04c218fc618b3be6574955ead02327b0"
+    "89e23e8cdc27fee62f65a5222f06db3ced76c9f355af07f4665739adf7f235ee"
 )
 NCU_LAUNCHER_PATH = (
     "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu"
@@ -805,7 +805,7 @@ def _verify_ncu_artifacts(
         "ncu_replay_mode": "kernel",
         "ncu_target_processes": "all",
         "ncu_filter_mode": "global",
-        "ncu_profile_from_start": False,
+        "ncu_profile_from_start": True,
         "ncu_launch_skip": 0,
         "ncu_launch_count": 1,
         "host_gpu_index": 0,
@@ -1122,7 +1122,7 @@ def _expected_ncu_command(
         "--target-processes", "all",
         "--filter-mode", "global",
         "--replay-mode", "kernel",
-        "--profile-from-start", "off",
+        "--profile-from-start", "on",
         "--launch-skip", "0",
         "--launch-count", "1",
         "--clock-control", "none",

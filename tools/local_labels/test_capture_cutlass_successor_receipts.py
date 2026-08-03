@@ -1380,7 +1380,7 @@ def _ncu_command(identity: capture.ncu_executor.ExpectedNcuIdentity) -> list[str
         "--replay-mode", "kernel",
         "--cache-control", "all",
         "--clock-control", "none",
-        "--profile-from-start", "off",
+        "--profile-from-start", "on",
         "--launch-skip", "0",
         "--launch-count", "1",
         "--",
@@ -1707,7 +1707,7 @@ def test_ncu_handoff_is_imported_and_published_as_singleton(
         "ncu_replay_mode": "kernel",
         "ncu_target_processes": "all",
         "ncu_filter_mode": "global",
-        "ncu_profile_from_start": False,
+        "ncu_profile_from_start": True,
         "ncu_launch_skip": 0,
         "ncu_launch_count": 1,
         "host_gpu_index": 0,
@@ -2161,6 +2161,27 @@ def test_ncu_capture_rejects_command_authority_drift(
         str(capture.LABEL_DRIVER), "d" * 64, 0o555
     )
     with pytest.raises(capture.CaptureError, match="--launch-count"):
+        capture._run_ncu_capture_command(
+            command, identity, environment, driver, _retained_target(), tmp_path
+        )
+
+
+def test_ncu_capture_rejects_profile_from_start_off(
+    tmp_path: Path, monkeypatch,
+):
+    identity = capture._ncu_identity_from_authority(_ncu_authority())
+    command = _ncu_command(identity)
+    command[command.index("--profile-from-start") + 1] = "off"
+    monkeypatch.setattr(
+        capture.ncu_executor,
+        "execute_ncu_supervised_executable",
+        lambda *_args, **_kwargs: pytest.fail("inactive profiler command must not run"),
+    )
+    environment = capture._label_collection_environment({}, cwd=tmp_path)
+    driver = capture.ncu_executor.ExpectedExecutableIdentity(
+        str(capture.LABEL_DRIVER), "d" * 64, 0o555
+    )
+    with pytest.raises(capture.CaptureError, match="--profile-from-start"):
         capture._run_ncu_capture_command(
             command, identity, environment, driver, _retained_target(), tmp_path
         )

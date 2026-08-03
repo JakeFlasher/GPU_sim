@@ -72,7 +72,7 @@ CAPTURE_STREAM_READ_BYTES = 64 * 1024
 CAPTURE_PROCESS_POLL_S = 0.05
 CAPTURE_CLEANUP_TIMEOUT_S = 5.0
 CAPTURE_PRODUCER_SELF_SHA256 = (
-    "acb60dcf400603f548094f8d8a2a90bb04c218fc618b3be6574955ead02327b0"
+    "89e23e8cdc27fee62f65a5222f06db3ced76c9f355af07f4665739adf7f235ee"
 )
 EXPECTED_TRACE_CONTRACT_ID = admission.TRACE_CONTRACT_ID
 EXPECTED_MEMORY_PAYLOAD_CLASSES = admission.TRACE_MEMORY_PAYLOAD_CLASSES
@@ -1063,7 +1063,7 @@ def _run_ncu_capture_command(
         "--replay-mode": "kernel",
         "--cache-control": "all",
         "--clock-control": "none",
-        "--profile-from-start": "off",
+        "--profile-from-start": "on",
         "--launch-skip": "0",
         "--launch-count": "1",
     }
@@ -1474,7 +1474,7 @@ def _build_ncu_sidecar(
         "SIDECAR_NCU_REPLAY_MODE": "kernel",
         "SIDECAR_NCU_TARGET_PROCESSES": "all",
         "SIDECAR_NCU_FILTER_MODE": "global",
-        "SIDECAR_NCU_PROFILE_FROM_START": "off",
+        "SIDECAR_NCU_PROFILE_FROM_START": "on",
         "SIDECAR_NCU_LAUNCH_SKIP": "0",
         "SIDECAR_NCU_LAUNCH_COUNT": "1",
         "SIDECAR_HOST_GPU_INDEX": "0",

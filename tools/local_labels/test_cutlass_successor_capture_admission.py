@@ -806,7 +806,7 @@ def _receipt(root: Path, row: dict, kind: str, index: int) -> Path:
                     "ncu_replay_mode": "kernel",
                     "ncu_target_processes": "all",
                     "ncu_filter_mode": "global",
-                    "ncu_profile_from_start": False,
+                    "ncu_profile_from_start": True,
                     "ncu_launch_skip": 0,
                     "ncu_launch_count": 1,
                     "host_gpu_index": 0,
@@ -1060,6 +1060,24 @@ def test_ncu_sidecar_producer_pins_are_rederived(
     )
 
     with pytest.raises(admit.AdmissionError, match="sidecar identity"):
+        admit.build_overlay(
+            tmp_path,
+            generated_at_utc="2026-07-23T01:00:00Z",
+        )
+
+
+def test_ncu_sidecar_rejects_inactive_profile_start(tmp_path: Path):
+    target = _receipt(tmp_path, MATRIX["rows"][0], "ncu", 0)
+    _mutate_json_artifact(
+        tmp_path,
+        target,
+        "label_sidecar",
+        lambda value: value["measurement_protocol"].update({
+            "ncu_profile_from_start": False,
+        }),
+    )
+
+    with pytest.raises(admit.AdmissionError, match="sidecar controls"):
         admit.build_overlay(
             tmp_path,
             generated_at_utc="2026-07-23T01:00:00Z",
