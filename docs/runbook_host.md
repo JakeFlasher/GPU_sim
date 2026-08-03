@@ -10,6 +10,7 @@ tracer must be built with CUDA 13.2.
 |---|---|
 | GPU | NVIDIA GeForce RTX 3090 Ti, `sm_86` |
 | Driver | 610.43.02 |
+| Authorized Task-17 driver successor | 610.43.03 (explicit authority dated 2026-08-03; capture verification pending) |
 | Default CUDA compiler | 13.3 under `/opt/cuda` |
 | Pinned NVBit build CUDA | 13.2 under `/usr/local/cuda-13.2` |
 | NVBit | 1.8 vendored core |
@@ -23,7 +24,9 @@ compiled with CUDA 13.2: CUDA 13.3 remains the system default, and a CUDA
 13.3-built sm_86 target passed the live trace contract on this host. NVBit's
 published `driver <=575.xx` line has not been formally corrected, so driver
 610.43.02 is locally verified outside the published envelope, not claimed as
-official NVBit support.
+official NVBit support. Driver/KMD 610.43.03 is an explicitly authorized
+Task-17 successor authority only; it does not rewrite historical 610.43.02
+evidence or imply capture verification before the successor gate passes.
 
 ## Readiness ladder
 

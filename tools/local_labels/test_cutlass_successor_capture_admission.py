@@ -556,13 +556,13 @@ def _seal(document: dict) -> dict:
 
 def _process(pid: int, command: list[str]) -> dict:
     smi_stdout = "NVIDIA GeForce RTX 3090 Ti, 8.6, Enabled, 1350, 10501\n"
-    identity_stdout = f"{GPU_UUID}, 610.43.02\n"
+    identity_stdout = f"{GPU_UUID}, 610.43.03\n"
     process = {
         "host_identity_sha256": admit.canonical_sha({
             "gpu": "NVIDIA GeForce RTX 3090 Ti",
             "smi": admit.sha256_bytes(smi_stdout.encode()),
             "gpu_uuid_sha256": admit.sha256_bytes(GPU_UUID.encode()),
-            "driver_version": "610.43.02",
+            "driver_version": "610.43.03",
             "identity_stdout_sha256": admit.sha256_bytes(
                 identity_stdout.encode()
             ),
@@ -610,7 +610,7 @@ def _environment_payload(
     live_outputs = {
         "smi_stdout": "NVIDIA GeForce RTX 3090 Ti, 8.6, Enabled, 1350, 10501\n",
         "competing_process_stdout": "",
-        "identity_stdout": f"{GPU_UUID}, 610.43.02\n",
+        "identity_stdout": f"{GPU_UUID}, 610.43.03\n",
         "nvcc_stdout": "Cuda compilation tools, release 13.2, V13.2.0\n",
     }
     live = {
@@ -621,7 +621,7 @@ def _environment_payload(
         "identity_command": ["nvidia-smi", "--query-gpu=uuid,driver_version", "--format=csv,noheader,nounits"],
         "identity_stdout_sha256": admit.sha256_bytes(live_outputs["identity_stdout"].encode()),
         "gpu_uuid_sha256": admit.sha256_bytes(GPU_UUID.encode()),
-        "driver_version": "610.43.02",
+        "driver_version": "610.43.03",
         "nvcc_command": ["/usr/local/cuda-13.2/bin/nvcc", "--version"],
         "nvcc_stdout_sha256": admit.sha256_bytes(live_outputs["nvcc_stdout"].encode()),
         "cuda_release": {"major": 13, "minor": 2},
@@ -784,7 +784,7 @@ def _receipt(root: Path, row: dict, kind: str, index: int) -> Path:
                 "profiler_family": "nsight_compute",
                 "profiler_version": admit.NCU_VERSION_LINE,
                 "cuda_version": "13.2",
-                "driver_version": "610.43.02",
+                "driver_version": "610.43.03",
                 "gpu_uuid_sha256": admit.sha256_bytes(GPU_UUID.encode()),
                 "replay_mode": "kernel",
                 "aggregation": "kernel",
@@ -1099,6 +1099,24 @@ def test_ncu_artifacts_require_canonical_launch_set_paths(tmp_path: Path):
     _rewrite(target, document)
 
     with pytest.raises(admit.AdmissionError, match="canonical launch-set namespace"):
+        admit.build_overlay(
+            tmp_path,
+            generated_at_utc="2026-07-23T01:00:00Z",
+        )
+
+
+def test_environment_retired_driver_authority_is_rejected(tmp_path: Path):
+    target = _receipt(tmp_path, MATRIX["rows"][0], "ncu", 0)
+    _mutate_json_artifact(
+        tmp_path,
+        target,
+        "environment",
+        lambda value: value["live_checks"].update({
+            "driver_version": "610.43.02",
+        }),
+    )
+
+    with pytest.raises(admit.AdmissionError, match="live-check pins are invalid"):
         admit.build_overlay(
             tmp_path,
             generated_at_utc="2026-07-23T01:00:00Z",
@@ -1841,7 +1859,7 @@ def _replace_receipt_gpu_uuid(
     )
     environment_path = root / environment_artifact["path"]
     environment = json.loads(environment_path.read_text())
-    identity_stdout = f"{gpu_uuid}, 610.43.02\n"
+    identity_stdout = f"{gpu_uuid}, 610.43.03\n"
     environment["live_outputs"]["identity_stdout"] = identity_stdout
     environment["live_checks"]["identity_stdout_sha256"] = admit.sha256_bytes(
         identity_stdout.encode()

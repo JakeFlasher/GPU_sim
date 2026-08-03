@@ -212,6 +212,26 @@ def test_live_preflight_rejects_malformed_gpu_uuid(
         capture.validate_live_capture_preflight(phase="nvbit")
 
 
+def test_live_preflight_rejects_retired_driver_authority(monkeypatch):
+    def query(_command, label):
+        if label == "nvidia-smi device":
+            return (
+                f"{capture.GPU_NAME}, 8.6, Enabled, "
+                f"{capture.SM_CLOCK_MHZ}, {capture.MEM_CLOCK_MHZ}\n",
+                [],
+            )
+        if label == "nvidia-smi competing-process":
+            return "", []
+        if label == "nvidia-smi device identity":
+            return f"{GPU_UUID}, 610.43.02\n", []
+        pytest.fail(f"unexpected live query: {label}")
+
+    monkeypatch.setattr(capture, "_query", query)
+
+    with pytest.raises(capture.CaptureError, match="live GPU identity is not pinned"):
+        capture.validate_live_capture_preflight(phase="nvbit")
+
+
 def test_capture_metadata_is_namespaced_by_variant_and_phase(tmp_path: Path):
     first = set(
         capture._capture_metadata_paths(

@@ -70,7 +70,7 @@ CGROUP_CONTAINMENT_SUPERVISOR_SHA256 = (
     "7a938d2f7f07fbb1477351a195616f9a7478db5c28b81fa29a3d226d11eadbff"
 )
 CAPTURE_PRODUCER_SELF_SHA256_AUTHORITY = (
-    "27a340df7a65beeeb3d5c8f2a83d174667fc8bf04088ad1042c589cc81a08a79"
+    "acb60dcf400603f548094f8d8a2a90bb04c218fc618b3be6574955ead02327b0"
 )
 NCU_LAUNCHER_PATH = (
     "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu"
@@ -1336,7 +1336,7 @@ def _verify_capture_documents(
         live["smi_command"] != ["nvidia-smi", "--query-gpu=name,compute_cap,persistence_mode,clocks.sm,clocks.mem", "--format=csv,noheader,nounits"]
         or live["competing_process_command"] != ["nvidia-smi", "--query-compute-apps=pid,process_name", "--format=csv,noheader,nounits"]
         or live["identity_command"] != ["nvidia-smi", "--query-gpu=uuid,driver_version", "--format=csv,noheader,nounits"]
-        or live["driver_version"] != "610.43.02"
+        or live["driver_version"] != "610.43.03"
         or live["nvcc_command"] != ["/usr/local/cuda-13.2/bin/nvcc", "--version"]
         or live["cuda_release"] != {"major": 13, "minor": 2}
         or live["nvbit_version"] != "1.8"
