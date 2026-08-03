@@ -275,8 +275,22 @@ def test_collection_binds_identity_controls_and_published_artifacts(
     )
     calls: list[tuple[object, ...]] = []
 
-    def fake_execute(expected, arguments, *, timeout_seconds, auxiliary_descriptors):
-        calls.append((expected, tuple(arguments), timeout_seconds, tuple(auxiliary_descriptors)))
+    def fake_execute(
+        expected,
+        arguments,
+        *,
+        timeout_seconds,
+        auxiliary_descriptors,
+        require_cgroup_containment,
+    ):
+        calls.append((
+            expected,
+            tuple(arguments),
+            timeout_seconds,
+            tuple(auxiliary_descriptors),
+            require_cgroup_containment,
+        ))
+        assert require_cgroup_containment is True
         assert expected == identity
         assert tuple(arguments[:12]) == (
             "--metrics", golden.GOLDEN_METRIC,

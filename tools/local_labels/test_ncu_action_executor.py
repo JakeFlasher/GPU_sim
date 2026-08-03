@@ -191,6 +191,19 @@ def test_collection_environment_rejects_non_allowlisted_names(name: str) -> None
         _collection_environment(**{name: "hostile"})
 
 
+def test_collection_environment_admits_explicit_source_commit_override() -> None:
+    expected = "a" * 40
+    environment = _collection_environment(
+        LD_SOURCE_COMMIT_OVERRIDE=expected,
+    )
+    assert environment.as_dict()["LD_SOURCE_COMMIT_OVERRIDE"] == expected
+
+
+def test_collection_environment_rejects_malformed_source_commit_override() -> None:
+    with _assert_code(executor.NCU_ACTION_REQUEST_INVALID):
+        _collection_environment(LD_SOURCE_COMMIT_OVERRIDE="A" * 40)
+
+
 def test_collection_environment_rejects_canonical_hostile_path(
     tmp_path: Path,
 ) -> None:
@@ -252,8 +265,9 @@ def test_supervised_child_inherits_one_authorized_ncu_descriptor(
 
     monkeypatch.setattr(executor.subprocess, "Popen", popen)
     environment = _collection_environment(PWD=str(tmp_path))
-    result = executor.execute_ncu_supervised_child(
+    result = executor.execute_ncu_supervised_executable(
         _identity(ncu),
+        _supervised_identity(driver),
         [str(driver), executor.AUTHORIZED_NCU_PROC_PATH, "inherited"],
         timeout_seconds=2,
         environment=environment,
@@ -268,19 +282,25 @@ def test_supervised_child_inherits_one_authorized_ncu_descriptor(
     assert target_environment == environment.as_dict()
     assert result.stderr == b"synthetic stderr\n"
     assert len(observed) == 2
-    descriptor = observed[1][1][0]
-    assert observed[0][0] == (f"/proc/self/fd/{descriptor}", "--version")
-    assert observed[0][1] == (descriptor,)
+    ncu_descriptor = observed[0][1][0]
+    driver_descriptor = observed[1][1][1]
+    assert observed[0][0] == (
+        f"/proc/self/fd/{ncu_descriptor}", "--version",
+    )
+    assert observed[0][1] == (ncu_descriptor,)
     assert observed[0][2] == executor.ncu_action_environment()
     assert observed[0][3] == "/"
     assert observed[1][0] == (
-        str(driver), f"/proc/self/fd/{descriptor}", "inherited",
+        f"/proc/self/fd/{driver_descriptor}",
+        f"/proc/self/fd/{ncu_descriptor}",
+        "inherited",
     )
-    assert observed[1][1] == (descriptor,)
+    assert observed[1][1] == (ncu_descriptor, driver_descriptor)
     assert observed[1][2] == environment.as_dict()
     assert observed[1][3] == str(tmp_path)
-    with pytest.raises(OSError):
-        os.fstat(descriptor)
+    for descriptor in (ncu_descriptor, driver_descriptor):
+        with pytest.raises(OSError):
+            os.fstat(descriptor)
 
 
 def test_supervised_child_rejects_pwd_working_directory_mismatch(
@@ -288,8 +308,11 @@ def test_supervised_child_rejects_pwd_working_directory_mismatch(
 ) -> None:
     expected = executor.ExpectedNcuIdentity("/missing/ncu", "a" * 64, _VERSION)
     with _assert_code(executor.NCU_ACTION_REQUEST_INVALID):
-        executor.execute_ncu_supervised_child(
+        executor.execute_ncu_supervised_executable(
             expected,
+            executor.ExpectedExecutableIdentity(
+                "/bin/true", "b" * 64, 0o755,
+            ),
             ["/bin/true", executor.AUTHORIZED_NCU_PROC_PATH],
             timeout_seconds=1,
             environment=_collection_environment(),
@@ -311,8 +334,11 @@ def test_supervised_child_rejects_pwd_working_directory_mismatch(
 def test_supervised_child_rejects_invalid_placeholder_before_open(command) -> None:
     expected = executor.ExpectedNcuIdentity("/missing/ncu", "a" * 64, _VERSION)
     with _assert_code(executor.NCU_ACTION_REQUEST_INVALID):
-        executor.execute_ncu_supervised_child(
+        executor.execute_ncu_supervised_executable(
             expected,
+            executor.ExpectedExecutableIdentity(
+                "/bin/true", "b" * 64, 0o755,
+            ),
             command,
             timeout_seconds=1,
             environment=_collection_environment(),
@@ -329,8 +355,11 @@ def test_supervised_child_rejects_oversized_sequence_without_indexing() -> None:
 
     expected = executor.ExpectedNcuIdentity("/missing/ncu", "a" * 64, _VERSION)
     with _assert_code(executor.NCU_ACTION_REQUEST_INVALID):
-        executor.execute_ncu_supervised_child(
+        executor.execute_ncu_supervised_executable(
             expected,
+            executor.ExpectedExecutableIdentity(
+                "/bin/true", "b" * 64, 0o755,
+            ),
             OversizedSequence(),
             timeout_seconds=1,
             environment=_collection_environment(),
@@ -371,8 +400,9 @@ while not pid_path.is_file() and time.monotonic() < deadline:
 raise SystemExit(0 if pid_path.is_file() else 9)
 """)
     driver.chmod(0o555)
-    result = executor.execute_ncu_supervised_child(
+    result = executor.execute_ncu_supervised_executable(
         _identity(ncu),
+        _supervised_identity(driver),
         [str(driver), executor.AUTHORIZED_NCU_PROC_PATH, str(pid_path)],
         timeout_seconds=3,
         environment=_collection_environment(),
@@ -412,8 +442,9 @@ raise SystemExit(7)
 """)
     driver.chmod(0o555)
     with _assert_code(executor.NCU_EXECUTABLE_IDENTITY_INVALID):
-        executor.execute_ncu_supervised_child(
+        executor.execute_ncu_supervised_executable(
             _identity(ncu),
+            _supervised_identity(driver),
             [
                 str(driver), executor.AUTHORIZED_NCU_PROC_PATH, str(ncu),
             ],
@@ -456,11 +487,284 @@ def test_action_environment_is_closed_literal_and_fresh(
         "PATH": "/bin:/usr/bin",
     }
     assert result.returncode == 0
+    assert isinstance(result.process_id, int) and result.process_id > 0
     assert observed == [expected, expected]
     assert all(name not in observed[0] for name in hostile_names)
     first = executor.ncu_action_environment()
     first["PATH"] = "/mutated"
     assert executor.ncu_action_environment() == expected
+
+
+def test_action_threads_required_cgroup_to_probe_and_action(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    ncu = _fixture_ncu(tmp_path / "ncu")
+    observed: list[tuple[tuple[str, ...], bool]] = []
+
+    def run_bounded(
+        _descriptor,
+        arguments,
+        *,
+        inherited_descriptors,
+        timeout_seconds,
+        max_output_bytes,
+        timeout_code,
+        launch_code,
+        require_cgroup_containment,
+    ):
+        del (
+            inherited_descriptors,
+            timeout_seconds,
+            max_output_bytes,
+            timeout_code,
+            launch_code,
+        )
+        action = tuple(arguments)
+        observed.append((action, require_cgroup_containment))
+        stdout = f"{_VERSION}\n".encode() if action == ("--version",) else b"action"
+        return executor.NcuActionResult(0, stdout, b"")
+
+    monkeypatch.setattr(executor, "_run_bounded", run_bounded)
+    result = executor.execute_ncu_action(
+        _identity(ncu),
+        ["--echo"],
+        timeout_seconds=2,
+        require_cgroup_containment=True,
+    )
+
+    assert result.returncode == 0
+    assert observed == [(("--version",), True), (("--echo",), True)]
+
+
+def test_retained_version_probe_threads_required_cgroup(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    ncu = _fixture_ncu(tmp_path / "ncu")
+    observed: list[bool] = []
+
+    def run_bounded(
+        _descriptor,
+        arguments,
+        *,
+        inherited_descriptors,
+        timeout_seconds,
+        max_output_bytes,
+        timeout_code,
+        launch_code,
+        require_cgroup_containment,
+    ):
+        del (
+            inherited_descriptors,
+            timeout_seconds,
+            max_output_bytes,
+            timeout_code,
+            launch_code,
+        )
+        assert tuple(arguments) == ("--version",)
+        observed.append(require_cgroup_containment)
+        return executor.NcuActionResult(0, f"{_VERSION}\n".encode(), b"")
+
+    monkeypatch.setattr(executor, "_run_bounded", run_bounded)
+    with immutable.open_retained_executable(ncu) as retained:
+        result = executor.execute_retained_ncu_version_probe(
+            retained,
+            require_cgroup_containment=True,
+        )
+
+    assert result.returncode == 0
+    assert observed == [True]
+
+
+def test_retained_version_probe_uses_real_delegated_cgroup(tmp_path: Path) -> None:
+    if os.environ.get("GPU_SIM_DELEGATED_CGROUP_TEST") != "1":
+        pytest.skip("requires a systemd-delegated cgroup-v2 test service")
+    ncu = _fixture_ncu(tmp_path / "ncu")
+
+    with immutable.open_retained_executable(ncu) as retained:
+        result = executor.execute_retained_ncu_version_probe(
+            retained,
+            require_cgroup_containment=True,
+        )
+
+    assert result.returncode == 0
+    assert result.stdout == f"{_VERSION}\n".encode()
+    assert result.containment is not None
+    assert result.containment.terminal_populated_zero is True
+    assert result.containment.leaf_removed is True
+
+
+def test_successful_containment_cleanup_preserves_keyboard_interrupt(
+    monkeypatch,
+) -> None:
+    evidence = executor.delegated_cgroup.CgroupContainmentEvidence(
+        kind=executor.delegated_cgroup.CGROUP_V2_KILL_V1,
+        parent_cgroup_sha256="a" * 64,
+        cgroup_inode=123,
+        terminal_populated_zero=True,
+        leaf_removed=True,
+    )
+
+    class Process:
+        pid = 4321
+
+    class Containment:
+        def __init__(self):
+            self.finished = False
+
+        def popen(self, _command, **_kwargs):
+            return Process()
+
+        def finish(self):
+            self.finished = True
+            return evidence
+
+    containment = Containment()
+    monkeypatch.setattr(
+        executor.delegated_cgroup.DelegatedCgroupV2,
+        "create",
+        lambda: containment,
+    )
+    monkeypatch.setattr(
+        executor,
+        "_collect_bounded",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            KeyboardInterrupt("synthetic operator interruption")
+        ),
+    )
+
+    with pytest.raises(KeyboardInterrupt, match="operator interruption"):
+        executor._run_command_bounded(
+            ("/fixture/ncu", "--version"),
+            environment=executor.ncu_action_environment(),
+            working_directory="/",
+            inherited_descriptors=(),
+            timeout_seconds=1,
+            max_output_bytes=1024,
+            timeout_code=executor.NCU_VERSION_PROBE_FAILED,
+            launch_code=executor.NCU_VERSION_PROBE_FAILED,
+            require_cgroup_containment=True,
+        )
+
+    assert containment.finished is True
+
+
+def test_failed_containment_cleanup_supersedes_keyboard_interrupt(
+    monkeypatch,
+) -> None:
+    cleanup_error = RuntimeError("synthetic containment cleanup failure")
+
+    class Process:
+        pid = 4321
+
+    class Containment:
+        def __init__(self):
+            self.finished = False
+
+        def popen(self, _command, **_kwargs):
+            return Process()
+
+        def finish(self):
+            self.finished = True
+            raise cleanup_error
+
+    containment = Containment()
+    monkeypatch.setattr(
+        executor.delegated_cgroup.DelegatedCgroupV2,
+        "create",
+        lambda: containment,
+    )
+    monkeypatch.setattr(
+        executor,
+        "_collect_bounded",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            KeyboardInterrupt("synthetic operator interruption")
+        ),
+    )
+
+    with pytest.raises(
+        executor.NcuActionExecutorError,
+        match="delegated cgroup cleanup failed",
+    ) as failure:
+        executor._run_command_bounded(
+            ("/fixture/ncu", "--version"),
+            environment=executor.ncu_action_environment(),
+            working_directory="/",
+            inherited_descriptors=(),
+            timeout_seconds=1,
+            max_output_bytes=1024,
+            timeout_code=executor.NCU_VERSION_PROBE_FAILED,
+            launch_code=executor.NCU_VERSION_PROBE_FAILED,
+            require_cgroup_containment=True,
+        )
+
+    assert containment.finished is True
+    assert failure.value.code == executor.NCU_VERSION_PROBE_FAILED
+    assert failure.value.__cause__ is cleanup_error
+    assert any(
+        "active process error: synthetic operator interruption" in note
+        for note in failure.value.__notes__
+    )
+
+
+def test_failed_process_cleanup_supersedes_keyboard_interrupt(monkeypatch) -> None:
+    cleanup_error = RuntimeError("synthetic process cleanup failure")
+
+    class Process:
+        pid = 4321
+        stdout = object()
+        stderr = object()
+
+    class InterruptingSelector:
+        def register(self, *_args, **_kwargs):
+            raise KeyboardInterrupt("synthetic output monitor interruption")
+
+    monkeypatch.setattr(
+        executor.selectors,
+        "DefaultSelector",
+        InterruptingSelector,
+    )
+    monkeypatch.setattr(
+        executor,
+        "_stop_and_reap",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(cleanup_error),
+    )
+    monkeypatch.setattr(
+        executor,
+        "_close_monitor_resources",
+        lambda *_args, **_kwargs: (),
+    )
+
+    with pytest.raises(
+        executor.NcuActionExecutorError,
+        match="retained NCU process cleanup failed",
+    ) as failure:
+        executor._collect_bounded(
+            Process(),
+            started_at_utc="2026-08-03T00:00:00Z",
+            timeout_seconds=1,
+            max_output_bytes=1024,
+            timeout_code=executor.NCU_VERSION_PROBE_FAILED,
+        )
+
+    assert failure.value.code == executor.NCU_ACTION_LAUNCH_FAILED
+    assert failure.value.process_id == 4321
+    assert failure.value.__cause__ is cleanup_error
+    assert any(
+        "active retained NCU process error: synthetic output monitor interruption"
+        in note
+        for note in failure.value.__notes__
+    )
+
+
+@pytest.mark.parametrize("value", [None, 0, 1, "true"])
+def test_action_rejects_non_boolean_cgroup_requirement(value) -> None:
+    with _assert_code(executor.NCU_ACTION_REQUEST_INVALID):
+        executor.execute_ncu_action(
+            executor.ExpectedNcuIdentity("/missing/ncu", "a" * 64, _VERSION),
+            ["--echo"],
+            timeout_seconds=1,
+            require_cgroup_containment=value,
+        )
 
 
 def test_fixed_action_path_supports_wrapper_without_ambient_tools(
@@ -1080,10 +1384,17 @@ def test_rejects_invalid_version_probe(
     tmp_path: Path, monkeypatch, mode: str, code: str,
 ) -> None:
     ncu = _fixture_ncu(tmp_path / "ncu", version_mode=mode)
-    with _assert_code(code):
+    expected = _identity(ncu)
+    with _assert_code(code) as caught:
         executor.execute_ncu_action(
-            _identity(ncu), ["--echo"], timeout_seconds=1,
+            expected, ["--echo"], timeout_seconds=1,
         )
+    assert caught.value.process_id is not None
+    assert caught.value.started_at_utc is not None
+    assert caught.value.process_role == "ncu_version_probe"
+    assert caught.value.process_command == (expected.resolved_path, "--version")
+    assert caught.value.process_environment == executor.ncu_action_environment()
+    assert caught.value.process_tool_sha256 == expected.executable_sha256
 
 
 @pytest.mark.parametrize("semantic_failure", ["nonzero", "version"])
@@ -1113,6 +1424,44 @@ def test_version_semantic_failure_cannot_mask_late_identity_drift(
         )
 
 
+def test_final_version_probe_revalidation_preserves_process_provenance(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    ncu = _fixture_ncu(tmp_path / "ncu")
+    expected = _identity(ncu)
+    original = executor._reverify_authorities
+    calls = 0
+
+    def reverify(retained, borrowed, supervised, *, pending=None):
+        nonlocal calls
+        calls += 1
+        if calls == 3:
+            ncu.chmod(0o755)
+            ncu.write_bytes(b"mutated at final version-probe revalidation")
+            ncu.chmod(0o555)
+        return original(
+            retained, borrowed, supervised, pending=pending,
+        )
+
+    monkeypatch.setattr(executor, "_reverify_authorities", reverify)
+    with _assert_code(executor.NCU_EXECUTABLE_IDENTITY_INVALID) as caught:
+        executor.execute_ncu_action(
+            expected, ["--echo"], timeout_seconds=1,
+        )
+
+    assert calls == 3
+    assert caught.value.stdout == f"{_VERSION}\n".encode()
+    assert caught.value.stderr == b""
+    assert caught.value.process_id is not None
+    assert caught.value.process_id > 0
+    assert caught.value.started_at_utc is not None
+    assert caught.value.started_at_utc.endswith("Z")
+    assert caught.value.process_role == "ncu_version_probe"
+    assert caught.value.process_command == (expected.resolved_path, "--version")
+    assert caught.value.process_environment == executor.ncu_action_environment()
+    assert caught.value.process_tool_sha256 == expected.executable_sha256
+
+
 def test_requires_exact_expected_version_line(tmp_path: Path) -> None:
     ncu = _fixture_ncu(tmp_path / "ncu")
     with _assert_code(executor.NCU_VERSION_LINE_MISMATCH):
@@ -1136,6 +1485,73 @@ def test_version_probe_timeout_is_bounded_and_typed(
     assert time.monotonic() - started < 3
 
 
+@pytest.mark.parametrize("timeout", [False, True])
+def test_process_group_is_never_signaled_after_leader_reap(
+    tmp_path: Path, monkeypatch, timeout: bool,
+) -> None:
+    states: dict[int, dict[str, object]] = {}
+    original_popen = executor.subprocess.Popen
+    original_signal_group = executor._signal_group
+
+    def popen(*args, **kwargs):
+        process = original_popen(*args, **kwargs)
+        state: dict[str, object] = {"waited": False, "signals": []}
+        states[process.pid] = state
+        original_wait = process.wait
+
+        def wait(*wait_args, **wait_kwargs):
+            result = original_wait(*wait_args, **wait_kwargs)
+            state["waited"] = True
+            return result
+
+        process.wait = wait
+        return process
+
+    def signal_group(process, signal_number):
+        state = states[process.pid]
+        assert state["waited"] is False
+        state["signals"].append(signal_number)
+        return original_signal_group(process, signal_number)
+
+    monkeypatch.setattr(executor.subprocess, "Popen", popen)
+    monkeypatch.setattr(executor, "_signal_group", signal_group)
+    command = (
+        sys.executable,
+        "-c",
+        "import time; time.sleep(10)" if timeout else "print('complete')",
+    )
+    if timeout:
+        with _assert_code("synthetic_timeout"):
+            executor.execute_bounded_command(
+                command,
+                environment={"PATH": "/bin:/usr/bin"},
+                working_directory=str(tmp_path),
+                inherited_descriptors=(),
+                timeout_seconds=0.05,
+                max_output_bytes=1024,
+                timeout_code="synthetic_timeout",
+                launch_code="synthetic_launch_failed",
+            )
+    else:
+        result = executor.execute_bounded_command(
+            command,
+            environment={"PATH": "/bin:/usr/bin"},
+            working_directory=str(tmp_path),
+            inherited_descriptors=(),
+            timeout_seconds=2,
+            max_output_bytes=1024,
+            timeout_code="synthetic_timeout",
+            launch_code="synthetic_launch_failed",
+        )
+        assert result.returncode == 0
+        assert result.stdout == b"complete\n"
+
+    assert len(states) == 1
+    state = next(iter(states.values()))
+    assert state["waited"] is True
+    assert state["signals"]
+
+
 def test_output_monitor_setup_failure_terminates_and_reaps_process(
     tmp_path: Path, monkeypatch,
 ) -> None:
@@ -1153,11 +1569,14 @@ def test_output_monitor_setup_failure_terminates_and_reaps_process(
 
     monkeypatch.setattr(executor.subprocess, "Popen", popen)
     monkeypatch.setattr(executor.selectors, "DefaultSelector", fail_selector)
-    with _assert_code(executor.NCU_VERSION_PROBE_FAILED):
+    with _assert_code(executor.NCU_VERSION_PROBE_FAILED) as caught:
         executor.execute_ncu_action(
             _identity(ncu), ["--echo"], timeout_seconds=1,
         )
     assert len(observed) == 1
+    assert caught.value.process_id == observed[0].pid
+    assert caught.value.started_at_utc is not None
+    assert caught.value.started_at_utc.endswith("Z")
     assert observed[0].poll() is not None
     assert observed[0].stdout.closed
     assert observed[0].stderr.closed
@@ -1234,6 +1653,10 @@ def test_version_and_action_output_are_bounded(tmp_path: Path, monkeypatch) -> N
             _identity(flood_version_ncu), ["--echo"], timeout_seconds=1,
         )
     assert version_error.value.stdout == b"x" * 1024
+    assert version_error.value.process_id is not None
+    assert version_error.value.process_id > 0
+    assert version_error.value.started_at_utc is not None
+    assert version_error.value.started_at_utc.endswith("Z")
 
     ncu = _fixture_ncu(tmp_path / "ncu")
     monkeypatch.setattr(executor, "_MAX_ACTION_OUTPUT_BYTES", 1024)
@@ -1242,6 +1665,10 @@ def test_version_and_action_output_are_bounded(tmp_path: Path, monkeypatch) -> N
             _identity(ncu), ["--flood", "4096"], timeout_seconds=1,
         )
     assert action_error.value.stdout == b"x" * 1024
+    assert action_error.value.process_id is not None
+    assert action_error.value.process_id > 0
+    assert action_error.value.started_at_utc is not None
+    assert action_error.value.started_at_utc.endswith("Z")
 
 
 def test_action_timeout_preserves_partial_output(tmp_path: Path) -> None:
@@ -1252,6 +1679,10 @@ def test_action_timeout_preserves_partial_output(tmp_path: Path) -> None:
         )
     assert caught.value.stdout == b"stdout before timeout"
     assert caught.value.stderr == b"stderr before timeout"
+    assert caught.value.process_id is not None
+    assert caught.value.process_id > 0
+    assert caught.value.started_at_utc is not None
+    assert caught.value.started_at_utc.endswith("Z")
 
 
 def test_action_timeout_kills_process_group(tmp_path: Path) -> None:
@@ -1587,7 +2018,17 @@ def test_supervised_executable_runs_through_two_private_descriptors(
     )
     assert payload["ncu_descriptor"] == ncu_descriptor
     assert payload["driver_descriptor"] == driver_descriptor
-    assert set(result.__dict__) == {"returncode", "stdout", "stderr"}
+    assert set(result.__dict__) == {
+        "returncode",
+        "stdout",
+        "stderr",
+        "process_id",
+        "started_at_utc",
+        "containment",
+    }
+    assert result.process_id is not None and result.process_id > 0
+    assert result.started_at_utc is not None
+    assert result.started_at_utc.endswith("Z")
     assert len(retained) == 2
     for descriptor in (ncu_descriptor, driver_descriptor):
         with pytest.raises(OSError):
@@ -1598,6 +2039,145 @@ def test_supervised_executable_runs_through_two_private_descriptors(
             match="retained executable is closed",
         ):
             _ = handle.descriptor
+
+
+def test_auxiliary_path_capability_is_private_and_path_bound(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    assert not hasattr(executor, "AuthorizedExecutableProcPath")
+    ncu = _fixture_ncu(tmp_path / "ncu")
+    driver = _fixture_supervised_executable(tmp_path / "driver")
+    target = _fixture_supervised_executable(tmp_path / "target")
+    replacement = _fixture_supervised_executable(tmp_path / "replacement")
+    real_stat = os.stat
+
+    with immutable.open_retained_executable(target) as retained_target:
+        target_argument = executor.authorized_executable_proc_path(
+            retained_target
+        )
+
+        def substitute_path_identity(path, *args, **kwargs):
+            if str(path) == str(target):
+                return real_stat(replacement, *args, **kwargs)
+            return real_stat(path, *args, **kwargs)
+
+        with monkeypatch.context() as patch:
+            patch.setattr(executor.os, "stat", substitute_path_identity)
+            with _assert_code(executor.NCU_ACTION_REQUEST_INVALID):
+                executor.execute_ncu_supervised_executable(
+                    _identity(ncu),
+                    _supervised_identity(driver),
+                    [
+                        str(driver),
+                        executor.AUTHORIZED_NCU_PROC_PATH,
+                        "0",
+                        target_argument,
+                    ],
+                    timeout_seconds=2,
+                    environment=_collection_environment(),
+                    auxiliary_descriptors=(retained_target.descriptor,),
+                )
+
+
+def test_supervised_executable_renders_retained_auxiliary_path(
+    tmp_path: Path, monkeypatch,
+) -> None:
+    ncu = _fixture_ncu(tmp_path / "ncu")
+    driver = _fixture_supervised_executable(tmp_path / "driver")
+    target = tmp_path / "target"
+    target.write_text("#!/bin/sh\nexit 0\n")
+    target.chmod(0o555)
+    observed = []
+    original_popen = executor.subprocess.Popen
+
+    def popen(*args, **kwargs):
+        observed.append((tuple(args[0]), tuple(kwargs["pass_fds"])))
+        return original_popen(*args, **kwargs)
+
+    monkeypatch.setattr(executor.subprocess, "Popen", popen)
+    with immutable.open_retained_executable(target) as retained_target:
+        target_argument = executor.authorized_executable_proc_path(
+            retained_target
+        )
+        result = executor.execute_ncu_supervised_executable(
+            _identity(ncu),
+            _supervised_identity(driver),
+            [
+                str(driver),
+                executor.AUTHORIZED_NCU_PROC_PATH,
+                "0",
+                target_argument,
+            ],
+            timeout_seconds=2,
+            environment=_collection_environment(),
+            auxiliary_descriptors=(retained_target.descriptor,),
+        )
+        target_descriptor = retained_target.descriptor
+
+    payload = json.loads(result.stdout)
+    assert payload["argv"][3] == f"/proc/self/fd/{target_descriptor}"
+    assert observed[1][0][3] == f"/proc/self/fd/{target_descriptor}"
+    assert observed[1][1][-1] == target_descriptor
+    assert target_argument.canonical_path == str(target)
+
+
+@pytest.mark.parametrize(
+    ("failed_authority", "expected_code"),
+    [
+        (
+            "ncu",
+            executor.NCU_EXECUTABLE_IDENTITY_INVALID,
+        ),
+        (
+            "driver",
+            executor.NCU_SUPERVISED_EXECUTABLE_IDENTITY_INVALID,
+        ),
+    ],
+)
+def test_supervised_post_success_close_failure_preserves_process_provenance(
+    tmp_path: Path, monkeypatch, failed_authority: str, expected_code: str,
+) -> None:
+    ncu = _fixture_ncu(tmp_path / "ncu")
+    driver = _fixture_supervised_executable(tmp_path / "driver")
+    expected_driver = _supervised_identity(driver)
+    environment = _collection_environment()
+    original_open = executor.immutable.open_retained_executable
+    failed_path = ncu if failed_authority == "ncu" else driver
+
+    def open_retained(path):
+        retained = original_open(path)
+        if Path(path) == failed_path:
+            original_close = retained.close
+
+            def close_then_fail():
+                original_close()
+                raise OSError(f"synthetic {failed_authority} close failure")
+
+            retained.close = close_then_fail
+        return retained
+
+    monkeypatch.setattr(
+        executor.immutable, "open_retained_executable", open_retained,
+    )
+    with _assert_code(expected_code) as caught:
+        executor.execute_ncu_supervised_executable(
+            _identity(ncu),
+            expected_driver,
+            [str(driver), executor.AUTHORIZED_NCU_PROC_PATH, "0"],
+            timeout_seconds=2,
+            environment=environment,
+        )
+
+    assert caught.value.stdout.startswith(b"{")
+    assert caught.value.stderr == b""
+    assert caught.value.process_id is not None
+    assert caught.value.process_id > 0
+    assert caught.value.started_at_utc is not None
+    assert caught.value.started_at_utc.endswith("Z")
+    assert caught.value.process_role == "ncu_supervised_executable"
+    assert caught.value.process_command == (str(driver), str(ncu), "0")
+    assert caught.value.process_environment == environment.as_dict()
+    assert caught.value.process_tool_sha256 == expected_driver.executable_sha256
 
 
 @pytest.mark.parametrize("kind", ["leaf_symlink", "ancestor_symlink", "hardlink"])
@@ -1706,16 +2286,21 @@ def test_supervised_executable_drift_precedes_child_outcome(
             error.stderr = b"partial stderr"
             raise error
         return executor.NcuActionResult(
-            0 if outcome == "success" else 7, b"ordinary", b"failure",
+            0 if outcome == "success" else 7,
+            b"ordinary",
+            b"failure",
+            process_id=4321,
+            started_at_utc="2026-08-02T00:00:00Z",
         )
 
     monkeypatch.setattr(executor, "_run_command_bounded", run_command)
+    driver_identity = _supervised_identity(driver)
     with _assert_code(
         executor.NCU_SUPERVISED_EXECUTABLE_IDENTITY_INVALID,
     ) as caught:
         executor.execute_ncu_supervised_executable(
             _identity(ncu),
-            _supervised_identity(driver),
+            driver_identity,
             [str(driver), executor.AUTHORIZED_NCU_PROC_PATH, "0"],
             timeout_seconds=1,
             environment=_collection_environment(),
@@ -1723,6 +2308,23 @@ def test_supervised_executable_drift_precedes_child_outcome(
     if outcome == "timeout":
         assert caught.value.stdout == b"partial stdout"
         assert caught.value.stderr == b"partial stderr"
+    else:
+        assert caught.value.stdout == b"ordinary"
+        assert caught.value.stderr == b"failure"
+        assert caught.value.process_id == 4321
+        assert caught.value.started_at_utc == "2026-08-02T00:00:00Z"
+        assert caught.value.process_role == "ncu_supervised_executable"
+        assert caught.value.process_command == (
+            str(driver),
+            str(ncu),
+            "0",
+        )
+        assert caught.value.process_environment == (
+            _collection_environment().as_dict()
+        )
+        assert caught.value.process_tool_sha256 == (
+            driver_identity.executable_sha256
+        )
 
 
 def test_ncu_identity_precedes_simultaneous_supervised_executable_drift(
@@ -1815,9 +2417,8 @@ def test_supervised_executable_rejects_same_retained_inode(tmp_path: Path) -> No
         retained.close()
 
 
-@pytest.mark.parametrize("descriptor_bound", [False, True])
 def test_supervised_working_directory_nul_is_typed_before_open(
-    monkeypatch, descriptor_bound: bool,
+    monkeypatch,
 ) -> None:
     monkeypatch.setattr(
         executor.immutable,
@@ -1828,25 +2429,16 @@ def test_supervised_working_directory_nul_is_typed_before_open(
         "/missing/ncu", "a" * 64, _VERSION,
     )
     with _assert_code(executor.NCU_ACTION_REQUEST_INVALID):
-        if descriptor_bound:
-            executor.execute_ncu_supervised_executable(
-                expected_ncu,
-                executor.ExpectedExecutableIdentity(
-                    "/missing/driver", "b" * 64, 0o555,
-                ),
-                ["/missing/driver", executor.AUTHORIZED_NCU_PROC_PATH],
-                timeout_seconds=1,
-                environment=_collection_environment(),
-                working_directory=Path("/tmp/bad\x00directory"),
-            )
-        else:
-            executor.execute_ncu_supervised_child(
-                expected_ncu,
-                ["/missing/driver", executor.AUTHORIZED_NCU_PROC_PATH],
-                timeout_seconds=1,
-                environment=_collection_environment(),
-                working_directory=Path("/tmp/bad\x00directory"),
-            )
+        executor.execute_ncu_supervised_executable(
+            expected_ncu,
+            executor.ExpectedExecutableIdentity(
+                "/missing/driver", "b" * 64, 0o555,
+            ),
+            ["/missing/driver", executor.AUTHORIZED_NCU_PROC_PATH],
+            timeout_seconds=1,
+            environment=_collection_environment(),
+            working_directory=Path("/tmp/bad\x00directory"),
+        )
 
 
 @pytest.mark.parametrize("failed_authority", ["ncu", "driver"])

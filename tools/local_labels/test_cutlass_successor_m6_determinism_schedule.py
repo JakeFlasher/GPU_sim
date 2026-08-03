@@ -13,9 +13,11 @@ from tools.local_labels import build_cutlass_successor_m6_determinism_schedule a
 from tools.local_labels import m6_determinism_campaign as m6
 from tools.local_labels.test_cutlass_successor_capture_admission import (
     MATRIX,
-    _REPORT_CSV,
+    _REPORT_IDENTITY,
     _all_pairs,
     _receipt,
+    _row_for_report_path,
+    _row_report_csv,
 )
 
 GENERATED_AT = "2026-07-23T01:00:00Z"
@@ -28,7 +30,16 @@ def _mock_ncu_report_import(monkeypatch):
     monkeypatch.setattr(
         admission,
         "_import_ncu_report_csv",
-        lambda path: (_REPORT_CSV, None),
+        lambda _identity, path: (
+            _row_report_csv(_row_for_report_path(path)),
+            admission.sha256_bytes(path.read_bytes()),
+            None,
+        ),
+    )
+    monkeypatch.setattr(
+        admission,
+        "_sass_kernel_names",
+        lambda _row: {_REPORT_IDENTITY["Kernel Name"]},
     )
 
 

@@ -1139,9 +1139,22 @@ def _validate_ncu_inner_elf(retained: immutable.RetainedExecutable) -> None:
 def probe_ncu(
     pins: dict, *, resolve_command=None, open_executable=None,
     run_version=None, host_machine: str | None = None,
+    require_cgroup_containment: bool = False,
 ) -> dict:
     raw_expected = pins.get("toolchain", {}).get("ncu_version_prefix")
     expected_for_failure = raw_expected if isinstance(raw_expected, str) else None
+    if type(require_cgroup_containment) is not bool:
+        return _ncu_probe_result(
+            status=STATUS_FAILED,
+            expected=expected_for_failure,
+            detail="NCU cgroup containment requirement is not boolean",
+        )
+    if require_cgroup_containment and run_version is not None:
+        return _ncu_probe_result(
+            status=STATUS_FAILED,
+            expected=expected_for_failure,
+            detail="custom NCU version runners cannot satisfy required containment",
+        )
     try:
         expected = toolchain_contract.normalized_ncu_version_prefix(raw_expected)
     except toolchain_contract.CaptureToolchainContractError as exc:
@@ -1195,7 +1208,18 @@ def probe_ncu(
             _validate_retained_ncu_file(launcher, role="NCU launcher")
             with opener(inner_path) as inner:
                 _validate_ncu_inner_elf(inner)
-                rc, out, err = runner(inner.descriptor)
+                if require_cgroup_containment:
+                    version_result = (
+                        ncu_executor.execute_retained_ncu_version_probe(
+                            inner,
+                            require_cgroup_containment=True,
+                        )
+                    )
+                    rc = version_result.returncode
+                    out = version_result.stdout.decode("utf-8", errors="strict")
+                    err = version_result.stderr.decode("utf-8", errors="strict")
+                else:
+                    rc, out, err = runner(inner.descriptor)
                 if (
                     type(rc) is not int
                     or not isinstance(out, str)
@@ -1254,7 +1278,9 @@ def probe_ncu(
         OSError,
         ValueError,
         subprocess.TimeoutExpired,
+        UnicodeDecodeError,
         immutable.ImmutableArtifactError,
+        ncu_executor.NcuActionExecutorError,
     ) as exc:
         return _ncu_probe_result(
             status=STATUS_FAILED,

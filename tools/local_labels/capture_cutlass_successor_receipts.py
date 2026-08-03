@@ -10,15 +10,19 @@ pass.  This tool never edits canonical or successor manifests.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import datetime as dt
 import hashlib
 import json
 import os
 import re
+import selectors
 import signal
+import stat
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 from typing import Any
 
@@ -27,6 +31,10 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from tools.local_labels import admit_cutlass_successor_capture as admission  # noqa: E402
+from tools.local_labels import campaign_preflight  # noqa: E402
+from tools.local_labels import delegated_cgroup  # noqa: E402
+from tools.local_labels import immutable_artifact as immutable  # noqa: E402
+from tools.local_labels import ncu_action_executor as ncu_executor  # noqa: E402
 from tools.local_labels.capture_toolchain_contract import (  # noqa: E402
     parse_nvcc_release_banner,
     require_sol_cuda_release,
@@ -34,7 +42,7 @@ from tools.local_labels.capture_toolchain_contract import (  # noqa: E402
 )
 from tools.local_labels import build_cutlass_successor_cohort as cohort  # noqa: E402
 from tools.nvbit_tracer.import_trace_contract import validate_trace_dir  # noqa: E402
-from tools.nvbit_tracer.runtime_env import tracer_runtime_env  # noqa: E402
+from tools.nvbit_tracer import runtime_env as nvbit_runtime  # noqa: E402
 from tools.nvbit_tracer.trace_admission import (  # noqa: E402
     _import_trace_pb2,
     require_trace_admission,
@@ -44,22 +52,56 @@ PINNED_COMMIT = admission.PINNED_BUNDLE_COMMIT
 ARCH = "sm_86"
 SKU = "rtx_3090_ti"
 CUDA_RELEASE = {"major": 13, "minor": 2}
-NVBIT_VERSION = "1.8"
+NVBIT_VERSION = admission.NVBIT_VERSION
 NCU_VERSION = "2026.1.0"
 GPU_NAME = "NVIDIA GeForce RTX 3090 Ti"
 SM_CLOCK_MHZ = 1350
 MEM_CLOCK_MHZ = 10501
-TRACER_SO = ROOT / "tools/nvbit_tracer/tracer_tool/tracer_tool.so"
+TRACER_SO = ROOT / admission.NVBIT_TRACER_REL
+NVBIT_PB_LIB = ROOT / admission.NVBIT_PB_LIB_REL
 NVBIT_VERSION_HEADER = ROOT / "tools/nvbit_tracer/nvbit_release/core/nvbit.h"
 LABEL_DRIVER = ROOT / "tools/local_labels/label_driver.sh"
 CUDA_NVCC = Path("/usr/local/cuda-13.2/bin/nvcc")
 CAPTURE_TIMEOUT_S = 3600
-EXPECTED_TRACE_CONTRACT_ID = "sm86_addr_carry_v1"
-EXPECTED_MEMORY_PAYLOAD_CLASSES = [1, 2, 3, 6, 8]
+CAPTURE_STREAM_LIMIT_BYTES = 8 * 1024 * 1024
+CAPTURE_STREAM_READ_BYTES = 64 * 1024
+CAPTURE_PROCESS_POLL_S = 0.05
+CAPTURE_CLEANUP_TIMEOUT_S = 5.0
+CAPTURE_PRODUCER_SELF_SHA256 = (
+    "aa677745c38573ea331ec9af287f0b4d616de22d2570e7c0fd50b657acb5ee6e"
+)
+EXPECTED_TRACE_CONTRACT_ID = admission.TRACE_CONTRACT_ID
+EXPECTED_MEMORY_PAYLOAD_CLASSES = admission.TRACE_MEMORY_PAYLOAD_CLASSES
+_LABEL_COLLECTION_PATH = "/usr/local/cuda-13.2/bin:/usr/bin:/bin"
+_LABEL_COLLECTION_ENVIRONMENT_NAMES = (
+    admission.NCU_COLLECTION_OPTIONAL_ENVIRONMENT_NAMES
+)
 
 
 class CaptureError(RuntimeError):
     """A preflight or capture contract failed closed."""
+
+    def __init__(
+        self,
+        detail: str,
+        *,
+        process_id: int | None = None,
+        started_at_utc: str | None = None,
+        process_role: str | None = None,
+        process_command: list[str] | None = None,
+        process_environment: dict[str, str] | None = None,
+        process_tool_sha256: str | None = None,
+        containment: delegated_cgroup.CgroupContainmentEvidence | None = None,
+    ) -> None:
+        self.detail = detail
+        self.process_id = process_id
+        self.started_at_utc = started_at_utc
+        self.process_role = process_role
+        self.process_command = process_command
+        self.process_environment = process_environment
+        self.process_tool_sha256 = process_tool_sha256
+        self.containment = containment
+        super().__init__(detail)
 
 
 def canonical_sha(value: Any) -> str:
@@ -77,6 +119,27 @@ def _regular(path: Path, label: str) -> None:
         raise CaptureError(f"{label} unavailable: {path}") from exc
     if path.is_symlink() or not path.is_file() or stat.st_nlink != 1:
         raise CaptureError(f"{label} is not a single regular file: {path}")
+
+
+def _capture_producer_identity() -> tuple[Path, str]:
+    source = Path(__file__).resolve(strict=True)
+    try:
+        with immutable.open_retained_regular(source) as retained:
+            payload = retained.read_bytes()
+            declared = admission._capture_producer_self_digest(payload)
+            if declared != CAPTURE_PRODUCER_SELF_SHA256:
+                raise CaptureError(
+                    "loaded capture producer disagrees with its named source self-seal"
+                )
+            if declared != admission.CAPTURE_PRODUCER_SELF_SHA256_AUTHORITY:
+                raise CaptureError(
+                    "capture producer differs from independent self-seal authority"
+                )
+            return source, retained.sha256
+    except (admission.AdmissionError, immutable.ImmutableArtifactError) as exc:
+        raise CaptureError(
+            f"capture producer immutable identity failed: {exc}"
+        ) from exc
 
 
 def _absolute_external(path: Path, label: str) -> Path:
@@ -262,25 +325,98 @@ def _capture_tree_bytes(root: Path) -> int:
     return total
 
 
+def _require_capture_tree_budget(root: Path, byte_budget: int) -> None:
+    if byte_budget <= 0:
+        raise CaptureError("capture byte budget must be positive")
+    try:
+        total = _capture_tree_bytes(root)
+    except OSError as exc:
+        raise CaptureError(f"capture output budget scan failed: {exc}") from exc
+    if total > byte_budget:
+        raise CaptureError(
+            "post-processed capture exceeds its trace byte budget"
+        )
+
+
 def _kill_capture_process(process: subprocess.Popen[bytes]) -> None:
     try:
         os.killpg(process.pid, signal.SIGKILL)
     except (ProcessLookupError, PermissionError):
         try:
-            process.kill()
-        except ProcessLookupError:
+            os.kill(process.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
             pass
+
+
+def _process_exited_unreaped(process: subprocess.Popen[bytes]) -> bool:
+    """Observe child exit without releasing its PID/process-group authority."""
+    while True:
+        try:
+            status = os.waitid(
+                os.P_PID,
+                process.pid,
+                os.WEXITED | os.WNOHANG | os.WNOWAIT,
+            )
+        except InterruptedError:
+            continue
+        except (ChildProcessError, OSError) as exc:
+            raise CaptureError(
+                f"capture process exit state is unavailable: {exc}"
+            ) from exc
+        return status is not None
+
+
+def _read_capture_streams(
+    selector: selectors.BaseSelector,
+    buffers: dict[str, bytearray],
+    *,
+    timeout_s: float,
+) -> tuple[bool, OSError | None, bool]:
+    exceeded = False
+    progressed = False
+    try:
+        ready = selector.select(timeout_s)
+    except OSError as exc:
+        return False, exc, False
+    for key, _mask in ready:
+        label = key.data
+        try:
+            chunk = os.read(key.fd, CAPTURE_STREAM_READ_BYTES)
+        except BlockingIOError:
+            continue
+        except OSError as exc:
+            return exceeded, exc, progressed
+        progressed = True
+        if not chunk:
+            selector.unregister(key.fileobj)
+            continue
+        retained = buffers[label]
+        remaining = CAPTURE_STREAM_LIMIT_BYTES - len(retained)
+        if remaining > 0:
+            retained.extend(chunk[:remaining])
+        if len(chunk) > remaining:
+            exceeded = True
+    return exceeded, None, progressed
 
 
 def _run_capture_command(
     command: list[str], env: dict[str, str], cwd: Path, *,
     timeout_s: float = CAPTURE_TIMEOUT_S, byte_root: Path | None = None,
-    byte_budget: int | None = None,
-) -> tuple[int, int, str, bytes, bytes]:
+    byte_budget: int | None = None, failure_root: Path | None = None,
+    inherited_descriptors: tuple[int, ...] = (),
+    require_cgroup_containment: bool = False,
+) -> tuple[
+    int, int, str, bytes, bytes,
+    delegated_cgroup.CgroupContainmentEvidence | None,
+]:
+    if type(require_cgroup_containment) is not bool:
+        raise CaptureError("cgroup containment requirement must be boolean")
     if timeout_s <= 0:
         raise CaptureError("capture timeout must be positive")
     if byte_budget is not None and byte_budget <= 0:
         raise CaptureError("capture byte budget must be positive")
+    if CAPTURE_STREAM_LIMIT_BYTES <= 0 or CAPTURE_STREAM_READ_BYTES <= 0:
+        raise CaptureError("capture stream limits must be positive")
     started = dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z")
     _check_dt(started, "process start")
     exceeded = threading.Event()
@@ -289,48 +425,414 @@ def _run_capture_command(
     def watch_bytes() -> None:
         while not stop_watchdog.wait(0.1):
             try:
-                if byte_root is not None and byte_budget is not None and _capture_tree_bytes(byte_root) > byte_budget:
+                if (
+                    byte_root is not None
+                    and byte_budget is not None
+                    and _capture_tree_bytes(byte_root) > byte_budget
+                ):
                     exceeded.set()
-                    _kill_capture_process(process)
                     return
-            except CaptureError:
+            except (CaptureError, OSError):
                 exceeded.set()
-                _kill_capture_process(process)
                 return
 
+    containment: delegated_cgroup.DelegatedCgroupV2 | None = None
+    if require_cgroup_containment:
+        try:
+            containment = delegated_cgroup.DelegatedCgroupV2.create()
+        except delegated_cgroup.CgroupContainmentError as exc:
+            raise CaptureError(
+                f"capture descendant containment is unavailable: {exc}"
+            ) from exc
+    popen_arguments = {
+        "cwd": str(cwd),
+        "env": env,
+        "stdout": subprocess.PIPE,
+        "stderr": subprocess.PIPE,
+        "start_new_session": True,
+        "pass_fds": inherited_descriptors,
+    }
     try:
-        process = subprocess.Popen(
-            command,
-            cwd=str(cwd),
-            env=env,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            start_new_session=True,
+        process = (
+            subprocess.Popen(command, **popen_arguments)
+            if containment is None
+            else containment.popen(command, **popen_arguments)
         )
-    except OSError as exc:
+    except (OSError, delegated_cgroup.CgroupContainmentError) as exc:
+        if containment is not None:
+            try:
+                containment.close_after_error()
+            except BaseException as cleanup_error:
+                try:
+                    exc.add_note(
+                        f"capture containment launch cleanup failed: {cleanup_error}"
+                    )
+                except (AttributeError, TypeError):
+                    pass
         raise CaptureError(f"capture process could not start: {exc}") from exc
-    watchdog = threading.Thread(target=watch_bytes, daemon=True)
-    watchdog.start()
+
+    selector: selectors.BaseSelector | None = None
+    watchdog: threading.Thread | None = None
+    buffers = {"stdout": bytearray(), "stderr": bytearray()}
+    deadline = time.monotonic() + timeout_s
+    failure_kind: str | None = None
+    failure_cause: BaseException | None = None
+    output_exceeded = False
+    containment_evidence: delegated_cgroup.CgroupContainmentEvidence | None = None
+    containment_error: BaseException | None = None
+    group_kill_error: BaseException | None = None
+    process_cleanup_error: BaseException | None = None
+    process_wait_error: BaseException | None = None
+    active_base_exception: BaseException | None = None
     try:
-        stdout, stderr = process.communicate(timeout=timeout_s)
-    except subprocess.TimeoutExpired as exc:
-        _kill_capture_process(process)
-        stdout, stderr = process.communicate()
-        raise CaptureError(f"capture process exceeded timeout of {timeout_s:g}s") from exc
+        if process.stdout is None or process.stderr is None:  # pragma: no cover
+            raise CaptureError(
+                "capture process streams are unavailable",
+                process_id=process.pid,
+                started_at_utc=started,
+            )
+        selector = selectors.DefaultSelector()
+        try:
+            for label, stream in (
+                ("stdout", process.stdout),
+                ("stderr", process.stderr),
+            ):
+                os.set_blocking(stream.fileno(), False)
+                selector.register(stream, selectors.EVENT_READ, label)
+        except (OSError, ValueError) as exc:
+            raise CaptureError(
+                f"capture process stream setup failed: {exc}",
+                process_id=process.pid,
+                started_at_utc=started,
+            ) from exc
+
+        watchdog = threading.Thread(target=watch_bytes, daemon=True)
+        watchdog.start()
+        while True:
+            now = time.monotonic()
+            wait_s = max(0.0, min(CAPTURE_PROCESS_POLL_S, deadline - now))
+            stream_exceeded, stream_error, _progressed = _read_capture_streams(
+                selector, buffers, timeout_s=wait_s,
+            )
+            output_exceeded = output_exceeded or stream_exceeded
+            if stream_error is not None:
+                failure_kind = "stream"
+                failure_cause = stream_error
+                break
+            if output_exceeded:
+                failure_kind = "output_limit"
+                break
+            if exceeded.is_set():
+                failure_kind = "budget"
+                break
+            if time.monotonic() >= deadline:
+                failure_kind = "timeout"
+                break
+            if _process_exited_unreaped(process):
+                break
+    except CaptureError as exc:
+        failure_kind = "setup"
+        failure_cause = exc
+    except Exception as exc:
+        failure_kind = "stream"
+        failure_cause = exc
+    except BaseException as exc:
+        active_base_exception = exc
     finally:
+        # Bound every teardown phase. Production launches also retain cgroup
+        # authority, so process-group escapes are killed before leader reaping.
         stop_watchdog.set()
-        watchdog.join(timeout=1)
-    if exceeded.is_set():
-        if process.poll() is None:
+        try:
             _kill_capture_process(process)
-            process.wait()
-        raise CaptureError("capture process exceeded its trace byte budget or wrote unsafe output")
-    return process.returncode, process.pid, started, stdout, stderr
+        except BaseException as exc:
+            if isinstance(exc, Exception):
+                group_kill_error = exc
+            elif active_base_exception is None:
+                active_base_exception = exc
+            else:
+                try:
+                    active_base_exception.add_note(
+                        f"capture process-group kill interrupted: {exc}"
+                    )
+                except (AttributeError, TypeError):
+                    pass
+        if containment is not None:
+            try:
+                containment.kill_all()
+            except BaseException as exc:
+                containment_error = exc
+        if watchdog is not None:
+            try:
+                watchdog.join(timeout=CAPTURE_CLEANUP_TIMEOUT_S)
+            except BaseException as exc:
+                if isinstance(exc, Exception):
+                    process_cleanup_error = exc
+                elif active_base_exception is None:
+                    active_base_exception = exc
+                else:
+                    try:
+                        active_base_exception.add_note(
+                            f"capture watchdog join interrupted: {exc}"
+                        )
+                    except (AttributeError, TypeError):
+                        pass
+            if watchdog.is_alive():
+                timeout_error = RuntimeError(
+                    "capture byte-budget watchdog did not stop within "
+                    f"{CAPTURE_CLEANUP_TIMEOUT_S:g}s"
+                )
+                if process_cleanup_error is None:
+                    process_cleanup_error = timeout_error
+                else:
+                    try:
+                        process_cleanup_error.add_note(str(timeout_error))
+                    except (AttributeError, TypeError):
+                        pass
+        try:
+            process.wait(timeout=CAPTURE_CLEANUP_TIMEOUT_S)
+        except BaseException as exc:
+            process_wait_error = exc
+            if not isinstance(exc, Exception):
+                if active_base_exception is None:
+                    active_base_exception = exc
+                else:
+                    try:
+                        active_base_exception.add_note(
+                            f"capture process wait interrupted: {exc}"
+                        )
+                    except (AttributeError, TypeError):
+                        pass
+        if containment is not None:
+            try:
+                containment_evidence = containment.finish()
+            except BaseException as exc:
+                if containment_error is not None:
+                    try:
+                        exc.add_note(
+                            f"initial cgroup.kill failed: {containment_error}"
+                        )
+                    except (AttributeError, TypeError):
+                        pass
+                containment_error = exc
+        if group_kill_error is not None and containment_evidence is None:
+            if process_cleanup_error is None:
+                process_cleanup_error = group_kill_error
+            else:
+                try:
+                    process_cleanup_error.add_note(
+                        f"capture process-group kill failed: {group_kill_error}"
+                    )
+                except (AttributeError, TypeError):
+                    pass
+        if process_wait_error is not None:
+            try:
+                process.wait(timeout=CAPTURE_CLEANUP_TIMEOUT_S)
+            except BaseException as retry_error:
+                retry_failure = (
+                    retry_error
+                    if isinstance(retry_error, Exception)
+                    else RuntimeError(
+                        "capture process retry wait was interrupted before "
+                        "leader reaping was proven"
+                    )
+                )
+                if process_cleanup_error is None:
+                    process_cleanup_error = retry_failure
+                else:
+                    try:
+                        process_cleanup_error.add_note(
+                            f"capture process retry wait failed: {retry_failure}"
+                        )
+                    except (AttributeError, TypeError):
+                        pass
+                try:
+                    process_cleanup_error.add_note(
+                        f"initial capture process wait failed: {process_wait_error}"
+                    )
+                except (AttributeError, TypeError):
+                    pass
+            else:
+                process_wait_error = None
+        if selector is not None:
+            try:
+                while selector.get_map() and not output_exceeded:
+                    stream_exceeded, stream_error, progressed = (
+                        _read_capture_streams(
+                            selector, buffers, timeout_s=0,
+                        )
+                    )
+                    output_exceeded = output_exceeded or stream_exceeded
+                    if stream_error is not None and failure_cause is None:
+                        failure_cause = stream_error
+                        failure_kind = failure_kind or "stream"
+                        break
+                    if not progressed:
+                        break
+                for key in list(selector.get_map().values()):
+                    selector.unregister(key.fileobj)
+                selector.close()
+            except BaseException as exc:
+                if process_cleanup_error is None:
+                    process_cleanup_error = exc
+                else:
+                    try:
+                        process_cleanup_error.add_note(
+                            f"capture stream cleanup failed: {exc}"
+                        )
+                    except (AttributeError, TypeError):
+                        pass
+        for stream in (process.stdout, process.stderr):
+            if stream is None:
+                continue
+            try:
+                stream.close()
+            except BaseException as exc:
+                if process_cleanup_error is None:
+                    process_cleanup_error = exc
+                else:
+                    try:
+                        process_cleanup_error.add_note(
+                            f"capture pipe cleanup failed: {exc}"
+                        )
+                    except (AttributeError, TypeError):
+                        pass
+
+    stdout = bytes(buffers["stdout"])
+    stderr = bytes(buffers["stderr"])
+    if containment_error is not None:
+        error = CaptureError(
+            f"capture descendant containment cleanup failed: {containment_error}",
+            process_id=process.pid,
+            started_at_utc=started,
+        )
+        if active_base_exception is not None:
+            try:
+                error.add_note(
+                    "active capture interruption was superseded by containment "
+                    f"cleanup failure: {active_base_exception}"
+                )
+            except (AttributeError, TypeError):
+                pass
+        if process_cleanup_error is not None:
+            try:
+                error.add_note(
+                    f"capture process cleanup also failed: {process_cleanup_error}"
+                )
+            except (AttributeError, TypeError):
+                pass
+        raise error from containment_error
+    if process_cleanup_error is not None:
+        error = CaptureError(
+            f"capture process cleanup failed: {process_cleanup_error}",
+            process_id=process.pid,
+            started_at_utc=started,
+            containment=containment_evidence,
+        )
+        if active_base_exception is not None:
+            try:
+                error.add_note(
+                    "active capture interruption was superseded by process "
+                    f"cleanup failure: {active_base_exception}"
+                )
+            except (AttributeError, TypeError):
+                pass
+        if failure_cause is not None:
+            try:
+                error.add_note(f"active capture failure: {failure_cause}")
+            except (AttributeError, TypeError):
+                pass
+        raise error from process_cleanup_error
+    if active_base_exception is not None:
+        raise active_base_exception
+    if failure_kind == "setup":
+        assert isinstance(failure_cause, CaptureError)
+        failure_cause.containment = containment_evidence
+        raise failure_cause
+    if failure_kind is None and output_exceeded:
+        failure_kind = "output_limit"
+    if failure_kind is None and exceeded.is_set():
+        failure_kind = "budget"
+    if byte_root is not None and byte_budget is not None:
+        try:
+            terminal_bytes = _capture_tree_bytes(byte_root)
+        except (CaptureError, OSError):
+            failure_kind = failure_kind or "budget"
+        else:
+            if terminal_bytes > byte_budget:
+                failure_kind = failure_kind or "budget"
+
+    if failure_kind == "timeout":
+        if failure_root is not None:
+            _write_new(failure_root / "capture_timeout.stdout.bin", stdout)
+            _write_new(failure_root / "capture_timeout.stderr.bin", stderr)
+        raise CaptureError(
+            f"capture process exceeded timeout of {timeout_s:g}s",
+            process_id=process.pid,
+            started_at_utc=started,
+            containment=containment_evidence,
+        ) from failure_cause
+    if failure_kind == "output_limit":
+        if failure_root is not None:
+            _write_new(failure_root / "capture_output_limit.stdout.bin", stdout)
+            _write_new(failure_root / "capture_output_limit.stderr.bin", stderr)
+        raise CaptureError(
+            "capture process exceeded its bounded stdout/stderr byte limit",
+            process_id=process.pid,
+            started_at_utc=started,
+            containment=containment_evidence,
+        ) from failure_cause
+    if failure_kind == "stream":
+        if failure_root is not None:
+            _write_new(failure_root / "capture_stream_error.stdout.bin", stdout)
+            _write_new(failure_root / "capture_stream_error.stderr.bin", stderr)
+        raise CaptureError(
+            f"capture process stream collection failed: {failure_cause}",
+            process_id=process.pid,
+            started_at_utc=started,
+            containment=containment_evidence,
+        ) from failure_cause
+    if failure_kind == "budget":
+        if failure_root is not None:
+            _write_new(failure_root / "capture_budget.stdout.bin", stdout)
+            _write_new(failure_root / "capture_budget.stderr.bin", stderr)
+        raise CaptureError(
+            "capture process exceeded its trace byte budget or wrote unsafe output",
+            process_id=process.pid,
+            started_at_utc=started,
+            containment=containment_evidence,
+        )
+    return (
+        process.returncode,
+        process.pid,
+        started,
+        stdout,
+        stderr,
+        containment_evidence,
+    )
+
+
+def _boot_id_sha256() -> str:
+    path = Path("/proc/sys/kernel/random/boot_id")
+    _regular(path, "Linux boot identity")
+    payload = path.read_bytes().strip()
+    if re.fullmatch(
+        rb"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
+        payload,
+    ) is None:
+        raise CaptureError("Linux boot identity is malformed")
+    return sha256_bytes(payload)
 
 
 def _query(command: list[str], label: str) -> tuple[str, list[dict[str, str]]]:
     try:
-        result = subprocess.run(command, cwd=ROOT, capture_output=True, text=True, check=False, timeout=30)
+        result = subprocess.run(
+            command,
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=30,
+        )
     except (OSError, subprocess.TimeoutExpired) as exc:
         raise CaptureError(f"{label} query failed: {exc}") from exc
     if result.returncode != 0:
@@ -347,8 +849,267 @@ def _nvbit_version() -> str:
     return matches[0]
 
 
-def validate_live_capture_preflight() -> dict[str, Any]:
-    """Check live host state only after static preflight pins pass."""
+def _ncu_identity_from_authority(
+    authority: dict[str, Any],
+) -> ncu_executor.ExpectedNcuIdentity:
+    required = {
+        "status",
+        "expected",
+        "execution_mode",
+        "host_machine",
+        "launcher_resolved_path",
+        "launcher_sha256",
+        "launcher_target_relpath",
+        "resolved_path",
+        "executable_sha256",
+        "version_line",
+    }
+    if type(authority) is not dict or set(authority) != required:
+        raise CaptureError("live NCU authority fields differ")
+    if (
+        authority["status"] != campaign_preflight.STATUS_OK
+        or authority["expected"] != NCU_VERSION
+        or authority["execution_mode"] != campaign_preflight.NCU_EXECUTION_MODE
+        or authority["host_machine"] != campaign_preflight.NCU_HOST_MACHINE
+        or authority["launcher_target_relpath"]
+        != campaign_preflight.NCU_LAUNCHER_TARGET_RELPATH
+    ):
+        raise CaptureError("live NCU authority pins differ")
+    launcher_raw = authority["launcher_resolved_path"]
+    resolved_raw = authority["resolved_path"]
+    if (
+        type(launcher_raw) is not str
+        or type(resolved_raw) is not str
+        or not Path(launcher_raw).is_absolute()
+        or not Path(resolved_raw).is_absolute()
+        or os.path.normpath(launcher_raw) != launcher_raw
+        or os.path.normpath(resolved_raw) != resolved_raw
+    ):
+        raise CaptureError("live NCU authority paths differ")
+    launcher = Path(launcher_raw)
+    resolved = Path(resolved_raw)
+    if resolved != launcher.parent / authority["launcher_target_relpath"]:
+        raise CaptureError("live NCU launcher and inner executable paths differ")
+    if not all(
+        type(authority[name]) is str
+        and re.fullmatch(r"[0-9a-f]{64}", authority[name]) is not None
+        for name in ("launcher_sha256", "executable_sha256")
+    ):
+        raise CaptureError("live NCU authority hashes are invalid")
+    try:
+        return admission._validate_ncu_authority(authority)
+    except admission.AdmissionError as exc:
+        raise CaptureError(f"live NCU executable authority is invalid: {exc}") from exc
+
+
+def _probe_ncu_authority() -> tuple[dict[str, Any], str]:
+    observed = campaign_preflight.probe_ncu(
+        {"toolchain": {"ncu_version_prefix": NCU_VERSION}},
+        require_cgroup_containment=True,
+    )
+    authority = {
+        name: observed.get(name)
+        for name in (
+            "status",
+            "expected",
+            "execution_mode",
+            "host_machine",
+            "launcher_resolved_path",
+            "launcher_sha256",
+            "launcher_target_relpath",
+            "resolved_path",
+            "executable_sha256",
+            "version_line",
+        )
+    }
+    expected = _ncu_identity_from_authority(authority)
+    try:
+        result = ncu_executor.execute_ncu_action(
+            expected,
+            ["--version"],
+            timeout_seconds=30,
+            require_cgroup_containment=True,
+        )
+        stdout = result.stdout.decode("utf-8", errors="strict")
+    except (UnicodeDecodeError, ncu_executor.NcuActionExecutorError) as exc:
+        raise CaptureError(f"live NCU version output is invalid: {exc}") from exc
+    expected_stdout = (
+        "NVIDIA (R) Nsight Compute Command Line Profiler\n"
+        "Copyright (c) 2018-2026 NVIDIA Corporation\n"
+        f"{expected.version_line}\n"
+    )
+    if result.returncode != 0 or result.stderr or stdout != expected_stdout:
+        raise CaptureError("live NCU version output differs from exact authority")
+    return authority, stdout
+
+
+def _label_driver_identity() -> ncu_executor.ExpectedExecutableIdentity:
+    try:
+        with immutable.open_retained_executable(LABEL_DRIVER) as retained:
+            if retained.sha256 != admission.LABEL_DRIVER_SHA256:
+                raise CaptureError(
+                    "label driver differs from the pinned capture authority"
+                )
+            mode = stat.S_IMODE(os.fstat(retained.descriptor).st_mode)
+            if mode != admission.LABEL_DRIVER_MODE:
+                raise CaptureError(
+                    "label driver mode differs from the pinned capture authority"
+                )
+            expected = ncu_executor.build_expected_executable_identity(
+                resolved_path=str(retained.path),
+                executable_sha256=retained.sha256,
+                executable_mode=admission.LABEL_DRIVER_MODE,
+            )
+            retained.verify_unchanged()
+    except (
+        OSError,
+        immutable.ImmutableArtifactError,
+        ncu_executor.NcuActionExecutorError,
+    ) as exc:
+        raise CaptureError(f"label driver authority is invalid: {exc}") from exc
+    return expected
+
+
+def _label_collection_environment(
+    source: dict[str, str], *, cwd: Path,
+) -> ncu_executor.NcuCollectionEnvironment:
+    resolved_cwd = cwd.resolve(strict=True)
+    values = {
+        "LANG": "C",
+        "LANGUAGE": "C",
+        "LC_ALL": "C",
+        "PATH": _LABEL_COLLECTION_PATH,
+        "PWD": str(resolved_cwd),
+        "PYTHONNOUSERSITE": "1",
+        "LABEL_DRIVER_GPU_INDEX": "0",
+        "LABEL_DRIVER_PRESERVE_FAILED_EVIDENCE": "1",
+    }
+    for name in _LABEL_COLLECTION_ENVIRONMENT_NAMES:
+        value = source.get(name)
+        if value:
+            values[name] = value
+    try:
+        return ncu_executor.NcuCollectionEnvironment(values)
+    except ncu_executor.NcuActionExecutorError as exc:
+        raise CaptureError(f"label collection environment is invalid: {exc}") from exc
+
+
+def _command_option(command: list[str], name: str) -> str:
+    if command.count(name) != 1:
+        raise CaptureError(f"NCU command requires exactly one {name}")
+    index = command.index(name)
+    if index + 1 >= len(command) or command[index + 1] == "--":
+        raise CaptureError(f"NCU command has no value for {name}")
+    return command[index + 1]
+
+
+def _run_ncu_capture_command(
+    command: list[str],
+    expected_ncu_identity: ncu_executor.ExpectedNcuIdentity,
+    environment: ncu_executor.NcuCollectionEnvironment,
+    driver_identity: ncu_executor.ExpectedExecutableIdentity,
+    retained_target: immutable.RetainedExecutable,
+    cwd: Path,
+    *,
+    timeout_s: float = CAPTURE_TIMEOUT_S,
+    failure_root: Path | None = None,
+) -> tuple[
+    int, int, str, bytes, bytes,
+    delegated_cgroup.CgroupContainmentEvidence,
+]:
+    if not timeout_s > 0:
+        raise CaptureError("capture timeout must be positive")
+    expected_options = {
+        "--ncu": expected_ncu_identity.resolved_path,
+        "--ncu-executable-sha256": expected_ncu_identity.executable_sha256,
+        "--ncu-version-line": expected_ncu_identity.version_line,
+        "--target-processes": "all",
+        "--filter-mode": "global",
+        "--replay-mode": "kernel",
+        "--cache-control": "all",
+        "--clock-control": "none",
+        "--profile-from-start": "off",
+        "--launch-skip": "0",
+        "--launch-count": "1",
+    }
+    if command[0] != str(LABEL_DRIVER) or "--ncu-exec-path" in command:
+        raise CaptureError("NCU command does not name the canonical label driver")
+    for name, expected in expected_options.items():
+        if _command_option(command, name) != expected:
+            raise CaptureError(f"NCU command authority differs for {name}")
+    if command.count("--") != 1:
+        raise CaptureError("NCU command requires one application separator")
+    supervised_command: list[object] = list(command)
+    binary_index = supervised_command.index("--binary") + 1
+    if supervised_command[binary_index] != str(retained_target.path):
+        raise CaptureError("NCU target command differs from retained executable")
+    supervised_command[binary_index] = retained_target.proc_path
+    separator = supervised_command.index("--")
+    supervised_command[separator:separator] = [
+        "--ncu-exec-path",
+        ncu_executor.AUTHORIZED_NCU_PROC_PATH,
+    ]
+    if environment.as_dict()["PWD"] != str(cwd.resolve(strict=True)):
+        raise CaptureError("NCU collection PWD differs from the process directory")
+    try:
+        result = ncu_executor.execute_ncu_supervised_executable(
+            expected_ncu_identity,
+            driver_identity,
+            supervised_command,
+            timeout_seconds=timeout_s,
+            environment=environment,
+            working_directory=cwd,
+            auxiliary_descriptors=(retained_target.descriptor,),
+            require_cgroup_containment=True,
+        )
+    except ncu_executor.NcuActionExecutorError as exc:
+        if failure_root is not None:
+            _write_new(failure_root / "ncu_executor_failure.stdout.bin", exc.stdout)
+            _write_new(failure_root / "ncu_executor_failure.stderr.bin", exc.stderr)
+        detail = exc.stderr[-400:] if exc.stderr else str(exc).encode()
+        process_command = (
+            None
+            if exc.process_command is None
+            else [
+                str(retained_target.path)
+                if item == retained_target.proc_path
+                else item
+                for item in exc.process_command
+            ]
+        )
+        raise CaptureError(
+            f"descriptor-bound NCU capture failed: {detail!r}",
+            process_id=exc.process_id,
+            started_at_utc=exc.started_at_utc,
+            process_role=exc.process_role,
+            process_command=process_command,
+            process_environment=exc.process_environment,
+            process_tool_sha256=exc.process_tool_sha256,
+            containment=exc.containment,
+        ) from exc
+    if type(result.process_id) is not int or result.process_id <= 0:
+        raise CaptureError("descriptor-bound NCU capture returned no process identity")
+    if type(result.started_at_utc) is not str:
+        raise CaptureError("descriptor-bound NCU capture returned no start time")
+    if result.containment is None:
+        raise CaptureError(
+            "descriptor-bound NCU capture returned no containment evidence"
+        )
+    _check_dt(result.started_at_utc, "process start")
+    return (
+        result.returncode,
+        result.process_id,
+        result.started_at_utc,
+        result.stdout,
+        result.stderr,
+        result.containment,
+    )
+
+
+def validate_live_capture_preflight(*, phase: str) -> dict[str, Any]:
+    """Check phase-local live host state only after static preflight pins pass."""
+    if phase not in {"ncu", "nvbit"}:
+        raise CaptureError("live preflight phase is invalid")
     smi_command = [
         "nvidia-smi", "--query-gpu=name,compute_cap,persistence_mode,clocks.sm,clocks.mem",
         "--format=csv,noheader,nounits",
@@ -373,12 +1134,8 @@ def validate_live_capture_preflight() -> dict[str, Any]:
         require_sol_cuda_release(cuda)
     except ValueError as exc:
         raise CaptureError(f"CUDA release pin failed: {exc}") from exc
-    ncu_command = ["ncu", "--version"]
-    ncu_stdout, _ = _query(ncu_command, "NCU")
-    if not any(ncu_version_matches(line, NCU_VERSION) for line in ncu_stdout.splitlines()):
-        raise CaptureError("NCU version is not the pinned 2026.1.0 release")
     nvbit = _nvbit_version()
-    return {
+    result = {
         "smi_command": smi_command,
         "smi_stdout": smi_stdout,
         "smi_stdout_sha256": sha256_bytes(smi_stdout.encode()),
@@ -388,17 +1145,25 @@ def validate_live_capture_preflight() -> dict[str, Any]:
         "nvcc_command": nvcc_command,
         "nvcc_stdout": nvcc_stdout,
         "nvcc_stdout_sha256": sha256_bytes(nvcc_stdout.encode()),
-        "ncu_command": ncu_command,
-        "ncu_stdout": ncu_stdout,
-        "ncu_stdout_sha256": sha256_bytes(ncu_stdout.encode()),
         "cuda_release": cuda,
         "nvbit_version": nvbit,
-        "ncu_version": NCU_VERSION,
         "gpu_name": GPU_NAME,
         "persistence_mode": "Enabled",
         "sm_clock_mhz": SM_CLOCK_MHZ,
         "mem_clock_mhz": MEM_CLOCK_MHZ,
     }
+    if phase == "ncu":
+        ncu_authority, ncu_stdout = _probe_ncu_authority()
+        if not ncu_version_matches(ncu_authority["version_line"], NCU_VERSION):
+            raise CaptureError("NCU version is not the pinned 2026.1.0 release")
+        result.update({
+            "ncu_command": [ncu_authority["resolved_path"], "--version"],
+            "ncu_stdout": ncu_stdout,
+            "ncu_stdout_sha256": sha256_bytes(ncu_stdout.encode()),
+            "ncu_version": NCU_VERSION,
+            "ncu_authority": ncu_authority,
+        })
+    return result
 
 
 def _validate_trace_producer(trace_root: Path) -> dict[str, Any]:
@@ -419,23 +1184,32 @@ def _validate_trace_producer(trace_root: Path) -> dict[str, Any]:
         raise CaptureError("NVBit trace producer/schema contract mismatch")
     if metadata["memory_payload_classes"] != EXPECTED_MEMORY_PAYLOAD_CLASSES:
         raise CaptureError("NVBit trace producer payload-class mismatch")
-    if metadata["binary_version"] != 86 or metadata["nvbit_version"] != NVBIT_VERSION:
+    if (
+        metadata["binary_version"] != admission.NVBIT_TRACE_BINARY_VERSION
+        or metadata["nvbit_version"] != NVBIT_VERSION
+    ):
         raise CaptureError("NVBit trace producer version mismatch")
     return metadata
 
 
-def _environment_document(preflight: dict[str, Any], live: dict[str, Any], env: dict[str, str]) -> dict[str, Any]:
-    selected = {
-        key: env.get(key, "")
-        for key in (
-            "PATH", "LD_LIBRARY_PATH", "CUDA_HOME", "CUDA_PATH",
-            "NVBIT_PB_PREFIX", "CUDA_INJECTION64_PATH", "TRACES_FOLDER",
-            "USER_DEFINED_FOLDERS",
-        )
-    }
-    output_keys = (
-        "smi_stdout", "competing_process_stdout", "nvcc_stdout", "ncu_stdout",
-    )
+def _environment_document(
+    preflight: dict[str, Any],
+    live: dict[str, Any],
+    env: dict[str, str],
+    *,
+    capture_kind: str,
+) -> dict[str, Any]:
+    if capture_kind == "ncu":
+        selected = dict(env)
+    elif capture_kind == "nvbit":
+        selected = dict(env)
+    else:
+        raise CaptureError("environment document capture kind is invalid")
+    output_keys = [
+        "smi_stdout", "competing_process_stdout", "nvcc_stdout",
+    ]
+    if capture_kind == "ncu":
+        output_keys.append("ncu_stdout")
     return {
         "schema_version": 1,
         "artifact_kind": "cutlass_successor_capture_environment",
@@ -448,11 +1222,40 @@ def _environment_document(preflight: dict[str, Any], live: dict[str, Any], env: 
 
 
 def _write_new(path: Path, payload: bytes) -> None:
-    if path.exists() or path.is_symlink():
-        raise CaptureError(f"refusing to overwrite capture output: {path}")
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_bytes(payload)
-    _regular(path, "capture output")
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with immutable.PinnedDirectoryReader(path.parent) as parent:
+            immutable.write_regular_bytes_at(
+                parent.descriptor,
+                path.name,
+                payload,
+                mode=0o400,
+            )
+            parent.verify_path()
+    except (OSError, immutable.ImmutableArtifactError) as exc:
+        raise CaptureError(
+            f"cannot exclusively publish capture output {path}: {exc}"
+        ) from exc
+
+
+def _capture_metadata_paths(
+    root: Path,
+    *,
+    variant_id: str,
+    phase: str,
+) -> tuple[Path, Path, Path, Path]:
+    return (
+        root / f"{variant_id}.preflight_{phase}.json",
+        root / f"{variant_id}.environment_{phase}.json",
+        root / f"{variant_id}.{phase}{admission.RECEIPT_SUFFIX}",
+        root / "failures" / variant_id / phase,
+    )
+
+
+def _verify_unchanged(path: Path, expected_sha256: str, label: str) -> None:
+    _regular(path, label)
+    if sha256_bytes(path.read_bytes()) != expected_sha256:
+        raise CaptureError(f"{label} changed during capture")
 
 
 def _artifact(root: Path, path: Path, role: str) -> dict[str, Any]:
@@ -464,16 +1267,102 @@ def _artifact(root: Path, path: Path, role: str) -> dict[str, Any]:
     return {"role": role, "path": relative, "sha256": sha256_bytes(payload), "size_bytes": len(payload)}
 
 
+def _write_failure_provenance(
+    failure_root: Path,
+    *,
+    phase: str,
+    row: dict[str, Any],
+    command: list[str],
+    live: dict[str, Any],
+    environment_payload: bytes,
+    default_environment: dict[str, str],
+    capture_producer_sha256: str,
+    containment_supervisor_sha256: str,
+    phase_tool_sha256: str,
+    action_executor_sha256: str | None,
+    error: CaptureError,
+) -> None:
+    failure_root.mkdir(parents=True, exist_ok=True)
+    streams = []
+    for path in sorted(failure_root.glob("*.bin")):
+        _regular(path, "failed capture stream")
+        payload = path.read_bytes()
+        streams.append({
+            "path": path.name,
+            "sha256": sha256_bytes(payload),
+            "size_bytes": len(payload),
+        })
+    failed_command = error.process_command or command
+    failed_environment = error.process_environment or default_environment
+    failed_tool_sha256 = error.process_tool_sha256 or phase_tool_sha256
+    process = {
+        "role": error.process_role or f"{phase}_capture",
+        "boot_id_sha256": _boot_id_sha256(),
+        "command": failed_command,
+        "command_sha256": canonical_sha(failed_command),
+        "environment": failed_environment,
+        "environment_sha256": canonical_sha(failed_environment),
+        "host_identity_sha256": canonical_sha({
+            "gpu": live["gpu_name"],
+            "smi": live["smi_stdout_sha256"],
+        }),
+        "pid": error.process_id,
+        "started_at_utc": error.started_at_utc,
+    }
+    if error.containment is not None:
+        process["containment"] = error.containment.as_dict()
+    provenance = {
+        "capture_producer_sha256": capture_producer_sha256,
+        "containment_supervisor_sha256": containment_supervisor_sha256,
+        "phase_tool_sha256": failed_tool_sha256,
+    }
+    if action_executor_sha256 is not None:
+        provenance["action_executor_sha256"] = action_executor_sha256
+    document = {
+        "schema_version": 1,
+        "artifact_kind": "cutlass_successor_capture_failure",
+        "status": "failed_unadmitted",
+        "capture_kind": phase,
+        "matrix_key": row["matrix_key"],
+        "variant_id": row["variant_id"],
+        "detail": error.detail,
+        "capture_environment_document_sha256": sha256_bytes(environment_payload),
+        "process": process,
+        "provenance": provenance,
+        "streams": streams,
+    }
+    document["failure_seal_sha256"] = canonical_sha(document)
+    _write_new(
+        failure_root / "failure_provenance.json",
+        (json.dumps(document, sort_keys=True, indent=2) + "\n").encode(),
+    )
+
+
 def _receipt(
     *, root: Path, phase: str, row: dict[str, Any], preflight_path: Path,
     preflight_payload: bytes, environment_path: Path, environment_payload: bytes,
     command: list[str], process: dict[str, Any], artifacts: list[dict[str, Any]],
     semantic: dict[str, Any], captured_at: str,
+    capture_producer_sha256: str,
+    containment_supervisor_sha256: str,
+    phase_tool_sha256: str,
+    action_executor_sha256: str | None,
 ) -> dict[str, Any]:
     preflight_relative = preflight_path.relative_to(root).as_posix()
     environment_digest = sha256_bytes(environment_payload)
+    provenance = {
+        "capture_producer_sha256": capture_producer_sha256,
+        "containment_supervisor_sha256": containment_supervisor_sha256,
+        "phase_tool_sha256": phase_tool_sha256,
+    }
+    if phase == "ncu":
+        if action_executor_sha256 is None:
+            raise CaptureError("NCU receipt lacks action-executor provenance")
+        provenance["action_executor_sha256"] = action_executor_sha256
+    elif action_executor_sha256 is not None:
+        raise CaptureError("NVBit receipt carries NCU executor provenance")
     receipt = {
-        "schema_version": 1,
+        "schema_version": 2,
         "artifact_kind": "cutlass_successor_capture_receipt",
         "receipt": {
             "capture_kind": phase,
@@ -501,12 +1390,7 @@ def _receipt(
                 "block_dim": row["shape"]["trace_shape"]["launch_config"]["block"],
             },
             "process": process,
-            "provenance": {
-                "capture_producer_sha256": sha256_bytes(Path(__file__).read_bytes()),
-                "phase_tool_sha256": sha256_bytes(
-                    (LABEL_DRIVER if phase == "ncu" else TRACER_SO).read_bytes()
-                ),
-            },
+            "provenance": provenance,
             "captured_at_utc": captured_at,
             "preflight_path": preflight_relative,
             "preflight_sha256": sha256_bytes(preflight_payload),
@@ -527,72 +1411,52 @@ def _receipt(
     return receipt
 
 
-def capture_phase(*, matrix_key: str, variant_id: str, phase: str, preflight_path: Path, output_root: Path) -> Path:
-    if phase not in {"ncu", "nvbit"}:
-        raise CaptureError("phase must be ncu or nvbit")
-    root = _absolute_external(output_root, "capture output root")
-    root.mkdir(parents=True, exist_ok=True)
-    row, roster_row = _row_for(matrix_key, variant_id)
-    preflight, preflight_payload = validate_successor_preflight(preflight_path, row, roster_row)
-    live = validate_live_capture_preflight()
-    env = dict(os.environ)
-    command: list[str]
-    binary = ROOT / row["static_launch_inventory"]["binary_path"]
-    args = [str(value) for value in row["shape"]["actual_args"]]
-    process_cwd = binary.parent
-    if phase == "ncu":
-        for key in (
-            "NVBIT_PB_PREFIX", "CUDA_INJECTION64_PATH", "TRACES_FOLDER",
-            "USER_DEFINED_FOLDERS",
-        ):
-            env.pop(key, None)
-        command = [str(LABEL_DRIVER), "--device", ARCH, "--slug", row["successor_slug"], "--shape-point", "trace_00", "--repeat", "0", "--launch", "0", "--binary", str(binary), "--warmup", "0", "--out-dir", str(root), "--expected-cuda-release", "13.2", "--expected-ncu-version-prefix", NCU_VERSION, "--publication-metric-scope", "cycles_only_binding", "--clock-control", "none", "--cache-control", "all", "--unit-metric", "gpc__cycles_elapsed.max", "--unit-metric", "gpu__time_duration.sum", "--", *args]
-        env["LD_SCRIPT_DIR"] = str(LABEL_DRIVER.parent)
-        env["LD_SOURCE_COMMIT_OVERRIDE"] = PINNED_COMMIT
-        phase_output_dir = root / ARCH / row["successor_slug"] / "trace_00"
-    else:
-        env = tracer_runtime_env(TRACER_SO, base_env=env)
-        env["CUDA_INJECTION64_PATH"] = str(TRACER_SO)
-        env["USER_DEFINED_FOLDERS"] = "1"
-        trace_root = root / "nvbit" / row["successor_slug"]
-        phase_output_dir = trace_root
-        env["TRACES_FOLDER"] = str(trace_root)
-        command = [str(binary), *args]
-    preflight_out = root / f"preflight_{phase}.json"
-    environment_out = root / f"environment_{phase}.json"
-    receipt_path = root / f"{variant_id}.{phase}{admission.RECEIPT_SUFFIX}"
-    _reject_preexisting_output_descendants(
-        root,
-        output_dir=phase_output_dir,
-        reserved_files=(preflight_out, environment_out, receipt_path),
-    )
-    if phase == "nvbit":
-        trace_root.mkdir(parents=True, exist_ok=True)
-    _write_new(preflight_out, preflight_payload)
-    environment_doc = _environment_document(preflight, live, env)
-    environment_payload = (json.dumps(environment_doc, sort_keys=True, indent=2) + "\n").encode()
-    _write_new(environment_out, environment_payload)
-    returncode, pid, started, stdout, stderr = _run_capture_command(
-        command,
-        env,
-        process_cwd,
-        timeout_s=float(row["trace_budget"]["max_wall_time_s"] if phase == "nvbit" else CAPTURE_TIMEOUT_S),
-        byte_root=(trace_root if phase == "nvbit" else None),
-        byte_budget=(row["trace_budget"]["max_trace_bytes"] if phase == "nvbit" else None),
-    )
-    if returncode != 0 or stderr:
-        raise CaptureError(f"{phase} capture failed returncode={returncode} stderr={stderr[-400:]!r}")
+def _finalize_capture_in_generation(
+    *,
+    generation_stack: contextlib.ExitStack,
+    root: Path,
+    phase: str,
+    row: dict[str, Any],
+    live: dict[str, Any],
+    pid: int,
+    started: str,
+    containment: delegated_cgroup.CgroupContainmentEvidence,
+    command: list[str],
+    capture_source: Path,
+    capture_producer_sha256: str,
+    containment_supervisor_sha256: str,
+    phase_tool_sha256: str,
+    action_executor_sha256: str | None,
+    preflight_out: Path,
+    preflight_payload: bytes,
+    environment_out: Path,
+    environment_payload: bytes,
+    receipt_path: Path,
+) -> tuple[Path, bytes]:
     process = {
-        "host_identity_sha256": canonical_sha({"gpu": live["gpu_name"], "smi": live["smi_stdout_sha256"]}),
-        "boot_id_sha256": sha256_bytes(Path("/proc/sys/kernel/random/boot_id").read_bytes().strip()) if Path("/proc/sys/kernel/random/boot_id").is_file() else "0" * 64,
+        "host_identity_sha256": canonical_sha({
+            "gpu": live["gpu_name"],
+            "smi": live["smi_stdout_sha256"],
+        }),
+        "boot_id_sha256": _boot_id_sha256(),
         "pid": pid,
         "started_at_utc": started,
         "command_sha256": canonical_sha(command),
+        "containment": containment.as_dict(),
     }
     process["process_identity_sha256"] = canonical_sha(process)
     artifacts: list[dict[str, Any]] = []
     if phase == "ncu":
         cell = root / ARCH / row["successor_slug"] / "trace_00"
+        cell_reader = generation_stack.enter_context(
+            immutable.PinnedDirectoryReader(cell)
+        )
+        generation_stack.enter_context(cell_reader.retain_tree_generation(
+            max_files=64,
+            max_directories=16,
+            max_total_file_bytes=8 * 1024 * 1024 * 1024,
+            max_total_relative_path_bytes=64 * 1024,
+        ))
         required = {
             "ncu_report": cell / "run_0_0.ncu-rep",
             "label_sidecar": cell / "label_0_0.json",
@@ -602,10 +1466,25 @@ def capture_phase(*, matrix_key: str, variant_id: str, phase: str, preflight_pat
         for role, path in required.items():
             artifacts.append(_artifact(root, path, role))
         sidecar, _ = _load_object(required["label_sidecar"], "NCU label sidecar")
-        metrics = {item.get("ncu_metric") for item in sidecar.get("unit_tagged_metrics", []) if isinstance(item, dict)}
-        if not {"gpc__cycles_elapsed.max", "gpu__time_duration.sum"}.issubset(metrics):
+        metrics = {
+            item.get("ncu_metric")
+            for item in sidecar.get("unit_tagged_metrics", [])
+            if isinstance(item, dict)
+        }
+        if not {
+            "gpc__cycles_elapsed.max",
+            "gpu__time_duration.sum",
+        }.issubset(metrics):
             raise CaptureError("NCU sidecar lacks both required diagnostic metrics")
-        semantic = {"semantic_kind": "ncu_metric_validation", "primary_metric": "gpc__cycles_elapsed.max", "secondary_metric": "gpu__time_duration.sum", "primary_metric_present": True, "secondary_metric_present": True, "target_only": True, "simulator_config_present": False}
+        semantic = {
+            "semantic_kind": "ncu_metric_validation",
+            "primary_metric": "gpc__cycles_elapsed.max",
+            "secondary_metric": "gpu__time_duration.sum",
+            "primary_metric_present": True,
+            "secondary_metric_present": True,
+            "target_only": True,
+            "simulator_config_present": False,
+        }
     else:
         trace_root = root / "nvbit" / row["successor_slug"]
         try:
@@ -615,10 +1494,12 @@ def capture_phase(*, matrix_key: str, variant_id: str, phase: str, preflight_pat
         except Exception as exc:
             raise CaptureError(f"NVBit trace validation failed: {exc}") from exc
         if not contract.ok:
-            raise CaptureError(f"NVBit trace contract failed: {contract.typed_reason}")
+            raise CaptureError(
+                f"NVBit trace contract failed: {contract.typed_reason}"
+            )
         summary = {
             "schema_version": 1,
-            "producer": "nvbit_tracer",
+            "producer": admission.NVBIT_TRACE_SUMMARY_PRODUCER,
             "artifact_kind": "cutlass_successor_nvbit_trace_summary",
             "trace_contract_id": producer["trace_contract_id"],
             "memory_payload_classes": producer["memory_payload_classes"],
@@ -632,9 +1513,34 @@ def capture_phase(*, matrix_key: str, variant_id: str, phase: str, preflight_pat
             "stats": "stats.csv",
         }
         summary_path = trace_root / "trace_summary.json"
-        summary_payload = (json.dumps(summary, sort_keys=True, indent=2) + "\n").encode()
+        summary_payload = (
+            json.dumps(summary, sort_keys=True, indent=2) + "\n"
+        ).encode()
         _write_new(summary_path, summary_payload)
-        artifacts.append(_artifact(root, trace_root / "dynamic_trace.pb", "dynamic_trace"))
+        trace_reader = generation_stack.enter_context(
+            immutable.PinnedDirectoryReader(trace_root)
+        )
+        generation_stack.enter_context(trace_reader.retain_tree_generation(
+            max_files=1_000_000,
+            max_directories=100_000,
+            max_total_file_bytes=row["trace_budget"]["max_trace_bytes"],
+            max_total_relative_path_bytes=64 * 1024 * 1024,
+        ))
+        try:
+            admission_result = require_trace_admission(trace_root)
+            contract = validate_trace_dir(trace_root)
+            producer = _validate_trace_producer(trace_root)
+        except Exception as exc:
+            raise CaptureError(
+                f"NVBit trace generation revalidation failed: {exc}"
+            ) from exc
+        if not contract.ok:
+            raise CaptureError(
+                f"NVBit trace contract failed: {contract.typed_reason}"
+            )
+        artifacts.append(
+            _artifact(root, trace_root / "dynamic_trace.pb", "dynamic_trace")
+        )
         artifacts.append(_artifact(root, trace_root / "stats.csv", "stats"))
         artifacts.extend(
             _artifact(root, path, "threadblock")
@@ -651,15 +1557,418 @@ def capture_phase(*, matrix_key: str, variant_id: str, phase: str, preflight_pat
                 relative = path.relative_to(root).as_posix()
                 if relative not in known_paths:
                     artifacts.append(_artifact(root, path, "trace_auxiliary"))
-        semantic = {"semantic_kind": "nvbit_trace_validation", "trace_contract_status": "pass", "dynamic_trace_role": "dynamic_trace", "summary_role": "trace_summary", "target_only": True, "simulator_config_present": False}
+        semantic = {
+            "semantic_kind": "nvbit_trace_validation",
+            "trace_contract_status": "pass",
+            "dynamic_trace_role": "dynamic_trace",
+            "summary_role": "trace_summary",
+            "target_only": True,
+            "simulator_config_present": False,
+        }
+        _require_capture_tree_budget(
+            trace_root,
+            row["trace_budget"]["max_trace_bytes"],
+        )
+    _verify_unchanged(capture_source, capture_producer_sha256, "capture producer")
+    _verify_unchanged(
+        Path(delegated_cgroup.__file__),
+        containment_supervisor_sha256,
+        "cgroup containment supervisor",
+    )
+    if phase == "ncu":
+        if action_executor_sha256 is None:
+            raise CaptureError("NCU action executor authority is absent")
+        _verify_unchanged(
+            Path(ncu_executor.__file__),
+            action_executor_sha256,
+            "NCU action executor",
+        )
+    if phase == "nvbit":
+        _verify_unchanged(TRACER_SO, phase_tool_sha256, "NVBit tracer")
     captured = dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z")
-    receipt = _receipt(root=root, phase=phase, row=row, preflight_path=preflight_out, preflight_payload=preflight_payload, environment_path=environment_out, environment_payload=environment_payload, command=command, process=process, artifacts=artifacts, semantic=semantic, captured_at=captured)
+    receipt = _receipt(
+        root=root,
+        phase=phase,
+        row=row,
+        preflight_path=preflight_out,
+        preflight_payload=preflight_payload,
+        environment_path=environment_out,
+        environment_payload=environment_payload,
+        command=command,
+        process=process,
+        artifacts=artifacts,
+        semantic=semantic,
+        captured_at=captured,
+        capture_producer_sha256=capture_producer_sha256,
+        containment_supervisor_sha256=containment_supervisor_sha256,
+        phase_tool_sha256=phase_tool_sha256,
+        action_executor_sha256=action_executor_sha256,
+    )
     try:
-        admission._validate_schema(ROOT / admission.RECEIPT_SCHEMA_REL, receipt, "capture receipt")
+        admission._validate_schema(
+            ROOT / admission.RECEIPT_SCHEMA_REL,
+            receipt,
+            "capture receipt",
+        )
     except Exception as exc:
         raise CaptureError(f"capture receipt schema/producer mismatch: {exc}") from exc
-    _write_new(receipt_path, (json.dumps(receipt, sort_keys=True, indent=2) + "\n").encode())
-    return receipt_path
+    payload = (json.dumps(receipt, sort_keys=True, indent=2) + "\n").encode()
+    return receipt_path, payload
+
+
+def _finalize_capture(
+    *,
+    root: Path,
+    phase: str,
+    row: dict[str, Any],
+    live: dict[str, Any],
+    pid: int,
+    started: str,
+    containment: delegated_cgroup.CgroupContainmentEvidence,
+    command: list[str],
+    capture_source: Path,
+    capture_producer_sha256: str,
+    containment_supervisor_sha256: str,
+    phase_tool_sha256: str,
+    action_executor_sha256: str | None,
+    preflight_out: Path,
+    preflight_payload: bytes,
+    environment_out: Path,
+    environment_payload: bytes,
+    receipt_path: Path,
+) -> Path:
+    with contextlib.ExitStack() as generation_stack:
+        output, payload = _finalize_capture_in_generation(
+            generation_stack=generation_stack,
+            root=root,
+            phase=phase,
+            row=row,
+            live=live,
+            pid=pid,
+            started=started,
+            containment=containment,
+            command=command,
+            capture_source=capture_source,
+            capture_producer_sha256=capture_producer_sha256,
+            containment_supervisor_sha256=containment_supervisor_sha256,
+            phase_tool_sha256=phase_tool_sha256,
+            action_executor_sha256=action_executor_sha256,
+            preflight_out=preflight_out,
+            preflight_payload=preflight_payload,
+            environment_out=environment_out,
+            environment_payload=environment_payload,
+            receipt_path=receipt_path,
+        )
+        parent = generation_stack.enter_context(
+            immutable.PinnedDirectoryReader(output.parent)
+        )
+        try:
+            immutable.publish_regular_file(
+                output.parent,
+                output.name,
+                payload,
+                pinned_parent=parent,
+                after_commit=generation_stack.close,
+            )
+        except (OSError, immutable.ImmutableArtifactError) as exc:
+            raise CaptureError(
+                f"cannot transactionally publish capture receipt {output}: {exc}"
+            ) from exc
+        return output
+
+
+def capture_phase(*, matrix_key: str, variant_id: str, phase: str, preflight_path: Path, output_root: Path) -> Path:
+    if phase not in {"ncu", "nvbit"}:
+        raise CaptureError("phase must be ncu or nvbit")
+    root = _absolute_external(output_root, "capture output root")
+    root.mkdir(parents=True, exist_ok=True)
+    row, roster_row = _row_for(matrix_key, variant_id)
+    preflight, preflight_payload = validate_successor_preflight(preflight_path, row, roster_row)
+    live = validate_live_capture_preflight(phase=phase)
+    expected_ncu_identity: ncu_executor.ExpectedNcuIdentity | None = None
+    if phase == "ncu":
+        expected_ncu_identity = _ncu_identity_from_authority(
+            live["ncu_authority"]
+        )
+    capture_source, capture_producer_sha256 = _capture_producer_identity()
+    containment_source = Path(delegated_cgroup.__file__).resolve(strict=True)
+    _regular(containment_source, "cgroup containment supervisor")
+    containment_supervisor_sha256 = sha256_bytes(containment_source.read_bytes())
+    env = dict(os.environ)
+    command: list[str]
+    collection_environment: ncu_executor.NcuCollectionEnvironment | None = None
+    driver_identity: ncu_executor.ExpectedExecutableIdentity | None = None
+    action_executor_sha256: str | None = None
+    binary = ROOT / row["static_launch_inventory"]["binary_path"]
+    process_cwd = binary.parent
+    if phase == "ncu":
+        if expected_ncu_identity is None:
+            raise CaptureError("NCU executable authority was not initialized")
+        executor_source = Path(ncu_executor.__file__).resolve(strict=True)
+        _regular(executor_source, "NCU action executor")
+        action_executor_sha256 = sha256_bytes(executor_source.read_bytes())
+        if action_executor_sha256 != admission.NCU_ACTION_EXECUTOR_SHA256:
+            raise CaptureError("NCU action executor differs from pinned authority")
+        for key in (
+            "NVBIT_PB_PREFIX", "CUDA_INJECTION64_PATH", "TRACES_FOLDER",
+            "USER_DEFINED_FOLDERS",
+        ):
+            env.pop(key, None)
+        env["LD_SOURCE_COMMIT_OVERRIDE"] = PINNED_COMMIT
+        command = admission._expected_ncu_command(
+            root, row, expected_ncu_identity
+        )
+        collection_environment = _label_collection_environment(
+            env, cwd=process_cwd
+        )
+        driver_identity = _label_driver_identity()
+        phase_tool_sha256 = driver_identity.executable_sha256
+        phase_output_dir = root / ARCH / row["successor_slug"] / "trace_00"
+    else:
+        env = admission._expected_nvbit_environment(root, row)
+        trace_root = root / "nvbit" / row["successor_slug"]
+        phase_output_dir = trace_root
+        command = admission._expected_nvbit_command(row)
+        _regular(TRACER_SO, "NVBit tracer")
+        phase_tool_sha256 = sha256_bytes(TRACER_SO.read_bytes())
+    preflight_out, environment_out, receipt_path, failure_root = (
+        _capture_metadata_paths(root, variant_id=variant_id, phase=phase)
+    )
+    _reject_preexisting_output_descendants(
+        root,
+        output_dir=phase_output_dir,
+        reserved_files=(preflight_out, environment_out, receipt_path),
+    )
+    _reject_preexisting_output_descendants(
+        root,
+        output_dir=failure_root,
+        reserved_files=(failure_root / "failure_provenance.json",),
+    )
+    if phase == "nvbit":
+        trace_root.mkdir(parents=True, exist_ok=True)
+    _write_new(preflight_out, preflight_payload)
+    recorded_environment = (
+        collection_environment.as_dict()
+        if collection_environment is not None
+        else env
+    )
+    environment_doc = _environment_document(
+        preflight,
+        live,
+        recorded_environment,
+        capture_kind=phase,
+    )
+    environment_payload = (json.dumps(environment_doc, sort_keys=True, indent=2) + "\n").encode()
+    _write_new(environment_out, environment_payload)
+    pid: int | None = None
+    started: str | None = None
+    stdout = b""
+    stderr = b""
+    containment: delegated_cgroup.CgroupContainmentEvidence | None = None
+    try:
+        with immutable.open_retained_executable(binary) as retained_target:
+            if retained_target.sha256 != row["static_launch_inventory"]["binary_sha256"]:
+                raise CaptureError("capture target differs from pinned binary authority")
+            if phase == "ncu":
+                if (
+                    collection_environment is None
+                    or driver_identity is None
+                    or expected_ncu_identity is None
+                ):
+                    raise CaptureError("NCU execution authority was not initialized")
+                (
+                    returncode, pid, started, stdout, stderr, containment,
+                ) = _run_ncu_capture_command(
+                    command,
+                    expected_ncu_identity,
+                    collection_environment,
+                    driver_identity,
+                    retained_target,
+                    process_cwd,
+                    timeout_s=CAPTURE_TIMEOUT_S,
+                    failure_root=failure_root,
+                )
+            else:
+                with immutable.open_retained_regular(TRACER_SO) as retained_tracer:
+                    if retained_tracer.sha256 != phase_tool_sha256:
+                        raise CaptureError("NVBit tracer differs from pinned capture authority")
+                    runtime_environment = dict(env)
+                    runtime_environment["CUDA_INJECTION64_PATH"] = retained_tracer.proc_path
+                    runtime_environment = nvbit_runtime.tracer_runtime_env(
+                        TRACER_SO,
+                        base_env=runtime_environment,
+                        pb_lib=NVBIT_PB_LIB,
+                        retained_descriptor=retained_tracer.descriptor,
+                    )
+                    expected_runtime_environment = dict(env)
+                    expected_runtime_environment["CUDA_INJECTION64_PATH"] = (
+                        retained_tracer.proc_path
+                    )
+                    if runtime_environment != expected_runtime_environment:
+                        raise CaptureError(
+                            "NVBit runtime environment differs from closed pins"
+                        )
+                    runtime_command = [retained_target.proc_path, *command[1:]]
+                    (
+                        returncode, pid, started, stdout, stderr, containment,
+                    ) = _run_capture_command(
+                        runtime_command,
+                        runtime_environment,
+                        process_cwd,
+                        timeout_s=float(row["trace_budget"]["max_wall_time_s"]),
+                        byte_root=trace_root,
+                        byte_budget=row["trace_budget"]["max_trace_bytes"],
+                        failure_root=failure_root,
+                        inherited_descriptors=(
+                            retained_target.descriptor,
+                            retained_tracer.descriptor,
+                        ),
+                        require_cgroup_containment=True,
+                    )
+    except (
+        OSError,
+        immutable.ImmutableArtifactError,
+        nvbit_runtime.TracerRuntimeError,
+    ) as raw_error:
+        exc = CaptureError(
+            f"retained capture authority failed: {raw_error}",
+            process_id=pid,
+            started_at_utc=started,
+            process_role=(None if pid is None else f"{phase}_capture"),
+            process_command=(None if pid is None else list(command)),
+            process_environment=(
+                None if pid is None else dict(recorded_environment)
+            ),
+            process_tool_sha256=(None if pid is None else phase_tool_sha256),
+            containment=containment,
+        )
+        _write_failure_provenance(
+            failure_root,
+            phase=phase,
+            row=row,
+            command=command,
+            live=live,
+            environment_payload=environment_payload,
+            default_environment=recorded_environment,
+            capture_producer_sha256=capture_producer_sha256,
+            containment_supervisor_sha256=containment_supervisor_sha256,
+            phase_tool_sha256=phase_tool_sha256,
+            action_executor_sha256=action_executor_sha256,
+            error=exc,
+        )
+        raise exc from raw_error
+    except CaptureError as exc:
+        if exc.process_id is not None and exc.process_command is None:
+            exc.process_role = f"{phase}_capture"
+            exc.process_command = list(command)
+            exc.process_environment = dict(recorded_environment)
+            exc.process_tool_sha256 = phase_tool_sha256
+        if exc.containment is None:
+            exc.containment = containment
+        _write_failure_provenance(
+            failure_root,
+            phase=phase,
+            row=row,
+            command=command,
+            live=live,
+            environment_payload=environment_payload,
+            default_environment=recorded_environment,
+            capture_producer_sha256=capture_producer_sha256,
+            containment_supervisor_sha256=containment_supervisor_sha256,
+            phase_tool_sha256=phase_tool_sha256,
+            action_executor_sha256=action_executor_sha256,
+            error=exc,
+        )
+        raise
+    if returncode != 0 or stderr:
+        _write_new(failure_root / "capture_failure.stdout.bin", stdout)
+        _write_new(failure_root / "capture_failure.stderr.bin", stderr)
+        failure = CaptureError(
+            f"{phase} capture failed returncode={returncode} "
+            f"stderr={stderr[-400:]!r}",
+            process_id=pid,
+            started_at_utc=started,
+            process_role=f"{phase}_capture",
+            process_command=list(command),
+            process_environment=dict(recorded_environment),
+            process_tool_sha256=phase_tool_sha256,
+            containment=containment,
+        )
+        _write_failure_provenance(
+            failure_root,
+            phase=phase,
+            row=row,
+            command=command,
+            live=live,
+            environment_payload=environment_payload,
+            default_environment=recorded_environment,
+            capture_producer_sha256=capture_producer_sha256,
+            containment_supervisor_sha256=containment_supervisor_sha256,
+            phase_tool_sha256=phase_tool_sha256,
+            action_executor_sha256=action_executor_sha256,
+            error=failure,
+        )
+        raise failure
+    if pid is None or started is None or containment is None:
+        raise CaptureError(
+            "successful capture has incomplete process or containment provenance"
+        )
+    try:
+        return _finalize_capture(
+            root=root,
+            phase=phase,
+            row=row,
+            live=live,
+            pid=pid,
+            started=started,
+            containment=containment,
+            command=command,
+            capture_source=capture_source,
+            capture_producer_sha256=capture_producer_sha256,
+            containment_supervisor_sha256=containment_supervisor_sha256,
+            phase_tool_sha256=phase_tool_sha256,
+            action_executor_sha256=action_executor_sha256,
+            preflight_out=preflight_out,
+            preflight_payload=preflight_payload,
+            environment_out=environment_out,
+            environment_payload=environment_payload,
+            receipt_path=receipt_path,
+        )
+    except Exception as raw_error:
+        exc = (
+            raw_error
+            if isinstance(raw_error, CaptureError)
+            else CaptureError(
+                f"post-capture validation failed: {raw_error}",
+            )
+        )
+        _write_new(failure_root / "post_validation.stdout.bin", stdout)
+        _write_new(failure_root / "post_validation.stderr.bin", stderr)
+        exc.process_id = pid
+        exc.started_at_utc = started
+        exc.process_role = f"{phase}_postprocess_validation"
+        exc.process_command = list(command)
+        exc.process_environment = dict(recorded_environment)
+        exc.process_tool_sha256 = phase_tool_sha256
+        exc.containment = containment
+        _write_failure_provenance(
+            failure_root,
+            phase=phase,
+            row=row,
+            command=command,
+            live=live,
+            environment_payload=environment_payload,
+            default_environment=recorded_environment,
+            capture_producer_sha256=capture_producer_sha256,
+            containment_supervisor_sha256=containment_supervisor_sha256,
+            phase_tool_sha256=phase_tool_sha256,
+            action_executor_sha256=action_executor_sha256,
+            error=exc,
+        )
+        if exc is raw_error:
+            raise
+        raise exc from raw_error
+
 
 
 def main(argv: list[str] | None = None) -> int:

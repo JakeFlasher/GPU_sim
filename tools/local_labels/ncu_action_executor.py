@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
 """Descriptor-bound execution of independently authorized NCU actions.
 
-This is not a process sandbox. Authorized actions must not daemonize or leave the
-new process group; bounded cleanup terminates and reaps that process group.
+Production collection may require a delegated cgroup-v2 leaf so descendants remain
+bounded even after changing their process group or session.
 """
 
 from __future__ import annotations
 
+import datetime as dt
 import math
 import os
 import re
@@ -16,10 +17,11 @@ import stat
 import subprocess
 import time
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import NoReturn
 
+from tools.local_labels import delegated_cgroup
 from tools.local_labels import immutable_artifact as immutable
 
 
@@ -71,6 +73,11 @@ class NcuActionResult:
     returncode: int
     stdout: bytes
     stderr: bytes
+    process_id: int | None = field(default=None, compare=False)
+    started_at_utc: str | None = field(default=None, compare=False)
+    containment: delegated_cgroup.CgroupContainmentEvidence | None = field(
+        default=None, compare=False,
+    )
 
 
 class _AuthorizedNcuProcPath:
@@ -78,6 +85,32 @@ class _AuthorizedNcuProcPath:
 
 
 AUTHORIZED_NCU_PROC_PATH = _AuthorizedNcuProcPath()
+
+
+_AUTHORIZED_EXECUTABLE_PROC_PATH_SEAL = object()
+
+
+class _AuthorizedExecutableProcPath:
+    """One authenticated runtime descriptor and canonical durable path."""
+
+    __slots__ = ("canonical_path", "descriptor", "descriptor_identity", "_seal")
+
+    def __init__(
+        self,
+        descriptor: int,
+        canonical_path: str,
+        descriptor_identity: tuple[int, int, int],
+        seal: object,
+    ) -> None:
+        if seal is not _AUTHORIZED_EXECUTABLE_PROC_PATH_SEAL:
+            raise TypeError(
+                "authorized executable paths require a retained capability"
+            )
+        self.descriptor = descriptor
+        self.canonical_path = canonical_path
+        self.descriptor_identity = descriptor_identity
+        self._seal = seal
+
 
 _REQUIRED_COLLECTION_ENVIRONMENT = {
     "LANG": "C",
@@ -95,6 +128,7 @@ _OPTIONAL_COLLECTION_ENVIRONMENT_NAMES = frozenset({
     "CXX",
     "FLASHINFER_TRACE_DIR",
     "HOME",
+    "LD_SOURCE_COMMIT_OVERRIDE",
     "NVCC_CCBIN",
     "PYTORCH_ALLOC_CONF",
     "SOL_EXECBENCH_CAPTURE_REQUEST",
@@ -151,6 +185,16 @@ class NcuCollectionEnvironment:
                     NCU_ACTION_REQUEST_INVALID,
                     f"collection environment {name} must equal {required!r}",
                 )
+        source_commit = values.get("LD_SOURCE_COMMIT_OVERRIDE")
+        if source_commit is not None and (
+            type(source_commit) is not str
+            or re.fullmatch(r"[0-9a-f]{40}", source_commit) is None
+        ):
+            _fail(
+                NCU_ACTION_REQUEST_INVALID,
+                "collection environment LD_SOURCE_COMMIT_OVERRIDE must be "
+                "lowercase 40-hex",
+            )
         normalized: list[tuple[str, str]] = []
         for name in sorted(names):
             value = values[name]
@@ -219,7 +263,59 @@ class NcuActionExecutorError(RuntimeError):
         self.detail = detail
         self.stdout = b""
         self.stderr = b""
+        self.process_id: int | None = None
+        self.started_at_utc: str | None = None
+        self.process_role: str | None = None
+        self.process_command: tuple[str, ...] | None = None
+        self.process_environment: dict[str, str] | None = None
+        self.process_tool_sha256: str | None = None
+        self.containment: delegated_cgroup.CgroupContainmentEvidence | None = None
         super().__init__(f"{code}: {detail}")
+
+
+def _bind_process_failure(
+    error: BaseException,
+    *,
+    role: str,
+    command: tuple[str, ...],
+    environment: dict[str, str],
+    tool_sha256: str,
+) -> None:
+    if isinstance(error, NcuActionExecutorError):
+        error.process_role = role
+        error.process_command = command
+        error.process_environment = dict(environment)
+        error.process_tool_sha256 = tool_sha256
+
+
+def _copy_process_failure(
+    target: NcuActionExecutorError,
+    source: NcuActionExecutorError,
+) -> None:
+    target.stdout = source.stdout
+    target.stderr = source.stderr
+    target.process_id = source.process_id
+    target.started_at_utc = source.started_at_utc
+    target.process_role = source.process_role
+    target.process_command = source.process_command
+    target.process_environment = (
+        None
+        if source.process_environment is None
+        else dict(source.process_environment)
+    )
+    target.process_tool_sha256 = source.process_tool_sha256
+    target.containment = source.containment
+
+
+def _copy_process_result(
+    target: NcuActionExecutorError,
+    source: NcuActionResult,
+) -> None:
+    target.stdout = source.stdout
+    target.stderr = source.stderr
+    target.process_id = source.process_id
+    target.started_at_utc = source.started_at_utc
+    target.containment = source.containment
 
 
 def _fail(code: str, detail: str) -> NoReturn:
@@ -482,6 +578,35 @@ def _validate_supervised_command(
             placeholder_count += 1
             rendered.append("/proc/self/fd/3")
             template.append(item)
+        elif type(item) is _AuthorizedExecutableProcPath:
+            if index == 0:
+                _fail(
+                    NCU_ACTION_REQUEST_INVALID,
+                    "authorized auxiliary path cannot be the supervised executable",
+                )
+            canonical_path = item.canonical_path
+            if (
+                type(canonical_path) is not str
+                or not canonical_path
+                or "\x00" in canonical_path
+                or canonical_path.splitlines() != [canonical_path]
+                or _strict_utf8_size(
+                    canonical_path,
+                    code=NCU_ACTION_REQUEST_INVALID,
+                    label="authorized auxiliary canonical path",
+                ) > _MAX_PATH_BYTES
+                or not Path(canonical_path).is_absolute()
+                or canonical_path.startswith("//")
+                or os.path.normpath(canonical_path) != canonical_path
+                or "/proc/self/fd/" in canonical_path
+            ):
+                _fail(
+                    NCU_ACTION_REQUEST_INVALID,
+                    "authorized auxiliary path lacks a canonical durable path",
+                )
+            _validate_authorized_executable_proc_path(item)
+            rendered.append(proc_fd_path(item.descriptor))
+            template.append(item)
         else:
             rendered.append(item)
             template.append(item)
@@ -502,7 +627,12 @@ def _validate_supervised_command(
             "supervised executable is not a canonical absolute path",
         )
     return tuple(
-        original if original is AUTHORIZED_NCU_PROC_PATH else value
+        original
+        if (
+            original is AUTHORIZED_NCU_PROC_PATH
+            or type(original) is _AuthorizedExecutableProcPath
+        )
+        else value
         for original, value in zip(template, validated, strict=True)
     )
 
@@ -564,7 +694,13 @@ def _render_supervised_command(
 ) -> tuple[str, ...]:
     retained_path = proc_fd_path(retained.descriptor)
     return tuple(
-        retained_path if item is AUTHORIZED_NCU_PROC_PATH else item
+        retained_path
+        if item is AUTHORIZED_NCU_PROC_PATH
+        else (
+            proc_fd_path(item.descriptor)
+            if type(item) is _AuthorizedExecutableProcPath
+            else item
+        )
         for item in template
     )
 
@@ -589,6 +725,39 @@ def _descriptor_identity(descriptor: int) -> tuple[int, int, int]:
     return metadata.st_dev, metadata.st_ino, stat.S_IFMT(metadata.st_mode)
 
 
+def _validate_authorized_executable_proc_path(
+    value: _AuthorizedExecutableProcPath,
+) -> None:
+    if value._seal is not _AUTHORIZED_EXECUTABLE_PROC_PATH_SEAL:
+        _fail(
+            NCU_ACTION_REQUEST_INVALID,
+            "authorized auxiliary path lacks retained-capability authority",
+        )
+    descriptor_identity = _descriptor_identity(value.descriptor)
+    if descriptor_identity != value.descriptor_identity:
+        _fail(
+            NCU_ACTION_REQUEST_INVALID,
+            "authorized auxiliary descriptor identity changed",
+        )
+    try:
+        path_metadata = os.stat(value.canonical_path, follow_symlinks=False)
+    except (OSError, ValueError) as exc:
+        raise NcuActionExecutorError(
+            NCU_ACTION_REQUEST_INVALID,
+            f"authorized auxiliary canonical path is unavailable: {exc}",
+        ) from exc
+    path_identity = (
+        path_metadata.st_dev,
+        path_metadata.st_ino,
+        stat.S_IFMT(path_metadata.st_mode),
+    )
+    if path_identity != descriptor_identity or not stat.S_ISREG(path_metadata.st_mode):
+        _fail(
+            NCU_ACTION_REQUEST_INVALID,
+            "authorized auxiliary canonical path differs from its descriptor",
+        )
+
+
 def proc_fd_path(descriptor: int) -> str:
     """Return the canonical child-visible path for one open borrowed descriptor."""
 
@@ -602,6 +771,43 @@ def proc_fd_path(descriptor: int) -> str:
         )
     _descriptor_identity(descriptor)
     return f"/proc/self/fd/{descriptor}"
+
+
+def authorized_executable_proc_path(
+    retained: immutable.RetainedExecutable,
+) -> _AuthorizedExecutableProcPath:
+    """Bind a caller-retained executable to runtime and durable argv forms."""
+    if type(retained) is not immutable.RetainedExecutable:
+        _fail(
+            NCU_ACTION_REQUEST_INVALID,
+            "authorized auxiliary executable is not an exact retained capability",
+        )
+    try:
+        retained.verify_unchanged()
+        descriptor = retained.descriptor
+    except immutable.ImmutableArtifactError as exc:
+        raise NcuActionExecutorError(
+            NCU_ACTION_REQUEST_INVALID,
+            f"authorized auxiliary executable is unavailable: {exc}",
+        ) from exc
+    canonical_path = str(retained.path)
+    if (
+        not Path(canonical_path).is_absolute()
+        or canonical_path.startswith("//")
+        or os.path.normpath(canonical_path) != canonical_path
+        or "/proc/self/fd/" in canonical_path
+    ):
+        _fail(
+            NCU_ACTION_REQUEST_INVALID,
+            "authorized auxiliary executable path is not canonical",
+        )
+    descriptor_identity = _descriptor_identity(descriptor)
+    return _AuthorizedExecutableProcPath(
+        descriptor,
+        canonical_path,
+        descriptor_identity,
+        _AUTHORIZED_EXECUTABLE_PROC_PATH_SEAL,
+    )
 
 
 def _validate_borrowed_descriptors(
@@ -721,29 +927,70 @@ def _signal_group(process: subprocess.Popen[bytes], signal_number: int) -> None:
         os.killpg(process.pid, signal_number)
     except ProcessLookupError:
         return
-    except OSError:
-        try:
-            process.send_signal(signal_number)
-        except ProcessLookupError:
-            return
 
 
-def _stop_and_reap(process: subprocess.Popen[bytes]) -> None:
-    _signal_group(process, signal.SIGTERM)
+def _process_exited_unreaped(process: subprocess.Popen[bytes]) -> bool:
     try:
-        process.wait(timeout=_TERMINATION_GRACE_SECONDS)
-    except subprocess.TimeoutExpired:
-        _signal_group(process, signal.SIGKILL)
-        try:
-            process.wait(timeout=_TERMINATION_GRACE_SECONDS)
-        except subprocess.TimeoutExpired as exc:
+        status = os.waitid(
+            os.P_PID,
+            process.pid,
+            os.WEXITED | os.WNOHANG | os.WNOWAIT,
+        )
+    except ChildProcessError as exc:
+        raise NcuActionExecutorError(
+            NCU_ACTION_LAUNCH_FAILED,
+            "retained NCU process authority was released before cleanup",
+        ) from exc
+    except OSError as exc:
+        raise NcuActionExecutorError(
+            NCU_ACTION_LAUNCH_FAILED,
+            f"cannot observe retained NCU process without reaping it: {exc}",
+        ) from exc
+    return status is not None
+
+
+def _wait_for_exit_unreaped(
+    process: subprocess.Popen[bytes], timeout_seconds: float,
+) -> bool:
+    deadline = time.monotonic() + timeout_seconds
+    while True:
+        if _process_exited_unreaped(process):
+            return True
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return False
+        time.sleep(min(0.01, remaining))
+
+
+def _stop_and_reap(
+    process: subprocess.Popen[bytes],
+    containment: delegated_cgroup.DelegatedCgroupV2 | None = None,
+) -> None:
+    _signal_group(process, signal.SIGTERM)
+    if not _wait_for_exit_unreaped(process, _TERMINATION_GRACE_SECONDS):
+        if containment is None:
+            _signal_group(process, signal.SIGKILL)
+        else:
+            containment.kill_all()
+        if not _wait_for_exit_unreaped(process, _TERMINATION_GRACE_SECONDS):
             raise NcuActionExecutorError(
                 NCU_ACTION_LAUNCH_FAILED,
-                "cannot reap retained NCU process after SIGKILL",
-            ) from exc
-    finally:
-        # The direct process can exit before a stubborn descendant in its group.
-        _signal_group(process, signal.SIGKILL)
+                "retained NCU process did not exit after forced termination",
+            )
+    else:
+        # Keep the exited leader unreaped while removing descendants that retain
+        # inherited capabilities in its process group or delegated cgroup.
+        if containment is None:
+            _signal_group(process, signal.SIGKILL)
+        else:
+            containment.kill_all()
+    try:
+        process.wait(timeout=_TERMINATION_GRACE_SECONDS)
+    except subprocess.TimeoutExpired as exc:
+        raise NcuActionExecutorError(
+            NCU_ACTION_LAUNCH_FAILED,
+            "cannot reap exited retained NCU process",
+        ) from exc
 
 
 def _close_monitor_resources(
@@ -768,9 +1015,11 @@ def _close_monitor_resources(
 def _collect_bounded(
     process: subprocess.Popen[bytes],
     *,
+    started_at_utc: str,
     timeout_seconds: float,
     max_output_bytes: int,
     timeout_code: str,
+    containment: delegated_cgroup.DelegatedCgroupV2 | None = None,
 ) -> NcuActionResult:
     selector: selectors.BaseSelector | None = None
     buffers = {"stdout": bytearray(), "stderr": bytearray()}
@@ -791,7 +1040,16 @@ def _collect_bounded(
                 NCU_ACTION_LAUNCH_FAILED,
                 f"cannot initialize retained NCU output monitor: {exc}",
             ) from exc
+        child_exit_observed = False
         while selector.get_map():
+            if not child_exit_observed and _process_exited_unreaped(process):
+                # Preserve the exited leader as PID/PGID authority until every
+                # same-group descendant has been synchronously terminated.
+                if containment is None:
+                    _signal_group(process, signal.SIGKILL)
+                else:
+                    containment.kill_all()
+                child_exit_observed = True
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise NcuActionExecutorError(
@@ -830,34 +1088,52 @@ def _collect_bounded(
                 timeout_code,
                 f"retained NCU action exceeded {timeout_seconds} seconds",
             )
-        try:
-            returncode = process.wait(timeout=remaining)
-        except subprocess.TimeoutExpired as exc:
-            raise NcuActionExecutorError(
-                timeout_code,
-                f"retained NCU action exceeded {timeout_seconds} seconds",
-            ) from exc
+        if not child_exit_observed:
+            if not _wait_for_exit_unreaped(process, remaining):
+                raise NcuActionExecutorError(
+                    timeout_code,
+                    f"retained NCU action exceeded {timeout_seconds} seconds",
+                )
+            if containment is None:
+                _signal_group(process, signal.SIGKILL)
+            else:
+                containment.kill_all()
+        returncode = process.wait()
         return NcuActionResult(
-            returncode, bytes(buffers["stdout"]), bytes(buffers["stderr"]),
+            returncode,
+            bytes(buffers["stdout"]),
+            bytes(buffers["stderr"]),
+            process_id=process.pid,
+            started_at_utc=started_at_utc,
         )
     except BaseException as active_error:
         primary_error = active_error
         if isinstance(active_error, NcuActionExecutorError):
             active_error.stdout = bytes(buffers["stdout"])
             active_error.stderr = bytes(buffers["stderr"])
+            active_error.process_id = process.pid
+            active_error.started_at_utc = started_at_utc
         try:
-            _stop_and_reap(process)
+            _stop_and_reap(process, containment)
         except BaseException as cleanup_error:
+            cleanup_failure = NcuActionExecutorError(
+                NCU_ACTION_LAUNCH_FAILED,
+                f"retained NCU process cleanup failed: {cleanup_error}",
+            )
+            cleanup_failure.stdout = bytes(buffers["stdout"])
+            cleanup_failure.stderr = bytes(buffers["stderr"])
+            cleanup_failure.process_id = process.pid
+            cleanup_failure.started_at_utc = started_at_utc
             try:
-                active_error.add_note(f"process cleanup failed: {cleanup_error}")
+                cleanup_failure.add_note(
+                    f"active retained NCU process error: {active_error}"
+                )
             except (AttributeError, TypeError):
                 pass
+            primary_error = cleanup_failure
+            raise cleanup_failure from cleanup_error
         raise
     finally:
-        # A successful direct child may still leave a descendant holding inherited
-        # capabilities after closing its pipes. The dedicated process group never
-        # survives this synchronous boundary.
-        _signal_group(process, signal.SIGKILL)
         close_errors = _close_monitor_resources(selector, process)
         if close_errors:
             detail = "; ".join(str(error) for error in close_errors)
@@ -869,10 +1145,13 @@ def _collect_bounded(
                 except (AttributeError, TypeError):
                     pass
             else:
-                raise NcuActionExecutorError(
+                closure_error = NcuActionExecutorError(
                     NCU_ACTION_LAUNCH_FAILED,
                     f"cannot close retained NCU process resources: {detail}",
-                ) from close_errors[0]
+                )
+                closure_error.process_id = process.pid
+                closure_error.started_at_utc = started_at_utc
+                raise closure_error from close_errors[0]
 
 
 def _run_command_bounded(
@@ -885,38 +1164,112 @@ def _run_command_bounded(
     max_output_bytes: int,
     timeout_code: str,
     launch_code: str,
+    require_cgroup_containment: bool = False,
 ) -> NcuActionResult:
+    started_at_utc = (
+        dt.datetime.now(dt.timezone.utc).isoformat().replace("+00:00", "Z")
+    )
+    containment: delegated_cgroup.DelegatedCgroupV2 | None = None
+    if require_cgroup_containment:
+        try:
+            containment = delegated_cgroup.DelegatedCgroupV2.create()
+        except delegated_cgroup.CgroupContainmentError as exc:
+            raise NcuActionExecutorError(
+                launch_code,
+                f"cannot establish delegated cgroup containment: {exc}",
+            ) from exc
+    popen_arguments = {
+        "stdin": subprocess.DEVNULL,
+        "stdout": subprocess.PIPE,
+        "stderr": subprocess.PIPE,
+        "env": environment,
+        "cwd": working_directory,
+        "pass_fds": inherited_descriptors,
+        "start_new_session": True,
+    }
     try:
-        process = subprocess.Popen(
-            command,
-            stdin=subprocess.DEVNULL,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            env=environment,
-            cwd=working_directory,
-            pass_fds=inherited_descriptors,
-            start_new_session=True,
+        process = (
+            subprocess.Popen(command, **popen_arguments)
+            if containment is None
+            else containment.popen(command, **popen_arguments)
         )
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, delegated_cgroup.CgroupContainmentError) as exc:
+        if containment is not None:
+            try:
+                containment.close_after_error()
+            except BaseException as cleanup_error:
+                try:
+                    exc.add_note(
+                        f"delegated cgroup launch cleanup failed: {cleanup_error}"
+                    )
+                except (AttributeError, TypeError):
+                    pass
         raise NcuActionExecutorError(
             launch_code, f"cannot launch supervised process: {exc}"
         ) from exc
     try:
-        return _collect_bounded(
+        result = _collect_bounded(
             process,
+            started_at_utc=started_at_utc,
             timeout_seconds=timeout_seconds,
             max_output_bytes=max_output_bytes,
             timeout_code=timeout_code,
+            containment=containment,
         )
-    except NcuActionExecutorError as exc:
-        if exc.code in {NCU_ACTION_TIMEOUT, NCU_ACTION_OUTPUT_LIMIT}:
+    except BaseException as active_error:
+        if isinstance(active_error, NcuActionExecutorError):
+            process_error = active_error
+        else:
+            process_error = NcuActionExecutorError(
+                launch_code,
+                f"supervised process execution failed: {active_error}",
+            )
+            process_error.process_id = process.pid
+            process_error.started_at_utc = started_at_utc
+        if containment is not None:
+            try:
+                process_error.containment = containment.finish()
+            except BaseException as cleanup_error:
+                wrapped = NcuActionExecutorError(
+                    launch_code,
+                    f"delegated cgroup cleanup failed: {cleanup_error}",
+                )
+                _copy_process_failure(wrapped, process_error)
+                try:
+                    wrapped.add_note(f"active process error: {active_error}")
+                except (AttributeError, TypeError):
+                    pass
+                raise wrapped from cleanup_error
+        if not isinstance(active_error, Exception):
             raise
-        if exc.code == timeout_code:
+        if not isinstance(active_error, NcuActionExecutorError):
+            raise process_error from active_error
+        if active_error.code in {NCU_ACTION_TIMEOUT, NCU_ACTION_OUTPUT_LIMIT}:
             raise
-        wrapped = NcuActionExecutorError(launch_code, exc.detail)
-        wrapped.stdout = exc.stdout
-        wrapped.stderr = exc.stderr
-        raise wrapped from exc
+        if active_error.code == timeout_code:
+            raise
+        wrapped = NcuActionExecutorError(launch_code, active_error.detail)
+        _copy_process_failure(wrapped, active_error)
+        raise wrapped from active_error
+    if containment is not None:
+        try:
+            containment_evidence = containment.finish()
+        except BaseException as cleanup_error:
+            error = NcuActionExecutorError(
+                launch_code,
+                f"delegated cgroup cleanup failed: {cleanup_error}",
+            )
+            _copy_process_result(error, result)
+            raise error from cleanup_error
+        result = NcuActionResult(
+            result.returncode,
+            result.stdout,
+            result.stderr,
+            process_id=result.process_id,
+            started_at_utc=result.started_at_utc,
+            containment=containment_evidence,
+        )
+    return result
 
 
 def execute_bounded_command(
@@ -929,6 +1282,7 @@ def execute_bounded_command(
     max_output_bytes: int,
     timeout_code: str,
     launch_code: str,
+    require_cgroup_containment: bool = False,
 ) -> NcuActionResult:
     """Run a retained-capability command with bounded process cleanup."""
     return _run_command_bounded(
@@ -940,6 +1294,7 @@ def execute_bounded_command(
         max_output_bytes=max_output_bytes,
         timeout_code=timeout_code,
         launch_code=launch_code,
+        require_cgroup_containment=require_cgroup_containment,
     )
 
 
@@ -952,6 +1307,7 @@ def _run_bounded(
     max_output_bytes: int,
     timeout_code: str,
     launch_code: str,
+    require_cgroup_containment: bool = False,
 ) -> NcuActionResult:
     command = (f"/proc/self/fd/{descriptor}", *arguments)
     return _run_command_bounded(
@@ -963,6 +1319,7 @@ def _run_bounded(
         max_output_bytes=max_output_bytes,
         timeout_code=timeout_code,
         launch_code=launch_code,
+        require_cgroup_containment=require_cgroup_containment,
     )
 
 
@@ -1081,8 +1438,7 @@ def _reverify_with_supervised_executable(
                 pass
         if pending is not None:
             if isinstance(pending, NcuActionExecutorError):
-                primary.stdout = pending.stdout
-                primary.stderr = pending.stderr
+                _copy_process_failure(primary, pending)
             raise primary from pending
         raise primary from cause
     if pending is not None:
@@ -1164,8 +1520,7 @@ def _reverify(
                 pass
         if pending is not None:
             if isinstance(pending, NcuActionExecutorError):
-                primary.stdout = pending.stdout
-                primary.stderr = pending.stderr
+                _copy_process_failure(primary, pending)
             raise primary from pending
         raise primary from cause
     if pending is not None:
@@ -1183,6 +1538,7 @@ def _run_and_reverify(
     max_output_bytes: int,
     timeout_code: str,
     launch_code: str,
+    require_cgroup_containment: bool = False,
 ) -> NcuActionResult:
     try:
         result = _run_bounded(
@@ -1193,6 +1549,7 @@ def _run_and_reverify(
             max_output_bytes=max_output_bytes,
             timeout_code=timeout_code,
             launch_code=launch_code,
+            require_cgroup_containment=require_cgroup_containment,
         )
     except BaseException as exc:
         _reverify_authorities(
@@ -1202,9 +1559,13 @@ def _run_and_reverify(
             pending=exc,
         )
         raise AssertionError("unreachable")
-    _reverify_authorities(
-        retained, borrowed, retained_supervised_executable,
-    )
+    try:
+        _reverify_authorities(
+            retained, borrowed, retained_supervised_executable,
+        )
+    except NcuActionExecutorError as exc:
+        _copy_process_result(exc, result)
+        raise
     return result
 
 
@@ -1214,6 +1575,7 @@ def _authorize_opened(
     borrowed: _BorrowedActionDescriptors,
     *,
     retained_supervised_executable: immutable.RetainedExecutable | None = None,
+    require_cgroup_containment: bool = False,
 ) -> None:
     if str(retained.path) != expected.resolved_path:
         _fail(
@@ -1243,25 +1605,48 @@ def _authorize_opened(
     _reverify_authorities(
         retained, borrowed, retained_supervised_executable,
     )
-    probe = _run_and_reverify(
-        retained,
-        borrowed,
-        ("--version",),
-        retained_supervised_executable=retained_supervised_executable,
-        timeout_seconds=_VERSION_TIMEOUT_SECONDS,
-        max_output_bytes=_MAX_VERSION_OUTPUT_BYTES,
-        timeout_code=NCU_VERSION_PROBE_FAILED,
-        launch_code=NCU_VERSION_PROBE_FAILED,
-    )
+    try:
+        probe = _run_and_reverify(
+            retained,
+            borrowed,
+            ("--version",),
+            retained_supervised_executable=retained_supervised_executable,
+            timeout_seconds=_VERSION_TIMEOUT_SECONDS,
+            max_output_bytes=_MAX_VERSION_OUTPUT_BYTES,
+            timeout_code=NCU_VERSION_PROBE_FAILED,
+            launch_code=NCU_VERSION_PROBE_FAILED,
+            require_cgroup_containment=require_cgroup_containment,
+        )
+    except BaseException as exc:
+        _bind_process_failure(
+            exc,
+            role="ncu_version_probe",
+            command=(expected.resolved_path, "--version"),
+            environment=ncu_action_environment(),
+            tool_sha256=expected.executable_sha256,
+        )
+        raise
     if probe.returncode != 0:
+        error = NcuActionExecutorError(
+            NCU_VERSION_PROBE_FAILED,
+            f"retained NCU --version exited {probe.returncode}",
+        )
+        error.stdout = probe.stdout
+        error.stderr = probe.stderr
+        error.process_id = probe.process_id
+        error.started_at_utc = probe.started_at_utc
+        _bind_process_failure(
+            error,
+            role="ncu_version_probe",
+            command=(expected.resolved_path, "--version"),
+            environment=ncu_action_environment(),
+            tool_sha256=expected.executable_sha256,
+        )
         _reverify_authorities(
             retained,
             borrowed,
             retained_supervised_executable,
-            pending=NcuActionExecutorError(
-                NCU_VERSION_PROBE_FAILED,
-                f"retained NCU --version exited {probe.returncode}",
-            ),
+            pending=error,
         )
     decoded = probe.stdout.decode("utf-8", errors="surrogateescape")
     version_lines = [
@@ -1270,18 +1655,41 @@ def _authorize_opened(
         if re.match(r"^\s*Version\s+", line)
     ]
     if len(version_lines) != 1 or version_lines[0] != expected.version_line:
+        error = NcuActionExecutorError(
+            NCU_VERSION_LINE_MISMATCH,
+            "retained NCU version line differs from independent authority",
+        )
+        error.stdout = probe.stdout
+        error.stderr = probe.stderr
+        error.process_id = probe.process_id
+        error.started_at_utc = probe.started_at_utc
+        _bind_process_failure(
+            error,
+            role="ncu_version_probe",
+            command=(expected.resolved_path, "--version"),
+            environment=ncu_action_environment(),
+            tool_sha256=expected.executable_sha256,
+        )
         _reverify_authorities(
             retained,
             borrowed,
             retained_supervised_executable,
-            pending=NcuActionExecutorError(
-                NCU_VERSION_LINE_MISMATCH,
-                "retained NCU version line differs from independent authority",
-            ),
+            pending=error,
         )
-    _reverify_authorities(
-        retained, borrowed, retained_supervised_executable,
-    )
+    try:
+        _reverify_authorities(
+            retained, borrowed, retained_supervised_executable,
+        )
+    except NcuActionExecutorError as exc:
+        _copy_process_result(exc, probe)
+        _bind_process_failure(
+            exc,
+            role="ncu_version_probe",
+            command=(expected.resolved_path, "--version"),
+            environment=ncu_action_environment(),
+            tool_sha256=expected.executable_sha256,
+        )
+        raise
 
 
 def _execute_opened(
@@ -1290,8 +1698,15 @@ def _execute_opened(
     action: tuple[str, ...],
     timeout_seconds: float,
     borrowed: _BorrowedActionDescriptors,
+    *,
+    require_cgroup_containment: bool,
 ) -> NcuActionResult:
-    _authorize_opened(retained, expected, borrowed)
+    _authorize_opened(
+        retained,
+        expected,
+        borrowed,
+        require_cgroup_containment=require_cgroup_containment,
+    )
     return _run_and_reverify(
         retained,
         borrowed,
@@ -1301,7 +1716,65 @@ def _execute_opened(
         max_output_bytes=_MAX_ACTION_OUTPUT_BYTES,
         timeout_code=NCU_ACTION_TIMEOUT,
         launch_code=NCU_ACTION_LAUNCH_FAILED,
+        require_cgroup_containment=require_cgroup_containment,
     )
+
+
+def execute_retained_ncu_version_probe(
+    retained: immutable.RetainedExecutable,
+    *,
+    require_cgroup_containment: bool = False,
+) -> NcuActionResult:
+    """Run ``--version`` on one caller-owned retained NCU candidate."""
+
+    if type(retained) is not immutable.RetainedExecutable:
+        _fail(
+            NCU_ACTION_REQUEST_INVALID,
+            "retained NCU version probe requires an exact executable capability",
+        )
+    if type(require_cgroup_containment) is not bool:
+        _fail(
+            NCU_ACTION_REQUEST_INVALID,
+            "cgroup containment requirement is not boolean",
+        )
+    try:
+        retained.verify_unchanged()
+        writable = os.access(
+            f"/proc/self/fd/{retained.descriptor}",
+            os.W_OK,
+            effective_ids=True,
+        )
+    except (OSError, TypeError, immutable.ImmutableArtifactError) as exc:
+        raise _identity_error(
+            "cannot validate retained NCU version candidate", exc,
+        ) from exc
+    if writable:
+        _fail(
+            NCU_EXECUTABLE_IDENTITY_INVALID,
+            "retained NCU version candidate is writable by the probe process",
+        )
+    borrowed = _BorrowedActionDescriptors(None, (), (), ())
+    try:
+        result = _run_and_reverify(
+            retained,
+            borrowed,
+            ("--version",),
+            timeout_seconds=_VERSION_TIMEOUT_SECONDS,
+            max_output_bytes=_MAX_VERSION_OUTPUT_BYTES,
+            timeout_code=NCU_VERSION_PROBE_FAILED,
+            launch_code=NCU_VERSION_PROBE_FAILED,
+            require_cgroup_containment=require_cgroup_containment,
+        )
+    except BaseException as exc:
+        _bind_process_failure(
+            exc,
+            role="ncu_identity_version_probe",
+            command=(str(retained.path), "--version"),
+            environment=ncu_action_environment(),
+            tool_sha256=retained.sha256,
+        )
+        raise
+    return result
 
 
 def execute_ncu_action(
@@ -1311,8 +1784,14 @@ def execute_ncu_action(
     timeout_seconds: float,
     retained_report: immutable.RetainedRegular | None = None,
     auxiliary_descriptors: Sequence[int] = (),
+    require_cgroup_containment: bool = False,
 ) -> NcuActionResult:
     """Run one bounded NCU action through independently retained capabilities."""
+    if type(require_cgroup_containment) is not bool:
+        _fail(
+            NCU_ACTION_REQUEST_INVALID,
+            "cgroup containment requirement is not boolean",
+        )
     path = _validate_expected(expected)
     action = _validate_action(arguments, timeout_seconds)
     borrowed = _validate_borrowed_descriptors(
@@ -1325,64 +1804,13 @@ def execute_ncu_action(
 
     try:
         result = _execute_opened(
-            retained, expected, action, timeout_seconds, borrowed,
+            retained,
+            expected,
+            action,
+            timeout_seconds,
+            borrowed,
+            require_cgroup_containment=require_cgroup_containment,
         )
-    except BaseException as active_error:
-        try:
-            retained.close()
-        except BaseException as close_error:
-            try:
-                active_error.add_note(
-                    f"retained executable close failed: {close_error}"
-                )
-            except (AttributeError, TypeError):
-                pass
-        raise
-    try:
-        retained.close()
-    except BaseException as exc:
-        raise _identity_error("cannot close retained executable", exc) from exc
-    return result
-
-
-def execute_ncu_supervised_child(
-    expected: ExpectedNcuIdentity,
-    command: Sequence[object],
-    *,
-    timeout_seconds: float,
-    environment: NcuCollectionEnvironment,
-    working_directory: Path = Path("/"),
-) -> NcuActionResult:
-    """Run one bounded child with exactly one inherited authorized NCU path."""
-
-    path = _validate_expected(expected)
-    template = _validate_supervised_command(command, timeout_seconds)
-    working_directory_text = _validate_supervised_context(
-        environment, working_directory,
-    )
-    borrowed = _BorrowedActionDescriptors(None, (), (), ())
-    try:
-        retained = immutable.open_retained_executable(path)
-    except (OSError, immutable.ImmutableArtifactError) as exc:
-        raise _identity_error("cannot retain expected executable", exc) from exc
-    try:
-        _authorize_opened(retained, expected, borrowed)
-        rendered = _render_supervised_command(template, retained)
-        try:
-            result = _run_command_bounded(
-                rendered,
-                environment=environment.as_dict(),
-                working_directory=working_directory_text,
-                inherited_descriptors=(retained.descriptor,),
-                timeout_seconds=timeout_seconds,
-                max_output_bytes=_MAX_ACTION_OUTPUT_BYTES,
-                timeout_code=NCU_ACTION_TIMEOUT,
-                launch_code=NCU_ACTION_LAUNCH_FAILED,
-            )
-        except BaseException as action_error:
-            _reverify(retained, borrowed, pending=action_error)
-            raise AssertionError("unreachable")
-        _reverify(retained, borrowed)
     except BaseException as active_error:
         try:
             retained.close()
@@ -1409,9 +1837,16 @@ def execute_ncu_supervised_executable(
     timeout_seconds: float,
     environment: NcuCollectionEnvironment,
     working_directory: Path = Path("/"),
+    auxiliary_descriptors: Sequence[int] = (),
+    require_cgroup_containment: bool = False,
 ) -> NcuActionResult:
     """Run a descriptor-bound child with one descriptor-bound NCU authority."""
 
+    if type(require_cgroup_containment) is not bool:
+        _fail(
+            NCU_ACTION_REQUEST_INVALID,
+            "cgroup containment requirement is not boolean",
+        )
     ncu_path = _validate_expected(expected)
     executable_path = _validate_expected_executable(expected_executable)
     if ncu_path == executable_path:
@@ -1429,7 +1864,21 @@ def execute_ncu_supervised_executable(
         environment, working_directory,
     )
 
-    borrowed = _BorrowedActionDescriptors(None, (), (), ())
+    borrowed_command = tuple(
+        "authorized-ncu-descriptor"
+        if item is AUTHORIZED_NCU_PROC_PATH
+        else (
+            proc_fd_path(item.descriptor)
+            if type(item) is _AuthorizedExecutableProcPath
+            else str(item)
+        )
+        for item in template
+    )
+    borrowed = _validate_borrowed_descriptors(
+        borrowed_command,
+        None,
+        auxiliary_descriptors,
+    )
     try:
         retained_ncu = immutable.open_retained_executable(ncu_path)
     except (OSError, immutable.ImmutableArtifactError) as exc:
@@ -1461,9 +1910,20 @@ def execute_ncu_supervised_executable(
             expected,
             borrowed,
             retained_supervised_executable=retained_executable,
+            require_cgroup_containment=require_cgroup_containment,
         )
         rendered = _render_supervised_executable_command(
             template, retained_ncu, retained_executable,
+        )
+        canonical_command = tuple(
+            expected.resolved_path
+            if item is AUTHORIZED_NCU_PROC_PATH
+            else (
+                item.canonical_path
+                if type(item) is _AuthorizedExecutableProcPath
+                else str(item)
+            )
+            for item in template
         )
         try:
             result = _run_command_bounded(
@@ -1473,13 +1933,22 @@ def execute_ncu_supervised_executable(
                 inherited_descriptors=(
                     retained_ncu.descriptor,
                     retained_executable.descriptor,
+                    *borrowed.inherited,
                 ),
                 timeout_seconds=timeout_seconds,
                 max_output_bytes=_MAX_ACTION_OUTPUT_BYTES,
                 timeout_code=NCU_ACTION_TIMEOUT,
                 launch_code=NCU_ACTION_LAUNCH_FAILED,
+                require_cgroup_containment=require_cgroup_containment,
             )
         except BaseException as action_error:
+            _bind_process_failure(
+                action_error,
+                role="ncu_supervised_executable",
+                command=canonical_command,
+                environment=environment.as_dict(),
+                tool_sha256=expected_executable.executable_sha256,
+            )
             _reverify_with_supervised_executable(
                 retained_ncu,
                 borrowed,
@@ -1487,9 +1956,20 @@ def execute_ncu_supervised_executable(
                 pending=action_error,
             )
             raise AssertionError("unreachable")
-        _reverify_with_supervised_executable(
-            retained_ncu, borrowed, retained_executable,
-        )
+        try:
+            _reverify_with_supervised_executable(
+                retained_ncu, borrowed, retained_executable,
+            )
+        except NcuActionExecutorError as action_error:
+            _copy_process_result(action_error, result)
+            _bind_process_failure(
+                action_error,
+                role="ncu_supervised_executable",
+                command=canonical_command,
+                environment=environment.as_dict(),
+                tool_sha256=expected_executable.executable_sha256,
+            )
+            raise
     except BaseException as active_error:
         for label, retained in (
             ("supervised executable", retained_executable),
@@ -1509,18 +1989,36 @@ def execute_ncu_supervised_executable(
     try:
         retained_executable.close()
     except BaseException as exc:
+        error = _supervised_executable_identity_error(
+            "cannot close retained supervised executable", exc,
+        )
+        _copy_process_result(error, result)
+        _bind_process_failure(
+            error,
+            role="ncu_supervised_executable",
+            command=canonical_command,
+            environment=environment.as_dict(),
+            tool_sha256=expected_executable.executable_sha256,
+        )
         try:
             retained_ncu.close()
         except BaseException as close_error:
             try:
-                exc.add_note(f"retained NCU close failed: {close_error}")
+                error.add_note(f"retained NCU close failed: {close_error}")
             except (AttributeError, TypeError):
                 pass
-        raise _supervised_executable_identity_error(
-            "cannot close retained supervised executable", exc,
-        ) from exc
+        raise error from exc
     try:
         retained_ncu.close()
     except BaseException as exc:
-        raise _identity_error("cannot close retained executable", exc) from exc
+        error = _identity_error("cannot close retained executable", exc)
+        _copy_process_result(error, result)
+        _bind_process_failure(
+            error,
+            role="ncu_supervised_executable",
+            command=canonical_command,
+            environment=environment.as_dict(),
+            tool_sha256=expected_executable.executable_sha256,
+        )
+        raise error from exc
     return result

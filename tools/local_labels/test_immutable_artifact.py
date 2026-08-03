@@ -1744,6 +1744,34 @@ def test_pinned_directory_reader_enforces_tree_inventory_limits(
             reader.snapshot_tree(**{limit_name: limit})
 
 
+def test_pinned_directory_reader_retains_one_tree_generation(
+    tmp_path: Path,
+) -> None:
+    root, _branch, _leaf, payload = _reader_tree(tmp_path)
+    with immutable.PinnedDirectoryReader(root) as reader:
+        with reader.retain_tree_generation() as snapshot:
+            expected = dict(snapshot.files)["branch/value"]
+            observed = reader.read_snapshot(
+                "branch/value", expected_metadata=expected,
+            )
+            assert observed.payload == payload
+
+
+def test_pinned_directory_reader_rejects_transient_tree_mutation(
+    tmp_path: Path,
+) -> None:
+    root, branch, _leaf, _payload = _reader_tree(tmp_path)
+    with pytest.raises(
+        immutable.ImmutableArtifactError,
+        match="immutable tree changed during bounded verification",
+    ):
+        with immutable.PinnedDirectoryReader(root) as reader:
+            with reader.retain_tree_generation():
+                transient = branch / "transient"
+                _regular(transient, b"temporary")
+                transient.unlink()
+
+
 def test_write_regular_bytes_at_uses_retained_parent_descriptor(
     tmp_path: Path,
 ) -> None:

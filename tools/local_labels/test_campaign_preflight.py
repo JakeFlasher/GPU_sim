@@ -376,6 +376,68 @@ def test_ncu_probe_runs_retained_inner_and_never_launcher(tmp_path):
     }
 
 
+def test_ncu_probe_threads_required_containment_to_retained_executor(
+    tmp_path, monkeypatch,
+):
+    launcher, inner = _synthetic_ncu_install(tmp_path)
+    observed = {}
+
+    def execute(retained, *, require_cgroup_containment):
+        metadata = os.fstat(retained.descriptor)
+        observed.update({
+            "path": retained.path,
+            "identity": (metadata.st_dev, metadata.st_ino),
+            "require_cgroup_containment": require_cgroup_containment,
+        })
+        return cp.ncu_executor.NcuActionResult(
+            0,
+            b"Version 2026.1.0.0 (public-release)\n",
+            b"",
+        )
+
+    monkeypatch.setattr(
+        cp.ncu_executor,
+        "execute_retained_ncu_version_probe",
+        execute,
+    )
+    result = cp.probe_ncu(
+        {"toolchain": {"ncu_version_prefix": "2026.1.0"}},
+        resolve_command=lambda _name: str(launcher),
+        require_cgroup_containment=True,
+    )
+
+    inner_stat = inner.stat()
+    assert result["status"] == cp.STATUS_OK
+    assert observed == {
+        "path": inner,
+        "identity": (inner_stat.st_dev, inner_stat.st_ino),
+        "require_cgroup_containment": True,
+    }
+
+
+def test_required_ncu_containment_rejects_custom_runner_before_resolution():
+    result = cp.probe_ncu(
+        {"toolchain": {"ncu_version_prefix": "2026.1.0"}},
+        resolve_command=lambda _name: pytest.fail("resolution reached"),
+        run_version=lambda _descriptor: (0, "forged", ""),
+        require_cgroup_containment=True,
+    )
+
+    assert result["status"] == cp.STATUS_FAILED
+    assert "custom NCU version runners" in result["detail"]
+
+
+@pytest.mark.parametrize("value", [None, 0, 1, "true"])
+def test_ncu_probe_rejects_non_boolean_containment_requirement(value):
+    result = cp.probe_ncu(
+        {"toolchain": {"ncu_version_prefix": "2026.1.0"}},
+        require_cgroup_containment=value,
+    )
+
+    assert result["status"] == cp.STATUS_FAILED
+    assert "not boolean" in result["detail"]
+
+
 def test_ncu_probe_refuses_unsupported_machine_before_resolution():
     def resolve(_name):
         pytest.fail("PATH resolution reached for unsupported host")

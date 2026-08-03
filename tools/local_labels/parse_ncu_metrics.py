@@ -1303,6 +1303,7 @@ def _import_report_csv(
     report_path: Path,
     *,
     timeout_seconds: float = _NCU_IMPORT_TIMEOUT_SECONDS,
+    require_cgroup_containment: bool = False,
 ) -> tuple[ImportedReportCsv | None, MetricExtractionResult | None]:
     """Import one retained report through independently authorized NCU.
 
@@ -1356,6 +1357,7 @@ def _import_report_csv(
             arguments,
             timeout_seconds=timeout_seconds,
             retained_report=retained_report,
+            require_cgroup_containment=require_cgroup_containment,
         )
         if action.returncode != 0:
             stderr = action.stderr.decode("utf-8", errors="surrogateescape")

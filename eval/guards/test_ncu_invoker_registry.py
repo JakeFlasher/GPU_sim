@@ -67,6 +67,7 @@ REVIEWED_NCU_INVOKER_PATHS = frozenset({
     "tools/local_labels/campaign_preflight.py",
     "tools/local_labels/label_driver.sh",
     "tools/local_labels/parse_ncu_metrics.py",
+    "tools/local_labels/admit_cutlass_successor_capture.py",
     "tools/local_labels/sm86_capture_chunk.py",
     "tools/local_labels/probe_ncu_metric_availability.py",
     "tools/local_labels/validate_static_occupancy_agreement.py",
@@ -87,6 +88,7 @@ REVIEWED_NCU_INVOKER_PATHS = frozenset({
     "tools/sol_baselines_harness/calibration/cache_prediction/ncu_harvester.py",
 })
 REVIEWED_TRANSITIVE_INVOKER_PATHS = frozenset({
+    "tools/local_labels/admit_cutlass_successor_capture.py",
     "tools/local_labels/capture_t2_stream_labels.py",
     "tools/local_labels/orchestrate_sm86_label_recapture.py",
     "tools/local_labels/run_sm86_label_recapture_sweep.py",
@@ -99,6 +101,7 @@ REVIEWED_ROLE_BY_PATH = {
     "tools/local_labels/campaign_preflight.py": "campaign",
     "tools/local_labels/label_driver.sh": "campaign",
     "tools/local_labels/parse_ncu_metrics.py": "campaign",
+    "tools/local_labels/admit_cutlass_successor_capture.py": "diagnostic",
     "tools/local_labels/sm86_capture_chunk.py": "campaign",
     "tools/local_labels/probe_ncu_metric_availability.py": "diagnostic",
     "tools/local_labels/validate_static_occupancy_agreement.py": "diagnostic",
@@ -119,6 +122,14 @@ REVIEWED_ROLE_BY_PATH = {
     "tools/sol_baselines_harness/calibration/cache_prediction/ncu_harvester.py": "retired_private",
 }
 REVIEWED_TRANSITIVE_CALL_SITES = {
+    "tools/local_labels/admit_cutlass_successor_capture.py": (
+        (
+            "_import_ncu_report_csv",
+            "tools.local_labels.parse_ncu_metrics._import_report_csv",
+            "expected_ncu_identity",
+            frozenset(),
+        ),
+    ),
     "tools/local_labels/capture_t2_stream_labels.py": (
         ("main", "capture_count_labels.capture_and_land", None,
          frozenset({"metrics", "ncu"})),
@@ -178,8 +189,8 @@ REVIEWED_TRANSITIVE_SHELL_CALL_SITES = {
 EXECUTOR_CALLS = {
     "execute_bounded_command",
     "execute_ncu_action",
-    "execute_ncu_supervised_child",
     "execute_ncu_supervised_executable",
+    "execute_retained_ncu_version_probe",
 }
 PROCESS_APIS = {
     "subprocess.Popen",
@@ -223,6 +234,9 @@ SHELL_STRING_APIS = {
     "subprocess.getstatusoutput",
 }
 DISCOVERY_APIS = {"shutil.which"}
+TRANSITIVE_DISCOVERY_APIS = {
+    "tools.local_labels.campaign_preflight.probe_ncu",
+}
 HEREDOC_OPEN = re.compile(
     r"(?<!<)<<(?!<)-?\s*(?:'([^'\n]+)'|\"([^\"\n]+)\"|\\([^\s;&|]+)|([^\s;&|]+))"
 )
@@ -257,6 +271,9 @@ NCU_INVOKER_REGISTRY: dict[str, RegistryEntry] = {
     ),
     "tools/local_labels/parse_ncu_metrics.py": RegistryEntry(
         "campaign", "python", "production", "invoke"
+    ),
+    "tools/local_labels/admit_cutlass_successor_capture.py": RegistryEntry(
+        "diagnostic", "python", "production", "invoke"
     ),
     "tools/local_labels/sm86_capture_chunk.py": RegistryEntry(
         "campaign", "python", "production", "invoke"
@@ -324,7 +341,13 @@ NCU_INVOKER_REGISTRY: dict[str, RegistryEntry] = {
     "tools/local_labels/test_campaign_preflight.py": RegistryEntry(
         "diagnostic", "python", "test", "discover"
     ),
+    "tools/local_labels/test_delegated_cgroup.py": RegistryEntry(
+        "diagnostic", "python", "test", "invoke"
+    ),
     "tools/local_labels/test_ncu_action_executor.py": RegistryEntry(
+        "diagnostic", "python", "test", "invoke"
+    ),
+    "tools/local_labels/test_capture_cutlass_successor_receipts.py": RegistryEntry(
         "diagnostic", "python", "test", "invoke"
     ),
 }
@@ -865,6 +888,8 @@ def _python_call_boundary_kinds(
     name = _call_name(call)
     if name in EXECUTOR_CALLS:
         kinds.add("invoke")
+    if qualified in TRANSITIVE_DISCOVERY_APIS:
+        kinds.add("discover")
     if qualified in DISCOVERY_APIS or name in {"which", "resolver"}:
         if call.args:
             discovery_values = _resolved_literal_strings(call.args[0], assignments)
@@ -1495,8 +1520,8 @@ def test_registry_is_closed_and_matches_direct_ncu_sources():
 
 
 def test_reviewed_inventory_includes_transitive_delegators():
-    assert len(REVIEWED_NCU_INVOKER_PATHS) == 21
-    assert len(REVIEWED_TRANSITIVE_INVOKER_PATHS) == 7
+    assert len(REVIEWED_NCU_INVOKER_PATHS) == 22
+    assert len(REVIEWED_TRANSITIVE_INVOKER_PATHS) == 8
     assert REVIEWED_TRANSITIVE_INVOKER_PATHS <= REVIEWED_NCU_INVOKER_PATHS
     assert set(REVIEWED_ROLE_BY_PATH) == REVIEWED_NCU_INVOKER_PATHS
     assert (

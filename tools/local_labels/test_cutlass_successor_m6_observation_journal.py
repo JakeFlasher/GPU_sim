@@ -12,8 +12,10 @@ from tools.local_labels import build_cutlass_successor_m6_determinism_schedule a
 from tools.local_labels import cutlass_successor_m6_observation_journal as journal
 from tools.local_labels import m6_determinism_campaign as m6
 from tools.local_labels.test_cutlass_successor_capture_admission import (
-    _REPORT_CSV,
+    _REPORT_IDENTITY,
     _all_pairs,
+    _row_for_report_path,
+    _row_report_csv,
 )
 
 GENERATED_AT = "2026-07-23T03:00:00Z"
@@ -21,7 +23,7 @@ STATIC_FILE_HASHES = {
     "tools/local_labels/build_cutlass_successor_m6_determinism_schedule.py":
         "a52bc0d487b61f4a60f4d6164d75413ac55e7891315e18365eb08d3d3027ae20",
     "tools/local_labels/test_cutlass_successor_m6_determinism_schedule.py":
-        "8ffad1720e72089fda07e3f31e095461de5417048715b2c19e7a9b0c4c5177d8",
+        "7c0e1fc2d02fb7d40cf9e908c05409e431ac2f88ae4644b7230b7eefcaa2ff26",
     "workloads/simbench_bw/schemas/"
     "cutlass_successor_m6_determinism_schedule.schema.json":
         "52af5bfe5a6e88393546ad5f5718b3a49dc93e126f070287c7c49b75d28547ac",
@@ -30,8 +32,16 @@ STATIC_FILE_HASHES = {
 
 @pytest.fixture(scope="module")
 def successor_contract(tmp_path_factory):
-    original = admission._import_ncu_report_csv
-    admission._import_ncu_report_csv = lambda path: (_REPORT_CSV, None)
+    original_import = admission._import_ncu_report_csv
+    original_sass = admission._sass_kernel_names
+    admission._import_ncu_report_csv = lambda _identity, path: (
+        _row_report_csv(_row_for_report_path(path)),
+        admission.sha256_bytes(path.read_bytes()),
+        None,
+    )
+    admission._sass_kernel_names = lambda _row: {
+        _REPORT_IDENTITY["Kernel Name"]
+    }
     try:
         root = tmp_path_factory.mktemp("successor-journal-receipts")
         _all_pairs(root)
@@ -53,7 +63,8 @@ def successor_contract(tmp_path_factory):
             "receipt_root": root,
         }
     finally:
-        admission._import_ncu_report_csv = original
+        admission._import_ncu_report_csv = original_import
+        admission._sass_kernel_names = original_sass
 
 
 def _selected(policy):

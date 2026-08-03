@@ -50,6 +50,7 @@ import archive_capture_defect_attempt as capture_defect_archive  # noqa: E402
 import capture_budget_route as budget_route  # noqa: E402
 import capture_toolchain_contract as toolchain_contract  # noqa: E402
 from tools.local_labels import immutable_artifact as immutable  # noqa: E402
+from tools.local_labels import label_driver_authority  # noqa: E402
 from tools.local_labels import ncu_action_executor as ncu_executor  # noqa: E402
 from tools.local_labels import ncu_collection_receipt as collection_receipt  # noqa: E402
 from tools.local_labels import ncu_details_export_persistence as details_persistence  # noqa: E402
@@ -101,7 +102,7 @@ LABEL_SCHEMA = (
     REPO_ROOT / "workloads" / "simbench_bw" / "schemas"
     / "local_label_sidecar.schema.json"
 )
-LABEL_DRIVER = LOCAL_LABELS / "label_driver.sh"
+LABEL_DRIVER = REPO_ROOT / label_driver_authority.LABEL_DRIVER_REL
 CONTROL_EMITTER = REPO_ROOT / "tools" / "sass_control" / "emit_control_bits_sidecar.py"
 
 _DIRECT_ADAPTERS = {
@@ -118,6 +119,7 @@ ROUND28_PROVENANCE_REFUSAL_CODES = frozenset({
     "PREFLIGHT_CLOCK_SKEW",
     "PREFLIGHT_EXPIRED",
     "capture_ncu_authority_invalid",
+    "capture_label_driver_authority_invalid",
     "REFERENCED_PREFLIGHT_INVALID",
     "JOURNAL_RECOVERY_NOT_ADMITTED",
     "JOURNAL_PREFLIGHT_MISMATCH",
@@ -2875,7 +2877,9 @@ def _run_logged(
     tree_limit_bytes: int | None = None,
     trusted_child_storage_marker: bool = False,
     supervised_ncu_identity: ncu_executor.ExpectedNcuIdentity | None = None,
+    supervised_executable_identity: ncu_executor.ExpectedExecutableIdentity | None = None,
     supervised_ncu_environment: ncu_executor.NcuCollectionEnvironment | None = None,
+    supervised_auxiliary_descriptors: tuple[int, ...] = (),
 ) -> tuple[float, Path, Path]:
     _mkdir_output(
         log_dir, parents=True, exist_ok=True,
@@ -2924,12 +2928,23 @@ def _run_logged(
             f"{failure_code}_tree_limit_invalid",
             f"tree_limit_bytes={tree_limit_bytes!r}",
         )
-    if (supervised_ncu_identity is None) != (
-        supervised_ncu_environment is None
+    supervision_values = (
+        supervised_ncu_identity,
+        supervised_executable_identity,
+        supervised_ncu_environment,
+    )
+    if any(value is None for value in supervision_values) and any(
+        value is not None for value in supervision_values
     ):
         raise ChunkRefusal(
             f"{failure_code}_supervision_invalid",
-            "NCU identity and collection environment must be supplied together",
+            "NCU identity, executable identity, and collection environment "
+            "must be supplied together",
+        )
+    if supervised_ncu_identity is None and supervised_auxiliary_descriptors:
+        raise ChunkRefusal(
+            f"{failure_code}_supervision_invalid",
+            "auxiliary descriptors require supervised NCU execution",
         )
     if supervised_ncu_identity is not None:
         if env is not None or monitored_tree is not None:
@@ -2938,12 +2953,15 @@ def _run_logged(
                 "supervised NCU execution owns env and does not monitor a tree",
             )
         try:
-            result = ncu_executor.execute_ncu_supervised_child(
+            result = ncu_executor.execute_ncu_supervised_executable(
                 supervised_ncu_identity,
+                supervised_executable_identity,
                 command,
                 timeout_seconds=timeout_s,
                 environment=supervised_ncu_environment,
                 working_directory=cwd,
+                auxiliary_descriptors=supervised_auxiliary_descriptors,
+                require_cgroup_containment=True,
             )
         except ncu_executor.NcuActionExecutorError as exc:
             refuse_child_storage(exc.stderr)
@@ -2954,6 +2972,10 @@ def _run_logged(
                 code = f"{failure_code}_timeout"
             elif exc.code == ncu_executor.NCU_ACTION_OUTPUT_LIMIT:
                 code = f"{failure_code}_output_limit"
+            elif exc.code == (
+                ncu_executor.NCU_SUPERVISED_EXECUTABLE_IDENTITY_INVALID
+            ):
+                code = "capture_label_driver_authority_invalid"
             elif exc.code in {
                 ncu_executor.NCU_EXECUTABLE_IDENTITY_INVALID,
                 ncu_executor.NCU_VERSION_PROBE_FAILED,
@@ -5455,6 +5477,10 @@ def _execute_launch_set_plan(
                     "label_launch_set_target_authority_invalid",
                     "profiled target executable SHA-256 differs",
                 )
+            target_argument_index = supervised_command.index("--binary") + 1
+            supervised_command[target_argument_index] = (
+                ncu_executor.authorized_executable_proc_path(retained_target)
+            )
             with immutable.PinnedDirectoryReader(artifact_root) as pinned_root:
                 if os.listdir(pinned_root.descriptor):
                     raise ChunkRefusal(
@@ -5468,6 +5494,8 @@ def _execute_launch_set_plan(
                     timeout_seconds=timeout_s,
                     environment=environment,
                     working_directory=runtime_cwd,
+                    auxiliary_descriptors=(retained_target.descriptor,),
+                    require_cgroup_containment=production_driver_required,
                 )
                 pinned_root.verify_path()
             retained_target.verify_unchanged()
@@ -5529,7 +5557,9 @@ def _execute_launch_set_plan(
             run_manifest_sha256 = retained_manifest.sha256
             run_manifest_size_bytes = retained_manifest.size_bytes
             imported, import_error = parse_ncu_metrics._import_report_csv(
-                expected_ncu_identity, report,
+                expected_ncu_identity,
+                report,
+                require_cgroup_containment=production_driver_required,
             )
             if import_error is not None or imported is None:
                 raise ChunkRefusal(
@@ -5677,6 +5707,19 @@ def _execute_launch_set_plan(
     }
 
 
+def _expected_label_driver_identity() -> ncu_executor.ExpectedExecutableIdentity:
+    try:
+        return ncu_executor.build_expected_executable_identity(
+            resolved_path=str(LABEL_DRIVER),
+            executable_sha256=label_driver_authority.LABEL_DRIVER_SHA256,
+            executable_mode=label_driver_authority.LABEL_DRIVER_MODE,
+        )
+    except ncu_executor.NcuActionExecutorError as exc:
+        raise ChunkRefusal(
+            "capture_label_driver_authority_invalid", str(exc),
+        ) from exc
+
+
 def _expected_launch_set_driver_identity(
     path: Path,
 ) -> ncu_executor.ExpectedExecutableIdentity:
@@ -5810,9 +5853,7 @@ def execute_production_launch_set_plan(
             "label_launch_set_production_boundary_invalid",
             "production launch-set plan does not name the production label driver",
         )
-    expected_driver_identity = _expected_launch_set_driver_identity(
-        _PRODUCTION_LABEL_DRIVER
-    )
+    expected_driver_identity = _expected_label_driver_identity()
     return _execute_launch_set_plan(
         plan=plan,
         expected_plan_sha256=expected_plan_sha256,
@@ -6036,6 +6077,7 @@ def capture_label(
         ncu_executor.validate_expected_ncu_identity(expected_ncu_identity)
     except ncu_executor.NcuActionExecutorError as exc:
         raise ChunkRefusal("capture_ncu_authority_invalid", str(exc)) from exc
+    label_driver_identity = _expected_label_driver_identity()
     if not _is_sha256(preflight_sha256):
         raise ChunkRefusal(
             "capture_preflight_authority_invalid", repr(preflight_sha256),
@@ -6065,10 +6107,20 @@ def capture_label(
     supervised_command: list[object] = list(command)
     try:
         separator = supervised_command.index("--")
+        binary_index = supervised_command.index("--binary") + 1
     except ValueError as exc:
         raise ChunkRefusal(
-            "label_capture_command_invalid", "missing target argument separator",
+            "label_capture_command_invalid",
+            "missing target argument separator or binary option",
         ) from exc
+    if (
+        binary_index >= separator
+        or supervised_command[binary_index] != str(binary)
+    ):
+        raise ChunkRefusal(
+            "label_capture_command_invalid",
+            "binary option differs from the prepared target authority",
+        )
     supervised_command[separator:separator] = [
         "--ncu-exec-path", ncu_executor.AUTHORIZED_NCU_PROC_PATH,
     ]
@@ -6087,15 +6139,35 @@ def capture_label(
     collection_environment = _label_collection_environment(
         runtime_env, cwd=label_cwd,
     )
-    elapsed, stdout_log, stderr_log = _run_logged(
-        supervised_command, cwd=label_cwd, env=None,
-        timeout_s=timeout_s,
-        log_dir=cell_dir / "logs", stem=artifact_tag,
-        failure_code="label_capture_failed",
-        trusted_child_storage_marker=True,
-        supervised_ncu_identity=expected_ncu_identity,
-        supervised_ncu_environment=collection_environment,
-    )
+    try:
+        with immutable.open_retained_executable(binary) as retained_target:
+            if retained_target.sha256 != invocation["executable_sha256"]:
+                raise ChunkRefusal(
+                    "capture_target_authority_invalid",
+                    "retained target hash differs from invocation authority",
+                )
+            supervised_command[binary_index] = (
+                ncu_executor.authorized_executable_proc_path(retained_target)
+            )
+            elapsed, stdout_log, stderr_log = _run_logged(
+                supervised_command, cwd=label_cwd, env=None,
+                timeout_s=timeout_s,
+                log_dir=cell_dir / "logs", stem=artifact_tag,
+                failure_code="label_capture_failed",
+                trusted_child_storage_marker=True,
+                supervised_ncu_identity=expected_ncu_identity,
+                supervised_executable_identity=label_driver_identity,
+                supervised_ncu_environment=collection_environment,
+                supervised_auxiliary_descriptors=(retained_target.descriptor,),
+            )
+    except (
+        OSError,
+        immutable.ImmutableArtifactError,
+        ncu_executor.NcuActionExecutorError,
+    ) as exc:
+        raise ChunkRefusal(
+            "capture_target_authority_invalid", str(exc),
+        ) from exc
     phase_evidence = (
         phase_result_validator(runtime_env or {}, "label")
         if phase_result_validator is not None else None

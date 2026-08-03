@@ -7,7 +7,7 @@
   "additionalProperties": false,
   "required": ["schema_version", "artifact_kind", "receipt", "receipt_seal_sha256"],
   "properties": {
-    "schema_version": {"const": 1},
+    "schema_version": {"const": 2},
     "artifact_kind": {"const": "cutlass_successor_capture_receipt"},
     "receipt": {
       "oneOf": [
@@ -64,13 +64,46 @@
         "launch_identity_sha256": {"$ref": "#/$defs/sha256"}
       }
     },
-    "provenance": {
+    "ncu_provenance": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["capture_producer_sha256", "phase_tool_sha256"],
+      "required": [
+        "capture_producer_sha256", "phase_tool_sha256",
+        "action_executor_sha256", "containment_supervisor_sha256"
+      ],
       "properties": {
         "capture_producer_sha256": {"$ref": "#/$defs/sha256"},
-        "phase_tool_sha256": {"$ref": "#/$defs/sha256"}
+        "phase_tool_sha256": {"$ref": "#/$defs/sha256"},
+        "action_executor_sha256": {"$ref": "#/$defs/sha256"},
+        "containment_supervisor_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "nvbit_provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "capture_producer_sha256", "phase_tool_sha256",
+        "containment_supervisor_sha256"
+      ],
+      "properties": {
+        "capture_producer_sha256": {"$ref": "#/$defs/sha256"},
+        "phase_tool_sha256": {"$ref": "#/$defs/sha256"},
+        "containment_supervisor_sha256": {"$ref": "#/$defs/sha256"}
+      }
+    },
+    "containment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind", "parent_cgroup_sha256", "cgroup_inode",
+        "terminal_populated_zero", "leaf_removed"
+      ],
+      "properties": {
+        "kind": {"const": "cgroup_v2_kill_v1"},
+        "parent_cgroup_sha256": {"$ref": "#/$defs/sha256"},
+        "cgroup_inode": {"type": "integer", "minimum": 1},
+        "terminal_populated_zero": {"const": true},
+        "leaf_removed": {"const": true}
       }
     },
     "process": {
@@ -78,7 +111,8 @@
       "additionalProperties": false,
       "required": [
         "host_identity_sha256", "boot_id_sha256", "pid",
-        "started_at_utc", "command_sha256", "process_identity_sha256"
+        "started_at_utc", "command_sha256", "containment",
+        "process_identity_sha256"
       ],
       "properties": {
         "host_identity_sha256": {"$ref": "#/$defs/sha256"},
@@ -86,6 +120,7 @@
         "pid": {"type": "integer", "minimum": 1},
         "started_at_utc": {"type": "string", "format": "date-time"},
         "command_sha256": {"$ref": "#/$defs/sha256"},
+        "containment": {"$ref": "#/$defs/containment"},
         "process_identity_sha256": {"$ref": "#/$defs/sha256"}
       }
     },
@@ -178,7 +213,7 @@
         "identity": {"$ref": "#/$defs/identity"},
         "launch_identity": {"$ref": "#/$defs/launch_identity"},
         "process": {"$ref": "#/$defs/process"},
-        "provenance": {"$ref": "#/$defs/provenance"},
+        "provenance": {"$ref": "#/$defs/ncu_provenance"},
         "captured_at_utc": {"type": "string", "format": "date-time"},
         "preflight_path": {"$ref": "#/$defs/relative_path"},
         "preflight_sha256": {"$ref": "#/$defs/sha256"},
@@ -211,7 +246,7 @@
         "identity": {"$ref": "#/$defs/identity"},
         "launch_identity": {"$ref": "#/$defs/launch_identity"},
         "process": {"$ref": "#/$defs/process"},
-        "provenance": {"$ref": "#/$defs/provenance"},
+        "provenance": {"$ref": "#/$defs/nvbit_provenance"},
         "captured_at_utc": {"type": "string", "format": "date-time"},
         "preflight_path": {"$ref": "#/$defs/relative_path"},
         "preflight_sha256": {"$ref": "#/$defs/sha256"},

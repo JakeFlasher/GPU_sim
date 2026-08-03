@@ -4011,6 +4011,9 @@ def test_run_logged_routes_supervised_ncu_and_writes_logs(
     tmp_path, monkeypatch,
 ):
     expected = _expected_ncu_identity()
+    expected_driver = cc.ncu_executor.ExpectedExecutableIdentity(
+        "/bin/true", "b" * 64, 0o755,
+    )
     environment = cc.ncu_executor.NcuCollectionEnvironment({
         "LANG": "C", "LANGUAGE": "C", "LC_ALL": "C",
         "PATH": "/usr/local/cuda-13.2/bin:/usr/bin:/bin",
@@ -4023,17 +4026,23 @@ def test_run_logged_routes_supervised_ncu_and_writes_logs(
     ]
     observed = {}
 
-    def execute(identity, action, **kwargs):
-        observed.update(identity=identity, action=action, **kwargs)
+    def execute(identity, executable_identity, action, **kwargs):
+        observed.update(
+            identity=identity,
+            executable_identity=executable_identity,
+            action=action,
+            **kwargs,
+        )
         return cc.ncu_executor.NcuActionResult(0, b"stdout", b"stderr")
 
     monkeypatch.setattr(
-        cc.ncu_executor, "execute_ncu_supervised_child", execute,
+        cc.ncu_executor, "execute_ncu_supervised_executable", execute,
     )
     elapsed, stdout, stderr = cc._run_logged(
         command, cwd=tmp_path, env=None, timeout_s=5,
         log_dir=tmp_path / "logs", stem="supervised", failure_code="label",
         supervised_ncu_identity=expected,
+        supervised_executable_identity=expected_driver,
         supervised_ncu_environment=environment,
     )
     assert elapsed >= 0
@@ -4041,15 +4050,21 @@ def test_run_logged_routes_supervised_ncu_and_writes_logs(
     assert stderr.read_bytes() == b"stderr"
     assert observed == {
         "identity": expected,
+        "executable_identity": expected_driver,
         "action": command,
         "timeout_seconds": 5,
         "environment": environment,
         "working_directory": tmp_path,
+        "auxiliary_descriptors": (),
+        "require_cgroup_containment": True,
     }
 
 
 def test_run_logged_types_supervised_ncu_timeout(tmp_path, monkeypatch):
     expected = _expected_ncu_identity()
+    expected_driver = cc.ncu_executor.ExpectedExecutableIdentity(
+        "/bin/true", "b" * 64, 0o755,
+    )
     environment = cc.ncu_executor.NcuCollectionEnvironment({
         "LANG": "C", "LANGUAGE": "C", "LC_ALL": "C",
         "PATH": "/usr/local/cuda-13.2/bin:/usr/bin:/bin",
@@ -4067,7 +4082,7 @@ def test_run_logged_types_supervised_ncu_timeout(tmp_path, monkeypatch):
         raise error
 
     monkeypatch.setattr(
-        cc.ncu_executor, "execute_ncu_supervised_child", timeout,
+        cc.ncu_executor, "execute_ncu_supervised_executable", timeout,
     )
     with pytest.raises(cc.ChunkRefusal) as caught:
         cc._run_logged(
@@ -4075,6 +4090,7 @@ def test_run_logged_types_supervised_ncu_timeout(tmp_path, monkeypatch):
             cwd=tmp_path, env=None, timeout_s=5,
             log_dir=tmp_path / "logs", stem="timeout", failure_code="label",
             supervised_ncu_identity=expected,
+            supervised_executable_identity=expected_driver,
             supervised_ncu_environment=environment,
         )
     assert caught.value.code == "label_timeout"
@@ -4084,10 +4100,49 @@ def test_run_logged_types_supervised_ncu_timeout(tmp_path, monkeypatch):
     assert "NCU_ACTION_TIMEOUT" in stderr
 
 
+def test_run_logged_types_supervised_driver_authority_failure(
+    tmp_path, monkeypatch,
+):
+    expected = _expected_ncu_identity()
+    expected_driver = cc.ncu_executor.ExpectedExecutableIdentity(
+        "/bin/true", "b" * 64, 0o755,
+    )
+    environment = cc.ncu_executor.NcuCollectionEnvironment({
+        "LANG": "C", "LANGUAGE": "C", "LC_ALL": "C",
+        "PATH": "/usr/local/cuda-13.2/bin:/usr/bin:/bin",
+        "PWD": str(tmp_path), "PYTHONNOUSERSITE": "1",
+        "LABEL_DRIVER_GPU_INDEX": "0",
+        "LABEL_DRIVER_PRESERVE_FAILED_EVIDENCE": "1",
+    })
+
+    def reject(*_args, **_kwargs):
+        raise cc.ncu_executor.NcuActionExecutorError(
+            cc.ncu_executor.NCU_SUPERVISED_EXECUTABLE_IDENTITY_INVALID,
+            "synthetic driver digest mismatch",
+        )
+
+    monkeypatch.setattr(
+        cc.ncu_executor, "execute_ncu_supervised_executable", reject,
+    )
+    with pytest.raises(cc.ChunkRefusal) as caught:
+        cc._run_logged(
+            ["/bin/true", cc.ncu_executor.AUTHORIZED_NCU_PROC_PATH],
+            cwd=tmp_path, env=None, timeout_s=5,
+            log_dir=tmp_path / "logs", stem="authority", failure_code="label",
+            supervised_ncu_identity=expected,
+            supervised_executable_identity=expected_driver,
+            supervised_ncu_environment=environment,
+        )
+    assert caught.value.code == "capture_label_driver_authority_invalid"
+
+
 def test_run_logged_storage_marker_precedes_supervised_timeout(
     tmp_path, monkeypatch,
 ):
     expected = _expected_ncu_identity()
+    expected_driver = cc.ncu_executor.ExpectedExecutableIdentity(
+        "/bin/true", "b" * 64, 0o755,
+    )
     environment = cc.ncu_executor.NcuCollectionEnvironment({
         "LANG": "C", "LANGUAGE": "C", "LC_ALL": "C",
         "PATH": "/usr/local/cuda-13.2/bin:/usr/bin:/bin",
@@ -4110,7 +4165,7 @@ def test_run_logged_storage_marker_precedes_supervised_timeout(
         raise error
 
     monkeypatch.setattr(
-        cc.ncu_executor, "execute_ncu_supervised_child", timeout,
+        cc.ncu_executor, "execute_ncu_supervised_executable", timeout,
     )
     with pytest.raises(cc.ChunkRefusal) as caught:
         cc._run_logged(
@@ -4119,6 +4174,7 @@ def test_run_logged_storage_marker_precedes_supervised_timeout(
             log_dir=tmp_path / "logs", stem="storage", failure_code="label",
             trusted_child_storage_marker=True,
             supervised_ncu_identity=expected,
+            supervised_executable_identity=expected_driver,
             supervised_ncu_environment=environment,
         )
     assert caught.value.code == "label_storage_failure"
@@ -6828,12 +6884,22 @@ def test_label_capture_stages_workload_output_and_checks_full_vector(
     def fake_run(
         command, *, cwd, env, timeout_s, log_dir, stem, failure_code,
         trusted_child_storage_marker=False, supervised_ncu_identity=None,
+        supervised_executable_identity=None,
         supervised_ncu_environment=None,
+        supervised_auxiliary_descriptors=(),
     ):
         assert supervised_ncu_identity == _expected_ncu_identity()
+        assert supervised_executable_identity == (
+            cc._expected_label_driver_identity()
+        )
         assert isinstance(
             supervised_ncu_environment, cc.ncu_executor.NcuCollectionEnvironment,
         )
+        assert len(supervised_auxiliary_descriptors) == 1
+        target_argument = command[command.index("--binary") + 1]
+        assert type(target_argument) is cc.ncu_executor._AuthorizedExecutableProcPath
+        assert target_argument.descriptor == supervised_auxiliary_descriptors[0]
+        assert target_argument.canonical_path == str(binary)
         commands.append(command)
         out = cell_dir / "labels" / "sm_86" / "silu_fwd_bf16_sm80" / "timing_shape"
         out.mkdir(parents=True)
@@ -6927,11 +6993,15 @@ def test_label_capture_stages_workload_output_and_checks_full_vector(
     collection_receipt = json.loads(receipt_path.read_text())
     assert collection_receipt["preflight_sha256"] == "0" * 64
     assert collection_receipt["environment"]["LABEL_DRIVER_GPU_INDEX"] == "0"
-    assert collection_receipt["command"] == [
-        item for item in command
-        if item is not cc.ncu_executor.AUTHORIZED_NCU_PROC_PATH
-        and item != "--ncu-exec-path"
-    ]
+    durable_command = list(command)
+    target_argument = durable_command[durable_command.index("--binary") + 1]
+    assert type(target_argument) is cc.ncu_executor._AuthorizedExecutableProcPath
+    durable_command[durable_command.index("--binary") + 1] = (
+        target_argument.canonical_path
+    )
+    ncu_exec_index = durable_command.index("--ncu-exec-path")
+    del durable_command[ncu_exec_index:ncu_exec_index + 2]
+    assert collection_receipt["command"] == durable_command
     assert [row["role"] for row in collection_receipt["artifacts"]] == [
         "ncu_report",
         "label_run_manifest",
@@ -6977,12 +7047,16 @@ def test_sol_label_consumer_keeps_shape_metadata_out_of_target_argv(
     def fake_run(
         command, *, cwd, env, timeout_s, log_dir, stem, failure_code,
         trusted_child_storage_marker=False, supervised_ncu_identity=None,
+        supervised_executable_identity=None,
         supervised_ncu_environment=None,
+        supervised_auxiliary_descriptors=(),
     ):
         observed.update(
             command=command, cwd=cwd, env=env,
             supervised_ncu_identity=supervised_ncu_identity,
+            supervised_executable_identity=supervised_executable_identity,
             supervised_ncu_environment=supervised_ncu_environment,
+            supervised_auxiliary_descriptors=supervised_auxiliary_descriptors,
         )
         out = cell_dir / "labels" / "sm_86" / slug / shape
         out.mkdir(parents=True)
@@ -7039,13 +7113,19 @@ def test_sol_label_consumer_keeps_shape_metadata_out_of_target_argv(
         bind_supplemental_toolchain=True,
     )
     command = observed["command"]
+    target_argument = command[command.index("--binary") + 1]
+    assert type(target_argument) is cc.ncu_executor._AuthorizedExecutableProcPath
+    assert target_argument.canonical_path == str(binary)
+    assert observed["supervised_auxiliary_descriptors"] == (
+        target_argument.descriptor,
+    )
     expected = [
         str(cc.LABEL_DRIVER), "--device", matrix["arch"],
         "--slug", slug,
         "--shape-point", shape,
         "--shape-binding", "logical-workload",
         "--repeat", "0", "--launch", "0",
-        "--binary", str(binary),
+        "--binary", target_argument,
         "--warmup", "1",
         "--ncu", ncu_identity.resolved_path,
         "--ncu-executable-sha256", ncu_identity.executable_sha256,
@@ -7081,6 +7161,9 @@ def test_sol_label_consumer_keeps_shape_metadata_out_of_target_argv(
     assert observed["cwd"] == cc.REPO_ROOT
     assert observed["env"] is None
     assert observed["supervised_ncu_identity"] == ncu_identity
+    assert observed["supervised_executable_identity"] == (
+        cc._expected_label_driver_identity()
+    )
     collection_environment = observed["supervised_ncu_environment"]
     assert isinstance(
         collection_environment, cc.ncu_executor.NcuCollectionEnvironment,

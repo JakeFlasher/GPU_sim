@@ -46,10 +46,15 @@ def test_report_import_requests_mangled_kernel_names(monkeypatch, tmp_path):
         observed["report_proc_path"] = retained.proc_path
         observed["report_sha256"] = retained.sha256
         assert kwargs["timeout_seconds"] == parser._NCU_IMPORT_TIMEOUT_SECONDS
+        assert kwargs["require_cgroup_containment"] is True
         return ncu_executor.NcuActionResult(0, csv_text.encode(), b"")
 
     monkeypatch.setattr(ncu_executor, "execute_ncu_action", fake_execute)
-    imported, error = parser._import_report_csv(expected, report)
+    imported, error = parser._import_report_csv(
+        expected,
+        report,
+        require_cgroup_containment=True,
+    )
 
     assert error is None
     assert imported == parser.ImportedReportCsv(

@@ -9,11 +9,13 @@ and NVBit join, including the runner's seven-field identity and launch identity.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import datetime as dt
 import hashlib
 import json
 import math
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -26,6 +28,14 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from tools.local_labels import build_cutlass_successor_cohort as cohort  # noqa: E402
+from tools.local_labels import campaign_preflight  # noqa: E402
+from tools.local_labels import delegated_cgroup  # noqa: E402
+from tools.local_labels import immutable_artifact as immutable  # noqa: E402
+from tools.local_labels import label_driver_authority  # noqa: E402
+from tools.local_labels import ncu_action_executor as ncu_executor  # noqa: E402
+from tools.local_labels.capture_toolchain_contract import (  # noqa: E402
+    ncu_version_matches,
+)
 
 
 PINNED_BUNDLE_COMMIT = "237f17cd34728b31ea752062e7ea7843a3a2603a"
@@ -43,6 +53,66 @@ LOCAL_LABEL_SIDECAR_SCHEMA_REL = Path(
 )
 TRACE_CONTRACT_ID = "sm86_addr_carry_v1"
 TRACE_MEMORY_PAYLOAD_CLASSES = [1, 2, 3, 6, 8]
+NVBIT_TRACE_BINARY_VERSION = 86
+NVBIT_VERSION = "1.8"
+NVBIT_TRACE_SUMMARY_PRODUCER = "nvbit_tracer"
+GPU_NAME = "NVIDIA GeForce RTX 3090 Ti"
+LABEL_DRIVER_REL = label_driver_authority.LABEL_DRIVER_REL
+LABEL_DRIVER_SHA256 = label_driver_authority.LABEL_DRIVER_SHA256
+LABEL_DRIVER_MODE = label_driver_authority.LABEL_DRIVER_MODE
+NCU_ACTION_EXECUTOR_SHA256 = (
+    "3515165fafd2084e7fb1d24402b0d8be751f18714f7827cabb1a603344b6c8ac"
+)
+CGROUP_CONTAINMENT_SUPERVISOR_SHA256 = (
+    "7a938d2f7f07fbb1477351a195616f9a7478db5c28b81fa29a3d226d11eadbff"
+)
+CAPTURE_PRODUCER_SELF_SHA256_AUTHORITY = (
+    "aa677745c38573ea331ec9af287f0b4d616de22d2570e7c0fd50b657acb5ee6e"
+)
+NCU_LAUNCHER_PATH = (
+    "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu"
+)
+NCU_LAUNCHER_SHA256 = (
+    "a44ff2c735c4dcf66c78f3f430155805d6a0b1f74f26331f98ecec03bfbf3f1a"
+)
+NCU_EXECUTABLE_PATH = (
+    "/usr/local/cuda-13.2/nsight-compute-2026.1.0/"
+    "target/linux-desktop-glibc_2_11_3-x64/ncu"
+)
+NCU_EXECUTABLE_SHA256 = (
+    "c966a9a9467ae1b4a37fd6be88991a57dc3ec790249c699d68ef74df8f4d62ac"
+)
+NCU_VERSION_LINE = "Version 2026.1.0.0 (build 37166530) (public-release)"
+NVBIT_TRACER_REL = Path("tools/nvbit_tracer/tracer_tool/tracer_tool.so")
+NVBIT_PB_LIB_REL = Path(".toolchain/pb/lib")
+NVBIT_COLLECTION_PATH = "/usr/local/cuda-13.2/bin:/usr/bin:/bin"
+NCU_COLLECTION_REQUIRED_ENVIRONMENT_NAMES = (
+    "LANG",
+    "LANGUAGE",
+    "LC_ALL",
+    "PATH",
+    "PWD",
+    "PYTHONNOUSERSITE",
+    "LABEL_DRIVER_GPU_INDEX",
+    "LABEL_DRIVER_PRESERVE_FAILED_EVIDENCE",
+)
+NCU_COLLECTION_OPTIONAL_ENVIRONMENT_NAMES = (
+    "CC",
+    "CUDAHOSTCXX",
+    "CUDA_HOME",
+    "CUTLASS_DIR",
+    "CXX",
+    "FLASHINFER_TRACE_DIR",
+    "LD_SOURCE_COMMIT_OVERRIDE",
+    "NVCC_CCBIN",
+    "PYTORCH_ALLOC_CONF",
+    "SOL_EXECBENCH_CAPTURE_REQUEST",
+    "TMPDIR",
+)
+RECEIPT_TREE_MAX_FILES = 32_768
+RECEIPT_TREE_MAX_DIRECTORIES = 4_096
+RECEIPT_TREE_MAX_TOTAL_FILE_BYTES = 1024 * 1024 * 1024
+RECEIPT_TREE_MAX_TOTAL_RELATIVE_PATH_BYTES = 32 * 1024 * 1024
 
 BUNDLE_FILES = (
     cohort.VALIDATION_REL,
@@ -66,6 +136,60 @@ class AdmissionError(RuntimeError):
     """External capture admission failed closed."""
 
 
+class _ReceiptGeneration:
+    """One descriptor-relative receipt-tree generation held through admission."""
+
+    def __init__(
+        self,
+        root: Path,
+        reader: immutable.PinnedDirectoryReader,
+        snapshot: immutable.PinnedTreeSnapshot,
+    ) -> None:
+        self.root = root
+        self.reader = reader
+        self._metadata = dict(snapshot.files)
+        self._payloads: dict[str, bytes] = {}
+
+    @property
+    def paths(self) -> list[Path]:
+        return [self.root / relative for relative in self._metadata]
+
+    def _relative(self, path: Path) -> str:
+        try:
+            relative = path.relative_to(self.root).as_posix()
+        except ValueError as exc:
+            raise AdmissionError(
+                f"receipt generation path escapes root: {path}"
+            ) from exc
+        if relative not in self._metadata:
+            raise AdmissionError(
+                f"receipt generation does not contain regular file: {relative}"
+            )
+        return relative
+
+    def read_bytes(self, path: Path) -> bytes:
+        relative = self._relative(path)
+        metadata = self._metadata[relative]
+        if relative not in self._payloads:
+            self._payloads[relative] = self.reader.read_snapshot(
+                relative, expected_metadata=metadata,
+            ).payload
+        else:
+            self.reader.verify_regular(relative, metadata)
+        return self._payloads[relative]
+
+    def inventory(self) -> list[dict[str, Any]]:
+        inventory: list[dict[str, Any]] = []
+        for relative in self._metadata:
+            payload = self.read_bytes(self.root / relative)
+            inventory.append({
+                "path": relative,
+                "sha256": sha256_bytes(payload),
+                "size_bytes": len(payload),
+            })
+        return inventory
+
+
 def canonical_sha(value: Any) -> str:
     return hashlib.sha256(
         json.dumps(
@@ -76,6 +200,43 @@ def canonical_sha(value: Any) -> str:
 
 def sha256_bytes(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
+
+
+_CAPTURE_PRODUCER_SELF_SEAL = re.compile(
+    rb'CAPTURE_PRODUCER_SELF_SHA256 = \(\n    "([0-9a-f]{64})"\n\)'
+)
+
+
+def _capture_producer_self_digest(payload: bytes) -> str:
+    matches = list(_CAPTURE_PRODUCER_SELF_SEAL.finditer(payload))
+    if len(matches) != 1:
+        raise AdmissionError(
+            "successor capture producer has no unique embedded self-seal"
+        )
+    match = matches[0]
+    declared = match.group(1).decode("ascii", errors="strict")
+    start, end = match.span(1)
+    normalized = payload[:start] + (b"0" * 64) + payload[end:]
+    if sha256_bytes(normalized) != declared:
+        raise AdmissionError("successor capture producer self-seal mismatch")
+    return declared
+
+
+def _capture_producer_sha256() -> str:
+    source = ROOT / "tools/local_labels/capture_cutlass_successor_receipts.py"
+    try:
+        with immutable.open_retained_regular(source) as retained:
+            payload = retained.read_bytes()
+            declared = _capture_producer_self_digest(payload)
+            if declared != CAPTURE_PRODUCER_SELF_SHA256_AUTHORITY:
+                raise AdmissionError(
+                    "successor capture producer differs from self-seal authority"
+                )
+            return retained.sha256
+    except immutable.ImmutableArtifactError as exc:
+        raise AdmissionError(
+            f"successor capture producer immutable identity failed: {exc}"
+        ) from exc
 
 
 def _regular(path: Path, label: str) -> None:
@@ -89,10 +250,19 @@ def _regular(path: Path, label: str) -> None:
         raise AdmissionError(f"{label} is not a single regular file: {path}")
 
 
-def _load_json(path: Path, label: str) -> dict[str, Any]:
+def _load_json(
+    path: Path,
+    label: str,
+    generation: _ReceiptGeneration | None = None,
+) -> dict[str, Any]:
     _regular(path, label)
     try:
-        value = json.loads(path.read_text(encoding="utf-8"))
+        payload = (
+            generation.read_bytes(path)
+            if generation is not None
+            else path.read_bytes()
+        )
+        value = json.loads(payload.decode("utf-8"))
     except (OSError, UnicodeError, json.JSONDecodeError) as exc:
         raise AdmissionError(f"invalid JSON {label}: {exc}") from exc
     if not isinstance(value, dict):
@@ -133,6 +303,7 @@ def _git_blob(path: Path) -> bytes:
 
 def validate_immutable_bundle() -> tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
     """Require the current four manifests and four source schemas to equal 237f17c."""
+    expected_documents: dict[str, dict[str, Any]] = {}
     for path in BUNDLE_FILES:
         current = ROOT / path
         _regular(current, f"pinned bundle file {path}")
@@ -141,12 +312,31 @@ def validate_immutable_bundle() -> tuple[dict[str, Any], dict[str, Any], dict[st
         if actual != expected:
             raise AdmissionError(f"pinned successor bundle drifted: {path}")
         expected_hash = BUNDLE_HASHES.get(path.as_posix())
-        if expected_hash is not None and sha256_bytes(actual) != expected_hash:
-            raise AdmissionError(f"pinned successor manifest hash drifted: {path}")
+        if expected_hash is not None:
+            if sha256_bytes(actual) != expected_hash:
+                raise AdmissionError(f"pinned successor manifest hash drifted: {path}")
+            try:
+                expected_document = json.loads(expected.decode("utf-8"))
+            except (UnicodeError, json.JSONDecodeError) as exc:
+                raise AdmissionError(
+                    f"pinned successor manifest is invalid JSON: {path}"
+                ) from exc
+            if not isinstance(expected_document, dict):
+                raise AdmissionError(
+                    f"pinned successor manifest is not an object: {path}"
+                )
+            expected_documents[path.as_posix()] = expected_document
     try:
         documents = cohort.validate_existing_bundle()
     except Exception as exc:  # normalize helper failures at this boundary
         raise AdmissionError(f"pinned successor bundle validation failed: {exc}") from exc
+    expected_return = tuple(
+        expected_documents[path.as_posix()] for path in BUNDLE_FILES[:4]
+    )
+    if documents != expected_return:
+        raise AdmissionError(
+            "validated successor bundle documents differ from pinned Git bytes"
+        )
     return documents
 
 
@@ -172,23 +362,6 @@ def _external_root(raw: Path) -> Path:
     return root
 
 
-def _inventory(root: Path) -> list[Path]:
-    files: list[Path] = []
-    for current, dirs, names in os.walk(root, topdown=True, followlinks=False):
-        current_path = Path(current)
-        for name in list(dirs):
-            path = current_path / name
-            if path.is_symlink():
-                raise AdmissionError(f"receipt directory contains a symlink: {path}")
-            if not path.is_dir():
-                raise AdmissionError(f"receipt directory entry is not a directory: {path}")
-        for name in names:
-            path = current_path / name
-            _regular(path, "receipt directory entry")
-            files.append(path)
-    return sorted(files, key=lambda path: path.relative_to(root).as_posix())
-
-
 def _safe_receipt_path(root: Path, raw: Any, label: str) -> Path:
     if not isinstance(raw, str) or not raw or Path(raw).is_absolute() or "\\" in raw:
         raise AdmissionError(f"{label} is not a safe relative path")
@@ -204,9 +377,14 @@ def _safe_receipt_path(root: Path, raw: Any, label: str) -> Path:
     return resolved
 
 
-def _receipt_ref(root: Path, relative: str, seal: str) -> dict[str, Any]:
+def _receipt_ref(
+    generation: _ReceiptGeneration,
+    root: Path,
+    relative: str,
+    seal: str,
+) -> dict[str, Any]:
     path = _safe_receipt_path(root, relative, "receipt path")
-    payload = path.read_bytes()
+    payload = generation.read_bytes(path)
     return {
         "path": relative,
         "sha256": sha256_bytes(payload),
@@ -241,6 +419,19 @@ def _verify_process(process: dict[str, Any], label: str) -> None:
     expected = canonical_sha({k: v for k, v in process.items() if k != "process_identity_sha256"})
     if process["process_identity_sha256"] != expected:
         raise AdmissionError(f"{label} process identity seal mismatch")
+    if process["boot_id_sha256"] == "0" * 64:
+        raise AdmissionError(f"{label} process boot identity is unavailable")
+    containment = process["containment"]
+    if containment != {
+        "kind": delegated_cgroup.CGROUP_V2_KILL_V1,
+        "parent_cgroup_sha256": containment["parent_cgroup_sha256"],
+        "cgroup_inode": containment["cgroup_inode"],
+        "terminal_populated_zero": True,
+        "leaf_removed": True,
+    }:
+        raise AdmissionError(f"{label} process containment is not terminal")
+    if containment["parent_cgroup_sha256"] == "0" * 64:
+        raise AdmissionError(f"{label} parent cgroup identity is unavailable")
     _check_dt(process["started_at_utc"], f"{label} process started_at_utc")
 
 
@@ -257,26 +448,66 @@ def _verify_launch(launch: dict[str, Any], identity: dict[str, Any], row: dict[s
         raise AdmissionError(f"{label} launch geometry does not match successor matrix")
 
 
-def _import_ncu_report_csv(report_path: Path) -> tuple[str | None, Any]:
-    del report_path
-    raise AdmissionError(
-        "NCU_REPORT_EXPORTER_AUTHORITY_UNAVAILABLE: the frozen successor-v1 "
-        "preflight records no independently authorized NCU path and SHA-256"
+def _import_ncu_report_csv(
+    expected_ncu_identity: ncu_executor.ExpectedNcuIdentity,
+    report_path: Path,
+) -> tuple[str | None, str | None, Any]:
+    from tools.local_labels import parse_ncu_metrics
+
+    imported, error = parse_ncu_metrics._import_report_csv(
+        expected_ncu_identity,
+        report_path,
+        require_cgroup_containment=True,
     )
+    if error is not None or imported is None:
+        return None, None, error
+    return imported.text, imported.report_sha256, None
+
+
+def _ncu_dimension(value: Any, label: str) -> list[int]:
+    if type(value) is not str:
+        raise AdmissionError(f"NCU report {label} is not a string")
+    text = value.strip()
+    if text.startswith("(") or text.endswith(")"):
+        if not (text.startswith("(") and text.endswith(")")):
+            raise AdmissionError(f"NCU report {label} parentheses are malformed")
+        text = text[1:-1]
+    parts = [part.strip() for part in text.split(",")]
+    if len(parts) != 3 or any(
+        re.fullmatch(r"0|[1-9][0-9]*", part) is None for part in parts
+    ):
+        raise AdmissionError(f"NCU report {label} is not a 3D dimension")
+    dimensions = [int(part) for part in parts]
+    if any(value <= 0 for value in dimensions):
+        raise AdmissionError(f"NCU report {label} must be positive")
+    return dimensions
+
+
+def _ncu_device_name(value: Any) -> str:
+    if value not in {GPU_NAME, "0", f"{GPU_NAME} (0)"}:
+        raise AdmissionError("NCU report device differs from selected GPU 0")
+    return GPU_NAME
 
 
 def _verify_ncu_report(
+    expected_ncu_identity: ncu_executor.ExpectedNcuIdentity,
     report_path: Path,
     report_sha256: str,
     sidecar: dict[str, Any],
     observation: dict[str, Any],
-) -> None:
+    expected_launch_identity: dict[str, Any],
+    allowed_kernel_names: set[str],
+) -> dict[str, Any]:
     from tools.local_labels import metric_registry, parse_ncu_metrics
 
-    csv_text, import_error = _import_ncu_report_csv(report_path)
+    csv_text, imported_report_sha256, import_error = _import_ncu_report_csv(
+        expected_ncu_identity, report_path
+    )
     if import_error is not None or csv_text is None:
         detail = getattr(import_error, "detail", repr(import_error))
         raise AdmissionError(f"NCU report import failed: {detail}")
+    if imported_report_sha256 != report_sha256:
+        raise AdmissionError("NCU report import used different retained bytes")
     extraction = parse_ncu_metrics.extract_unit_tagged_metrics(
         csv_text,
         metric_registry.load_registry(),
@@ -316,14 +547,53 @@ def _verify_ncu_report(
         or observation.get("report_sha256") != report_sha256
     ):
         raise AdmissionError("NCU report launch identity disagrees with observation artifact")
+    parsed_identity = parsed_observation["identity"]
+    if parsed_identity.get("ID") != expected_launch_identity["ID"]:
+        raise AdmissionError("NCU report launch identity differs from successor launch")
+    device = _ncu_device_name(parsed_identity.get("Device"))
+    block_dim = _ncu_dimension(parsed_identity.get("Block Size"), "Block Size")
+    grid_dim = _ncu_dimension(parsed_identity.get("Grid Size"), "Grid Size")
+    if (
+        device != expected_launch_identity["Device"]
+        or block_dim != expected_launch_identity["Block Size"]
+        or grid_dim != expected_launch_identity["Grid Size"]
+    ):
+        raise AdmissionError("NCU report launch identity differs from successor launch")
+    kernel_name = parsed_identity["Kernel Name"]
+    if kernel_name not in allowed_kernel_names:
+        raise AdmissionError("NCU report kernel is absent from pinned SASS authority")
+    return {
+        "kernel_name": kernel_name,
+        "grid_dim": grid_dim,
+        "block_dim": block_dim,
+    }
+
+
+def _sass_kernel_names(row: dict[str, Any]) -> set[str]:
+    inventory = row["static_launch_inventory"]
+    sass_path = ROOT / inventory["sass_path"]
+    _regular(sass_path, "successor SASS authority")
+    payload = sass_path.read_bytes()
+    if sha256_bytes(payload) != inventory["sass_sha256"]:
+        raise AdmissionError("successor SASS authority hash mismatch")
+    try:
+        text = payload.decode("utf-8", errors="strict")
+    except UnicodeDecodeError as exc:
+        raise AdmissionError(f"successor SASS authority is not UTF-8: {exc}") from exc
+    names = set(re.findall(r"^\s*Function : (\S+)\s*$", text, flags=re.MULTILINE))
+    if len(names) != inventory["function_count"]:
+        raise AdmissionError("successor SASS function inventory differs")
+    return names
 
 
 def _verify_ncu_artifacts(
+    generation: _ReceiptGeneration,
     root: Path,
+    expected_ncu_identity: ncu_executor.ExpectedNcuIdentity,
     receipt: dict[str, Any],
     row: dict[str, Any],
     artifact_by_role: dict[str, list[dict[str, Any]]],
-) -> None:
+) -> dict[str, Any]:
     """Re-derive NCU identity and target-only metric semantics from payloads."""
     try:
         from tools.local_labels import import_label
@@ -331,7 +601,7 @@ def _verify_ncu_artifacts(
         sidecar_path = _safe_receipt_path(
             root, artifact_by_role["label_sidecar"][0]["path"], "label sidecar"
         )
-        sidecar = _load_json(sidecar_path, "label sidecar")
+        sidecar = _load_json(sidecar_path, "label sidecar", generation)
         result = import_label.validate(sidecar)
         if not result.ok:
             raise AdmissionError(
@@ -384,7 +654,7 @@ def _verify_ncu_artifacts(
     run_path = _safe_receipt_path(
         root, artifact_by_role["label_run_manifest"][0]["path"], "label run manifest"
     )
-    run = _load_json(run_path, "label run manifest")
+    run = _load_json(run_path, "label run manifest", generation)
     run_expected = {
         "source_commit": PINNED_BUNDLE_COMMIT,
         "binary_sha256": expected["binary_sha256"],
@@ -417,53 +687,171 @@ def _verify_ncu_artifacts(
         root, artifact_by_role["ncu_launch_observation"][0]["path"],
         "NCU launch observation",
     )
-    observation = _load_json(observation_path, "NCU launch observation")
-    if (
-        observation.get("schema_version") != 1
-        or observation.get("kind") != "ncu_details_csv_launch_observation"
-        or observation.get("requested_launch_skip") != 0
-        or observation.get("requested_launch_count") != 1
-        or observation.get("report_sha256") != report_artifact["sha256"]
-    ):
-        raise AdmissionError("NCU launch observation selector/report binding is invalid")
-    identity = observation.get("identity")
-    if not isinstance(identity, dict) or not isinstance(identity.get("Kernel Name"), str) or not identity["Kernel Name"]:
-        raise AdmissionError("NCU launch observation has no kernel identity")
-    observation_seal = observation.get("observation_sha256")
-    if observation_seal != canonical_sha(
-        {key: value for key, value in observation.items() if key != "observation_sha256"}
-    ):
-        raise AdmissionError("NCU launch observation seal mismatch")
-    _verify_ncu_report(
+    observation = _load_json(
+        observation_path, "NCU launch observation", generation,
+    )
+    try:
+        from tools.local_labels import parse_ncu_metrics
+
+        parse_ncu_metrics.validate_launch_observation_document(
+            observation,
+            requested_launch_skip=0,
+            requested_launch_count=1,
+            report_sha256=report_artifact["sha256"],
+        )
+    except Exception as exc:
+        raise AdmissionError(
+            f"NCU launch observation contract is invalid: {exc}"
+        ) from exc
+    launch_config = row["shape"]["trace_shape"]["launch_config"]
+    expected_launch_identity = {
+        "ID": "0",
+        "Device": GPU_NAME,
+        "Block Size": list(launch_config["block"]),
+        "Grid Size": list(launch_config["grid"]),
+    }
+    return _verify_ncu_report(
+        expected_ncu_identity,
         _safe_receipt_path(root, report_artifact["path"], "NCU report"),
         report_artifact["sha256"],
         sidecar,
         observation,
+        expected_launch_identity,
+        _sass_kernel_names(row),
     )
+
+
+def _nvbit_kernel_base(value: Any) -> str:
+    if type(value) is not str:
+        raise AdmissionError("NVBit admitted kernel name is not a string")
+    match = re.fullmatch(r"(.+)___(0|[1-9][0-9]*)", value)
+    if match is None:
+        raise AdmissionError("NVBit admitted kernel lacks its producer variant suffix")
+    if match.group(2) != "0":
+        raise AdmissionError(
+            "NVBit admitted kernel variant is ambiguous for the NCU launch join"
+        )
+    return match.group(1)
 
 
 def _verify_nvbit_artifacts(
+    generation: _ReceiptGeneration,
     root: Path,
     receipt: dict[str, Any],
+    row: dict[str, Any],
     artifact_by_role: dict[str, list[dict[str, Any]]],
-) -> None:
+) -> dict[str, Any]:
     """Re-derive the closed NVBit trace-summary contract from its JSON payload."""
+    trace_roles = {
+        "dynamic_trace",
+        "stats",
+        "threadblock",
+        "trace_summary",
+        "trace_auxiliary",
+    }
+    trace_size_bytes = sum(
+        artifact["size_bytes"]
+        for role in trace_roles
+        for artifact in artifact_by_role.get(role, [])
+    )
+    if trace_size_bytes > row["trace_budget"]["max_trace_bytes"]:
+        raise AdmissionError("NVBit trace artifacts exceed immutable trace byte budget")
     summary_path = _safe_receipt_path(
         root, artifact_by_role["trace_summary"][0]["path"], "NVBit trace summary"
     )
-    summary = _load_json(summary_path, "NVBit trace summary")
+    summary = _load_json(summary_path, "NVBit trace summary", generation)
     dynamic = artifact_by_role["dynamic_trace"][0]
     stats = artifact_by_role["stats"][0]
+    expected_summary_fields = {
+        "schema_version",
+        "producer",
+        "artifact_kind",
+        "trace_contract_id",
+        "memory_payload_classes",
+        "binary_version",
+        "nvbit_version",
+        "trace_contract_status",
+        "expected_record_count",
+        "admitted_record_count",
+        "threadblock_count",
+        "dynamic_trace",
+        "stats",
+    }
+    if set(summary) != expected_summary_fields:
+        raise AdmissionError("NVBit trace summary fields differ from closed contract")
+
+    dynamic_path = _safe_receipt_path(
+        root, dynamic["path"], "NVBit dynamic trace"
+    )
+    expected_trace_root = root / "nvbit" / row["successor_slug"]
+    if dynamic_path != expected_trace_root / "dynamic_trace.pb":
+        raise AdmissionError("NVBit dynamic trace path differs from canonical trace root")
+    for role in trace_roles:
+        for artifact in artifact_by_role.get(role, []):
+            artifact_path = _safe_receipt_path(
+                root, artifact["path"], f"NVBit {role} artifact"
+            )
+            try:
+                relative = artifact_path.relative_to(expected_trace_root)
+            except ValueError as exc:
+                raise AdmissionError(
+                    f"NVBit {role} artifact is outside canonical trace root"
+                ) from exc
+            if role == "stats" and relative != Path("stats.csv"):
+                raise AdmissionError("NVBit stats artifact path differs from producer path")
+            if role == "trace_summary" and relative != Path("trace_summary.json"):
+                raise AdmissionError(
+                    "NVBit trace summary artifact path differs from producer path"
+                )
+            if role == "threadblock" and (
+                len(relative.parts) < 2
+                or relative.parts[0] != "threadblocks"
+                or relative.suffix != ".pb"
+            ):
+                raise AdmissionError(
+                    "NVBit threadblock artifact path differs from producer tree"
+                )
+    try:
+        dynamic_payload = generation.read_bytes(dynamic_path)
+        if sha256_bytes(dynamic_payload) != dynamic["sha256"]:
+            raise AdmissionError("NVBit dynamic trace changed before metadata validation")
+        from tools.nvbit_tracer.proto_binding_loader import (
+            load_dynamic_trace_bindings,
+        )
+
+        trace_pb2 = load_dynamic_trace_bindings().trace_pb2
+        trace = trace_pb2.Trace()
+        trace.ParseFromString(dynamic_payload)
+    except AdmissionError:
+        raise
+    except Exception as exc:
+        raise AdmissionError(
+            f"NVBit trace producer metadata is unreadable: {exc}"
+        ) from exc
     if (
-        summary.get("schema_version") != 1
-        or summary.get("artifact_kind") != "cutlass_successor_nvbit_trace_summary"
-        or summary.get("trace_contract_id") != TRACE_CONTRACT_ID
-        or summary.get("memory_payload_classes") != TRACE_MEMORY_PAYLOAD_CLASSES
-        or summary.get("trace_contract_status") != "pass"
-        or summary.get("dynamic_trace") != Path(dynamic["path"]).name
-        or summary.get("stats") != Path(stats["path"]).name
+        type(trace.binary_version) is not int
+        or trace.binary_version != NVBIT_TRACE_BINARY_VERSION
+        or type(trace.nvbit_version) is not str
+        or trace.nvbit_version != NVBIT_VERSION
     ):
+        raise AdmissionError("NVBit dynamic trace producer version metadata differs")
+
+    expected_summary = {
+        "schema_version": 1,
+        "producer": NVBIT_TRACE_SUMMARY_PRODUCER,
+        "artifact_kind": "cutlass_successor_nvbit_trace_summary",
+        "trace_contract_id": TRACE_CONTRACT_ID,
+        "memory_payload_classes": TRACE_MEMORY_PAYLOAD_CLASSES,
+        "binary_version": NVBIT_TRACE_BINARY_VERSION,
+        "nvbit_version": NVBIT_VERSION,
+        "trace_contract_status": "pass",
+        "dynamic_trace": Path(dynamic["path"]).name,
+        "stats": Path(stats["path"]).name,
+    }
+    if any(summary.get(key) != value for key, value in expected_summary.items()):
         raise AdmissionError("NVBit trace summary semantics do not match payload inventory")
+    if type(summary["binary_version"]) is not int:
+        raise AdmissionError("NVBit trace summary producer version metadata differs")
     for key in ("expected_record_count", "admitted_record_count", "threadblock_count"):
         if type(summary.get(key)) is not int or summary[key] <= 0:
             raise AdmissionError(f"NVBit trace summary has invalid {key}")
@@ -473,9 +861,7 @@ def _verify_nvbit_artifacts(
         from tools.nvbit_tracer.import_trace_contract import validate_trace_dir
         from tools.nvbit_tracer.trace_admission import require_trace_admission
 
-        trace_root = _safe_receipt_path(
-            root, dynamic["path"], "NVBit dynamic trace"
-        ).parent
+        trace_root = dynamic_path.parent
         admission_result = require_trace_admission(trace_root)
         contract = validate_trace_dir(trace_root)
         if not contract.ok:
@@ -484,12 +870,31 @@ def _verify_nvbit_artifacts(
         raise
     except Exception as exc:
         raise AdmissionError(f"NVBit trace semantic validation failed: {exc}") from exc
+    if admission_result.dynamic_trace_sha256 != dynamic["sha256"]:
+        raise AdmissionError("NVBit trace admission used different dynamic trace bytes")
     if (
         summary["expected_record_count"] != admission_result.expected_record_count
         or summary["admitted_record_count"] != admission_result.admitted_record_count
         or summary["threadblock_count"] != admission_result.threadblock_count
     ):
         raise AdmissionError("NVBit trace summary counts do not match independent admission")
+    if len(admission_result.launches) != 1:
+        raise AdmissionError("NVBit trace must contain exactly one admitted launch")
+    launch = admission_result.launches[0]
+    if launch.launch_index != 0 or launch.device_id != 0 or not launch.kernel_name:
+        raise AdmissionError("NVBit admitted launch identity is invalid")
+    observed = {
+        "kernel_name": _nvbit_kernel_base(launch.kernel_name),
+        "grid_dim": [launch.grid_x, launch.grid_y, launch.grid_z],
+        "block_dim": [launch.block_x, launch.block_y, launch.block_z],
+    }
+    launch_config = row["shape"]["trace_shape"]["launch_config"]
+    if (
+        observed["grid_dim"] != launch_config["grid"]
+        or observed["block_dim"] != launch_config["block"]
+    ):
+        raise AdmissionError("NVBit admitted launch geometry differs from successor row")
+    return observed
 
 
 def _expected_preflight(
@@ -523,16 +928,146 @@ def _expected_preflight(
     }
 
 
+def _expected_ncu_command(
+    output_root: Path,
+    row: dict[str, Any],
+    ncu_identity: ncu_executor.ExpectedNcuIdentity,
+) -> list[str]:
+    binary = ROOT / row["static_launch_inventory"]["binary_path"]
+    arguments = [str(value) for value in row["shape"]["actual_args"]]
+    return [
+        str(ROOT / LABEL_DRIVER_REL),
+        "--device", "sm_86",
+        "--slug", row["successor_slug"],
+        "--shape-point", "trace_00",
+        "--repeat", "0",
+        "--launch", "0",
+        "--binary", str(binary),
+        "--warmup", "0",
+        "--ncu", ncu_identity.resolved_path,
+        "--ncu-executable-sha256", ncu_identity.executable_sha256,
+        "--ncu-version-line", ncu_identity.version_line,
+        "--out-dir", str(output_root),
+        "--expected-cuda-release", "13.2",
+        "--expected-ncu-version-prefix", "2026.1.0",
+        "--publication-metric-scope", "cycles_only_binding",
+        "--target-processes", "all",
+        "--filter-mode", "global",
+        "--replay-mode", "kernel",
+        "--profile-from-start", "off",
+        "--launch-skip", "0",
+        "--launch-count", "1",
+        "--clock-control", "none",
+        "--cache-control", "all",
+        "--unit-metric", "gpc__cycles_elapsed.max",
+        "--unit-metric", "gpu__time_duration.sum",
+        "--",
+        *arguments,
+    ]
+
+
+def _expected_nvbit_command(row: dict[str, Any]) -> list[str]:
+    binary = ROOT / row["static_launch_inventory"]["binary_path"]
+    arguments = [str(value) for value in row["shape"]["actual_args"]]
+    return [str(binary), *arguments]
+
+
+def _expected_nvbit_environment(
+    output_root: Path,
+    row: dict[str, Any],
+) -> dict[str, str]:
+    binary = ROOT / row["static_launch_inventory"]["binary_path"]
+    return {
+        "CUDA_INJECTION64_PATH": str(ROOT / NVBIT_TRACER_REL),
+        "CUDA_VISIBLE_DEVICES": "0",
+        "LANG": "C",
+        "LANGUAGE": "C",
+        "LC_ALL": "C",
+        "LD_LIBRARY_PATH": str(ROOT / NVBIT_PB_LIB_REL),
+        "PATH": NVBIT_COLLECTION_PATH,
+        "PWD": str(binary.parent.resolve(strict=True)),
+        "TRACES_FOLDER": str(output_root / "nvbit" / row["successor_slug"]),
+        "USER_DEFINED_FOLDERS": "1",
+    }
+
+
+def _validate_ncu_authority(
+    authority: Any,
+) -> ncu_executor.ExpectedNcuIdentity:
+    required = {
+        "status",
+        "expected",
+        "execution_mode",
+        "host_machine",
+        "launcher_resolved_path",
+        "launcher_sha256",
+        "launcher_target_relpath",
+        "resolved_path",
+        "executable_sha256",
+        "version_line",
+    }
+    if type(authority) is not dict or set(authority) != required:
+        raise AdmissionError("successor NCU authority fields differ")
+    if (
+        authority["status"] != campaign_preflight.STATUS_OK
+        or authority["expected"] != "2026.1.0"
+        or authority["execution_mode"] != campaign_preflight.NCU_EXECUTION_MODE
+        or authority["host_machine"] != campaign_preflight.NCU_HOST_MACHINE
+        or authority["launcher_target_relpath"]
+        != campaign_preflight.NCU_LAUNCHER_TARGET_RELPATH
+    ):
+        raise AdmissionError("successor NCU authority pins differ")
+    launcher = authority["launcher_resolved_path"]
+    resolved = authority["resolved_path"]
+    if (
+        type(launcher) is not str
+        or type(resolved) is not str
+        or not Path(launcher).is_absolute()
+        or not Path(resolved).is_absolute()
+        or os.path.normpath(launcher) != launcher
+        or os.path.normpath(resolved) != resolved
+        or Path(resolved) != Path(launcher).parent / authority["launcher_target_relpath"]
+    ):
+        raise AdmissionError("successor NCU authority paths differ")
+    if not all(
+        type(authority[name]) is str
+        and re.fullmatch(r"[0-9a-f]{64}", authority[name]) is not None
+        for name in ("launcher_sha256", "executable_sha256")
+    ):
+        raise AdmissionError("successor NCU authority hashes are invalid")
+    if authority["version_line"] != NCU_VERSION_LINE:
+        raise AdmissionError("successor NCU authority version line differs")
+    if (
+        launcher != NCU_LAUNCHER_PATH
+        or authority["launcher_sha256"] != NCU_LAUNCHER_SHA256
+        or resolved != NCU_EXECUTABLE_PATH
+        or authority["executable_sha256"] != NCU_EXECUTABLE_SHA256
+    ):
+        raise AdmissionError("successor NCU executable pins differ")
+    try:
+        return ncu_executor.build_expected_ncu_identity(
+            resolved_path=resolved,
+            executable_sha256=authority["executable_sha256"],
+            version_line=authority["version_line"],
+        )
+    except ncu_executor.NcuActionExecutorError as exc:
+        raise AdmissionError(
+            f"successor NCU executable authority is invalid: {exc}"
+        ) from exc
+
+
 def _verify_capture_documents(
+    generation: _ReceiptGeneration,
     root: Path,
     receipt: dict[str, Any],
     row: dict[str, Any],
     roster_row: dict[str, Any],
     artifact_by_role: dict[str, list[dict[str, Any]]],
-) -> None:
+) -> ncu_executor.ExpectedNcuIdentity | None:
     preflight = _load_json(
         _safe_receipt_path(root, artifact_by_role["preflight"][0]["path"], "preflight"),
         "preflight",
+        generation,
     )
     expected = _expected_preflight(row, roster_row)
     if preflight != expected or canonical_sha(preflight) != canonical_sha(expected):
@@ -546,6 +1081,7 @@ def _verify_capture_documents(
     environment = _load_json(
         _safe_receipt_path(root, artifact_by_role["environment"][0]["path"], "environment"),
         "environment",
+        generation,
     )
     if set(environment) != {
         "schema_version", "artifact_kind", "source_commit",
@@ -560,52 +1096,78 @@ def _verify_capture_documents(
     ):
         raise AdmissionError("successor environment pin binding is invalid")
     selected = environment["environment"]
-    selected_keys = {
-        "PATH", "LD_LIBRARY_PATH", "CUDA_HOME", "CUDA_PATH",
-        "NVBIT_PB_PREFIX", "CUDA_INJECTION64_PATH", "TRACES_FOLDER",
-        "USER_DEFINED_FOLDERS",
-    }
-    if not isinstance(selected, dict) or set(selected) != selected_keys or any(
-        not isinstance(value, str) for value in selected.values()
+    if not isinstance(selected, dict) or any(
+        type(name) is not str or type(value) is not str
+        for name, value in selected.items()
     ):
         raise AdmissionError("successor environment variables are not closed strings")
     if receipt["capture_kind"] == "nvbit":
+        expected_nvbit_environment = _expected_nvbit_environment(root, row)
+        if selected != expected_nvbit_environment:
+            raise AdmissionError("NVBit collection environment pins differ")
         trace_root = _safe_receipt_path(
             root, artifact_by_role["dynamic_trace"][0]["path"], "NVBit dynamic trace"
         ).parent
-        if selected["USER_DEFINED_FOLDERS"] != "1" or Path(selected["TRACES_FOLDER"]) != trace_root:
-            raise AdmissionError("NVBit environment injection controls are invalid")
-        if selected["CUDA_INJECTION64_PATH"] != str(
-            ROOT / "tools/nvbit_tracer/tracer_tool/tracer_tool.so"
+        if Path(selected["TRACES_FOLDER"]) != trace_root:
+            raise AdmissionError("NVBit trace output path differs from artifacts")
+    else:
+        allowed_ncu_environment_names = set(
+            NCU_COLLECTION_REQUIRED_ENVIRONMENT_NAMES
+        ) | set(NCU_COLLECTION_OPTIONAL_ENVIRONMENT_NAMES)
+        if (
+            not set(NCU_COLLECTION_REQUIRED_ENVIRONMENT_NAMES).issubset(selected)
+            or not set(selected).issubset(allowed_ncu_environment_names)
         ):
-            raise AdmissionError("NVBit tracer injection path is not pinned")
-    elif any(
-        selected[key]
-        for key in (
-            "NVBIT_PB_PREFIX", "CUDA_INJECTION64_PATH", "TRACES_FOLDER",
-            "USER_DEFINED_FOLDERS",
+            raise AdmissionError(
+                "successor NCU environment names differ from producer contract"
+            )
+        if any(
+            selected.get(name)
+            for name in (
+                "NVBIT_PB_PREFIX", "CUDA_INJECTION64_PATH", "TRACES_FOLDER",
+                "USER_DEFINED_FOLDERS",
+            )
+        ):
+            raise AdmissionError("NCU environment contains NVBit injection controls")
+        try:
+            ncu_environment = ncu_executor.NcuCollectionEnvironment(dict(selected))
+        except ncu_executor.NcuActionExecutorError as exc:
+            raise AdmissionError(
+                f"successor NCU collection environment is invalid: {exc}"
+            ) from exc
+        expected_pwd = str(
+            (ROOT / row["static_launch_inventory"]["binary_path"])
+            .parent.resolve(strict=True)
         )
-    ):
-        raise AdmissionError("NCU environment contains NVBit injection controls")
+        if (
+            ncu_environment.as_dict() != selected
+            or selected["PWD"] != expected_pwd
+            or selected.get("LD_SOURCE_COMMIT_OVERRIDE")
+            != PINNED_BUNDLE_COMMIT
+        ):
+            raise AdmissionError("successor NCU collection environment pins differ")
 
     live = environment["live_checks"]
-    live_keys = {
+    base_live_keys = {
         "smi_command", "smi_stdout_sha256", "competing_process_command",
         "competing_process_stdout_sha256", "nvcc_command", "nvcc_stdout_sha256",
-        "ncu_command", "ncu_stdout_sha256", "cuda_release", "nvbit_version",
-        "ncu_version", "gpu_name", "persistence_mode", "sm_clock_mhz",
-        "mem_clock_mhz",
+        "cuda_release", "nvbit_version", "gpu_name", "persistence_mode",
+        "sm_clock_mhz", "mem_clock_mhz",
     }
+    ncu_live_keys = {
+        "ncu_command", "ncu_stdout_sha256", "ncu_authority", "ncu_version",
+    }
+    live_keys = base_live_keys | (
+        ncu_live_keys if receipt["capture_kind"] == "ncu" else set()
+    )
     if not isinstance(live, dict) or set(live) != live_keys:
         raise AdmissionError("successor live-check document keys are not closed")
     if (
         live["smi_command"] != ["nvidia-smi", "--query-gpu=name,compute_cap,persistence_mode,clocks.sm,clocks.mem", "--format=csv,noheader,nounits"]
         or live["competing_process_command"] != ["nvidia-smi", "--query-compute-apps=pid,process_name", "--format=csv,noheader,nounits"]
         or live["nvcc_command"] != ["/usr/local/cuda-13.2/bin/nvcc", "--version"]
-        or live["ncu_command"] != ["ncu", "--version"]
         or live["cuda_release"] != {"major": 13, "minor": 2}
         or live["nvbit_version"] != "1.8"
-        or live["ncu_version"] != "2026.1.0"
         or live["gpu_name"] != "NVIDIA GeForce RTX 3090 Ti"
         or live["persistence_mode"] != "Enabled"
         or live["sm_clock_mhz"] != 1350
@@ -614,19 +1176,16 @@ def _verify_capture_documents(
         raise AdmissionError("successor live-check pins are invalid")
     outputs = environment["live_outputs"]
     output_keys = {
-        "smi_stdout", "competing_process_stdout", "nvcc_stdout", "ncu_stdout",
+        "smi_stdout", "competing_process_stdout", "nvcc_stdout",
     }
+    if receipt["capture_kind"] == "ncu":
+        output_keys.add("ncu_stdout")
     if not isinstance(outputs, dict) or set(outputs) != output_keys or any(
         not isinstance(value, str) for value in outputs.values()
     ):
         raise AdmissionError("successor live outputs are not closed strings")
-    output_hashes = {
-        "smi_stdout": "smi_stdout_sha256",
-        "competing_process_stdout": "competing_process_stdout_sha256",
-        "nvcc_stdout": "nvcc_stdout_sha256",
-        "ncu_stdout": "ncu_stdout_sha256",
-    }
-    for output_key, hash_key in output_hashes.items():
+    for output_key in output_keys:
+        hash_key = f"{output_key}_sha256"
         if sha256_bytes(outputs[output_key].encode()) != live[hash_key]:
             raise AdmissionError(f"successor live output hash mismatch: {output_key}")
     smi_lines = [line.strip() for line in outputs["smi_stdout"].splitlines() if line.strip()]
@@ -637,8 +1196,30 @@ def _verify_capture_documents(
         raise AdmissionError("successor competing-process output is not empty")
     if "release 13.2" not in outputs["nvcc_stdout"]:
         raise AdmissionError("successor nvcc output does not prove CUDA 13.2")
-    if "2026.1.0" not in outputs["ncu_stdout"]:
-        raise AdmissionError("successor NCU output does not prove 2026.1.0")
+    ncu_identity: ncu_executor.ExpectedNcuIdentity | None = None
+    if receipt["capture_kind"] == "ncu":
+        ncu_identity = _validate_ncu_authority(live["ncu_authority"])
+        if (
+            live["ncu_command"] != [ncu_identity.resolved_path, "--version"]
+            or live["ncu_version"] != "2026.1.0"
+        ):
+            raise AdmissionError("successor NCU live-check pins are invalid")
+        expected_ncu_stdout = (
+            "NVIDIA (R) Nsight Compute Command Line Profiler\n"
+            "Copyright (c) 2018-2026 NVIDIA Corporation\n"
+            f"{ncu_identity.version_line}\n"
+        )
+        if outputs["ncu_stdout"] != expected_ncu_stdout:
+            raise AdmissionError("successor NCU output differs from exact authority")
+        expected_command = _expected_ncu_command(root, row, ncu_identity)
+        if receipt["command"] != expected_command:
+            raise AdmissionError(
+                "successor NCU command authority differs from the exact row"
+            )
+    elif receipt["command"] != _expected_nvbit_command(row):
+        raise AdmissionError(
+            "successor NVBit command authority differs from the exact row"
+        )
     expected_host = canonical_sha({"gpu": live["gpu_name"], "smi": live["smi_stdout_sha256"]})
     if receipt["process"]["host_identity_sha256"] != expected_host:
         raise AdmissionError("successor process host identity does not match live output")
@@ -648,17 +1229,27 @@ def _verify_capture_documents(
             or any(char not in "0123456789abcdef" for char in live[key])
         ):
             raise AdmissionError(f"successor live-check hash is invalid: {key}")
+    return ncu_identity
 
 
 def _verify_receipt(
+    generation: _ReceiptGeneration,
     root: Path,
     path: Path,
     expected_rows: dict[tuple[str, str], dict[str, Any]],
     expected_roster_rows: dict[tuple[str, str], dict[str, Any]],
     used_artifacts: set[str],
-) -> tuple[tuple[str, str], str, dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]:
+) -> tuple[
+    tuple[str, str],
+    str,
+    dict[str, Any],
+    dict[str, Any],
+    dict[str, Any],
+    dict[str, Any],
+    dict[str, Any],
+]:
     rel = path.relative_to(root).as_posix()
-    document = _load_json(path, f"receipt {rel}")
+    document = _load_json(path, f"receipt {rel}", generation)
     _validate_schema(ROOT / RECEIPT_SCHEMA_REL, document, f"receipt {rel}")
     seal = document["receipt_seal_sha256"]
     if seal != canonical_sha({k: v for k, v in document.items() if k != "receipt_seal_sha256"}):
@@ -689,21 +1280,38 @@ def _verify_receipt(
         raise AdmissionError(f"receipt identity does not match matrix: {rel}")
     _verify_launch(receipt["launch_identity"], identity, row, rel)
     _verify_process(receipt["process"], rel)
+    if receipt["command_sha256"] != canonical_sha(receipt["command"]):
+        raise AdmissionError(f"{rel} command digest does not match receipt command")
     if receipt["process"]["command_sha256"] != receipt["command_sha256"]:
         raise AdmissionError(f"{rel} process command does not match receipt command")
     _check_dt(receipt["captured_at_utc"], f"{rel} captured_at_utc")
     expected_tool = ROOT / (
         "tools/local_labels/label_driver.sh"
         if receipt["capture_kind"] == "ncu"
-        else "tools/nvbit_tracer/tracer_tool/tracer_tool.so"
+        else NVBIT_TRACER_REL
     )
     _regular(expected_tool, "successor capture phase tool")
+    phase_tool_sha256 = sha256_bytes(expected_tool.read_bytes())
+    if (
+        receipt["capture_kind"] == "ncu"
+        and phase_tool_sha256 != LABEL_DRIVER_SHA256
+    ):
+        raise AdmissionError("successor label driver differs from pinned authority")
+    containment_sha256 = sha256_bytes(Path(delegated_cgroup.__file__).read_bytes())
+    if containment_sha256 != CGROUP_CONTAINMENT_SUPERVISOR_SHA256:
+        raise AdmissionError(
+            "successor cgroup containment supervisor differs from pinned authority"
+        )
     expected_provenance = {
-        "capture_producer_sha256": sha256_bytes(
-            (ROOT / "tools/local_labels/capture_cutlass_successor_receipts.py").read_bytes()
-        ),
-        "phase_tool_sha256": sha256_bytes(expected_tool.read_bytes()),
+        "capture_producer_sha256": _capture_producer_sha256(),
+        "containment_supervisor_sha256": containment_sha256,
+        "phase_tool_sha256": phase_tool_sha256,
     }
+    if receipt["capture_kind"] == "ncu":
+        executor_sha256 = sha256_bytes(Path(ncu_executor.__file__).read_bytes())
+        if executor_sha256 != NCU_ACTION_EXECUTOR_SHA256:
+            raise AdmissionError("successor NCU executor differs from pinned authority")
+        expected_provenance["action_executor_sha256"] = executor_sha256
     if receipt["provenance"] != expected_provenance:
         raise AdmissionError(f"{rel} capture tool provenance does not match current inputs")
     expected_semantics = (
@@ -739,7 +1347,7 @@ def _verify_receipt(
 
     for artifact in receipt["artifacts"]:
         role = artifact["role"]
-        if role in seen_roles and role != "threadblock":
+        if role in seen_roles and role not in {"threadblock", "trace_auxiliary"}:
             raise AdmissionError(f"duplicate artifact role in receipt: {rel}:{role}")
         seen_roles.add(role)
         if role not in expected_roles:
@@ -765,7 +1373,7 @@ def _verify_receipt(
         ):
             raise AdmissionError(f"threadblock artifact is outside threadblocks/: {artifact['path']}")
         artifact_by_role.setdefault(role, []).append(artifact)
-        payload = artifact_path.read_bytes()
+        payload = generation.read_bytes(artifact_path)
         if not payload:
             raise AdmissionError(f"zero-size artifact: {artifact_rel}")
         if sha256_bytes(payload) != artifact["sha256"] or len(payload) != artifact["size_bytes"]:
@@ -778,12 +1386,33 @@ def _verify_receipt(
         raise AdmissionError(f"{rel} preflight reference does not match typed artifact")
     if receipt["environment_sha256"] != environment["sha256"]:
         raise AdmissionError(f"{rel} environment hash does not match typed artifact")
-    _verify_capture_documents(root, receipt, row, roster_row, artifact_by_role)
+    expected_ncu_identity = _verify_capture_documents(
+        generation, root, receipt, row, roster_row, artifact_by_role
+    )
     if receipt["capture_kind"] == "ncu":
-        _verify_ncu_artifacts(root, receipt, row, artifact_by_role)
+        if expected_ncu_identity is None:
+            raise AdmissionError("NCU receipt lacks executable authority")
+        observed_launch = _verify_ncu_artifacts(
+            generation,
+            root,
+            expected_ncu_identity,
+            receipt,
+            row,
+            artifact_by_role,
+        )
     else:
-        _verify_nvbit_artifacts(root, receipt, artifact_by_role)
-    return pair_key, receipt["capture_kind"], receipt["identity"], receipt["launch_identity"], receipt["process"], _receipt_ref(root, rel, seal)
+        observed_launch = _verify_nvbit_artifacts(
+            generation, root, receipt, row, artifact_by_role
+        )
+    return (
+        pair_key,
+        receipt["capture_kind"],
+        receipt["identity"],
+        receipt["launch_identity"],
+        observed_launch,
+        receipt["process"],
+        _receipt_ref(generation, root, rel, seal),
+    )
 
 
 def _row_key(pair_key: tuple[str, str]) -> dict[str, str]:
@@ -818,33 +1447,45 @@ def _bundle_overlay_meta(matrix: dict[str, Any]) -> dict[str, Any]:
     return {**base, "bundle_identity_sha256": canonical_sha(base)}
 
 
-def build_overlay(receipt_root: Path, *, generated_at_utc: str) -> dict[str, Any]:
-    root = _external_root(receipt_root)
-    _check_dt(generated_at_utc, "generated_at_utc")
-    _, _, roster, matrix = validate_immutable_bundle()
-    expected = _expected_rows(matrix)
-    expected_roster = _expected_roster_rows(roster)
-    files = _inventory(root)
+def _build_overlay_from_generation(
+    generation: _ReceiptGeneration,
+    root: Path,
+    *,
+    generated_at_utc: str,
+    matrix: dict[str, Any],
+    expected: dict[tuple[str, str], dict[str, Any]],
+    expected_roster: dict[tuple[str, str], dict[str, Any]],
+) -> dict[str, Any]:
+    files = generation.paths
     receipt_files = [path for path in files if path.name.endswith(RECEIPT_SUFFIX)]
     extras = [path for path in files if not path.name.endswith(RECEIPT_SUFFIX)]
     used_artifacts: set[str] = set()
-    receipts: dict[tuple[str, str], dict[str, tuple[dict[str, Any], dict[str, Any], dict[str, Any], dict[str, Any]]]] = {}
+    receipts: dict[
+        tuple[str, str],
+        dict[
+            str,
+            tuple[
+                dict[str, Any],
+                dict[str, Any],
+                dict[str, Any],
+                dict[str, Any],
+                dict[str, Any],
+            ],
+        ],
+    ] = {}
     for path in receipt_files:
-        pair_key, kind, identity, launch, process, ref = _verify_receipt(
-            root, path, expected, expected_roster, used_artifacts
+        pair_key, kind, identity, launch, observed, process, ref = _verify_receipt(
+            generation, root, path, expected, expected_roster, used_artifacts
         )
         by_kind = receipts.setdefault(pair_key, {})
         if kind in by_kind:
             raise AdmissionError(f"duplicate {kind} receipt for {pair_key}")
-        by_kind[kind] = (identity, launch, process, ref)
+        by_kind[kind] = (identity, launch, observed, process, ref)
     referenced = set(used_artifacts) | {path.relative_to(root).as_posix() for path in receipt_files}
     extra_rel = [path.relative_to(root).as_posix() for path in extras if path.relative_to(root).as_posix() not in referenced]
     if extra_rel:
         raise AdmissionError(f"unreferenced extra receipt files: {extra_rel}")
-    inventory = [
-        {"path": path.relative_to(root).as_posix(), "sha256": sha256_bytes(path.read_bytes()), "size_bytes": path.stat().st_size}
-        for path in files
-    ]
+    inventory = generation.inventory()
     rows: list[dict[str, Any]] = []
     ready_keys: list[tuple[str, str]] = []
     for pair_key in expected:
@@ -855,12 +1496,14 @@ def build_overlay(receipt_root: Path, *, generated_at_utc: str) -> dict[str, Any
             rows.append({"matrix_key": pair_key[0], "variant_id": pair_key[1], "status": "pending", "typed_reason": "ncu_and_nvbit_receipts_absent", "ncu_receipt": None, "nvbit_receipt": None, "identity": None, "launch_identity": None, "process_separation": None})
             continue
         if ncu is None or nvbit is None:
-            rows.append({"matrix_key": pair_key[0], "variant_id": pair_key[1], "status": "pending", "typed_reason": "ncu_receipt_absent" if ncu is None else "nvbit_receipt_absent", "ncu_receipt": ncu[3] if ncu else None, "nvbit_receipt": nvbit[3] if nvbit else None, "identity": None, "launch_identity": None, "process_separation": None})
+            rows.append({"matrix_key": pair_key[0], "variant_id": pair_key[1], "status": "pending", "typed_reason": "ncu_receipt_absent" if ncu is None else "nvbit_receipt_absent", "ncu_receipt": ncu[4] if ncu else None, "nvbit_receipt": nvbit[4] if nvbit else None, "identity": None, "launch_identity": None, "process_separation": None})
             continue
-        identity, launch, ncu_process, ncu_ref = ncu
-        nv_identity, nv_launch, nv_process, nv_ref = nvbit
+        identity, launch, ncu_observed, ncu_process, ncu_ref = ncu
+        nv_identity, nv_launch, nv_observed, nv_process, nv_ref = nvbit
         if identity != nv_identity or launch != nv_launch:
             raise AdmissionError(f"NCU/NVBit identity or launch join mismatch: {pair_key}")
+        if ncu_observed != nv_observed:
+            raise AdmissionError(f"NCU/NVBit observed launch join mismatch: {pair_key}")
         separation = _process_separation(ncu_process, nv_process)
         rows.append({"matrix_key": pair_key[0], "variant_id": pair_key[1], "status": "capture_ready", "typed_reason": "valid_joined_receipt_pair", "ncu_receipt": ncu_ref, "nvbit_receipt": nv_ref, "identity": identity, "launch_identity": launch, "process_separation": separation})
         ready_keys.append(pair_key)
@@ -895,7 +1538,44 @@ def build_overlay(receipt_root: Path, *, generated_at_utc: str) -> dict[str, Any
     return document
 
 
-def write_overlay(document: dict[str, Any], output: Path, receipt_root: Path) -> None:
+def _receipt_generation_limits() -> dict[str, int]:
+    return {
+        "max_files": RECEIPT_TREE_MAX_FILES,
+        "max_directories": RECEIPT_TREE_MAX_DIRECTORIES,
+        "max_total_file_bytes": RECEIPT_TREE_MAX_TOTAL_FILE_BYTES,
+        "max_total_relative_path_bytes": (
+            RECEIPT_TREE_MAX_TOTAL_RELATIVE_PATH_BYTES
+        ),
+    }
+
+
+def build_overlay(receipt_root: Path, *, generated_at_utc: str) -> dict[str, Any]:
+    root = _external_root(receipt_root)
+    _check_dt(generated_at_utc, "generated_at_utc")
+    _, _, roster, matrix = validate_immutable_bundle()
+    expected = _expected_rows(matrix)
+    expected_roster = _expected_roster_rows(roster)
+    try:
+        with immutable.PinnedDirectoryReader(root) as reader:
+            with reader.retain_tree_generation(
+                **_receipt_generation_limits()
+            ) as snapshot:
+                generation = _ReceiptGeneration(root, reader, snapshot)
+                return _build_overlay_from_generation(
+                    generation,
+                    root,
+                    generated_at_utc=generated_at_utc,
+                    matrix=matrix,
+                    expected=expected,
+                    expected_roster=expected_roster,
+                )
+    except immutable.ImmutableArtifactError as exc:
+        raise AdmissionError(
+            f"receipt tree immutable generation validation failed: {exc}"
+        ) from exc
+
+
+def _overlay_output_target(output: Path, receipt_root: Path) -> tuple[Path, Path]:
     if not output.is_absolute():
         raise AdmissionError("overlay output must be an absolute path")
     resolved_root = _external_root(receipt_root)
@@ -906,16 +1586,97 @@ def write_overlay(document: dict[str, Any], output: Path, receipt_root: Path) ->
         pass
     else:
         raise AdmissionError("overlay output must not be inside receipt root")
-    if output.exists() or output.is_symlink():
-        raise AdmissionError(f"refusing to overwrite existing overlay: {output}")
-    if not output.parent.is_dir() or output.parent.is_symlink():
-        raise AdmissionError(f"overlay output parent is unavailable: {output.parent}")
-    payload = (json.dumps(document, indent=2, sort_keys=True) + "\n").encode("utf-8")
+    return resolved_root, target
+
+
+def _overlay_payload(document: dict[str, Any]) -> bytes:
+    return (json.dumps(document, indent=2, sort_keys=True) + "\n").encode("utf-8")
+
+
+def write_overlay(document: dict[str, Any], output: Path, receipt_root: Path) -> None:
+    _resolved_root, _target = _overlay_output_target(output, receipt_root)
+    payload = _overlay_payload(document)
     try:
-        with output.open("xb") as stream:
-            stream.write(payload)
-    except OSError as exc:
-        raise AdmissionError(f"cannot write overlay {output}: {exc}") from exc
+        with immutable.PinnedDirectoryReader(output.parent) as parent:
+            immutable.write_regular_bytes_at(
+                parent.descriptor,
+                output.name,
+                payload,
+                mode=0o444,
+            )
+            parent.verify_path()
+    except (OSError, immutable.ImmutableArtifactError) as exc:
+        raise AdmissionError(f"cannot exclusively write overlay {output}: {exc}") from exc
+
+
+def build_and_write_overlay(
+    receipt_root: Path,
+    output: Path,
+    *,
+    generated_at_utc: str,
+) -> dict[str, Any]:
+    """Build and publish while one receipt-tree generation remains retained."""
+
+    root, _target = _overlay_output_target(output, receipt_root)
+    _check_dt(generated_at_utc, "generated_at_utc")
+    _, _, roster, matrix = validate_immutable_bundle()
+    expected = _expected_rows(matrix)
+    expected_roster = _expected_roster_rows(roster)
+    try:
+        with (
+            contextlib.ExitStack() as source_stack,
+            contextlib.ExitStack() as output_stack,
+        ):
+            reader = source_stack.enter_context(
+                immutable.PinnedDirectoryReader(root)
+            )
+            snapshot = source_stack.enter_context(
+                reader.retain_tree_generation(
+                    **_receipt_generation_limits()
+                )
+            )
+            generation = _ReceiptGeneration(root, reader, snapshot)
+            document = _build_overlay_from_generation(
+                generation,
+                root,
+                generated_at_utc=generated_at_utc,
+                matrix=matrix,
+                expected=expected,
+                expected_roster=expected_roster,
+            )
+            output_parent = output_stack.enter_context(
+                immutable.PinnedDirectoryReader(output.parent)
+            )
+
+            def authorize_published_overlay() -> None:
+                try:
+                    source_stack.close()
+                except immutable.ImmutableArtifactError as exc:
+                    raise AdmissionError(
+                        "receipt tree immutable generation validation failed: "
+                        f"{exc}"
+                    ) from exc
+                try:
+                    output_stack.close()
+                except (OSError, immutable.ImmutableArtifactError) as exc:
+                    raise AdmissionError(
+                        f"overlay output parent closure failed: {exc}"
+                    ) from exc
+
+            immutable.publish_regular_file(
+                output.parent,
+                output.name,
+                _overlay_payload(document),
+                pinned_parent=output_parent,
+                after_commit=authorize_published_overlay,
+            )
+            return document
+    except AdmissionError:
+        raise
+    except (OSError, immutable.ImmutableArtifactError) as exc:
+        raise AdmissionError(
+            f"cannot transactionally publish overlay {output}: {exc}"
+        ) from exc
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -925,8 +1686,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--generated-at-utc", default="2026-07-23T00:00:00Z")
     args = parser.parse_args(argv)
     try:
-        document = build_overlay(args.receipt_root, generated_at_utc=args.generated_at_utc)
-        write_overlay(document, args.output, args.receipt_root)
+        build_and_write_overlay(
+            args.receipt_root,
+            args.output,
+            generated_at_utc=args.generated_at_utc,
+        )
     except (AdmissionError, OSError, ValueError, jsonschema.SchemaError) as exc:
         print(f"CUTLASS successor capture admission failed: {exc}", file=sys.stderr)
         return 1

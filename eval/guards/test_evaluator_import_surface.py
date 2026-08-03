@@ -41,7 +41,7 @@ import pytest
 REPO_ROOT = Path(__file__).resolve().parents[2]
 REGISTRY_RELATIVE = "eval/guards/evaluator_import_surface_registry.v1.json"
 SCHEMA_RELATIVE = "eval/guards/evaluator_import_surface_registry.v1.schema.json"
-REGISTRY_SHA256 = "bcc229a2acd82e0526c9a4fad9f3314525a0a465e0bfc2bef62a774821355b7f"
+REGISTRY_SHA256 = "050dbcb9db9ac491b7ce25e19b00ae99e7b1346040f316e5e5cfa7ff21ec8716"
 ENTRYPOINT = "eval/production_evaluator/__init__.py"
 ENTRYPOINT_MODULE = "eval.production_evaluator"
 SCHEMA_ID = (

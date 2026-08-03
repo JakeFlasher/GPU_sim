@@ -696,6 +696,7 @@ def collect_golden_ncu(
                     arguments,
                     timeout_seconds=timeout_seconds,
                     auxiliary_descriptors=(retained_binary.descriptor,),
+                    require_cgroup_containment=True,
                 )
             except ncu_executor.NcuActionExecutorError as exc:
                 raise GoldenNcuCaptureError(str(exc)) from exc

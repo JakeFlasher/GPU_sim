@@ -2198,6 +2198,53 @@ class PinnedDirectoryReader:
         self.verify_path()
         return snapshot
 
+    @contextlib.contextmanager
+    def retain_tree_generation(
+        self,
+        *,
+        require_readonly_files: bool = False,
+        require_readonly_directories: bool = False,
+        max_files: int | None = None,
+        max_directories: int | None = None,
+        max_total_file_bytes: int | None = None,
+        max_total_relative_path_bytes: int | None = None,
+    ) -> Iterable[PinnedTreeSnapshot]:
+        """Hold one monitored tree generation across caller-owned reads."""
+        limits = {
+            "max_files": max_files,
+            "max_directories": max_directories,
+            "max_total_file_bytes": max_total_file_bytes,
+            "max_total_relative_path_bytes": max_total_relative_path_bytes,
+        }
+        monitor = _arm_directory_mutation_monitor(
+            self._root.descriptor, **limits,
+        )
+        try:
+            initial = self.snapshot_tree(
+                require_readonly_files=require_readonly_files,
+                require_readonly_directories=require_readonly_directories,
+                **limits,
+            )
+            monitor.require_quiet()
+            yield initial
+            monitor.require_quiet()
+            final = self.snapshot_tree(
+                require_readonly_files=require_readonly_files,
+                require_readonly_directories=require_readonly_directories,
+                **limits,
+            )
+            if final != initial:
+                raise ImmutableArtifactError(
+                    "retained tree generation changed during use"
+                )
+            self.verify_path()
+            monitor.require_quiet()
+        except BaseException:
+            monitor.cancel_close_verification()
+            raise
+        finally:
+            monitor.close()
+
     def close(self) -> None:
         binding = self._binding
         self._binding = None
