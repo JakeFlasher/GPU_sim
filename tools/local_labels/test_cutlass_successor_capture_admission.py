@@ -46,6 +46,21 @@ _REPORT_IDENTITY = {
 }
 
 
+def _nvbit_startup_stderr(context: bytes = b"555f69dd8fc0") -> bytes:
+    return (
+        b"WARNING: Do not call CUDA memory allocation in nvbit_at_ctx_init(). "
+        b"It will cause deadlocks. Do them in nvbit_tool_init(). If you "
+        b"encounter deadlocks, remove CUDA API calls to debug.\n"
+        b"INFO: tracer binary_version initialised per-context from device "
+        b"compute capability at tool-init: binary_version=86 (ctx=0x"
+        + context
+        + b")\n"
+        b"INFO: cuFuncGetAttribute(BINARY_VERSION) returned attr_bv=0 "
+        b"(CUresult=400); falling back to device compute capability 8.6 -> "
+        b"binary_version=86\n"
+    )
+
+
 def _row_report_identity(
     row: dict,
     *,
@@ -859,6 +874,10 @@ def _receipt(root: Path, row: dict, kind: str, index: int) -> Path:
                 "trace_contract_status": "pass", "expected_record_count": 1,
                 "admitted_record_count": 1, "threadblock_count": 1,
                 "dynamic_trace": "dynamic_trace.pb", "stats": "stats.csv",
+                "capture_stdout": None, "capture_stderr": None,
+                "capture_stderr_protocol": (
+                    admit.NVBIT_CAPTURE_STDERR_PROTOCOL
+                ),
             }, sort_keys=True).encode()
         (root / relative).parent.mkdir(parents=True, exist_ok=True)
         (root / relative).write_bytes(payload)
@@ -937,6 +956,36 @@ def _all_pairs(root: Path) -> None:
 
 def _rewrite(path: Path, document: dict) -> None:
     path.write_text(json.dumps(_seal(document), indent=2, sort_keys=True) + "\n")
+
+
+def _bind_nvbit_capture_stderr(
+    root: Path,
+    receipt_path: Path,
+    payload: bytes,
+) -> None:
+    document = json.loads(receipt_path.read_text())
+    artifacts = document["receipt"]["artifacts"]
+    summary_artifact = next(
+        item for item in artifacts if item["role"] == "trace_summary"
+    )
+    summary_path = root / summary_artifact["path"]
+    summary = json.loads(summary_path.read_text())
+    summary["capture_stderr"] = admit.NVBIT_CAPTURE_STDERR_NAME
+    summary_payload = json.dumps(summary, sort_keys=True).encode()
+    summary_path.write_bytes(summary_payload)
+    summary_artifact["sha256"] = admit.sha256_bytes(summary_payload)
+    summary_artifact["size_bytes"] = len(summary_payload)
+
+    stream_path = summary_path.parent / admit.NVBIT_CAPTURE_STDERR_NAME
+    stream_path.write_bytes(payload)
+    relative = stream_path.relative_to(root).as_posix()
+    artifacts.append({
+        "role": "trace_auxiliary",
+        "path": relative,
+        "sha256": admit.sha256_bytes(payload),
+        "size_bytes": len(payload),
+    })
+    _rewrite(receipt_path, document)
 
 
 def _mutate_json_artifact(root: Path, receipt_path: Path, role: str, mutate) -> None:
@@ -1637,6 +1686,89 @@ def test_nvbit_trace_summary_producer_metadata_is_pinned(
         lambda summary: summary.update({field: value}),
     )
     with pytest.raises(admit.AdmissionError, match="trace summary semantics"):
+        admit.build_overlay(
+            tmp_path,
+            generated_at_utc="2026-07-23T01:00:00Z",
+        )
+
+
+def test_nvbit_startup_stderr_is_retained_and_revalidated(tmp_path: Path):
+    target = _receipt(tmp_path, MATRIX["rows"][0], "nvbit", 0)
+    _bind_nvbit_capture_stderr(
+        tmp_path,
+        target,
+        _nvbit_startup_stderr(),
+    )
+
+    overlay = admit.build_overlay(
+        tmp_path,
+        generated_at_utc="2026-07-23T01:00:00Z",
+    )
+    assert overlay["rows"][0]["status"] == "pending"
+    assert overlay["rows"][0]["typed_reason"] == "ncu_receipt_absent"
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        _nvbit_startup_stderr() + b"extra\n",
+        _nvbit_startup_stderr(b"0"),
+        b"arbitrary warning\n",
+    ],
+)
+def test_nvbit_startup_stderr_drift_is_rejected(
+    tmp_path: Path,
+    payload: bytes,
+):
+    target = _receipt(tmp_path, MATRIX["rows"][0], "nvbit", 0)
+    _bind_nvbit_capture_stderr(tmp_path, target, payload)
+
+    with pytest.raises(admit.AdmissionError, match="stderr differs"):
+        admit.build_overlay(
+            tmp_path,
+            generated_at_utc="2026-07-23T01:00:00Z",
+        )
+
+
+def test_nvbit_canonical_stream_rejects_receipt_controlled_role(
+    tmp_path: Path,
+):
+    target = _receipt(tmp_path, MATRIX["rows"][0], "nvbit", 0)
+    _bind_nvbit_capture_stderr(
+        tmp_path,
+        target,
+        _nvbit_startup_stderr(),
+    )
+    document = json.loads(target.read_text())
+    artifacts = document["receipt"]["artifacts"]
+    stream = next(
+        item for item in artifacts
+        if item["path"].endswith(admit.NVBIT_CAPTURE_STDERR_NAME)
+    )
+    artifacts.remove(stream)
+    stream["role"] = "preflight"
+    artifacts.insert(0, stream)
+    _rewrite(target, document)
+
+    with pytest.raises(admit.AdmissionError, match="wrong artifact role"):
+        admit.build_overlay(
+            tmp_path,
+            generated_at_utc="2026-07-23T01:00:00Z",
+        )
+
+
+def test_nvbit_declared_stderr_requires_retained_artifact(tmp_path: Path):
+    target = _receipt(tmp_path, MATRIX["rows"][0], "nvbit", 0)
+    _mutate_json_artifact(
+        tmp_path,
+        target,
+        "trace_summary",
+        lambda summary: summary.update({
+            "capture_stderr": admit.NVBIT_CAPTURE_STDERR_NAME,
+        }),
+    )
+
+    with pytest.raises(admit.AdmissionError, match="summary binding differs"):
         admit.build_overlay(
             tmp_path,
             generated_at_utc="2026-07-23T01:00:00Z",

@@ -440,6 +440,8 @@ def test_nvbit_descriptor_execution_and_post_validation_failure_provenance(
             return False
 
     def finalize(**kwargs):
+        assert kwargs["capture_stdout"] == b"validated stdout"
+        assert kwargs["capture_stderr"] == b""
         kwargs["generation_stack"].enter_context(GenerationGuard())
         raise failure_type("synthetic post-validation failure")
 
@@ -1975,6 +1977,111 @@ def test_ncu_handoff_accepts_only_exact_driver_result(
         stdout=b"",
         stderr=capture._NCU_HANDOFF_STDERR,
     )
+
+
+def _nvbit_startup_stderr(context: bytes = b"555f69dd8fc0") -> bytes:
+    return (
+        b"WARNING: Do not call CUDA memory allocation in nvbit_at_ctx_init(). "
+        b"It will cause deadlocks. Do them in nvbit_tool_init(). If you "
+        b"encounter deadlocks, remove CUDA API calls to debug.\n"
+        b"INFO: tracer binary_version initialised per-context from device "
+        b"compute capability at tool-init: binary_version=86 (ctx=0x"
+        + context
+        + b")\n"
+        b"INFO: cuFuncGetAttribute(BINARY_VERSION) returned attr_bv=0 "
+        b"(CUresult=400); falling back to device compute capability 8.6 -> "
+        b"binary_version=86\n"
+    )
+
+
+def test_nvbit_protocol_accepts_empty_or_exact_startup_diagnostics():
+    for stderr in (b"", _nvbit_startup_stderr()):
+        assert capture._nvbit_capture_stderr_matches(stderr)
+        assert capture._capture_protocol_succeeded(
+            "nvbit",
+            returncode=0,
+            stdout=b"bounded tracer diagnostics",
+            stderr=stderr,
+        )
+    assert not capture._capture_protocol_succeeded(
+        "nvbit",
+        returncode=1,
+        stdout=b"bounded tracer diagnostics",
+        stderr=_nvbit_startup_stderr(),
+    )
+
+
+@pytest.mark.parametrize(
+    "stderr",
+    [
+        _nvbit_startup_stderr() + b"extra\n",
+        _nvbit_startup_stderr(b"0"),
+        _nvbit_startup_stderr().replace(b"binary_version=86", b"binary_version=120", 1),
+        _nvbit_startup_stderr().replace(b"CUresult=400", b"CUresult=0"),
+        b"arbitrary warning\n",
+    ],
+)
+def test_nvbit_protocol_rejects_malformed_startup_diagnostics(stderr: bytes):
+    assert not capture._nvbit_capture_stderr_matches(stderr)
+    assert not capture._capture_protocol_succeeded(
+        "nvbit",
+        returncode=0,
+        stdout=b"bounded tracer diagnostics",
+        stderr=stderr,
+    )
+
+
+def test_nvbit_stream_artifacts_bind_exact_captured_buffers(tmp_path: Path):
+    trace_root = tmp_path / "nvbit" / "synthetic"
+    trace_root.mkdir(parents=True)
+    stdout = b"captured stdout"
+    stderr = _nvbit_startup_stderr()
+    stdout_path = trace_root / capture._NVBIT_CAPTURE_STDOUT_NAME
+    stderr_path = trace_root / capture._NVBIT_CAPTURE_STDERR_NAME
+    stdout_path.write_bytes(stdout)
+    stderr_path.write_bytes(stderr)
+    artifacts = [
+        capture._artifact(tmp_path, stdout_path, "trace_auxiliary"),
+        capture._artifact(tmp_path, stderr_path, "trace_auxiliary"),
+    ]
+
+    capture._require_nvbit_stream_artifact_bindings(
+        tmp_path,
+        trace_root,
+        artifacts,
+        capture_stdout=stdout,
+        capture_stderr=stderr,
+    )
+
+
+@pytest.mark.parametrize(
+    ("captured", "retained"),
+    [
+        (b"captured stdout", b"substituted stdout"),
+        (b"", b"unexpected stdout"),
+    ],
+)
+def test_nvbit_stream_artifacts_reject_substitution_or_empty_vacuity(
+    tmp_path: Path,
+    captured: bytes,
+    retained: bytes,
+):
+    trace_root = tmp_path / "nvbit" / "synthetic"
+    trace_root.mkdir(parents=True)
+    stream_path = trace_root / capture._NVBIT_CAPTURE_STDOUT_NAME
+    stream_path.write_bytes(retained)
+    artifacts = [capture._artifact(
+        tmp_path, stream_path, "trace_auxiliary",
+    )]
+
+    with pytest.raises(capture.CaptureError, match="capture stream artifact"):
+        capture._require_nvbit_stream_artifact_bindings(
+            tmp_path,
+            trace_root,
+            artifacts,
+            capture_stdout=captured,
+            capture_stderr=b"",
+        )
 
 
 def test_ncu_authority_requires_launcher_inner_path_binding():

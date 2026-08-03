@@ -72,7 +72,7 @@ CAPTURE_STREAM_READ_BYTES = 64 * 1024
 CAPTURE_PROCESS_POLL_S = 0.05
 CAPTURE_CLEANUP_TIMEOUT_S = 5.0
 CAPTURE_PRODUCER_SELF_SHA256 = (
-    "816eb26f885e91ef76b8ce0db45b2b95f4a53518c9793095817cc5e51aa57ef2"
+    "da3b3dc996227b93559e30a91fb9d85e44582283cf926e0f0b2994b4b1cc924b"
 )
 EXPECTED_TRACE_CONTRACT_ID = admission.TRACE_CONTRACT_ID
 EXPECTED_MEMORY_PAYLOAD_CLASSES = admission.TRACE_MEMORY_PAYLOAD_CLASSES
@@ -83,6 +83,21 @@ _LABEL_COLLECTION_ENVIRONMENT_NAMES = (
 _NCU_HANDOFF_STDERR = (
     b"label_driver: NCU_LAUNCH_SET_POSTPROCESSING_UNIMPLEMENTED: "
     b"explicit launch-set report retained without a sidecar\n"
+)
+NVBIT_CAPTURE_STDERR_PROTOCOL = (
+    "nvbit_1_8_sm86_empty_or_startup_diagnostics_v1"
+)
+_NVBIT_CAPTURE_STDOUT_NAME = "capture_process.stdout.bin"
+_NVBIT_CAPTURE_STDERR_NAME = "capture_process.stderr.bin"
+_NVBIT_CAPTURE_STDERR_PATTERN = re.compile(
+    rb"WARNING: Do not call CUDA memory allocation in nvbit_at_ctx_init\(\)\. "
+    rb"It will cause deadlocks\. Do them in nvbit_tool_init\(\)\. If you "
+    rb"encounter deadlocks, remove CUDA API calls to debug\.\n"
+    rb"INFO: tracer binary_version initialised per-context from device compute "
+    rb"capability at tool-init: binary_version=86 \(ctx=0x[1-9a-f][0-9a-f]*\)\n"
+    rb"INFO: cuFuncGetAttribute\(BINARY_VERSION\) returned attr_bv=0 "
+    rb"\(CUresult=400\); falling back to device compute capability 8\.6 -> "
+    rb"binary_version=86\n"
 )
 _NCU_INITIAL_ARTIFACT_NAMES = frozenset({
     "label_run_manifest_0_launch_set.json",
@@ -1330,6 +1345,41 @@ def _artifact(root: Path, path: Path, role: str) -> dict[str, Any]:
     return {"role": role, "path": relative, "sha256": sha256_bytes(payload), "size_bytes": len(payload)}
 
 
+def _require_nvbit_stream_artifact_bindings(
+    root: Path,
+    trace_root: Path,
+    artifacts: list[dict[str, Any]],
+    *,
+    capture_stdout: bytes,
+    capture_stderr: bytes,
+) -> None:
+    for name, payload in (
+        (_NVBIT_CAPTURE_STDOUT_NAME, capture_stdout),
+        (_NVBIT_CAPTURE_STDERR_NAME, capture_stderr),
+    ):
+        relative = (trace_root / name).relative_to(root).as_posix()
+        matches = [
+            artifact for artifact in artifacts
+            if artifact["path"] == relative
+        ]
+        if not payload:
+            if matches:
+                raise CaptureError(
+                    "NVBit capture stream artifact exists for an empty buffer"
+                )
+            continue
+        expected = {
+            "role": "trace_auxiliary",
+            "path": relative,
+            "sha256": sha256_bytes(payload),
+            "size_bytes": len(payload),
+        }
+        if matches != [expected]:
+            raise CaptureError(
+                "NVBit capture stream artifact differs from captured buffer"
+            )
+
+
 def _require_directory_namespace(
     parent: immutable.PinnedDirectoryReader,
     *,
@@ -1996,6 +2046,8 @@ def _finalize_capture_in_generation(
     environment_out: Path,
     environment_payload: bytes,
     receipt_path: Path,
+    capture_stdout: bytes = b"",
+    capture_stderr: bytes = b"",
 ) -> tuple[Path, bytes]:
     process = {
         "host_identity_sha256": _host_identity_sha256(live),
@@ -2077,6 +2129,14 @@ def _finalize_capture_in_generation(
         }
     else:
         trace_root = root / "nvbit" / row["successor_slug"]
+        if not _nvbit_capture_stderr_matches(capture_stderr):
+            raise CaptureError("NVBit capture stderr differs from closed protocol")
+        capture_stdout_path = trace_root / _NVBIT_CAPTURE_STDOUT_NAME
+        capture_stderr_path = trace_root / _NVBIT_CAPTURE_STDERR_NAME
+        if capture_stdout:
+            _write_new(capture_stdout_path, capture_stdout)
+        if capture_stderr:
+            _write_new(capture_stderr_path, capture_stderr)
         try:
             admission_result = require_trace_admission(trace_root)
             contract = validate_trace_dir(trace_root)
@@ -2101,6 +2161,13 @@ def _finalize_capture_in_generation(
             "threadblock_count": admission_result.threadblock_count,
             "dynamic_trace": "dynamic_trace.pb",
             "stats": "stats.csv",
+            "capture_stdout": (
+                _NVBIT_CAPTURE_STDOUT_NAME if capture_stdout else None
+            ),
+            "capture_stderr": (
+                _NVBIT_CAPTURE_STDERR_NAME if capture_stderr else None
+            ),
+            "capture_stderr_protocol": NVBIT_CAPTURE_STDERR_PROTOCOL,
         }
         summary_path = trace_root / "trace_summary.json"
         summary_payload = (
@@ -2148,6 +2215,13 @@ def _finalize_capture_in_generation(
                 relative = path.relative_to(root).as_posix()
                 if relative not in known_paths:
                     artifacts.append(_artifact(root, path, "trace_auxiliary"))
+        _require_nvbit_stream_artifact_bindings(
+            root,
+            trace_root,
+            artifacts,
+            capture_stdout=capture_stdout,
+            capture_stderr=capture_stderr,
+        )
         semantic = {
             "semantic_kind": "nvbit_trace_validation",
             "trace_contract_status": "pass",
@@ -2229,6 +2303,8 @@ def _finalize_capture(
     environment_out: Path,
     environment_payload: bytes,
     receipt_path: Path,
+    capture_stdout: bytes = b"",
+    capture_stderr: bytes = b"",
 ) -> Path:
     owns_generation_stack = generation_stack is None
     if generation_stack is None:
@@ -2254,6 +2330,8 @@ def _finalize_capture(
             environment_out=environment_out,
             environment_payload=environment_payload,
             receipt_path=receipt_path,
+            capture_stdout=capture_stdout,
+            capture_stderr=capture_stderr,
         )
         parent = generation_stack.enter_context(
             immutable.PinnedDirectoryReader(output.parent)
@@ -2276,6 +2354,10 @@ def _finalize_capture(
             generation_stack.close()
 
 
+def _nvbit_capture_stderr_matches(stderr: bytes) -> bool:
+    return stderr == b"" or _NVBIT_CAPTURE_STDERR_PATTERN.fullmatch(stderr) is not None
+
+
 def _capture_protocol_succeeded(
     phase: str,
     *,
@@ -2290,7 +2372,7 @@ def _capture_protocol_succeeded(
             and stderr == _NCU_HANDOFF_STDERR
         )
     if phase == "nvbit":
-        return returncode == 0 and stderr == b""
+        return returncode == 0 and _nvbit_capture_stderr_matches(stderr)
     raise CaptureError("capture result phase is invalid")
 
 
@@ -2573,6 +2655,8 @@ def capture_phase(*, matrix_key: str, variant_id: str, phase: str, preflight_pat
             environment_out=environment_out,
             environment_payload=environment_payload,
             receipt_path=receipt_path,
+            capture_stdout=stdout,
+            capture_stderr=stderr,
         )
     except BaseException as raw_error:
         exc = (

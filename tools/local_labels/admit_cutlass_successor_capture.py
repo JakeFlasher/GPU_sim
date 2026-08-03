@@ -55,6 +55,21 @@ TRACE_MEMORY_PAYLOAD_CLASSES = [1, 2, 3, 6, 8]
 NVBIT_TRACE_BINARY_VERSION = 86
 NVBIT_VERSION = "1.8"
 NVBIT_TRACE_SUMMARY_PRODUCER = "nvbit_tracer"
+NVBIT_CAPTURE_STDERR_PROTOCOL = (
+    "nvbit_1_8_sm86_empty_or_startup_diagnostics_v1"
+)
+NVBIT_CAPTURE_STDOUT_NAME = "capture_process.stdout.bin"
+NVBIT_CAPTURE_STDERR_NAME = "capture_process.stderr.bin"
+_NVBIT_CAPTURE_STDERR_PATTERN = re.compile(
+    rb"WARNING: Do not call CUDA memory allocation in nvbit_at_ctx_init\(\)\. "
+    rb"It will cause deadlocks\. Do them in nvbit_tool_init\(\)\. If you "
+    rb"encounter deadlocks, remove CUDA API calls to debug\.\n"
+    rb"INFO: tracer binary_version initialised per-context from device compute "
+    rb"capability at tool-init: binary_version=86 \(ctx=0x[1-9a-f][0-9a-f]*\)\n"
+    rb"INFO: cuFuncGetAttribute\(BINARY_VERSION\) returned attr_bv=0 "
+    rb"\(CUresult=400\); falling back to device compute capability 8\.6 -> "
+    rb"binary_version=86\n"
+)
 GPU_NAME = "NVIDIA GeForce RTX 3090 Ti"
 GPU_UUID_PATTERN = (
     r"GPU-[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-"
@@ -70,7 +85,7 @@ CGROUP_CONTAINMENT_SUPERVISOR_SHA256 = (
     "7a938d2f7f07fbb1477351a195616f9a7478db5c28b81fa29a3d226d11eadbff"
 )
 CAPTURE_PRODUCER_SELF_SHA256_AUTHORITY = (
-    "816eb26f885e91ef76b8ce0db45b2b95f4a53518c9793095817cc5e51aa57ef2"
+    "da3b3dc996227b93559e30a91fb9d85e44582283cf926e0f0b2994b4b1cc924b"
 )
 NCU_LAUNCHER_PATH = (
     "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu"
@@ -942,6 +957,10 @@ def _nvbit_kernel_base(value: Any) -> str:
     return match.group(1)
 
 
+def _nvbit_capture_stderr_matches(stderr: bytes) -> bool:
+    return stderr == b"" or _NVBIT_CAPTURE_STDERR_PATTERN.fullmatch(stderr) is not None
+
+
 def _verify_nvbit_artifacts(
     generation: _ReceiptGeneration,
     root: Path,
@@ -984,6 +1003,9 @@ def _verify_nvbit_artifacts(
         "threadblock_count",
         "dynamic_trace",
         "stats",
+        "capture_stdout",
+        "capture_stderr",
+        "capture_stderr_protocol",
     }
     if set(summary) != expected_summary_fields:
         raise AdmissionError("NVBit trace summary fields differ from closed contract")
@@ -1055,9 +1077,43 @@ def _verify_nvbit_artifacts(
         "trace_contract_status": "pass",
         "dynamic_trace": Path(dynamic["path"]).name,
         "stats": Path(stats["path"]).name,
+        "capture_stderr_protocol": NVBIT_CAPTURE_STDERR_PROTOCOL,
     }
     if any(summary.get(key) != value for key, value in expected_summary.items()):
         raise AdmissionError("NVBit trace summary semantics do not match payload inventory")
+    auxiliary_by_relative: dict[str, dict[str, Any]] = {}
+    for artifact in artifact_by_role.get("trace_auxiliary", []):
+        artifact_path = _safe_receipt_path(
+            root, artifact["path"], "NVBit trace auxiliary artifact"
+        )
+        relative = artifact_path.relative_to(expected_trace_root).as_posix()
+        auxiliary_by_relative[relative] = artifact
+    for field, name in (
+        ("capture_stdout", NVBIT_CAPTURE_STDOUT_NAME),
+        ("capture_stderr", NVBIT_CAPTURE_STDERR_NAME),
+    ):
+        declared = summary[field]
+        artifact = auxiliary_by_relative.get(name)
+        if declared is None:
+            if artifact is not None:
+                raise AdmissionError(
+                    f"NVBit {field} artifact is present but undeclared"
+                )
+        elif declared != name or artifact is None:
+            raise AdmissionError(
+                f"NVBit {field} summary binding differs from artifact inventory"
+            )
+    if summary["capture_stderr"] is not None:
+        stderr_artifact = auxiliary_by_relative[NVBIT_CAPTURE_STDERR_NAME]
+        stderr_path = _safe_receipt_path(
+            root, stderr_artifact["path"], "NVBit capture stderr"
+        )
+        if not _nvbit_capture_stderr_matches(
+            generation.read_bytes(stderr_path)
+        ):
+            raise AdmissionError(
+                "NVBit capture stderr differs from closed protocol"
+            )
     if type(summary["binary_version"]) is not int:
         raise AdmissionError("NVBit trace summary producer version metadata differs")
     for key in ("expected_record_count", "admitted_record_count", "threadblock_count"):
@@ -1579,13 +1635,25 @@ def _verify_receipt(
 
     for artifact in receipt["artifacts"]:
         role = artifact["role"]
-        if role in seen_roles and role not in {"threadblock", "trace_auxiliary"}:
-            raise AdmissionError(f"duplicate artifact role in receipt: {rel}:{role}")
-        seen_roles.add(role)
         if role not in expected_roles:
             raise AdmissionError(f"unexpected artifact role in receipt: {rel}:{role}")
         artifact_path = _safe_receipt_path(root, artifact["path"], "artifact path")
         artifact_rel = artifact_path.relative_to(root).as_posix()
+        if receipt["capture_kind"] == "nvbit":
+            canonical_stream_paths = {
+                f"nvbit/{row['successor_slug']}/{NVBIT_CAPTURE_STDOUT_NAME}",
+                f"nvbit/{row['successor_slug']}/{NVBIT_CAPTURE_STDERR_NAME}",
+            }
+            if (
+                artifact_rel in canonical_stream_paths
+                and role != "trace_auxiliary"
+            ):
+                raise AdmissionError(
+                    "NVBit canonical capture stream has the wrong artifact role"
+                )
+        if role in seen_roles and role not in {"threadblock", "trace_auxiliary"}:
+            raise AdmissionError(f"duplicate artifact role in receipt: {rel}:{role}")
+        seen_roles.add(role)
         if artifact_rel.endswith(RECEIPT_SUFFIX):
             raise AdmissionError(f"receipt listed as its own artifact: {artifact_rel}")
         if artifact_rel in used_artifacts:
