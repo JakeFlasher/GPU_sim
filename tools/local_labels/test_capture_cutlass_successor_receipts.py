@@ -69,7 +69,7 @@ def tmp_path():
 @contextlib.contextmanager
 def _retained_runtime(base_env: dict[str, str], retained_descriptor: int):
     runtime_descriptor = capture.os.dup(retained_descriptor)
-    environment = dict(base_env)
+    environment = capture.nvbit_runtime.sanitized_capture_environment(base_env)
     environment["LD_LIBRARY_PATH"] = f"/proc/self/fd/{runtime_descriptor}"
     try:
         yield SimpleNamespace(
@@ -1591,12 +1591,17 @@ def test_external_nvbit_tracer_is_retained_and_executed_by_descriptor(
         if phase == "nvbit"
         else pytest.fail("wrong phase"),
     )
+
+    @contextlib.contextmanager
+    def retained_runtime(_path, *, base_env, retained_descriptor, **_kwargs):
+        observed["runtime_base_environment"] = dict(base_env)
+        with _retained_runtime(base_env, retained_descriptor) as runtime:
+            yield runtime
+
     monkeypatch.setattr(
         capture.nvbit_runtime,
         "retained_tracer_runtime_env",
-        lambda _path, *, base_env, retained_descriptor, **_kwargs: (
-            _retained_runtime(base_env, retained_descriptor)
-        ),
+        retained_runtime,
     )
 
     def run(command, environment, _cwd, **kwargs):
@@ -1645,6 +1650,12 @@ def test_external_nvbit_tracer_is_retained_and_executed_by_descriptor(
     )
 
     assert result == output_root / f"{VARIANT_ID}.nvbit.capture_receipt.json"
+    assert {
+        "CUDA_INJECTION64_PATH",
+        "LD_LIBRARY_PATH",
+        "TRACES_FOLDER",
+        "USER_DEFINED_FOLDERS",
+    }.isdisjoint(observed["runtime_base_environment"])
     assert observed["command"][0].startswith("/proc/self/fd/")
     assert observed["environment"]["CUDA_INJECTION64_PATH"].startswith(
         "/proc/self/fd/"
@@ -1652,6 +1663,7 @@ def test_external_nvbit_tracer_is_retained_and_executed_by_descriptor(
     assert observed["environment"]["TRACES_FOLDER"].startswith(
         "/proc/self/fd/"
     )
+    assert observed["environment"]["USER_DEFINED_FOLDERS"] == "1"
     assert observed["byte_root"] == Path(
         observed["environment"]["TRACES_FOLDER"]
     )

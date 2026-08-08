@@ -66,7 +66,7 @@ CAPTURE_PRODUCER_SHA256_BY_RECEIPT_VERSION = {
     # v2 receipts were emitted by the final repository-tracer producer before
     # retained external NVBit phase tools became part of the receipt contract.
     2: "a67f4a0f84f5ee73cd3f5998e4da79927ac2bee05148cecd08216ddab5694e86",
-    3: "bad7125c3b77e8228952408a211cabb1f8124b48e6dfbe1b614d042c1474236a",
+    3: "4a871f6ef58f688f508a8f1a91177398a983abddfca9b8888df2d3199d3fdbf3",
 }
 ACTIVE_RECEIPT_SCHEMA_VERSION = 3
 RECEIPT_SCHEMA_REL = RECEIPT_SCHEMA_PATHS_BY_VERSION[
@@ -155,7 +155,7 @@ CGROUP_CONTAINMENT_SUPERVISOR_SHA256 = (
     "1b4cbe75929eb6f8f98c55f300c964ba1592fa5547335cdcf2324fe0d4a0d452"
 )
 CAPTURE_PRODUCER_SELF_SHA256_AUTHORITY = (
-    "d2754d7e4ef33877c0962d2ca18431981b4b50d6c2fe3b20e893e5cb9a951b31"
+    "f0c17d7d6b9d8dedd6c8f21f4b6d1dd46250fc671f1e3c2fd08c8ae3c0e77fdf"
 )
 NCU_LAUNCHER_PATH = (
     "/usr/local/cuda-13.2/nsight-compute-2026.1.0/ncu"

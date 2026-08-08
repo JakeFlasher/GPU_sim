@@ -94,7 +94,7 @@ CAPTURE_STREAM_READ_BYTES = 64 * 1024
 CAPTURE_PROCESS_POLL_S = 0.05
 CAPTURE_CLEANUP_TIMEOUT_S = 5.0
 CAPTURE_PRODUCER_SELF_SHA256 = (
-    "d2754d7e4ef33877c0962d2ca18431981b4b50d6c2fe3b20e893e5cb9a951b31"
+    "f0c17d7d6b9d8dedd6c8f21f4b6d1dd46250fc671f1e3c2fd08c8ae3c0e77fdf"
 )
 EXPECTED_TRACE_CONTRACT_ID = admission.TRACE_CONTRACT_ID
 EXPECTED_MEMORY_PAYLOAD_CLASSES = admission.TRACE_MEMORY_PAYLOAD_CLASSES
@@ -6146,13 +6146,12 @@ def capture_phase(
                 trace_proc_path = Path(
                     f"/proc/self/fd/{retained_trace_reader.descriptor}"
                 )
-                runtime_environment = dict(env)
-                runtime_environment["CUDA_INJECTION64_PATH"] = (
-                    retained_phase_tool.proc_path
+                sanitized_runtime_environment = (
+                    nvbit_runtime.sanitized_capture_environment(env)
                 )
                 with nvbit_runtime.retained_tracer_runtime_env(
                     retained_phase_tool_path,
-                    base_env=runtime_environment,
+                    base_env=sanitized_runtime_environment,
                     pb_lib=NVBIT_PB_LIB,
                     runtime_manifest=retained_runtime_manifest_path,
                     retained_descriptor=retained_phase_tool.descriptor,
@@ -6161,19 +6160,56 @@ def capture_phase(
                     ),
                 ) as retained_runtime:
                     runtime_environment = dict(retained_runtime.environment)
-                    expected_runtime_environment = dict(env)
-                    expected_runtime_environment["CUDA_INJECTION64_PATH"] = (
-                        retained_phase_tool.proc_path
+                    retained_runtime_descriptors = retained_runtime.pass_fds
+                    expected_runtime_names = set(
+                        sanitized_runtime_environment
+                    ) | {"LD_LIBRARY_PATH"}
+                    expected_runtime_paths = {
+                        f"/proc/self/fd/{descriptor}"
+                        for descriptor in retained_runtime_descriptors
+                    }
+                    if (
+                        set(runtime_environment) != expected_runtime_names
+                        or runtime_environment.get("LD_LIBRARY_PATH")
+                        not in expected_runtime_paths
+                    ):
+                        raise CaptureError(
+                            "NVBit runtime environment differs from closed pins"
+                        )
+                    expected_runtime_environment = dict(
+                        sanitized_runtime_environment
                     )
+                    expected_runtime_environment["LD_LIBRARY_PATH"] = env[
+                        "LD_LIBRARY_PATH"
+                    ]
                     contract_environment = dict(runtime_environment)
-                    contract_environment["LD_LIBRARY_PATH"] = (
-                        expected_runtime_environment["LD_LIBRARY_PATH"]
-                    )
+                    contract_environment["LD_LIBRARY_PATH"] = env[
+                        "LD_LIBRARY_PATH"
+                    ]
                     if contract_environment != expected_runtime_environment:
                         raise CaptureError(
                             "NVBit runtime environment differs from closed pins"
                         )
+                    for name in nvbit_runtime.NVBIT_CAPTURE_ENVIRONMENT_CONTROLS:
+                        if name in env and name != "LD_LIBRARY_PATH":
+                            runtime_environment[name] = env[name]
+                    runtime_environment["CUDA_INJECTION64_PATH"] = (
+                        retained_phase_tool.proc_path
+                    )
                     runtime_environment["TRACES_FOLDER"] = str(trace_proc_path)
+                    expected_child_environment = dict(env)
+                    for name in (
+                        "CUDA_INJECTION64_PATH",
+                        "LD_LIBRARY_PATH",
+                        "TRACES_FOLDER",
+                    ):
+                        expected_child_environment[name] = runtime_environment[
+                            name
+                        ]
+                    if runtime_environment != expected_child_environment:
+                        raise CaptureError(
+                            "NVBit child environment differs from closed pins"
+                        )
                     runtime_command = [retained_target.proc_path, *command[1:]]
                     (
                         returncode, pid, started, stdout, stderr, containment,
@@ -6189,7 +6225,7 @@ def capture_phase(
                             retained_target.descriptor,
                             retained_phase_tool.descriptor,
                             retained_trace_reader.descriptor,
-                            *retained_runtime.pass_fds,
+                            *retained_runtime_descriptors,
                         ))),
                         require_cgroup_containment=True,
                     )
